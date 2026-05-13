@@ -238,12 +238,16 @@ def _build_planning_context(
         if conn:
             try:
                 cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+                # DEADLINE_SIGNAL_HYGIENE_1 Scope B: exclude closed-matter deadlines.
                 cur.execute("""
-                    SELECT description, due_date, priority, status
-                    FROM deadlines
-                    WHERE status = 'active'
-                      AND (description ILIKE %s OR description ILIKE %s)
-                    ORDER BY due_date ASC
+                    SELECT d.description, d.due_date, d.priority, d.status
+                    FROM deadlines d
+                    LEFT JOIN matter_registry m
+                      ON LOWER(REPLACE(m.matter_name, ' ', '-')) = LOWER(d.matter_slug)
+                    WHERE d.status = 'active'
+                      AND (d.matter_slug IS NULL OR m.status IS NULL OR m.status = 'active')
+                      AND (d.description ILIKE %s OR d.description ILIKE %s)
+                    ORDER BY d.due_date ASC
                     LIMIT 5
                 """, (f"%{matter_slug}%", f"%{matter_slug.replace('_', ' ')}%"))
                 deadlines = cur.fetchall()

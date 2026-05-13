@@ -213,15 +213,21 @@ def _query_deadlines(desk: str) -> list[dict]:
     try:
         cur = conn.cursor()
         try:
+            # DEADLINE_SIGNAL_HYGIENE_1 Scope B: exclude deadlines whose
+            # matter_slug points at a closed/paused/inactive matter_registry row.
+            # Triple-NULL/OR keeps unclassified + unregistered deadlines visible.
             cur.execute(
                 """
-                SELECT id, description, due_date, priority, severity, matter_slug,
-                       assigned_to, last_reminded_at, reminder_stage, is_critical
-                FROM deadlines
-                WHERE status = 'active'
-                  AND assigned_to = %s
-                  AND (due_date IS NULL OR due_date <= NOW() + INTERVAL '30 days')
-                ORDER BY due_date NULLS LAST, priority
+                SELECT d.id, d.description, d.due_date, d.priority, d.severity, d.matter_slug,
+                       d.assigned_to, d.last_reminded_at, d.reminder_stage, d.is_critical
+                FROM deadlines d
+                LEFT JOIN matter_registry m
+                  ON LOWER(REPLACE(m.matter_name, ' ', '-')) = LOWER(d.matter_slug)
+                WHERE d.status = 'active'
+                  AND d.assigned_to = %s
+                  AND (d.matter_slug IS NULL OR m.status IS NULL OR m.status = 'active')
+                  AND (d.due_date IS NULL OR d.due_date <= NOW() + INTERVAL '30 days')
+                ORDER BY d.due_date NULLS LAST, d.priority
                 LIMIT %s
                 """,
                 (desk, MAX_DEADLINES_QUERY_LIMIT),
@@ -640,15 +646,20 @@ def _query_unassigned_deadlines() -> list[dict]:
     try:
         cur = conn.cursor()
         try:
+            # DEADLINE_SIGNAL_HYGIENE_1 Scope B: same matter-closed filter
+            # applied to the unassigned-deadline scan path.
             cur.execute(
                 """
-                SELECT id, description, due_date, priority, severity, matter_slug,
-                       last_reminded_at, reminder_stage, is_critical
-                FROM deadlines
-                WHERE status = 'active'
-                  AND assigned_to IS NULL
-                  AND (due_date IS NULL OR due_date <= NOW() + INTERVAL '30 days')
-                ORDER BY due_date NULLS LAST, priority
+                SELECT d.id, d.description, d.due_date, d.priority, d.severity, d.matter_slug,
+                       d.last_reminded_at, d.reminder_stage, d.is_critical
+                FROM deadlines d
+                LEFT JOIN matter_registry m
+                  ON LOWER(REPLACE(m.matter_name, ' ', '-')) = LOWER(d.matter_slug)
+                WHERE d.status = 'active'
+                  AND d.assigned_to IS NULL
+                  AND (d.matter_slug IS NULL OR m.status IS NULL OR m.status = 'active')
+                  AND (d.due_date IS NULL OR d.due_date <= NOW() + INTERVAL '30 days')
+                ORDER BY d.due_date NULLS LAST, d.priority
                 LIMIT %s
                 """,
                 (MAX_DEADLINES_QUERY_LIMIT,),

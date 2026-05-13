@@ -545,6 +545,19 @@ def _sync_clickup_deadline(task_id, task_name, due_date, list_name, space_name, 
                            (due_date, deadline_id, due_date))
         elif not is_done:
             description = f"[{space_name}/{list_name}] {task_name}"
+            # DEADLINE_SIGNAL_HYGIENE_1 Scope A5: pre-classifier noise filter.
+            try:
+                from kbl.noise_patterns import is_noise
+                if is_noise(description, source_tag):
+                    logger.info(
+                        "clickup_trigger deadline rejected as noise: %s",
+                        description[:80],
+                    )
+                    conn.commit()
+                    cur.close()
+                    return
+            except ImportError:
+                pass
             # DEADLINE_MATTER_SLUG_BACKFILL_1 Scope A4: classify before write
             # so the ClickUp-trigger door no longer bypasses the slug classifier.
             _matter_slug = None

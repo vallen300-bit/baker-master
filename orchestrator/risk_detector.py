@@ -90,22 +90,30 @@ def _score_matter(cur, slug: str, now: datetime) -> tuple:
     signals = {}
 
     # 1. Overdue deadlines (weight: 2 per deadline, max 6)
+    # DEADLINE_SIGNAL_HYGIENE_1 Scope B: exclude closed-matter deadlines from risk count.
     cur.execute("""
-        SELECT COUNT(*) FROM deadlines
-        WHERE status = 'active'
-          AND due_date < CURRENT_DATE
-          AND (description ILIKE %s OR source_snippet ILIKE %s)
+        SELECT COUNT(*) FROM deadlines d
+        LEFT JOIN matter_registry m
+          ON LOWER(REPLACE(m.matter_name, ' ', '-')) = LOWER(d.matter_slug)
+        WHERE d.status = 'active'
+          AND (d.matter_slug IS NULL OR m.status IS NULL OR m.status = 'active')
+          AND d.due_date < CURRENT_DATE
+          AND (d.description ILIKE %s OR d.source_snippet ILIKE %s)
     """, (f"%{slug}%", f"%{slug}%"))
     overdue_deadlines = cur.fetchone()["count"]
     if overdue_deadlines > 0:
         signals["overdue_deadlines"] = min(overdue_deadlines, 3)
 
     # 2. Approaching deadlines within 7 days (weight: 1 per deadline, max 3)
+    # DEADLINE_SIGNAL_HYGIENE_1 Scope B: same matter-closed exclusion.
     cur.execute("""
-        SELECT COUNT(*) FROM deadlines
-        WHERE status = 'active'
-          AND due_date BETWEEN CURRENT_DATE AND CURRENT_DATE + 7
-          AND (description ILIKE %s OR source_snippet ILIKE %s)
+        SELECT COUNT(*) FROM deadlines d
+        LEFT JOIN matter_registry m
+          ON LOWER(REPLACE(m.matter_name, ' ', '-')) = LOWER(d.matter_slug)
+        WHERE d.status = 'active'
+          AND (d.matter_slug IS NULL OR m.status IS NULL OR m.status = 'active')
+          AND d.due_date BETWEEN CURRENT_DATE AND CURRENT_DATE + 7
+          AND (d.description ILIKE %s OR d.source_snippet ILIKE %s)
     """, (f"%{slug}%", f"%{slug}%"))
     approaching = cur.fetchone()["count"]
     if approaching > 0:

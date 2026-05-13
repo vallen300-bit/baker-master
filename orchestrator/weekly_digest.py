@@ -51,14 +51,24 @@ def run_weekly_digest():
             sections.append("\n".join(lines))
 
         # 2. Overdue deadlines
+        # DEADLINE_SIGNAL_HYGIENE_1 Scope B: exclude closed-matter deadlines.
         cur.execute("""
-            SELECT COUNT(*) as cnt FROM deadlines
-            WHERE status = 'active' AND due_date < CURRENT_DATE
+            SELECT COUNT(*) as cnt FROM deadlines d
+            LEFT JOIN matter_registry m
+              ON LOWER(REPLACE(m.matter_name, ' ', '-')) = LOWER(d.matter_slug)
+            WHERE d.status = 'active'
+              AND (d.matter_slug IS NULL OR m.status IS NULL OR m.status = 'active')
+              AND d.due_date < CURRENT_DATE
         """)
         overdue = cur.fetchone()["cnt"]
+        # DEADLINE_SIGNAL_HYGIENE_1 Scope B: same matter-closed exclusion.
         cur.execute("""
-            SELECT COUNT(*) as cnt FROM deadlines
-            WHERE status = 'active' AND due_date BETWEEN CURRENT_DATE AND CURRENT_DATE + 7
+            SELECT COUNT(*) as cnt FROM deadlines d
+            LEFT JOIN matter_registry m
+              ON LOWER(REPLACE(m.matter_name, ' ', '-')) = LOWER(d.matter_slug)
+            WHERE d.status = 'active'
+              AND (d.matter_slug IS NULL OR m.status IS NULL OR m.status = 'active')
+              AND d.due_date BETWEEN CURRENT_DATE AND CURRENT_DATE + 7
         """)
         approaching = cur.fetchone()["cnt"]
         sections.append(f"**Deadlines:** {overdue} overdue, {approaching} due next week")

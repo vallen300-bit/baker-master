@@ -2563,11 +2563,15 @@ async def get_morning_brief():
             fire_count = cur.fetchone()["cnt"]
 
             # Stats: deadlines this week (due between today and +7 days)
+            # DEADLINE_SIGNAL_HYGIENE_1 Scope B: exclude closed-matter deadlines.
             cur.execute("""
-                SELECT COUNT(*) AS cnt FROM deadlines
-                WHERE status = 'active'
-                  AND due_date >= CURRENT_DATE
-                  AND due_date <= CURRENT_DATE + INTERVAL '7 days'
+                SELECT COUNT(*) AS cnt FROM deadlines d
+                LEFT JOIN matter_registry m
+                  ON LOWER(REPLACE(m.matter_name, ' ', '-')) = LOWER(d.matter_slug)
+                WHERE d.status = 'active'
+                  AND (d.matter_slug IS NULL OR m.status IS NULL OR m.status = 'active')
+                  AND d.due_date >= CURRENT_DATE
+                  AND d.due_date <= CURRENT_DATE + INTERVAL '7 days'
             """)
             deadline_count = cur.fetchone()["cnt"]
 
@@ -2617,24 +2621,29 @@ async def get_morning_brief():
 
             # Deadlines this week — exclude critical (shown in Critical) and travel (shown in Travel)
             # LANDING-FIX-2: Deduplicate ClickUp-synced deadlines that differ only by prefix
+            # DEADLINE_SIGNAL_HYGIENE_1 Scope B: exclude closed-matter deadlines
+            # from the morning-brief deadline card.
             cur.execute("""
                 SELECT DISTINCT ON (
-                    LEFT(REGEXP_REPLACE(LOWER(description), '^(\[.*?\]\s*)+', ''), 45)
+                    LEFT(REGEXP_REPLACE(LOWER(d.description), '^(\[.*?\]\s*)+', ''), 45)
                 )
-                    id, description, due_date, source_type, confidence,
-                    priority, status, created_at,
-                    LEFT(source_snippet, 500) AS source_snippet
-                FROM deadlines
-                WHERE status = 'active'
-                  AND (is_critical IS NOT TRUE)
-                  AND due_date >= CURRENT_DATE
-                  AND due_date <= CURRENT_DATE + INTERVAL '7 days'
-                  AND NOT (description ILIKE '%%flight%%' OR description ILIKE '%%departure%%'
-                           OR description ILIKE '%%travel%%' OR description ILIKE '%%airport%%'
-                           OR description ILIKE '%%boarding%%' OR description ILIKE '%%check-in%%')
-                ORDER BY LEFT(REGEXP_REPLACE(LOWER(description), '^(\[.*?\]\s*)+', ''), 45),
-                         LENGTH(COALESCE(source_snippet, '')) DESC,
-                         priority DESC, created_at DESC
+                    d.id, d.description, d.due_date, d.source_type, d.confidence,
+                    d.priority, d.status, d.created_at,
+                    LEFT(d.source_snippet, 500) AS source_snippet
+                FROM deadlines d
+                LEFT JOIN matter_registry m
+                  ON LOWER(REPLACE(m.matter_name, ' ', '-')) = LOWER(d.matter_slug)
+                WHERE d.status = 'active'
+                  AND (d.matter_slug IS NULL OR m.status IS NULL OR m.status = 'active')
+                  AND (d.is_critical IS NOT TRUE)
+                  AND d.due_date >= CURRENT_DATE
+                  AND d.due_date <= CURRENT_DATE + INTERVAL '7 days'
+                  AND NOT (d.description ILIKE '%%flight%%' OR d.description ILIKE '%%departure%%'
+                           OR d.description ILIKE '%%travel%%' OR d.description ILIKE '%%airport%%'
+                           OR d.description ILIKE '%%boarding%%' OR d.description ILIKE '%%check-in%%')
+                ORDER BY LEFT(REGEXP_REPLACE(LOWER(d.description), '^(\[.*?\]\s*)+', ''), 45),
+                         LENGTH(COALESCE(d.source_snippet, '')) DESC,
+                         d.priority DESC, d.created_at DESC
                 LIMIT 10
             """)
             deadlines = [_serialize(dict(r)) for r in cur.fetchall()]
@@ -2651,11 +2660,17 @@ async def get_morning_brief():
             # LANDING-GRID-1: Overdue obligations (deadlines table, replaces old commitments)
             overdue_commitments = []
             try:
+                # DEADLINE_SIGNAL_HYGIENE_1 Scope B: exclude closed-matter deadlines
+                # from overdue obligations card.
                 cur.execute("""
-                    SELECT id, description, due_date, priority, severity
-                    FROM deadlines
-                    WHERE status = 'active' AND due_date < CURRENT_DATE
-                    ORDER BY due_date ASC LIMIT 5
+                    SELECT d.id, d.description, d.due_date, d.priority, d.severity
+                    FROM deadlines d
+                    LEFT JOIN matter_registry m
+                      ON LOWER(REPLACE(m.matter_name, ' ', '-')) = LOWER(d.matter_slug)
+                    WHERE d.status = 'active'
+                      AND (d.matter_slug IS NULL OR m.status IS NULL OR m.status = 'active')
+                      AND d.due_date < CURRENT_DATE
+                    ORDER BY d.due_date ASC LIMIT 5
                 """)
                 overdue_commitments = [_serialize(dict(r)) for r in cur.fetchall()]
             except Exception:
@@ -2727,16 +2742,21 @@ async def get_morning_brief():
 
             # Travel-related deadlines (next 3 days)
             try:
+                # DEADLINE_SIGNAL_HYGIENE_1 Scope B: exclude closed-matter
+                # travel deadlines.
                 cur.execute("""
-                    SELECT id, description, due_date, priority, source_snippet
-                    FROM deadlines
-                    WHERE status = 'active'
-                      AND due_date >= CURRENT_DATE
-                      AND due_date < CURRENT_DATE + INTERVAL '4 days'
-                      AND (description ILIKE '%%flight%%' OR description ILIKE '%%departure%%'
-                           OR description ILIKE '%%travel%%' OR description ILIKE '%%airport%%'
-                           OR description ILIKE '%%train%%' OR description ILIKE '%%depart%%')
-                    ORDER BY due_date ASC LIMIT 10
+                    SELECT d.id, d.description, d.due_date, d.priority, d.source_snippet
+                    FROM deadlines d
+                    LEFT JOIN matter_registry m
+                      ON LOWER(REPLACE(m.matter_name, ' ', '-')) = LOWER(d.matter_slug)
+                    WHERE d.status = 'active'
+                      AND (d.matter_slug IS NULL OR m.status IS NULL OR m.status = 'active')
+                      AND d.due_date >= CURRENT_DATE
+                      AND d.due_date < CURRENT_DATE + INTERVAL '4 days'
+                      AND (d.description ILIKE '%%flight%%' OR d.description ILIKE '%%departure%%'
+                           OR d.description ILIKE '%%travel%%' OR d.description ILIKE '%%airport%%'
+                           OR d.description ILIKE '%%train%%' OR d.description ILIKE '%%depart%%')
+                    ORDER BY d.due_date ASC LIMIT 10
                 """)
                 _travel_deadlines_rows = [_serialize(dict(r)) for r in cur.fetchall()]
             except Exception as e:
@@ -3267,13 +3287,18 @@ def _build_people_dossiers(store, trip: dict) -> list:
 
             # Mutual obligations (deadlines assigned to or mentioning this contact)
             contact_name = dossier["name"]
+            # DEADLINE_SIGNAL_HYGIENE_1 Scope B: exclude closed-matter deadlines
+            # from contact-dossier obligation list.
             cur.execute("""
-                SELECT description, due_date, priority, severity, status
-                FROM deadlines
-                WHERE status = 'active'
-                  AND (LOWER(assigned_to) LIKE %s
-                    OR LOWER(description) LIKE %s)
-                ORDER BY due_date ASC NULLS LAST LIMIT 5
+                SELECT d.description, d.due_date, d.priority, d.severity, d.status
+                FROM deadlines d
+                LEFT JOIN matter_registry m
+                  ON LOWER(REPLACE(m.matter_name, ' ', '-')) = LOWER(d.matter_slug)
+                WHERE d.status = 'active'
+                  AND (d.matter_slug IS NULL OR m.status IS NULL OR m.status = 'active')
+                  AND (LOWER(d.assigned_to) LIKE %s
+                    OR LOWER(d.description) LIKE %s)
+                ORDER BY d.due_date ASC NULLS LAST LIMIT 5
             """, (f"%{contact_name.lower()}%", f"%{contact_name.lower()}%"))
             dossier["obligations"] = [_serialize(dict(r)) for r in cur.fetchall()]
 
@@ -3674,12 +3699,17 @@ async def get_trip_cards(trip_id: int):
             tz_card["urgent_alerts"] = [_serialize(dict(r)) for r in cur.fetchall()]
 
             # Deadlines due soon
+            # DEADLINE_SIGNAL_HYGIENE_1 Scope B: exclude closed-matter deadlines
+            # from trip-card "Deadlines due soon" surface.
             cur.execute("""
-                SELECT description, due_date, priority
-                FROM deadlines
-                WHERE status = 'active'
-                  AND due_date BETWEEN CURRENT_DATE AND CURRENT_DATE + INTERVAL '3 days'
-                ORDER BY due_date LIMIT 5
+                SELECT d.description, d.due_date, d.priority
+                FROM deadlines d
+                LEFT JOIN matter_registry m
+                  ON LOWER(REPLACE(m.matter_name, ' ', '-')) = LOWER(d.matter_slug)
+                WHERE d.status = 'active'
+                  AND (d.matter_slug IS NULL OR m.status IS NULL OR m.status = 'active')
+                  AND d.due_date BETWEEN CURRENT_DATE AND CURRENT_DATE + INTERVAL '3 days'
+                ORDER BY d.due_date LIMIT 5
             """)
             tz_card["deadlines"] = [_serialize(dict(r)) for r in cur.fetchall()]
             cur.close()
@@ -11881,12 +11911,19 @@ async def get_ao_dashboard():
         # 4. Deadlines
         deadlines = []
         try:
+            # DEADLINE_SIGNAL_HYGIENE_1 Scope B: exclude closed-matter deadlines
+            # from AO context-pack deadline pull.
             cur.execute(
-                "SELECT id, description, due_date, priority, status, confidence, source_snippet "
-                "FROM deadlines WHERE status='active' AND ("
-                "description ILIKE %s OR description ILIKE %s OR description ILIKE %s "
-                "OR description ILIKE %s OR description ILIKE %s"
-                ") ORDER BY due_date LIMIT 15",
+                "SELECT d.id, d.description, d.due_date, d.priority, d.status, d.confidence, d.source_snippet "
+                "FROM deadlines d "
+                "LEFT JOIN matter_registry m "
+                "  ON LOWER(REPLACE(m.matter_name, ' ', '-')) = LOWER(d.matter_slug) "
+                "WHERE d.status='active' "
+                "  AND (d.matter_slug IS NULL OR m.status IS NULL OR m.status = 'active') "
+                "  AND ("
+                "    d.description ILIKE %s OR d.description ILIKE %s OR d.description ILIKE %s "
+                "    OR d.description ILIKE %s OR d.description ILIKE %s"
+                "  ) ORDER BY d.due_date LIMIT 15",
                 ("%oskolkov%", "%capital call%", "%hagenauer%", "%rg7%", "%aelio%"),
             )
             deadlines = [dict(r) for r in cur.fetchall()]

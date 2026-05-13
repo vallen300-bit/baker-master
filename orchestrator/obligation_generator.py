@@ -122,12 +122,16 @@ def _gather_signals() -> dict:
                 pass
 
         # 2. Approaching deadlines (next 7 days)
+        # DEADLINE_SIGNAL_HYGIENE_1 Scope B: exclude closed-matter deadlines.
         cur.execute("""
-            SELECT description, due_date, priority, matter_slug
-            FROM deadlines
-            WHERE status = 'active'
-              AND due_date BETWEEN CURRENT_DATE AND CURRENT_DATE + 7
-            ORDER BY due_date ASC LIMIT 10
+            SELECT d.description, d.due_date, d.priority, d.matter_slug
+            FROM deadlines d
+            LEFT JOIN matter_registry m
+              ON LOWER(REPLACE(m.matter_name, ' ', '-')) = LOWER(d.matter_slug)
+            WHERE d.status = 'active'
+              AND (d.matter_slug IS NULL OR m.status IS NULL OR m.status = 'active')
+              AND d.due_date BETWEEN CURRENT_DATE AND CURRENT_DATE + 7
+            ORDER BY d.due_date ASC LIMIT 10
         """)
         ctx["approaching_deadlines"] = [
             {**dict(r), "due_date": r["due_date"].isoformat() if r.get("due_date") else None}
@@ -135,11 +139,16 @@ def _gather_signals() -> dict:
         ]
 
         # 3. Overdue deadlines
+        # DEADLINE_SIGNAL_HYGIENE_1 Scope B: exclude closed-matter deadlines.
         cur.execute("""
-            SELECT description, due_date, priority, matter_slug
-            FROM deadlines
-            WHERE status = 'active' AND due_date < CURRENT_DATE
-            ORDER BY due_date ASC LIMIT 10
+            SELECT d.description, d.due_date, d.priority, d.matter_slug
+            FROM deadlines d
+            LEFT JOIN matter_registry m
+              ON LOWER(REPLACE(m.matter_name, ' ', '-')) = LOWER(d.matter_slug)
+            WHERE d.status = 'active'
+              AND (d.matter_slug IS NULL OR m.status IS NULL OR m.status = 'active')
+              AND d.due_date < CURRENT_DATE
+            ORDER BY d.due_date ASC LIMIT 10
         """)
         ctx["overdue_deadlines"] = [
             {**dict(r), "due_date": r["due_date"].isoformat() if r.get("due_date") else None}
