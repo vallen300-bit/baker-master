@@ -49,7 +49,7 @@ Source: `https://x.com/Mnilax/status/2053116311132155938` (May 2026, 30-codebase
 > **AI Head A2 (AH2) opening this dir via picker symlink** (`~/Vallen Dropbox/Dimitry vallen/bm-aihead2/` → `~/bm-aihead2/`, ratified 2026-05-05 to fix `/security-review` harness git-cwd gap) — MANDATORY before any reply (Tier 0/1/2/3 access model, ratified 2026-05-09 — `_ops/processes/cross-agent-knowledge-dispatch.md`):
 >
 > **Tier 0 — always (~3K tokens):**
-> 1. Invoke the Read tool on `/Users/dimitry/.claude/CLAUDE.md` (global rules + Tier 0 portfolio context).
+> 1. *Global rules + Tier 0 portfolio context (`/Users/dimitry/.claude/CLAUDE.md` + imported `dropbox-tier0.md`) are harness-auto-loaded — do NOT Read again. Sanity check: confirm Rule 1 ("Director is non-technical") is visible in context; if missing, fall back to Read on `/Users/dimitry/.claude/CLAUDE.md`.*
 > 2. Invoke the Read tool on `~/baker-vault/_ops/agents/aihead2/orientation.md` (full AH2 orientation).
 > 3. Invoke the Read tool on `~/baker-vault/_ops/skills/ai-head/SKILL.md` (canonical AI Head operating rules).
 > 4. Invoke the Read tool on `~/.claude/projects/-Users-dimitry-Vallen-Dropbox-Dimitry-vallen-Baker-Project/memory/MEMORY.md` (canonical AH memory).
@@ -85,7 +85,7 @@ Source: `https://x.com/Mnilax/status/2053116311132155938` (May 2026, 30-codebase
 > **AI Head A1 (AH1) opening this dir via picker symlink** (`~/Vallen Dropbox/Dimitry vallen/bm-aihead1/` → `~/bm-aihead1/`, ratified 2026-05-08 to mirror AH2 pattern + drop session start cost from ~12% to ~6% by retiring the heavy `~/Desktop/baker-code` auto-memory slug) — MANDATORY before any reply (Tier 0/1/2/3 access model, ratified 2026-05-09 — `_ops/processes/cross-agent-knowledge-dispatch.md`):
 >
 > **Tier 0 — always (~3K tokens):**
-> 1. Invoke the Read tool on `/Users/dimitry/.claude/CLAUDE.md` (global rules + Tier 0 portfolio context).
+> 1. *Global rules + Tier 0 portfolio context (`/Users/dimitry/.claude/CLAUDE.md` + imported `dropbox-tier0.md`) are harness-auto-loaded — do NOT Read again. Sanity check: confirm Rule 1 ("Director is non-technical") is visible in context; if missing, fall back to Read on `/Users/dimitry/.claude/CLAUDE.md`.*
 > 2. Invoke the Read tool on `~/baker-vault/_ops/agents/aihead1/orientation.md` (full AH1 orientation).
 > 3. Invoke the Read tool on `~/baker-vault/_ops/skills/ai-head/SKILL.md` (canonical AI Head operating rules).
 > 4. Invoke the Read tool on `~/.claude/projects/-Users-dimitry-Vallen-Dropbox-Dimitry-vallen-Baker-Project/memory/MEMORY.md` (canonical AH memory).
