@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "updated_at": "2026-05-07",
+  "updated_at": "2026-05-14",
   "folders": [
     {
       "name": "ORIGINATION",
@@ -98,6 +98,14 @@
       "name": "NVIDIA",
       "slug": "nvidia",
       "presentations": [
+        {
+          "title": "★ Corinthia × Brisen AI × NVIDIA — Pitch V2 DRAFT (14 May 2026)",
+          "file": "corinthia-pitch-v2-draft.html",
+          "created": "2026-05-14",
+          "matter": "nvidia-corinthia",
+          "status": "draft",
+          "note": "internal only, pending AH1 review + Director ratification"
+        },
         {
           "title": "Brisen AI x NVIDIA x Corinthia — Partnership Strategy",
           "file": "partnership.html",

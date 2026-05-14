@@ -1,0 +1,379 @@
+<!DOCTYPE html>
+<!--
+Corinthia × Brisen AI × NVIDIA — Pitch deck V2 DRAFT
+Built: 2026-05-14 by Origination Desk
+Supersedes: 2026-05-11-corinthia-nvidia-pitch-v1.html
+Author: Origination Desk; review pending AH1; not yet Director-ratified for external send.
+
+V2 fixes (per Researcher Bucket 1 verification 2026-05-13 + Director ratifications 2026-05-14):
+- RED 01 — Slide 3 European pipeline numbers corrected (LE Q1 2026 primary)
+- RED 02-03 — Slide 5 visual note + slide 10 NVIDIA Omniverse claims rewritten with named flagship customers (Omniverse 300K+ downloads and 252+ deployments figures dropped — stale / unverifiable)
+- RED 04 — N/A in v1 ($1B hospitality AI not cited in deck body); guarded against in speaker notes
+- RED 05 — Slide 3 "45 luxury openings" replaced with 179 luxury pipeline projects (LE Q1 2026)
+- YELLOW 06 — N/A in v1 (IRIS +54% not cited); speaker-notes guardrail added in case raised in Q&A
+- YELLOW 07 — Slide 3 + slide 10 branded-residences replaced with Savills 2024/25 primary line + Knight Frank premium range
+- YELLOW 08 — Slide 7 + slide 10 Arcadis / HKA / McKinsey citations tightened with proper attribution
+- IDENTITY — Peter S. = Peter Storer (NVIDIA Head of Hospitality) — Director-ratified 2026-05-14
+
+Pending external send: AH1 review + Director ratification per Brisen autonomy charter.
+-->
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Corinthia × Brisen AI × NVIDIA — Pitch V2 DRAFT</title>
+<style>
+  :root {
+    --bg: #000000;
+    --frame: #0d0d0d;
+    --nv-green: #76B900;
+    --text: #ffffff;
+    --sub: #888888;
+    --rule: #2d2d2d;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; padding: 0; background: var(--bg); color: var(--text);
+               font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
+               line-height: 1.5; }
+  body { overflow-x: hidden; }
+
+  .progress { position: fixed; top: 0; left: 0; height: 3px; background: var(--nv-green);
+              width: 10%; transition: width 0.25s; z-index: 100; }
+  .nav-hint { position: fixed; bottom: 1rem; right: 1.5rem; color: var(--sub);
+              font-size: 0.78rem; z-index: 90; user-select: none; }
+  .nav-hint kbd { background: #1a1a1a; padding: 0.1rem 0.4rem; border: 1px solid var(--rule);
+                  border-radius: 3px; font-family: ui-monospace, Consolas, monospace;
+                  font-size: 0.72rem; }
+  .counter { position: fixed; bottom: 1rem; left: 1.5rem; color: var(--sub);
+             font-size: 0.78rem; z-index: 90; user-select: none;
+             font-family: ui-monospace, Consolas, monospace; }
+  .toggle-notes { position: fixed; top: 1rem; right: 1.5rem; color: var(--sub);
+                  font-size: 0.78rem; z-index: 90; background: transparent;
+                  border: 1px solid var(--rule); padding: 0.3rem 0.7rem; border-radius: 3px;
+                  cursor: pointer; font-family: inherit; }
+  .toggle-notes:hover { color: var(--text); border-color: var(--nv-green); }
+
+  .slide { min-height: 100vh; display: none; padding: 4rem 5rem 5rem; position: relative;
+           flex-direction: column; }
+  .slide.active { display: flex; }
+  .slide::before { content: ""; position: absolute; top: 0; left: 0; right: 0; height: 2px;
+                   background: var(--nv-green); }
+  .slide-meta { display: flex; justify-content: space-between; color: var(--sub);
+                font-size: 0.78rem; letter-spacing: 0.1em; text-transform: uppercase;
+                margin-bottom: 3rem; }
+  .slide-meta .tag { color: var(--nv-green); }
+
+  .slide h1 { font-size: 3.4rem; font-weight: 600; letter-spacing: -0.02em;
+              margin: 0 0 2rem; max-width: 18ch; line-height: 1.1; }
+  .slide h1.title-deck { font-size: 4.2rem; max-width: 22ch; }
+
+  .slide .subtitle { color: var(--sub); font-size: 1.4rem; max-width: 50ch;
+                     margin-bottom: 2rem; }
+  .slide .anchor-line { color: var(--nv-green); font-size: 1.15rem; font-weight: 500;
+                        max-width: 60ch; margin-bottom: 2rem; line-height: 1.4; }
+
+  .slide ul.bullets { list-style: none; padding: 0; margin: 0; max-width: 75ch; }
+  .slide ul.bullets li { font-size: 1.4rem; padding: 0.6rem 0 0.6rem 1.6rem;
+                         border-bottom: 1px solid var(--rule); position: relative;
+                         line-height: 1.4; }
+  .slide ul.bullets li::before { content: "▸"; color: var(--nv-green); position: absolute;
+                                  left: 0; top: 0.6rem; font-size: 1.2rem; }
+  .slide ul.bullets li:last-child { border-bottom: none; }
+
+  .slide .visual-note { color: var(--sub); font-size: 0.85rem; margin-top: 2rem;
+                        font-style: italic; max-width: 60ch; }
+
+  .speaker-notes { background: #0a0a0a; border-left: 2px solid var(--nv-green);
+                   padding: 1rem 1.4rem; margin-top: auto; color: #c8c8c8;
+                   font-size: 0.95rem; max-width: 75ch; line-height: 1.55;
+                   display: none; }
+  body.show-notes .speaker-notes { display: block; }
+  .speaker-notes .label { color: var(--nv-green); font-size: 0.72rem;
+                          letter-spacing: 0.15em; text-transform: uppercase;
+                          margin-bottom: 0.4rem; font-weight: 600; }
+  .speaker-notes .qa-guard { color: #d97706; font-size: 0.78rem; letter-spacing: 0.1em;
+                              text-transform: uppercase; font-weight: 600; margin-top: 0.6rem;
+                              border-top: 1px solid #2d2d2d; padding-top: 0.5rem; }
+
+  .title-card { justify-content: center; align-items: flex-start; }
+  .title-card .deck-meta { color: var(--sub); font-size: 1rem; margin-top: 2rem;
+                           line-height: 1.8; }
+  .title-card .deck-meta strong { color: var(--text); font-weight: 500; }
+
+  .ask-box { background: #0a0a0a; border: 1px solid var(--nv-green); padding: 1.6rem 2rem;
+             margin-top: 2rem; max-width: 70ch; }
+  .ask-box .ask-label { color: var(--nv-green); font-size: 0.78rem;
+                        letter-spacing: 0.15em; text-transform: uppercase;
+                        margin-bottom: 0.6rem; font-weight: 600; }
+  .ask-box .ask-body { font-size: 1.4rem; line-height: 1.4; }
+
+  .draft-banner { position: fixed; top: 0; left: 50%; transform: translateX(-50%);
+                  background: #d97706; color: #000; padding: 0.2rem 0.8rem;
+                  font-size: 0.72rem; letter-spacing: 0.15em; text-transform: uppercase;
+                  font-weight: 700; z-index: 99; font-family: ui-monospace, Consolas, monospace; }
+
+  .footer-meta { position: fixed; bottom: 1rem; left: 50%; transform: translateX(-50%);
+                 color: var(--sub); font-size: 0.72rem; font-family: ui-monospace, Consolas, monospace;
+                 z-index: 90; user-select: none; }
+
+  /* Print-friendly */
+  @media print {
+    .slide { display: flex !important; page-break-after: always; min-height: auto; }
+    .progress, .nav-hint, .counter, .toggle-notes, .footer-meta, .draft-banner { display: none !important; }
+    body { background: white; color: black; }
+    .slide ul.bullets li { border-color: #ccc; }
+    .speaker-notes { display: block !important; background: #f5f5f5; color: black; }
+  }
+</style>
+</head>
+<body>
+
+<div class="draft-banner">V2 DRAFT — internal only — pending AH1 review + Director ratification</div>
+<div class="progress" id="progress"></div>
+<button class="toggle-notes" id="toggle-notes">Toggle speaker notes</button>
+<div class="counter" id="counter">1 / 10</div>
+<div class="footer-meta">Brisen · Corinthia · NVIDIA · V2 DRAFT · 2026-05-14</div>
+<div class="nav-hint">Navigate · <kbd>←</kbd> <kbd>→</kbd> · or click</div>
+
+<!-- ============================== SLIDE 1 ============================== -->
+<section class="slide title-card active" data-slide="1">
+  <div class="slide-meta"><span>Brisen Group · Corinthia · NVIDIA</span><span>01 · Title</span></div>
+  <h1 class="title-deck">Corinthia × Brisen AI × NVIDIA</h1>
+  <div class="anchor-line">A frontier partnership in real estate's most underserved vertical.</div>
+  <div class="deck-meta">
+    <strong>Audience:</strong> Corinthia leadership<br>
+    <strong>Date:</strong> 2026-05-14 (draft)<br>
+    <strong>Presented by:</strong> Brisen Group · Dimitry Vallen
+  </div>
+  <div class="speaker-notes">
+    <div class="label">Speaker notes · Opening</div>
+    Thank you for the time. Today we propose Corinthia as the anchor hospitality partner in a three-way frontier — Brisen building the platform, NVIDIA providing the compute and roadmap, Corinthia defining the vertical. Eight slides, then the decision ask. We will keep it tight.
+  </div>
+</section>
+
+<!-- ============================== SLIDE 2 — EXECUTIVE SUMMARY ============================== -->
+<section class="slide" data-slide="2">
+  <div class="slide-meta"><span class="tag">Must-land message</span><span>02 · Executive summary</span></div>
+  <h1>A frontier partnership, ready to sign</h1>
+  <div class="anchor-line">"AI is the future of real estate development and construction — and we are on the frontier of its most underserved vertical."</div>
+  <ul class="bullets">
+    <li>Hospitality is the most underserved vertical for AI today.</li>
+    <li>NVIDIA is developing this vertical — Corinthia entering now moves with the roadmap.</li>
+    <li>Brisen AI will be Europe's first platform across design, development, construction, asset management.</li>
+    <li>One pilot, 90-day framework, joint exec working group.</li>
+    <li>Decision asked on slide 9.</li>
+  </ul>
+  <div class="speaker-notes">
+    <div class="label">Speaker notes · Board-pack register</div>
+    AI is the future of real estate construction and development. We are on the frontier of this vertical — which is the most underserved vertical. Hospitality sits untouched while every other sector has been mapped, and NVIDIA's own roadmap now points here. Brisen is building the first platform spanning design, development, construction, and asset management across Europe. Corinthia stepping in alongside us means stepping in early.
+  </div>
+</section>
+
+<!-- ============================== SLIDE 3 — THE OPPORTUNITY (FIXED) ============================== -->
+<section class="slide" data-slide="3">
+  <div class="slide-meta"><span class="tag">Takeaway 2 · v2 fix</span><span>03 · The opportunity</span></div>
+  <h1>Corinthia gains NVIDIA's vertical-strategy seat</h1>
+  <div class="anchor-line">The hospitality seat in NVIDIA's vertical strategy is currently uncontested.</div>
+  <ul class="bullets">
+    <li>NVIDIA has disclosed no public hotel partner in its Travel &amp; Hospitality vertical (May 2026).</li>
+    <li>Zero Series A+ owner-developer AI startups exist — field is open.</li>
+    <li>Branded residences (Savills 2024/25): ~1,500 properties, 240 new in 2024, ~760 pipeline by 2030; Knight Frank 20-35% global price premium.</li>
+    <li>European hotel pipeline Q1 2026 (Lodging Econometrics): 1,731 projects / 255,354 rooms / +3% YoY total, +14% YoY early-planning subset.</li>
+    <li>179 luxury projects in European pipeline (LE Q1 2026) — substrate is moving.</li>
+  </ul>
+  <div class="visual-note">Visual: split panel — left, NVIDIA Travel &amp; Hospitality vertical schematic with the hospitality slot empty; right, branded-residence growth curve 2020-2030 (Savills).</div>
+  <div class="speaker-notes">
+    <div class="label">Speaker notes · Visionary register</div>
+    NVIDIA has built explicit verticals — automotive, healthcare, finance, telecoms — each anchored by a flagship partner. Hospitality has no anchor. Every senior executive in Mandarin Oriental, Aman, Six Senses, Marriott has been publicly silent on owner-side AI for six months. The seat is open. It will not stay open. Corinthia walking in now is the difference between defining the category and competing inside it.
+    <div class="qa-guard">Q&amp;A guard · if asked for hospitality-AI fundraising scale: "Hospitality tech raised ~$1B in the 12 months to March 2026 (Abode Index); AI-specific platforms captured ~$165M of that — Canary, Duve, Boom, Chatlyn, Conduit. The largest non-AI raise was Mews $300M (PMS, Feb 2026)."</div>
+  </div>
+</section>
+
+<!-- ============================== SLIDE 4 — WHAT AI DOES FOR CORINTHIA ============================== -->
+<section class="slide" data-slide="4">
+  <div class="slide-meta"><span class="tag">Takeaway 3 · Heart of the deck</span><span>04 · What AI does for Corinthia</span></div>
+  <h1>AI rebuilds every guest and asset workflow</h1>
+  <div class="anchor-line">Five concrete operational gains, one platform, full asset lifecycle.</div>
+  <ul class="bullets">
+    <li>Underwriting: zoning, heritage, branded comps assessed in minutes, not days.</li>
+    <li>Design: thousands of massing iterations; GDV optimised before groundbreak.</li>
+    <li>Construction claims: 50,000 pages → recoverable claims in 30 days (live: MO Vienna).</li>
+    <li>Asset oversight: portfolio cost-per-key, programme compliance, contractor performance.</li>
+    <li>Guest experience: concierge intelligence layer over operator stack.</li>
+  </ul>
+  <div class="visual-note">Visual: 5-stage horizontal lifecycle ribbon (Underwriting → Design → Construction → Asset → Guest) with NVIDIA green dot on each stage, "Live" / "Pilot" / "Roadmap" tags below each.</div>
+  <div class="speaker-notes">
+    <div class="label">Speaker notes · Visionary register</div>
+    Imagine a hotel that knows its guests before they arrive and a construction site that knows its delays before they happen. That is the standard we are building toward — concierge intelligence that lifts guest satisfaction, predictive cost control that compresses development timelines by months, asset-level insight that tightens operating margins room by room. Hospitality has waited longer than any sector for this. Corinthia gets to define what the answer looks like.
+    <div class="qa-guard">Q&amp;A guard · if asked for guest-experience AI proof-points: do NOT cite MOHG IRIS +54% F&amp;B uplift. That figure is from Hotel Technology News 5 Feb 2026, sourced to Peter McKenna (MOHG F&amp;B Systems Manager), 20-property scope, no baseline disclosed. Pair instead with industry-generic concierge-AI patterns.</div>
+  </div>
+</section>
+
+<!-- ============================== SLIDE 5 — WHY NOW (FIXED visual) ============================== -->
+<section class="slide" data-slide="5">
+  <div class="slide-meta"><span class="tag">Takeaway 2 · v2 fix</span><span>05 · Why now</span></div>
+  <h1>NVIDIA hunts verticals; hospitality is open</h1>
+  <div class="anchor-line">Jensen Huang at GTC 2026: "Every single company needs an agentic AI strategy."</div>
+  <ul class="bullets">
+    <li>Bentley, Jacobs, Bechtel are live on NVIDIA Omniverse — construction is on, hotels are not.</li>
+    <li>Trimble acquired Document Crunch April 2026: construction-AI consolidation has begun.</li>
+    <li>80% of construction-AI pilots fail to reach production — owner-side data moat fixes this.</li>
+    <li>Marriott committed $1.1B to tech with no dev-side AI disclosed — incumbents are not building it.</li>
+    <li>By 2028: standard two-tier stack — execution layer for GCs, governance layer for owners.</li>
+  </ul>
+  <div class="visual-note">Visual: timeline 2021-2028 — Bentley (2021), Omniverse flagship enterprise customers (BMW, Foxconn, Siemens — NVIDIA-disclosed), Trimble acquires Document Crunch (Apr 2026), Brisen × Corinthia pilot (Q3 2026 target), owner-stack standard (2028).</div>
+  <div class="speaker-notes">
+    <div class="label">Speaker notes · Board-pack register</div>
+    Construction-AI consolidation is twelve months old. Trimble bought Document Crunch in April for an undisclosed sum, Q2 2026 close. Bentley, Jacobs, Bechtel are running infrastructure on Omniverse alongside BMW, Foxconn, Siemens as NVIDIA's named flagship enterprise customers. None of that touches the owner. The owner is still walking into a digital construction site with an analog spreadsheet. That asymmetry resolves by 2028 — either with a defined owner stack or with owners losing more change-order disputes. Brisen is building the owner stack now.
+  </div>
+</section>
+
+<!-- ============================== SLIDE 6 — THE BRISEN AI PLATFORM ============================== -->
+<section class="slide" data-slide="6">
+  <div class="slide-meta"><span class="tag">Takeaway 3</span><span>06 · The Brisen AI platform</span></div>
+  <h1>Europe's first AI platform — full lifecycle</h1>
+  <div class="anchor-line">One platform, one source of truth, four stages of the asset lifecycle.</div>
+  <ul class="bullets">
+    <li>Design: generative massing, NLA optimisation, GDV uplift before groundbreak.</li>
+    <li>Development: underwriting acceleration, tender preparation (TenderMax — roadmap).</li>
+    <li>Construction: ClaimsMax (production), SiteWatch computer-vision (pilot scope).</li>
+    <li>Asset: OwnerView dashboard (single-project live, portfolio rollout in progress).</li>
+    <li>No European competitor spans the full lifecycle today — single source of truth wins.</li>
+  </ul>
+  <div class="visual-note">Visual: 4-quadrant grid (Design / Development / Construction / Asset) with NVIDIA green checkmarks marking what is live vs roadmap; central column "Single source of truth".</div>
+  <div class="speaker-notes">
+    <div class="label">Speaker notes · Hybrid register</div>
+    Fragmentation is why 80% of construction-AI pilots fail. Owners have data in eight systems. Brisen unifies the four stages of the asset lifecycle in one platform. ClaimsMax is live in production. TenderMax, OwnerView portfolio, and SiteWatch are sequenced behind it. Corinthia gets the full platform as it ships and a voice in the order it ships in.
+  </div>
+</section>
+
+<!-- ============================== SLIDE 7 — PROOF (FIXED citation) ============================== -->
+<section class="slide" data-slide="7">
+  <div class="slide-meta"><span class="tag">Takeaway 1 + 3 · v2 fix</span><span>07 · Proof</span></div>
+  <h1>Mandarin Oriental Vienna proves it works</h1>
+  <div class="anchor-line">A live production reference, validated by an external legal counterparty.</div>
+  <ul class="bullets">
+    <li>€6M+ recovered on a €250M build = 4.6% — conservative vs ~33% industry dispute baseline (per HKA CRUX Insight 2024 / industry reporting).</li>
+    <li>50,000 pages of contractor claims processed in 30 days (vs 6-12 months manually).</li>
+    <li>External counterparty E+H actively using claimsmax.co.uk in live dispute proceedings.</li>
+    <li>Comparators: Buildots 20% faster delivery; Doxel 38% rework reduction — owner-side extension.</li>
+    <li>Single live production reference; expandable per Corinthia pilot property.</li>
+  </ul>
+  <div class="visual-note">Visual: stat callout — "€6M recovered / 50,000 pages / 30 days" big numbers in NVIDIA green; supporting chart of industry dispute baseline (HKA / Arcadis range) vs Brisen MO Vienna 4.6%.</div>
+  <div class="speaker-notes">
+    <div class="label">Speaker notes · Visionary register</div>
+    The platform is not a slide. It is in production at Mandarin Oriental Vienna. Six million euros recovered. Fifty thousand pages of contractor documentation parsed in thirty days. An external law firm is logging in and using the system as we speak. The 4.6 percent we recovered against the build is conservative against industry dispute baselines reported in HKA CRUX Insight 2024 and Arcadis Global Construction Disputes Report. The room to extend is enormous.
+  </div>
+</section>
+
+<!-- ============================== SLIDE 8 — COMMERCIAL TERMS ============================== -->
+<section class="slide" data-slide="8">
+  <div class="slide-meta"><span class="tag">Setup for ask</span><span>08 · Commercial terms</span></div>
+  <h1>Terms designed for speed, not friction</h1>
+  <div class="anchor-line">Low capital ask, high optionality, NVIDIA-channel positioning included.</div>
+  <ul class="bullets">
+    <li>Pilot Q2-Q3 2026: $10K/month DGX Cloud tier; Brisen runs the pilot at-cost.</li>
+    <li>Corinthia commitment: documents + 2-3 hrs/week executive lead.</li>
+    <li>Suggested pilot scope: a recently completed Corinthia or QP third-party project.</li>
+    <li>Platform stage H1 2027: $75-100K/month; Corinthia gets first-mover pricing.</li>
+    <li>Co-development rights across the platform + joint NVIDIA-channel positioning when ready.</li>
+  </ul>
+  <div class="visual-note">Visual: two-column term sheet — left "Pilot Q2-Q3 2026" with line items; right "Platform H1 2027" with same line-item rhythm; NVIDIA-green horizontal divider.</div>
+  <div class="speaker-notes">
+    <div class="label">Speaker notes · Board-pack register</div>
+    The pilot is structured to remove every excuse not to start. Ten thousand a month, at-cost. Two to three hours a week of executive time. One project — ideally something Corinthia or QP has just completed. Platform pricing engages next year on first-mover terms. Co-development rights and joint NVIDIA positioning are in the framework, not separately negotiated.
+  </div>
+</section>
+
+<!-- ============================== SLIDE 9 — DECISION ASK ============================== -->
+<section class="slide" data-slide="9">
+  <div class="slide-meta"><span class="tag">Decision</span><span>09 · Decision ask</span></div>
+  <h1>Decision: greenlight the joint pilot</h1>
+  <div class="ask-box">
+    <div class="ask-label">What we are asking</div>
+    <div class="ask-body">Corinthia commits as Brisen's anchor hospitality partner. Signed framework within 90 days. One pilot property. Joint executive working group. Shared positioning alongside NVIDIA when ready.</div>
+  </div>
+  <ul class="bullets" style="margin-top: 2rem;">
+    <li>Anchor partner status — first-mover economics across the platform.</li>
+    <li>Co-development rights on the four lifecycle stages.</li>
+    <li>Defining voice in how AI enters the hospitality vertical.</li>
+    <li>NVIDIA-channel positioning when the channel opens.</li>
+    <li>The window is now — other groups will not get this seat.</li>
+  </ul>
+  <div class="speaker-notes">
+    <div class="label">Speaker notes · Direct close</div>
+    We are asking Corinthia to commit as our anchor hospitality partner. Concretely: a signed framework for one pilot property within ninety days, a joint working group at executive level, and shared positioning with NVIDIA in market communications. In return, Corinthia gets first-mover economics, co-development rights across the platform, and a defining voice in how AI enters this industry. The window is now. Other groups will not get this seat.
+  </div>
+</section>
+
+<!-- ============================== SLIDE 10 — APPENDIX (FIXED citations) ============================== -->
+<section class="slide" data-slide="10">
+  <div class="slide-meta"><span class="tag">Data · v2 fix</span><span>10 · Appendix</span></div>
+  <h1>Appendix — the numbers behind the claims</h1>
+  <div class="anchor-line">Source benchmarks supporting slides 3-7 (selected).</div>
+  <ul class="bullets">
+    <li>HKA CRUX Insight 2024 (8th ed.): industry-leading construction-dispute study — global CapEx + claim baselines per industry reporting.</li>
+    <li>Arcadis Global Construction Disputes Report: ~$60M average dispute value, ~12.5 months duration (North America scope; per industry reporting).</li>
+    <li>McKinsey Global Institute (Chui / Roberts / Smaje / Sukharevsky / Yee, June 2023): $110-180B annual economic value potential for real estate from generative AI (productivity + revenue + cost combined).</li>
+    <li>Branded residences (Savills 2024/25): ~1,500 properties globally, 240 new in 2024, ~760 in pipeline by 2030; Knight Frank 20-35% global price premium.</li>
+    <li>European hotel pipeline (Lodging Econometrics Q1 2026): 1,731 projects / 255,354 rooms / +3% YoY total / +14% YoY early-planning subset / 179 luxury projects.</li>
+    <li>NVIDIA Omniverse: named flagship enterprise deployments at BMW, Foxconn, Siemens (NVIDIA-disclosed).</li>
+  </ul>
+  <div class="visual-note">Visual: clean data table with sources column — HKA CRUX 2024, Arcadis GCDR, McKinsey MGI 2023, Savills 2024/25, Knight Frank, Lodging Econometrics Q1 2026, NVIDIA enterprise disclosures.</div>
+  <div class="speaker-notes">
+    <div class="label">Speaker notes · Reference only</div>
+    Reserve slide. Use only if a Corinthia board member asks for source-level data. Full evidence pack + verification trail in baker-vault: 2026-05-13 Bucket 1 verification (wiki/research/), 2026-05-14 findings memo (wiki/matters/nvidia-corinthia/curated/), and prior research files on partnership strategy. Hand over on request.
+    <div class="qa-guard">Q&amp;A guard · do NOT cite "NVIDIA Omniverse 300K+ downloads" or "252+ enterprise deployments" — both stale / unverifiable per 2026-05-13 verification. Cite flagship customer names instead.</div>
+  </div>
+</section>
+
+<script>
+  const slides = document.querySelectorAll('.slide');
+  const total = slides.length;
+  let current = 1;
+
+  function show(n) {
+    if (n < 1) n = 1;
+    if (n > total) n = total;
+    slides.forEach(s => s.classList.remove('active'));
+    const target = document.querySelector('.slide[data-slide="' + n + '"]');
+    if (target) target.classList.add('active');
+    current = n;
+    document.getElementById('counter').textContent = n + ' / ' + total;
+    document.getElementById('progress').style.width = (n / total * 100) + '%';
+    window.scrollTo(0, 0);
+  }
+
+  document.addEventListener('keydown', e => {
+    if (e.key === 'ArrowRight' || e.key === ' ' || e.key === 'PageDown') {
+      e.preventDefault();
+      show(current + 1);
+    } else if (e.key === 'ArrowLeft' || e.key === 'PageUp') {
+      e.preventDefault();
+      show(current - 1);
+    } else if (e.key === 'Home') {
+      show(1);
+    } else if (e.key === 'End') {
+      show(total);
+    } else if (e.key === 'n' || e.key === 'N') {
+      document.body.classList.toggle('show-notes');
+    }
+  });
+
+  document.querySelectorAll('.slide').forEach(s => {
+    s.addEventListener('click', e => {
+      if (e.target.closest('button')) return;
+      const x = e.clientX;
+      const w = window.innerWidth;
+      if (x > w / 2) show(current + 1);
+      else show(current - 1);
+    });
+  });
+
+  document.getElementById('toggle-notes').addEventListener('click', () => {
+    document.body.classList.toggle('show-notes');
+  });
+
+  show(1);
+</script>
+</body>
+</html>
