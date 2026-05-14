@@ -1,80 +1,89 @@
 ---
-status: COMPLETE
-completed_at: 2026-05-13T09:28:29Z
-merge_commit_baker_master: 37e9c71dd8
-merge_commit_brisen_lab: 2ff2d17bde
-pr_baker_master: 201
-pr_brisen_lab: 16
-ship_reports: B3 v0-1 + B1 v0-2 (4-gate chain twice; v0-2 PASS clean)
-gates_v0_2: feature-dev:code-reviewer x2 PASS — all 5 v0-1 findings closed, no regressions
-brief: briefs/BRIEF_BRISEN_LAB_CARD_STATE_FIX_2.md
-brief_id: BRISEN_LAB_CARD_STATE_FIX_2
-trigger_class: TIER_B_GLANCE_UX_PLUS_BUS_HYGIENE_FAST_FOLLOW
-dispatched_at: 2026-05-13
+status: PENDING
+brief: briefs/BRIEF_WORKER_SELFWAKE_PHASE_1.md
+brief_id: WORKER_SELFWAKE_PHASE_1
+trigger_class: TIER_B_AGENT_RUNTIME
+dispatched_at: 2026-05-15
 dispatched_by: ai-head-1 (AH1)
 target: b1
-phase: fast-follow v0-2 (post-gate-chain REQUEST_CHANGES)
-re_dispatch_reason: |
-  Originally dispatched to b3 at b74da09. B3 shipped PRs #201 + #16 + baker-vault
-  d64c07d. AH1 4-gate chain returned PASS-WITH-NITS with 1 HIGH on PR #201 +
-  1 MEDIUM on PR #16 — fast-follow required. Mid-gate-chain, parallel-AH1
-  re-dispatched B3 to DEADLINE_SIGNAL_HYGIENE_1 (Director-ratified post-Triaga).
-  Director directive 2026-05-13: "direct the work not to B3 but to B1, B2, or
-  B4." AH1 picked B1 (cleanest mailbox state, fresh forge/daemon perimeter
-  context from PR #196).
 mandatory_2nd_pass: true
-security_review_required: false (covered in v0-1 gate chain; fix-by-fix is scoped)
-effort_estimate: ~1-1.5h (fix-by-fix only — small additions to existing branch)
-existing_branches:
-  baker_master: b3/brisen-lab-card-state-fix-2 (PR #201, head c-prefix already on origin)
-  brisen_lab: b3/brisen-lab-card-state-fix-2 (PR #16, head already on origin)
-prs_open:
-  - https://github.com/vallen300-bit/baker-master/pull/201
-  - https://github.com/vallen300-bit/brisen-lab/pull/16
-fix_by_fix_pointer:
-  pr_201_comment: https://github.com/vallen300-bit/baker-master/pull/201#issuecomment-4439021572
-  pr_16_comment: https://github.com/vallen300-bit/brisen-lab/pull/16#issuecomment-4439022390
-hard_ship_gate: |
-  1. PR #201 HIGH (extract_brief_name branch-aware) + 2 MEDIUMs (Case H' integration + cold-clone fallback) addressed; literal pytest + bash output paste.
-  2. PR #16 MEDIUM (drift key extended to age + topics, not just count) addressed; literal manual reveal showing badge auto-corrects when count stable + age drifting.
-  3. LOWs: fix what's easy in the same fast-follow commit (suggest read -ra array fix for ack_dispatch_msgs.sh:131, -f drop from inbox curl :244, drift comment alignment on app.js:54-56 and :60).
-  4. Re-trigger gate chain via bus-post topic `ship/BRISEN_LAB_CARD_STATE_FIX_2-v0-2` on push of fix-by-fix commit to existing branches.
+security_review_required: true
+effort_estimate: ~2d (1d build + 1d test + plist install)
+director_anchor: |
+  Director-ratified 2026-05-14 (chat): Stage 3 Phase 1 (B1-B4 self-wake worker).
+  Source spec: ~/baker-vault/_ops/ideas/2026-05-14-stage-3-worker-self-wake-design.md
+  (commit 5c55767). Phasing approved Phase 1 only (B-codes); cadence 2 min;
+  daily digest @ 09:00 UTC + immediate push on Tier B / failure; no veto window.
 scope: |
-  Fast-follow ONLY. Continue work on existing branches `b3/brisen-lab-card-state-fix-2`
-  in both baker-master (~/bm-b1 or fresh clone of vallen300-bit/baker-master) AND
-  brisen-lab (~/bm-b1-brisen-lab — create if absent). Do NOT open new PRs. Do NOT
-  rename branches (Director-pragmatic call — branch prefix is convention, not
-  binding).
-coordination: |
-  B3 is occupied with DEADLINE_SIGNAL_HYGIENE_1 (parallel-AH1's dispatch). B3
-  received msg #214 with request-changes details for FIX_2 — that message is now
-  obsolete for B3; AH1 acked it on B3's behalf via curl + sent B3 a standdown.
-  B1 owns FIX_2 fast-follow from this dispatch forward.
+  Build per-B-code launchd worker that polls brisen-lab bus every 120s, fires
+  `claude --print` non-interactively in ~/bm-b{N} on new messages, enforces
+  cost/rate/breaker caps, audits to baker_actions via new HTTP endpoints.
+  Touches: baker-master (dashboard endpoint + migration + worker scripts) +
+  local Mac filesystem (~/Library/Application Support/baker/, ~/Library/LaunchAgents/).
+  NOT touched: bus_post.sh/py outbound, B-code CLAUDE.md, baker_actions columns.
+hard_ship_gate: |
+  1. Literal `pytest tests/test_worker_wake_audit.py tests/test_baker_worker.py -v`
+     green output in ship report. NO "pass by inspection".
+  2. Token-count probe documented (parsed real / constant approximation w/ rationale).
+  3. Manual install + kickstart of worker-b1 produces clean log entry.
+  4. End-to-end probe: test bus message → worker fires ≤120s → claude session runs
+     in ~/bm-b1 → message acked → baker_actions row written.
+  5. Breaker / rate cap / cost cap each probed manually (3 simple tests with
+     pre-seeded state.json).
+  6. SessionStart hook updated to write wake.lock on interactive picker open
+     (concurrent-picker collision mitigation per brief §Concurrent-picker collision).
+gate_chain_post_ship: |
+  After b1 bus-posts ship/WORKER_SELFWAKE_PHASE_1, AH1 fires:
+  1. AH2 static review
+  2. AH2 /security-review (mandatory — new automation surface + token handling)
+  3. picker-architect review
+  4. feature-dev:code-reviewer 2nd-pass (parallel, mandatory per SKILL.md triggers
+     1+3+4+7: auth/token handling + concurrency-ordering primitive (wake.lock) +
+     new external-surface endpoints + judgment "high-stakes")
+  All 4 must clear before merge.
+existing_branches: none (fresh branch)
+prs_open: none (this is a new build)
 ship_report_to: |
-  Bus-post to `lead` on completion with topic `ship/BRISEN_LAB_CARD_STATE_FIX_2-v0-2`.
-  Include literal pytest/bash output + manual reveal confirmation + fix-by-fix
-  closure summary per PR.
+  Bus-post to `lead` with topic `ship/WORKER_SELFWAKE_PHASE_1`.
+  Body: literal pytest output + token-probe outcome + 10 Quality Checkpoint
+  results from brief §Quality Checkpoints + PR link + commit SHA + any
+  open issues surfaced during build.
 ---
 
 # Dispatch notice
 
 Read first (in order):
-1. `briefs/BRIEF_BRISEN_LAB_CARD_STATE_FIX_2.md` — full original spec (you are picking up fast-follow on it).
-2. PR #201 comment 4439021572 — fix-by-fix instructions for baker-master HIGH + MEDIUMs + LOWs.
-3. PR #16 comment 4439022390 — fix-by-fix instructions for brisen-lab MEDIUM + LOWs.
-4. B3's original ship report at `briefs/_reports/B3_BRISEN_LAB_CARD_STATE_FIX_2_*.md` — what B3 already built (so you don't redo it).
+1. `briefs/BRIEF_WORKER_SELFWAKE_PHASE_1.md` — full spec (this brief)
+2. `~/baker-vault/_ops/ideas/2026-05-14-stage-3-worker-self-wake-design.md` — Director-facing 1-pager with the design context, phasing rationale, devil's-advocate counter-points
+3. `~/baker-vault/_ops/processes/agent-bus-posting-contract.md` — bus transport reference (you'll use this for the ship-post)
+4. `scripts/bus_post.sh` — sender pattern (your worker polls inbound; outbound stays via this)
+5. `~/bm-b{1-4}/.claude/hooks/user-prompt-submit-confirm.py` — inbound drain hook (your worker triggers this indirectly via `claude --print`)
 
 Pre-flight:
-1. `cd ~/bm-b1 && git fetch origin && git checkout b3/brisen-lab-card-state-fix-2 && git pull --ff-only origin b3/brisen-lab-card-state-fix-2`.
-2. For brisen-lab: `git clone git@github.com:vallen300-bit/brisen-lab.git ~/bm-b1-brisen-lab` (if absent) and checkout `b3/brisen-lab-card-state-fix-2`.
+1. `cd ~/bm-b1 && git fetch origin && git checkout main && git pull --ff-only origin main`
+2. `git checkout -b b1/worker-selfwake-phase-1`
+3. Read the brief end-to-end before writing any code — token-count probe in §Token accounting probe is REQUIRED before ship (do it first; it informs `_parse_tokens()`).
 
-Build discipline (fast-follow only):
-- baker-master: address HIGH + 2 MEDIUMs + LOWs per PR #201 comment. Add Case J test (feature branch with no local mailbox file). Single commit. Push to existing branch — PR auto-updates.
-- brisen-lab: address MEDIUM + LOWs per PR #16 comment. Extend drift key to include `oldest_unacked_age_sec` and `topics`. Single commit. Push to existing branch.
-- Mirror install: re-run `cp + launchctl kickstart` on Mac Mini after baker-master fast-follow lands. Capture daemon state in ship report.
+Build discipline:
+- Migration first: `migrations/20260515_worker_self_wake.sql` (single action class registration; no DDL).
+- Dashboard endpoints next: `POST /api/worker/wake` + `GET /api/worker/digest` in `outputs/dashboard.py`. Run `grep -n "/api/worker" outputs/dashboard.py` BEFORE adding routes (FastAPI shadow check). Verify `get_db_connection()` actual function name via grep before referencing.
+- Worker library: `scripts/baker_worker.py`. Token-count probe FIRST; then `_parse_tokens()` implementation.
+- Daily digest: `scripts/worker_digest.py` + dashboard endpoint.
+- Installer: `scripts/install_workers.sh` + 2 plist templates.
+- Tests: `tests/test_worker_wake_audit.py` + `tests/test_baker_worker.py` — mock urllib + subprocess; literal pytest output captured.
+- SessionStart hook update: write wake.lock on interactive picker open (touch the 4 b-code `session-start-role.sh` files, NOT AH1/AH2 ones).
+
+Anti-pattern checks (from /write-brief lessons):
+- Every DB query has LIMIT (brief specifies LIMIT 100 on digest query).
+- Every except has `conn.rollback()` (brief shows pattern in `/api/worker/wake`).
+- Column names match actual schema (no new columns; uses existing `tier`, `cost_eur`, `action_class`, `committer_agent`, `committed_at`, `self_cost_eur`).
+- Function signatures verified (brief flags `get_db_connection` vs `_get_db_conn` — grep before use).
+- No secrets in code (brief uses `op://` refs and `state_dir/key` file mode 0600).
 
 End-of-work:
-- Bus-post to `lead` with topic `ship/BRISEN_LAB_CARD_STATE_FIX_2-v0-2`.
-- Body: per-PR fix-by-fix closure (HIGH closed by X, MEDIUMs closed by Y/Z) + literal pytest/bash paste + manual reveal output.
-- Use the NEW `scripts/ack_dispatch_msgs.sh` from this brief's Fix 1 as the FIRST verification step — ack this dispatch's wake-ping (you'll get one shortly after AH1 bus-posts you). That's the Fix 1 dogfood.
-- Mailbox flip `CODE_1_PENDING.md` → frontmatter `status: COMPLETE` after AH1 confirms re-gate-chain clear.
+- Open PR on `b1/worker-selfwake-phase-1` against `main`. PR description includes Director anchor + 10 Quality Checkpoint outcomes + token-probe outcome.
+- Bus-post to `lead` with topic `ship/WORKER_SELFWAKE_PHASE_1` per `ship_report_to` above.
+- Do NOT merge yourself. Mandatory 4-gate chain runs first.
+- Mailbox flip `CODE_1_PENDING.md` → `status: COMPLETE` only AFTER AH1 confirms merge.
+
+Surface a `BLOCKED-AI-HEAD-Q` mailbox transition for anything ambiguous in the brief — don't guess on architecture or scope.
