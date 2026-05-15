@@ -183,7 +183,13 @@ async def scheduler_watchdog_middleware(request, call_next):
 
 
 def _check_scheduler_heartbeat():
-    """If heartbeat stale >12 min, restart scheduler + WhatsApp alert (throttled)."""
+    """If heartbeat stale >12 min, restart scheduler + log warning (throttled).
+
+    WA push intentionally disabled 2026-05-15 — Director directive while
+    BRIEF_SCHEDULER_CRASHLOOP_RCA_2 is in flight. Re-enable only after that
+    RCA closes and crash-loop frequency is back to <1 event/day. Dashboard
+    + server logs still capture every restart.
+    """
     global _watchdog_last_alert_ts
     try:
         from triggers.state import trigger_state
@@ -193,18 +199,14 @@ def _check_scheduler_heartbeat():
             logger.error(f"SCHEDULER-WATCHDOG-1: Heartbeat stale ({age_seconds:.0f}s). Restarting...")
             from triggers.embedded_scheduler import restart_scheduler
             restart_scheduler()
-            # Throttle: only alert if last alert was >cooldown ago
+            # Throttle log frequency (replaces the WA push, same cooldown)
             now_ts = time.time()
             if now_ts - _watchdog_last_alert_ts > _watchdog_alert_cooldown_s:
                 _watchdog_last_alert_ts = now_ts
-                try:
-                    from outputs.whatsapp_sender import send_whatsapp
-                    send_whatsapp(
-                        f"Baker scheduler was dead for {int(age_seconds/60)} minutes. "
-                        f"Auto-restarted. Check dashboard for missed items."
-                    )
-                except Exception as wa_e:
-                    logger.warning(f"Watchdog WhatsApp alert failed: {wa_e}")
+                logger.warning(
+                    f"WATCHDOG_RESTART: scheduler was dead {int(age_seconds/60)} min. "
+                    f"Auto-restart fired. WA push disabled pending CRASHLOOP_RCA_2."
+                )
     except Exception as e:
         logger.debug(f"Scheduler watchdog check failed (non-fatal): {e}")
 
