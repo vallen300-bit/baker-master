@@ -167,6 +167,7 @@ app.add_middleware(
 _watchdog_last_check = 0
 _watchdog_last_alert_ts = 0
 _watchdog_alert_cooldown_s = 300  # min seconds between WA alerts
+_watchdog_consecutive_stale = 0  # FALSE_POSITIVE_FIX_1: count of consecutive stale reads
 
 @app.middleware("http")
 async def scheduler_watchdog_middleware(request, call_next):
@@ -183,22 +184,38 @@ async def scheduler_watchdog_middleware(request, call_next):
 
 
 def _check_scheduler_heartbeat():
-    """If heartbeat stale >12 min, restart scheduler + log warning (throttled).
+    """If heartbeat stale >12 min on TWO consecutive reads, restart + log warning (throttled).
+
+    SCHEDULER_WATCHDOG_FALSE_POSITIVE_FIX_1 (2026-05-15): require TWO consecutive
+    stale reads (60s apart per middleware throttle) before firing restart. Single
+    transient blips no longer trigger restart. Counter resets on fresh-read OR
+    on restart.
 
     WA push intentionally disabled 2026-05-15 — Director directive while
     BRIEF_SCHEDULER_CRASHLOOP_RCA_2 is in flight. Re-enable only after that
     RCA closes and crash-loop frequency is back to <1 event/day. Dashboard
     + server logs still capture every restart.
     """
-    global _watchdog_last_alert_ts
+    global _watchdog_last_alert_ts, _watchdog_consecutive_stale
     try:
         from triggers.state import trigger_state
         hb = trigger_state.get_watermark("scheduler_heartbeat")
         age_seconds = (datetime.now(timezone.utc) - hb).total_seconds()
         if age_seconds > 720:  # 12 minutes = missed 2 heartbeat cycles
-            logger.error(f"SCHEDULER-WATCHDOG-1: Heartbeat stale ({age_seconds:.0f}s). Restarting...")
+            _watchdog_consecutive_stale += 1
+            if _watchdog_consecutive_stale < 2:
+                logger.info(
+                    f"SCHEDULER-WATCHDOG-1: heartbeat stale ({age_seconds:.0f}s) "
+                    f"on read #{_watchdog_consecutive_stale}/2. Waiting one more tick."
+                )
+                return
+            logger.error(
+                f"SCHEDULER-WATCHDOG-1: Heartbeat stale ({age_seconds:.0f}s) "
+                f"for 2 consecutive reads. Restarting..."
+            )
             from triggers.embedded_scheduler import restart_scheduler
             restart_scheduler()
+            _watchdog_consecutive_stale = 0
             # Throttle log frequency (replaces the WA push, same cooldown)
             now_ts = time.time()
             if now_ts - _watchdog_last_alert_ts > _watchdog_alert_cooldown_s:
@@ -207,6 +224,9 @@ def _check_scheduler_heartbeat():
                     f"WATCHDOG_RESTART: scheduler was dead {int(age_seconds/60)} min. "
                     f"Auto-restart fired. WA push disabled pending CRASHLOOP_RCA_2."
                 )
+        else:
+            # Fresh heartbeat → reset counter (single fresh read is enough).
+            _watchdog_consecutive_stale = 0
     except Exception as e:
         logger.debug(f"Scheduler watchdog check failed (non-fatal): {e}")
 

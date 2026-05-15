@@ -1372,11 +1372,21 @@ def _expire_browser_actions():
 def _scheduler_heartbeat():
     """SCHEDULER-WATCHDOG-1: Write proof-of-life timestamp to DB every 5 min.
 
-    SCHEDULER_SINGLETON_HARDEN_1: also probe the held singleton-lock connection
-    for liveness. If the connection died (Neon auto-suspend, network drop), the
-    advisory lock is already server-side released — restart so the lock-acquire
-    path runs cleanly and reclaims the lock (or yields to a sibling).
+    SCHEDULER_WATCHDOG_FALSE_POSITIVE_FIX_1 (2026-05-15): watermark is written
+    FIRST, before any IO probe. The probe is now diagnostic only — it logs WARN
+    on failure but never calls restart_scheduler() from inside the heartbeat
+    job thread (reentrancy-hostile: shutdown(wait=True) joins worker threads,
+    a thread cannot join itself). The middleware watchdog at
+    outputs/dashboard.py is the sole restarter.
     """
+    # 1) Write watermark FIRST — proof-of-life is independent of probe latency.
+    try:
+        from triggers.state import trigger_state
+        trigger_state.set_watermark("scheduler_heartbeat", datetime.now(timezone.utc))
+    except Exception as e:
+        logger.error(f"Scheduler heartbeat write failed: {e}")
+
+    # 2) Probe singleton-lock connection — diagnostic only, NO restart from here.
     try:
         import triggers.scheduler_lease as _lease
         held = _lease._held_conn
@@ -1387,20 +1397,14 @@ def _scheduler_heartbeat():
                 cur.fetchone()
                 cur.close()
             except Exception as probe_err:
-                logger.error(
-                    "scheduler singleton-lock connection dead (%s) — "
-                    "forcing restart_scheduler()",
+                logger.warning(
+                    "scheduler singleton-lock connection probe failed (%s). "
+                    "Watchdog will restart on next stale-watermark detection; "
+                    "this job does NOT self-restart (reentrancy-hostile).",
                     probe_err,
                 )
-                restart_scheduler()
-                return  # restart will re-write heartbeat next cycle
     except Exception:
         pass  # never fail heartbeat from probe path
-    try:
-        from triggers.state import trigger_state
-        trigger_state.set_watermark("scheduler_heartbeat", datetime.now(timezone.utc))
-    except Exception as e:
-        logger.error(f"Scheduler heartbeat write failed: {e}")
 
 
 def _get_rss_mb():
