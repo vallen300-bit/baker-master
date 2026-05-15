@@ -1,85 +1,98 @@
 ---
-status: COMPLETE
-completed_at: 2026-05-12T23:39:50Z
-merge_commit: 31158996a820d0c1e412160fd8ed3cc4e524d6fd
-pr: 198
-ship_report: briefs/_reports/B4_hard_deadline_audit_v1_20260513.md
-vault_audit_doc: _ops/processes/deadline-system-contract-v1.md @ 32e42ec (baker-vault main)
-db_row: deadlines.id = 1524 (residence-fee deferral 31.12.2026; movie-desk / mo-vie-am)
-hard_ship_gate: PASS (4/4 — see ship report)
-v1_5_trigger: FIRED — P=2.9% << 50% → triggered CODE_3_PENDING (DEADLINE_ASSIGNED_TO_BACKFILL_1, shipped PR #199)
-brief: briefs/BRIEF_HARD_DEADLINE_AUDIT_V1.md
-trigger_class: TIER_B_AUDIT_PLUS_DB_WRITE
-dispatched_at: 2026-05-13
-dispatched_by: ai-head-1 (AH1)
+status: PENDING
+brief_phase_a: briefs/BRIEF_SCHEDULER_WATCHDOG_WA_KILL_1.md
+brief_phase_b: briefs/BRIEF_SCHEDULER_CRASHLOOP_RCA_2.md
+trigger_class: PHASE_A=LOW (single-file kill) ; PHASE_B=LOW (RCA, no code)
+dispatched_at: 2026-05-15T15:25:00Z
+dispatched_by: ai-head-2 (AH2)
 target: b4
-update_at: 2026-05-13
-update_reason: |
-  Post AH1 architecture-review (Director-ratified same session, verdict
-  "accept-with-changes"). One amendment folded as
-  "## UPDATE — 2026-05-13" section in brief end. Adds ~15 min effort.
-  Closes 1 HIGH concern (assigned_to population gap -> scanner silent
-  under-reporting). Q5 now requires quantitative output (% population
-  rate) + v1.5 backfill trigger if P < 50%.
-  READ the UPDATE section FIRST.
+prior_brief_complete: |
+  HARD_DEADLINE_AUDIT_V1 (PR #198, commit 31158996, 2026-05-12). Closed.
+  This dispatch supersedes the prior CODE_4_PENDING.md content.
 director_ratification: |
-  Director 2026-05-13 "go" — post AH1 engineering eval of MOVIE Desk
-  scheduled-tasks architecture review. Three-tier frame ratified.
-  This brief is 3 of 3 in v1 dispatch.
-  Director "ratified" 2026-05-13 same session — architecture-review
-  amendment (above) folded in pre-build.
-priority: P2
-phase: 1 of 1
-expected_pr_count: 0 (audit doc commits to baker-vault directly; DB write is runtime via MCP)
-expected_branch: none (vault direct-push; no baker-master PR)
-expected_complexity: low (~2.25h B-code; grep + write doc + 1 MCP call + 1 SQL UPDATE + 1 quantitative Q5 query + conditional v1.5 trigger)
-mandatory_2nd_pass: FALSE
+  Director 2026-05-15 ~15:10Z (in-chat to AH2): "ah1 is busy, can you
+  kill the whatsapp alert and prepare the brief to b4 to fix?"
+  AH2 dispatching as deputy per orientation §recurring-workflow #1.
+  AH1 (lead orchestrator) not on this dispatch — Director authorized AH2
+  redirect explicitly.
+priority: P0 (Phase A — user-visible noise; production-spam)
+            P1 (Phase B — RCA, scope-bounded)
+phase: 1 of 2 (Phase A first, then Phase B)
+expected_pr_count: 1 (Phase A) + 0 (Phase B — RCA-only, ship report commit)
+expected_complexity: |
+  Phase A: ~10 min — single-file edit at outputs/dashboard.py:200-207
+  Phase B: 1-2h — diagnostic SQL + Render log inspection + ship report
+mandatory_2nd_pass: FALSE (both phases LOW trigger class)
 hard_ship_gate: |
-  1. `_ops/processes/deadline-system-contract-v1.md` committed to
-     baker-vault main, covering all 7 questions in brief Part 1 with
-     file:line citations.
-  2. Literal SELECT verification output pasted in ship report:
-     SELECT id, description, due_date, priority, severity, status,
-            assigned_to, matter_slug
-     FROM deadlines
-     WHERE description LIKE '%residence fee%';
-     Must return exactly one row, all fields populated.
-  3. AH1 spot-check: 3 random file:line citations from the audit doc
-     resolve to the actual claimed content.
-  4. Q5 quantitative output: literal SQL + literal row output pasted in
-     the audit doc (assigned_to + matter_slug population percentages).
-     If P < 50%, the v1.5 follow-up section is appended to the audit
-     doc per brief UPDATE.
-scope: |
-  baker-vault: ONE new doc at _ops/processes/deadline-system-contract-v1.md.
-  Baker DB: insert + update ONE row in `deadlines` table (residence-fee
-  deferral 31.12.2026).
-  NO baker-master code changes. NO MCP signature extension. NO new nudge
-  stages (audit only — gaps surfaced as v2 follow-up list, not implemented).
-coordination: |
-  Independent of Brief 1 (b2) + Brief 2 (b3). Brief 2's scanner will pick
-  up the registered deadline whenever it next runs. If Brief 2 lands first
-  with VAULT_SCANNER_ENABLED=false, no deadline-row drift.
-audit_quality_gate: |
-  Per Lesson #7 (brief file:line citation verification — anchor: AH#2
-  MOVIE AM 2026-04-23 :385 cite on 154-line file). Every cite in the
-  audit doc MUST be verified by opening the actual file at the actual
-  line. AH1 will spot-check 3 random cites.
+  PHASE A:
+    1. `python3 -c "import py_compile; py_compile.compile('outputs/dashboard.py', doraise=True)"` clean.
+    2. `pytest tests/test_watchdog_cooldown.py -v` literal green pasted in ship report.
+    3. PR opened, /security-review skill clean (single-file, no auth/DB/external surface).
+    4. After merge + 30 min: `SELECT COUNT(*) FROM baker_actions WHERE action_type='whatsapp_send'
+       AND payload->>'text_preview' LIKE 'Baker scheduler was dead%' AND created_at > NOW() - INTERVAL '30 minutes'`
+       returns 0 (literal SELECT output in ship report).
+
+  PHASE B (after Phase A merged):
+    1. Ship report committed to briefs/_reports/B4_scheduler_crashloop_rca2_<date>.md.
+    2. Root cause statement single sentence + cited evidence.
+    3. Evidence table for all 5 hypotheses (VERIFIED/FALSIFIED/INCONCLUSIVE).
+    4. Proposed fix + risk + verification plan.
+    5. Follow-up brief skeleton inline if proposed fix needs code (most likely yes).
+    6. AH2 reviews ship report; surfaces proposed fix to Director for ratification before any patch.
 ship_report_to: |
-  Bus-post to `lead` on completion with topic `ship/HARD_DEADLINE_AUDIT_V1`.
+  Bus-post to `deputy` on each Phase A PR open + ship.
+  Bus-post to `deputy` on Phase B ship-report commit.
 ---
 
-# Dispatch notice
+# CODE_4_PENDING — Scheduler watchdog WA kill + crash-loop RCA — 2026-05-15
 
-Read `briefs/BRIEF_HARD_DEADLINE_AUDIT_V1.md` end-to-end before starting.
+**Dispatched by:** AH2 (deputy) under Director directive 2026-05-15 ~15:10Z
+**Working dir:** `~/bm-b4`
+**Branch strategy:**
+- Phase A → new branch off `main`, e.g. `b4/scheduler-watchdog-wa-kill-1`
+- Phase B → no branch (ship report committed to `main` directly under `briefs/_reports/`)
 
 Pre-flight:
-1. `git pull --ff-only origin main` in `~/bm-b4` (baker-master clone — for reading models/deadlines.py + grep).
-2. `cd ~/baker-vault && git pull --ff-only origin main` for the audit-doc commit target.
+1. `git pull --ff-only origin main` in `~/bm-b4`.
 
-Audit discipline:
-- Open every cited file at the cited line BEFORE writing the cite. AH1 spot-checks 3 at random.
-- If a feature is not found (e.g., no nudge state machine exists despite columns existing), say so explicitly + surface as v2 follow-up.
-- Part 2 idempotency: if a row matching the description already exists, UPDATE its fields rather than INSERT a duplicate.
+---
 
-End-of-work: bus-post to `lead` with the literal SELECT output + commit SHA of the audit doc.
+## Phase A — URGENT (ship within hours)
+
+Read `briefs/BRIEF_SCHEDULER_WATCHDOG_WA_KILL_1.md` end-to-end.
+
+Scope: single edit at `outputs/dashboard.py:185-209`. Replace the `send_whatsapp(...)` block with a throttled `logger.warning(...)`. Keep `restart_scheduler()` intact. Keep the 720s threshold. Keep the cooldown variable + semantics — it now throttles the WARN log instead.
+
+Open PR titled: `fix(scheduler): disable watchdog WA alert (CRASHLOOP_RCA_2 in flight)`.
+
+Ship gate per the brief. PR + literal pytest output. AH2 reviews + merges (Tier A — single-file behaviour-narrow, no auth/DB).
+
+After merge: paste the post-merge `SELECT COUNT(*)` verification (30 min wait) in the ship report.
+
+## Phase B — RCA after Phase A merges
+
+Read `briefs/BRIEF_SCHEDULER_CRASHLOOP_RCA_2.md` end-to-end.
+
+Scope: 6 investigation steps (env var check, Render logs, pg_locks query, heartbeat-gap distribution, WA-send correlation, root-cause statement). Deliverable = ship report at `briefs/_reports/B4_scheduler_crashloop_rca2_<date>.md`.
+
+**No production code change in Phase B.** Proposed fix lands as a follow-up brief after Director ratifies the scope based on your RCA.
+
+---
+
+## Background context (read before starting)
+
+- `BRIEF_SCHEDULER_SINGLETON_HARDEN_1.md` already shipped — `triggers/scheduler_lease.py` exists, `tests/test_scheduler_singleton.py` exists, `config/settings.py:147` has `host_direct`. Yet scheduler still crash-loops. Your RCA tells us why.
+- 426 whatsapp_sends in 3 days, all the same watchdog alert text. Real alerts (Steininger / ORF, 2026-05-15 13:50Z) buried in the noise.
+- Current health: `Scheduler: stopped, jobs: 0` at 15:09Z — but `scheduler_executions` table shows jobs ARE firing periodically. Scheduler dies + restarts on a ~12-min cycle.
+- Hypotheses pre-listed in the RCA brief: (1) `POSTGRES_HOST_DIRECT` unset on Render, (2) held connection dies (Neon auto-suspend), (3) SIGTERM orphan lock, (4) APScheduler thread death from unhandled job exception, (5) container OOM.
+
+## Reporting
+
+- Bus-post to `deputy` on each PR open + ship (Phase A) and on RCA ship-report commit (Phase B), per `_ops/processes/agent-bus-posting-contract.md`.
+
+## Co-Authored-By
+
+```
+Co-authored-by: Code Brisen #4 <b4@brisengroup.com>
+Co-Authored-By: Claude Opus 4.7 (1M context) <noreply@anthropic.com>
+```
