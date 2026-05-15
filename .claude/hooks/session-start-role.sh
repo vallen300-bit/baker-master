@@ -52,6 +52,32 @@ EOF
 fi
 
 ROLE_LC="$(echo "$ROLE" | tr '[:upper:]' '[:lower:]')"
+
+# WORKER_SELFWAKE_PHASE_1: write wake.lock for interactive picker sessions on
+# b1-b4 so the launchd worker (com.baker.worker-bN) skips its wake cycle while
+# this interactive session is open. Lock holds parent claude PID ($PPID); the
+# worker auto-cleans the lock when that PID dies (session close) or after its
+# 15-min stale-TTL, whichever comes first. b5 / aiheads ignored (no Phase 1 worker).
+case "$ROLE_LC" in
+  b1|b2|b3|b4)
+    _wake_lock_dir="$HOME/Library/Application Support/baker/worker-$ROLE_LC"
+    if [ -d "$_wake_lock_dir" ]; then
+      python3 - "$_wake_lock_dir/wake.lock" 2>/dev/null <<'PY' || true
+import json, os, sys, time
+try:
+    with open(sys.argv[1], "w") as f:
+        f.write(json.dumps({
+            "pid": int(os.environ.get("PPID") or os.getppid()),
+            "start_ts": time.time(),
+            "source": "interactive-picker",
+        }))
+except Exception:
+    pass
+PY
+    fi
+    ;;
+esac
+
 CTX_FILE="$REPO_ROOT/.claude/role-context/${ROLE_LC}.md"
 
 if [ ! -f "$CTX_FILE" ]; then
