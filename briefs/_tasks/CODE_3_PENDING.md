@@ -1,42 +1,74 @@
 ---
-status: COMPLETE
-brief: briefs/BRIEF_CORTEX_TIER_B_RUNTIME_V1.md
-brief_id: CORTEX_TIER_B_RUNTIME_V1
-trigger_class: TIER_B_DB_MIGRATION_+_BUDGET_RUNTIME_+_CRON_+_ENDPOINT
-dispatched_at: 2026-05-10
-dispatched_by: ai-head-1 (AH1)
+status: PENDING
+brief: briefs/BRIEF_BAKER_WA_DIRECTOR_FILTER_1.md
+trigger_class: MEDIUM (external-surface helper edit + >10 files; mandatory 2nd-pass)
+dispatched_at: 2026-05-15T18:35:00Z
+dispatched_by: ai-head-2 (AH2)
 target: b3
-mandatory_2nd_pass: true
-security_review_required: true
-effort_estimate: ~6-8h
-completed_at: 2026-05-10
-pr: 179
-pr_state: MERGED 2026-05-10T20:39:30Z (sha 9ab4e18)
-supplemental_pr: 182 (CORTEX_TIER_B_ATOMICITY_V1, sha deeec9c)
-ship_commit: 9ab4e18
-ship_report: briefs/_reports/B3_cortex_tier_b_runtime_v1_20260510.md
-ship_report_supplemental: briefs/_reports/B3_cortex_tier_b_atomicity_v1_20260510.md
-ratified_spec: ~/baker-vault/_ops/briefs/CORTEX_B3_TIER_B_RUNTIME_V1.md (AID design)
-director_ratification: D8 via D3+D8 Triaga 2026-05-10
-mailbox_re_dispatch_2026_05_15: WITHDRAWN
-mailbox_re_dispatch_blocker_msg: 242 (b3 → lead, topic blocker/CORTEX_TIER_B_RUNTIME_V1)
-predecessor:
-  brief: briefs/BRIEF_DEADLINE_FEEDBACK_LOOP_1.md
-  pr: 203
-  merge_commit: 0e770ee
-  status: COMPLETE 2026-05-13
+prior_brief_complete: |
+  CORTEX_TIER_B_RUNTIME_V1 (PR #179 merged 2026-05-10) + DEADLINE_FEEDBACK_LOOP_1
+  (PR #203 merged 2026-05-15 09:37Z). This dispatch supersedes prior content.
+director_ratification: |
+  Director 2026-05-15 ~18:30Z (in-chat to AH2): "Ratified." in response to
+  AH2's proposal for outbound WhatsApp allowlist + chokepoint enforcement.
+  Anchor: Director "I stopped even reading messages now from Baker on
+  WhatsApp. ... Why do I need to know this?" — generalisation of the
+  scheduler-watchdog Phase A kill to all infra-class WA sends.
+priority: P0 (Director quality-of-life; signal-to-noise on the Director's
+              primary alert channel)
+phase: 1 of 1
+expected_pr_count: 1
+expected_branch: b3/baker-wa-director-filter-1
+expected_complexity: medium (~2-3h: 10+ call sites to audit + tag, chokepoint, CI guard, 5 tests)
+mandatory_2nd_pass: TRUE (per SKILL.md §"Code-reviewer 2nd-pass Protocol" trigger #4 — external-surface helper)
+hard_ship_gate: |
+  1. `python3 -c "import py_compile; py_compile.compile('outputs/whatsapp_sender.py', doraise=True)"` clean.
+  2. `pytest tests/test_wa_director_filter.py -v` — 5 passed (literal stdout in ship report).
+  3. `bash scripts/check_wa_director_kinds.sh` exits 0 after all callers tagged (literal in ship report).
+  4. Step 2 audit table in ship report — every call site listed with classification + 1-line justification.
+  5. AH2 cross-lane review + /security-review + picker-architect + feature-dev:code-reviewer 2nd-pass all clear.
+  6. Post-merge 24h: `SELECT action_type, COUNT(*) FROM baker_actions WHERE action_type IN ('whatsapp_send','whatsapp_blocked') AND created_at > NOW() - INTERVAL '24 hours' GROUP BY 1` — paste result in ship report addendum.
+ship_report_to: |
+  Bus-post to `deputy` on PR open + ship.
 ---
 
-# CODE_3_PENDING — CORTEX_TIER_B_RUNTIME_V1 — COMPLETE
+# CODE_3_PENDING — Baker WhatsApp Director filter — 2026-05-15
 
-Shipped 2026-05-10 (PR #179 + supplemental PR #182). See `briefs/_reports/B3_cortex_tier_b_runtime_v1_20260510.md` + `briefs/_reports/B3_cortex_tier_b_atomicity_v1_20260510.md`.
+**Dispatched by:** AH2 (deputy) under Director directive 2026-05-15 ~18:30Z
+**Working dir:** `~/bm-b3`
+**Branch:** `b3/baker-wa-director-filter-1` off `main`
 
-## Re-dispatch withdrawal — 2026-05-15
+Pre-flight:
+1. `git pull --ff-only origin main` in `~/bm-b3`.
+2. Read `briefs/BRIEF_BAKER_WA_DIRECTOR_FILTER_1.md` end-to-end.
 
-AH1 re-dispatched 2026-05-15 (commit `0eb98e8`) under mistaken belief brief was unstarted (CYCLE_REGISTER had stale "pending" entry; oskolkov Cortex cycle f2954da4 synthesis quoted "B3 plumbing STATUS NOT-STARTED" from stale matter brain).
+---
 
-B3 caught the duplicate in 13 minutes via bus-post #242 (topic `blocker/CORTEX_TIER_B_RUNTIME_V1`) — recommended option A (close mailbox as already-shipped). AH1 ratified A 2026-05-15.
+## Scope
 
-B3 also flagged that the re-dispatch mailbox AC #4/#5/#6 invented scope (`/api/tier_b/preflight` + `/api/tier_b/budget` + `tier_b_monthly_reset`) that diverges from BOTH the brief body AND what actually shipped (`/api/admin/tier-b-status` + `tier_b_counter_reset`). No work was claimed; no `b3/cortex-tier-b-runtime-v1` branch was created on the re-dispatch attempt.
+Add a `kind=` parameter + allowlist enforcement to `outputs/whatsapp_sender.py:266`. Calls that resolve to Director's number (`chat_id=DIRECTOR_WHATSAPP`) must pass an allowlisted `kind=` value or get blocked at the chokepoint (returns False + logs to `baker_actions.whatsapp_blocked`). Non-Director chat_ids are unaffected.
 
-**Lesson captured:** every B-code re-dispatch must be preceded by `gh pr list --state merged --search "<brief-id>"` + `git log --grep "<brief-id>"` cross-check before trusting CYCLE_REGISTER status. CYCLE_REGISTER B-code subsection treated as STALE-UNTIL-VERIFIED.
+Allowlist: `counterparty / legal_threat / deadline / vip_signal / financial / director_inbound`.
+
+Audit + tag the 10+ existing `send_whatsapp(` call sites per the brief's Step 2 table. Infra-only ones get replaced with `logger.warning(...)` (mirroring Phase A pattern at `outputs/dashboard.py`). Director-relevant ones get tagged with the right `kind=` value.
+
+Add `scripts/check_wa_director_kinds.sh` as a pre-push hook to fail-fast if any future caller forgets the tag.
+
+## Background context (read before starting)
+
+- Director cited Phase A (`SCHEDULER_WATCHDOG_WA_KILL_1`, PR #206 merged 15:57Z) as the pattern: stop infra-class WA to Director. This brief generalises the rule.
+- Phase A only fixed ONE call site (the scheduler-watchdog at `outputs/dashboard.py`). Several infra-class call sites still default to Director's number — most obviously `triggers/sentinel_health.py` (3 sites: WAHA silent / WAHA session down / general sentinel health).
+- Director's concrete frustration: "I stopped even reading messages now from Baker on WhatsApp." The signal-to-noise is gone. Restore it by silencing everything that isn't an entity outside Baker.
+- Director ratification of THIS brief is implicit in his "Ratified." reply. No further authorization needed for the implementation.
+
+## Reporting
+
+- Bus-post `deputy` on PR open + ship per `_ops/processes/agent-bus-posting-contract.md`.
+- Cite the audit table (Step 2 of the brief) in the ship report — every classification decision must have a 1-line justification (DON'T classify without reading the trigger code).
+
+## Co-Authored-By
+
+```
+Co-authored-by: Code Brisen #3 <b3@brisengroup.com>
+Co-Authored-By: Claude Opus 4.7 (1M context) <noreply@anthropic.com>
+```
