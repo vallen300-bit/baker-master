@@ -119,3 +119,81 @@ PM_REGISTRY: added `curated_wiki_matters` only to `ao_pm`. `movie_am` deliberate
 - Mailbox claim commit: `2845c0b`
 - Implementation commit: pending in same turn as this report
 - PR: opened in same turn as this report
+
+---
+
+## Addendum — 2026-05-16T13:45Z (REQUEST_CHANGES round 1)
+
+AH1 /security-review surfaced 1 MEDIUM (file-level symlink containment gap in
+defense #4 as claimed above). AH2 had already returned PASS-WITH-NITS (msg
+#301). Fixed in commit `b2e6f35` on same branch.
+
+### What changed
+
+`kbl/curated_wiki_reader.py`: file paths inside `curated/` are now `.resolve()`-d
+and re-checked against `matters_root_resolved` BEFORE any `is_file()` /
+`read_text()` call. Skip + log on escape (defense-in-depth — same graceful
+no-op pattern as missing files; do NOT raise so a single bad symlink can't
+take down the whole PM context build).
+
+Bundled trivial LOW nits from same review:
+- LOW-1: tightened filename regex from `^[A-Za-z0-9_.-]+\.md$` to
+  `^[A-Za-z0-9][A-Za-z0-9_.-]*\.md$` — rejects dot-only names (`.md`, `..md`).
+- LOW-2: one-line rationale on `_parse_last_curated_at`'s 30-line cap.
+
+Skipped LOW-3 (integration test asserting `_build_system_prompt` emits
+`# CURATED WIKI` + `## CURATED-VS-STATE CONFLICT RULE` in correct order) —
+not "trivial" per AH1 guidance; can be a follow-up if AH1 wants it bundled.
+
+### Defense #4 restated
+
+| Layer | Before | After |
+|---|---|---|
+| Directory containment | ✅ `matter_dir.resolve()` + prefix-check | (unchanged) |
+| **File-level containment** | ❌ `(matter_dir / fname)` not resolved before `is_file()`/`read_text()` | ✅ `(matter_dir / fname).resolve()` + prefix-check; skip + log on escape |
+
+### Tests (literal pytest output)
+
+```
+$ /opt/homebrew/bin/python3.12 -m pytest tests/test_curated_wiki_reader.py -v
+
+============================= test session starts ==============================
+platform darwin -- Python 3.12.12, pytest-9.0.3, pluggy-1.6.0
+collected 23 items
+
+tests/test_curated_wiki_reader.py::test_rejects_empty_slug PASSED        [  4%]
+tests/test_curated_wiki_reader.py::test_rejects_path_traversal_slug PASSED [  8%]
+tests/test_curated_wiki_reader.py::test_rejects_slug_with_slash PASSED   [ 13%]
+tests/test_curated_wiki_reader.py::test_rejects_uppercase_slug PASSED    [ 17%]
+tests/test_curated_wiki_reader.py::test_rejects_unknown_slug PASSED      [ 21%]
+tests/test_curated_wiki_reader.py::test_rejects_unsafe_filename PASSED   [ 26%]
+tests/test_curated_wiki_reader.py::test_raises_when_vault_env_unset PASSED [ 30%]
+tests/test_curated_wiki_reader.py::test_reads_curated_files PASSED       [ 34%]
+tests/test_curated_wiki_reader.py::test_missing_files_skipped_not_errored PASSED [ 39%]
+tests/test_curated_wiki_reader.py::test_missing_dir_returns_empty PASSED [ 43%]
+tests/test_curated_wiki_reader.py::test_char_cap_truncates_with_marker PASSED [ 47%]
+tests/test_curated_wiki_reader.py::test_zero_char_cap_disables_truncation PASSED [ 52%]
+tests/test_curated_wiki_reader.py::test_frontmatter_without_last_curated_returns_none PASSED [ 56%]
+tests/test_curated_wiki_reader.py::test_no_frontmatter_returns_none PASSED [ 60%]
+tests/test_curated_wiki_reader.py::test_symlink_escape_rejected PASSED   [ 65%]
+tests/test_curated_wiki_reader.py::test_file_level_symlink_escape_rejected PASSED [ 69%]
+tests/test_curated_wiki_reader.py::test_rejects_dot_only_filename PASSED [ 73%]
+tests/test_curated_wiki_reader.py::test_format_for_prompt_empty_on_no_files PASSED [ 78%]
+tests/test_curated_wiki_reader.py::test_format_for_prompt_emits_labels PASSED [ 82%]
+tests/test_curated_wiki_reader.py::test_format_for_prompt_swallows_invalid_slug PASSED [ 86%]
+tests/test_curated_wiki_reader.py::test_load_curated_wiki_context_iterates_pm_registry_matters PASSED [ 91%]
+tests/test_curated_wiki_reader.py::test_load_curated_wiki_context_unknown_pm_returns_empty PASSED [ 95%]
+tests/test_curated_wiki_reader.py::test_load_curated_wiki_context_pm_without_curated_config_returns_empty PASSED [100%]
+
+============================== 23 passed in 0.28s ==============================
+```
+
+23/23 pass (was 20/20; new: `test_file_level_symlink_escape_rejected` +
+`test_rejects_dot_only_filename` + the existing dir-level symlink test
+unaffected).
+
+### New HEAD
+
+- Commit: `b2e6f35` (pushed to `b1/ao-pm-read-curated-wiki-1`)
+- PR #210 — auto-updates on push
+- AH1 to re-fire /security-review on new commit, then final sign-off
