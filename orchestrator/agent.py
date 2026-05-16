@@ -757,7 +757,17 @@ TOOL_DEFINITIONS = [
         "name": "update_ao_state",
         "description": (
             "Update the AO Project Manager's persistent state after learning new "
-            "information. Call at the END of every AO interaction."
+            "information. Call at the END of every AO interaction.\n\n"
+            "PATCH, DON'T PARALLEL: before constructing `updates`, inspect the "
+            "existing state_json (call get_ao_state first if you haven't already). "
+            "Patch existing top-level keys when the same fact is already "
+            "represented under a different name. Only introduce a new top-level "
+            "key for a genuinely new concept not covered by any existing field. "
+            "Worked example: if state already has `capital_calls` and you've "
+            "learned of a new tranche, patch `capital_calls` — do NOT add a new "
+            "key like `capital_call_EUR_7M` or `April Capital Tranche`. The "
+            "server rejects writes that look like parallel keys; if you "
+            "deliberately want a new key set `force: true`."
         ),
         "input_schema": {
             "type": "object",
@@ -765,14 +775,25 @@ TOOL_DEFINITIONS = [
                 "updates": {
                     "type": "object",
                     "description": (
-                        "JSON object with fields to update in the state. Keys: "
+                        "JSON object with fields to update in the state. Preferred "
+                        "top-level keys mirror the existing state shape: "
                         "sub_matters, relationship_state, open_actions, red_flags, "
-                        "document_inventory, decisions_log. Only include changed fields."
+                        "document_inventory, decisions_log, capital_calls, "
+                        "investment_channels, financial_summary, ao_psychology. "
+                        "Only include changed fields; patch in place rather than "
+                        "adding parallel keys."
                     ),
                 },
                 "summary": {
                     "type": "string",
                     "description": "One-sentence summary of what was discussed/learned.",
+                },
+                "force": {
+                    "type": "boolean",
+                    "description": (
+                        "Set true ONLY to override the parallel-key guard when a "
+                        "new top-level key is genuinely a new concept. Default false."
+                    ),
                 },
             },
             "required": ["summary"],
@@ -801,7 +822,18 @@ TOOL_DEFINITIONS = [
         "name": "update_pm_state",
         "description": (
             "Update a Project Manager's persistent state after learning new "
-            "information. Call at the END of every PM interaction."
+            "information. Call at the END of every PM interaction.\n\n"
+            "PATCH, DON'T PARALLEL: before constructing `updates`, inspect the "
+            "existing state_json (call get_pm_state first if you haven't "
+            "already). Patch existing top-level keys when the same fact is "
+            "already represented under a different name. Only introduce a new "
+            "top-level key for a genuinely new concept not covered by any "
+            "existing field. Worked example: if state already has "
+            "`capital_calls` and you've learned of a new tranche, patch "
+            "`capital_calls` — do NOT add a new key like `capital_call_EUR_7M` "
+            "or `April Capital Tranche`. The server rejects writes that look "
+            "like parallel keys; if you deliberately want a new key set "
+            "`force: true`."
         ),
         "input_schema": {
             "type": "object",
@@ -813,13 +845,21 @@ TOOL_DEFINITIONS = [
                 "updates": {
                     "type": "object",
                     "description": (
-                        "JSON object with fields to update in the state. "
-                        "Only include changed fields."
+                        "JSON object with fields to update in the state. Patch "
+                        "existing top-level keys in place rather than adding "
+                        "parallel keys for the same fact."
                     ),
                 },
                 "summary": {
                     "type": "string",
                     "description": "One-sentence summary of what was discussed/learned.",
+                },
+                "force": {
+                    "type": "boolean",
+                    "description": (
+                        "Set true ONLY to override the parallel-key guard when a "
+                        "new top-level key is genuinely a new concept. Default false."
+                    ),
                 },
             },
             "required": ["pm_slug", "summary"],
@@ -2067,6 +2107,10 @@ class ToolExecutor:
         gap flagged in PR #50 ship report. Agent-tool writes now carry
         ``mutation_source='agent_tool'`` for audit attribution; thread-stitching
         itself is deferred to a follow-up (tag closure alone satisfies H4).
+
+        PM_STATE_UPDATE_PATCH_NOT_PARALLEL_1: forwards ``force`` from tool input
+        and surfaces a parallel-key rejection back to the LLM as a structured
+        JSON error so the agent can retry with the canonical key.
         """
         pm_slug = inp.get("pm_slug", "ao_pm")
         from memory.store_back import SentinelStoreBack
@@ -2074,11 +2118,15 @@ class ToolExecutor:
         updates = inp.get("updates", {})
         summary = inp.get("summary", "")
         question = inp.get("question", "")
-        store.update_pm_project_state(
+        force = bool(inp.get("force", False))
+        result = store.update_pm_project_state(
             pm_slug, updates, summary,
             question=question,
             mutation_source="agent_tool",
+            force=force,
         )
+        if isinstance(result, dict) and result.get("error"):
+            return json.dumps(result)
         return f"{pm_slug} project state updated successfully."
 
     def _delegate_to_capability(self, inp: dict) -> str:

@@ -11,9 +11,11 @@ All writes use parameterized queries — no SQL injection risk.
 """
 import json
 import logging
+import re
 import uuid
 from datetime import datetime, timezone
-from typing import Optional
+from difflib import SequenceMatcher
+from typing import Iterable, Optional
 
 import psycopg2
 import psycopg2.pool
@@ -26,6 +28,70 @@ from qdrant_client.models import PointStruct, VectorParams, Distance
 from config.settings import config
 
 logger = logging.getLogger("sentinel.store_back")
+
+
+def _normalize_pm_key(k: str) -> str:
+    """Lowercase + collapse non-alphanumeric runs to single spaces."""
+    return re.sub(r"[^a-z0-9]+", " ", (k or "").lower()).strip()
+
+
+def detect_parallel_pm_key(new_key: str, existing_keys: Iterable[str],
+                           threshold: float = 0.7) -> Optional[str]:
+    """PM_STATE_UPDATE_PATCH_NOT_PARALLEL_1: detect a same-semantic top-level key.
+
+    Returns the existing top-level key that ``new_key`` looks like a parallel of,
+    or None if no candidate clears ``threshold``.
+
+    Signals (max-of):
+      1. ``SequenceMatcher`` ratio between normalised forms — catches near-renames
+         like ``capital_call_EUR_7M`` vs ``capital_calls``.
+      2. Shared-significant-token harmonic mean — catches
+         ``capital_call_EUR_7M`` vs ``capital_calls`` (both have only the
+         ``capital`` root, harmonic = 1.0). Score = 2*|shared| / (|tokens_new|
+         + |tokens_existing|). This intentionally does NOT inflate when one
+         side has many extra tokens (e.g. ``leverage`` matching
+         ``leverage_decline_attribution_baseline`` no longer fires at 1.0 from
+         a single shared root) — the cost is that natural-language keys with
+         distinctive extra tokens (e.g. ``'AO April Capital Tranche (EUR 2.5M)'``
+         vs ``capital_calls``) get only the SequenceMatcher signal; Layer 1
+         (the tool description) carries the catch for those.
+
+    Caller passes ``existing_keys`` already deduplicated; case-insensitive compare.
+    Exact (case-insensitive) match returns None — that's a legitimate patch, not
+    a parallel.
+    """
+    if not new_key:
+        return None
+    new_norm = _normalize_pm_key(new_key)
+    if not new_norm:
+        return None
+    new_tokens = {t for t in new_norm.split() if len(t) >= 6 and t.isalpha()}
+
+    best_match: Optional[str] = None
+    best_score = 0.0
+    for ek in existing_keys:
+        if not ek:
+            continue
+        ek_norm = _normalize_pm_key(ek)
+        if not ek_norm:
+            continue
+        if new_norm == ek_norm:
+            # Exact match (case/punctuation-insensitive) — caller is patching.
+            return None
+        ratio = SequenceMatcher(None, new_norm, ek_norm).ratio()
+        ek_tokens = {t for t in ek_norm.split() if len(t) >= 6 and t.isalpha()}
+        if new_tokens and ek_tokens:
+            shared = new_tokens & ek_tokens
+            # Harmonic mean (PR #209 HIGH-2): symmetric denominator so a single
+            # shared token can't hit 1.0 against a multi-token counterpart.
+            token_score = (2 * len(shared)) / (len(new_tokens) + len(ek_tokens))
+        else:
+            token_score = 0.0
+        score = max(ratio, token_score)
+        if score > best_score:
+            best_score = score
+            best_match = ek
+    return best_match if best_score > threshold else None
 
 
 def _titles_similar(t1: str, t2: str, threshold: int = 3) -> bool:
@@ -5615,7 +5681,8 @@ class SentinelStoreBack:
     def update_pm_project_state(self, pm_slug: str, updates: dict, summary: str = "",
                                 question: str = "",
                                 mutation_source: str = "auto",
-                                thread_id: Optional[str] = None):
+                                thread_id: Optional[str] = None,
+                                force: bool = False):
         """PM-FACTORY: Upsert PM project state with audit trail + optimistic locking.
 
         BRIEF_CAPABILITY_THREADS_1: optional ``thread_id`` threaded into
@@ -5623,9 +5690,18 @@ class SentinelStoreBack:
         Callers that don't care about threads pass ``thread_id=None`` (default);
         existing rows stay NULL — zero impact on legacy behaviour.
 
+        PM_STATE_UPDATE_PATCH_NOT_PARALLEL_1: when ``mutation_source == 'agent_tool'``
+        and ``force`` is False, a parallel-key guard runs before merge. If a new
+        top-level key in ``updates`` is semantically close to an existing top-level
+        key (see :func:`detect_parallel_pm_key`), the write is rejected and a
+        structured-error dict is returned instead of a history-row id. Other
+        mutation sources (auto extraction, signal flagger, etc.) construct keys
+        from fixed schemas and bypass the guard.
+
         Returns ``pm_state_history.id`` of the newly-inserted audit row on success,
-        or ``None`` on first-ever insert (no history row is created for the
-        initial pm_project_state insert) or on any error.
+        ``None`` on first-ever insert (no history row is created for the initial
+        pm_project_state insert) or on any error, or a ``{"error": ..., ...}``
+        dict when the parallel-key guard rejects the write.
         """
         max_retries = 3
         for attempt in range(max_retries):
@@ -5643,6 +5719,65 @@ class SentinelStoreBack:
                 if row:
                     existing = row[0] if isinstance(row[0], dict) else json.loads(row[0] or '{}')
                     current_version = row[1] or 1
+
+                    # PM_STATE_UPDATE_PATCH_NOT_PARALLEL_1: agent-tool writes get a
+                    # parallel-key guard. LLM-constructed updates that invent a new
+                    # top-level key for an existing concept (e.g. capital_call_EUR_7M
+                    # vs existing capital_calls) are rejected so the agent loop can
+                    # retry with the canonical key — or override via force=True.
+                    if mutation_source == "agent_tool" and not force and updates:
+                        existing_keys = list(existing.keys())
+                        for new_k in updates.keys():
+                            if new_k in existing:
+                                continue
+                            similar = detect_parallel_pm_key(new_k, existing_keys)
+                            if similar:
+                                err = {
+                                    "error": "parallel_key_rejected",
+                                    "rejected_key": new_k,
+                                    "similar_to": similar,
+                                    "hint": (
+                                        f"'{new_k}' looks like a parallel of existing "
+                                        f"'{similar}'. Patch the existing key, or "
+                                        "re-call with force=true to override."
+                                    ),
+                                }
+                                logger.warning(
+                                    f"PM state ({pm_slug}) agent_tool write rejected: "
+                                    f"parallel key '{new_k}' ~ '{similar}'"
+                                )
+                                try:
+                                    cur.execute(
+                                        "INSERT INTO baker_actions "
+                                        "(action_type, action_summary, action_data) "
+                                        "VALUES (%s, %s, %s)",
+                                        (
+                                            "pm_state_parallel_key_rejected",
+                                            f"{pm_slug}: '{new_k}' ~ '{similar}'",
+                                            json.dumps({
+                                                "pm_slug": pm_slug,
+                                                "rejected_key": new_k,
+                                                "similar_to": similar,
+                                                "summary": summary[:300],
+                                            }),
+                                        ),
+                                    )
+                                    conn.commit()
+                                except Exception as _audit_e:
+                                    # Audit failure must not mask the rejection.
+                                    try:
+                                        conn.rollback()
+                                    except Exception:
+                                        pass
+                                    logger.warning(
+                                        f"baker_actions audit for parallel-key "
+                                        f"rejection failed (non-fatal): {_audit_e}"
+                                    )
+                                # PR #209 HIGH-1: don't manually _put_conn here —
+                                # the enclosing try/finally already does. Cursor
+                                # close + return; finally returns the connection.
+                                cur.close()
+                                return err
 
                     # Audit trail: snapshot before mutation
                     cur.execute("""
