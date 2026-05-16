@@ -147,10 +147,16 @@ Rules: Only "I will/I'll/let me" = Director's commitment. NOT tasks for others."
 
 
 def _wa_reply(text: str):
-    """Send a reply to the Director on WhatsApp. Non-fatal on error."""
+    """Send a reply to the Director on WhatsApp. Non-fatal on error.
+
+    Tagged kind="director_inbound" — these replies are inside an
+    already-active Director-initiated WA thread (feedback / acks / obligations
+    detect), so they're the canonical user-initiated channel and stay enabled
+    under BAKER_WA_DIRECTOR_FILTER_1.
+    """
     try:
         from outputs.whatsapp_sender import send_whatsapp
-        send_whatsapp(text)
+        send_whatsapp(text, kind="director_inbound")
     except Exception as e:
         logger.warning(f"WhatsApp reply failed: {e}")
 
@@ -800,16 +806,15 @@ async def waha_webhook(
             except Exception:
                 pass
 
-            # Try WhatsApp alert (may fail if session is truly dead — that's OK)
-            try:
-                from outputs.whatsapp_sender import send_whatsapp
-                send_whatsapp(
-                    f"*WAHA SESSION DOWN*\n\nStatus: {session_status}\n"
-                    f"Inbound WhatsApp messages are NOT being received.\n\n"
-                    f"Re-scan QR: https://baker-waha.onrender.com/#/sessions/default"
-                )
-            except Exception:
-                pass
+            # BAKER_WA_DIRECTOR_FILTER_1: infra_only — WAHA session state is
+            # Baker internal infra; dashboard T1 alert above + Slack are the
+            # canonical surfaces. Demoted to logger.warning.
+            logger.warning(
+                "WAHA SESSION DOWN (WA-suppressed, infra_only): status=%s — "
+                "inbound WhatsApp NOT being received. Re-scan: %s",
+                session_status,
+                "https://baker-waha.onrender.com/#/sessions/default",
+            )
 
         elif session_status == "WORKING":
             try:

@@ -507,10 +507,13 @@ def _deliver_initiatives(initiatives: list):
 
     wa_text = "\n".join(wa_lines)
 
-    # Send WhatsApp
+    # Send WhatsApp — initiatives are Baker's daily strategic recommendations
+    # about external entities (counterparties, matters, deadlines). vip_signal
+    # is the broadest Director-facing kind; per-initiative classification would
+    # be ideal but engine emits a single combined message.
     try:
         from outputs.whatsapp_sender import send_whatsapp
-        send_whatsapp(f"[Initiatives] {wa_text}"[:1500])
+        send_whatsapp(f"[Initiatives] {wa_text}"[:1500], kind="vip_signal")
         logger.info("Initiatives sent to Director via WhatsApp")
     except Exception as e:
         logger.warning(f"Initiative WA delivery failed (non-fatal): {e}")

@@ -744,10 +744,11 @@ def run_vip_sla_check():
             )
 
             if vip_tier == 1:
-                # WhatsApp alert to Director
+                # WhatsApp alert to Director — Tier-1 VIP unanswered is by
+                # definition a VIP signal (named contact, time-sensitive).
                 try:
                     from outputs.whatsapp_sender import send_whatsapp
-                    send_whatsapp(alert_text)
+                    send_whatsapp(alert_text, kind="vip_signal")
                     logger.info(f"VIP SLA alert (WhatsApp): {sender_name} — {wait_str}")
                 except Exception as e:
                     logger.warning(f"VIP SLA WhatsApp alert failed: {e}")

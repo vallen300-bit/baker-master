@@ -1,0 +1,17 @@
+#!/usr/bin/env bash
+# Baker pre-push — run CI-class checks that take more than a few hundred ms
+# (don't belong at pre-commit) but still want to fire BEFORE the remote sees
+# the push.
+#
+# Activation (one-time per clone): git config core.hooksPath .githooks
+#
+# BAKER_WA_DIRECTOR_FILTER_1 (2026-05-16): structural guard so future callers
+# of `send_whatsapp(` cannot silently default to Director's number without a
+# kind= tag. Anchor: Director directive 2026-05-15 — "Baker NEVER WhatsApps
+# me about its own internal infrastructure."
+set -euo pipefail
+
+REPO_ROOT="$(git rev-parse --show-toplevel)"
+cd "$REPO_ROOT"
+
+bash scripts/check_wa_director_kinds.sh || exit 1
