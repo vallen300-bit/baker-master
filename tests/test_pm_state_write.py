@@ -6,6 +6,13 @@ Five required tests per §Ship Gate:
   3. test_sidebar_hook_skipped_for_non_pm_capability
   4. test_backfill_idempotency_skips_processed_rows
   5. test_flag_pm_signal_push_slack_only_when_requested
+
+PM_STATE_UPDATE_PATCH_NOT_PARALLEL_1 (2026-05-16) adds:
+  6. test_detect_parallel_pm_key_catches_renamed_key
+  7. test_detect_parallel_pm_key_ignores_exact_match
+  8. test_update_pm_state_rejects_parallel_key_via_agent_tool
+  9. test_update_pm_state_force_overrides_parallel_guard
+ 10. test_update_pm_state_patches_existing_key_via_agent_tool
 """
 from __future__ import annotations
 
@@ -294,3 +301,167 @@ def test_flag_pm_signal_push_slack_only_when_requested(monkeypatch):
     assert channel_id == "D0AFY28N030"
     assert "AO PM" in text
     assert "meeting" in text
+
+
+# ----------------------------- PM_STATE_UPDATE_PATCH_NOT_PARALLEL_1 -----------
+# Layer 1 (tool description) is verified by source inspection; Layer 2
+# (server-side similarity guard) is verified by these tests.
+
+
+def test_detect_parallel_pm_key_catches_renamed_key():
+    """SequenceMatcher catches `capital_call_EUR_7M` ~ `capital_calls`, and
+    the token-overlap signal catches `'AO April Capital Tranche (EUR 2.5M)'`
+    ~ `capital_calls` via the shared root token `capital`."""
+    from memory.store_back import detect_parallel_pm_key
+
+    existing = [
+        "capital_calls", "sub_matters", "open_actions", "red_flags",
+        "relationship_state",
+    ]
+
+    assert detect_parallel_pm_key("capital_call_EUR_7M", existing) == "capital_calls"
+    assert detect_parallel_pm_key(
+        "AO April Capital Tranche (EUR 2.5M)", existing
+    ) == "capital_calls"
+    # A genuinely new concept must NOT trigger the guard.
+    assert detect_parallel_pm_key("rg7_equity", existing) is None
+    assert detect_parallel_pm_key("financial_summary", existing) is None
+
+
+def test_detect_parallel_pm_key_ignores_exact_match():
+    """An exact (case/punctuation-insensitive) match is a legitimate patch,
+    not a parallel — guard must return None so the merge proceeds."""
+    from memory.store_back import detect_parallel_pm_key
+
+    existing = ["capital_calls", "sub_matters"]
+    assert detect_parallel_pm_key("capital_calls", existing) is None
+    assert detect_parallel_pm_key("CAPITAL_CALLS", existing) is None
+    assert detect_parallel_pm_key("Capital Calls", existing) is None
+
+
+def _make_fake_store_with_state(state_json: dict, version: int = 1):
+    """Bypass SentinelStoreBack.__init__ (which opens Qdrant/Voyage/Postgres)
+    and return a minimal stand-in plus the cursor's executed-SQL log."""
+    from memory.store_back import SentinelStoreBack
+
+    fake = object.__new__(SentinelStoreBack)
+    executed = []
+
+    class _Cur:
+        def __init__(self):
+            self._next: list = []
+
+        def execute(self, sql, params=None):
+            sql_norm = " ".join(sql.split())
+            executed.append((sql_norm, params))
+            if "SELECT state_json, version FROM pm_project_state" in sql_norm:
+                self._next = [(state_json, version)]
+            elif "INSERT INTO pm_state_history" in sql_norm:
+                self._next = [(424242,)]  # fake history id
+            elif "UPDATE pm_project_state" in sql_norm:
+                self.rowcount = 1
+                self._next = []
+            else:
+                self._next = []
+
+        def fetchone(self):
+            return self._next[0] if self._next else None
+
+        def close(self):
+            pass
+
+        rowcount = 1
+
+    class _Conn:
+        def __init__(self):
+            self.committed = 0
+            self.rolledback = 0
+
+        def cursor(self):
+            return _Cur()
+
+        def commit(self):
+            self.committed += 1
+
+        def rollback(self):
+            self.rolledback += 1
+
+    conn_holder = {"conn": _Conn()}
+
+    def _get_conn():
+        return conn_holder["conn"]
+
+    def _put_conn(_c):
+        pass
+
+    fake._get_conn = _get_conn  # type: ignore[attr-defined]
+    fake._put_conn = _put_conn  # type: ignore[attr-defined]
+    return fake, conn_holder, executed
+
+
+def test_update_pm_state_rejects_parallel_key_via_agent_tool():
+    """Acceptance #3: agent-tool write with a parallel key gets a structured
+    error back; no UPDATE is issued against pm_project_state."""
+    fake, conn_holder, executed = _make_fake_store_with_state(
+        {"capital_calls": {"status": "fully_funded"}, "sub_matters": {}}
+    )
+
+    result = fake.update_pm_project_state(
+        "ao_pm",
+        {"capital_call_EUR_7M": {"status": "april_tranche_received"}},
+        summary="test write — LLM invented a parallel key",
+        mutation_source="agent_tool",
+    )
+
+    assert isinstance(result, dict), f"expected rejection dict, got {result!r}"
+    assert result.get("error") == "parallel_key_rejected"
+    assert result.get("rejected_key") == "capital_call_EUR_7M"
+    assert result.get("similar_to") == "capital_calls"
+    # No UPDATE to pm_project_state must have fired.
+    update_sqls = [s for s, _ in executed if s.startswith("UPDATE pm_project_state")]
+    assert update_sqls == [], (
+        "Parallel-key write must not reach the pm_project_state UPDATE"
+    )
+
+
+def test_update_pm_state_force_overrides_parallel_guard():
+    """Acceptance #4: same shape as #3 but with force=True the write goes
+    through — pm_state_history INSERT + pm_project_state UPDATE both fire."""
+    fake, conn_holder, executed = _make_fake_store_with_state(
+        {"capital_calls": {"status": "fully_funded"}}
+    )
+
+    result = fake.update_pm_project_state(
+        "ao_pm",
+        {"capital_call_EUR_7M": {"status": "april_tranche_received"}},
+        summary="force-write — Director-ratified genuine new concept",
+        mutation_source="agent_tool",
+        force=True,
+    )
+
+    assert result == 424242, (
+        f"force=True must return the history-row id, got {result!r}"
+    )
+    history_inserts = [s for s, _ in executed if "INSERT INTO pm_state_history" in s]
+    state_updates = [s for s, _ in executed if s.startswith("UPDATE pm_project_state")]
+    assert len(history_inserts) == 1
+    assert len(state_updates) == 1
+
+
+def test_update_pm_state_patches_existing_key_via_agent_tool():
+    """Acceptance #5: when updates target an existing key, the merge proceeds
+    normally — no guard rejection."""
+    fake, conn_holder, executed = _make_fake_store_with_state(
+        {"capital_calls": {"status": "fully_funded"}}
+    )
+
+    result = fake.update_pm_project_state(
+        "ao_pm",
+        {"capital_calls": {"status": "april_tranche_received_2026_04_24"}},
+        summary="patching existing capital_calls",
+        mutation_source="agent_tool",
+    )
+
+    assert result == 424242
+    state_updates = [s for s, _ in executed if s.startswith("UPDATE pm_project_state")]
+    assert len(state_updates) == 1
