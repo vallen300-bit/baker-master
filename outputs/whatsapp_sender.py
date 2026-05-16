@@ -274,6 +274,7 @@ DIRECTOR_WA_ALLOWED_KINDS = frozenset({
     "vip_signal",        # VIP contact event (call, email, message) needing decision
     "financial",         # Investment / capital call / payment / banking event
     "director_inbound",  # Reply to Director's own outbound WA (user-initiated thread)
+    "kbl_critical",      # KBL CRITICAL (Anthropic circuit / KBL cost cap) — Director-actionable infra; 5-min bucket dedupe upstream
 })
 
 

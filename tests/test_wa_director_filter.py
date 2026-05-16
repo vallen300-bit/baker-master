@@ -81,7 +81,13 @@ def test_non_director_chat_id_kind_optional():
 
 
 def test_allowlist_contents():
-    """Allowlist contains exactly the 6 Director-ratified kinds."""
+    """Allowlist contains exactly the 7 Director-ratified kinds.
+
+    Added `kbl_critical` post-REQUEST_CHANGES on PR #208 (AH1 2026-05-16):
+    KBL CRITICAL alerts (Anthropic circuit / KBL cost cap) are
+    Director-actionable infra and must pass the chokepoint. See
+    kbl/logging.py:169.
+    """
     assert DIRECTOR_WA_ALLOWED_KINDS == frozenset({
         "counterparty",
         "legal_threat",
@@ -89,4 +95,24 @@ def test_allowlist_contents():
         "vip_signal",
         "financial",
         "director_inbound",
+        "kbl_critical",
     })
+
+
+def test_director_send_with_kbl_critical_kind_allowed():
+    """kind='kbl_critical' + Director chat_id → reaches the WAHA HTTP call."""
+    with patch.object(sender, "_resolve_to_active_chat_id", side_effect=lambda c: c):
+        with patch.object(sender, "_log_send_to_baker_actions"):
+            with patch("httpx.Client") as MockClient:
+                client_inst = MockClient.return_value.__enter__.return_value
+                resp = MagicMock()
+                resp.is_success = True
+                resp.status_code = 200
+                client_inst.post.return_value = resp
+                result = send_whatsapp(
+                    "[KBL CRITICAL] anthropic_client: circuit opened",
+                    chat_id=DIRECTOR_WHATSAPP,
+                    kind="kbl_critical",
+                )
+    assert result is True
+    client_inst.post.assert_called_once()
