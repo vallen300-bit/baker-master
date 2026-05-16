@@ -5,13 +5,15 @@ dispatched_by: AH2 (deputy) under Director redirect 2026-05-16 ~08:50Z
 dispatched_at: 2026-05-16T08:50:00Z
 claimed_at: 2026-05-16T08:58:00Z
 shipped_at: 2026-05-16T09:07:00Z
-status: PR_OPEN
+status: PR_OPEN_REWORKED
 pr: https://github.com/vallen300-bit/baker-master/pull/209
 branch: b4/pm-state-update-patch-not-parallel-1
-commit: 427eea3
+commit: ead947a
 trigger_class: LOW
 reviewer: AH1 cross-lane (no /security-review per brief)
 bus_post: msg #286 (topic ship/pm-state-update-patch-not-parallel-1 → lead)
+ah1_review_first: msg #294 (REQUEST_CHANGES — 2 HIGH findings)
+ah1_response_at: 2026-05-16T09:55:00Z
 ---
 
 # B4 ship report — PM_STATE_UPDATE_PATCH_NOT_PARALLEL_1
@@ -151,3 +153,119 @@ criteria" items 3, 4, 5 plus two helper-unit tests for the new
 Co-authored-by: Code Brisen #4 <b4@brisengroup.com>
 Co-Authored-By: Claude Opus 4.7 (1M context) <noreply@anthropic.com>
 ```
+
+---
+
+## Addendum — AH1 REQUEST_CHANGES rework (2026-05-16T09:55Z, commit `ead947a`)
+
+AH1 cross-lane review (bus msg #294) PASS-WITH-NITS but with 2 HIGH findings
+blocking merge. Both addressed in commit `ead947a` pushed to the same
+branch. MED/LOW deferred per AH1 recommendation ("Defer all MED/LOW unless
+trivially bundled").
+
+### HIGH-1 — connection double-put on rejection path (`memory/store_back.py`)
+
+The parallel-key rejection block was manually calling `cur.close()` +
+`self._put_conn(conn)` + `return err`, while the enclosing `try/finally`
+at the end of `update_pm_project_state` ALSO calls `self._put_conn(conn)`
+in its finally clause — meaning every rejection silently double-freed the
+connection (psycopg2.pool.ThreadedConnectionPool.putconn raises PoolError
+on double-put; the except-pass inside `_put_conn` swallowed it, but the
+class of bug is real and pool-corruption-prone).
+
+Fix: removed the manual `self._put_conn(conn)` from the rejection block.
+Kept `cur.close()` to match the success-path pattern (line 5809). The
+existing `finally: self._put_conn(conn)` at line 5828 cleanly handles
+return and exception exits.
+
+Diff (relevant lines):
+
+```python
+                                # PR #209 HIGH-1: don't manually _put_conn here —
+                                # the enclosing try/finally already does. Cursor
+                                # close + return; finally returns the connection.
+                                cur.close()
+                                return err
+```
+
+### HIGH-2 — token-overlap denominator flaw (`memory/store_back.py:detect_parallel_pm_key`)
+
+Original formula: `token_score = len(shared) / min(len(new_tokens),
+len(ek_tokens))`. When one side had 1 significant token and that token
+appeared in the other (multi-token) side's set, score = 1.0 → instant
+rejection regardless of semantic distance. Worked example:
+
+- new = `leverage` (1 significant token: {`leverage`})
+- existing = `leverage_decline_attribution_to_2024_baseline` (4 tokens)
+- shared = {`leverage`} → old token_score = 1/1 = 1.0 (FALSE POSITIVE)
+
+Fix: swapped to harmonic mean `2*|shared| / (|new_tokens| + |ek_tokens|)`.
+Symmetric denominator prevents single-token-side inflation. With the same
+example: 2*1/(1+4) = 0.4 < 0.7 → no longer blocks. The `capital_call_EUR_7M`
+→ `capital_calls` catch (both single-token sets) is preserved at
+harmonic = 2/(1+1) = 1.0.
+
+Trade-off documented in the function docstring: natural-language keys with
+distinctive extra tokens — e.g. `'AO April Capital Tranche (EUR 2.5M)'`
+against `capital_calls` (new tokens {capital, tranche}, existing tokens
+{capital}, harmonic = 2/3 = 0.667) — now fall through Layer 2. Layer 1 (the
+tool-description prompt) carries those cases. The brief's primary
+acceptance criterion (`capital_call_EUR_7M` → `capital_calls` rejection)
+remains pinned by `test_update_pm_state_rejects_parallel_key_via_agent_tool`.
+
+### New regression test (per AH1 directive)
+
+`tests/test_pm_state_write.py::test_detect_parallel_pm_key_single_shared_token_does_not_overblock`
+covers both AH1's worked example (`tranche_overview` vs `tranches_2026`,
+which never tripped tokens anyway since `tranche` ≠ `tranches` as set
+members — pinned defensively) and the conceptual false-positive class
+(`leverage` vs `leverage_decline_attribution_to_2024_baseline`, which DID
+trip under the min-denominator formula and no longer does).
+
+### Existing test updated (Layer-1/Layer-2 split documented inline)
+
+`test_detect_parallel_pm_key_catches_renamed_key` previously asserted that
+`'AO April Capital Tranche (EUR 2.5M)'` returned `capital_calls`. That
+assertion relied on the min-denominator token signal which AH1 flagged as
+unsafe. Removed the assertion and replaced with a docstring paragraph
+explaining the new Layer-1/Layer-2 split for natural-language keys. The
+`capital_call_EUR_7M` assertion stays — it's the brief's primary case and
+remains catchable under harmonic mean.
+
+### Deferred (MED/LOW — per AH1's "defer unless trivially bundled")
+
+- **M1** (positional arg in `update_ao_project_state` line 5712)
+- **M2** (`_update_pm_state` docstring missing force-forwarding mention)
+- **M3** (`_Cur` rowcount=1 default in test fixture)
+- **L2** (baker_actions summary truncation 300 vs 500)
+
+All four are out-of-scope for this REQUEST_CHANGES cycle. Flag for
+follow-up housekeeping ticket. Not bundled because each touches a
+different file/code path and would inflate the diff beyond AH1's
+~30-45min estimate.
+
+### Ship gate (rework)
+
+`python3.12 -m pytest tests/test_pm_state_write.py -v` — 11/11 green:
+
+```
+test_extract_and_update_pm_state_tags_mutation_source PASSED
+test_sidebar_hook_fires_on_ao_pm PASSED
+test_sidebar_hook_skipped_for_non_pm_capability PASSED
+test_backfill_idempotency_skips_processed_rows PASSED
+test_flag_pm_signal_push_slack_only_when_requested PASSED
+test_detect_parallel_pm_key_catches_renamed_key PASSED
+test_detect_parallel_pm_key_single_shared_token_does_not_overblock PASSED
+test_detect_parallel_pm_key_ignores_exact_match PASSED
+test_update_pm_state_rejects_parallel_key_via_agent_tool PASSED
+test_update_pm_state_force_overrides_parallel_guard PASSED
+test_update_pm_state_patches_existing_key_via_agent_tool PASSED
+============================== 11 passed in 0.32s ==============================
+```
+
+`python3 -c "import py_compile; py_compile.compile('memory/store_back.py', doraise=True)"` — OK.
+
+### Files touched (addendum)
+
+- `memory/store_back.py` — HIGH-1 + HIGH-2 fixes; +13/-7 lines.
+- `tests/test_pm_state_write.py` — +1 test, updated assertion + docstring; +29/-6 lines.

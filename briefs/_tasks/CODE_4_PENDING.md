@@ -86,3 +86,39 @@ Both layers shipped together as one PR.
 Co-authored-by: Code Brisen #4 <b4@brisengroup.com>
 Co-Authored-By: Claude Opus 4.7 (1M context) <noreply@anthropic.com>
 ```
+
+---
+
+## UPDATE — 2026-05-16T09:55:00Z — AH1 REQUEST_CHANGES rework pushed
+
+PR #209 reworked at commit `ead947a` addressing both HIGH findings from
+AH1 cross-lane review (bus msg #294):
+
+- **HIGH-1** — connection double-put on rejection path: removed manual
+  `_put_conn(conn)` from rejection branch in `update_pm_project_state`;
+  enclosing `try/finally` now solely owns connection cleanup. Matches
+  the function's success-path pattern (line 5809).
+- **HIGH-2** — token-overlap denominator: `detect_parallel_pm_key` now
+  uses harmonic mean `2*|shared|/(|new|+|ek|)` instead of
+  `|shared|/min(|new|,|ek|)`. Preserves `capital_call_EUR_7M` →
+  `capital_calls` catch (both single-token, harmonic = 1.0). Lets
+  through false-positive `leverage` vs
+  `leverage_decline_attribution_to_2024_baseline` (harmonic = 0.4).
+- **New regression test**: `test_detect_parallel_pm_key_single_shared_token_does_not_overblock`
+  pins both AH1's worked example (`tranche_overview` vs `tranches_2026`)
+  and the conceptual false-positive class.
+- **Trade-off noted**: `'AO April Capital Tranche (EUR 2.5M)'` against
+  `capital_calls` (harmonic = 0.667) now falls through Layer 2; Layer 1
+  (tool-description prompt) carries that catch. Documented in
+  `detect_parallel_pm_key` docstring + updated assertion in
+  `test_detect_parallel_pm_key_catches_renamed_key`.
+- **Deferred** (per AH1 "defer MED/LOW unless trivially bundled"): M1
+  positional-arg in `update_ao_project_state` · M2 docstring force-fwd
+  note · M3 `_Cur` rowcount default · L2 baker_actions truncation
+  300/500. Flag for follow-up ticket.
+
+Ship gate: `python3.12 -m pytest tests/test_pm_state_write.py -v` →
+11/11 green (0.32s). `py_compile memory/store_back.py` → OK.
+
+Ship report addendum committed at `briefs/_reports/B4_PM_STATE_UPDATE_PATCH_NOT_PARALLEL_1_20260516.md`.
+Bus-post pending to `lead` with topic `ship/pm-state-update-patch-not-parallel-1-rework`.
