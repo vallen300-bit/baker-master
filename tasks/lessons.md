@@ -389,3 +389,22 @@ v = d["key"]; print(f"... {v} ...")        # drop the inner quote
 ```
 Pattern to grep: `f".*{[^}]*\\\\"` inside any embedded Python.
 **Anchor:** `BRIEF_BRISEN_LAB_TERMINAL_BUS_DRAIN_ON_SESSION_START_1.md` V0.2; PR #183 (2026-05-11); B2 implementation pass caught what the brief-reviewer pass missed.
+
+### 65. Cross-lane / security review: verify claimed defenses against threat-model scenarios, not test names (2026-05-16)
+**Mistake:** PR #210 (`AO_PM_READ_CURATED_WIKI_1`) ship report listed 8 security defenses; defense #4 = *"Path resolution containment — string-prefix match on resolved paths defeats symlink escape."* AH2 cross-lane review (#301) green-lit because `test_symlink_escape_rejected` existed and `matter_dir.resolve()` + prefix-check was present in code. AH1 `/security-review` pass surfaced a NEW MEDIUM: per-file `is_file()` + `read_text()` follows file-level symlinks without re-validating containment. The directory-level defense was tested; the file-level was claimed-but-not-tested. AH2 missed it because the test name + code pattern matched the case the test exercised — not the broader "defeats symlink escape" claim.
+**Why it happened:** Reviewer verified "each claim → matching test name → present" rather than enumerating the threat scenarios each claim should cover and tracing code-vs-tests against the full enumeration. Tests verify what was thought of, not what was claimed.
+**Rule:** when reviewing a PR that lists numbered "security defenses" or "threat-model defenses":
+1. Read each numbered claim wording exactly.
+2. Enumerate the threat-model scenarios that wording covers — there will usually be MORE than one (directory-level symlink, file-level symlink, nested-link chain, parent-dir relative, etc.).
+3. Read the code path that implements the defense. Trace whether ALL enumerated scenarios are handled.
+4. Cross-check tests cover each enumerated scenario, not just the obvious one.
+5. If code covers fewer scenarios than the claim wording implies, flag it — the brief is overclaiming.
+
+Claim wording like "defeats X attack," "prevents Y," "handles Z" promises broader coverage than a single specific test case. Verify the breadth.
+
+When in doubt: ask "what's the file-level / nested-link / edge-case version of this claim's threat?" — and read whether the code handles it.
+
+Don't outsource the threat-model enumeration to the brief author. They were already in the code; they may have only thought of the scenario they tested.
+
+Applies to: AH1 + AH2 `/security-review`, cross-lane review, picker-architect, feature-dev:code-reviewer on PRs with security claims.
+**Anchor:** AH1 #306 post-merge analysis 2026-05-16 ~13:24Z on PR #210 (BRIEF_AO_PM_READ_CURATED_WIKI_1) — file-level symlink containment gap missed by AH2 cross-lane (#301) but caught by AH1 `/security-review`. Director ratified codification 2026-05-16 ~13:35Z.
