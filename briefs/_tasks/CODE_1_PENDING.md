@@ -1,5 +1,8 @@
 ---
-status: PENDING
+status: CLAIMED
+claimed_at: 2026-05-16T09:00:00Z
+claimed_by: b1
+branch: b1/ao-pm-read-curated-wiki-1
 brief: briefs/BRIEF_AO_PM_READ_CURATED_WIKI_1.md
 brief_id: AO_PM_READ_CURATED_WIKI_1
 trigger_class: MEDIUM (capability read-path; /security-review required due to slug-input filesystem read)
