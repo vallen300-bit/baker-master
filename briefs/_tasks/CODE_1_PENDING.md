@@ -1,10 +1,13 @@
 ---
-status: SHIPPED_V2
+status: COMPLETE
 claimed_at: 2026-05-16T09:00:00Z
 claimed_by: b1
 shipped_at: 2026-05-16T09:08:23Z
 shipped_v2_at: 2026-05-16T13:45:00Z
+merged_at: 2026-05-16T13:34:13Z
+merge_bus_message: 309
 pr: https://github.com/vallen300-bit/baker-master/pull/210
+pr_status: MERGED (squash, branch deleted)
 ship_report: briefs/_reports/B1_ao_pm_read_curated_wiki_1_20260516.md
 bus_message: 287
 bus_message_v2: 304
@@ -12,6 +15,10 @@ head_v2: b2e6f35
 branch: b1/ao-pm-read-curated-wiki-1
 brief: briefs/BRIEF_AO_PM_READ_CURATED_WIKI_1.md
 brief_id: AO_PM_READ_CURATED_WIKI_1
+deferred_fast_follow: |
+  LOW-3 integration test on _build_system_prompt block + CURATED-VS-STATE
+  CONFLICT RULE directive order — AH1 will file brief if stale, else b1
+  picks up on next dispatch.
 v2_changes: |
   REQUEST_CHANGES round 1 (AH1 /security-review msg #304):
   - MEDIUM fixed: file-level symlink containment in kbl/curated_wiki_reader.py
