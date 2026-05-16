@@ -45,11 +45,16 @@ def detect_parallel_pm_key(new_key: str, existing_keys: Iterable[str],
     Signals (max-of):
       1. ``SequenceMatcher`` ratio between normalised forms — catches near-renames
          like ``capital_call_EUR_7M`` vs ``capital_calls``.
-      2. Shared significant token (length >= 6, alphabetic) — catches
-         ``"AO April Capital Tranche (EUR 2.5M)"`` vs ``capital_calls`` where the
-         shared root ``capital`` (or ``tranche`` against a future ``tranches``)
-         is the same-semantic giveaway. Score = |shared| / min(|tokens_new|,
-         |tokens_existing|), so a single shared root in a short key scores 1.0.
+      2. Shared-significant-token harmonic mean — catches
+         ``capital_call_EUR_7M`` vs ``capital_calls`` (both have only the
+         ``capital`` root, harmonic = 1.0). Score = 2*|shared| / (|tokens_new|
+         + |tokens_existing|). This intentionally does NOT inflate when one
+         side has many extra tokens (e.g. ``leverage`` matching
+         ``leverage_decline_attribution_baseline`` no longer fires at 1.0 from
+         a single shared root) — the cost is that natural-language keys with
+         distinctive extra tokens (e.g. ``'AO April Capital Tranche (EUR 2.5M)'``
+         vs ``capital_calls``) get only the SequenceMatcher signal; Layer 1
+         (the tool description) carries the catch for those.
 
     Caller passes ``existing_keys`` already deduplicated; case-insensitive compare.
     Exact (case-insensitive) match returns None — that's a legitimate patch, not
@@ -77,7 +82,9 @@ def detect_parallel_pm_key(new_key: str, existing_keys: Iterable[str],
         ek_tokens = {t for t in ek_norm.split() if len(t) >= 6 and t.isalpha()}
         if new_tokens and ek_tokens:
             shared = new_tokens & ek_tokens
-            token_score = len(shared) / min(len(new_tokens), len(ek_tokens))
+            # Harmonic mean (PR #209 HIGH-2): symmetric denominator so a single
+            # shared token can't hit 1.0 against a multi-token counterpart.
+            token_score = (2 * len(shared)) / (len(new_tokens) + len(ek_tokens))
         else:
             token_score = 0.0
         score = max(ratio, token_score)
@@ -5761,8 +5768,10 @@ class SentinelStoreBack:
                                         f"baker_actions audit for parallel-key "
                                         f"rejection failed (non-fatal): {_audit_e}"
                                     )
+                                # PR #209 HIGH-1: don't manually _put_conn here —
+                                # the enclosing try/finally already does. Cursor
+                                # close + return; finally returns the connection.
                                 cur.close()
-                                self._put_conn(conn)
                                 return err
 
                     # Audit trail: snapshot before mutation

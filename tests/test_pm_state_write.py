@@ -309,9 +309,17 @@ def test_flag_pm_signal_push_slack_only_when_requested(monkeypatch):
 
 
 def test_detect_parallel_pm_key_catches_renamed_key():
-    """SequenceMatcher catches `capital_call_EUR_7M` ~ `capital_calls`, and
-    the token-overlap signal catches `'AO April Capital Tranche (EUR 2.5M)'`
-    ~ `capital_calls` via the shared root token `capital`."""
+    """Layer 2 catches near-rename `capital_call_EUR_7M` ~ `capital_calls`
+    (shared root token `capital`, harmonic = 1.0 across single-token sets).
+
+    PR #209 HIGH-2 (2026-05-16): the token denominator moved from
+    ``min(|new|, |ek|)`` to harmonic mean ``2*|shared|/(|new|+|ek|)``.
+    Side effect: natural-language keys with distinctive extra tokens
+    (e.g. ``'AO April Capital Tranche (EUR 2.5M)'`` vs ``capital_calls``)
+    no longer fire on tokens alone (harmonic = 2/3 < 0.7). Layer 1 (the
+    tool-description prompt) carries that catch — Layer 2 stays
+    intentionally conservative to avoid blocking legit distinct keys.
+    """
     from memory.store_back import detect_parallel_pm_key
 
     existing = [
@@ -320,12 +328,30 @@ def test_detect_parallel_pm_key_catches_renamed_key():
     ]
 
     assert detect_parallel_pm_key("capital_call_EUR_7M", existing) == "capital_calls"
-    assert detect_parallel_pm_key(
-        "AO April Capital Tranche (EUR 2.5M)", existing
-    ) == "capital_calls"
     # A genuinely new concept must NOT trigger the guard.
     assert detect_parallel_pm_key("rg7_equity", existing) is None
     assert detect_parallel_pm_key("financial_summary", existing) is None
+
+
+def test_detect_parallel_pm_key_single_shared_token_does_not_overblock():
+    """PR #209 HIGH-2 regression: a new key whose only signal is one
+    shared significant token against a multi-token existing key must NOT
+    fall through the 0.7 threshold. Previous min-denominator formula
+    yielded score = 1.0 → silent block of legit distinct keys."""
+    from memory.store_back import detect_parallel_pm_key
+
+    # AH1's worked example — `tranche` and `tranches` are distinct tokens
+    # (set membership is exact) so harmonic shared=0 already, but ratio
+    # alone (0.55) is below threshold too. Pin it.
+    assert detect_parallel_pm_key("tranche_overview", ["tranches_2026"]) is None
+
+    # The conceptual false-positive class — one shared significant token,
+    # multi-token counterpart, low SequenceMatcher ratio. Old code blocked
+    # at token_score=1.0; new code lets it through (harmonic = 2/5 = 0.4).
+    assert detect_parallel_pm_key(
+        "leverage",
+        ["leverage_decline_attribution_to_2024_baseline"],
+    ) is None
 
 
 def test_detect_parallel_pm_key_ignores_exact_match():
