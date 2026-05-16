@@ -95,7 +95,9 @@ def _parse_last_curated_at(body: str) -> Optional[str]:
     lines = body.splitlines()
     if len(lines) < 2:
         return None
-    # Find closing `---`
+    # 30-line cap: real curated files have ≤10-line frontmatter; cap defends
+    # against a pathological body that has no closing `---` (e.g. partially
+    # written file) without scanning the whole body.
     for i in range(1, min(len(lines), 30)):
         if lines[i].strip() == "---":
             break
@@ -133,7 +135,8 @@ def read_curated(
     _validate_slug(slug)
 
     requested = files or DEFAULT_FILES
-    safe_filename = re.compile(r"^[A-Za-z0-9_.-]+\.md$")
+    # Require leading alphanumeric to block dot-only names like '.md' / '..md'.
+    safe_filename = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.-]*\.md$")
     for fname in requested:
         if not safe_filename.match(fname):
             raise CuratedWikiError(f"unsafe curated filename {fname!r}")
@@ -158,7 +161,16 @@ def read_curated(
 
     out: list[CuratedFile] = []
     for fname in requested:
-        fpath = matter_dir / fname
+        # File-level symlink containment: matter_dir containment is verified
+        # above, but a symlink INSIDE curated/ can still point outside the
+        # vault. is_file()/read_text() follow symlinks, so resolve + re-check
+        # before any filesystem access on the path.
+        fpath = (matter_dir / fname).resolve()
+        if not str(fpath).startswith(str(matters_root_resolved) + os.sep):
+            logger.warning(
+                "curated_wiki: file %s escapes vault, skipping", fpath
+            )
+            continue
         if not fpath.is_file():
             continue
         try:

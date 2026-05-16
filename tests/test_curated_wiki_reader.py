@@ -184,6 +184,51 @@ def test_symlink_escape_rejected(vault, tmp_path):
         read_curated("oskolkov")
 
 
+def test_file_level_symlink_escape_rejected(vault, tmp_path):
+    """File-level symlink INSIDE a legit curated/ dir pointing outside vault
+    must be skipped (not followed). Closes the file-level containment gap
+    that AH1 /security-review flagged on PR #210.
+    """
+    from kbl.curated_wiki_reader import read_curated, format_for_prompt
+    # Build legit matter dir + one legit file.
+    _make_vault(vault, "capital-call", {"00_overview.md": "legit overview"})
+    curated_dir = vault / "wiki" / "matters" / "capital-call" / "curated"
+
+    # Create a secret file OUTSIDE the vault.
+    secret = tmp_path.parent / "outside_vault_file_secret.md"
+    secret.write_text("SECRET_OUTSIDE_VAULT")
+
+    # Place a file-level symlink inside curated/ pointing at the outside file.
+    link = curated_dir / "02_money.md"
+    try:
+        link.symlink_to(secret)
+    except (OSError, NotImplementedError):
+        pytest.skip("symlinks unsupported in this environment")
+
+    # 02_money.md is a symlink that escapes vault — reader must skip it,
+    # NOT raise (per defense-in-depth: log + continue, like the unsafe
+    # is_file() miss). 00_overview.md still readable.
+    out = read_curated("capital-call")
+    assert len(out) == 1
+    assert out[0].path.endswith("00_overview.md")
+    assert "SECRET_OUTSIDE_VAULT" not in out[0].body
+
+    # format_for_prompt must not leak the escaping symlink's content either.
+    block = format_for_prompt("capital-call")
+    assert "SECRET_OUTSIDE_VAULT" not in block
+    assert "00_overview.md" in block
+
+
+def test_rejects_dot_only_filename(vault):
+    """LOW-1: filename regex must reject leading-dot names like '.md' / '..md'."""
+    from kbl.curated_wiki_reader import read_curated, CuratedWikiError
+    _make_vault(vault, "capital-call", {"00_overview.md": "x"})
+    with pytest.raises(CuratedWikiError):
+        read_curated("capital-call", files=(".md",))
+    with pytest.raises(CuratedWikiError):
+        read_curated("capital-call", files=("..md",))
+
+
 # ─── format_for_prompt convenience wrapper ───
 
 def test_format_for_prompt_empty_on_no_files(vault):
