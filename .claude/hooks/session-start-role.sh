@@ -60,5 +60,30 @@ if [ ! -f "$CTX_FILE" ]; then
   exit 0
 fi
 
+# BRIEF_WORKER_SELFWAKE_PHASE_1 — concurrent-picker collision mitigation.
+# Interactive picker sessions for b1-b4 write the same wake.lock the
+# launchd worker checks before invoking claude. Lock holds the parent
+# claude PID ($PPID of this hook) so worker's os.kill liveness probe
+# stays accurate for the full session. Best-effort; failures swallowed
+# (lock-write must NEVER block claude startup, per PR #149 discipline).
+case "$ROLE_LC" in
+  b1|b2|b3|b4)
+    LOCK_DIR="$HOME/Library/Application Support/baker/worker-$ROLE_LC"
+    if [ -d "$LOCK_DIR" ]; then
+      python3 -c '
+import json, os, sys, time
+lock_path = sys.argv[1]
+ppid = int(sys.argv[2])
+payload = {"pid": ppid, "start_ts": time.time(), "source": "interactive-picker"}
+try:
+    with open(lock_path, "w") as f:
+        f.write(json.dumps(payload))
+except Exception:
+    pass
+' "$LOCK_DIR/wake.lock" "$PPID" 2>/dev/null || true
+    fi
+    ;;
+esac
+
 _emit < "$CTX_FILE"
 exit 0
