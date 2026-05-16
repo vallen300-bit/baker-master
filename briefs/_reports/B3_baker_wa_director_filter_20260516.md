@@ -181,3 +181,96 @@ Awaiting gates 2-4 (MEDIUM trigger, mandatory 2nd-pass per SKILL.md).
 ## Post-merge 24h DB addendum
 
 _(To be appended after Render auto-deploy + 24h observation.)_
+
+---
+
+## REQUEST_CHANGES Round 1 — Hot-fix bundle (2026-05-16T09:35:00Z)
+
+**Source:** AH1 bus #289 (`REQUEST_CHANGES/BAKER_WA_DIRECTOR_FILTER_1`, posted 2026-05-16T09:19:48Z).
+**Pre-fix HEAD:** `307c599`. **Post-fix HEAD:** `940f4b0` (NEW commit, not amend).
+**Branch:** `b3/baker-wa-director-filter-1` (unchanged).
+
+### Reviewer convergence (merge-blocking)
+
+picker-architect + feature-dev:code-reviewer both PASS-WITH-NITS with one convergent HIGH:
+
+- **HIGH (both):** `kbl/logging.py:169` — `send_director_alert(f'[KBL CRITICAL] {component}: {message}')` was missing `kind=`. Post-merge that call would have been blocked at the new chokepoint and logged as `whatsapp_blocked` in `baker_actions`. KBL CRITICAL is the highest-severity internal alert class (Anthropic circuit / KBL cost cap) — Director must keep seeing those, the brief intent was to silence noise, not signal.
+- **HIGH (picker-architect only, accepted):** `scripts/check_wa_director_kinds.sh` false-positives on Cowork worktree clones under `.claude/`.
+- **HIGH (picker-architect only, accepted):** guard grep missed the `send_director_alert(` symbol entirely — a kbl-side call ladder bypassed the audit.
+- MEDIUM (`_check_wa_kinds_filter.py` multi-line blindness) + LOW × 2 (`_phone_root('')` edge, `action_handler.py:1615` wording) **deferred to fast-follow** per AH1 recommendation.
+
+### Files changed in this round
+
+| File | Change |
+|---|---|
+| `outputs/whatsapp_sender.py` | `DIRECTOR_WA_ALLOWED_KINDS` += `"kbl_critical"` (now 7 entries) with rationale comment |
+| `kbl/logging.py` | line 169: `send_director_alert(f"[KBL CRITICAL] {component}: {message}", kind="kbl_critical")` (inlined; multi-line breaks the line-based guard) |
+| `kbl/whatsapp.py` | docstring updated — KBL CRITICAL via `kind="kbl_critical"`; generic infra noise still leaves `kind=None` and is blocked |
+| `scripts/check_wa_director_kinds.sh` | grep ERE now matches `(send_whatsapp\|send_director_alert)\(`; added `--exclude-dir='.claude'`; added `grep -v 'def send_director_alert'` + `grep -v 'import send_director_alert'` + `grep -v 'from kbl.whatsapp'` |
+| `scripts/_check_wa_kinds_filter.py` | `_earliest_call_idx()` resolves the smaller of either call-token index for the quote-prefix heuristic; `CALL_TOKENS` is the single source of truth |
+| `tests/test_wa_director_filter.py` | new `test_director_send_with_kbl_critical_kind_allowed`; `test_allowlist_contents` updated to expect 7 kinds (with anchor comment to this RC1) |
+
+Diff: 6 files, +79 / -23.
+
+### Design call: option (b) over option (a)
+
+AH1's REQUEST_CHANGES offered either (a) reuse `kind='vip_signal'` or (b) add `'kbl_critical'` to the allowlist. Picked (b):
+
+- `vip_signal` is defined as "VIP contact event (call, email, message) needing decision" — a counterparty-side trigger. KBL CRITICAL is Baker-internal infra. Reusing the slot would have lied to every downstream audit query that filters by `kind` to answer "what classes of Director-bound alerts did Baker send today?"
+- The allowlist comment `# Add new values only after Director ratification.` is satisfied: AH1's REQUEST_CHANGES explicitly authorized either path, and AH1 holds the Tier-B prerogative for this brief class.
+- The `test_allowlist_contents` test has been updated to lock in 7 kinds, so further drift is structurally caught.
+
+### Verification (literal stdout)
+
+```
+$ python3 -c "import py_compile; py_compile.compile('outputs/whatsapp_sender.py', doraise=True); py_compile.compile('kbl/logging.py', doraise=True); py_compile.compile('kbl/whatsapp.py', doraise=True); py_compile.compile('scripts/_check_wa_kinds_filter.py', doraise=True); print('compile OK')"
+compile OK
+```
+
+```
+$ bash scripts/check_wa_director_kinds.sh
+OK: all send_whatsapp() callers tag kind= or non-Director chat_id.
+$ echo $?
+0
+```
+
+```
+$ ~/bm-b3/.venv-b3/bin/python3 -m pytest tests/test_wa_director_filter.py -v
+============================= test session starts ==============================
+platform darwin -- Python 3.12.12, pytest-9.0.3, pluggy-1.6.0 -- /Users/dimitry/bm-b3/.venv-b3/bin/python3
+cachedir: .pytest_cache
+rootdir: /Users/dimitry/bm-b3
+plugins: langsmith-0.7.33, anyio-4.13.0
+collecting ... collected 6 items
+
+tests/test_wa_director_filter.py::test_director_send_without_kind_blocked PASSED [ 16%]
+tests/test_wa_director_filter.py::test_director_send_with_infra_kind_blocked PASSED [ 33%]
+tests/test_wa_director_filter.py::test_director_send_with_allowlisted_kind_allowed PASSED [ 50%]
+tests/test_wa_director_filter.py::test_non_director_chat_id_kind_optional PASSED [ 66%]
+tests/test_wa_director_filter.py::test_allowlist_contents PASSED         [ 83%]
+tests/test_wa_director_filter.py::test_director_send_with_kbl_critical_kind_allowed PASSED [100%]
+
+============================== 6 passed in 0.03s ===============================
+```
+
+```
+$ ~/bm-b3/.venv-b3/bin/python3 -m pytest tests/test_whatsapp_sender_lid.py -v | tail -3
+...
+============================== 23 passed in 0.06s ==============================
+```
+
+`.githooks/pre-push` fired on `git push origin b3/baker-wa-director-filter-1` (commit `940f4b0`) and printed `OK: all send_whatsapp() callers tag kind= or non-Director chat_id.` — extension to second symbol verified in CI loop end-to-end.
+
+### Gate state after round 1
+
+- [x] Gate 1 — B3 pytest (6/6 + 23/23 LID regression)
+- [ ] Gate 2 — AH2 cross-lane review (re-run on `940f4b0`)
+- [ ] Gate 3 — picker-architect (re-run on `940f4b0`)
+- [ ] Gate 4 — feature-dev:code-reviewer 2nd-pass (re-run on `940f4b0`)
+
+### Deferred to fast-follow (per AH1)
+
+1. `_check_wa_kinds_filter.py` multi-line `send_whatsapp(` / `send_director_alert(` blindness — fail-closed (over-flags), doc-only nit. New brief if/when a real caller wants to write a multi-line call.
+2. `_phone_root('')` edge — empty string returns `""`, which is not in `DIRECTOR_PHONE_ROOTS`. Already handled correctly; cosmetic cleanup only.
+3. `action_handler.py:1615` "connectivity failure" message on policy-blocked sends — misleading wording, no behavioural impact.
+
