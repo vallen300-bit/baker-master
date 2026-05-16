@@ -58,6 +58,17 @@ PM_REGISTRY = {
         "registry_version": 2,
         "name": "AO Project Manager",
         "view_dir": "wiki/matters/oskolkov",
+        # BRIEF_AO_PM_READ_CURATED_WIKI_1: additional matters whose curated
+        # wiki layer is loaded into context at runtime. Each slug points at
+        # `wiki/matters/<slug>/curated/{00_overview,02_money}.md` (graceful
+        # no-op if files missing). State_json remains primary; curated wiki
+        # is the fresher second source.
+        "curated_wiki_matters": [
+            "capital-call",
+            "oskolkov",
+            "hagenauer-rg7",
+            "aukera",
+        ],
         "view_file_order": [
             "_index.md",
             "_overview.md",
@@ -1174,6 +1185,22 @@ class CapabilityRunner:
                     state_ctx = self._get_pm_project_state_context(pm_slug)
                     if state_ctx:
                         prompt += f"\n\n# LIVE STATE (from PostgreSQL)\n{state_ctx}\n"
+                    # BRIEF_AO_PM_READ_CURATED_WIKI_1: curated wiki — fresher
+                    # than state_json for cycle facts (drawdown receipts,
+                    # signing gates, deadline state). When the two disagree
+                    # on a dated fact, prompt below tells Opus to prefer wiki.
+                    curated_ctx = self._load_curated_wiki_context(pm_slug)
+                    if curated_ctx:
+                        prompt += (
+                            f"\n\n# CURATED WIKI (cycle-fresh; prefer over LIVE STATE on dated-fact conflicts)\n"
+                            f"{curated_ctx}\n\n"
+                            f"## CURATED-VS-STATE CONFLICT RULE\n"
+                            f"If LIVE STATE (PostgreSQL state_json) and CURATED WIKI disagree on a dated fact "
+                            f"(cycle status, tranche receipt, deadline state, signing status), the curated wiki is "
+                            f"authoritative — cite the wiki path and explicitly note that state_json is stale "
+                            f"(e.g. 'Note: pm_project_state shows X from <date>; curated wiki reports Y as of "
+                            f"<last_curated_at>'). Do NOT silently average the two.\n"
+                        )
                     # BRIEF_CAPABILITY_THREADS_1: Layer 1.5 — recent thread context
                     thread_ctx = self._get_pm_thread_context(pm_slug)
                     if thread_ctx:
@@ -1700,6 +1727,38 @@ class CapabilityRunner:
             return store.get_cortex_config(key, default)
         except Exception:
             return default
+
+    def _load_curated_wiki_context(self, pm_slug: str) -> str:
+        """BRIEF_AO_PM_READ_CURATED_WIKI_1: Load curated wiki for active matters
+        in a PM's domain (via PM_REGISTRY[pm_slug]["curated_wiki_matters"]).
+
+        Per-matter `wiki/matters/<slug>/curated/{00_overview,02_money}.md` is
+        the Director-edited / B-code-curated knowledge layer. State_json
+        (loaded separately by _get_pm_project_state_context) lags this by the
+        Opus-extraction cadence, so capabilities reading only state_json give
+        stale answers on cycle facts.
+
+        Returns formatted prompt block or "" on any failure (graceful no-op).
+        """
+        config = PM_REGISTRY.get(pm_slug)
+        if not config:
+            return ""
+        matters = config.get("curated_wiki_matters") or []
+        if not matters:
+            return ""
+        try:
+            from kbl.curated_wiki_reader import format_for_prompt
+        except ImportError as e:
+            logger.warning("curated_wiki_reader unavailable: %s", e)
+            return ""
+        blocks = []
+        for matter_slug in matters:
+            block = format_for_prompt(matter_slug)
+            if block:
+                blocks.append(block)
+        if not blocks:
+            return ""
+        return "\n\n===\n\n".join(blocks)
 
     def _load_wiki_context(self, pm_slug: str) -> str:
         """CORTEX-PHASE-1A: Load agent context from wiki_pages table.
