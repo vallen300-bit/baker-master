@@ -1,7 +1,27 @@
 ---
-status: PENDING
+status: SHIPPED_V2
+claimed_at: 2026-05-16T09:00:00Z
+claimed_by: b1
+shipped_at: 2026-05-16T09:08:23Z
+shipped_v2_at: 2026-05-16T13:45:00Z
+pr: https://github.com/vallen300-bit/baker-master/pull/210
+ship_report: briefs/_reports/B1_ao_pm_read_curated_wiki_1_20260516.md
+bus_message: 287
+bus_message_v2: 304
+head_v2: b2e6f35
+branch: b1/ao-pm-read-curated-wiki-1
 brief: briefs/BRIEF_AO_PM_READ_CURATED_WIKI_1.md
 brief_id: AO_PM_READ_CURATED_WIKI_1
+v2_changes: |
+  REQUEST_CHANGES round 1 (AH1 /security-review msg #304):
+  - MEDIUM fixed: file-level symlink containment in kbl/curated_wiki_reader.py
+    (resolve + prefix-check before is_file/read_text; skip+log on escape).
+  - LOW-1 bundled: tightened filename regex to reject dot-only names.
+  - LOW-2 bundled: rationale comment on _parse_last_curated_at 30-line cap.
+  - LOW-3 NOT bundled (integration test on _build_system_prompt order) —
+    not "trivial" per AH1 guidance; follow-up if requested.
+  - Tests: 23/23 pass (was 20/20).
+  - HEAD: b2e6f35
 trigger_class: MEDIUM (capability read-path; /security-review required due to slug-input filesystem read)
 dispatched_at: 2026-05-16T08:50:00Z
 dispatched_by: ai-head-2 (AH2) — Director redirect "use b1 or b4"
