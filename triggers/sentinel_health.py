@@ -571,26 +571,23 @@ def run_health_watchdog():
         lines.append(f"\nReset via: POST /api/sentinel-health/SOURCE/reset")
         message = "\n".join(lines)
 
-        # Send via WAHA
+        # BAKER_WA_DIRECTOR_FILTER_1: infra_only — Baker sentinel health is
+        # Baker telling Director about Baker itself. Per Director directive
+        # 2026-05-15 ("I stopped reading Baker WA"), demoted to logger.warning;
+        # Director gets the signal via dashboard T1/T2 alerts + Slack instead.
+        logger.warning("Health watchdog (WA-suppressed, infra_only): %s", message)
         try:
-            from outputs.whatsapp_sender import send_whatsapp
-            send_whatsapp(message)
-            logger.warning(f"Health watchdog: WhatsApp alert sent — {len(stuck)} stuck sentinels")
-        except Exception as wa_err:
-            logger.error(f"Health watchdog: WhatsApp send failed: {wa_err}")
-            # Fallback: create a T1 alert in the dashboard
-            try:
-                from memory.store_back import SentinelStoreBack
-                st = SentinelStoreBack._get_global_instance()
-                st.create_alert(
-                    tier=1,
-                    title=f"SENTINEL WATCHDOG: {len(stuck)} source(s) stuck down >2h",
-                    body=message,
-                    source="sentinel_health",
-                    source_id=f"watchdog-{datetime.now(timezone.utc).strftime('%Y-%m-%d-%H')}",
-                )
-            except Exception:
-                pass
+            from memory.store_back import SentinelStoreBack
+            st = SentinelStoreBack._get_global_instance()
+            st.create_alert(
+                tier=1,
+                title=f"SENTINEL WATCHDOG: {len(stuck)} source(s) stuck down >2h",
+                body=message,
+                source="sentinel_health",
+                source_id=f"watchdog-{datetime.now(timezone.utc).strftime('%Y-%m-%d-%H')}",
+            )
+        except Exception:
+            pass
 
     except Exception as e:
         logger.error(f"Health watchdog failed: {e}")
@@ -666,12 +663,10 @@ def check_waha_silence():
             except Exception:
                 pass
 
-            # Try WhatsApp (may fail if session dead — falls through to dashboard alert)
-            try:
-                from outputs.whatsapp_sender import send_whatsapp
-                send_whatsapp(f"*WAHA SILENT*\n\n{alert_msg}")
-            except Exception:
-                pass
+            # BAKER_WA_DIRECTOR_FILTER_1: infra_only — WAHA silence is a Baker
+            # internal-state condition (the session itself); dashboard T1 alert
+            # above is the canonical surface. Demoted to logger.warning.
+            logger.warning("WAHA SILENT (WA-suppressed, infra_only): %s", alert_msg)
         else:
             # Healthy — clear any previous silence failure
             report_success("waha_silence")
@@ -749,12 +744,13 @@ def poll_waha_session():
         except Exception:
             pass
 
-        # Try WhatsApp (best effort)
-        try:
-            from outputs.whatsapp_sender import send_whatsapp
-            send_whatsapp(f"*WAHA SESSION DOWN*\n\nStatus: {status}\n\n{alert_msg}")
-        except Exception:
-            pass
+        # BAKER_WA_DIRECTOR_FILTER_1: infra_only — WAHA session state is Baker
+        # internal infra; dashboard T1 alert above is canonical.
+        logger.warning(
+            "WAHA SESSION DOWN (WA-suppressed, infra_only): status=%s — %s",
+            status,
+            alert_msg,
+        )
     else:
         # Unknown status — log but don't alert
         logger.warning(f"WAHA session poll: unexpected status '{status}'")

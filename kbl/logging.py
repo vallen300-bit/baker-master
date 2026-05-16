@@ -166,7 +166,7 @@ def emit_critical_alert(
         try:
             from kbl.whatsapp import send_director_alert
 
-            send_director_alert(f"[KBL CRITICAL] {component}: {message}")
+            send_director_alert(f"[KBL CRITICAL] {component}: {message}", kind="kbl_critical")
         except Exception as e:
             sys.stderr.write(f"[kbl.logging] WhatsApp alert failed: {e}\n")
 

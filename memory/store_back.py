@@ -4445,13 +4445,18 @@ class SentinelStoreBack:
                     invalidate_morning_narrative()
                 except Exception:
                     pass  # dashboard module may not be loaded in all contexts
-                # Push T1 alerts to Director via WhatsApp (always reachable)
+                # Push T1 alerts to Director via WhatsApp (always reachable).
+                # T1 alerts surface VIP / counterparty / deadline signals from
+                # sentinels — Baker's signal-to-Director surface. kind="vip_signal"
+                # is the closest fit; per-alert classification would be ideal but
+                # source-of-T1-alert is heterogeneous (sentinels + watchdog +
+                # convergence). vip_signal is the broadest Director-facing kind.
                 try:
                     from outputs.whatsapp_sender import send_whatsapp
                     wa_text = f"*T1 Alert:* {title}"
                     if body:
                         wa_text += f"\n{body[:300]}"
-                    send_whatsapp(wa_text)
+                    send_whatsapp(wa_text, kind="vip_signal")
                 except Exception as e:
                     logger.warning(f"T1 WhatsApp push failed (non-fatal): {e}")
             # Web Push to all subscribers (T1 + T2)

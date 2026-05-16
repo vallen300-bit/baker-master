@@ -614,15 +614,12 @@ def _notify_director(result: ChainResult):
     if "FAIL" in verification or "ABORT" in verification:
         summary += f"\n({verification})"
 
-    # Send via WAHA
-    try:
-        from outputs.whatsapp_sender import send_whatsapp
-        # Prefix with chain indicator
-        wa_text = f"[Chain] {summary}"
-        send_whatsapp(wa_text[:1500])
-        logger.info("Chain notification sent to Director via WhatsApp")
-    except Exception as e:
-        logger.warning(f"Chain WA notification failed (non-fatal): {e}")
+    # BAKER_WA_DIRECTOR_FILTER_1: infra_only — chain notifications report
+    # which actions Baker chained internally; this is Baker self-reporting,
+    # exactly the noise Director cut on 2026-05-15. Demoted to logger.warning.
+    # If a chain produces a Director-relevant output, it should go via the
+    # underlying action's surface (T1 alert, etc.), not via the chain wrapper.
+    logger.warning("[Chain] (WA-suppressed, infra_only): %s", summary[:1500])
 
 
 # ─────────────────────────────────────────────────

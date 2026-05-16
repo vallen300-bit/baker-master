@@ -404,7 +404,8 @@ def _process_baker_labeled_threads(service):
                 source_id=dedup_key,
             )
 
-            # Push to WhatsApp
+            # Push to WhatsApp. Director-flagged-email analysis is by definition
+            # about an external counterparty — Director only flags external mail.
             try:
                 from outputs.whatsapp_sender import send_whatsapp
                 wa_text = (
@@ -413,7 +414,7 @@ def _process_baker_labeled_threads(service):
                     f"*Subject:* {subject}\n\n"
                     f"{analysis[:3000]}"
                 )
-                send_whatsapp(wa_text)
+                send_whatsapp(wa_text, kind="counterparty")
             except Exception as _we:
                 logger.warning(f"BAKER-LABEL-1: WhatsApp push failed: {_we}")
 
@@ -1141,7 +1142,8 @@ def _check_reply_match(
                 f'"{body_preview[:200]}"\n\n'
                 f"Reply here to follow up, or ask me to draft a response."
             )
-            send_whatsapp(wa_text)
+            # Counterparty reply to a Director-originated outbound — by definition external.
+            send_whatsapp(wa_text, kind="counterparty")
         except Exception as e:
             logger.warning(f"WhatsApp reply notification failed: {e}")
 

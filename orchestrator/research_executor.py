@@ -323,7 +323,8 @@ def _notify_completion(proposal_id: int, subject_name: str, filename: str,
     except Exception as e:
         logger.warning(f"Dossier alert creation failed: {e}")
 
-    # WhatsApp
+    # WhatsApp — research dossier is Baker's delivery of work product about
+    # an external entity (subject_name) to Director. vip_signal kind fits.
     try:
         from outputs.whatsapp_sender import send_whatsapp
         wa_text = (
@@ -332,7 +333,7 @@ def _notify_completion(proposal_id: int, subject_name: str, filename: str,
             f"File: {filename}\n\n"
             f"Saved to Baker-Feed/research-dossiers/."
         )
-        send_whatsapp(wa_text)
+        send_whatsapp(wa_text, kind="vip_signal")
     except Exception as e:
         logger.warning(f"Dossier WA notification failed: {e}")
 

@@ -150,7 +150,12 @@ def test_e2e_send_never_posts_director_traffic_to_a_counterparty_for_any_directo
                 resp.is_success = True
                 resp.status_code = 200
                 client_inst.post.return_value = resp
-                ok = sender.send_whatsapp(text="T1 alert body", chat_id=requested)
+                # BAKER_WA_DIRECTOR_FILTER_1: Director-bound calls require
+                # an allowlisted kind=. "T1 alert body" is the canonical T1
+                # surface — tagged kind="vip_signal" (same as store_back.py).
+                ok = sender.send_whatsapp(
+                    text="T1 alert body", chat_id=requested, kind="vip_signal",
+                )
 
     assert ok is True
     posted = client_inst.post.call_args
@@ -236,7 +241,14 @@ def test_director_target_lid_db_unreachable_collapses_to_fail_closed(director_ro
             with patch.object(sender, "_alarm_slack_lid_db_degraded") as mock_alarm:
                 with patch.object(sender, "_log_send_to_baker_actions", side_effect=fake_log):
                     with patch("httpx.Client") as MockClient:
-                        ok = sender.send_whatsapp(text="director alert", chat_id=requested)
+                        # BAKER_WA_DIRECTOR_FILTER_1: must clear chokepoint
+                        # (valid kind=) so the test reaches the UNSAFE-collapse
+                        # path under exercise.
+                        ok = sender.send_whatsapp(
+                            text="director alert",
+                            chat_id=requested,
+                            kind="vip_signal",
+                        )
     assert ok is False
     MockClient.return_value.__enter__.return_value.post.assert_not_called()
     mock_alarm.assert_not_called()
@@ -268,7 +280,12 @@ def _drive_scenario(sender_module, scenario: str) -> None:
     """
     if scenario == "director_short_circuit":
         # Director-target, resolver short-circuits naturally on phone-root.
-        sender_module.send_whatsapp(text="director smoke", chat_id=sender_module.DIRECTOR_WHATSAPP)
+        # kind= required post-BAKER_WA_DIRECTOR_FILTER_1 to clear chokepoint.
+        sender_module.send_whatsapp(
+            text="director smoke",
+            chat_id=sender_module.DIRECTOR_WHATSAPP,
+            kind="vip_signal",
+        )
         return
     if scenario == "clean_resolver_return":
         # Non-Director, resolver maps to @lid, lid_belongs confirms TRUE.
@@ -290,10 +307,15 @@ def _drive_scenario(sender_module, scenario: str) -> None:
         return
     if scenario == "director_lid_db_err":
         # Director, force resolver around the short-circuit; lid_belongs returns None.
+        # kind= required post-BAKER_WA_DIRECTOR_FILTER_1 to clear chokepoint.
         with patch.object(sender_module, "_resolve_to_active_chat_id", return_value="999999999999@lid"):
             with patch.object(sender_module, "_lid_belongs_to_phone", return_value=None):
                 with patch.object(sender_module, "_alarm_slack_lid_db_degraded"):
-                    sender_module.send_whatsapp(text="director alert", chat_id=sender_module.DIRECTOR_WHATSAPP)
+                    sender_module.send_whatsapp(
+                        text="director alert",
+                        chat_id=sender_module.DIRECTOR_WHATSAPP,
+                        kind="vip_signal",
+                    )
         return
     raise ValueError(f"Unknown scenario: {scenario}")
 

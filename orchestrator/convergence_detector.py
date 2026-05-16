@@ -392,7 +392,9 @@ def _deliver_convergences(insights: list, convergences: list):
             for i, insight in enumerate(high_risk[:2], 1):
                 wa_lines.append(f"\n{i}. {insight.get('title', '')}")
                 wa_lines.append(f"   {insight.get('body', '')[:120]}")
-            send_whatsapp("\n".join(wa_lines)[:1500])
+            # BAKER_WA_DIRECTOR_FILTER_1: cross-matter convergences are by
+            # definition about external entities/matters — counterparty kind.
+            send_whatsapp("\n".join(wa_lines)[:1500], kind="counterparty")
         except Exception as e:
             logger.warning(f"Convergence WA delivery failed: {e}")
 

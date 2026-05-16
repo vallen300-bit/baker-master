@@ -1137,7 +1137,9 @@ def _hot_md_weekly_nudge_job():
         return
 
     try:
-        ok = send_whatsapp(HOT_MD_NUDGE_TEXT)
+        # BAKER_WA_DIRECTOR_FILTER_1: Saturday hot.md nudge is a calendar-shaped
+        # reminder for Director to edit his weekly focus file — deadline-class.
+        ok = send_whatsapp(HOT_MD_NUDGE_TEXT, kind="deadline")
     except Exception as e:
         # Defensive: send_whatsapp already has its own try/except, but a
         # config-level blow-up (e.g., module init on an imported constant)

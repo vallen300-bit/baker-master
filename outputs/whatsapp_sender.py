@@ -263,12 +263,107 @@ def _log_send_to_baker_actions(
         logger.warning(f"baker_actions audit unavailable: {e}")
 
 
-def send_whatsapp(text: str, chat_id: str = DIRECTOR_WHATSAPP) -> bool:
+# Director-facing allowlist. Add new values only after Director ratification.
+# Anchor: Director directive 2026-05-15 — "Baker NEVER WhatsApps me about its own
+# internal infrastructure. Counterparty / legal / deadline / VIP / financial only."
+# Brief: BRIEF_BAKER_WA_DIRECTOR_FILTER_1.
+DIRECTOR_WA_ALLOWED_KINDS = frozenset({
+    "counterparty",      # AO / Hagenauer / Cupial / MOHG action or message
+    "legal_threat",      # Steininger-ORF type media or legal escalation
+    "deadline",          # Hard deadlines requiring Director action
+    "vip_signal",        # VIP contact event (call, email, message) needing decision
+    "financial",         # Investment / capital call / payment / banking event
+    "director_inbound",  # Reply to Director's own outbound WA (user-initiated thread)
+    "kbl_critical",      # KBL CRITICAL (Anthropic circuit / KBL cost cap) — Director-actionable infra; 5-min bucket dedupe upstream
+})
+
+
+def _log_director_blocked(text: str, kind: Optional[str]) -> None:
+    """Audit a Director-bound WA send that was blocked at the chokepoint.
+
+    Writes a `whatsapp_blocked` row to baker_actions for later review. Fails
+    silently — the block itself must always proceed even if audit fails.
+    """
+    try:
+        from memory.store_back import SentinelStoreBack
+        store = SentinelStoreBack._get_global_instance()
+        conn = store._get_conn()
+        if not conn:
+            return
+        try:
+            payload = {
+                "reason": "director_kind_not_allowlisted",
+                "kind": kind,
+                "text_preview": text[:200],
+            }
+            cur = conn.cursor()
+            cur.execute(
+                """
+                INSERT INTO baker_actions
+                    (action_type, target_task_id, target_space_id, payload,
+                     trigger_source, success, error_message)
+                VALUES (%s, NULL, NULL, %s::jsonb, %s, %s, %s)
+                """,
+                (
+                    "whatsapp_blocked",
+                    json.dumps(payload),
+                    "whatsapp_sender",
+                    False,
+                    None,
+                ),
+            )
+            conn.commit()
+            cur.close()
+        except Exception as e:
+            logger.warning(f"whatsapp_blocked audit insert failed: {e}")
+            try:
+                conn.rollback()
+            except Exception:
+                pass
+        finally:
+            store._put_conn(conn)
+    except Exception as e:
+        logger.warning(f"whatsapp_blocked audit unavailable: {e}")
+
+
+def send_whatsapp(
+    text: str,
+    chat_id: str = DIRECTOR_WHATSAPP,
+    *,
+    kind: Optional[str] = None,
+) -> bool:
     """Send a text message via WAHA. Returns True on success.
+
     Messages to external contacts get a Baker signature prefix.
     Messages to the Director himself are sent without signature.
+
+    Director-bound calls (any chat_id whose phone digit-root is in
+    DIRECTOR_PHONE_ROOTS — Swiss primary or UK Baker-managed Director
+    number) MUST pass an allowlisted `kind=` value or get blocked at the
+    chokepoint (returns False, no HTTP call, audited as `whatsapp_blocked`
+    in baker_actions). For non-Director chat_ids, `kind=` is not required.
+    Allowlist: `DIRECTOR_WA_ALLOWED_KINDS`. Anchor: Director directive
+    2026-05-15 ("Baker NEVER WhatsApps me about its own internal
+    infrastructure"). Uses the existing DIRECTOR_PHONE_ROOTS primitive so
+    adding a new Director-controlled number is a one-line change there.
     """
     requested_chat_id = chat_id
+
+    # BAKER_WA_DIRECTOR_FILTER_1 chokepoint — Director-bound must have allowlisted kind.
+    # Filter on phone-root set (not literal DIRECTOR_WHATSAPP) so the UK
+    # Baker-managed Director number gets the same protection as the Swiss one.
+    if _phone_root(chat_id) in DIRECTOR_PHONE_ROOTS:
+        if kind is None or kind not in DIRECTOR_WA_ALLOWED_KINDS:
+            logger.warning(
+                "WA_DIRECTOR_BLOCKED: dropped Director-bound send. "
+                "chat_id=%r kind=%r (allowed=%s). text_preview=%r",
+                chat_id,
+                kind,
+                sorted(DIRECTOR_WA_ALLOWED_KINDS),
+                text[:120],
+            )
+            _log_director_blocked(text, kind)
+            return False
 
     # Filter: suppress cost alerts to Director (noisy, not actionable)
     if chat_id == DIRECTOR_WHATSAPP and any(kw in text.lower() for kw in ['cost alert', 'budget exceeded', 'daily spend', 'circuit breaker']):

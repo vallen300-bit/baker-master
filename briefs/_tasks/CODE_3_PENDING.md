@@ -72,3 +72,28 @@ Add `scripts/check_wa_director_kinds.sh` as a pre-push hook to fail-fast if any 
 Co-authored-by: Code Brisen #3 <b3@brisengroup.com>
 Co-Authored-By: Claude Opus 4.7 (1M context) <noreply@anthropic.com>
 ```
+
+---
+
+## UPDATE 2026-05-16T09:35:00Z — REQUEST_CHANGES bundle pushed (HEAD bump)
+
+Source: AH1 bus message #289 (REQUEST_CHANGES on PR #208, posted 2026-05-16T09:19:48Z).
+
+Three HIGH fixes bundled into NEW commit `940f4b0` on `b3/baker-wa-director-filter-1`:
+
+1. **`kbl/logging.py:169`** — `send_director_alert("[KBL CRITICAL] ...")` now passes `kind="kbl_critical"`. Option (b) per AH1 — new `kbl_critical` entry added to `DIRECTOR_WA_ALLOWED_KINDS`. Cleaner than reusing `vip_signal` (semantic mismatch: VIP-signal = external contact event; KBL CRITICAL = Director-actionable infra). Upstream 5-min dedupe in `emit_critical_alert` keeps cadence sane.
+2. **`scripts/check_wa_director_kinds.sh`** — added `--exclude-dir='.claude'` to drop Cowork worktree false-positives.
+3. **`scripts/check_wa_director_kinds.sh` + `scripts/_check_wa_kinds_filter.py`** — extended grep to also scan `send_director_alert(`; python filter resolves earliest of either call token for the quote-prefix heuristic.
+
+Tests + guard literal:
+
+- `python3 -m pytest tests/test_wa_director_filter.py -v` → **6 passed in 0.03s** (added `test_director_send_with_kbl_critical_kind_allowed`; updated `test_allowlist_contents` to expect 7 kinds).
+- `python3 -m pytest tests/test_whatsapp_sender_lid.py -v` → **23 passed in 0.06s** (regression clean).
+- `bash scripts/check_wa_director_kinds.sh` → `OK: all send_whatsapp() callers tag kind= or non-Director chat_id.` (exit 0); also fired automatically on `git push` via `.githooks/pre-push`.
+
+Deferred per AH1 recommendation: MEDIUM (multi-line guard blindness — over-flags only) + LOW × 2 (`_phone_root('')` empty edge, `action_handler.py:1615` misleading "connectivity failure" wording on policy-blocked sends).
+
+Ship-report addendum at `briefs/_reports/B3_baker_wa_director_filter_20260516.md` §"REQUEST_CHANGES Round 1 — Hot-fix bundle".
+
+Re-review fan-out pending AH1 (picker-architect + feature-dev:code-reviewer on `940f4b0`).
+
