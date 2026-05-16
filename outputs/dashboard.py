@@ -410,6 +410,22 @@ class CortexRunRequest(BaseModel):
     )
 
 
+class WorkerWakeRequest(BaseModel):
+    """WORKER_SELFWAKE_PHASE_1: per-wake audit payload posted by the launchd
+    worker after a `claude --print` invocation completes (or fails)."""
+    worker_slug: str = Field(..., pattern=r"^b[1-4]$",
+                             description="b1 / b2 / b3 / b4")
+    wake_ts: str = Field(..., min_length=10, max_length=40,
+                         description="ISO-8601 UTC timestamp of wake start")
+    messages_drained: int = Field(..., ge=0, le=1000)
+    message_ids: list[int] = Field(default_factory=list, max_length=1000)
+    claude_exit_code: int = Field(..., ge=-32768, le=32767)
+    claude_stdout_tokens: int = Field(..., ge=0, le=10_000_000)
+    claude_stderr_truncated: str = Field(default="", max_length=2000)
+    duration_seconds: float = Field(..., ge=0, le=86_400)
+    cost_eur_est: float = Field(..., ge=0, le=1000)
+
+
 def _serialize(obj: dict) -> dict:
     """Convert datetime/date fields to ISO strings for JSON serialization."""
     import datetime as _dt_mod
@@ -4722,6 +4738,106 @@ async def cortex_run_stream(req: CortexRunRequest):
         ),
         media_type="text/event-stream",
     )
+
+
+# WORKER_SELFWAKE_PHASE_1: audit endpoint for the B-code self-wake worker.
+# One row per wake cycle. tier='B', action_class='worker.wake.b_code'.
+# Auth: X-Baker-Key (reuse verify_api_key dep). Pydantic validation surfaces
+# 422 on malformed bodies (FastAPI default), not 400 — mirrors /api/cortex/run.
+@app.post("/api/worker/wake", tags=["worker"], dependencies=[Depends(verify_api_key)])
+async def worker_wake_log(req: WorkerWakeRequest):
+    """WORKER_SELFWAKE_PHASE_1: audit one wake cycle into baker_actions.
+
+    Returns: {"ok": True, "id": <baker_actions.id>}
+    """
+    store = _get_store()
+    conn = store._get_conn()
+    try:
+        payload_dict = req.model_dump()
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                INSERT INTO baker_actions
+                    (action_type, payload, trigger_source, success,
+                     tier, cost_eur, action_class,
+                     committer_agent, committed_at, self_cost_eur)
+                VALUES (%s, %s::jsonb, %s, %s, %s, %s, %s, %s, %s::timestamptz, %s)
+                RETURNING id
+                """,
+                (
+                    "worker_wake",
+                    json.dumps(payload_dict),
+                    "self_wake_worker",
+                    req.claude_exit_code == 0,
+                    "B",
+                    req.cost_eur_est,
+                    "worker.wake.b_code",
+                    f"worker-{req.worker_slug}",
+                    req.wake_ts,
+                    req.cost_eur_est,
+                ),
+            )
+            new_id = cur.fetchone()[0]
+        conn.commit()
+        return {"ok": True, "id": int(new_id)}
+    except Exception as e:
+        try:
+            conn.rollback()
+        except Exception:
+            pass
+        logger.warning("worker_wake_log insert failed: %s", e)
+        raise HTTPException(status_code=500, detail="Audit log write failed")
+    finally:
+        store._put_conn(conn)
+
+
+# WORKER_SELFWAKE_PHASE_1: daily digest aggregation endpoint.
+# Consumed by scripts/worker_digest.py once/day (09:00 UTC launchd job).
+@app.get("/api/worker/digest", tags=["worker"], dependencies=[Depends(verify_api_key)])
+async def worker_digest(since: str = Query(..., min_length=10, max_length=40)):
+    """WORKER_SELFWAKE_PHASE_1: aggregate worker.wake.b_code rows since timestamp.
+
+    Returns per-worker counts, token totals, fail counts, plus total_cost_eur.
+    """
+    store = _get_store()
+    conn = store._get_conn()
+    try:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                SELECT committer_agent,
+                       COUNT(*) AS wakes,
+                       COALESCE(SUM((payload->>'claude_stdout_tokens')::bigint), 0) AS total_tokens,
+                       COALESCE(SUM(
+                           CASE WHEN (payload->>'claude_exit_code')::int <> 0 THEN 1 ELSE 0 END
+                       ), 0) AS fails,
+                       COALESCE(SUM(cost_eur), 0) AS cost_eur
+                FROM baker_actions
+                WHERE action_class = 'worker.wake.b_code'
+                  AND committed_at > %s::timestamptz
+                GROUP BY committer_agent
+                ORDER BY committer_agent
+                LIMIT 100
+                """,
+                (since,),
+            )
+            rows = cur.fetchall()
+        out: dict = {"total_cost_eur": 0.0}
+        for committer, wakes, tokens, fails, cost in rows:
+            slug = (committer or "").replace("worker-", "")
+            out[slug] = {
+                "wake_count": int(wakes or 0),
+                "total_tokens": int(tokens or 0),
+                "fail_count": int(fails or 0),
+                "breaker_tripped": False,
+            }
+            out["total_cost_eur"] += float(cost or 0)
+        return out
+    except Exception as e:
+        logger.warning("worker_digest query failed: %s", e)
+        raise HTTPException(status_code=500, detail="Digest query failed")
+    finally:
+        store._put_conn(conn)
 
 
 # CORTEX_PRE_REVIEW_GATE_1: tap-from-Slack endpoint for the cost gate.
