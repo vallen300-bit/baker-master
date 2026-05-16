@@ -1,7 +1,11 @@
 ---
-status: CLAIMED
+status: SHIPPED
 claimed_at: 2026-05-16T09:00:00Z
 claimed_by: b1
+shipped_at: 2026-05-16T09:08:23Z
+pr: https://github.com/vallen300-bit/baker-master/pull/210
+ship_report: briefs/_reports/B1_ao_pm_read_curated_wiki_1_20260516.md
+bus_message: 287
 branch: b1/ao-pm-read-curated-wiki-1
 brief: briefs/BRIEF_AO_PM_READ_CURATED_WIKI_1.md
 brief_id: AO_PM_READ_CURATED_WIKI_1
