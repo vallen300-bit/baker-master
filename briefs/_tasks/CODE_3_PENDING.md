@@ -1,5 +1,9 @@
 ---
-status: PENDING
+status: COMPLETE
+completed_at: 2026-05-16T13:19:28Z
+completed_pr: 208
+completed_merge_sha: 8ca850e9de35763ba0805ac1d78278dd787098e9
+completed_anchor: bus #303 (AH1 → b3 merge notice)
 brief: briefs/BRIEF_BAKER_WA_DIRECTOR_FILTER_1.md
 trigger_class: MEDIUM (external-surface helper edit + >10 files; mandatory 2nd-pass)
 dispatched_at: 2026-05-15T18:35:00Z
@@ -96,4 +100,35 @@ Deferred per AH1 recommendation: MEDIUM (multi-line guard blindness — over-fla
 Ship-report addendum at `briefs/_reports/B3_baker_wa_director_filter_20260516.md` §"REQUEST_CHANGES Round 1 — Hot-fix bundle".
 
 Re-review fan-out pending AH1 (picker-architect + feature-dev:code-reviewer on `940f4b0`).
+
+---
+
+## CLOSE 2026-05-16T13:23:18Z — MERGED
+
+Source: AH1 bus message #303 (`merge/BAKER_WA_DIRECTOR_FILTER_1`).
+
+PR #208 squash-merged 2026-05-16T13:19:28Z. Merge commit `8ca850e9de35763ba0805ac1d78278dd787098e9` on `main`. Branch `b3/baker-wa-director-filter-1` deleted on origin.
+
+All gates cleared:
+- AH2 cross-lane: **PASS** (msg #300 after RC1 re-fire — earlier #291 REQUEST_CHANGES retracted).
+- AH2 `/security-review`: **CLEAN**.
+- picker-architect (RC1): **PASS-WITH-NITS** (2 LOW only).
+- feature-dev:code-reviewer 2nd-pass: AH1 direct-verify (agent had stale-clone failure mode; AH1 ran 6/6 pytest on Python 3.12 PASS + grep'd all 3 HIGH fixes in code).
+
+Director-ratifications captured in flight:
+- phone-root scope (block both Swiss + UK Baker SIM) — kept as shipped in V0.
+- `'kbl_critical'` allowlist naming — kept (NOT `'system_critical'` per AH2's earlier ask).
+
+### Deferred fast-follows (per AH1 — file briefs at convenience)
+
+1. **MEDIUM** — `scripts/_check_wa_kinds_filter.py` multi-line guard blindness. Fail-closed (over-flags only).
+2. **LOW** — `outputs/whatsapp_sender.py` `_phone_root('')` edge case (no `@c.us`).
+3. **LOW** — `action_handler.py:1615` misleading "connectivity failure" wording on policy-blocked sends.
+4. **LOW** — `scripts/check_wa_director_kinds.sh` `--exclude-dir='.claude'` broader than needed (could narrow to `'.claude/worktrees'`).
+5. **LOW** — `scripts/check_wa_director_kinds.sh` allowlist help-line still says 6 kinds (off by 1; allowlist is now 7 after RC1 added `kbl_critical`).
+
+### Post-merge 24h DB check
+
+Pending — to be appended to `briefs/_reports/B3_baker_wa_director_filter_20260516.md` after 2026-05-17T13:19:28Z observation window. Hard ship-gate item #6 from the brief.
+
 
