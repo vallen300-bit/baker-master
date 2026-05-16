@@ -1,5 +1,8 @@
 ---
-status: PENDING
+status: COMPLETE
+completed_at: 2026-05-16T13:30:00Z
+merge_commit: a13b2c9 (squash-merge of PR #209 ead947a)
+ah1_merge_msg: bus #305 (topic merge/PM_STATE_UPDATE_PATCH_NOT_PARALLEL_1)
 brief: briefs/BRIEF_PM_STATE_UPDATE_PATCH_NOT_PARALLEL_1.md
 brief_id: PM_STATE_UPDATE_PATCH_NOT_PARALLEL_1
 trigger_class: LOW (tool-description + small server-side validator; no auth/DB-schema/external-surface touch)
