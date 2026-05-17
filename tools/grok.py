@@ -2,14 +2,15 @@
 
 Three MCP tools backed by ``kbl.grok_client``:
 
-    - baker_grok_x_search   — X/Twitter Live Search
-    - baker_grok_web_search — open-web Live Search (web + news sources)
-    - baker_grok_ask        — plain Grok Responses-API call (no Live Search)
+    - baker_grok_x_search   — X/Twitter search via xAI Agent Tools API
+    - baker_grok_web_search — open-web search via xAI Agent Tools API
+    - baker_grok_ask        — plain Grok Responses-API call (no tool use)
 
 All three resolve to ``POST /v1/responses`` on the xAI API. The X / web split
 exists at the MCP-tool surface for matter-Desk clarity; the underlying client
-parameterizes ``search_parameters.sources`` per call (one endpoint, three
-intents).
+selects ``tools=[{type:'x_search', ...}]`` vs ``[{type:'web_search', ...}]``
+per call (one endpoint, three intents). The earlier Live Search /
+``search_parameters`` dict form was server-side deprecated 2026-05.
 
 The HTTP client is built lazily on first dispatch and cached at module level
 so its httpx connection pool is reused across MCP dispatches.
@@ -84,11 +85,6 @@ GROK_TOOLS: list[Tool] = [
                     "type": "string",
                     "description": "X search query (natural language).",
                 },
-                "max_results": {
-                    "type": "integer",
-                    "description": "Max tweet citations to surface (default 10).",
-                    "default": 10,
-                },
                 "from_date": {
                     "type": "string",
                     "description": "ISO-8601 lower bound YYYY-MM-DD (optional).",
@@ -96,6 +92,16 @@ GROK_TOOLS: list[Tool] = [
                 "to_date": {
                     "type": "string",
                     "description": "ISO-8601 upper bound YYYY-MM-DD (optional).",
+                },
+                "allowed_x_handles": {
+                    "type": "array",
+                    "items": {"type": "string"},
+                    "description": "Restrict to specific X handles (max 10, mutex with excluded_x_handles).",
+                },
+                "excluded_x_handles": {
+                    "type": "array",
+                    "items": {"type": "string"},
+                    "description": "Block specific X handles (max 10, mutex with allowed_x_handles).",
                 },
                 "matter_slug": {
                     "type": "string",
@@ -121,23 +127,15 @@ GROK_TOOLS: list[Tool] = [
                     "type": "string",
                     "description": "Web search query.",
                 },
-                "freshness_days": {
-                    "type": "integer",
-                    "description": (
-                        "Restrict results to the last N days (default 7). Set "
-                        "to 0 or omit to skip the freshness window."
-                    ),
-                    "default": 7,
+                "allowed_domains": {
+                    "type": "array",
+                    "items": {"type": "string"},
+                    "description": "Restrict search to specific domains (max 5).",
                 },
-                "max_results": {
-                    "type": "integer",
-                    "description": "Max citations to surface (default 10).",
-                    "default": 10,
-                },
-                "include_news": {
-                    "type": "boolean",
-                    "description": "Include the news source in addition to web (default true).",
-                    "default": True,
+                "excluded_domains": {
+                    "type": "array",
+                    "items": {"type": "string"},
+                    "description": "Block specific domains from search (max 5).",
                 },
                 "matter_slug": {
                     "type": "string",
@@ -221,27 +219,19 @@ def dispatch_grok(name: str, args: dict[str, Any]) -> str:
         if name == "baker_grok_x_search":
             payload = _get_client().x_search(
                 query=args["query"],
-                max_results=int(args.get("max_results", 10)),
                 from_date=args.get("from_date"),
                 to_date=args.get("to_date"),
+                allowed_x_handles=args.get("allowed_x_handles"),
+                excluded_x_handles=args.get("excluded_x_handles"),
             )
             _log_grok_cost(payload, matter_slug)
             return json.dumps(payload, ensure_ascii=False)
 
         if name == "baker_grok_web_search":
-            freshness = args.get("freshness_days", 7)
-            if isinstance(freshness, str):
-                try:
-                    freshness = int(freshness)
-                except ValueError:
-                    freshness = 7
-            if freshness == 0:
-                freshness = None
             payload = _get_client().web_search(
                 query=args["query"],
-                freshness_days=freshness,
-                max_results=int(args.get("max_results", 10)),
-                include_news=bool(args.get("include_news", True)),
+                allowed_domains=args.get("allowed_domains"),
+                excluded_domains=args.get("excluded_domains"),
             )
             _log_grok_cost(payload, matter_slug)
             return json.dumps(payload, ensure_ascii=False)

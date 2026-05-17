@@ -184,42 +184,62 @@ def test_x_search_returns_summary_and_tweets() -> None:
     body = _search_response_body(citations=citations, summary="Two tweets.")
     http = _make_http_client_mock(_make_response(200, body))
     client = GrokClient(_http_client=http)
-    out = client.x_search("Grok 4.3 launch", max_results=5)
+    out = client.x_search("Grok 4.3 launch")
     assert out["summary"] == "Two tweets."
     assert len(out["tweets"]) == 2
     assert out["tweets"][0]["author"] == "elonmusk"
     assert out["tweets"][0]["engagement"]["favorites"] == 1234
     assert out["tweets"][1]["url"] == "https://x.com/xai/status/456"
-    # request body
+    # request body uses tools[] array per Agent Tools API, not search_parameters
     sent_body = http.request.call_args.kwargs["json"]
-    sp = sent_body["search_parameters"]
-    assert sp["mode"] == "on"
-    assert sp["sources"] == [{"type": "x"}]
-    assert sp["max_search_results"] == 5
-    assert sp["return_citations"] is True
+    assert "search_parameters" not in sent_body
+    assert sent_body["input"] == "Grok 4.3 launch"
+    assert len(sent_body["tools"]) == 1
+    assert sent_body["tools"][0]["type"] == "x_search"
 
 
-def test_web_search_adds_news_source_and_freshness_window() -> None:
+def test_x_search_passes_date_and_handle_filters() -> None:
+    body = _search_response_body(citations=[], summary="filtered")
+    http = _make_http_client_mock(_make_response(200, body))
+    client = GrokClient(_http_client=http)
+    client.x_search(
+        "AO move",
+        from_date="2026-05-01",
+        to_date="2026-05-10",
+        allowed_x_handles=["elonmusk", "xai"],
+    )
+    tool = http.request.call_args.kwargs["json"]["tools"][0]
+    assert tool["type"] == "x_search"
+    assert tool["from_date"] == "2026-05-01"
+    assert tool["to_date"] == "2026-05-10"
+    assert tool["allowed_x_handles"] == ["elonmusk", "xai"]
+    assert "excluded_x_handles" not in tool
+
+
+def test_web_search_uses_tools_array() -> None:
     body = _search_response_body(citations=[], summary="empty")
     http = _make_http_client_mock(_make_response(200, body))
     client = GrokClient(_http_client=http)
-    client.web_search("EU construction defect law 2026", freshness_days=14)
+    client.web_search("EU construction defect law 2026")
     sent_body = http.request.call_args.kwargs["json"]
-    sp = sent_body["search_parameters"]
-    assert {"type": "web"} in sp["sources"]
-    assert {"type": "news"} in sp["sources"]
-    assert "from_date" in sp  # freshness window applied
+    assert "search_parameters" not in sent_body
+    assert sent_body["input"] == "EU construction defect law 2026"
+    assert sent_body["tools"] == [{"type": "web_search"}]
 
 
-def test_web_search_skip_news_and_no_freshness() -> None:
+def test_web_search_passes_domain_filters() -> None:
     body = _search_response_body(citations=[])
     http = _make_http_client_mock(_make_response(200, body))
     client = GrokClient(_http_client=http)
-    client.web_search("anything", freshness_days=None, include_news=False)
-    sent_body = http.request.call_args.kwargs["json"]
-    sp = sent_body["search_parameters"]
-    assert sp["sources"] == [{"type": "web"}]
-    assert "from_date" not in sp
+    client.web_search(
+        "anything",
+        allowed_domains=["example.com", "grokipedia.com"],
+        excluded_domains=["spam.example"],
+    )
+    tool = http.request.call_args.kwargs["json"]["tools"][0]
+    assert tool["type"] == "web_search"
+    assert tool["filters"]["allowed_domains"] == ["example.com", "grokipedia.com"]
+    assert tool["filters"]["excluded_domains"] == ["spam.example"]
 
 
 def test_web_search_citations_are_shaped() -> None:
@@ -230,7 +250,7 @@ def test_web_search_citations_are_shaped() -> None:
     body = _search_response_body(citations=citations)
     http = _make_http_client_mock(_make_response(200, body))
     client = GrokClient(_http_client=http)
-    out = client.web_search("q", freshness_days=None)
+    out = client.web_search("q")
     assert out["citations"][0]["title"] == "A"
     assert out["citations"][1]["url"] == "https://example.com/b"
     assert out["citations"][1]["snippet"] == "snippet b"
@@ -502,8 +522,8 @@ def test_live_grok_ask_smoke() -> None:
     """One real Grok ask() call against the live xAI Responses API.
 
     Gated by ``TEST_XAI_API_KEY`` so CI stays green without the key. Mocks
-    alone can't catch wire-format errors (e.g. input field shape, search_parameters
-    vs tools array). Run locally with::
+    alone can't catch wire-format errors (e.g. input field shape, tools array
+    type names). Run locally with::
 
         TEST_XAI_API_KEY=<real-key> XAI_API_KEY=<real-key> \\
           pytest tests/test_grok_client.py::test_live_grok_ask_smoke -v
@@ -517,3 +537,33 @@ def test_live_grok_ask_smoke() -> None:
         client.close()
     assert out["text"], "live grok ask returned empty text — wire format may be off"
     assert out["tokens_in"] > 0, "live grok ask returned zero input_tokens — usage block may be off"
+
+
+@pytest.mark.skipif(
+    not os.environ.get("TEST_XAI_API_KEY"),
+    reason="TEST_XAI_API_KEY env var not set — skipping live xAI web_search smoke test",
+)
+def test_live_grok_web_search_smoke() -> None:
+    """One real Grok web_search call to confirm the tools[] Agent Tools API wires.
+
+    Uses a date-current query the model cannot answer from training so the
+    tool actually fires (per msg #370). Asserts ≥1 citation returned —
+    a clean ask() without tool execution would return citations=[] and prove
+    nothing about the search wire-format.
+
+    Gated by ``TEST_XAI_API_KEY`` so CI stays green without the key.
+    """
+    real_key = os.environ["TEST_XAI_API_KEY"]
+    client = GrokClient(api_key=real_key)
+    try:
+        out = client.web_search(
+            "What is today's BTC/USD spot price? Cite at least one source."
+        )
+    finally:
+        client.close()
+    assert out["summary"], "live grok web_search returned empty summary — tool may not have fired"
+    assert len(out["citations"]) >= 1, (
+        "live grok web_search returned zero citations — the web_search tool did "
+        "not execute (model answered from inference). Wire-format regression."
+    )
+    assert out["tokens_in"] > 0

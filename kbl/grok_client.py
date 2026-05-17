@@ -8,11 +8,12 @@ Wraps the xAI Grok HTTP API behind a thin synchronous Python interface used by
     - ask         — plain Grok Responses-API call (no Live Search)
 
 All three call the same ``POST /v1/responses`` endpoint. ``x_search`` /
-``web_search`` set ``search_parameters`` on the request body to enable xAI's
-native Live Search tool (NOT a function/tool entry — that's a separate xAI
-feature ``tools=[{"type": "web_search"}]`` which is older). The native
-``search_parameters`` form returns citations + structured source metadata
-directly on the response and is the documented production path.
+``web_search`` pass a ``tools`` array entry — ``[{"type": "x_search", ...}]``
+or ``[{"type": "web_search", ...}]`` — per xAI's Agent Tools API
+(``https://docs.x.ai/docs/guides/tools/overview``). The earlier
+``search_parameters`` dict form was server-side deprecated 2026-05 and now
+returns HTTP 410. Citations are returned at the top level of the response
+under ``citations`` (and per-message under ``output[*].content[*].annotations``).
 
 Auth: bearer token from ``XAI_API_KEY`` env var.
 Base URL: ``XAI_BASE_URL`` env var (default ``https://api.x.ai/v1``).
@@ -31,10 +32,15 @@ general-purpose model (1M context window). Reasoning model
 ``grok-4.20-0309-reasoning`` available via the ``model`` parameter on ``ask``.
 
 Brief-§Scope divergences resolved here (bus-posted to lead as
-grok-api-spec-mismatch 2026-05-17):
-    - Search invocation: search_parameters dict, not tools=[{type:web_search}].
-    - Model name: grok-4.3 default (brief said grok-4.20-reasoning).
+grok-api-spec-mismatch 2026-05-17, then re-resolved 2026-05-17 PM after live
+smoke from lead surfaced server-side deprecation of the Live Search form):
+    - Search invocation: tools=[{type:'web_search'|'x_search', ...}] (Agent
+      Tools API). Earlier ``search_parameters`` dict is server-side deprecated
+      (HTTP 410 since msg #370 live smoke).
+    - Model name: grok-4.3 default (brief said grok-4.20-reasoning; grok-4-latest
+      resolves to grok-4.3 server-side).
     - X vs web: one client method per surface, all routed to /v1/responses.
+    - `input` field: plain string accepted (gate-4 #3 was false positive).
 """
 from __future__ import annotations
 
@@ -227,29 +233,35 @@ class GrokClient:
     def x_search(
         self,
         query: str,
-        max_results: int = 10,
         from_date: Optional[str] = None,
         to_date: Optional[str] = None,
+        allowed_x_handles: Optional[list[str]] = None,
+        excluded_x_handles: Optional[list[str]] = None,
         model: str = _DEFAULT_MODEL,
     ) -> dict:
-        """POST /responses with search_parameters.sources=[{type:'x'}].
+        """POST /responses with tools=[{type:'x_search', ...}] per xAI Agent Tools API.
 
         Returns ``{summary, tweets: [...], model, tokens_in, tokens_out, cost_usd}``.
         Tweets are extracted from the response citations list where available;
         full citation payload is included on each tweet dict.
+
+        ``allowed_x_handles`` and ``excluded_x_handles`` are mutually exclusive
+        per xAI docs (max 10 each); date params accept ISO-8601 YYYY-MM-DD.
         """
+        tool: dict[str, Any] = {"type": "x_search"}
+        if from_date:
+            tool["from_date"] = from_date
+        if to_date:
+            tool["to_date"] = to_date
+        if allowed_x_handles:
+            tool["allowed_x_handles"] = list(allowed_x_handles)
+        if excluded_x_handles:
+            tool["excluded_x_handles"] = list(excluded_x_handles)
         return _shape_search_response(
             self._request(
                 "POST",
                 "responses",
-                json=_search_body(
-                    query=query,
-                    sources=[{"type": "x"}],
-                    max_results=max_results,
-                    from_date=from_date,
-                    to_date=to_date,
-                    model=model,
-                ),
+                json={"model": model, "input": query, "tools": [tool]},
             ),
             model=model,
             kind="x",
@@ -258,39 +270,31 @@ class GrokClient:
     def web_search(
         self,
         query: str,
-        freshness_days: Optional[int] = 7,
-        max_results: int = 10,
-        from_date: Optional[str] = None,
-        to_date: Optional[str] = None,
+        allowed_domains: Optional[list[str]] = None,
+        excluded_domains: Optional[list[str]] = None,
         model: str = _DEFAULT_MODEL,
-        include_news: bool = True,
     ) -> dict:
-        """POST /responses with search_parameters.sources=[{type:'web'} (+ news)].
-
-        ``freshness_days`` is a convenience: when set and ``from_date`` is None,
-        the client computes ``from_date = today - N days`` server-side via the
-        from_date parameter on the xAI API. Set ``freshness_days=None`` to keep
-        the full Live Search default window.
+        """POST /responses with tools=[{type:'web_search', ...}] per xAI Agent Tools API.
 
         Returns ``{summary, citations: [...], model, tokens_in, tokens_out, cost_usd}``.
+
+        ``allowed_domains`` / ``excluded_domains`` go inside the tool's ``filters``
+        sub-object per xAI docs (max 5 each). News results are returned via the
+        same web_search tool — no separate news source under the tools API.
         """
-        if from_date is None and freshness_days is not None and freshness_days > 0:
-            from_date = _utc_today_minus_days(freshness_days)
-        sources: list[dict[str, Any]] = [{"type": "web"}]
-        if include_news:
-            sources.append({"type": "news"})
+        tool: dict[str, Any] = {"type": "web_search"}
+        filters: dict[str, Any] = {}
+        if allowed_domains:
+            filters["allowed_domains"] = list(allowed_domains)
+        if excluded_domains:
+            filters["excluded_domains"] = list(excluded_domains)
+        if filters:
+            tool["filters"] = filters
         return _shape_search_response(
             self._request(
                 "POST",
                 "responses",
-                json=_search_body(
-                    query=query,
-                    sources=sources,
-                    max_results=max_results,
-                    from_date=from_date,
-                    to_date=to_date,
-                    model=model,
-                ),
+                json={"model": model, "input": query, "tools": [tool]},
             ),
             model=model,
             kind="web",
@@ -319,41 +323,6 @@ def _parse_retry_after(header_value: Optional[str]) -> float:
         return max(0.0, float(header_value))
     except (TypeError, ValueError):
         return _DEFAULT_RETRY_AFTER
-
-
-def _utc_today_minus_days(days: int) -> str:
-    """Return ISO-8601 date (YYYY-MM-DD) for today UTC minus N days."""
-    import datetime as _dt
-
-    d = _dt.datetime.now(_dt.timezone.utc).date() - _dt.timedelta(days=days)
-    return d.isoformat()
-
-
-def _search_body(
-    *,
-    query: str,
-    sources: list[dict[str, Any]],
-    max_results: int,
-    from_date: Optional[str],
-    to_date: Optional[str],
-    model: str,
-) -> dict[str, Any]:
-    """Build the /responses request body for a Live Search call."""
-    search_parameters: dict[str, Any] = {
-        "mode": "on",
-        "sources": sources,
-        "max_search_results": max_results,
-        "return_citations": True,
-    }
-    if from_date:
-        search_parameters["from_date"] = from_date
-    if to_date:
-        search_parameters["to_date"] = to_date
-    return {
-        "model": model,
-        "input": query,
-        "search_parameters": search_parameters,
-    }
 
 
 def _shape_ask_response(payload: dict, model: str) -> dict:
