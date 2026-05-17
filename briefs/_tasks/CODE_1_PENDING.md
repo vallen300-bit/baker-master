@@ -1,5 +1,9 @@
 ---
-status: AWAITING_REVIEW
+status: COMPLETE
+merged_at: 2026-05-17T12:26:36Z
+merge_commit: 11c0b187
+merged_by: ai-head-1 (AH1)
+merge_bus_message: 340
 claimed_at: 2026-05-17T09:50:00Z
 claimed_by: b1
 branch: b1/state-file-refresh-1
