@@ -1,5 +1,10 @@
 ---
-status: PENDING
+status: SHIPPED
+pr: https://github.com/vallen300-bit/baker-master/pull/216
+branch: b3/render-env-write-guard-1
+commit: 7611276
+shipped_at: 2026-05-17T15:00:00Z
+ship_report: briefs/_reports/B3_render_env_write_guard_1_20260517.md
 brief: briefs/BRIEF_RENDER_ENV_WRITE_GUARD_1.md
 brief_id: RENDER_ENV_WRITE_GUARD_1
 trigger_class: LOW-MEDIUM (new operator-side tooling; no runtime path; mandatory 2nd-pass NOT triggered unless tests touch external surface)
