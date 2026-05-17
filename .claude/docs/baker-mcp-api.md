@@ -67,3 +67,19 @@ Notes:
 - Investigation flow: `baker_claimsmax_investigate` → poll `baker_claimsmax_check_investigation` every ~5s → on `status="complete"`, `baker_claimsmax_save_investigation` writes JSON. PDF/HTML conversion is Director-gated, not automatic.
 - Capability set `claimsmax_archive` registers with `capability_type='archive'` — out of scope for Cortex Phase 3 auto-routing; matter Desks invoke directly via the MCP tools listed above.
 - Sample query: `{"name":"baker_claimsmax_search","arguments":{"query":"Pagitsch defects","filters":{"l1":["report"]}}}`.
+
+## Grok real-time tools (3) — GROK_API_CAPABILITY_1
+
+Wraps the xAI Grok Responses API (`https://api.x.ai/v1`) — native X/Twitter Live Search + open-web Live Search + plain Grok reasoning. Auth via `XAI_API_KEY` env var (set by AH1 in Render before merge). Default model `grok-4.3` (1M context, $1.25/M input / $2.50/M output as of 2026-05-17); reasoning variant `grok-4.20-0309-reasoning` available via the `model` param on `baker_grok_ask`.
+
+| Tool | Purpose |
+|---|---|
+| `baker_grok_x_search` | Search X/Twitter via xAI Live Search (`search_parameters.sources=[{type:'x'}]`). Returns Grok's summary plus a list of tweet citations (`url`, `author`, `date`, `text`, `engagement.favorites/views/reposts`). Replaces the fragile Chrome-MCP port-9222 X path. |
+| `baker_grok_web_search` | Search the open web via xAI Live Search (`sources=[{type:'web'},{type:'news'}]`). Returns Grok's summary plus citations (`url`, `title`, `date`, `snippet`). Parallel to `baker_perplexity_ask` — both stay live. |
+| `baker_grok_ask` | Plain Grok Responses-API call, no Live Search. Returns `{text, model, tokens_in, tokens_out, cost_usd}`. Use for general reasoning when the prompt doesn't need real-time X/web data. |
+
+Notes:
+- All three tools resolve to `POST /v1/responses` — the X / web split exists at the MCP surface for matter-Desk clarity; the client parameterizes `search_parameters.sources` per call.
+- Capability set `grok_realtime` registers with `capability_type='archive'` — out of scope for Cortex Phase 3 auto-routing (mirrors ClaimsMax C1 lesson; `baker_grok_*` tools live in MCP, not `TOOL_DEFINITIONS`).
+- Cost: 32 input + 9 output tokens → ~$0.000063. A 1M+1M call → ~$3.75. Pilot starts on $250 credits, no auto top-up.
+- Sample query: `{"name":"baker_grok_x_search","arguments":{"query":"Brisen Group","max_results":5}}`.

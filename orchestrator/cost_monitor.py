@@ -30,6 +30,8 @@ MODEL_COSTS = {
     # Gemini
     "gemini-2.5-flash": {"input": 0.30, "output": 2.50},
     "gemini-2.5-pro": {"input": 1.25, "output": 10.00},
+    # xAI (GROK_API_CAPABILITY_1; pricing per xAI docs 2026-05-17)
+    "grok-4.3": {"input": 1.25, "output": 2.50},
 }
 DEFAULT_COSTS = {"input": 15.00, "output": 75.00}
 
