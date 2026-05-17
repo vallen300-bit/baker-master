@@ -19,17 +19,63 @@ Director explicitly instructs the matter Desk to convert. No auto-render
 heuristic.
 
 Importing this module is cheap — neither the HTTP client nor the renderer
-touches the network or filesystem at import time.
+touches the network or filesystem at import time. The HTTP client is built
+lazily on first dispatch and cached at module level so its connection pool
+is reused across MCP calls (matters during /investigate polling).
 """
 from __future__ import annotations
 
 import json
-from typing import Any
+import logging
+import threading
+from typing import Any, Optional
 
 from mcp.types import Tool
 
 from kbl import claimsmax_client as _client_mod
 from kbl import report_renderer as _renderer_mod
+
+
+logger = logging.getLogger("baker.tools.claimsmax")
+
+
+# ─────────────────────────── module-level client cache ───────────────────────────
+
+
+_CLIENT: Optional[_client_mod.ClaimsmaxClient] = None
+_CLIENT_LOCK = threading.Lock()
+
+
+def _get_client() -> _client_mod.ClaimsmaxClient:
+    """Lazy module-level ClaimsmaxClient cache.
+
+    A fresh client was previously instantiated for every MCP dispatch — for
+    /investigate runs that triggered dozens of redundant TLS handshakes
+    against ClaimsMax. One cached instance reuses the pooled httpx
+    connection across all dispatches in the process.
+
+    Thread-safe via double-checked locking; ``CLAIMSMAX_API_KEY`` is still
+    read at first call so missing-env failures surface at dispatch (visible
+    to the caller) rather than at module import.
+    """
+    global _CLIENT
+    if _CLIENT is None:
+        with _CLIENT_LOCK:
+            if _CLIENT is None:
+                _CLIENT = _client_mod.ClaimsmaxClient()
+    return _CLIENT
+
+
+def _reset_client_for_tests() -> None:
+    """Drop the cached client (test hook only)."""
+    global _CLIENT
+    with _CLIENT_LOCK:
+        if _CLIENT is not None:
+            try:
+                _CLIENT.close()
+            except Exception:
+                pass
+        _CLIENT = None
 
 
 # ─────────────────────────── tool catalog ───────────────────────────
@@ -205,8 +251,7 @@ def dispatch_claimsmax(name: str, args: dict[str, Any]) -> str:
     """
     try:
         if name == "baker_claimsmax_search":
-            client = _client_mod.ClaimsmaxClient()
-            payload = client.search(
+            payload = _get_client().search(
                 query=args["query"],
                 filters=args.get("filters"),
                 mode=args.get("mode", "natural"),
@@ -215,8 +260,7 @@ def dispatch_claimsmax(name: str, args: dict[str, Any]) -> str:
             return _format_search_result(payload)
 
         if name == "baker_claimsmax_investigate":
-            client = _client_mod.ClaimsmaxClient()
-            payload = client.investigate_start(
+            payload = _get_client().investigate_start(
                 query=args["query"],
                 language=args.get("language", "en"),
                 starting_doc_id=args.get("starting_doc_id"),
@@ -224,13 +268,11 @@ def dispatch_claimsmax(name: str, args: dict[str, Any]) -> str:
             return json.dumps(payload, ensure_ascii=False)
 
         if name == "baker_claimsmax_check_investigation":
-            client = _client_mod.ClaimsmaxClient()
-            payload = client.investigate_status(args["run_id"])
+            payload = _get_client().investigate_status(args["run_id"])
             return json.dumps(payload, ensure_ascii=False)
 
         if name == "baker_claimsmax_get_document":
-            client = _client_mod.ClaimsmaxClient()
-            payload = client.get_document(
+            payload = _get_client().get_document(
                 args["doc_id"],
                 include_text=args.get("include_text", False),
             )
@@ -241,6 +283,7 @@ def dispatch_claimsmax(name: str, args: dict[str, Any]) -> str:
                 run_id=args["run_id"],
                 matter_slug=args["matter_slug"],
                 topic_slug=args["topic_slug"],
+                client=_get_client(),
             )
             return json.dumps({"json_path": path}, ensure_ascii=False)
 
@@ -261,6 +304,11 @@ def dispatch_claimsmax(name: str, args: dict[str, Any]) -> str:
     except _renderer_mod.RendererError as e:
         return f"Error: renderer: {e}"
     except Exception as e:
+        # Generic catch is the last line of defence per repo's fault-tolerant
+        # rule; programming errors (AttributeError, TypeError) get swallowed
+        # here too, so log the full traceback before stringifying so prod
+        # bugs aren't invisible.
+        logger.exception("dispatch_claimsmax: unhandled error in %s", name)
         return f"Error: {type(e).__name__}: {e}"
 
 
@@ -277,6 +325,11 @@ def _format_search_result(payload: dict[str, Any]) -> str:
             "doc_date": r.get("doc_date"),
             "l1": r.get("l1"),
             "l2": r.get("l2"),
+            # l3 mirrors the l3_tags_required filter — agents that pass the
+            # filter want to see which l3 tags the hit actually carries so
+            # they can rank or follow-up. Dropping it silently in the slim
+            # projection forced a second get_document round-trip per hit.
+            "l3": r.get("l3"),
             "snippet": r.get("snippet"),
             "score": r.get("score"),
         }

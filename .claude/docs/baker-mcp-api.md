@@ -59,10 +59,11 @@ Wraps the ClaimsMax v1 REST API (`https://brisen.claimsmax.co.uk/api/v1/`) — 1
 | `baker_claimsmax_check_investigation` | Poll an investigation run by `run_id`; report markdown lands when status flips to `complete`. |
 | `baker_claimsmax_get_document` | Fetch full document metadata; optional `include_text=true` for the extracted body. |
 | `baker_claimsmax_save_investigation` | Persist a completed investigation's final state as JSON in the matter's Dropbox research folder. **Cheap default — run after every investigation.** |
-| `baker_claimsmax_convert_to_pdf` | Convert investigation JSON into a PDF sibling. **Run ONLY on Director instruction.** Requires pandoc on the runtime. |
-| `baker_claimsmax_convert_to_html` | Convert investigation JSON into standalone HTML under `docs-site/<matter>/`. **Run ONLY on Director instruction.** Caller commits + pushes docs-site so Render publishes. Requires pandoc. |
+| `baker_claimsmax_convert_to_pdf` | Convert investigation JSON into a PDF sibling. **Run ONLY on Director instruction.** Requires `pandoc` plus a PDF engine (`pdflatex` / `xelatex` / `wkhtmltopdf`) on the host. |
+| `baker_claimsmax_convert_to_html` | Convert investigation JSON into standalone HTML under `docs-site/<matter>/`. **Run ONLY on Director instruction.** Caller commits + pushes docs-site so Render publishes. Requires pandoc and the `BAKER_DOCS_SITE_ROOT` env var to point at the local docs-site checkout. |
 
 Notes:
 - `/ask` endpoint is intentionally **not** exposed — vendor bug pending Ellie Technologies fix (temperature deprecated server-side as of 2026-05-16). Re-enable when vendor confirms fix.
 - Investigation flow: `baker_claimsmax_investigate` → poll `baker_claimsmax_check_investigation` every ~5s → on `status="complete"`, `baker_claimsmax_save_investigation` writes JSON. PDF/HTML conversion is Director-gated, not automatic.
+- Capability set `claimsmax_archive` registers with `capability_type='archive'` — out of scope for Cortex Phase 3 auto-routing; matter Desks invoke directly via the MCP tools listed above.
 - Sample query: `{"name":"baker_claimsmax_search","arguments":{"query":"Pagitsch defects","filters":{"l1":["report"]}}}`.

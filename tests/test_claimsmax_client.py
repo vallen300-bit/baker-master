@@ -5,12 +5,11 @@ All HTTP is mocked via ``httpx.Client.request``. No live API contact in CI.
 from __future__ import annotations
 
 from typing import Any
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock
 
 import httpx
 import pytest
 
-from kbl import claimsmax_client
 from kbl.claimsmax_client import (
     ClaimsmaxAuthError,
     ClaimsmaxClient,
@@ -42,18 +41,18 @@ def _make_response(status_code: int, json_body: Any = None, *, headers: dict | N
     return resp
 
 
-def _patched_client(response_or_side_effect: Any):
-    """Patch ``httpx.Client`` to return a context manager whose ``request``
-    yields either a single response or a side_effect sequence."""
-    inner = MagicMock()
+def _make_http_client_mock(response_or_side_effect: Any) -> MagicMock:
+    """Build a mock ``httpx.Client`` whose ``request`` returns a fixed response
+    or iterates a side-effect sequence. Used as the ``_http_client`` injection
+    point on ``ClaimsmaxClient`` — the client now holds httpx state instance-
+    side so its connection pool is reused across requests."""
+    mock = MagicMock()
     if isinstance(response_or_side_effect, list):
-        inner.request = MagicMock(side_effect=response_or_side_effect)
+        mock.request = MagicMock(side_effect=response_or_side_effect)
     else:
-        inner.request = MagicMock(return_value=response_or_side_effect)
-    ctx = MagicMock()
-    ctx.__enter__ = MagicMock(return_value=inner)
-    ctx.__exit__ = MagicMock(return_value=False)
-    return patch.object(claimsmax_client.httpx, "Client", return_value=ctx), inner
+        mock.request = MagicMock(return_value=response_or_side_effect)
+    mock.close = MagicMock(return_value=None)
+    return mock
 
 
 # --------------------------- init / env ---------------------------
@@ -82,12 +81,11 @@ def test_auth_header_uses_bearer() -> None:
 
 def test_search_parses_response() -> None:
     body = {"total": 2, "page": 1, "per_page": 25, "results": [{"doc_id": "abc"}], "query_ms": 50}
-    p, inner = _patched_client(_make_response(200, body))
-    with p:
-        client = ClaimsmaxClient()
-        out = client.search("Pagitsch defects", filters={"l1": ["report"]}, l3_tags_required=["x"])
+    http = _make_http_client_mock(_make_response(200, body))
+    client = ClaimsmaxClient(_http_client=http)
+    out = client.search("Pagitsch defects", filters={"l1": ["report"]}, l3_tags_required=["x"])
     assert out["total"] == 2
-    call = inner.request.call_args
+    call = http.request.call_args
     assert call.args[0] == "POST"
     assert call.args[1].endswith("/search")
     sent_body = call.kwargs["json"]
@@ -97,72 +95,84 @@ def test_search_parses_response() -> None:
 
 
 def test_get_document_passes_include_text_param() -> None:
-    p, inner = _patched_client(_make_response(200, {"id": "doc-1"}))
-    with p:
-        client = ClaimsmaxClient()
-        client.get_document("doc-1", include_text=True)
-    assert inner.request.call_args.kwargs["params"] == {"include_text": "true"}
+    http = _make_http_client_mock(_make_response(200, {"id": "doc-1"}))
+    client = ClaimsmaxClient(_http_client=http)
+    client.get_document("doc-1", include_text=True)
+    assert http.request.call_args.kwargs["params"] == {"include_text": "true"}
 
 
 def test_investigate_start_returns_run_id() -> None:
-    p, inner = _patched_client(_make_response(200, {"run_id": "r-1", "status": "running"}))
-    with p:
-        client = ClaimsmaxClient()
-        out = client.investigate_start("find evidence", language="en")
+    http = _make_http_client_mock(_make_response(200, {"run_id": "r-1", "status": "running"}))
+    client = ClaimsmaxClient(_http_client=http)
+    out = client.investigate_start("find evidence", language="en")
     assert out == {"run_id": "r-1", "status": "running"}
 
 
 def test_investigate_status_flow() -> None:
-    """Two-call mock: still running, then complete."""
+    """Two-call mock: still running, then complete. Same http client both calls
+    — verifies the instance reuses its pooled httpx client (no re-init)."""
     running = _make_response(200, {"run_id": "r-1", "status": "running", "step_count": 3})
     complete = _make_response(
         200,
         {"run_id": "r-1", "status": "complete", "step_count": 12, "report": "# done"},
     )
-    p, _inner = _patched_client([running, complete])
-    with p:
-        client = ClaimsmaxClient()
-        first = client.investigate_status("r-1")
-        second = client.investigate_status("r-1")
+    http = _make_http_client_mock([running, complete])
+    client = ClaimsmaxClient(_http_client=http)
+    first = client.investigate_status("r-1")
+    second = client.investigate_status("r-1")
     assert first["status"] == "running"
     assert second["status"] == "complete"
     assert second["report"] == "# done"
+    assert http.request.call_count == 2
+
+
+def test_http_client_reused_across_requests() -> None:
+    """M1 regression guard: the underlying httpx.Client is held instance-side
+    so its connection pool survives across calls (no per-request rebuild)."""
+    http = _make_http_client_mock(_make_response(200, {"ok": True}))
+    client = ClaimsmaxClient(_http_client=http)
+    for _ in range(5):
+        client._request("GET", "anything")
+    assert http.request.call_count == 5
+
+
+def test_close_releases_underlying_client() -> None:
+    http = _make_http_client_mock(_make_response(200, {"ok": True}))
+    client = ClaimsmaxClient(_http_client=http)
+    client.close()
+    http.close.assert_called_once()
 
 
 # --------------------------- error mapping ---------------------------
 
 
 def test_401_raises_auth_error() -> None:
-    p, _ = _patched_client(_make_response(401, {"detail": "Invalid API key"}))
-    with p:
-        client = ClaimsmaxClient()
-        with pytest.raises(ClaimsmaxAuthError, match="Invalid API key"):
-            client.search("x")
+    http = _make_http_client_mock(_make_response(401, {"detail": "Invalid API key"}))
+    client = ClaimsmaxClient(_http_client=http)
+    with pytest.raises(ClaimsmaxAuthError, match="Invalid API key"):
+        client.search("x")
 
 
 def test_404_raises_not_found() -> None:
-    p, _ = _patched_client(_make_response(404, {"detail": "Document not found"}))
-    with p:
-        client = ClaimsmaxClient()
-        with pytest.raises(ClaimsmaxNotFoundError, match="Document not found"):
-            client.get_document("missing")
+    http = _make_http_client_mock(_make_response(404, {"detail": "Document not found"}))
+    client = ClaimsmaxClient(_http_client=http)
+    with pytest.raises(ClaimsmaxNotFoundError, match="Document not found"):
+        client.get_document("missing")
 
 
 def test_422_raises_validation_error() -> None:
-    p, _ = _patched_client(_make_response(422, {"detail": "bad body"}))
-    with p:
-        client = ClaimsmaxClient()
-        with pytest.raises(ClaimsmaxValidationError):
-            client.search("x")
+    http = _make_http_client_mock(_make_response(422, {"detail": "bad body"}))
+    client = ClaimsmaxClient(_http_client=http)
+    with pytest.raises(ClaimsmaxValidationError):
+        client.search("x")
 
 
 def test_5xx_raises_server_error_no_retry() -> None:
-    p, inner = _patched_client(_make_response(503, {"detail": "down"}))
-    with p:
-        client = ClaimsmaxClient()
-        with pytest.raises(ClaimsmaxServerError):
-            client.search("x")
-    assert inner.request.call_count == 1, "5xx must not retry"
+    http = _make_http_client_mock(_make_response(503, {"detail": "down"}))
+    client = ClaimsmaxClient(_http_client=http)
+    with pytest.raises(ClaimsmaxServerError):
+        client.search("x")
+    assert http.request.call_count == 1, "5xx must not retry"
 
 
 # --------------------------- 429 retry ---------------------------
@@ -171,17 +181,16 @@ def test_5xx_raises_server_error_no_retry() -> None:
 def test_429_retries_then_succeeds() -> None:
     sleeps: list[float] = []
     body_ok = {"total": 0, "results": []}
-    p, inner = _patched_client(
+    http = _make_http_client_mock(
         [
             _make_response(429, {"error": "rate_limited"}, headers={"Retry-After": "1"}),
             _make_response(200, body_ok),
         ]
     )
-    with p:
-        client = ClaimsmaxClient(_sleep=lambda s: sleeps.append(s))
-        out = client.search("x")
+    client = ClaimsmaxClient(_sleep=lambda s: sleeps.append(s), _http_client=http)
+    out = client.search("x")
     assert out == body_ok
-    assert inner.request.call_count == 2
+    assert http.request.call_count == 2
     assert sleeps == [1.0]
 
 
@@ -189,12 +198,11 @@ def test_429_budget_exhaustion_raises() -> None:
     sleeps: list[float] = []
     rate_limited = _make_response(429, {"error": "rate_limited"}, headers={"Retry-After": "0"})
     # 1 initial + 3 retries = 4 attempts; after 3 retries we raise.
-    p, inner = _patched_client([rate_limited, rate_limited, rate_limited, rate_limited])
-    with p:
-        client = ClaimsmaxClient(max_retries=3, _sleep=lambda s: sleeps.append(s))
-        with pytest.raises(ClaimsmaxRateLimitError, match="budget"):
-            client.search("x")
-    assert inner.request.call_count == 4
+    http = _make_http_client_mock([rate_limited, rate_limited, rate_limited, rate_limited])
+    client = ClaimsmaxClient(max_retries=3, _sleep=lambda s: sleeps.append(s), _http_client=http)
+    with pytest.raises(ClaimsmaxRateLimitError, match="budget"):
+        client.search("x")
+    assert http.request.call_count == 4
 
 
 def test_parse_retry_after_fallback() -> None:
@@ -207,27 +215,19 @@ def test_parse_retry_after_fallback() -> None:
 
 
 def test_timeout_raises_transport_error() -> None:
-    inner = MagicMock()
-    inner.request = MagicMock(side_effect=httpx.TimeoutException("slow"))
-    ctx = MagicMock()
-    ctx.__enter__ = MagicMock(return_value=inner)
-    ctx.__exit__ = MagicMock(return_value=False)
-    with patch.object(claimsmax_client.httpx, "Client", return_value=ctx):
-        client = ClaimsmaxClient()
-        with pytest.raises(ClaimsmaxTransportError, match="timeout"):
-            client.search("x")
+    http = MagicMock()
+    http.request = MagicMock(side_effect=httpx.TimeoutException("slow"))
+    client = ClaimsmaxClient(_http_client=http)
+    with pytest.raises(ClaimsmaxTransportError, match="timeout"):
+        client.search("x")
 
 
 def test_http_error_raises_transport_error() -> None:
-    inner = MagicMock()
-    inner.request = MagicMock(side_effect=httpx.ConnectError("refused"))
-    ctx = MagicMock()
-    ctx.__enter__ = MagicMock(return_value=inner)
-    ctx.__exit__ = MagicMock(return_value=False)
-    with patch.object(claimsmax_client.httpx, "Client", return_value=ctx):
-        client = ClaimsmaxClient()
-        with pytest.raises(ClaimsmaxTransportError, match="transport"):
-            client.search("x")
+    http = MagicMock()
+    http.request = MagicMock(side_effect=httpx.ConnectError("refused"))
+    client = ClaimsmaxClient(_http_client=http)
+    with pytest.raises(ClaimsmaxTransportError, match="transport"):
+        client.search("x")
 
 
 # --------------------------- /ask placeholder ---------------------------

@@ -80,8 +80,15 @@ class ClaimsmaxClient:
     """Synchronous httpx wrapper for ClaimsMax v1.
 
     Instantiation reads env at construction time; pass overrides explicitly
-    for tests. The client is stateless — no session pooling needed at this
-    request volume (caller is MCP tool dispatch, low rate).
+    for tests. A single ``httpx.Client`` is held as instance state so its
+    HTTP/HTTPS connection pool is reused across requests — important for
+    /investigate runs that poll dozens of times (47+ status calls per run
+    in the 2026-05-16 cooling-ceiling test). Each call previously opened a
+    fresh TLS handshake.
+
+    Call ``close()`` to release the connection pool. Used as a regular
+    object, not a context manager — the dispatcher caches one instance per
+    process (see ``tools/claimsmax.py::_get_client``).
     """
 
     def __init__(
@@ -91,6 +98,7 @@ class ClaimsmaxClient:
         timeout: float = _DEFAULT_TIMEOUT,
         max_retries: int = _MAX_RETRIES,
         _sleep: Any = time.sleep,
+        _http_client: Optional[httpx.Client] = None,
     ) -> None:
         key = api_key if api_key is not None else os.environ.get("CLAIMSMAX_API_KEY", "")
         if not key:
@@ -102,6 +110,15 @@ class ClaimsmaxClient:
         self._timeout = timeout
         self._max_retries = max_retries
         self._sleep = _sleep
+        # Allow tests to inject a mock; otherwise build a real pooled client.
+        self._http_client = _http_client if _http_client is not None else httpx.Client(timeout=self._timeout)
+
+    def close(self) -> None:
+        """Release the underlying httpx connection pool."""
+        try:
+            self._http_client.close()
+        except Exception:
+            pass
 
     # ─────────────────────── private helpers ───────────────────────
 
@@ -122,18 +139,16 @@ class ClaimsmaxClient:
         map to the ``Claimsmax*Error`` hierarchy.
         """
         attempt = 0
-        last_429: Optional[httpx.Response] = None
         while True:
             attempt += 1
             try:
-                with httpx.Client(timeout=self._timeout) as client:
-                    resp = client.request(
-                        method,
-                        self._url(path),
-                        headers=self._headers(),
-                        json=json,
-                        params=params,
-                    )
+                resp = self._http_client.request(
+                    method,
+                    self._url(path),
+                    headers=self._headers(),
+                    json=json,
+                    params=params,
+                )
             except httpx.TimeoutException as e:
                 raise ClaimsmaxTransportError(f"timeout calling {method} {path}: {e}") from e
             except httpx.HTTPError as e:
@@ -158,7 +173,6 @@ class ClaimsmaxClient:
             if status == 422:
                 raise ClaimsmaxValidationError(_extract_detail(resp) or "422 — validation error")
             if status == 429:
-                last_429 = resp
                 if attempt > self._max_retries:
                     raise ClaimsmaxRateLimitError(
                         f"429 — retry budget ({self._max_retries}) exhausted: {_extract_detail(resp)}"

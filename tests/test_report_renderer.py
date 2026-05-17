@@ -102,6 +102,19 @@ def test_save_investigation_json_requires_args() -> None:
         save_investigation_json("r", "m", "", client=client)
 
 
+@pytest.mark.parametrize(
+    "bad_slug",
+    ["..", "../etc", "a/../b", "..\\windows", "with/slash", "with\\backslash", "null\x00byte", "."],
+)
+def test_save_investigation_json_rejects_path_traversal_slugs(tmp_path: Path, bad_slug: str) -> None:
+    """M2: matter_slug + topic_slug must not let callers escape the matter dir."""
+    client = _FakeClient(_completion_payload())
+    with pytest.raises(ValueError):
+        save_investigation_json("r", bad_slug, "ok-topic", client=client, dropbox_root=tmp_path)
+    with pytest.raises(ValueError):
+        save_investigation_json("r", "ok-matter", bad_slug, client=client, dropbox_root=tmp_path)
+
+
 # --------------------------- convert_to_pdf ---------------------------
 
 
@@ -153,6 +166,47 @@ def test_convert_to_pdf_missing_json_raises(tmp_path: Path) -> None:
         convert_to_pdf(str(tmp_path / "nope.json"))
 
 
+def test_convert_to_pdf_cleans_up_md_sibling_on_success(tmp_path: Path) -> None:
+    """H1: the .md staged next to the JSON must not survive a successful render."""
+    json_p = _write_sample_json(tmp_path)
+    md_sibling = json_p.with_suffix(".md")
+
+    def _fake_run(cmd: list[str], **kwargs: Any) -> subprocess.CompletedProcess:
+        Path(cmd[cmd.index("-o") + 1]).write_bytes(b"%PDF-1.4 stub")
+        return subprocess.CompletedProcess(cmd, 0, stdout="", stderr="")
+
+    with patch.object(report_renderer.shutil, "which", return_value="/pandoc"), \
+         patch.object(report_renderer.subprocess, "run", side_effect=_fake_run):
+        convert_to_pdf(str(json_p))
+
+    assert not md_sibling.exists(), "PDF conversion must remove the .md artefact"
+
+
+def test_convert_to_pdf_cleans_up_md_sibling_on_failure(tmp_path: Path) -> None:
+    """H1: even when pandoc errors, the .md staging file must be removed."""
+    json_p = _write_sample_json(tmp_path)
+    md_sibling = json_p.with_suffix(".md")
+    failing = subprocess.CompletedProcess([], 1, stdout="", stderr="LaTeX missing")
+    with patch.object(report_renderer.shutil, "which", return_value="/pandoc"), \
+         patch.object(report_renderer.subprocess, "run", return_value=failing):
+        with pytest.raises(RendererUnavailableError):
+            convert_to_pdf(str(json_p))
+    assert not md_sibling.exists()
+
+
+def test_convert_to_pdf_pandoc_timeout_raises_unavailable(tmp_path: Path) -> None:
+    """M3: pandoc that hangs past the timeout maps to RendererUnavailableError."""
+    json_p = _write_sample_json(tmp_path)
+    with patch.object(report_renderer.shutil, "which", return_value="/pandoc"), \
+         patch.object(
+             report_renderer.subprocess,
+             "run",
+             side_effect=subprocess.TimeoutExpired(cmd=["pandoc"], timeout=120.0),
+         ):
+        with pytest.raises(RendererUnavailableError, match="timeout"):
+            convert_to_pdf(str(json_p))
+
+
 # --------------------------- convert_to_html ---------------------------
 
 
@@ -172,6 +226,39 @@ def test_convert_to_html_writes_under_docs_site(tmp_path: Path) -> None:
     assert Path(html_path).parent == docs_site / "mo-vie"
     assert Path(html_path).name.endswith(".html")
     assert Path(html_path).read_text(encoding="utf-8") == "<html>stub</html>"
+
+
+def test_convert_to_html_raises_when_docs_site_root_unset(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """H2: no BAKER_DOCS_SITE_ROOT env + no kwarg = fail loud, not phantom path."""
+    json_p = _write_sample_json(tmp_path)
+    monkeypatch.delenv("BAKER_DOCS_SITE_ROOT", raising=False)
+    with pytest.raises(RendererUnavailableError, match="BAKER_DOCS_SITE_ROOT"):
+        convert_to_html(str(json_p))
+
+
+def test_convert_to_html_uses_env_var_when_no_kwarg(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """H2: BAKER_DOCS_SITE_ROOT env supplies the default when no kwarg passed."""
+    json_p = _write_sample_json(tmp_path, matter="cupial")
+    docs_site = tmp_path / "docs-site"
+    monkeypatch.setenv("BAKER_DOCS_SITE_ROOT", str(docs_site))
+
+    def _fake_run(cmd: list[str], **kwargs: Any) -> subprocess.CompletedProcess:
+        Path(cmd[cmd.index("-o") + 1]).write_text("<html>ok</html>", encoding="utf-8")
+        return subprocess.CompletedProcess(cmd, 0, stdout="", stderr="")
+
+    with patch.object(report_renderer.shutil, "which", return_value="/pandoc"), \
+         patch.object(report_renderer.subprocess, "run", side_effect=_fake_run):
+        html_path = convert_to_html(str(json_p))
+
+    assert Path(html_path).parent == docs_site / "cupial"
+
+
+def test_convert_to_html_raises_when_docs_site_parent_missing(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """H2: pointing at a path whose parent doesn't exist is treated as unreachable."""
+    json_p = _write_sample_json(tmp_path)
+    monkeypatch.setenv("BAKER_DOCS_SITE_ROOT", str(tmp_path / "missing-parent" / "docs-site"))
+    with pytest.raises(RendererUnavailableError, match="parent does not exist"):
+        convert_to_html(str(json_p))
 
 
 def test_convert_to_html_falls_back_to_misc_when_path_not_under_research(tmp_path: Path) -> None:

@@ -17,8 +17,12 @@ matter Desk to convert):
 No size heuristic; no auto-render. Director ratified 2026-05-17 — produce
 cheap default (JSON), promote selectively.
 
-Pandoc is required for both conversions; absence raises
-``RendererUnavailableError`` with a remediation hint.
+Pandoc is required for both conversions; absence (or pandoc non-zero exit,
+or pandoc timeout) raises ``RendererUnavailableError``. HTML conversion also
+raises ``RendererUnavailableError`` when ``BAKER_DOCS_SITE_ROOT`` is unset
+or points at an unwritable path — the docs-site lives outside the bm-bN
+worktrees post-2026-05-08 picker move, and Render has no docs-site on the
+container filesystem, so the path can't be assumed.
 """
 from __future__ import annotations
 
@@ -39,7 +43,7 @@ class RendererError(RuntimeError):
 
 
 class RendererUnavailableError(RendererError):
-    """``pandoc`` binary missing or invocation failed."""
+    """``pandoc`` binary missing, invocation failed, or docs-site root unset/unreachable."""
 
 
 # ─────────────────────────── constants ───────────────────────────
@@ -50,7 +54,38 @@ _DROPBOX_ROOT = (
     / "Dimitry vallen"
     / "1_ACTIVE_PROJECTS"
 )
-_DOCS_SITE_ROOT = Path.home() / "Desktop" / "baker-code" / "docs-site"
+_DOCS_SITE_ENV_VAR = "BAKER_DOCS_SITE_ROOT"
+_PANDOC_TIMEOUT_SECONDS = 120.0
+
+
+def _resolve_docs_site_root() -> Optional[Path]:
+    """Read ``BAKER_DOCS_SITE_ROOT`` at call time.
+
+    AH1 sets this on the Mac Mini LaunchAgent + AH1 picker shell post-merge;
+    Render container deliberately leaves it unset so HTML conversion fails
+    loud instead of writing into a phantom ``/root/Desktop`` path.
+    """
+    raw = os.environ.get(_DOCS_SITE_ENV_VAR)
+    if not raw:
+        return None
+    return Path(raw).expanduser()
+
+
+def _validate_safe_slug(value: str, *, field: str) -> None:
+    """Reject slug values that could escape the matter/topic directory.
+
+    save_investigation_json composes paths from caller-supplied slugs; if
+    either contains ``..`` or a path separator the JSON could land outside
+    the matter's research folder (worst case: anywhere on the host).
+    """
+    if not value:
+        raise ValueError(f"{field} is required")
+    if value in (".", ".."):
+        raise ValueError(f"{field} cannot be '.' or '..': {value!r}")
+    if ".." in Path(value).parts:
+        raise ValueError(f"{field} contains parent-directory segment: {value!r}")
+    if "/" in value or "\\" in value or "\x00" in value:
+        raise ValueError(f"{field} cannot contain path separators or NUL: {value!r}")
 
 
 # ─────────────────────────── public surface ───────────────────────────
@@ -84,10 +119,8 @@ def save_investigation_json(
     """
     if not run_id:
         raise ValueError("run_id is required")
-    if not matter_slug:
-        raise ValueError("matter_slug is required")
-    if not topic_slug:
-        raise ValueError("topic_slug is required")
+    _validate_safe_slug(matter_slug, field="matter_slug")
+    _validate_safe_slug(topic_slug, field="topic_slug")
 
     if client is None:
         from kbl.claimsmax_client import ClaimsmaxClient  # local import; avoids env requirement at import time
@@ -110,9 +143,23 @@ def convert_to_pdf(json_path: str, *, pandoc_bin: Optional[str] = None) -> str:
     """Render the investigation's markdown report into a PDF sibling of the JSON.
 
     Runs only when Director instructs the matter Desk to convert.
+
+    Pandoc requires a PDF engine (``pdflatex`` / ``xelatex`` / ``wkhtmltopdf``)
+    in addition to the ``pandoc`` binary itself; missing engine surfaces as a
+    pandoc non-zero exit and raises ``RendererUnavailableError`` with the
+    pandoc stderr in the message.
     """
     md_path, pdf_path = _prepare_markdown_sibling(json_path, suffix=".pdf")
-    _pandoc_render(md_path, pdf_path, mode="pdf", pandoc_bin=pandoc_bin)
+    try:
+        _pandoc_render(md_path, pdf_path, mode="pdf", pandoc_bin=pandoc_bin)
+    finally:
+        # Cleanup symmetrical to convert_to_html — the .md sibling is a
+        # render artefact, not a deliverable; leaving it in the Director's
+        # Dropbox/research folder accumulates litter on repeated PDF builds.
+        try:
+            md_path.unlink()
+        except OSError:
+            pass
     return str(pdf_path)
 
 
@@ -127,13 +174,33 @@ def convert_to_html(
     Writes under ``docs-site/<matter>/<basename>.html``. The caller (matter Desk)
     is responsible for committing + pushing ``docs-site`` so Render publishes
     the page to brisen-docs.onrender.com.
+
+    The docs-site root must be supplied either via the ``docs_site_root``
+    kwarg (tests) or the ``BAKER_DOCS_SITE_ROOT`` environment variable
+    (production). If both are absent, or the resolved path's parent
+    directory does not exist, the renderer raises
+    ``RendererUnavailableError`` rather than silently writing into a
+    phantom Render-container path.
     """
     json_p = Path(json_path).expanduser().resolve()
     if not json_p.exists():
         raise FileNotFoundError(f"investigation JSON not found: {json_path}")
 
+    out_root = docs_site_root if docs_site_root is not None else _resolve_docs_site_root()
+    if out_root is None:
+        raise RendererUnavailableError(
+            f"docs-site root unset: export {_DOCS_SITE_ENV_VAR}=/path/to/docs-site "
+            f"on the host running the conversion (Director-gated; mac-local only)."
+        )
+
+    out_root = Path(out_root).expanduser()
+    if not out_root.parent.exists():
+        raise RendererUnavailableError(
+            f"docs-site root parent does not exist: {out_root.parent}. "
+            f"Set {_DOCS_SITE_ENV_VAR} to a path under an existing directory."
+        )
+
     matter_slug = _matter_slug_from_json_path(json_p)
-    out_root = docs_site_root if docs_site_root is not None else _DOCS_SITE_ROOT
     out_dir = out_root / matter_slug
     out_dir.mkdir(parents=True, exist_ok=True)
     html_path = out_dir / (json_p.stem + ".html")
@@ -224,7 +291,17 @@ def _pandoc_render(md_path: Path, out_path: Path, *, mode: str, pandoc_bin: Opti
         raise ValueError(f"unknown pandoc mode: {mode}")
 
     try:
-        result = subprocess.run(cmd, capture_output=True, text=True, check=False)
+        result = subprocess.run(
+            cmd,
+            capture_output=True,
+            text=True,
+            check=False,
+            timeout=_PANDOC_TIMEOUT_SECONDS,
+        )
+    except subprocess.TimeoutExpired as e:
+        raise RendererUnavailableError(
+            f"pandoc exceeded {_PANDOC_TIMEOUT_SECONDS:.0f}s timeout rendering {md_path.name}"
+        ) from e
     except (OSError, subprocess.SubprocessError) as e:
         raise RendererUnavailableError(f"pandoc invocation failed: {e}") from e
 
