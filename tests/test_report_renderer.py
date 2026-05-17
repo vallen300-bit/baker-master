@@ -312,3 +312,28 @@ def test_renderer_raises_on_invalid_json(tmp_path: Path) -> None:
     with patch.object(report_renderer.shutil, "which", return_value="/pandoc"):
         with pytest.raises(RendererError, match="not valid JSON"):
             convert_to_pdf(str(p))
+
+
+# --------------------------- _matter_slug_from_json_path ---------------------------
+
+
+def test_matter_slug_from_json_path_returns_segment_before_research() -> None:
+    p = Path("/dropbox/1_ACTIVE_PROJECTS/hagenauer-rg7/research/2026-05-17-defects.json")
+    assert report_renderer._matter_slug_from_json_path(p) == "hagenauer-rg7"
+
+
+def test_matter_slug_from_json_path_falls_back_when_no_research_segment() -> None:
+    p = Path("/tmp/orphan.json")
+    assert report_renderer._matter_slug_from_json_path(p) == "misc"
+
+
+def test_matter_slug_from_json_path_rejects_parent_dir_candidate() -> None:
+    """Validator must reject ``..`` as the slug segment before ``research/``."""
+    p = Path("/dropbox/foo/../research/x.json")
+    assert report_renderer._matter_slug_from_json_path(p) == "misc"
+
+
+def test_matter_slug_from_json_path_rejects_research_at_root() -> None:
+    """No segment before ``research/`` (idx==0) falls back without validation."""
+    p = Path("research/x.json")
+    assert report_renderer._matter_slug_from_json_path(p) == "misc"
