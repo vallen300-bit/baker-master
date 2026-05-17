@@ -316,12 +316,20 @@ def _matter_slug_from_json_path(json_p: Path) -> str:
 
     Falls back to ``"misc"`` when the path doesn't conform — keeps HTML
     generation working from anywhere (tests, ad-hoc local renders).
+    Recovered slug is passed through ``_validate_safe_slug`` so an
+    attacker-controlled path cannot escape ``docs_site_root`` via ``..``
+    or an embedded separator.
     """
     parts = json_p.parts
     try:
         idx = parts.index("research")
         if idx >= 1:
-            return parts[idx - 1]
+            candidate = parts[idx - 1]
+            try:
+                _validate_safe_slug(candidate, field="matter_slug")
+            except ValueError:
+                return "misc"
+            return candidate
     except ValueError:
         pass
     return "misc"
