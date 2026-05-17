@@ -99,27 +99,41 @@ Append a new section to `.claude/docs/baker-mcp-api.md`:
 - Note on `/ask` being disabled pending vendor fix
 - Pointer to the API spec at `~/Desktop/ClaimsMaxAPI.md`
 
-### 6. Auto-render investigation reports to PDF + HTML (Director-ratified 2026-05-17)
+### 6. Investigation output flow — JSON by default, convert on Director instruction (Director-ratified 2026-05-17, supersedes prior auto-render heuristic)
 
-When `/investigate` completes with a non-trivial report (heuristic: ≥500 words OR ≥1 markdown table OR ≥3 H2 sections), automatically render the markdown report to **both** formats:
+**Default behaviour: save raw JSON, do nothing else.** Conversion to PDF or HTML happens ONLY when Director explicitly instructs a desk to convert. No size heuristic, no auto-render.
 
-- **PDF** → write to `~/Vallen Dropbox/Dimitry vallen/1_ACTIVE_PROJECTS/<matter>/<YYYY-MM-DD>-<topic-slug>.pdf` for legal-evidence / forwarding use
-- **HTML** → write to `Desktop/baker-code/docs-site/<matter>/<YYYY-MM-DD>-<topic-slug>.html` (auto-published at `brisen-docs.onrender.com/<matter>/<YYYY-MM-DD>-<topic-slug>.html`) for shareable URL
+**New module `kbl/report_renderer.py`** with three small functions:
 
-Implementation:
+- `save_investigation_json(run_id: str, matter_slug: str, topic_slug: str) -> str` — fetches `/investigate/{run_id}` (final state), writes the full JSON response (status, query, report, step_count, started_at, ended_at) to `~/Vallen Dropbox/Dimitry vallen/1_ACTIVE_PROJECTS/<matter>/research/<YYYY-MM-DD>-<topic>.json`. Returns the path. **Cheap; the default artifact.**
+- `convert_to_pdf(json_path: str) -> str` — reads the JSON, extracts the `report` markdown, pipes through pandoc, writes a `.pdf` sibling to the JSON. Returns the PDF path.
+- `convert_to_html(json_path: str) -> str` — same, but writes a standalone HTML to `Desktop/baker-code/docs-site/<matter>/<basename>.html`. Caller is responsible for committing + pushing docs-site for Render to publish. Returns the HTML path.
 
-- New module `kbl/report_renderer.py` with `render_investigation_report(markdown: str, matter_slug: str, topic_slug: str) -> dict` returning `{pdf_path, html_path, skipped_reason?}`.
-- Use `pandoc` for both conversions (already on dev env; B4 to verify presence on Render runtime — if missing, add to Dockerfile / `aptfile` / buildpack `apt-packages`).
-- Templates: minimal at first (default pandoc styling). Future iteration can swap in Brisen-branded PDF/HTML templates without changing the API.
-- Skip render if heuristic returns False — return `{pdf_path: None, html_path: None, skipped_reason: "below threshold"}`.
+**New MCP tools (3, not 1):**
 
-New MCP tool: `baker_claimsmax_file_report` — args: `run_id, matter_slug, topic_slug` → returns the dict above. Calls `investigate_status(run_id)`, extracts `report`, hands to renderer.
+| Tool | Args | When called |
+|---|---|---|
+| `baker_claimsmax_save_investigation` | `run_id, matter_slug, topic_slug` | After every `/investigate` completes — always. Cheap. |
+| `baker_claimsmax_convert_to_pdf` | `json_path` | Only when Director instructs "convert to PDF". |
+| `baker_claimsmax_convert_to_html` | `json_path` | Only when Director instructs "convert to HTML". |
 
-Tests:
-- ☐ Above-threshold markdown → both files exist, non-empty
-- ☐ Below-threshold markdown → returns None paths, no files created
-- ☐ Missing `pandoc` binary → raises `RendererUnavailableError` with clear remediation message
+**Implementation notes:**
+
+- Use `pandoc` for both conversions. B4 to verify pandoc presence on Render runtime — if missing, add to `aptfile` / Dockerfile / buildpack `apt-packages`. If unavailable and not easily added, surface as a blocker before merge.
+- PDF template: default pandoc styling at first. Brisen-branded template is a future iteration; do not block on it.
+- HTML template: standalone (`pandoc -s`) with minimal styling. Same — Brisen template is future iteration.
+- No size threshold logic anywhere. No auto-trigger of conversion. Director gates conversion explicitly.
+
+**Tests:**
+
+- ☐ `save_investigation_json` writes a parseable JSON with the expected keys
+- ☐ `convert_to_pdf` produces a non-empty PDF from a sample JSON
+- ☐ `convert_to_html` produces a non-empty standalone HTML from a sample JSON
+- ☐ Missing `pandoc` binary → raises `RendererUnavailableError` with clear remediation
 - ☐ Matter folder doesn't exist → creates parent dirs, doesn't fail
+- ☐ Invalid JSON path → raises `FileNotFoundError` with clear message
+
+**Director's framing (verbatim):** "produce first with minimum cost, i.e., JSON file. If it's worth converting it into PDF, then the desks should know how to convert it into PDF or HTML depending on what I instruct."
 
 ## Acceptance criteria
 
@@ -131,7 +145,7 @@ Tests:
 6. ☐ `.claude/docs/baker-mcp-api.md` updated (5 tools total: 4 ClaimsMax + 1 file-report)
 7. ☐ Zero hardcoded keys; `CLAIMSMAX_API_KEY` read from env at startup
 8. ☐ Render env var set by AH1 before merge (separate Tier B action; not in B4 scope but B4's ship report should note completion blocker)
-9. ☐ `kbl/report_renderer.py` exists; auto-renders investigation reports to PDF + HTML above threshold; `baker_claimsmax_file_report` MCP tool registered; `pandoc` confirmed available on Render runtime (B4 to verify or surface as blocker)
+9. ☐ `kbl/report_renderer.py` exists with three functions (`save_investigation_json`, `convert_to_pdf`, `convert_to_html`); 3 MCP tools registered (`baker_claimsmax_save_investigation`, `baker_claimsmax_convert_to_pdf`, `baker_claimsmax_convert_to_html`); `pandoc` confirmed available on Render runtime (B4 to verify or surface as blocker). **No auto-render / size heuristic logic anywhere** — Director-gated conversion only.
 
 ## Constraints (hard)
 
