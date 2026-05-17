@@ -97,6 +97,10 @@ GROK_TOOLS: list[Tool] = [
                     "type": "string",
                     "description": "ISO-8601 upper bound YYYY-MM-DD (optional).",
                 },
+                "matter_slug": {
+                    "type": "string",
+                    "description": "Matter slug for cost attribution (optional).",
+                },
             },
             "required": ["query"],
         },
@@ -135,6 +139,10 @@ GROK_TOOLS: list[Tool] = [
                     "description": "Include the news source in addition to web (default true).",
                     "default": True,
                 },
+                "matter_slug": {
+                    "type": "string",
+                    "description": "Matter slug for cost attribution (optional).",
+                },
             },
             "required": ["query"],
         },
@@ -168,6 +176,10 @@ GROK_TOOLS: list[Tool] = [
                     "type": "string",
                     "description": "Optional system-prompt-style instructions.",
                 },
+                "matter_slug": {
+                    "type": "string",
+                    "description": "Matter slug for cost attribution (optional).",
+                },
             },
             "required": ["prompt"],
         },
@@ -187,7 +199,24 @@ def dispatch_grok(name: str, args: dict[str, Any]) -> str:
     Errors are caught here and surfaced as ``Error: <message>`` text so callers
     don't need Grok-specific exception handling. Per repo hard rule: fault-
     tolerant or it doesn't ship.
+
+    Cost-governor wiring: pre-invocation ``check_circuit_breaker`` blocks the
+    call if the daily hard-stop has tripped; post-invocation ``log_api_cost``
+    attributes usage to the matter_slug (when supplied) for daily aggregation.
+    Both wrapped so an instrumentation outage never blocks a real Grok call.
     """
+    # Pre-invocation cost gate. Failure to import / DB unavailable → allow
+    # the call (fail-open on instrumentation; fail-closed on hard-stop).
+    try:
+        from orchestrator.cost_monitor import check_circuit_breaker
+        allowed, daily_cost_eur = check_circuit_breaker()
+        if not allowed:
+            return f"Error: cost circuit breaker tripped (daily €{daily_cost_eur:.2f})"
+    except Exception:
+        logger.exception("dispatch_grok: cost_monitor.check_circuit_breaker failed (allowing call)")
+
+    matter_slug = args.get("matter_slug")
+    payload: Optional[dict] = None
     try:
         if name == "baker_grok_x_search":
             payload = _get_client().x_search(
@@ -196,6 +225,7 @@ def dispatch_grok(name: str, args: dict[str, Any]) -> str:
                 from_date=args.get("from_date"),
                 to_date=args.get("to_date"),
             )
+            _log_grok_cost(payload, matter_slug)
             return json.dumps(payload, ensure_ascii=False)
 
         if name == "baker_grok_web_search":
@@ -213,6 +243,7 @@ def dispatch_grok(name: str, args: dict[str, Any]) -> str:
                 max_results=int(args.get("max_results", 10)),
                 include_news=bool(args.get("include_news", True)),
             )
+            _log_grok_cost(payload, matter_slug)
             return json.dumps(payload, ensure_ascii=False)
 
         if name == "baker_grok_ask":
@@ -222,6 +253,7 @@ def dispatch_grok(name: str, args: dict[str, Any]) -> str:
                 model=args.get("model") or "grok-4.3",
                 instructions=args.get("instructions"),
             )
+            _log_grok_cost(payload, matter_slug)
             return json.dumps(payload, ensure_ascii=False)
 
         return f"Error: unknown Grok tool: {name}"
@@ -235,3 +267,23 @@ def dispatch_grok(name: str, args: dict[str, Any]) -> str:
         # programming errors (AttributeError, TypeError) don't go invisible.
         logger.exception("dispatch_grok: unhandled error in %s", name)
         return f"Error: {type(e).__name__}: {e}"
+
+
+def _log_grok_cost(payload: dict, matter_slug: Optional[str]) -> None:
+    """Attribute the Grok call's token usage via cost_monitor.
+
+    Wrapped so a logging failure never blocks the caller from seeing the
+    Grok payload. ``payload`` is the dict returned by GrokClient.{ask,
+    x_search, web_search} — token fields are normalized in _shape_*.
+    """
+    try:
+        from orchestrator.cost_monitor import log_api_cost
+        log_api_cost(
+            model=payload.get("model") or "grok-4.3",
+            input_tokens=int(payload.get("tokens_in") or 0),
+            output_tokens=int(payload.get("tokens_out") or 0),
+            source="grok_realtime",
+            matter_slug=matter_slug,
+        )
+    except Exception:
+        logger.exception("dispatch_grok: cost_monitor.log_api_cost failed (non-fatal)")

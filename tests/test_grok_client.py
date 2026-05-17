@@ -4,6 +4,7 @@ All HTTP is mocked via ``httpx.Client.request``. No live API contact in CI.
 """
 from __future__ import annotations
 
+import os
 from typing import Any
 from unittest.mock import MagicMock
 
@@ -369,8 +370,8 @@ def test_shape_web_citation_handles_string_and_dict() -> None:
 
 
 def test_cost_usd_prefers_ticks_when_provided() -> None:
-    # 12345 ticks → $1.2345
-    assert _cost_usd_from_usage({"cost_in_usd_ticks": 12345}) == pytest.approx(1.2345)
+    # 1 USD = 10^10 ticks per xAI docs: 12345 ticks → $1.2345e-6 ($0.0000012345)
+    assert _cost_usd_from_usage({"cost_in_usd_ticks": 12345}) == pytest.approx(1.2345e-6)
 
 
 def test_cost_usd_falls_back_to_token_rates() -> None:
@@ -398,3 +399,121 @@ def test_close_releases_underlying_client() -> None:
     client = GrokClient(_http_client=http)
     client.close()
     http.close.assert_called_once()
+
+
+# --------------------------- dispatch_grok cost-governor wiring ---------------------------
+
+
+def test_dispatch_grok_logs_cost_after_call(monkeypatch: pytest.MonkeyPatch) -> None:
+    """dispatch_grok must call cost_monitor.log_api_cost with normalized token counts."""
+    import tools.grok as grok_mod
+    from kbl import grok_client as _client_mod
+
+    http = _make_http_client_mock(_make_response(200, _ask_response_body()))
+    monkeypatch.setattr(
+        grok_mod,
+        "_get_client",
+        lambda: _client_mod.GrokClient(_http_client=http),
+    )
+    monkeypatch.setattr(
+        "orchestrator.cost_monitor.check_circuit_breaker",
+        lambda: (True, 0.0),
+    )
+    log_calls: list[dict] = []
+    monkeypatch.setattr(
+        "orchestrator.cost_monitor.log_api_cost",
+        lambda **kwargs: log_calls.append(kwargs),
+    )
+
+    result = grok_mod.dispatch_grok("baker_grok_ask", {"prompt": "hi", "matter_slug": "hagenauer"})
+
+    assert "Error" not in result
+    assert len(log_calls) == 1
+    call = log_calls[0]
+    assert call["model"] == "grok-4.3"
+    assert call["input_tokens"] == 32
+    assert call["output_tokens"] == 9
+    assert call["source"] == "grok_realtime"
+    assert call["matter_slug"] == "hagenauer"
+
+
+def test_dispatch_grok_blocks_when_circuit_breaker_tripped(monkeypatch: pytest.MonkeyPatch) -> None:
+    """When check_circuit_breaker returns (False, …), dispatch_grok must NOT call Grok."""
+    import tools.grok as grok_mod
+    from kbl import grok_client as _client_mod
+
+    http = _make_http_client_mock(_make_response(200, _ask_response_body()))
+    fake_client = _client_mod.GrokClient(_http_client=http)
+    monkeypatch.setattr(grok_mod, "_get_client", lambda: fake_client)
+    monkeypatch.setattr(
+        "orchestrator.cost_monitor.check_circuit_breaker",
+        lambda: (False, 150.00),
+    )
+    log_calls: list[dict] = []
+    monkeypatch.setattr(
+        "orchestrator.cost_monitor.log_api_cost",
+        lambda **kwargs: log_calls.append(kwargs),
+    )
+
+    result = grok_mod.dispatch_grok("baker_grok_ask", {"prompt": "hi"})
+
+    assert result.startswith("Error: cost circuit breaker tripped")
+    assert "€150.00" in result
+    assert http.request.call_count == 0
+    assert log_calls == []
+
+
+def test_dispatch_grok_cost_monitor_import_failure_fails_open(monkeypatch: pytest.MonkeyPatch) -> None:
+    """If cost_monitor.check_circuit_breaker raises, dispatch_grok still serves the call."""
+    import tools.grok as grok_mod
+    from kbl import grok_client as _client_mod
+
+    http = _make_http_client_mock(_make_response(200, _ask_response_body()))
+    monkeypatch.setattr(
+        grok_mod,
+        "_get_client",
+        lambda: _client_mod.GrokClient(_http_client=http),
+    )
+
+    def _boom() -> None:
+        raise RuntimeError("cost_monitor down")
+
+    monkeypatch.setattr(
+        "orchestrator.cost_monitor.check_circuit_breaker", _boom
+    )
+    monkeypatch.setattr(
+        "orchestrator.cost_monitor.log_api_cost",
+        lambda **kwargs: None,
+    )
+
+    result = grok_mod.dispatch_grok("baker_grok_ask", {"prompt": "hi"})
+    assert "Error" not in result
+    assert http.request.call_count == 1
+
+
+# --------------------------- live smoke test (env-gated) ---------------------------
+
+
+@pytest.mark.skipif(
+    not os.environ.get("TEST_XAI_API_KEY"),
+    reason="TEST_XAI_API_KEY env var not set — skipping live xAI smoke test",
+)
+def test_live_grok_ask_smoke() -> None:
+    """One real Grok ask() call against the live xAI Responses API.
+
+    Gated by ``TEST_XAI_API_KEY`` so CI stays green without the key. Mocks
+    alone can't catch wire-format errors (e.g. input field shape, search_parameters
+    vs tools array). Run locally with::
+
+        TEST_XAI_API_KEY=<real-key> XAI_API_KEY=<real-key> \\
+          pytest tests/test_grok_client.py::test_live_grok_ask_smoke -v
+    """
+    # Re-construct client so the autouse stub key fixture doesn't poison the call.
+    real_key = os.environ["TEST_XAI_API_KEY"]
+    client = GrokClient(api_key=real_key)
+    try:
+        out = client.ask("Say the word 'pong'. Nothing else.", max_output_tokens=16)
+    finally:
+        client.close()
+    assert out["text"], "live grok ask returned empty text — wire format may be off"
+    assert out["tokens_in"] > 0, "live grok ask returned zero input_tokens — usage block may be off"

@@ -471,15 +471,15 @@ def _shape_web_citation(citation: Any) -> dict[str, Any]:
 def _cost_usd_from_usage(usage: dict[str, Any]) -> float:
     """Derive USD cost from the xAI usage block.
 
-    Prefer the explicit ``cost_in_usd_ticks`` field when present (1 tick =
-    $0.0001 per xAI docs). Otherwise compute from token counts at the
-    documented grok-4.3 rate ($1.25/M input, $2.50/M output) — same per-token
-    rate applies to all text models as of 2026-05-17. Returns 0.0 if usage is
-    empty.
+    Prefer the explicit ``cost_in_usd_ticks`` field when present. xAI ticks
+    are denominated at 1 USD = 10^10 ticks (1 tick = $1e-10). Otherwise compute
+    from token counts at the documented grok-4.3 rate ($1.25/M input,
+    $2.50/M output) — same per-token rate applies to all text models as of
+    2026-05-17. Returns 0.0 if usage is empty.
     """
     ticks = usage.get("cost_in_usd_ticks")
     if isinstance(ticks, (int, float)) and ticks > 0:
-        return round(float(ticks) / 10_000.0, 8)
+        return round(float(ticks) / 10_000_000_000.0, 12)
     tokens_in = float(usage.get("input_tokens") or 0)
     tokens_out = float(usage.get("output_tokens") or 0)
     return round((tokens_in * 1.25 + tokens_out * 2.50) / 1_000_000.0, 8)
