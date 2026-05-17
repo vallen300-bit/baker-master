@@ -1,8 +1,13 @@
 ---
-status: CLAIMED
+status: AWAITING_REVIEW
 claimed_at: 2026-05-17T09:50:00Z
 claimed_by: b1
 branch: b1/state-file-refresh-1
+shipped_at: 2026-05-17T09:51:58Z
+pr: https://github.com/vallen300-bit/baker-master/pull/212
+ship_report: briefs/_reports/B1_state_file_refresh_1_20260517.md
+ship_bus_message: 322
+head: 81cb7be
 brief: briefs/BRIEF_STATE_FILE_REFRESH_1.md
 brief_id: STATE_FILE_REFRESH_1
 trigger_class: MEDIUM (new APScheduler job + ClickUp write + vault filesystem scan)
