@@ -99,16 +99,39 @@ Append a new section to `.claude/docs/baker-mcp-api.md`:
 - Note on `/ask` being disabled pending vendor fix
 - Pointer to the API spec at `~/Desktop/ClaimsMaxAPI.md`
 
+### 6. Auto-render investigation reports to PDF + HTML (Director-ratified 2026-05-17)
+
+When `/investigate` completes with a non-trivial report (heuristic: ≥500 words OR ≥1 markdown table OR ≥3 H2 sections), automatically render the markdown report to **both** formats:
+
+- **PDF** → write to `~/Vallen Dropbox/Dimitry vallen/1_ACTIVE_PROJECTS/<matter>/<YYYY-MM-DD>-<topic-slug>.pdf` for legal-evidence / forwarding use
+- **HTML** → write to `Desktop/baker-code/docs-site/<matter>/<YYYY-MM-DD>-<topic-slug>.html` (auto-published at `brisen-docs.onrender.com/<matter>/<YYYY-MM-DD>-<topic-slug>.html`) for shareable URL
+
+Implementation:
+
+- New module `kbl/report_renderer.py` with `render_investigation_report(markdown: str, matter_slug: str, topic_slug: str) -> dict` returning `{pdf_path, html_path, skipped_reason?}`.
+- Use `pandoc` for both conversions (already on dev env; B4 to verify presence on Render runtime — if missing, add to Dockerfile / `aptfile` / buildpack `apt-packages`).
+- Templates: minimal at first (default pandoc styling). Future iteration can swap in Brisen-branded PDF/HTML templates without changing the API.
+- Skip render if heuristic returns False — return `{pdf_path: None, html_path: None, skipped_reason: "below threshold"}`.
+
+New MCP tool: `baker_claimsmax_file_report` — args: `run_id, matter_slug, topic_slug` → returns the dict above. Calls `investigate_status(run_id)`, extracts `report`, hands to renderer.
+
+Tests:
+- ☐ Above-threshold markdown → both files exist, non-empty
+- ☐ Below-threshold markdown → returns None paths, no files created
+- ☐ Missing `pandoc` binary → raises `RendererUnavailableError` with clear remediation message
+- ☐ Matter folder doesn't exist → creates parent dirs, doesn't fail
+
 ## Acceptance criteria
 
 1. ☐ `kbl/claimsmax_client.py` exists with 8 methods (7 implemented + `ask()` placeholder)
 2. ☐ 4 MCP tools registered and callable via standard Baker MCP entry point
 3. ☐ Capability set row inserted via new migration
 4. ☐ All HTTP calls try/except wrapped; 429 retry verified by test
-5. ☐ Tests pass: `pytest tests/test_claimsmax_client.py -v`
-6. ☐ `.claude/docs/baker-mcp-api.md` updated
-7. ☐ Zero hardcoded keys; `CLAIMSMAX_API_KEY` read from env at startup; failing import if absent at boot is fine (matches existing env-var-required pattern)
+5. ☐ Tests pass: `pytest tests/test_claimsmax_client.py -v` AND `pytest tests/test_report_renderer.py -v`
+6. ☐ `.claude/docs/baker-mcp-api.md` updated (5 tools total: 4 ClaimsMax + 1 file-report)
+7. ☐ Zero hardcoded keys; `CLAIMSMAX_API_KEY` read from env at startup
 8. ☐ Render env var set by AH1 before merge (separate Tier B action; not in B4 scope but B4's ship report should note completion blocker)
+9. ☐ `kbl/report_renderer.py` exists; auto-renders investigation reports to PDF + HTML above threshold; `baker_claimsmax_file_report` MCP tool registered; `pandoc` confirmed available on Render runtime (B4 to verify or surface as blocker)
 
 ## Constraints (hard)
 
