@@ -41,16 +41,17 @@ print(json.dumps({"hookSpecificOutput": {"hookEventName": "SessionStart", "addit
 # --- resolve sender slug from BAKER_ROLE (mirror scripts/bus_post.sh:54-70) ---
 
 case "${BAKER_ROLE:-}" in
-    AH1|aihead1|lead|LEAD)        SLUG=lead ;;
-    AH2|aihead2|deputy|DEPUTY)    SLUG=deputy ;;
-    B1|b1)                         SLUG=b1 ;;
-    B2|b2)                         SLUG=b2 ;;
-    B3|b3)                         SLUG=b3 ;;
-    B4|b4)                         SLUG=b4 ;;
-    B5|b5)                         SLUG=b5 ;;
-    architect|ARCHITECT)          SLUG=architect ;;
-    cortex|CORTEX)                 SLUG=cortex ;;
-    aid|AID)                       SLUG=aid ;;
+    AH1|aihead1|lead|LEAD)              SLUG=lead ;;
+    AH1-APP|cowork-ah1|COWORK-AH1)      SLUG=cowork-ah1 ;;
+    AH2|aihead2|deputy|DEPUTY)          SLUG=deputy ;;
+    B1|b1)                              SLUG=b1 ;;
+    B2|b2)                              SLUG=b2 ;;
+    B3|b3)                              SLUG=b3 ;;
+    B4|b4)                              SLUG=b4 ;;
+    B5|b5)                              SLUG=b5 ;;
+    architect|ARCHITECT)                SLUG=architect ;;
+    cortex|CORTEX)                      SLUG=cortex ;;
+    aid|AID)                            SLUG=aid ;;
     *)
         # No BAKER_ROLE → silent no-op. Cwd-based fallback intentionally NOT
         # mirrored here to avoid auto-draining for sessions not meant to be on

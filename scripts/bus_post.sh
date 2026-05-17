@@ -52,19 +52,20 @@ esac
 # --- sender slug from BAKER_ROLE ---
 
 case "${BAKER_ROLE:-}" in
-    AH1|aihead1|lead|LEAD)        SENDER=lead ;;
-    AH2|aihead2|deputy|DEPUTY)    SENDER=deputy ;;
-    B1|b1)                         SENDER=b1 ;;
-    B2|b2)                         SENDER=b2 ;;
-    B3|b3)                         SENDER=b3 ;;
-    B4|b4)                         SENDER=b4 ;;
-    B5|b5)                         SENDER=b5 ;;
-    architect|ARCHITECT)          SENDER=architect ;;
-    cortex|CORTEX)                 SENDER=cortex ;;
-    aid|AID)                       SENDER=aid ;;
+    AH1|aihead1|lead|LEAD)              SENDER=lead ;;
+    AH1-APP|cowork-ah1|COWORK-AH1)      SENDER=cowork-ah1 ;;
+    AH2|aihead2|deputy|DEPUTY)          SENDER=deputy ;;
+    B1|b1)                              SENDER=b1 ;;
+    B2|b2)                              SENDER=b2 ;;
+    B3|b3)                              SENDER=b3 ;;
+    B4|b4)                              SENDER=b4 ;;
+    B5|b5)                              SENDER=b5 ;;
+    architect|ARCHITECT)                SENDER=architect ;;
+    cortex|CORTEX)                      SENDER=cortex ;;
+    aid|AID)                            SENDER=aid ;;
     *)
         echo "ERROR: BAKER_ROLE not set or unrecognized: '${BAKER_ROLE:-}'" >&2
-        echo "  Valid: AH1, AH2, B1-B5, architect, cortex, aid" >&2
+        echo "  Valid: AH1 (terminal=lead), AH1-APP (Cowork=cowork-ah1), AH2, B1-B5, architect, cortex, aid" >&2
         exit 1
         ;;
 esac
