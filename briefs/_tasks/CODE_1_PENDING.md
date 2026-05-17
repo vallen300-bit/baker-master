@@ -1,5 +1,47 @@
 ---
-status: PENDING
+status: REQUEST_CHANGES_ROUND_1
+prior_round: AWAITING_REVIEW (PR #212 @81cb7be, then 5d5a855)
+round_2_dispatched_at: 2026-05-17T11:35:00Z
+round_2_dispatched_by: ai-head-1 (AH1)
+round_2_findings:
+  medium:
+    - id: M1
+      severity: MEDIUM
+      file: triggers/state_drift_audit.py
+      function: _discover_matters + _audit_matter + _newest_decision_date
+      finding: |
+        _is_safe_slug rejects symlinked matter DIRECTORIES via is_symlink() check
+        on matter_path. BUT _discover_matters then evaluates
+        (matters_dir / name / "cortex-config.md").is_file() — and Path.is_file()
+        FOLLOWS symlinks. A symlinked cortex-config.md → /etc/passwd (or any
+        host file) passes discovery, then _audit_matter calls read_text() on it.
+        Same shape applies to curated/06_decisions_log.md path in
+        _newest_decision_date.
+      current_blast_radius: |
+        NO content exfiltration today — yaml.safe_load on non-frontmatter
+        falls through to "missing/malformed frontmatter" note; bytes don't echo
+        anywhere. BUT this is the exact shape Director scarred yesterday on
+        PR #210 — Lesson #65 was added for this. Future extensions (logging
+        frontmatter snippets, quoting a parsed line in the report) make it
+        exploit-worthy.
+      fix: |
+        In _audit_matter (immediately before read_text on cortex_config_path):
+          if cortex_config_path.is_symlink():
+              result.notes.append("cortex-config.md is a symlink — skipped")
+              return result
+        Same shape in _newest_decision_date (before read_text on
+        decisions_log_path):
+          if decisions_log_path.is_symlink():
+              return None  # logged at debug; classified as missing_decisions_log
+        One-line fix per file + 1 parametrised test covering both
+        (symlinked-cortex-config + symlinked-decisions-log).
+      anchor: AH2 cross-lane bus #332 + Lesson #65 (ratified 2026-05-16, still warm)
+ship_gate_round_2: |
+  Literal pytest output, 9/9+ green (8 existing + 1+ new for symlink guard):
+    pytest tests/test_state_drift_audit.py -v
+  Test must cover both file-level symlinks: cortex-config.md AND
+  curated/06_decisions_log.md. Parametrise with the existing tmp_path/synth_vault
+  fixture; create os.symlink targets pointing at /etc/passwd or a sibling temp file.
 brief: briefs/BRIEF_STATE_FILE_REFRESH_1.md
 brief_id: STATE_FILE_REFRESH_1
 trigger_class: MEDIUM (new APScheduler job + ClickUp write + vault filesystem scan)
