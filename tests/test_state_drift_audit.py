@@ -7,6 +7,7 @@ BAKER_VAULT_PATH at it, run audit, assert classifications.
 from __future__ import annotations
 
 import json
+import os
 from datetime import date, datetime, timezone
 from pathlib import Path
 
@@ -152,6 +153,46 @@ def test_second_run_no_new_drift_skips_clickup(synth_vault, monkeypatch):
 
     assert calls[0] != []  # first run surfaced new drift candidates
     assert calls[1] == []  # second run: same bucket, nothing new
+
+
+@pytest.mark.parametrize("target_file", ["cortex-config.md", "curated/06_decisions_log.md"])
+def test_file_level_symlink_refused_not_followed(synth_vault, tmp_path, target_file):
+    """File-level symlinks at cortex-config.md or curated/06_decisions_log.md
+    must not be read. _is_safe_slug rejects symlinked DIRECTORIES but
+    Path.is_file() follows file-level symlinks -- audit must guard at read site.
+    """
+    slug = "symlinked"
+    matter = synth_vault / "wiki" / "matters" / slug
+    matter.mkdir(parents=True)
+    (matter / "curated").mkdir()
+
+    # Real cortex-config + decisions log; we'll replace ONE with a symlink.
+    (matter / "cortex-config.md").write_text(
+        f"---\ntype: matter\nslug: {slug}\nupdated: '2026-05-01'\n---\n",
+        encoding="utf-8",
+    )
+    (matter / "curated" / "06_decisions_log.md").write_text(
+        "## D-001 — recent (2026-05-17)\n", encoding="utf-8"
+    )
+
+    sibling_target = tmp_path / "outside-secret.txt"
+    sibling_target.write_text("SECRET-CONTENT-MUST-NOT-LEAK\n", encoding="utf-8")
+
+    victim = matter / target_file
+    victim.unlink()
+    os.symlink(sibling_target, victim)
+
+    r = sda._audit_matter(sda._matters_dir(), slug)
+
+    if target_file == "cortex-config.md":
+        assert any("symlink" in n.lower() for n in r.notes), r.notes
+        assert r.cortex_config_updated is None
+    else:
+        assert r.newest_decision_date is None
+
+    # Belt-and-braces: no field on the result should contain the secret payload.
+    for value in (r.notes, [r.cortex_config_updated, r.newest_decision_date, r.lag_days]):
+        assert "SECRET-CONTENT-MUST-NOT-LEAK" not in str(value)
 
 
 def test_malformed_frontmatter_does_not_crash(tmp_path, monkeypatch):

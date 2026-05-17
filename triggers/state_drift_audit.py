@@ -161,6 +161,8 @@ def _newest_decision_date(decisions_log_path: Path) -> Optional[date]:
     Returns None if the file has no parseable decision headings (treat as
     "missing dated decisions" -- not drift, separate class).
     """
+    if decisions_log_path.is_symlink():
+        return None
     try:
         text = decisions_log_path.read_text(encoding="utf-8")
     except OSError:
@@ -181,6 +183,9 @@ def _audit_matter(matters_dir: Path, slug: str) -> MatterAuditResult:
     cortex_config_path = matters_dir / slug / "cortex-config.md"
     decisions_log_path = matters_dir / slug / "curated" / "06_decisions_log.md"
 
+    if cortex_config_path.is_symlink():
+        result.notes.append("cortex-config.md is a symlink -- refusing to follow")
+        return result
     try:
         cc_text = cortex_config_path.read_text(encoding="utf-8")
     except OSError as e:
