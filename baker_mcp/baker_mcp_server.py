@@ -907,6 +907,18 @@ except Exception as _claimsmax_import_err:  # pragma: no cover — defensive imp
         return f"Error: ClaimsMax tools failed to load: {_claimsmax_import_err}"
 
 
+# xAI Grok Responses API + Live Search — defensive import mirroring ClaimsMax.
+try:
+    from tools.grok import GROK_TOOLS, GROK_TOOL_NAMES, dispatch_grok
+    TOOLS.extend(GROK_TOOLS)
+except Exception as _grok_import_err:  # pragma: no cover — defensive import
+    logger.warning("Grok tools unavailable: %s", _grok_import_err)
+    GROK_TOOL_NAMES = frozenset()
+
+    def dispatch_grok(name: str, args: dict) -> str:  # type: ignore[no-redef]
+        return f"Error: Grok tools failed to load: {_grok_import_err}"
+
+
 @app.list_tools()
 async def list_tools() -> list[Tool]:
     return TOOLS
@@ -1961,6 +1973,9 @@ def _dispatch(name: str, args: dict) -> str:
 
     elif name in CLAIMSMAX_TOOL_NAMES:
         return dispatch_claimsmax(name, args)
+
+    elif name in GROK_TOOL_NAMES:
+        return dispatch_grok(name, args)
 
     else:
         return f"Unknown tool: {name}"
