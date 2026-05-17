@@ -1,74 +1,47 @@
 ---
-status: COMPLETE
-completed_at: 2026-05-16T13:19:28Z
-completed_pr: 208
-completed_merge_sha: 8ca850e9de35763ba0805ac1d78278dd787098e9
-completed_anchor: bus #303 (AH1 → b3 merge notice)
-brief: briefs/BRIEF_BAKER_WA_DIRECTOR_FILTER_1.md
-trigger_class: MEDIUM (external-surface helper edit + >10 files; mandatory 2nd-pass)
-dispatched_at: 2026-05-15T18:35:00Z
-dispatched_by: ai-head-2 (AH2)
-target: b3
+status: PENDING
+brief: briefs/BRIEF_RENDER_ENV_WRITE_GUARD_1.md
+brief_id: RENDER_ENV_WRITE_GUARD_1
+trigger_class: LOW-MEDIUM (new operator-side tooling; no runtime path; mandatory 2nd-pass NOT triggered unless tests touch external surface)
+target_branch: b3/render-env-write-guard-1
+matter_slug: baker-internal
+cross_matter_usage: [baker-internal]
+dispatched_at: 2026-05-17T14:40:00Z
+dispatched_by: AH1
+director_auth: 2026-05-17 chat — "dispatch" (post Tier-B bundle authorization + brief review)
 prior_brief_complete: |
-  CORTEX_TIER_B_RUNTIME_V1 (PR #179 merged 2026-05-10) + DEADLINE_FEEDBACK_LOOP_1
-  (PR #203 merged 2026-05-15 09:37Z). This dispatch supersedes prior content.
-director_ratification: |
-  Director 2026-05-15 ~18:30Z (in-chat to AH2): "Ratified." in response to
-  AH2's proposal for outbound WhatsApp allowlist + chokepoint enforcement.
-  Anchor: Director "I stopped even reading messages now from Baker on
-  WhatsApp. ... Why do I need to know this?" — generalisation of the
-  scheduler-watchdog Phase A kill to all infra-class WA sends.
-priority: P0 (Director quality-of-life; signal-to-noise on the Director's
-              primary alert channel)
-phase: 1 of 1
-expected_pr_count: 1
-expected_branch: b3/baker-wa-director-filter-1
-expected_complexity: medium (~2-3h: 10+ call sites to audit + tag, chokepoint, CI guard, 5 tests)
-mandatory_2nd_pass: TRUE (per SKILL.md §"Code-reviewer 2nd-pass Protocol" trigger #4 — external-surface helper)
-hard_ship_gate: |
-  1. `python3 -c "import py_compile; py_compile.compile('outputs/whatsapp_sender.py', doraise=True)"` clean.
-  2. `pytest tests/test_wa_director_filter.py -v` — 5 passed (literal stdout in ship report).
-  3. `bash scripts/check_wa_director_kinds.sh` exits 0 after all callers tagged (literal in ship report).
-  4. Step 2 audit table in ship report — every call site listed with classification + 1-line justification.
-  5. AH2 cross-lane review + /security-review + picker-architect + feature-dev:code-reviewer 2nd-pass all clear.
-  6. Post-merge 24h: `SELECT action_type, COUNT(*) FROM baker_actions WHERE action_type IN ('whatsapp_send','whatsapp_blocked') AND created_at > NOW() - INTERVAL '24 hours' GROUP BY 1` — paste result in ship report addendum.
-ship_report_to: |
-  Bus-post to `deputy` on PR open + ship.
+  BAKER_WA_DIRECTOR_FILTER_1 shipped as PR #208 (merge_commit 8ca850e,
+  2026-05-16T13:19:28Z, ah1_merge_msg bus #303). This dispatch
+  overwrites the mailbox slot with the new brief.
 ---
 
-# CODE_3_PENDING — Baker WhatsApp Director filter — 2026-05-15
+# Dispatch: RENDER_ENV_WRITE_GUARD_1
 
-**Dispatched by:** AH2 (deputy) under Director directive 2026-05-15 ~18:30Z
+B3 — full brief at `briefs/BRIEF_RENDER_ENV_WRITE_GUARD_1.md`.
+
+**TL;DR:** Add a safe Python utility for Render env-var writes that forces single-key merge-mode PUT and rejects array-form PUT. Prevents recurrence of today's catastrophic env-var wipe on `baker-master` (32 vars → 0). New `tools/render_env_guard.py` + tests + rules-doc update.
+
 **Working dir:** `~/bm-b3`
-**Branch:** `b3/baker-wa-director-filter-1` off `main`
+**Branch:** `b3/render-env-write-guard-1` off `main`
+**Estimated touch:** 2 prod files (~80 LOC: new module + rules-doc update) + 1 test file (~50 LOC).
+**Trigger class:** LOW-MEDIUM (no runtime path; operator-side tooling; touches Render API surface concept but not Render API itself).
+**Estimated time:** ~2-3 hours.
 
-Pre-flight:
-1. `git pull --ff-only origin main` in `~/bm-b3`.
-2. Read `briefs/BRIEF_BAKER_WA_DIRECTOR_FILTER_1.md` end-to-end.
+## Pre-flight
 
----
+1. `cd ~/bm-b3 && git fetch origin main && git checkout main && git pull --ff-only`.
+2. Read `briefs/BRIEF_RENDER_ENV_WRITE_GUARD_1.md` end-to-end.
+3. Read `.claude/rules/python-backend.md` to see existing rule entry being pointed to.
+4. Read `_ops/agents/ai-head/LONGTERM.md` Render section to see canonical pattern this utility codifies.
 
-## Scope
+## Ship gate
 
-Add a `kind=` parameter + allowlist enforcement to `outputs/whatsapp_sender.py:266`. Calls that resolve to Director's number (`chat_id=DIRECTOR_WHATSAPP`) must pass an allowlisted `kind=` value or get blocked at the chokepoint (returns False + logs to `baker_actions.whatsapp_blocked`). Non-Director chat_ids are unaffected.
-
-Allowlist: `counterparty / legal_threat / deadline / vip_signal / financial / director_inbound`.
-
-Audit + tag the 10+ existing `send_whatsapp(` call sites per the brief's Step 2 table. Infra-only ones get replaced with `logger.warning(...)` (mirroring Phase A pattern at `outputs/dashboard.py`). Director-relevant ones get tagged with the right `kind=` value.
-
-Add `scripts/check_wa_director_kinds.sh` as a pre-push hook to fail-fast if any future caller forgets the tag.
-
-## Background context (read before starting)
-
-- Director cited Phase A (`SCHEDULER_WATCHDOG_WA_KILL_1`, PR #206 merged 15:57Z) as the pattern: stop infra-class WA to Director. This brief generalises the rule.
-- Phase A only fixed ONE call site (the scheduler-watchdog at `outputs/dashboard.py`). Several infra-class call sites still default to Director's number — most obviously `triggers/sentinel_health.py` (3 sites: WAHA silent / WAHA session down / general sentinel health).
-- Director's concrete frustration: "I stopped even reading messages now from Baker on WhatsApp." The signal-to-noise is gone. Restore it by silencing everything that isn't an entity outside Baker.
-- Director ratification of THIS brief is implicit in his "Ratified." reply. No further authorization needed for the implementation.
+Literal `pytest tests/test_render_env_guard.py -v` output in ship report. NO "by inspection".
 
 ## Reporting
 
-- Bus-post `deputy` on PR open + ship per `_ops/processes/agent-bus-posting-contract.md`.
-- Cite the audit table (Step 2 of the brief) in the ship report — every classification decision must have a 1-line justification (DON'T classify without reading the trigger code).
+- Bus-post `lead` (AH1) on PR open with topic `pr-open/render-env-write-guard-1`.
+- AH1 runs cross-lane review chain (AH2 static + judgment call on `/security-review`). Trigger-class LOW-MEDIUM — if AH1 judgment fires the 2nd-pass `feature-dev:code-reviewer`, it'll be parallel with AH2 static.
 
 ## Co-Authored-By
 
@@ -76,59 +49,3 @@ Add `scripts/check_wa_director_kinds.sh` as a pre-push hook to fail-fast if any 
 Co-authored-by: Code Brisen #3 <b3@brisengroup.com>
 Co-Authored-By: Claude Opus 4.7 (1M context) <noreply@anthropic.com>
 ```
-
----
-
-## UPDATE 2026-05-16T09:35:00Z — REQUEST_CHANGES bundle pushed (HEAD bump)
-
-Source: AH1 bus message #289 (REQUEST_CHANGES on PR #208, posted 2026-05-16T09:19:48Z).
-
-Three HIGH fixes bundled into NEW commit `940f4b0` on `b3/baker-wa-director-filter-1`:
-
-1. **`kbl/logging.py:169`** — `send_director_alert("[KBL CRITICAL] ...")` now passes `kind="kbl_critical"`. Option (b) per AH1 — new `kbl_critical` entry added to `DIRECTOR_WA_ALLOWED_KINDS`. Cleaner than reusing `vip_signal` (semantic mismatch: VIP-signal = external contact event; KBL CRITICAL = Director-actionable infra). Upstream 5-min dedupe in `emit_critical_alert` keeps cadence sane.
-2. **`scripts/check_wa_director_kinds.sh`** — added `--exclude-dir='.claude'` to drop Cowork worktree false-positives.
-3. **`scripts/check_wa_director_kinds.sh` + `scripts/_check_wa_kinds_filter.py`** — extended grep to also scan `send_director_alert(`; python filter resolves earliest of either call token for the quote-prefix heuristic.
-
-Tests + guard literal:
-
-- `python3 -m pytest tests/test_wa_director_filter.py -v` → **6 passed in 0.03s** (added `test_director_send_with_kbl_critical_kind_allowed`; updated `test_allowlist_contents` to expect 7 kinds).
-- `python3 -m pytest tests/test_whatsapp_sender_lid.py -v` → **23 passed in 0.06s** (regression clean).
-- `bash scripts/check_wa_director_kinds.sh` → `OK: all send_whatsapp() callers tag kind= or non-Director chat_id.` (exit 0); also fired automatically on `git push` via `.githooks/pre-push`.
-
-Deferred per AH1 recommendation: MEDIUM (multi-line guard blindness — over-flags only) + LOW × 2 (`_phone_root('')` empty edge, `action_handler.py:1615` misleading "connectivity failure" wording on policy-blocked sends).
-
-Ship-report addendum at `briefs/_reports/B3_baker_wa_director_filter_20260516.md` §"REQUEST_CHANGES Round 1 — Hot-fix bundle".
-
-Re-review fan-out pending AH1 (picker-architect + feature-dev:code-reviewer on `940f4b0`).
-
----
-
-## CLOSE 2026-05-16T13:23:18Z — MERGED
-
-Source: AH1 bus message #303 (`merge/BAKER_WA_DIRECTOR_FILTER_1`).
-
-PR #208 squash-merged 2026-05-16T13:19:28Z. Merge commit `8ca850e9de35763ba0805ac1d78278dd787098e9` on `main`. Branch `b3/baker-wa-director-filter-1` deleted on origin.
-
-All gates cleared:
-- AH2 cross-lane: **PASS** (msg #300 after RC1 re-fire — earlier #291 REQUEST_CHANGES retracted).
-- AH2 `/security-review`: **CLEAN**.
-- picker-architect (RC1): **PASS-WITH-NITS** (2 LOW only).
-- feature-dev:code-reviewer 2nd-pass: AH1 direct-verify (agent had stale-clone failure mode; AH1 ran 6/6 pytest on Python 3.12 PASS + grep'd all 3 HIGH fixes in code).
-
-Director-ratifications captured in flight:
-- phone-root scope (block both Swiss + UK Baker SIM) — kept as shipped in V0.
-- `'kbl_critical'` allowlist naming — kept (NOT `'system_critical'` per AH2's earlier ask).
-
-### Deferred fast-follows (per AH1 — file briefs at convenience)
-
-1. **MEDIUM** — `scripts/_check_wa_kinds_filter.py` multi-line guard blindness. Fail-closed (over-flags only).
-2. **LOW** — `outputs/whatsapp_sender.py` `_phone_root('')` edge case (no `@c.us`).
-3. **LOW** — `action_handler.py:1615` misleading "connectivity failure" wording on policy-blocked sends.
-4. **LOW** — `scripts/check_wa_director_kinds.sh` `--exclude-dir='.claude'` broader than needed (could narrow to `'.claude/worktrees'`).
-5. **LOW** — `scripts/check_wa_director_kinds.sh` allowlist help-line still says 6 kinds (off by 1; allowlist is now 7 after RC1 added `kbl_critical`).
-
-### Post-merge 24h DB check
-
-Pending — to be appended to `briefs/_reports/B3_baker_wa_director_filter_20260516.md` after 2026-05-17T13:19:28Z observation window. Hard ship-gate item #6 from the brief.
-
-
