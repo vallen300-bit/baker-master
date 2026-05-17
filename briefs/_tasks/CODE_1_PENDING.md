@@ -8,8 +8,43 @@ pr: https://github.com/vallen300-bit/baker-master/pull/212
 ship_report: briefs/_reports/B1_state_file_refresh_1_20260517.md
 ship_bus_message: 322
 head: 3551a0d
-round_2_shipped_at: 2026-05-17T11:45:00Z
+round_1_head: 81cb7be
+round_2_dispatched_at: 2026-05-17T11:35:00Z
+round_2_dispatched_by: ai-head-1 (AH1)
+round_2_findings:
+  medium:
+    - id: M1
+      severity: MEDIUM
+      file: triggers/state_drift_audit.py
+      function: _audit_matter + _newest_decision_date
+      finding: |
+        _is_safe_slug rejects symlinked matter DIRECTORIES but Path.is_file() /
+        Path.read_text() in _discover_matters + _audit_matter +
+        _newest_decision_date FOLLOW file-level symlinks. A symlinked
+        cortex-config.md or curated/06_decisions_log.md targeting /etc/passwd
+        (or any host file) passes discovery, then read_text is called on it.
+      current_blast_radius: |
+        NO content exfiltration today — yaml.safe_load on non-frontmatter
+        falls through to "missing/malformed frontmatter" note; bytes don't echo
+        anywhere. BUT this is the exact shape Director scarred yesterday on
+        PR #210 — Lesson #65 was added for this. Future extensions (logging
+        frontmatter snippets, quoting a parsed line in the report) make it
+        exploit-worthy.
+      fix_applied: |
+        round-2 commit 3551a0d adds Path.is_symlink() guard immediately
+        before read_text() on both cortex_config_path (in _audit_matter)
+        and decisions_log_path (in _newest_decision_date). Parametrised test
+        test_file_level_symlink_refused_not_followed covers both file paths
+        with SECRET-CONTENT-MUST-NOT-LEAK sentinel; verified sentinel never
+        appears in any result field.
+      anchor: AH2 cross-lane bus #332 + Lesson #65 (ratified 2026-05-16, still warm)
+round_2_shipped_at: 2026-05-17T11:43:41Z
 round_2_scope: "Path.is_symlink() guard in _audit_matter + _newest_decision_date; parametrised test covers cortex-config.md + curated/06_decisions_log.md symlink targets. 10/10 pytest green."
+round_2_ship_bus_message: 336
+ship_gate_round_2: |
+  Literal pytest output, 10/10 green (8 existing + 2 parametrised for symlink guard):
+    /opt/homebrew/bin/python3.12 -m pytest tests/test_state_drift_audit.py -v
+  Verified by feature-dev:code-reviewer pass (AH1 spawned 2026-05-17T11:46Z).
 brief: briefs/BRIEF_STATE_FILE_REFRESH_1.md
 brief_id: STATE_FILE_REFRESH_1
 trigger_class: MEDIUM (new APScheduler job + ClickUp write + vault filesystem scan)

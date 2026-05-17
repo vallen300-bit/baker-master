@@ -894,6 +894,18 @@ TOOLS = [
     ),
 ]
 
+# ClaimsMax v1 REST surface — imported separately to keep the existing 24-tool
+# block stable. Tools live in tools/claimsmax.py; dispatch routes there too.
+try:
+    from tools.claimsmax import CLAIMSMAX_TOOLS, CLAIMSMAX_TOOL_NAMES, dispatch_claimsmax
+    TOOLS.extend(CLAIMSMAX_TOOLS)
+except Exception as _claimsmax_import_err:  # pragma: no cover — defensive import
+    logger.warning("ClaimsMax tools unavailable: %s", _claimsmax_import_err)
+    CLAIMSMAX_TOOL_NAMES = frozenset()
+
+    def dispatch_claimsmax(name: str, args: dict) -> str:  # type: ignore[no-redef]
+        return f"Error: ClaimsMax tools failed to load: {_claimsmax_import_err}"
+
 
 @app.list_tools()
 async def list_tools() -> list[Tool]:
@@ -1946,6 +1958,9 @@ def _dispatch(name: str, args: dict) -> str:
 
     elif name == "baker_inbox_ack":
         return _brisen_lab_ack_via_http(args)
+
+    elif name in CLAIMSMAX_TOOL_NAMES:
+        return dispatch_claimsmax(name, args)
 
     else:
         return f"Unknown tool: {name}"
