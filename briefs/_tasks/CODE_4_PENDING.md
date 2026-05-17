@@ -1,5 +1,5 @@
 ---
-status: PENDING
+status: COMPLETE
 brief: briefs/BRIEF_REPORT_RENDERER_SLUG_HARDEN_1.md
 brief_id: REPORT_RENDERER_SLUG_HARDEN_1
 trigger_class: LOW (single-function harden + 1 test; no auth/DB/external surface)
@@ -9,6 +9,10 @@ cross_matter_usage: [mo-vie-am, hagenauer-rg7, cupial, ao, baker-internal]
 dispatched_at: 2026-05-17T14:35:00Z
 dispatched_by: AH1
 director_auth: 2026-05-17 chat — "go" (Tier-B fast-follow bundle authorization)
+shipped_at: 2026-05-17T14:48:00Z
+pr: https://github.com/vallen300-bit/baker-master/pull/215
+commit: 4296cbc
+ship_report: briefs/_reports/B4_REPORT_RENDERER_SLUG_HARDEN_1_20260517.md
 prior_brief_complete: |
   CLAIMSMAX_API_CAPABILITY_1 shipped as PR #213 (merge_commit 3cbc287,
   2026-05-17T11:30:59Z, ah1_merge_msg bus #333). Ship report preserved in
