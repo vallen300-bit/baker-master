@@ -1,6 +1,14 @@
 ---
-status: REQUEST_CHANGES_ROUND_1
-prior_round: AWAITING_REVIEW (PR #212 @81cb7be, then 5d5a855)
+status: AWAITING_REVIEW
+claimed_at: 2026-05-17T09:50:00Z
+claimed_by: b1
+branch: b1/state-file-refresh-1
+shipped_at: 2026-05-17T09:51:58Z
+pr: https://github.com/vallen300-bit/baker-master/pull/212
+ship_report: briefs/_reports/B1_state_file_refresh_1_20260517.md
+ship_bus_message: 322
+head: 3551a0d
+round_1_head: 81cb7be
 round_2_dispatched_at: 2026-05-17T11:35:00Z
 round_2_dispatched_by: ai-head-1 (AH1)
 round_2_findings:
@@ -8,15 +16,13 @@ round_2_findings:
     - id: M1
       severity: MEDIUM
       file: triggers/state_drift_audit.py
-      function: _discover_matters + _audit_matter + _newest_decision_date
+      function: _audit_matter + _newest_decision_date
       finding: |
-        _is_safe_slug rejects symlinked matter DIRECTORIES via is_symlink() check
-        on matter_path. BUT _discover_matters then evaluates
-        (matters_dir / name / "cortex-config.md").is_file() — and Path.is_file()
-        FOLLOWS symlinks. A symlinked cortex-config.md → /etc/passwd (or any
-        host file) passes discovery, then _audit_matter calls read_text() on it.
-        Same shape applies to curated/06_decisions_log.md path in
-        _newest_decision_date.
+        _is_safe_slug rejects symlinked matter DIRECTORIES but Path.is_file() /
+        Path.read_text() in _discover_matters + _audit_matter +
+        _newest_decision_date FOLLOW file-level symlinks. A symlinked
+        cortex-config.md or curated/06_decisions_log.md targeting /etc/passwd
+        (or any host file) passes discovery, then read_text is called on it.
       current_blast_radius: |
         NO content exfiltration today — yaml.safe_load on non-frontmatter
         falls through to "missing/malformed frontmatter" note; bytes don't echo
@@ -24,24 +30,21 @@ round_2_findings:
         PR #210 — Lesson #65 was added for this. Future extensions (logging
         frontmatter snippets, quoting a parsed line in the report) make it
         exploit-worthy.
-      fix: |
-        In _audit_matter (immediately before read_text on cortex_config_path):
-          if cortex_config_path.is_symlink():
-              result.notes.append("cortex-config.md is a symlink — skipped")
-              return result
-        Same shape in _newest_decision_date (before read_text on
-        decisions_log_path):
-          if decisions_log_path.is_symlink():
-              return None  # logged at debug; classified as missing_decisions_log
-        One-line fix per file + 1 parametrised test covering both
-        (symlinked-cortex-config + symlinked-decisions-log).
+      fix_applied: |
+        round-2 commit 3551a0d adds Path.is_symlink() guard immediately
+        before read_text() on both cortex_config_path (in _audit_matter)
+        and decisions_log_path (in _newest_decision_date). Parametrised test
+        test_file_level_symlink_refused_not_followed covers both file paths
+        with SECRET-CONTENT-MUST-NOT-LEAK sentinel; verified sentinel never
+        appears in any result field.
       anchor: AH2 cross-lane bus #332 + Lesson #65 (ratified 2026-05-16, still warm)
+round_2_shipped_at: 2026-05-17T11:43:41Z
+round_2_scope: "Path.is_symlink() guard in _audit_matter + _newest_decision_date; parametrised test covers cortex-config.md + curated/06_decisions_log.md symlink targets. 10/10 pytest green."
+round_2_ship_bus_message: 336
 ship_gate_round_2: |
-  Literal pytest output, 9/9+ green (8 existing + 1+ new for symlink guard):
-    pytest tests/test_state_drift_audit.py -v
-  Test must cover both file-level symlinks: cortex-config.md AND
-  curated/06_decisions_log.md. Parametrise with the existing tmp_path/synth_vault
-  fixture; create os.symlink targets pointing at /etc/passwd or a sibling temp file.
+  Literal pytest output, 10/10 green (8 existing + 2 parametrised for symlink guard):
+    /opt/homebrew/bin/python3.12 -m pytest tests/test_state_drift_audit.py -v
+  Verified by feature-dev:code-reviewer pass (AH1 spawned 2026-05-17T11:46Z).
 brief: briefs/BRIEF_STATE_FILE_REFRESH_1.md
 brief_id: STATE_FILE_REFRESH_1
 trigger_class: MEDIUM (new APScheduler job + ClickUp write + vault filesystem scan)
