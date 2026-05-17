@@ -1,5 +1,8 @@
 ---
-status: PENDING
+status: CLAIMED
+claimed_at: 2026-05-17T09:50:00Z
+claimed_by: b1
+branch: b1/state-file-refresh-1
 brief: briefs/BRIEF_STATE_FILE_REFRESH_1.md
 brief_id: STATE_FILE_REFRESH_1
 trigger_class: MEDIUM (new APScheduler job + ClickUp write + vault filesystem scan)

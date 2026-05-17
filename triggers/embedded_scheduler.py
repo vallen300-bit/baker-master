@@ -145,6 +145,23 @@ def _register_jobs(scheduler: BackgroundScheduler):
         f"Registered: clickup_poll (daily at {_clickup_hour:02d}:{_clickup_minute:02d} UTC)"
     )
 
+    # STATE_FILE_REFRESH_1: nightly drift audit at 03:00 UTC (3h before vault_scanner
+    # at 06:00 UTC to spread filesystem load + ClickUp writes across the night).
+    # Singleton via scheduler_lease. Job is fault-tolerant — any exception
+    # is logged but does not crash scheduler (try/except inside run_state_drift_audit).
+    from triggers.state_drift_audit import run_state_drift_audit
+    scheduler.add_job(
+        run_state_drift_audit,
+        CronTrigger(hour=3, minute=0, timezone="UTC"),
+        id="state_drift_audit",
+        name="State drift audit — cortex-config vs decisions_log",
+        coalesce=True,
+        max_instances=1,
+        replace_existing=True,
+        misfire_grace_time=3600,
+    )
+    logger.info("Registered: state_drift_audit (daily at 03:00 UTC)")
+
     # Dropbox polling — every 30 minutes
     from triggers.dropbox_trigger import run_dropbox_poll
     scheduler.add_job(
