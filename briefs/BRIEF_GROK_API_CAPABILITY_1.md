@@ -28,17 +28,36 @@ This brief wires the Grok API into Baker as a permanent capability so any matter
 
 ## Authentication
 
-API key NOT yet provisioned. **AH1 will create the xAI API key + store in 1Password + set Render env var `XAI_API_KEY` before B2's merge.** This is a separate Tier B action that runs in parallel to B2's coding.
+API key **already provisioned 2026-05-17** by AH1 via xAI Console (Brisen Group team, key name "Baker — Production").
+
+- 1Password: `op://Baker API Keys/xAI API Key — Baker Production/credential`
+- xAI team_id: `e150ddd0-0177-4158-a639-c5143331f547`
+- Credits loaded: $250 USD (no auto top-up — pilot watch)
+- Render env var `XAI_API_KEY`: AH1 will push before B2's merge (Tier B, separate action)
 
 B2 reads from `os.environ["XAI_API_KEY"]` — never hardcodes, never prompts for it.
 
-Auth pattern (OpenAI-compatible per xAI docs):
+Auth pattern (Bearer):
 
 ```
-Authorization: Bearer <key>
+Authorization: Bearer xai-<key>
 ```
 
 ## Scope
+
+### Verified API spec (AH1 confirmed via xAI Console 2026-05-17)
+
+- **Base URL:** `https://api.x.ai/v1`
+- **Primary endpoint:** `/v1/responses` (new xAI Responses API — NOT OpenAI-style `/v1/chat/completions`)
+- **Default model in console:** `grok-4.20-reasoning` (B2: verify whether `grok-4.3` — flagged in console as "now available" — should be the new default; pick whichever xAI docs recommend as the production-grade reasoning model)
+- **Native real-time tools:** Grok supports X-search + web-search as built-in capabilities — verify in xAI docs whether they're (a) separate endpoints, (b) tool/function parameters on `/responses`, or (c) auto-triggered by prompt content. Brief assumes (b) based on xAI's tool-use pattern; CONFIRM before coding.
+- **Reference cURL** (from xAI Console quickstart):
+  ```
+  curl https://api.x.ai/v1/responses \
+    -H "Content-Type: application/json" \
+    -H "Authorization: Bearer $XAI_API_KEY" \
+    -d '{"model": "grok-4.20-reasoning", "input": "..."}'
+  ```
 
 ### 1. HTTP client (`kbl/grok_client.py`)
 
@@ -56,7 +75,7 @@ Public methods (verify against xAI docs FIRST — see §First step):
 
 - `x_search(query, max_results=10, language=None)` → dict — searches X/Twitter, returns `{summary, tweets: [{url, author, date, text, engagement}]}`
 - `web_search(query, freshness="week", max_results=10)` → dict — real-time web search, returns `{summary, citations: [{url, title, date, snippet}]}`
-- `ask(prompt, model="grok-4-heavy", max_tokens=4000, tools=None)` → dict — plain Grok chat completion for general reasoning (cost-arbitrage path)
+- `ask(prompt, model="grok-4.20-reasoning", max_tokens=4000, tools=None)` → dict — plain Grok Responses-API call for general reasoning (cost-arbitrage path)
 
 ### 2. MCP tools (`tools/grok.py` — new module)
 
