@@ -84,19 +84,22 @@ def test_emit_cortex_heartbeat_posts_correct_topic(cycle, key_env, recorder_http
     asyncio.run(runner._emit_cortex_heartbeat(cycle, "sense", "ok"))
 
     captured = recorder_httpx.captured
-    assert captured["url"] == "https://brisen-lab.test/msg/"
+    assert captured["url"] == "https://brisen-lab.test/msg/lead"
     assert captured["headers"]["X-Terminal-Key"] == "test-cortex-key"
     assert captured["headers"]["Content-Type"] == "application/json"
 
     body = captured["json"]
-    assert body["from_terminal"] == "cortex"
-    assert body["to_terminals"] == ["lead"]
+    assert body["kind"] == "dispatch"
+    assert body["to"] == ["lead"]
+    assert body["tier_required"] == "B"
     assert body["topic"] == "cortex/oskolkov/cycle-phase/sense"
-    assert body["kind"] == "heartbeat"
     assert "cycle_id=cycle-test-1234" in body["body"]
     assert "matter=oskolkov" in body["body"]
     assert "phase=sense" in body["body"]
     assert "status=ok" in body["body"]
+    # Sender derived from X-Terminal-Key auth header; no from_terminal on wire.
+    assert "from_terminal" not in body
+    assert "to_terminals" not in body
 
 
 # --------------------------------------------------------------------------
