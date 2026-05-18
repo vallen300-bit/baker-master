@@ -1,72 +1,63 @@
 ---
-status: COMPLETE
-brief: briefs/BRIEF_GROK_API_HARDENING_1.md
-brief_id: GROK_API_HARDENING_1
-target_branch: b3/grok-api-hardening-1
+status: PENDING
+brief: briefs/BRIEF_STATE_RECONCILER_1.md
+brief_id: STATE_RECONCILER_1
+target_branch: b3/state-reconciler-1
+target_repo: baker-vault (NOT baker-master — reconciler code lives in ~/baker-vault/_ops/reconciler/, hooks in ~/baker-vault/.githooks/)
 matter_slug: baker-internal
-cross_matter_usage: [ao, mo-vie-am, hagenauer-rg7, cupial, brisen, oskolkov, baden-baden-desk, baker-internal, theailogy]
-dispatched_at: 2026-05-17T20:05:00Z
+cross_matter_usage: [mrci, aukera, lilienmatt, capital-call, annaberg, mo-vie-am, hagenauer-rg7, oskolkov]
+dispatched_at: 2026-05-18T09:55:00Z
 dispatched_by: lead
-director_auth: 2026-05-17 chat — "ratified" (post GROK_API_HARDENING_1 brief review + recommendation)
-trigger_class: MEDIUM (DB schema change via CHECK constraint → 2nd-pass code-reviewer MANDATORY per SKILL.md trigger #2)
-merged_pr: 217
-merged_commit: 468965a
-merged_at: 2026-05-18T08:47:04Z
-amendment_commit: b2c3c23 (3 folds closed per bus #384)
+director_auth: 2026-05-18 chat — "go with your recomendations" (post Amendment §0 + §0.8 Path A presentation; ratifies §0 schema + Path A skip-and-log)
+trigger_class: HIGH (cross-file state propagation + new git-hook surface + 8-matter migration + nightly cron on Mac Mini; mandatory 4-gate review per SKILL.md §"Code-reviewer 2nd-pass Protocol")
+ratified_amendments:
+  - amendment_section: "§0 template-schema"
+    author: AH1
+    commit: 446cacb
+    director_ratified: 2026-05-18
+  - amendment_section: "§0.8 Path A (accept Tier-3 skips as drift signal)"
+    director_ratified: 2026-05-18
 prior_brief_complete: |
-  RENDER_ENV_WRITE_GUARD_1 shipped as PR #216 (merge_commit ee61271,
-  2026-05-17). This dispatch overwrites the mailbox slot with the new brief.
+  GROK_API_HARDENING_1 shipped + merged as PR #217 → 468965a on 2026-05-18.
+  Mailbox slot reclaimed for this dispatch.
+estimated_time: ~8 builder-days
 ---
 
-# Dispatch: GROK_API_HARDENING_1
+# Dispatch: STATE_RECONCILER_1
 
-B3 — full brief at `briefs/BRIEF_GROK_API_HARDENING_1.md`.
+B3 — full brief at `briefs/BRIEF_STATE_RECONCILER_1.md` (commit `446cacb`).
 
-**TL;DR:** Close 5 nits left over from PR #214 (`GROK_API_CAPABILITY_1`) gate chain. Functional capability is healthy in prod (€0.018 of €250 burned); this is quality-of-implementation work.
+**TL;DR:** Phase 1 of the state-architecture rebuild. Build the cortex-config reconciler that auto-regenerates the "recent ratifications" auto-region of 8 matter cortex-configs from `curated/06_decisions_log.md`. Fires on pre-commit + nightly cron. Closes the Aukera-25-day-stale class of drift incidents.
 
-- **M1** — rename `_reset_client_for_tests` → `reset_client_cache` in `tools/grok.py` + keep alias + key-rotation docstring + paragraph in `.claude/docs/baker-mcp-api.md`.
-- **M3** — per-call `timeout_seconds` arg threaded through `dispatch_grok` → client `ask` / `x_search` / `web_search` → `_request` → `httpx`; validate at dispatcher (positive, ≤ 300); add to 3 inputSchemas.
-- **M4** — new migration `migrations/20260518_capability_sets_archive_no_trigger_patterns.sql` that UPDATEs existing archive rows (`grok_realtime` + `claimsmax_archive`) to `trigger_patterns=[]` AND adds CHECK constraint. Matching bootstrap update in `memory/store_back.py:_ensure_capability_sets_table` (~line 2842 per Lesson #50 migration-vs-bootstrap drift).
-- **MED** — citation extraction merge: existing top-level `payload["citations"]` + new inline `output[*].content[*].annotations` extraction in `kbl/grok_client.py:_shape_search_response`; dedup by URL; preserve first-seen order.
-- **LOW** — BTC smoke probabilistic-failure inline comment in `tests/test_grok_client.py` + paragraph in `.claude/docs/baker-mcp-api.md`.
+## Working repo
 
-**Working dir:** `~/bm-b3`
-**Branch:** `b3/grok-api-hardening-1` off `main` (already created — head at `640bc35`).
-**Estimated time:** ~3-4h.
-**Complexity:** Medium (M4 migration ordering is the trickiest; brief specifies UPDATE before CHECK).
+**baker-vault**, NOT baker-master. Code lives in `~/baker-vault/_ops/reconciler/`; hooks in `~/baker-vault/.githooks/`; tests in `~/baker-vault/tests/test_state_reconciler.py`. Use existing clone at `~/bm-b3-baker-vault` if present; otherwise fresh-clone `https://github.com/vallen300-bit/baker-vault` to a worktree.
 
-## Reply target
+## Director-ratified amendments to read FIRST
 
-Per BUS_REPLY_TO_SENDER_RULE_1 (baker-vault `9562cad`): bus-post `lead` on PR open (topic `pr-open/grok-api-hardening-1`) and again on ship (topic `ship/grok-api-hardening-1`). `dispatched_by: lead` in this mailbox file.
+1. **§0 template-schema** (commit `446cacb`) — the authoritative contract for region format, body grammar, frontmatter contract, sort+cap, schema-version rules, hook/cron identity. If §0 and Step 3 code disagree, §0 wins; surface to lead via mailbox UPDATE before opening PR.
 
-## Ship gate
+2. **§0.5 revised decision parser** — two-tier ID format (`D-NNN` and `DN`); three-tier date extraction (heading paren → body fallback → skip-and-log). The original Step 3 single-regex is retained as reference but SHALL NOT be implemented as-is.
 
-- Literal `pytest tests/test_grok_client.py tests/test_capability_sets_constraints.py -v` green (no "by inspection").
-- All 28 existing Grok tests preserved.
-- 11 new tests passing (2 M1 + 4 M3 + 3 MED + 2 M4).
-- Apply migration to a copy-of-prod test DB locally; confirm UPDATE clears the 2 archive rows AND CHECK constraint applies cleanly.
-- Compile-clean check on `kbl/grok_client.py`, `tools/grok.py`, `memory/store_back.py`.
+3. **§0.8 Path A ratified** — accept Tier-3 un-parseable skips as drift signal. Do NOT pre-canonicalize decision-log headings. Survey pass in Step 2 still runs (read-only diagnostic for the Director-facing migration paste-block).
 
-## Gate chain on PR open
+## Ship gate (literal)
 
-1. AH2 static lane (cross-lane review).
-2. AH2 `/security-review`.
-3. `code-architecture-reviewer`.
-4. `feature-dev:code-reviewer` 2nd-pass — **MANDATORY** per SKILL.md §Code-reviewer 2nd-pass Protocol trigger #2 (DB schema change).
+1. `pytest tests/test_state_reconciler.py -v` shows **28 passed** (was 22; six new `TestDecisionParsing` cases added by §0.5).
+2. Dry-run on actual 8 matters returns zero `error_*` statuses (Step §Verification).
+3. Step 2 migration diff paste-block surfaced to lead BEFORE B3 stages the migration commit (Director ratifies migration shape).
+4. Survey output `/tmp/state_reconciler_survey.md` attached to ship report.
+5. Pre-commit hook synthetic verification (Step §Verification "D-999 fold → cortex-config auto-updates") captured in ship report.
 
-All four must clear before merge. Bus-post `lead` on PR open and the verdicts will route back via `lead`.
+## Reporting
 
-## Key constraints (mirrored from brief — read brief for full detail)
+- Bus-post **`lead`** (per `dispatched_by:` field) on PR open with topic `pr-open/state-reconciler-1`.
+- AH1 fires the full 4-gate chain (cross-lane static + `/security-review` + picker-architect + `feature-dev:code-reviewer` 2nd-pass) per HIGH trigger class.
+- LaunchAgent install on Mac Mini is **AH1 Tier-B**, post-merge — not B3's lane.
 
-- Do NOT edit `migrations/20260517_grok_capability_set.sql` (already applied).
-- Do NOT edit `migrations/20260517_claimsmax_capability_set.sql` (ditto; new migration handles its archive row too).
-- Do NOT touch `_ops/skills/ai-head/SKILL.md` or any matter desk `LONGTERM.md` (already updated in baker-vault `704495b` this session).
-- Do NOT touch `tasks/lessons.md` (append-only; nothing to add here).
-- Do NOT alter `capability_type='archive'` on the `grok_realtime` row.
-- Do NOT change the lazy `_CLIENT` cache pattern in `tools/grok.py` — keep the double-checked-lock + `httpx.Client` reuse.
+## Anchors
 
-## Standing rules to confirm before first commit
-
-- Read `~/baker-vault/_ops/agents/b3/orientation.md` (your role orientation).
-- Read this CODE_3_PENDING.md (you're already here).
-- Confirm via first-message phrase: `"B3 oriented. Read: CODE_3_PENDING.md, MEMORY.md."`
+- 2026-05-17 mapping session (Director + AH1 6-Q ratification).
+- 2026-05-18 Director — "go with your recomendations" (ratifies §0 + §0.8 Path A).
+- AID delegation withdrawn 2026-05-18 (bus #389) — template-schema authored inline by AH1.
+- Engineering audit `_ops/reviews/2026-05-17-ah1-engineering-audit-aid-state-architecture-note.md`.
