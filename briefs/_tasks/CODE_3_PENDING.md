@@ -1,5 +1,7 @@
 ---
-status: PENDING
+status: CLAIMED
+claimed_at: 2026-05-18T14:25:00Z
+claimed_by: b3
 brief: briefs/BRIEF_STATE_RECONCILER_2.md
 brief_id: STATE_RECONCILER_2
 target_repo: baker-vault
