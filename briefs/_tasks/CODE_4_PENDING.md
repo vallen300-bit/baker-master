@@ -1,5 +1,12 @@
 ---
-status: PENDING
+status: SHIPPED_AWAITING_GATES
+claimed_at: 2026-05-18T15:05:00Z
+claimed_by: b4
+last_heartbeat: 2026-05-18T15:25:00Z
+shipped_at: 2026-05-18T15:25:00Z
+pr: https://github.com/vallen300-bit/baker-master/pull/219
+branch_pushed: b4/stale-cycle-nudge-sentinel-1
+commit: 497a561
 brief: briefs/BRIEF_STALE_CYCLE_NUDGE_SENTINEL_1.md
 brief_id: STALE_CYCLE_NUDGE_SENTINEL_1
 target_repo: baker-master

@@ -672,12 +672,20 @@ class SentinelStoreBack:
                     feedback_ledger_id BIGINT,
                     cost_tokens        INTEGER DEFAULT 0,
                     cost_dollars       NUMERIC(10,4) DEFAULT 0,
-                    created_at         TIMESTAMPTZ NOT NULL DEFAULT NOW()
+                    created_at         TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                    last_nudge_at      TIMESTAMPTZ
                 )
             """)
             cur.execute("""
                 CREATE INDEX IF NOT EXISTS idx_cortex_cycles_matter_status
                     ON cortex_cycles (matter_slug, status, started_at DESC)
+            """)
+            # STALE_CYCLE_NUDGE_SENTINEL_1: keep bootstrap in lockstep with
+            # migrations/20260518_cortex_cycles_add_last_nudge_at.sql on
+            # already-bootstrapped DBs where CREATE TABLE IF NOT EXISTS no-ops.
+            cur.execute("""
+                ALTER TABLE cortex_cycles
+                    ADD COLUMN IF NOT EXISTS last_nudge_at TIMESTAMPTZ
             """)
             conn.commit()
             cur.close()
