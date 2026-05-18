@@ -59,7 +59,8 @@ trap 'rm -rf "$LOCK_DIR" 2>/dev/null' EXIT
 # pick_active_clone() scoring. lead/deputy stay single-path. Edit here if
 # a terminal's primary clone moves.
 declare -a TERMINALS=(
-  "lead:/Users/dimitry/Desktop/baker-code"
+  "lead:/Users/dimitry/bm-aihead1"
+  "cowork-ah1:/Users/dimitry/bm-aihead1"
   "deputy:/Users/dimitry/bm-aihead2"
   "b1:/Users/dimitry/bm-b1,/Users/dimitry/bm-b1-brisen-lab"
   "b2:/Users/dimitry/bm-b2,/Users/dimitry/bm-b2-brisen-lab"
