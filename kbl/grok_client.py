@@ -170,6 +170,15 @@ class GrokClient:
         responsible for any caller-facing upper bound — ``_request`` trusts
         the passed value (the client is reusable in non-MCP contexts where
         higher timeouts may be legitimate).
+
+        **Per-attempt semantics:** ``timeout`` bounds each individual HTTP
+        attempt, NOT the total wall-clock across retries. With ``_max_retries=3``
+        and a ``Retry-After: 30`` honoured between attempts, a caller passing
+        ``timeout=10`` can still see ~total wall-clock of roughly
+        ``timeout × max_retries + Retry-After × max_retries`` before the
+        ``GrokRateLimitError`` surfaces (~120s in the worst case here, not 10s).
+        Callers that need a hard wall-clock bound must wrap the call in their
+        own deadline.
         """
         attempt = 0
         while True:
@@ -239,6 +248,8 @@ class GrokClient:
         to fetch via ``GET /v1/responses/{id}`` if it needs structured access.
 
         ``timeout`` overrides the per-instance default for this call only.
+        Per-attempt HTTP timeout — does NOT bound 429 retry wall-clock; see
+        ``_request`` docstring for the full retry budget formula.
         """
         body: dict[str, Any] = {
             "model": model,
@@ -273,6 +284,8 @@ class GrokClient:
         ``allowed_x_handles`` and ``excluded_x_handles`` are mutually exclusive
         per xAI docs (max 10 each); date params accept ISO-8601 YYYY-MM-DD.
         ``timeout`` overrides the per-instance default for this call only.
+        Per-attempt HTTP timeout — does NOT bound 429 retry wall-clock; see
+        ``_request`` docstring for the full retry budget formula.
         """
         tool: dict[str, Any] = {"type": "x_search"}
         if from_date:
@@ -310,6 +323,8 @@ class GrokClient:
         sub-object per xAI docs (max 5 each). News results are returned via the
         same web_search tool — no separate news source under the tools API.
         ``timeout`` overrides the per-instance default for this call only.
+        Per-attempt HTTP timeout — does NOT bound 429 retry wall-clock; see
+        ``_request`` docstring for the full retry budget formula.
         """
         tool: dict[str, Any] = {"type": "web_search"}
         filters: dict[str, Any] = {}
@@ -393,7 +408,11 @@ def _shape_search_response(payload: dict, *, model: str, kind: str) -> dict:
     """
     top_level_citations = payload.get("citations") or []
     inline_citations = _extract_inline_annotations(payload.get("output") or [])
-    citations = _merge_citations_by_url(top_level_citations, inline_citations)
+    # Inline first: when both sources carry the same URL, the rich inline dict
+    # ({url, title, ...} from xAI's Agent Tools API) must win over the bare
+    # top-level string. Reversing the order would silently drop title/snippet
+    # downstream (observed in prod smoke #5).
+    citations = _merge_citations_by_url(inline_citations, top_level_citations)
     summary = _flatten_output_text(payload.get("output") or [])
     usage = payload.get("usage") or {}
     tokens_in = int(usage.get("input_tokens") or 0)
@@ -475,13 +494,18 @@ def _extract_inline_annotations(output: list[Any]) -> list[dict]:
 
 
 def _merge_citations_by_url(*sources: list[Any]) -> list[Any]:
-    """Merge multiple citation lists, deduplicating by URL.
+    """Merge multiple citation lists, deduplicating by URL — first-source-wins.
 
     Preserves first-seen order across all ``sources``. Entries are matched on
     their ``url`` field (or the entry itself when it is a bare string). Items
     without a discoverable URL are kept — dropping them silently would lose
     data when xAI emits a partial citation. String entries match dict entries
     when their value equals the dict's ``url``.
+
+    **First-source-wins:** on a URL tie, the entry from the earlier-listed
+    source is kept and the later one is dropped. Callers that want the rich
+    dict form to outrank a bare-string duplicate must therefore pass the
+    inline (rich) source first. ``_shape_search_response`` does exactly that.
     """
     seen: set[str] = set()
     out: list[Any] = []

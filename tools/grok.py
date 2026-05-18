@@ -133,7 +133,13 @@ GROK_TOOLS: list[Tool] = [
                 },
                 "timeout_seconds": {
                     "type": "number",
-                    "description": "Per-call HTTP timeout in seconds (default 60, max 300).",
+                    "description": (
+                        "Per-attempt HTTP timeout in seconds (default 60, max 300). "
+                        "Bounds each individual attempt — does NOT bound 429 retry "
+                        "wall-clock: total wall-clock ≈ timeout × max_retries + "
+                        "Retry-After × max_retries (up to ~120s with defaults). "
+                        "Wrap in your own deadline if you need a hard upper bound."
+                    ),
                     "minimum": 1,
                     "maximum": 300,
                 },
@@ -173,7 +179,13 @@ GROK_TOOLS: list[Tool] = [
                 },
                 "timeout_seconds": {
                     "type": "number",
-                    "description": "Per-call HTTP timeout in seconds (default 60, max 300).",
+                    "description": (
+                        "Per-attempt HTTP timeout in seconds (default 60, max 300). "
+                        "Bounds each individual attempt — does NOT bound 429 retry "
+                        "wall-clock: total wall-clock ≈ timeout × max_retries + "
+                        "Retry-After × max_retries (up to ~120s with defaults). "
+                        "Wrap in your own deadline if you need a hard upper bound."
+                    ),
                     "minimum": 1,
                     "maximum": 300,
                 },
@@ -216,7 +228,13 @@ GROK_TOOLS: list[Tool] = [
                 },
                 "timeout_seconds": {
                     "type": "number",
-                    "description": "Per-call HTTP timeout in seconds (default 60, max 300).",
+                    "description": (
+                        "Per-attempt HTTP timeout in seconds (default 60, max 300). "
+                        "Bounds each individual attempt — does NOT bound 429 retry "
+                        "wall-clock: total wall-clock ≈ timeout × max_retries + "
+                        "Retry-After × max_retries (up to ~120s with defaults). "
+                        "Wrap in your own deadline if you need a hard upper bound."
+                    ),
                     "minimum": 1,
                     "maximum": 300,
                 },

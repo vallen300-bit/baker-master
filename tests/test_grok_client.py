@@ -566,6 +566,31 @@ def test_grok_client_default_timeout_when_omitted() -> None:
     assert "timeout" not in http.request.call_args.kwargs
 
 
+def test_timeout_is_per_attempt_not_total_wall_clock() -> None:
+    """FOLD #3 (Option A): the public ``timeout`` arg bounds each individual
+    HTTP attempt, NOT the total wall-clock across 429 retries. Locks the
+    documented semantics so a future "budget timeout against elapsed" refactor
+    surfaces as a test break, not a silent contract change."""
+    sleeps: list[float] = []
+    ok_body = _ask_response_body()
+    rate_limited_30s = _make_response(
+        429, {"error": "rate_limited"}, headers={"Retry-After": "30"}
+    )
+    http = _make_http_client_mock(
+        [rate_limited_30s, rate_limited_30s, _make_response(200, ok_body)]
+    )
+    client = GrokClient(_sleep=lambda s: sleeps.append(s), _http_client=http)
+    out = client.ask("x", timeout=10.0)
+    assert out["text"] == "hello"
+    # Each attempt receives the full per-attempt timeout — not a remaining
+    # budget computed against elapsed wall-clock.
+    timeouts = [c.kwargs.get("timeout") for c in http.request.call_args_list]
+    assert timeouts == [10.0, 10.0, 10.0]
+    # Retry-After honoured at face value (not capped against the per-call
+    # timeout). Cumulative implied wall-clock: 30 + 30 = 60s sleep + 3 attempts.
+    assert sleeps == [30.0, 30.0]
+
+
 def test_dispatch_grok_passes_timeout_seconds_to_client(monkeypatch: pytest.MonkeyPatch) -> None:
     """dispatch_grok forwards a validated timeout_seconds to the client method."""
     import tools.grok as grok_mod
@@ -671,7 +696,8 @@ def test_web_search_extracts_inline_annotations() -> None:
 
 
 def test_web_search_merges_top_level_and_inline_dedup() -> None:
-    """Top-level + inline merge, dedup by URL, preserve first-seen order."""
+    """Top-level + inline merge, dedup by URL, preserve first-seen order with
+    inline (rich) source winning over the bare top-level string on URL tie."""
     body = _inline_annotation_body(
         annotations=[
             {"type": "url_citation", "url": "https://example.com/a", "title": "A inline"},
@@ -682,11 +708,40 @@ def test_web_search_merges_top_level_and_inline_dedup() -> None:
     http = _make_http_client_mock(_make_response(200, body))
     client = GrokClient(_http_client=http)
     out = client.web_search("q")
-    # First-seen order: top-level "a" first, then inline "b". Inline duplicate of
-    # "a" is dropped.
+    # Inline source listed first → rich dict for "a" wins; bare-string top-level
+    # duplicate is dropped. First-seen order across the merged sequence is
+    # therefore "a" (from inline, with title) then "b" (from inline).
     assert len(out["citations"]) == 2
     assert out["citations"][0]["url"] == "https://example.com/a"
+    assert out["citations"][0]["title"] == "A inline", (
+        "rich inline dict must survive bare-string top-level duplicate"
+    )
     assert out["citations"][1]["url"] == "https://example.com/b"
+
+
+def test_web_search_rich_inline_beats_bare_top_level_string_on_url_tie() -> None:
+    """FOLD #1: same URL appears in top-level (bare string) and inline (rich
+    dict). Downstream callers see the rich dict's title + snippet, not the
+    bare-string shape that loses both. Prod-smoke-#5 regression guard."""
+    body = _inline_annotation_body(
+        annotations=[
+            {
+                "type": "url_citation",
+                "url": "https://example.com/shared",
+                "title": "Shared Title (rich)",
+                "snippet": "Shared snippet (rich)",
+            },
+        ],
+        top_level_citations=["https://example.com/shared"],
+    )
+    http = _make_http_client_mock(_make_response(200, body))
+    client = GrokClient(_http_client=http)
+    out = client.web_search("q")
+    assert len(out["citations"]) == 1
+    cite = out["citations"][0]
+    assert cite["url"] == "https://example.com/shared"
+    assert cite["title"] == "Shared Title (rich)"
+    assert cite["snippet"] == "Shared snippet (rich)"
 
 
 def test_x_search_extracts_inline_annotations() -> None:

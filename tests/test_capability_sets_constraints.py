@@ -72,9 +72,58 @@ def test_migration_orders_update_before_constraint() -> None:
     )
 
 
+def _extract_check_predicate(sql_text: str, constraint_name: str) -> str:
+    """Return the CHECK predicate body for ``constraint_name`` from ``sql_text``.
+
+    Handles balanced parentheses so nested calls (e.g. ``jsonb_array_length(
+    trigger_patterns)``) parse correctly. Returns ``""`` if not found.
+    """
+    pattern = re.compile(
+        rf"ADD\s+CONSTRAINT\s+{re.escape(constraint_name)}\s+CHECK\s*\(",
+        re.IGNORECASE,
+    )
+    m = pattern.search(sql_text)
+    if not m:
+        return ""
+    start = m.end()
+    depth = 1
+    i = start
+    while i < len(sql_text) and depth > 0:
+        ch = sql_text[i]
+        if ch == "(":
+            depth += 1
+        elif ch == ")":
+            depth -= 1
+        i += 1
+    if depth != 0:
+        return ""
+    return sql_text[start : i - 1]
+
+
+def _check_predicate_clauses(predicate: str) -> list[str]:
+    """Split a normalized CHECK predicate into OR-joined clauses."""
+    normalized = re.sub(r"\s+", " ", predicate).strip()
+    return [c.strip() for c in re.split(r"\s+OR\s+", normalized, flags=re.IGNORECASE)]
+
+
 def test_store_back_bootstrap_in_sync_with_migration() -> None:
-    """``_ensure_capability_sets_table`` must declare the same constraint or
-    fresh databases land with a different shape than migrated ones (Lesson #50)."""
+    """``_ensure_capability_sets_table`` must declare the same CHECK predicate
+    clauses as the migration. Stronger than a constraint-name string match:
+    extracts the predicate body from both files and asserts each load-bearing
+    OR-clause is present verbatim in the bootstrap block — defends against the
+    Lesson #50 failure mode of one file's predicate drifting while the other
+    keeps the same constraint name."""
+    migration_sql = MIGRATION_PATH.read_text(encoding="utf-8")
+    migration_predicate = _extract_check_predicate(migration_sql, CONSTRAINT_NAME)
+    assert migration_predicate, (
+        "could not extract the CHECK predicate from the migration SQL — file "
+        "shape may have changed"
+    )
+    migration_clauses = _check_predicate_clauses(migration_predicate)
+    assert len(migration_clauses) >= 2, (
+        f"expected ≥2 OR-clauses in the CHECK predicate, got: {migration_clauses!r}"
+    )
+
     text = STORE_BACK_PATH.read_text(encoding="utf-8")
     m = re.search(
         r"def _ensure_capability_sets_table.*?(?=\n    def )",
@@ -90,6 +139,18 @@ def test_store_back_bootstrap_in_sync_with_migration() -> None:
         "bootstrap missing the trigger_patterns UPDATE — fresh DBs would fail the "
         "ADD CONSTRAINT if a seed left patterns on an archive row"
     )
+    bootstrap_predicate = _extract_check_predicate(block, CONSTRAINT_NAME)
+    assert bootstrap_predicate, (
+        f"bootstrap block declares {CONSTRAINT_NAME!r} but the CHECK predicate "
+        "could not be extracted — DDL shape may have changed"
+    )
+    bootstrap_normalized = re.sub(r"\s+", " ", bootstrap_predicate).strip()
+    for clause in migration_clauses:
+        assert clause in bootstrap_normalized, (
+            f"bootstrap predicate missing migration clause {clause!r} — drift "
+            f"vs {MIGRATION_PATH.name}. Bootstrap normalized: "
+            f"{bootstrap_normalized!r}"
+        )
 
 
 # ------------------------------ live-PG round-trip ------------------------------
