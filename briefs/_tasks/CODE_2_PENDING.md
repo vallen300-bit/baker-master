@@ -1,5 +1,6 @@
 ---
-status: PENDING
+status: COMPLETE
+pr: https://github.com/vallen300-bit/baker-master/pull/214
 brief: briefs/BRIEF_GROK_API_CAPABILITY_1.md
 brief_id: GROK_API_CAPABILITY_1
 trigger_class: MEDIUM (new external API surface + new MCP tools + new migration; mandatory 2nd-pass review)
@@ -8,12 +9,19 @@ matter_slug: baker-internal
 cross_matter_usage: [all-matter-desks]
 dispatched_at: 2026-05-17T11:45:43Z
 dispatched_by: AH1
+merge_commit: 99db952c
+merged_at: 2026-05-17T15:45:41Z
+ship_report: briefs/_reports/B2_GROK_API_CAPABILITY_1_20260517.md
+closeout_ts: 2026-05-18T07:55:00Z
+closeout_by: lead
+closeout_anchor: b2 bus #379 (status/idle) flagged stale PENDING status post-merge; AH1 closed mailbox per b-code-dispatch-coordination.md
 director_auth: 2026-05-17 chat — "Draft the brief now. Send it to B2. By bus. Don't worry about confidentiality. Let's try to use it. See what happens."
 pattern_source: BRIEF_CLAIMSMAX_API_CAPABILITY_1 (commit 3cbc287)
 prior_brief_state: |
   Mailbox previously held WORKER_SELFWAKE_PHASE_1 in PARKED state (Director directive 2026-05-15).
   Preserved at briefs/_tasks/CODE_2_PARKED_WORKER_SELFWAKE_20260515.md for future resume.
   Director authorized override 2026-05-17 ("Send it to B2") — Grok dispatch supersedes mailbox slot.
+hardening_followup: GROK_API_HARDENING_1 dispatched to b3 (branch b3/grok-api-hardening-1, mailbox commit 37b9e9f) 2026-05-17T20:05Z. 5 nits (M1/M3/M4/MED/LOW). Not b2's lane.
 ---
 
 # Dispatch: GROK_API_CAPABILITY_1
