@@ -59,6 +59,141 @@ def _get_store():
     return SentinelStoreBack._get_global_instance()
 
 
+# --------------------------------------------------------------------------
+# Brisen-Lab bus heartbeat — observability emit at every phase boundary.
+# Phase progression MUST continue regardless of lab availability (lab is
+# observability, not control plane). Helpers below have their own try/except
+# AND every call site wraps with belt-and-suspenders try/except.
+# --------------------------------------------------------------------------
+
+_BRISEN_LAB_HEARTBEAT_PHASES = {"sense", "load", "reason", "propose", "archive", "failed"}
+
+
+async def _post_to_brisen_lab_bus(
+    *,
+    topic: str,
+    body: str,
+    kind: str,
+    cycle: "CortexCycle",
+) -> None:
+    """Internal: POST a single envelope to brisen-lab /msg/. Never raises.
+
+    Skipped when BRISEN_LAB_TERMINAL_KEY_CORTEX env var is missing (logs warn
+    + returns). 5s timeout via httpx.AsyncClient. Any exception path
+    (timeout, network, 4xx, 5xx, missing key) collapses to a warning log.
+    """
+    key = os.getenv("BRISEN_LAB_TERMINAL_KEY_CORTEX")
+    if not key:
+        logger.warning(
+            "Cortex heartbeat skipped — BRISEN_LAB_TERMINAL_KEY_CORTEX unset",
+            extra={
+                "cycle_id": str(getattr(cycle, "cycle_id", None)),
+                "phase": topic.split("/")[-1],
+                "error_class": "MissingKey",
+            },
+        )
+        return
+    url = os.getenv("BRISEN_LAB_URL", "https://brisen-lab.onrender.com").rstrip("/") + "/msg/"
+    payload = {
+        "from_terminal": "cortex",
+        "to_terminals": ["lead"],
+        "topic": topic,
+        "kind": kind,
+        "body": body,
+    }
+    try:
+        import httpx
+        async with httpx.AsyncClient(timeout=5.0) as client:
+            await client.post(
+                url,
+                headers={"X-Terminal-Key": key, "Content-Type": "application/json"},
+                json=payload,
+            )
+    except Exception as e:
+        logger.warning(
+            "Cortex heartbeat post failed",
+            extra={
+                "cycle_id": str(getattr(cycle, "cycle_id", None)),
+                "phase": topic.split("/")[-1],
+                "error_class": type(e).__name__,
+            },
+        )
+
+
+async def _emit_cortex_heartbeat(
+    cycle: "CortexCycle",
+    phase: str,
+    status: str,
+) -> None:
+    """Post a phase-boundary heartbeat to brisen-lab bus.
+
+    Best-effort: NEVER raises. Bus-post failure logs at warning and returns.
+    The lab is observability, not control plane — phase progression cannot
+    block on bus availability.
+
+    Topic invariant (brisen-lab static/app.js parses tail via
+    topic.split("/").pop()): cortex/<matter_slug>/cycle-phase/<phase> with
+    phase in {sense, load, reason, propose, archive, failed}.
+    """
+    topic = f"cortex/{cycle.matter_slug}/cycle-phase/{phase}"
+    body = (
+        f"cycle_id={cycle.cycle_id} matter={cycle.matter_slug} "
+        f"phase={phase} status={status}"
+    )
+    await _post_to_brisen_lab_bus(topic=topic, body=body, kind="heartbeat", cycle=cycle)
+
+
+async def _emit_cortex_ratify_required(cycle: "CortexCycle") -> None:
+    """Post the ratify-required signal when entering tier_b_pending.
+
+    Lab needs this distinct from the phase=propose heartbeat for the
+    open_director_qs counter + >120s stuck badge. Best-effort: NEVER raises.
+    """
+    short_summary = getattr(cycle.phase3c_result, "proposal_text", None)
+    if not short_summary:
+        short_summary = str(cycle.phase3c_result) if cycle.phase3c_result is not None else ""
+    short_summary = short_summary[:200]
+    topic = f"cortex/{cycle.matter_slug}/ratify-required"
+    body = (
+        f"cycle_id={cycle.cycle_id} matter={cycle.matter_slug} "
+        f"proposal_summary={short_summary}"
+    )
+    await _post_to_brisen_lab_bus(topic=topic, body=body, kind="ratify-required", cycle=cycle)
+
+
+async def _safe_emit_heartbeat(cycle: "CortexCycle", phase: str, status: str) -> None:
+    """Call-site wrapper — belt-and-suspenders: even if _emit_cortex_heartbeat
+    grows a regression that leaks past its own try/except, the cycle MUST
+    continue. Logs + swallows.
+    """
+    try:
+        await _emit_cortex_heartbeat(cycle, phase, status)
+    except Exception as e:
+        logger.warning(
+            "Cortex heartbeat call-site swallowed unexpected error",
+            extra={
+                "cycle_id": str(getattr(cycle, "cycle_id", None)),
+                "phase": phase,
+                "error_class": type(e).__name__,
+            },
+        )
+
+
+async def _safe_emit_ratify_required(cycle: "CortexCycle") -> None:
+    """Call-site wrapper for ratify-required signal. Same belt-and-suspenders contract."""
+    try:
+        await _emit_cortex_ratify_required(cycle)
+    except Exception as e:
+        logger.warning(
+            "Cortex ratify-required call-site swallowed unexpected error",
+            extra={
+                "cycle_id": str(getattr(cycle, "cycle_id", None)),
+                "phase": "propose",
+                "error_class": type(e).__name__,
+            },
+        )
+
+
 async def maybe_run_cycle(
     *,
     matter_slug: str,
@@ -152,6 +287,7 @@ async def _run_cycle_inner(
     try:
         # Phase 1 — sense (create cycle row + sense artifact)
         await _phase1_sense(cycle)
+        await _safe_emit_heartbeat(cycle, "sense", "ok")
 
         # Phase 2 — load matter context
         cycle.current_phase = "load"
@@ -161,10 +297,12 @@ async def _run_cycle_inner(
         # need a signal_queue lookup that's 1C scope (per Obs #1 from PR
         # #71 review). 1B leaves signal_text empty for those.
         cycle.phase2_load_context["signal_text"] = director_question or ""
+        await _safe_emit_heartbeat(cycle, "load", "ok")
 
         # Phase 3 — reasoning (3a meta + 3b specialist + 3c synthesize)
         cycle.current_phase = "reason"
         await _phase3_reason(cycle)
+        await _safe_emit_heartbeat(cycle, "reason", cycle.status)
 
         # Phase 4 — propose (1C). Posts Slack card + flips status to
         # 'tier_b_pending' inside _phase4_propose. Director button press
@@ -175,6 +313,8 @@ async def _run_cycle_inner(
             cycle.current_phase = "propose"
             try:
                 if await _phase4_propose(cycle):
+                    await _safe_emit_heartbeat(cycle, "propose", "tier_b_pending")
+                    await _safe_emit_ratify_required(cycle)
                     proposal_card_posted = True
             except Exception as e:
                 logger.error(
@@ -201,6 +341,7 @@ async def _run_cycle_inner(
                 "matter_slug": getattr(cycle, "matter_slug", None),
             },
         )
+        await _safe_emit_heartbeat(cycle, cycle.current_phase, "failed")
     finally:
         # Phase 6 archive: skipped when Phase 4 successfully posted the
         # proposal card. The cycle is now 'tier_b_pending' awaiting
@@ -243,6 +384,13 @@ async def _run_cycle_inner(
                             _store._put_conn(_conn)
                 except Exception:
                     pass  # Detector A safety net
+
+        # Archive-boundary heartbeat fires for EVERY cycle terminal —
+        # whether Phase 6 actually ran (status=proposed/archive_failed/failed)
+        # or was skipped because Phase 4 posted the proposal card
+        # (status=tier_b_pending). Symmetric "cycle finalized" signal so the
+        # lab can flip the Cortex card on any terminal state.
+        await _safe_emit_heartbeat(cycle, "archive", cycle.status)
 
     if cycle_failed:
         # Re-raise the original failure so callers see it, even though the
