@@ -13,6 +13,10 @@ pr: https://github.com/vallen300-bit/baker-vault/pull/96
 merge_commit: e289ff482c74de043d339c07119b403f0f9689b5
 merged_at: 2026-05-18T13:19:53Z
 merged_by: ai-head-1 (AH1, lead)
+followup_pr: https://github.com/vallen300-bit/baker-vault/pull/97
+followup_merge_commit: 6ef117e
+followup_merged_at: 2026-05-18T13:52:19Z
+followup_scope: M4 .gitignore reconciler-*.json + L4 pre-push grep→python3 JSON parse (post-merge cleanup from #421 addendum slip; bus #433 dispatch / #437 merge)
 rounds:
   - round: 1
     head: d8d99bb
@@ -34,6 +38,6 @@ post_merge_tier_b:
   - Mac Mini LaunchAgent install (cp plist to ~/Library/LaunchAgents/, mkdir ~/Library/Application Support/baker + ~/Library/Logs/baker, cp bus_post.sh, launchctl load -w + kickstart smoke)
 ---
 
-# Mailbox COMPLETE — STATE_RECONCILER_1
+# Mailbox COMPLETE — STATE_RECONCILER_1 (+ followup)
 
-PR #96 merged `e289ff4`. b3 idle. Phase 1 reconciler shipped; first nightly fire scheduled 02:30 UTC tomorrow once Mac Mini LaunchAgent installed (AH1 Tier-B post-merge action).
+PR #96 merged `e289ff4`. Followup PR #97 merged `6ef117e` (M4 + L4 post-merge cleanup from bus #421 addendum slip; deputy PASS no findings). b3 idle. Phase 1 reconciler shipped; first nightly fire scheduled 02:30 UTC tomorrow once Mac Mini LaunchAgent installed (AH1 Tier-B post-merge action). M5 (post-write error path) stays queued for STATE_RECONCILER_2.
