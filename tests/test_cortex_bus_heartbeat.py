@@ -84,13 +84,13 @@ def test_emit_cortex_heartbeat_posts_correct_topic(cycle, key_env, recorder_http
     asyncio.run(runner._emit_cortex_heartbeat(cycle, "sense", "ok"))
 
     captured = recorder_httpx.captured
-    assert captured["url"] == "https://brisen-lab.test/msg/lead"
+    assert captured["url"] == "https://brisen-lab.test/msg/daemon"
     assert captured["headers"]["X-Terminal-Key"] == "test-cortex-key"
     assert captured["headers"]["Content-Type"] == "application/json"
 
     body = captured["json"]
     assert body["kind"] == "dispatch"
-    assert body["to"] == ["lead"]
+    assert body["to"] == ["daemon"]
     assert body["tier_required"] == "B"
     assert body["topic"] == "cortex/oskolkov/cycle-phase/sense"
     assert "cycle_id=cycle-test-1234" in body["body"]
@@ -100,6 +100,22 @@ def test_emit_cortex_heartbeat_posts_correct_topic(cycle, key_env, recorder_http
     # Sender derived from X-Terminal-Key auth header; no from_terminal on wire.
     assert "from_terminal" not in body
     assert "to_terminals" not in body
+
+
+def test_emit_cortex_ratify_required_routes_to_director(cycle, key_env, recorder_httpx):
+    """Ratify-required envelopes go to `director` (actionable), NOT `daemon`
+    (observability sink that heartbeats use). Otherwise Director would not
+    see the ping when a cycle finishes and needs ratification.
+    """
+    cycle.phase3c_result = SimpleNamespace(proposal_text="approve item X under condition Y")
+    asyncio.run(runner._emit_cortex_ratify_required(cycle))
+
+    captured = recorder_httpx.captured
+    assert captured["url"] == "https://brisen-lab.test/msg/director"
+    body = captured["json"]
+    assert body["to"] == ["director"]
+    assert body["topic"] == "cortex/oskolkov/ratify-required"
+    assert "proposal_summary=approve item X" in body["body"]
 
 
 # --------------------------------------------------------------------------
