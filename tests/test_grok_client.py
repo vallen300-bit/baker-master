@@ -20,7 +20,9 @@ from kbl.grok_client import (
     GrokTransportError,
     GrokValidationError,
     _cost_usd_from_usage,
+    _extract_inline_annotations,
     _flatten_output_text,
+    _merge_citations_by_url,
     _parse_retry_after,
     _shape_tweet_citation,
     _shape_web_citation,
@@ -511,6 +513,293 @@ def test_dispatch_grok_cost_monitor_import_failure_fails_open(monkeypatch: pytes
     assert http.request.call_count == 1
 
 
+# --------------------------- M1: client cache rotation hook ---------------------------
+
+
+def test_reset_client_cache_picks_up_rotated_key(monkeypatch: pytest.MonkeyPatch) -> None:
+    """After XAI_API_KEY rotates, reset_client_cache() forces the next dispatch to
+    rebuild the cached client and read the fresh env var."""
+    import tools.grok as grok_mod
+
+    grok_mod.reset_client_cache()
+    monkeypatch.setenv("XAI_API_KEY", "key-1-old")
+    first = grok_mod._get_client()
+    assert first._api_key == "key-1-old"
+    # Rotate the env var; without reset the cache is still serving key-1.
+    monkeypatch.setenv("XAI_API_KEY", "key-2-new")
+    still_cached = grok_mod._get_client()
+    assert still_cached is first
+    assert still_cached._api_key == "key-1-old"
+    # Reset and re-fetch — new client, new key.
+    grok_mod.reset_client_cache()
+    refreshed = grok_mod._get_client()
+    assert refreshed is not first
+    assert refreshed._api_key == "key-2-new"
+    # Cleanup so later tests start with a clean cache.
+    grok_mod.reset_client_cache()
+
+
+def test_reset_client_cache_alias_is_identity_preserving() -> None:
+    """The legacy underscore name must point at the public reset hook so existing
+    imports survive the rename."""
+    import tools.grok as grok_mod
+
+    assert grok_mod._reset_client_for_tests is grok_mod.reset_client_cache
+
+
+# --------------------------- M3: per-call timeout threading ---------------------------
+
+
+def test_grok_client_request_passes_timeout_to_httpx() -> None:
+    """A non-None timeout on ask() must reach httpx.Client.request as a kwarg."""
+    http = _make_http_client_mock(_make_response(200, _ask_response_body()))
+    client = GrokClient(_http_client=http)
+    client.ask("hi", timeout=10.0)
+    assert http.request.call_args.kwargs.get("timeout") == 10.0
+
+
+def test_grok_client_default_timeout_when_omitted() -> None:
+    """Omitting timeout must NOT send a timeout kwarg, so httpx uses the client default."""
+    http = _make_http_client_mock(_make_response(200, _ask_response_body()))
+    client = GrokClient(_http_client=http)
+    client.ask("hi")
+    assert "timeout" not in http.request.call_args.kwargs
+
+
+def test_timeout_is_per_attempt_not_total_wall_clock() -> None:
+    """FOLD #3 (Option A): the public ``timeout`` arg bounds each individual
+    HTTP attempt, NOT the total wall-clock across 429 retries. Locks the
+    documented semantics so a future "budget timeout against elapsed" refactor
+    surfaces as a test break, not a silent contract change."""
+    sleeps: list[float] = []
+    ok_body = _ask_response_body()
+    rate_limited_30s = _make_response(
+        429, {"error": "rate_limited"}, headers={"Retry-After": "30"}
+    )
+    http = _make_http_client_mock(
+        [rate_limited_30s, rate_limited_30s, _make_response(200, ok_body)]
+    )
+    client = GrokClient(_sleep=lambda s: sleeps.append(s), _http_client=http)
+    out = client.ask("x", timeout=10.0)
+    assert out["text"] == "hello"
+    # Each attempt receives the full per-attempt timeout — not a remaining
+    # budget computed against elapsed wall-clock.
+    timeouts = [c.kwargs.get("timeout") for c in http.request.call_args_list]
+    assert timeouts == [10.0, 10.0, 10.0]
+    # Retry-After honoured at face value (not capped against the per-call
+    # timeout). Cumulative implied wall-clock: 30 + 30 = 60s sleep + 3 attempts.
+    assert sleeps == [30.0, 30.0]
+
+
+def test_dispatch_grok_passes_timeout_seconds_to_client(monkeypatch: pytest.MonkeyPatch) -> None:
+    """dispatch_grok forwards a validated timeout_seconds to the client method."""
+    import tools.grok as grok_mod
+
+    captured: dict[str, Any] = {}
+
+    class _FakeClient:
+        def ask(self, **kwargs: Any) -> dict:
+            captured.update(kwargs)
+            return {"text": "ok", "model": "grok-4.3", "tokens_in": 1, "tokens_out": 1}
+
+    monkeypatch.setattr(grok_mod, "_get_client", lambda: _FakeClient())
+    monkeypatch.setattr(
+        "orchestrator.cost_monitor.check_circuit_breaker",
+        lambda: (True, 0.0),
+    )
+    monkeypatch.setattr(
+        "orchestrator.cost_monitor.log_api_cost",
+        lambda **kwargs: None,
+    )
+
+    result = grok_mod.dispatch_grok(
+        "baker_grok_ask", {"prompt": "x", "timeout_seconds": 30}
+    )
+
+    assert "Error" not in result
+    assert captured.get("timeout") == 30.0
+
+
+def test_dispatch_grok_rejects_invalid_timeout(monkeypatch: pytest.MonkeyPatch) -> None:
+    """timeout_seconds out of (0, 300] or non-numeric → Error, no client call."""
+    import tools.grok as grok_mod
+
+    invocations: list[str] = []
+
+    class _NeverCalledClient:
+        def ask(self, **kwargs: Any) -> dict:  # pragma: no cover - must not run
+            invocations.append("ask")
+            return {}
+
+    monkeypatch.setattr(grok_mod, "_get_client", lambda: _NeverCalledClient())
+    monkeypatch.setattr(
+        "orchestrator.cost_monitor.check_circuit_breaker",
+        lambda: (True, 0.0),
+    )
+
+    for bad in (-1, 0, 301, "abc", True):
+        result = grok_mod.dispatch_grok(
+            "baker_grok_ask", {"prompt": "x", "timeout_seconds": bad}
+        )
+        assert result.startswith("Error: timeout_seconds"), (
+            f"expected rejection for {bad!r}, got {result!r}"
+        )
+    assert invocations == []
+
+
+# --------------------------- MED: inline annotation citations ---------------------------
+
+
+def _inline_annotation_body(*, annotations: list[dict], top_level_citations: list[Any] | None = None) -> dict:
+    """Build a /responses payload with annotations on the message block."""
+    return {
+        "id": "resp-inline",
+        "object": "response",
+        "status": "completed",
+        "model": "grok-4.3",
+        "output": [
+            {
+                "type": "message",
+                "role": "assistant",
+                "content": [
+                    {
+                        "type": "output_text",
+                        "text": "summary referencing [1][2]",
+                        "annotations": annotations,
+                    }
+                ],
+            }
+        ],
+        "citations": top_level_citations or [],
+        "usage": {"input_tokens": 8, "output_tokens": 16, "total_tokens": 24},
+    }
+
+
+def test_web_search_extracts_inline_annotations() -> None:
+    """When citations[] is empty but annotations carry url_citation entries, the
+    shaped result must surface them under citations[]."""
+    body = _inline_annotation_body(
+        annotations=[
+            {
+                "type": "url_citation",
+                "url": "https://example.com/a",
+                "title": "Article A",
+            }
+        ],
+    )
+    http = _make_http_client_mock(_make_response(200, body))
+    client = GrokClient(_http_client=http)
+    out = client.web_search("q")
+    assert len(out["citations"]) == 1
+    assert out["citations"][0]["url"] == "https://example.com/a"
+    assert out["citations"][0]["title"] == "Article A"
+
+
+def test_web_search_merges_top_level_and_inline_dedup() -> None:
+    """Top-level + inline merge, dedup by URL, preserve first-seen order with
+    inline (rich) source winning over the bare top-level string on URL tie."""
+    body = _inline_annotation_body(
+        annotations=[
+            {"type": "url_citation", "url": "https://example.com/a", "title": "A inline"},
+            {"type": "url_citation", "url": "https://example.com/b", "title": "B inline"},
+        ],
+        top_level_citations=["https://example.com/a"],
+    )
+    http = _make_http_client_mock(_make_response(200, body))
+    client = GrokClient(_http_client=http)
+    out = client.web_search("q")
+    # Inline source listed first → rich dict for "a" wins; bare-string top-level
+    # duplicate is dropped. First-seen order across the merged sequence is
+    # therefore "a" (from inline, with title) then "b" (from inline).
+    assert len(out["citations"]) == 2
+    assert out["citations"][0]["url"] == "https://example.com/a"
+    assert out["citations"][0]["title"] == "A inline", (
+        "rich inline dict must survive bare-string top-level duplicate"
+    )
+    assert out["citations"][1]["url"] == "https://example.com/b"
+
+
+def test_web_search_rich_inline_beats_bare_top_level_string_on_url_tie() -> None:
+    """FOLD #1: same URL appears in top-level (bare string) and inline (rich
+    dict). Downstream callers see the rich dict's title + snippet, not the
+    bare-string shape that loses both. Prod-smoke-#5 regression guard."""
+    body = _inline_annotation_body(
+        annotations=[
+            {
+                "type": "url_citation",
+                "url": "https://example.com/shared",
+                "title": "Shared Title (rich)",
+                "snippet": "Shared snippet (rich)",
+            },
+        ],
+        top_level_citations=["https://example.com/shared"],
+    )
+    http = _make_http_client_mock(_make_response(200, body))
+    client = GrokClient(_http_client=http)
+    out = client.web_search("q")
+    assert len(out["citations"]) == 1
+    cite = out["citations"][0]
+    assert cite["url"] == "https://example.com/shared"
+    assert cite["title"] == "Shared Title (rich)"
+    assert cite["snippet"] == "Shared snippet (rich)"
+
+
+def test_x_search_extracts_inline_annotations() -> None:
+    """Same merge pattern applies to the tweets[] projection for kind='x'."""
+    body = _inline_annotation_body(
+        annotations=[
+            {
+                "type": "url_citation",
+                "url": "https://x.com/elonmusk/status/9",
+                "author": "elonmusk",
+                "text": "inline-cited tweet",
+            }
+        ],
+    )
+    http = _make_http_client_mock(_make_response(200, body))
+    client = GrokClient(_http_client=http)
+    out = client.x_search("q")
+    assert len(out["tweets"]) == 1
+    assert out["tweets"][0]["url"] == "https://x.com/elonmusk/status/9"
+    assert out["tweets"][0]["author"] == "elonmusk"
+
+
+def test_extract_inline_annotations_helper_filters_non_url_types() -> None:
+    """Only url_citation / citation entries are picked up; non-list content is ignored."""
+    output = [
+        {
+            "content": [
+                {
+                    "type": "output_text",
+                    "annotations": [
+                        {"type": "url_citation", "url": "https://example.com/a"},
+                        {"type": "file_citation", "file_id": "f1"},  # ignored
+                        "stray",  # ignored
+                    ],
+                },
+                {"type": "output_text", "text": "no annotations here"},
+            ]
+        },
+        # bare-string item — must be tolerated
+        "junk",
+    ]
+    out = _extract_inline_annotations(output)
+    assert len(out) == 1
+    assert out[0]["url"] == "https://example.com/a"
+
+
+def test_merge_citations_keeps_non_url_entries() -> None:
+    """Entries without a URL are preserved (we can't dedup them safely)."""
+    out = _merge_citations_by_url(
+        [{"title": "A", "url": "https://example.com/a"}],
+        [{"title": "no url here"}, "https://example.com/a"],
+    )
+    # 1: "a" dict, 2: bare-title dict (kept), "a" string dropped as duplicate URL.
+    assert len(out) == 2
+    assert out[0]["url"] == "https://example.com/a"
+    assert out[1]["title"] == "no url here"
+
+
 # --------------------------- live smoke test (env-gated) ---------------------------
 
 
@@ -562,6 +851,11 @@ def test_live_grok_web_search_smoke() -> None:
     finally:
         client.close()
     assert out["summary"], "live grok web_search returned empty summary — tool may not have fired"
+    # Probabilistic-failure note: the model may occasionally answer date-current
+    # queries (e.g. BTC spot price) from training rather than firing the
+    # web_search tool. A single failure here is NOT proof of a wire-format
+    # regression — re-run once before investigating. Two consecutive failures
+    # suggest a real wire issue.
     assert len(out["citations"]) >= 1, (
         "live grok web_search returned zero citations — the web_search tool did "
         "not execute (model answered from inference). Wire-format regression."

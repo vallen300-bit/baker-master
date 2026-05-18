@@ -14,6 +14,19 @@ per call (one endpoint, three intents). The earlier Live Search /
 
 The HTTP client is built lazily on first dispatch and cached at module level
 so its httpx connection pool is reused across MCP dispatches.
+
+Key rotation
+------------
+``GrokClient.__init__`` reads ``XAI_API_KEY`` once at construction and stores it
+on the instance. After rotating the key on Render (e.g. ``op item edit`` →
+Render env-var PUT via ``tools.render_env_guard.safe_env_put``), call
+:func:`reset_client_cache` to drop the cached client so the next dispatch
+re-reads the fresh env var. Worker restart is the heavier alternative; the
+reset hook avoids the restart and survives concurrent dispatches via the
+``_CLIENT_LOCK`` double-checked guard. Callable from any admin entrypoint or
+one-shot Render shell::
+
+    python3 -c "from tools.grok import reset_client_cache; reset_client_cache()"
 """
 from __future__ import annotations
 
@@ -52,8 +65,14 @@ def _get_client() -> _client_mod.GrokClient:
     return _CLIENT
 
 
-def _reset_client_for_tests() -> None:
-    """Drop the cached client (test hook only)."""
+def reset_client_cache() -> None:
+    """Drop the cached GrokClient. Call after rotating ``XAI_API_KEY`` on Render
+    so the next dispatch rebuilds the client and reads the fresh env var.
+
+    Safe to call from any thread; no-op if no client is cached. Closing the
+    httpx pool of the prior client is best-effort — a close failure does not
+    prevent the cache from being cleared.
+    """
     global _CLIENT
     with _CLIENT_LOCK:
         if _CLIENT is not None:
@@ -62,6 +81,11 @@ def _reset_client_for_tests() -> None:
             except Exception:
                 pass
         _CLIENT = None
+
+
+# Backwards-compat alias for any external callers that imported the underscore
+# name. Identity-preserving (``is`` check passes) so monkeypatches survive.
+_reset_client_for_tests = reset_client_cache
 
 
 # ─────────────────────────── tool catalog ───────────────────────────
@@ -107,6 +131,18 @@ GROK_TOOLS: list[Tool] = [
                     "type": "string",
                     "description": "Matter slug for cost attribution (optional).",
                 },
+                "timeout_seconds": {
+                    "type": "number",
+                    "description": (
+                        "Per-attempt HTTP timeout in seconds (default 60, max 300). "
+                        "Bounds each individual attempt — does NOT bound 429 retry "
+                        "wall-clock: total wall-clock ≈ timeout × max_retries + "
+                        "Retry-After × max_retries (up to ~120s with defaults). "
+                        "Wrap in your own deadline if you need a hard upper bound."
+                    ),
+                    "minimum": 1,
+                    "maximum": 300,
+                },
             },
             "required": ["query"],
         },
@@ -140,6 +176,18 @@ GROK_TOOLS: list[Tool] = [
                 "matter_slug": {
                     "type": "string",
                     "description": "Matter slug for cost attribution (optional).",
+                },
+                "timeout_seconds": {
+                    "type": "number",
+                    "description": (
+                        "Per-attempt HTTP timeout in seconds (default 60, max 300). "
+                        "Bounds each individual attempt — does NOT bound 429 retry "
+                        "wall-clock: total wall-clock ≈ timeout × max_retries + "
+                        "Retry-After × max_retries (up to ~120s with defaults). "
+                        "Wrap in your own deadline if you need a hard upper bound."
+                    ),
+                    "minimum": 1,
+                    "maximum": 300,
                 },
             },
             "required": ["query"],
@@ -178,6 +226,18 @@ GROK_TOOLS: list[Tool] = [
                     "type": "string",
                     "description": "Matter slug for cost attribution (optional).",
                 },
+                "timeout_seconds": {
+                    "type": "number",
+                    "description": (
+                        "Per-attempt HTTP timeout in seconds (default 60, max 300). "
+                        "Bounds each individual attempt — does NOT bound 429 retry "
+                        "wall-clock: total wall-clock ≈ timeout × max_retries + "
+                        "Retry-After × max_retries (up to ~120s with defaults). "
+                        "Wrap in your own deadline if you need a hard upper bound."
+                    ),
+                    "minimum": 1,
+                    "maximum": 300,
+                },
             },
             "required": ["prompt"],
         },
@@ -214,6 +274,15 @@ def dispatch_grok(name: str, args: dict[str, Any]) -> str:
         logger.exception("dispatch_grok: cost_monitor.check_circuit_breaker failed (allowing call)")
 
     matter_slug = args.get("matter_slug")
+
+    # Per-call HTTP timeout override (M3). Capped at 300s here — the client
+    # is reusable in non-MCP contexts where higher timeouts may be legitimate,
+    # so the cap lives at the dispatcher, not in GrokClient. None = inherit
+    # the client's per-instance default (60s).
+    timeout, timeout_err = _validate_timeout_seconds(args.get("timeout_seconds"))
+    if timeout_err is not None:
+        return timeout_err
+
     payload: Optional[dict] = None
     try:
         if name == "baker_grok_x_search":
@@ -223,6 +292,7 @@ def dispatch_grok(name: str, args: dict[str, Any]) -> str:
                 to_date=args.get("to_date"),
                 allowed_x_handles=args.get("allowed_x_handles"),
                 excluded_x_handles=args.get("excluded_x_handles"),
+                timeout=timeout,
             )
             _log_grok_cost(payload, matter_slug)
             return json.dumps(payload, ensure_ascii=False)
@@ -232,6 +302,7 @@ def dispatch_grok(name: str, args: dict[str, Any]) -> str:
                 query=args["query"],
                 allowed_domains=args.get("allowed_domains"),
                 excluded_domains=args.get("excluded_domains"),
+                timeout=timeout,
             )
             _log_grok_cost(payload, matter_slug)
             return json.dumps(payload, ensure_ascii=False)
@@ -242,6 +313,7 @@ def dispatch_grok(name: str, args: dict[str, Any]) -> str:
                 max_output_tokens=int(args.get("max_tokens", 4000)),
                 model=args.get("model") or "grok-4.3",
                 instructions=args.get("instructions"),
+                timeout=timeout,
             )
             _log_grok_cost(payload, matter_slug)
             return json.dumps(payload, ensure_ascii=False)
@@ -257,6 +329,30 @@ def dispatch_grok(name: str, args: dict[str, Any]) -> str:
         # programming errors (AttributeError, TypeError) don't go invisible.
         logger.exception("dispatch_grok: unhandled error in %s", name)
         return f"Error: {type(e).__name__}: {e}"
+
+
+_TIMEOUT_ERR = "Error: timeout_seconds must be a positive number ≤ 300"
+
+
+def _validate_timeout_seconds(value: Any) -> tuple[Optional[float], Optional[str]]:
+    """Validate the MCP-facing ``timeout_seconds`` arg.
+
+    Returns ``(timeout, None)`` on success (``timeout`` may be ``None`` when
+    the caller omitted the arg) or ``(None, error_string)`` on rejection.
+    Booleans are rejected on purpose — ``True`` would otherwise coerce to 1.0
+    and silently mask a caller bug.
+    """
+    if value is None:
+        return None, None
+    if isinstance(value, bool):
+        return None, _TIMEOUT_ERR
+    try:
+        v = float(value)
+    except (TypeError, ValueError):
+        return None, _TIMEOUT_ERR
+    if v <= 0 or v > 300:
+        return None, _TIMEOUT_ERR
+    return v, None
 
 
 def _log_grok_cost(payload: dict, matter_slug: Optional[str]) -> None:

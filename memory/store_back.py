@@ -2840,6 +2840,40 @@ class SentinelStoreBack:
             cur.execute("CREATE INDEX IF NOT EXISTS idx_capability_sets_type ON capability_sets(capability_type)")
             cur.execute("CREATE INDEX IF NOT EXISTS idx_capability_sets_active ON capability_sets(active) WHERE active = TRUE")
 
+            # GROK_API_HARDENING_1 (M4): archive-type rows must not carry
+            # trigger_patterns. Generic patterns on a row whose capability_type
+            # later flips back to 'domain' would hijack Cortex Phase 3 routing.
+            # Mirrors migrations/20260518_capability_sets_archive_no_trigger_patterns.sql
+            # (Lesson #50 migration-vs-bootstrap drift). UPDATE first, then
+            # ADD CONSTRAINT, so the constraint validation does not abort on
+            # pre-existing archive rows in fresh databases that already seeded
+            # the legacy patterns.
+            cur.execute("""
+                UPDATE capability_sets
+                SET trigger_patterns = '[]'::jsonb,
+                    updated_at = NOW()
+                WHERE capability_type = 'archive'
+                  AND trigger_patterns IS NOT NULL
+                  AND jsonb_array_length(trigger_patterns) > 0
+            """)
+            cur.execute("""
+                DO $$
+                BEGIN
+                    IF NOT EXISTS (
+                        SELECT 1 FROM pg_constraint
+                        WHERE conname = 'capability_sets_archive_no_trigger_patterns'
+                    ) THEN
+                        ALTER TABLE capability_sets
+                        ADD CONSTRAINT capability_sets_archive_no_trigger_patterns
+                        CHECK (
+                            capability_type <> 'archive'
+                            OR trigger_patterns IS NULL
+                            OR jsonb_array_length(trigger_patterns) = 0
+                        );
+                    END IF;
+                END $$
+            """)
+
             # SPECIALIST-THINKING-1: Add use_thinking column
             cur.execute("ALTER TABLE capability_sets ADD COLUMN IF NOT EXISTS use_thinking BOOLEAN DEFAULT FALSE")
 

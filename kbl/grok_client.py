@@ -151,22 +151,49 @@ class GrokClient:
     def _url(self, path: str) -> str:
         return self._base_url + "/" + path.lstrip("/")
 
-    def _request(self, method: str, path: str, *, json: Optional[dict] = None) -> dict:
+    def _request(
+        self,
+        method: str,
+        path: str,
+        *,
+        json: Optional[dict] = None,
+        timeout: Optional[float] = None,
+    ) -> dict:
         """Single HTTP round-trip with retry on 429.
 
         429 retry honours ``Retry-After`` (falls back to 30s); max
         ``self._max_retries`` retries. 5xx surfaces immediately. Other errors
         map to the ``Grok*Error`` hierarchy.
+
+        ``timeout`` overrides the client default for this call only; pass
+        ``None`` to inherit the per-instance default. The dispatcher is
+        responsible for any caller-facing upper bound — ``_request`` trusts
+        the passed value (the client is reusable in non-MCP contexts where
+        higher timeouts may be legitimate).
+
+        **Per-attempt semantics:** ``timeout`` bounds each individual HTTP
+        attempt, NOT the total wall-clock across retries. With ``_max_retries=3``
+        and a ``Retry-After: 30`` honoured between attempts, a caller passing
+        ``timeout=10`` can still see ~total wall-clock of roughly
+        ``timeout × max_retries + Retry-After × max_retries`` before the
+        ``GrokRateLimitError`` surfaces (~120s in the worst case here, not 10s).
+        Callers that need a hard wall-clock bound must wrap the call in their
+        own deadline.
         """
         attempt = 0
         while True:
             attempt += 1
             try:
+                request_kwargs: dict[str, Any] = {
+                    "headers": self._headers(),
+                    "json": json,
+                }
+                if timeout is not None:
+                    request_kwargs["timeout"] = timeout
                 resp = self._http_client.request(
                     method,
                     self._url(path),
-                    headers=self._headers(),
-                    json=json,
+                    **request_kwargs,
                 )
             except httpx.TimeoutException as e:
                 raise GrokTransportError(f"timeout calling {method} {path}: {e}") from e
@@ -211,6 +238,7 @@ class GrokClient:
         max_output_tokens: int = 4000,
         temperature: Optional[float] = None,
         instructions: Optional[str] = None,
+        timeout: Optional[float] = None,
     ) -> dict:
         """POST /responses — plain Grok call (no Live Search).
 
@@ -218,6 +246,10 @@ class GrokClient:
         cost_usd, raw_id}``. ``text`` is the flattened ``output[*].content[*].text``
         concatenation; full payload preserved in ``raw_id`` for the matter Desk
         to fetch via ``GET /v1/responses/{id}`` if it needs structured access.
+
+        ``timeout`` overrides the per-instance default for this call only.
+        Per-attempt HTTP timeout — does NOT bound 429 retry wall-clock; see
+        ``_request`` docstring for the full retry budget formula.
         """
         body: dict[str, Any] = {
             "model": model,
@@ -228,7 +260,10 @@ class GrokClient:
             body["temperature"] = temperature
         if instructions:
             body["instructions"] = instructions
-        return _shape_ask_response(self._request("POST", "responses", json=body), model)
+        return _shape_ask_response(
+            self._request("POST", "responses", json=body, timeout=timeout),
+            model,
+        )
 
     def x_search(
         self,
@@ -238,6 +273,7 @@ class GrokClient:
         allowed_x_handles: Optional[list[str]] = None,
         excluded_x_handles: Optional[list[str]] = None,
         model: str = _DEFAULT_MODEL,
+        timeout: Optional[float] = None,
     ) -> dict:
         """POST /responses with tools=[{type:'x_search', ...}] per xAI Agent Tools API.
 
@@ -247,6 +283,9 @@ class GrokClient:
 
         ``allowed_x_handles`` and ``excluded_x_handles`` are mutually exclusive
         per xAI docs (max 10 each); date params accept ISO-8601 YYYY-MM-DD.
+        ``timeout`` overrides the per-instance default for this call only.
+        Per-attempt HTTP timeout — does NOT bound 429 retry wall-clock; see
+        ``_request`` docstring for the full retry budget formula.
         """
         tool: dict[str, Any] = {"type": "x_search"}
         if from_date:
@@ -262,6 +301,7 @@ class GrokClient:
                 "POST",
                 "responses",
                 json={"model": model, "input": query, "tools": [tool]},
+                timeout=timeout,
             ),
             model=model,
             kind="x",
@@ -273,6 +313,7 @@ class GrokClient:
         allowed_domains: Optional[list[str]] = None,
         excluded_domains: Optional[list[str]] = None,
         model: str = _DEFAULT_MODEL,
+        timeout: Optional[float] = None,
     ) -> dict:
         """POST /responses with tools=[{type:'web_search', ...}] per xAI Agent Tools API.
 
@@ -281,6 +322,9 @@ class GrokClient:
         ``allowed_domains`` / ``excluded_domains`` go inside the tool's ``filters``
         sub-object per xAI docs (max 5 each). News results are returned via the
         same web_search tool — no separate news source under the tools API.
+        ``timeout`` overrides the per-instance default for this call only.
+        Per-attempt HTTP timeout — does NOT bound 429 retry wall-clock; see
+        ``_request`` docstring for the full retry budget formula.
         """
         tool: dict[str, Any] = {"type": "web_search"}
         filters: dict[str, Any] = {}
@@ -295,6 +339,7 @@ class GrokClient:
                 "POST",
                 "responses",
                 json={"model": model, "input": query, "tools": [tool]},
+                timeout=timeout,
             ),
             model=model,
             kind="web",
@@ -349,8 +394,25 @@ def _shape_search_response(payload: dict, *, model: str, kind: str) -> dict:
     ``kind`` is ``"x"`` or ``"web"``. When ``kind == "x"``, returns ``{summary,
     tweets: [...], ...}``. Otherwise ``{summary, citations: [...], ...}``. Both
     shapes include token + cost metadata so the caller can budget per request.
+
+    Citations are merged from two sources:
+
+      1. top-level ``payload["citations"]`` (older response shape).
+      2. inline ``output[*].content[*].annotations`` with
+         ``type=url_citation`` (xAI Agent Tools API, current shape).
+
+    De-duplicated by URL — xAI may emit the same citation in both. First-seen
+    order is preserved so any ``[1]`` / ``[2]`` mapping in the summary text
+    stays aligned with the citation list. Entries without a discoverable URL
+    are kept as-is (we can't safely dedup them).
     """
-    citations = payload.get("citations") or []
+    top_level_citations = payload.get("citations") or []
+    inline_citations = _extract_inline_annotations(payload.get("output") or [])
+    # Inline first: when both sources carry the same URL, the rich inline dict
+    # ({url, title, ...} from xAI's Agent Tools API) must win over the bare
+    # top-level string. Reversing the order would silently drop title/snippet
+    # downstream (observed in prod smoke #5).
+    citations = _merge_citations_by_url(inline_citations, top_level_citations)
     summary = _flatten_output_text(payload.get("output") or [])
     usage = payload.get("usage") or {}
     tokens_in = int(usage.get("input_tokens") or 0)
@@ -397,6 +459,69 @@ def _flatten_output_text(output: list[Any]) -> str:
                 if isinstance(txt, str):
                     parts.append(txt)
     return "".join(parts)
+
+
+def _extract_inline_annotations(output: list[Any]) -> list[dict]:
+    """Extract URL-citation annotations from ``output[*].content[*].annotations``.
+
+    xAI's Agent Tools API attaches structured citations as
+    ``{"type": "url_citation", "url": "...", "title": "...", ...}`` on each
+    ``output_text`` block that references a search hit. We flatten them into a
+    single ordered list, preserving the order in which Grok cited them across
+    blocks. Non-dict entries are skipped silently — they are the same junk
+    shapes ``_flatten_output_text`` already tolerates.
+    """
+    out: list[dict] = []
+    for item in output:
+        if not isinstance(item, dict):
+            continue
+        content = item.get("content")
+        if not isinstance(content, list):
+            continue
+        for block in content:
+            if not isinstance(block, dict):
+                continue
+            annotations = block.get("annotations")
+            if not isinstance(annotations, list):
+                continue
+            for ann in annotations:
+                if not isinstance(ann, dict):
+                    continue
+                if ann.get("type") not in ("url_citation", "citation"):
+                    continue
+                out.append(ann)
+    return out
+
+
+def _merge_citations_by_url(*sources: list[Any]) -> list[Any]:
+    """Merge multiple citation lists, deduplicating by URL — first-source-wins.
+
+    Preserves first-seen order across all ``sources``. Entries are matched on
+    their ``url`` field (or the entry itself when it is a bare string). Items
+    without a discoverable URL are kept — dropping them silently would lose
+    data when xAI emits a partial citation. String entries match dict entries
+    when their value equals the dict's ``url``.
+
+    **First-source-wins:** on a URL tie, the entry from the earlier-listed
+    source is kept and the later one is dropped. Callers that want the rich
+    dict form to outrank a bare-string duplicate must therefore pass the
+    inline (rich) source first. ``_shape_search_response`` does exactly that.
+    """
+    seen: set[str] = set()
+    out: list[Any] = []
+    for src in sources:
+        for c in src:
+            url = ""
+            if isinstance(c, str):
+                url = c
+            elif isinstance(c, dict):
+                url = str(c.get("url") or c.get("link") or "")
+            if url and url in seen:
+                continue
+            if url:
+                seen.add(url)
+            out.append(c)
+    return out
 
 
 def _shape_tweet_citation(citation: Any) -> dict[str, Any]:
