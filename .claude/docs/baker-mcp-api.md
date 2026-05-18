@@ -83,3 +83,18 @@ Notes:
 - Capability set `grok_realtime` registers with `capability_type='archive'` — out of scope for Cortex Phase 3 auto-routing (mirrors ClaimsMax C1 lesson; `baker_grok_*` tools live in MCP, not `TOOL_DEFINITIONS`).
 - Cost: 32 input + 9 output tokens → ~$0.000063. A 1M+1M call → ~$3.75. Pilot starts on $250 credits, no auto top-up.
 - Sample query: `{"name":"baker_grok_x_search","arguments":{"query":"Brisen Group","max_results":5}}`.
+- **Per-call timeout:** each tool accepts `timeout_seconds` (positive number, max 300, default 60). Caps long-running Live Search calls so they don't starve other dispatches sharing the worker. Values outside `(0, 300]` are rejected with `Error: timeout_seconds must be a positive number ≤ 300` — the dispatcher does not invoke Grok.
+
+### Key rotation
+
+`GrokClient` reads `XAI_API_KEY` once at construction and caches the client at module level so the HTTPS connection pool is reused across dispatches. After rotating the key on Render (`op item edit …` → Render env-var PUT via `tools.render_env_guard.safe_env_put` per repo hard rule), the cached client will keep using the OLD key until the worker restarts unless the cache is reset. Sequence:
+
+1. `op item edit "Baker API Keys/XAI_API_KEY"` — rotate the secret.
+2. `safe_env_put("XAI_API_KEY", new_value)` — push to Render (merge-mode; never raw PUT).
+3. `python3 -c "from tools.grok import reset_client_cache; reset_client_cache()"` — drop the cached client.
+
+The next dispatch rebuilds the client and re-reads `XAI_API_KEY`. `reset_client_cache()` is thread-safe (double-checked lock) and no-ops when no client is cached. The legacy underscore name `_reset_client_for_tests` is preserved as an identity-preserving alias so existing imports keep working.
+
+### Smoke testing
+
+A live smoke test exists at `tests/test_grok_client.py::test_live_grok_web_search_smoke`, env-gated by `TEST_XAI_API_KEY` so CI stays green without the key. It issues a date-current query (BTC spot price) and asserts at least one citation came back. The model may **probabilistically** answer date-current queries from training instead of firing the search tool — when this happens the test sees `citations=[]` and fails even though the wire format is intact. Re-run the smoke once before treating a failure as a real regression; two consecutive failures suggest a real wire issue worth chasing.
