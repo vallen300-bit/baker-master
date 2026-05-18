@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>MO Vienna — Source Verification: the −49.4% F&amp;B forecast · 18 May 2026</title>
+<title>MO Vienna — The −49.4% F&amp;B Forecast: Source &amp; Math · 18 May 2026</title>
 <style>
   :root {
     --bg: #f6f5f1;
@@ -19,7 +19,6 @@
     --chip-ink: #78350f;
     --breach-bg: #fee2e2;
     --breach-ink: #991b1b;
-    --quote-bar: #94a3b8;
     --table-head: #0a2540;
     --table-stripe: #fafafa;
     --table-section: #eef2f7;
@@ -40,7 +39,6 @@
     -moz-osx-font-smoothing: grayscale;
   }
 
-  /* MASTHEAD */
   .masthead {
     background: var(--navy);
     color: #f8fafc;
@@ -63,7 +61,6 @@
     text-transform: uppercase; vertical-align: middle; margin-left: 8px;
   }
 
-  /* CONTENT */
   .wrap { max-width: 920px; margin: 0 auto; padding: 28px 40px 50px 40px; }
   .part-header {
     background: var(--card);
@@ -74,7 +71,7 @@
     box-shadow: var(--shadow);
   }
   .part-eyebrow { font-size: 11px; text-transform: uppercase; letter-spacing: 0.1em; color: var(--accent); font-weight: 600; margin-bottom: 6px; }
-  .part-title { font-size: 24px; font-weight: 600; color: var(--navy); margin: 0 0 4px 0; letter-spacing: -0.01em; line-height: 1.25; }
+  .part-title { font-size: 22px; font-weight: 600; color: var(--navy); margin: 0 0 4px 0; letter-spacing: -0.01em; line-height: 1.3; }
   .part-subtitle { font-size: 14px; color: var(--ink-soft); margin: 0; }
 
   section.sect {
@@ -108,31 +105,25 @@
   strong { font-weight: 600; color: var(--navy); }
   em { font-style: italic; color: var(--ink); }
 
-  .src {
-    display: inline-block;
-    font-family: 'SF Mono', Menlo, Consolas, monospace;
-    font-size: 11.5px;
-    color: #1e5cb8;
-    font-weight: 500;
-    letter-spacing: 0.01em;
-  }
-  code {
-    font-family: 'SF Mono', Menlo, Consolas, monospace;
-    font-size: 12px;
-    background: #f3f4f6;
-    padding: 1px 5px;
-    border-radius: 3px;
-    color: var(--ink-soft);
-  }
-
-  .callout {
-    background: #eef2f7;
-    border-left: 3px solid var(--navy);
+  .src-block {
+    background: #f9f8f4;
+    border-left: 3px solid var(--navy-soft);
     padding: 12px 16px;
     margin: 14px 0;
     border-radius: 0 4px 4px 0;
     font-size: 14px;
   }
+  .src-block .label {
+    display: block;
+    font-family: 'SF Mono', Menlo, Consolas, monospace;
+    font-size: 11px;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    color: var(--accent);
+    font-weight: 700;
+    margin-bottom: 6px;
+  }
+
   .callout-warn {
     background: var(--breach-bg);
     border-left: 3px solid var(--breach-ink);
@@ -163,7 +154,6 @@
     font-size: 12px;
     text-transform: uppercase;
     letter-spacing: 0.04em;
-    border-bottom: 1px solid var(--navy-soft);
   }
   td {
     padding: 9px 12px;
@@ -171,7 +161,7 @@
     vertical-align: top;
   }
   tbody tr:nth-child(even) td { background: var(--table-stripe); }
-  td.num { font-family: 'SF Mono', monospace; font-weight: 600; }
+  td.num { font-family: 'SF Mono', monospace; font-weight: 600; text-align: right; }
 
   footer {
     border-top: 1px solid var(--border);
@@ -182,7 +172,6 @@
     background: var(--card);
   }
   footer .footer-meta { max-width: 920px; margin: 0 auto; }
-  footer code { background: transparent; color: var(--ink-soft); }
 
   @media print {
     body { background: #fff; font-size: 11pt; }
@@ -192,7 +181,7 @@
     .masthead .badge { background: var(--accent) !important; color: #fff !important; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
     .sect, .part-header { box-shadow: none; border-radius: 0; page-break-inside: avoid; }
     th { background: var(--navy) !important; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
-    .callout-warn, .callout { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+    .callout-warn, .src-block { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
   }
 </style>
 </head>
@@ -200,13 +189,12 @@
 
 <header class="masthead">
   <div class="masthead-inner">
-    <h1>MO Vienna — Source Verification: the −49.4% F&amp;B Forecast <span class="badge">Owners · Internal</span></h1>
-    <p class="subtitle">Tracing Christian Gradnitzer's 11 May 2026 one-pager — the math, the table, the cross-check.</p>
+    <h1>MO Vienna &mdash; The &minus;49.4% F&amp;B Forecast: Source &amp; Math <span class="badge">Owners · Internal</span></h1>
+    <p class="subtitle">A one-page walkthrough of the math and the two documents that produce it.</p>
     <div class="meta-row">
       <div class="meta-item"><span class="meta-label">For</span><span class="meta-value">Edita Vallen (Owner, LCG SA)</span></div>
       <div class="meta-item"><span class="meta-label">From</span><span class="meta-value">MOVIE Desk · via Dimitry Vallen</span></div>
       <div class="meta-item"><span class="meta-label">Date</span><span class="meta-value">18 May 2026</span></div>
-      <div class="meta-item"><span class="meta-label">Re</span><span class="meta-value">Owners' Executive Summary §1.4 — source citation</span></div>
     </div>
   </div>
 </header>
@@ -215,110 +203,65 @@
 
 <div class="part-header">
   <div class="part-eyebrow">Brief · standalone</div>
-  <h2 class="part-title">The "−49.4%" number is MOHG's, not ours</h2>
-  <p class="part-subtitle">A one-page walk through the math and the document that produced it.</p>
+  <h2 class="part-title">The &minus;49.4% number is real.</h2>
+  <p class="part-subtitle">Below: a one-page walkthrough of the math and the documents that produce it.</p>
 </div>
 
 <section class="sect">
-  <div class="sect-head"><h3 class="sect-title"><span class="sect-num">1.</span> What we said in the Executive Summary</h3></div>
+  <div class="sect-head"><h3 class="sect-title"><span class="sect-num">1.</span> Christian Gradnitzer's email of 11 May 2026 puts F&amp;B Departmental Profit for 2026 at &euro;274,406 against a 2026 budget of &euro;542,096 &mdash; a miss of 49.4%.</h3></div>
   <div class="sect-body">
-    <p>Christian Gradnitzer's 11 May one-pager forecasts FY26 F&amp;B Departmental Profit of <strong>€274,406</strong> against a 2026 budget of <strong>€542,096</strong>. That is a miss of <strong>−49.4%</strong> vs the budget MOHG themselves prepared, signed, and delivered to us.</p>
-    <p><span class="src">Source: MOHG "Mandarin Oriental, Vienna · RB&amp;E — Positioning &amp; Planned Changes", one-pager dated 11 May 2026, page 1, bottom financial table. Local file: <code>1_ACTIVE_PROJECTS/01_MOVIE_PROJECT/01_MOHG/2026-05-11-christian-gradnitzer-atelier7-onepager.pdf</code>. Intake channel: Balazs Csepregi (Brisen Projects &amp; Transactions).</span></p>
+    <p>All three figures &mdash; &euro;274,406, &euro;542,096, and the 49.4% variance &mdash; appear in the PDF Christian attached to his 11 May 2026 email. They sit on a single line of a single table.</p>
+
+    <div class="src-block">
+      <span class="label">Source of the three figures</span>
+      <strong>Email:</strong> Christian Gradnitzer to Brisen, 11 May 2026.<br>
+      <strong>Attachment:</strong> &ldquo;Mandarin Oriental, Vienna &mdash; RB&amp;E &mdash; Positioning &amp; Planned Changes&rdquo; (one-pager PDF).<br>
+      <strong>Location in PDF:</strong> page 1, financial table at the bottom of the page, row labelled &ldquo;Departmental Profit&rdquo;, final three columns:
+      <em>Fcast 2026 Total</em> &middot; <em>2026 Budget Total</em> &middot; <em>Variance +(&minus;)%</em>.<br>
+      Values read directly from those three columns: <strong>274,406 &middot; 542,096 &middot; (49.4)</strong>.
+    </div>
+
+    <div class="src-block">
+      <span class="label">Where the &euro;542,096 budget figure is anchored</span>
+      The formal 2026 Operating Budget for the hotel is the document <strong>&ldquo;MOVIE BUDGET P&amp;L 2026.pdf&rdquo;</strong> (Brisen project folder). The F&amp;B Departmental Contribution line appears in:
+      <ul style="margin-top:6px;">
+        <li><strong>Schedule 2.2 (Annual P&amp;L Summary)</strong>, page 1 &mdash; Food &amp; Beverage section, &ldquo;Departmental Contribution&rdquo; row, showing <strong>&euro;615,491</strong> for the full year.</li>
+        <li><strong>Schedule 2.4 (Monthly P&amp;L)</strong>, page 2 &mdash; same row broken out month by month (Jan through Dec 2026), summing to the same <strong>&euro;615,491</strong>.</li>
+      </ul>
+      Christian's table cites <strong>&euro;542,096</strong> as the &ldquo;2026 Budget Total&rdquo; &mdash; this differs from the Operating Budget by &euro;73,395, because Christian groups some F&amp;B Other Income items separately rather than inside F&amp;B Revenue. <strong>Both numbers are in MOHG's own documents.</strong> Measured against either one, the forecast is materially below: 49.4% below Christian's own cited budget, or 55.4% below the formal Operating Budget. The attached Excel shows all three sets of numbers (budget, Q1 actuals, Christian's full-year forecast) side by side, month by month.
+    </div>
   </div>
 </section>
 
 <section class="sect">
-  <div class="sect-head"><h3 class="sect-title"><span class="sect-num">2.</span> The table — copied verbatim from MOHG's document</h3></div>
+  <div class="sect-head"><h3 class="sect-title"><span class="sect-num">2.</span> Cross-check against the Monthly Statements MOHG already sent.</h3></div>
   <div class="sect-body">
-    <div class="callout-warn"><strong>The number comes from a single line in a table MOHG themselves built and sent.</strong> Below is exactly what appears in the bottom three columns of the one-pager's financial table, on the row labelled <strong>"Departmental Profit"</strong> (the bottom row of that table).</div>
-
+    <p>The same Christian table includes Jan, Feb, Mar 2026 as actual months (the rest are forecast). On the &ldquo;Departmental Profit&rdquo; row those three columns read:</p>
     <div class="tbl-wrap">
     <table>
-      <thead><tr><th>Row from MOHG's table</th><th>Fcast 2026 Total</th><th>2026 Budget Total</th><th>Variance +(-)%</th></tr></thead>
+      <thead><tr><th>Month</th><th style="text-align:right">F&amp;B Departmental Profit (&euro;)</th></tr></thead>
       <tbody>
-        <tr><td><strong>Departmental Profit</strong> (F&amp;B)</td><td class="num">274,406</td><td class="num">542,096</td><td class="num">(49.4)</td></tr>
+        <tr><td>January 2026 &mdash; actual</td><td class="num">(278,544)</td></tr>
+        <tr><td>February 2026 &mdash; actual</td><td class="num">(168,033)</td></tr>
+        <tr><td>March 2026 &mdash; actual</td><td class="num">(165,496)</td></tr>
+        <tr><td><strong>Q1 2026 &mdash; sum</strong></td><td class="num"><strong>(612,073)</strong></td></tr>
       </tbody>
     </table>
     </div>
-
-    <p><strong>Important.</strong> The "<strong>(49.4)</strong>" figure in the rightmost column is <strong>MOHG's own calculation</strong> of the variance. <strong>We did not compute that number — MOHG did.</strong> We are simply reading the column they printed.</p>
+    <p>These three figures are identical to the F&amp;B Departmental Contribution lines in MOHG's Monthly Statements for January, February, and March 2026 (delivered separately to us in March). <strong>Same numbers in two different MOHG documents, from the same operator.</strong> The table is internally consistent with what they have already reported.</p>
   </div>
 </section>
 
 <section class="sect">
-  <div class="sect-head"><h3 class="sect-title"><span class="sect-num">3.</span> The arithmetic, step by step</h3></div>
+  <div class="sect-head"><h3 class="sect-title"><span class="sect-num">3.</span> The full comparison is in the attached Excel.</h3></div>
   <div class="sect-body">
-    <ol>
-      <li>€274,406 ÷ €542,096 = <strong>0.5062</strong> → Christian's forecast = <strong>50.6% of the budget MOHG built.</strong></li>
-      <li>1 − 0.5062 = <strong>0.4938</strong> → forecast is <strong>49.4% below</strong> MOHG's own budget.</li>
-      <li>This matches the "(49.4)" figure printed in the rightmost column of MOHG's own table.</li>
-    </ol>
-  </div>
-</section>
-
-<section class="sect">
-  <div class="sect-head"><h3 class="sect-title"><span class="sect-num">4.</span> How to verify in 30 seconds</h3></div>
-  <div class="sect-body">
-    <ol>
-      <li>Open <code>1_ACTIVE_PROJECTS/01_MOVIE_PROJECT/01_MOHG/2026-05-11-christian-gradnitzer-atelier7-onepager.pdf</code>.</li>
-      <li>Go to the financial table on page 1 (below the five outlet narrative boxes — Brasserie · Café · Izakaya &amp; Bar · Le Sept · Banqueting).</li>
-      <li>Find the bottom row of that table, labelled "<strong>Departmental Profit</strong>".</li>
-      <li>Read the last three columns left-to-right: <strong>274,406 · 542,096 · (49.4)</strong>. That is the math.</li>
-    </ol>
-  </div>
-</section>
-
-<section class="sect">
-  <div class="sect-head"><h3 class="sect-title"><span class="sect-num">5.</span> Cross-check against the Monthly Statements MOHG already sent</h3></div>
-  <div class="sect-body">
-    <p>The same table's Jan / Feb / Mar columns on the "Departmental Profit" row read:</p>
-    <div class="tbl-wrap">
-    <table>
-      <thead><tr><th>Month</th><th>Departmental Profit (€)</th></tr></thead>
-      <tbody>
-        <tr><td>January 2026 actual</td><td class="num">(278,544)</td></tr>
-        <tr><td>February 2026 actual</td><td class="num">(168,033)</td></tr>
-        <tr><td>March 2026 actual</td><td class="num">(165,496)</td></tr>
-        <tr><td><strong>Q1 2026 — sum</strong></td><td class="num"><strong>(612,073)</strong></td></tr>
-      </tbody>
-    </table>
-    </div>
-    <p>That ties exactly to the <strong>−€612K Q1 F&amp;B Departmental Contribution</strong> we cite from the operator's Jan / Feb / Mar 2026 Monthly Statements. <strong>Same numbers, two separate MOHG documents, one operator.</strong> The 11 May one-pager is internally consistent with the Monthly Statements they have already sent us. <span class="src">Source: MOHG Monthly Statements Jan / Feb / Mar 2026, local files <code>1_ACTIVE_PROJECTS/01_MOVIE_PROJECT/05_Post_Openi_Hotel/00_Monthly_PnL_MOHG_2026/</code>.</span></p>
-  </div>
-</section>
-
-<section class="sect">
-  <div class="sect-head"><h3 class="sect-title"><span class="sect-num">6.</span> What Christian's forecast assumes</h3></div>
-  <div class="sect-body">
-    <p>Reading the same "Departmental Profit" row left-to-right across the months:</p>
-    <div class="tbl-wrap">
-    <table>
-      <thead><tr><th>Month</th><th>Departmental Profit (€)</th><th>Status</th></tr></thead>
-      <tbody>
-        <tr><td>Jan 2026</td><td class="num">(278,544)</td><td>actual</td></tr>
-        <tr><td>Feb 2026</td><td class="num">(168,033)</td><td>actual</td></tr>
-        <tr><td>Mar 2026</td><td class="num">(165,496)</td><td>actual</td></tr>
-        <tr><td>Apr 2026</td><td class="num">(128,914)</td><td>actual</td></tr>
-        <tr><td>May 2026</td><td class="num">4,233</td><td>forecast — <strong>flips positive</strong></td></tr>
-        <tr><td>Jun 2026</td><td class="num">59,638</td><td>forecast</td></tr>
-        <tr><td>Jul 2026</td><td class="num">39,488</td><td>forecast</td></tr>
-        <tr><td>Aug 2026</td><td class="num">24,228</td><td>forecast</td></tr>
-        <tr><td>Sep 2026</td><td class="num">161,387</td><td>forecast</td></tr>
-        <tr><td>Oct 2026</td><td class="num">159,026</td><td>forecast</td></tr>
-        <tr><td>Nov 2026</td><td class="num">181,305</td><td>forecast</td></tr>
-        <tr><td>Dec 2026</td><td class="num">386,090</td><td>forecast — <strong>peak month</strong></td></tr>
-        <tr><td><strong>FY 2026 Total</strong></td><td class="num"><strong>274,406</strong></td><td><strong>forecast total</strong></td></tr>
-      </tbody>
-    </table>
-    </div>
-    <p>The forecast assumes the F&amp;B bleed stops in May and grows from there, peaking at <strong>+€386,090 in December</strong>. <strong>It is on this assumption — the operator's own — that the full-year total still lands at only €274K, half of the budget MOHG built.</strong> If May does not inflect, Christian's own number gets worse.</p>
-  </div>
-</section>
-
-<section class="sect">
-  <div class="sect-head"><h3 class="sect-title"><span class="sect-num">7.</span> Conclusion</h3></div>
-  <div class="sect-body">
-    <div class="callout"><strong>The "−49.4%" figure is not an Owner-side or MOVIE Desk calculation.</strong> It is MOHG's own number, printed by MOHG in the right-most column of the same one-pager Christian sent. The arithmetic checks out (€274,406 ÷ €542,096 = 50.6% of budget = 49.4% miss). The Q1 actuals embedded in the same table tie exactly to the −€612K F&amp;B Departmental Contribution figure we cite from the Monthly Statements. <strong>It is the operator's own forecast vs the operator's own budget, on the same row of the same MOHG document.</strong></div>
+    <p>The attached spreadsheet (<strong>&ldquo;2026-05-18-movie-fnb-comparative-budget-actual-forecast.xlsx&rdquo;</strong>) sets the three sets of numbers side by side, by month:</p>
+    <ul>
+      <li><strong>Column A &mdash; What was budgeted.</strong> Monthly F&amp;B Departmental Contribution from the formal 2026 Operating Budget (MOVIE BUDGET P&amp;L 2026.pdf, Schedule 2.4). FY total &euro;615,491.</li>
+      <li><strong>Column B &mdash; What MOHG actually reported.</strong> Q1 2026 F&amp;B Departmental Contribution from the MOHG Monthly Statements (Jan, Feb, Mar 2026). Q1 sum &minus;&euro;612,073.</li>
+      <li><strong>Column C &mdash; What Christian now forecasts.</strong> Monthly figures from his 11 May 2026 PDF. FY total &euro;274,406 (Q1 actuals embedded + April actual + May&ndash;December forecast).</li>
+    </ul>
+    <p>The spreadsheet shows the variance against both budget definitions, the Q1 actual-vs-budget gap, and a note on the &euro;73K difference between the two budget figures used in MOHG's own documents.</p>
   </div>
 </section>
 
@@ -326,9 +269,9 @@
 
 <footer>
   <div class="footer-meta">
-    <div>Standalone brief · extracted from Owners' Executive Summary §1.4 · 18 May 2026</div>
-    <div style="margin-top:6px;">Underlying documents: <code>2026-05-11-christian-gradnitzer-atelier7-onepager.pdf</code> · MOHG Monthly Statements Jan / Feb / Mar 2026</div>
-    <div style="margin-top:6px; color: var(--ink-mute);">MOVIE Desk · Brisen Group · Confidential — Owners only</div>
+    <div>Standalone brief &middot; 18 May 2026 &middot; Owners only</div>
+    <div style="margin-top:6px;">Underlying documents: Christian Gradnitzer email 11 May 2026 + attached PDF &middot; 2026 Operating Budget &ldquo;MOVIE BUDGET P&amp;L 2026.pdf&rdquo; &middot; MOHG Monthly Statements Jan / Feb / Mar 2026</div>
+    <div style="margin-top:6px; color: var(--ink-mute);">MOVIE Desk &middot; Brisen Group &middot; Confidential</div>
   </div>
 </footer>
 
