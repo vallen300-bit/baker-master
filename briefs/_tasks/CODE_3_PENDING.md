@@ -1,63 +1,39 @@
 ---
-status: PENDING
+status: COMPLETE
 brief: briefs/BRIEF_STATE_RECONCILER_1.md
 brief_id: STATE_RECONCILER_1
-target_branch: b3/state-reconciler-1
-target_repo: baker-vault (NOT baker-master — reconciler code lives in ~/baker-vault/_ops/reconciler/, hooks in ~/baker-vault/.githooks/)
+target_repo: baker-vault
 matter_slug: baker-internal
 cross_matter_usage: [mrci, aukera, lilienmatt, capital-call, annaberg, mo-vie-am, hagenauer-rg7, oskolkov]
 dispatched_at: 2026-05-18T09:55:00Z
 dispatched_by: lead
-director_auth: 2026-05-18 chat — "go with your recomendations" (post Amendment §0 + §0.8 Path A presentation; ratifies §0 schema + Path A skip-and-log)
-trigger_class: HIGH (cross-file state propagation + new git-hook surface + 8-matter migration + nightly cron on Mac Mini; mandatory 4-gate review per SKILL.md §"Code-reviewer 2nd-pass Protocol")
-ratified_amendments:
-  - amendment_section: "§0 template-schema"
-    author: AH1
-    commit: 446cacb
-    director_ratified: 2026-05-18
-  - amendment_section: "§0.8 Path A (accept Tier-3 skips as drift signal)"
-    director_ratified: 2026-05-18
-prior_brief_complete: |
-  GROK_API_HARDENING_1 shipped + merged as PR #217 → 468965a on 2026-05-18.
-  Mailbox slot reclaimed for this dispatch.
-estimated_time: ~8 builder-days
+director_auth: 2026-05-18 chat — "go with your recomendations" (§0 + §0.8 Path A)
+trigger_class: HIGH (cross-file state propagation + new git-hook surface + 8-matter migration + nightly cron)
+pr: https://github.com/vallen300-bit/baker-vault/pull/96
+merge_commit: e289ff482c74de043d339c07119b403f0f9689b5
+merged_at: 2026-05-18T13:19:53Z
+merged_by: ai-head-1 (AH1, lead)
+rounds:
+  - round: 1
+    head: d8d99bb
+    findings: 2 CRITICAL false-alarm + 7 HIGH + 3 MEDIUM + 3 LOW (gate 4 + gate 3 + deputy)
+  - round: 2
+    head: fc6c33c
+    findings: 1 HIGH (LaunchAgent plist EnvironmentVariables) + 1 LOW (README test count)
+gate_chain:
+  gate_1_ah2_static: PASS-WITH-NITS (deputy #420)
+  gate_2_security_review: PASS-NO_FINDINGS (deputy #420)
+  gate_3_picker_architect: PASS-WITH-NITS (1 MEDIUM deferred to STATE_RECONCILER_2)
+  gate_4_2nd_pass_code_reviewer: PASS-WITH-NITS (round-2 re-fire after C1/C2 false-alarm rebuttal)
+tests: 45 passed (target 28; bumped through §0.5 + round-1 + round-2 folds)
+deferred_to_state_reconciler_2:
+  - schema_version regex re-application cleanup (gate 3 M2)
+  - STATE_RECONCILER_SKIP audit trail (gate 3 M5)
+  - reconcile_matter post-write error path (gate 3 re-fire M)
+post_merge_tier_b:
+  - Mac Mini LaunchAgent install (cp plist to ~/Library/LaunchAgents/, mkdir ~/Library/Application Support/baker + ~/Library/Logs/baker, cp bus_post.sh, launchctl load -w + kickstart smoke)
 ---
 
-# Dispatch: STATE_RECONCILER_1
+# Mailbox COMPLETE — STATE_RECONCILER_1
 
-B3 — full brief at `briefs/BRIEF_STATE_RECONCILER_1.md` (commit `446cacb`).
-
-**TL;DR:** Phase 1 of the state-architecture rebuild. Build the cortex-config reconciler that auto-regenerates the "recent ratifications" auto-region of 8 matter cortex-configs from `curated/06_decisions_log.md`. Fires on pre-commit + nightly cron. Closes the Aukera-25-day-stale class of drift incidents.
-
-## Working repo
-
-**baker-vault**, NOT baker-master. Code lives in `~/baker-vault/_ops/reconciler/`; hooks in `~/baker-vault/.githooks/`; tests in `~/baker-vault/tests/test_state_reconciler.py`. Use existing clone at `~/bm-b3-baker-vault` if present; otherwise fresh-clone `https://github.com/vallen300-bit/baker-vault` to a worktree.
-
-## Director-ratified amendments to read FIRST
-
-1. **§0 template-schema** (commit `446cacb`) — the authoritative contract for region format, body grammar, frontmatter contract, sort+cap, schema-version rules, hook/cron identity. If §0 and Step 3 code disagree, §0 wins; surface to lead via mailbox UPDATE before opening PR.
-
-2. **§0.5 revised decision parser** — two-tier ID format (`D-NNN` and `DN`); three-tier date extraction (heading paren → body fallback → skip-and-log). The original Step 3 single-regex is retained as reference but SHALL NOT be implemented as-is.
-
-3. **§0.8 Path A ratified** — accept Tier-3 un-parseable skips as drift signal. Do NOT pre-canonicalize decision-log headings. Survey pass in Step 2 still runs (read-only diagnostic for the Director-facing migration paste-block).
-
-## Ship gate (literal)
-
-1. `pytest tests/test_state_reconciler.py -v` shows **28 passed** (was 22; six new `TestDecisionParsing` cases added by §0.5).
-2. Dry-run on actual 8 matters returns zero `error_*` statuses (Step §Verification).
-3. Step 2 migration diff paste-block surfaced to lead BEFORE B3 stages the migration commit (Director ratifies migration shape).
-4. Survey output `/tmp/state_reconciler_survey.md` attached to ship report.
-5. Pre-commit hook synthetic verification (Step §Verification "D-999 fold → cortex-config auto-updates") captured in ship report.
-
-## Reporting
-
-- Bus-post **`lead`** (per `dispatched_by:` field) on PR open with topic `pr-open/state-reconciler-1`.
-- AH1 fires the full 4-gate chain (cross-lane static + `/security-review` + picker-architect + `feature-dev:code-reviewer` 2nd-pass) per HIGH trigger class.
-- LaunchAgent install on Mac Mini is **AH1 Tier-B**, post-merge — not B3's lane.
-
-## Anchors
-
-- 2026-05-17 mapping session (Director + AH1 6-Q ratification).
-- 2026-05-18 Director — "go with your recomendations" (ratifies §0 + §0.8 Path A).
-- AID delegation withdrawn 2026-05-18 (bus #389) — template-schema authored inline by AH1.
-- Engineering audit `_ops/reviews/2026-05-17-ah1-engineering-audit-aid-state-architecture-note.md`.
+PR #96 merged `e289ff4`. b3 idle. Phase 1 reconciler shipped; first nightly fire scheduled 02:30 UTC tomorrow once Mac Mini LaunchAgent installed (AH1 Tier-B post-merge action).
