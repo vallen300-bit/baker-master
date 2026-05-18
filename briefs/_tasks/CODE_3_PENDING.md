@@ -1,5 +1,5 @@
 ---
-status: PENDING
+status: COMPLETE
 brief: briefs/BRIEF_GROK_API_HARDENING_1.md
 brief_id: GROK_API_HARDENING_1
 target_branch: b3/grok-api-hardening-1
@@ -9,6 +9,10 @@ dispatched_at: 2026-05-17T20:05:00Z
 dispatched_by: lead
 director_auth: 2026-05-17 chat — "ratified" (post GROK_API_HARDENING_1 brief review + recommendation)
 trigger_class: MEDIUM (DB schema change via CHECK constraint → 2nd-pass code-reviewer MANDATORY per SKILL.md trigger #2)
+merged_pr: 217
+merged_commit: 468965a
+merged_at: 2026-05-18T08:47:04Z
+amendment_commit: b2c3c23 (3 folds closed per bus #384)
 prior_brief_complete: |
   RENDER_ENV_WRITE_GUARD_1 shipped as PR #216 (merge_commit ee61271,
   2026-05-17). This dispatch overwrites the mailbox slot with the new brief.
