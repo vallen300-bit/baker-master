@@ -1,64 +1,52 @@
 ---
 status: COMPLETE
-completed_at: 2026-05-12T20:30:00+00:00
-pr: 191
-pr_url: https://github.com/vallen300-bit/baker-master/pull/191
-brief: inline
-trigger_class: TIER_B_DAEMON_PARSER_LOGIC
-dispatched_at: 2026-05-13
-dispatched_by: ai-head-1 (AH1)
-target: b3
-director_ratification: Director 2026-05-13 "sent dispatch by bus to all the workers to deal with all of the issues step by step"
-priority: P2
-phase: 1 of 1
-expected_pr_count: 1 (baker-master)
-expected_branch: b3/forge-daemon-frontmatter-status-authoritative-1
-expected_complexity: low (~30-45 min including Case F fixture)
-mandatory_2nd_pass: FALSE
-hard_ship_gate: literal `bash tests/test_forge_snapshot_push.sh` GREEN (all existing cases + new Case F + new frontmatter-status case) pasted in PR description
-gates_required:
-  - AH2 /security-review
-  - picker-architect
-last_heartbeat: null
-heartbeat_cadence: 12h max
+brief: briefs/BRIEF_STATE_RECONCILER_2.md
+brief_id: STATE_RECONCILER_2
+target_repo: baker-vault
+matter_slug: baker-internal
+cross_matter_usage: [mrci, aukera, lilienmatt, capital-call, annaberg, mo-vie-am, hagenauer-rg7, oskolkov]
+dispatched_at: 2026-05-18T14:05:00Z
+dispatched_by: lead
+director_auth: 2026-05-18 chat — "go" (drafts STATE_RECONCILER_2 follow-up; pre-itemized deferrals from STATE_RECONCILER_1)
+trigger_class: LOW
+pr: https://github.com/vallen300-bit/baker-vault/pull/98
+pr_head_sha: 9c8dc82
+pr_opened_at: 2026-05-18T14:33:00Z
+merge_commit: 87b23c0
+merged_at: 2026-05-18T14:50:00Z
+merged_by: ai-head-1 (AH1, lead)
+tests_passed: 54
+gate_chain:
+  gate_1_ah2_static: PASS-WITH-NITS (deputy #445)
+  gate_2_security_review: PASS-NO_FINDINGS (deputy #445)
+  gate_3_picker_architect: NOT_REQUIRED (LOW trigger class)
+  gate_4_2nd_pass_code_reviewer: NOT_REQUIRED (LOW trigger class)
+rounds:
+  - round: 1
+    head: 9c8dc82
+    findings: 2 LOW non-blocking nits (deferred as future micro-cleanup)
+deferred_to_future_microcleanup:
+  - F1 — replace new_fm.find() with new_fm.index() for fail-loud on the (structurally unreachable) -1 case
+  - F3 — add shell-level test for error_io_postwrite classifier branch in nightly_cron.sh (Python contract covered)
+predecessor:
+  brief: STATE_RECONCILER_1
+  pr_main: 96
+  merge_commit_main: e289ff4
+  pr_followup: 97
+  merge_commit_followup: 6ef117e
+items_shipped:
+  - F1: schema_version regex re-application cleanup in update_frontmatter
+  - F2: STATE_RECONCILER_SKIP bypass audit trail (JSONL + nightly cron surfacer + .gitignore)
+  - F3: reconcile_matter post-write error path (error_io_postwrite symmetric to error_io_read)
+bus_thread:
+  dispatch: 439
+  ship: 441
+  review_request: 442
+  verdict: 445
+  merge_b3: 446
+  ack_deputy: 447
 ---
 
-# CODE_3_PENDING — FORGE_DAEMON_FRONTMATTER_STATUS_AUTHORITATIVE_1 — 2026-05-13
+# Mailbox COMPLETE — STATE_RECONCILER_2
 
-**Repo:** baker-master (`~/bm-b3`)
-**Branch:** `b3/forge-daemon-frontmatter-status-authoritative-1`
-**Base SHA:** `git pull --ff-only origin main` first (current main = 948af22 or newer; includes your prior BRISEN_LAB_CARD_STATE_FIX_1 ship)
-
-## Problem (two folded items)
-
-### #1 — Parser: frontmatter `status:` field as authoritative
-
-Today the forge daemon (`~/Library/Application Support/baker/forge_snapshot_push.sh` — source in repo) classifies mailbox state purely by filename suffix (`_PENDING` / `_COMPLETE` / `_DROPPED`).
-
-**Drift caught 2026-05-12 eve:** b4's `CODE_4_PENDING.md` had frontmatter `status: STAGED` (Director-ratified pivot 2026-05-11) but filename was still `_PENDING` → daemon reported pending → red card lied. Rectified manually by renaming to `_DROPPED`.
-
-**Fix:** read frontmatter `status:` and treat as authoritative when present; fallback to filename pattern when no frontmatter or no `status:` key.
-
-### #2 — Test fixture for daemon Case F (complete-in-one-clone, empty-in-other)
-
-`tests/test_forge_snapshot_push.sh` is missing a case that covers `pick_active_clone` scoring when one clone has a COMPLETE mailbox and a sibling clone is empty. This is the bug AH1 hotfixed at `f5012a9` after Director observed oscillation post-merge. The fix is in place; the test isn't.
-
-**Fix:** add Case F to `tests/test_forge_snapshot_push.sh`. Two-clone setup: clone-A has `CODE_X_COMPLETE.md`, clone-B is empty. Assert `pick_active_clone` returns clone-A (score 50 > 0).
-
-## Acceptance criteria
-
-1. Parser reads frontmatter `status:` when present; treats as authoritative; falls back to filename pattern otherwise.
-2. Mapping: frontmatter `status: STAGED` / `DROPPED` / `IN_PROGRESS` / `PENDING` / `COMPLETE` map to daemon classifications (decide sensibly — `STAGED` and `DROPPED` should NOT show as pending/red).
-3. Case F added to `tests/test_forge_snapshot_push.sh`; passes pre + post.
-4. New test case added covering frontmatter-status authority (assert: filename `_PENDING` + frontmatter `status: DROPPED` → daemon classifies as DROPPED, not PENDING).
-5. No regression on existing 5 cases.
-
-## Ship gate
-
-Literal `bash tests/test_forge_snapshot_push.sh` exit-0 output (all cases PASS, including new Case F + frontmatter-status case) pasted in PR description.
-
-## Bus-post on ship
-
-```
-BAKER_ROLE=b3 ~/Desktop/baker-code/scripts/bus_post.sh lead "SHIP: FORGE_DAEMON_FRONTMATTER_STATUS_AUTHORITATIVE_1 — PR #<N> open. Frontmatter status authoritative; Case F fixture added. Ship gate: forge_snapshot_push tests all PASS." ship/forge-daemon-frontmatter-status-authoritative-1
-```
+PR #98 merged baker-vault `87b23c0` at 2026-05-18T14:50Z. 4-step dispatch → ship → gate → merge cycle cleared in ~45 minutes (dispatch 14:05Z → merge 14:50Z). 54 tests green; live dry-run 8 matters all noop_identical. Two LOW nits captured as future micro-cleanup, neither blocking. b3 stand down.
