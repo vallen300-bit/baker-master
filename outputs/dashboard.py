@@ -13,14 +13,14 @@ import os
 import tempfile
 import threading
 import time
-from datetime import datetime, timezone
+from datetime import date, datetime, timezone
 from pathlib import Path
-from typing import Optional
+from typing import Literal, Optional
 
 import anthropic
 from fastapi import BackgroundTasks, Body, Depends, FastAPI, File, Form, Header, HTTPException, Query, Request, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, StreamingResponse
+from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, PlainTextResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
@@ -992,6 +992,100 @@ async def whatsapp_backfill_endpoint(
         except Exception as e:
             logger.error(f"WhatsApp backfill endpoint failed: {e}")
             return {"status": "error", "message": str(e)}
+
+
+def _format_wa_md(messages: list[dict]) -> str:
+    """Render WhatsApp messages as oldest-first markdown thread."""
+    lines = []
+    for m in messages:
+        ts = m.get("timestamp")
+        if isinstance(ts, datetime):
+            ts_fmt = ts.strftime("%Y-%m-%d %H:%M UTC")
+        elif isinstance(ts, str) and ts:
+            try:
+                ts_fmt = datetime.fromisoformat(ts.replace("Z", "+00:00")).strftime("%Y-%m-%d %H:%M UTC")
+            except ValueError:
+                ts_fmt = ts
+        else:
+            ts_fmt = "?"
+        name = m.get("sender_name") or m.get("sender") or "Unknown"
+        lines.append(f"**[{ts_fmt}] {name}**\n{m.get('full_text') or ''}\n")
+    return "\n".join(lines)
+
+
+@app.get("/api/whatsapp/messages", tags=["whatsapp"], dependencies=[Depends(verify_api_key)])
+async def whatsapp_messages_endpoint(
+    contact: str = Query(..., min_length=1, description="Match on sender_name ILIKE or chat_id substring"),
+    from_date: date = Query(..., alias="from", description="Inclusive lower bound (YYYY-MM-DD)"),
+    to_date: date = Query(..., alias="to", description="Inclusive upper bound (YYYY-MM-DD)"),
+    limit: int = Query(200, ge=1, le=1000),
+    fmt: Literal["json", "md"] = Query("json", alias="format"),
+):
+    """Read-only WhatsApp message pull for desk consumption.
+
+    Matches sender_name OR chat_id via ILIKE %contact%, timestamp inclusive
+    between `from` and `to` (end-of-day on `to`). Returns oldest-first.
+
+    has_media derives from `media_dropbox_path IS NOT NULL` (the canonical
+    media-presence flag per `_ensure_whatsapp_messages_table`; the brief's
+    reference to `media_path` is stale).
+    """
+    store = _get_store()
+    conn = store._get_conn()
+    if not conn:
+        logger.error("WhatsApp messages endpoint: no DB connection")
+        return {"status": "error", "message": "database unavailable"}
+
+    raw_messages: list[dict] = []
+    try:
+        cur = conn.cursor()
+        cur.execute(
+            """
+            SELECT id, timestamp, sender, sender_name, chat_id, full_text,
+                   (media_dropbox_path IS NOT NULL) AS has_media
+            FROM whatsapp_messages
+            WHERE (sender_name ILIKE %s OR chat_id ILIKE %s)
+              AND timestamp >= %s
+              AND timestamp < %s::date + INTERVAL '1 day'
+            ORDER BY timestamp ASC
+            LIMIT %s
+            """,
+            (f"%{contact}%", f"%{contact}%", from_date, to_date, limit),
+        )
+        cols = [d[0] for d in cur.description]
+        for row in cur.fetchall():
+            raw_messages.append(dict(zip(cols, row)))
+        cur.close()
+    except Exception as e:
+        conn.rollback()
+        logger.error(f"WhatsApp messages endpoint failed: {e}")
+        store._put_conn(conn)
+        return {"status": "error", "message": str(e)}
+    store._put_conn(conn)
+
+    if fmt == "md":
+        return PlainTextResponse(content=_format_wa_md(raw_messages))
+
+    messages = []
+    for m in raw_messages:
+        ts = m.get("timestamp")
+        messages.append({
+            "id": m.get("id"),
+            "timestamp": ts.isoformat() if isinstance(ts, datetime) else ts,
+            "sender": m.get("sender"),
+            "sender_name": m.get("sender_name"),
+            "chat_id": m.get("chat_id"),
+            "full_text": m.get("full_text"),
+            "has_media": bool(m.get("has_media")),
+        })
+    return {
+        "status": "ok",
+        "contact": contact,
+        "from": from_date.isoformat(),
+        "to": to_date.isoformat(),
+        "count": len(messages),
+        "messages": messages,
+    }
 
 
 @app.post("/api/contacts/enrich", tags=["contacts"], dependencies=[Depends(verify_api_key)])
