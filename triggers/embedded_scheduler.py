@@ -287,6 +287,19 @@ def _register_jobs(scheduler: BackgroundScheduler):
     )
     logger.info(f"Registered: daily_briefing (at {config.triggers.daily_briefing_hour:02d}:00 UTC)")
 
+    # STALE_CYCLE_NUDGE_SENTINEL_1: daily 07:00 UTC stale tier_b_pending nudge.
+    # Lands after daily_briefing (06:00 UTC) + wiki_lint (06:30 UTC) so the
+    # morning brief surface is rendered first, and before 09:00 CET workday
+    # start so any new ClickUp tasks appear on Director's board on arrival.
+    from triggers.stale_cycle_nudge_sentinel import run_stale_cycle_nudge_sentinel
+    scheduler.add_job(
+        run_stale_cycle_nudge_sentinel,
+        CronTrigger(hour=7, minute=0, timezone="UTC"),
+        id="stale_cycle_nudge", name="Stale tier_b_pending cycle nudge",
+        coalesce=True, max_instances=1, replace_existing=True,
+    )
+    logger.info("Registered: stale_cycle_nudge (daily 07:00 UTC)")
+
     # Wiki lint — daily 06:30 UTC (before morning brief) (CORTEX-PHASE-3)
     scheduler.add_job(
         _run_wiki_lint,

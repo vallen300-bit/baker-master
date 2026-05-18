@@ -1,5 +1,8 @@
 ---
-status: PENDING
+status: CLAIMED
+claimed_at: 2026-05-18T15:05:00Z
+claimed_by: b4
+last_heartbeat: 2026-05-18T15:05:00Z
 brief: briefs/BRIEF_STALE_CYCLE_NUDGE_SENTINEL_1.md
 brief_id: STALE_CYCLE_NUDGE_SENTINEL_1
 target_repo: baker-master
