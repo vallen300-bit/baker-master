@@ -1,5 +1,12 @@
 ---
-status: PENDING
+status: SHIPPED_AWAITING_GATES
+claimed_at: 2026-05-18T14:55:30Z
+claimed_by: b3
+pr: https://github.com/vallen300-bit/baker-master/pull/220
+head_sha: 72a9edd
+pr_opened_at: 2026-05-18T15:08:00Z
+bus_ship_msg_id: 452
+tests_passed: 7
 brief: briefs/BRIEF_BAKER_CORTEX_BUS_HEARTBEAT_1.md
 brief_id: BAKER_CORTEX_BUS_HEARTBEAT_1
 target_repo: baker-master
