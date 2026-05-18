@@ -73,10 +73,17 @@ async def _post_to_brisen_lab_bus(
     *,
     topic: str,
     body: str,
-    kind: str,
     cycle: "CortexCycle",
 ) -> None:
-    """Internal: POST a single envelope to brisen-lab /msg/. Never raises.
+    """Internal: POST a single envelope to brisen-lab /msg/{recipient}. Never raises.
+
+    Canonical wire contract (per `~/Desktop/baker-code/scripts/bus_post.sh`):
+    - URL: POST {base}/msg/{recipient}  (recipient slug in path; we always
+      target `lead` since Cortex broadcasts upward to the orchestrator)
+    - Body: {"kind": "dispatch", "body": <text>, "to": [<recipient>],
+            "tier_required": "B", "topic": <topic>}
+    - Sender is derived from the X-Terminal-Key auth header; no
+      `from_terminal` field on the wire.
 
     Skipped when BRISEN_LAB_TERMINAL_KEY_CORTEX env var is missing (logs warn
     + returns). 5s timeout via httpx.AsyncClient. Any exception path
@@ -93,13 +100,14 @@ async def _post_to_brisen_lab_bus(
             },
         )
         return
-    url = os.getenv("BRISEN_LAB_URL", "https://brisen-lab.onrender.com").rstrip("/") + "/msg/"
+    base = os.getenv("BRISEN_LAB_URL", "https://brisen-lab.onrender.com").rstrip("/")
+    url = f"{base}/msg/lead"
     payload = {
-        "from_terminal": "cortex",
-        "to_terminals": ["lead"],
-        "topic": topic,
-        "kind": kind,
+        "kind": "dispatch",
         "body": body,
+        "to": ["lead"],
+        "tier_required": "B",
+        "topic": topic,
     }
     try:
         import httpx
@@ -140,7 +148,7 @@ async def _emit_cortex_heartbeat(
         f"cycle_id={cycle.cycle_id} matter={cycle.matter_slug} "
         f"phase={phase} status={status}"
     )
-    await _post_to_brisen_lab_bus(topic=topic, body=body, kind="heartbeat", cycle=cycle)
+    await _post_to_brisen_lab_bus(topic=topic, body=body, cycle=cycle)
 
 
 async def _emit_cortex_ratify_required(cycle: "CortexCycle") -> None:
@@ -158,7 +166,7 @@ async def _emit_cortex_ratify_required(cycle: "CortexCycle") -> None:
         f"cycle_id={cycle.cycle_id} matter={cycle.matter_slug} "
         f"proposal_summary={short_summary}"
     )
-    await _post_to_brisen_lab_bus(topic=topic, body=body, kind="ratify-required", cycle=cycle)
+    await _post_to_brisen_lab_bus(topic=topic, body=body, cycle=cycle)
 
 
 async def _safe_emit_heartbeat(cycle: "CortexCycle", phase: str, status: str) -> None:
