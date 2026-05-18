@@ -8,12 +8,14 @@ Three drift scars in two weeks (2026-05-10 stale tracker labels, 2026-05-15 Auke
 
 **Companion brief:** BRIEF_STATE_FILE_REFRESH_1 (Option B bridge audit) ships in parallel, covers the 3-4 week build window. Rescoped to a narrower audit role once this brief ships clean.
 
-## Estimated time: ~7 builder-days
+**Template-schema delegation withdrawn 2026-05-18.** Original Q3 ratification had AID drafting the template-schema in his library. Director ratified withdrawal (bus #389) per captured rule "AID library-doc edits are still AID engineering when edits are implementation specs". **AH1 now authors the template-schema directly as Amendment §0 below**, folding the engineering audit findings (`_ops/reviews/2026-05-17-ah1-engineering-audit-aid-state-architecture-note.md`) plus two further self-audit findings against real decision-log data (D-id format variance; date format variance). The §0 amendment supersedes the old "Step 0: AID template-schema draft (BLOCKING precondition)" gate.
+
+## Estimated time: ~7-8 builder-days
 ## Complexity: Medium-High
 ## Prerequisites
-- BRIEF_STATE_FILE_REFRESH_1 ratified + ideally dispatched (parallel-buildable, no code conflict).
+- BRIEF_STATE_FILE_REFRESH_1 shipped (it did — PR #212 merged 11c0b18 on 2026-05-17; nightly first fire 2026-05-18 06:00 UTC).
 - Director ratification of the agent-writable-region delimiter convention as a fleet-wide pattern (per Q6 mapping session 2026-05-17). The pattern decided once here is reused in Phases 2-4.
-- AID drafts template schema for the auto-region (Q3 ratified ownership: AID design → AH1 architect → B-code build → Director ratifies output before cutover). AID's template draft must land before B-code starts Phase 1 build. **Block scheduling: do not dispatch this brief to B-code until AID's template-schema draft is in baker-vault `wiki/_ai-it/aid-t/library/state-reconciler-template-schema-cortex-config.md` and AH1 has engineering-audited it.**
+- Template-schema authored inline (Amendment §0 below). AH1 self-audited; no AID handoff required.
 
 ## API version / deprecation / fallback
 - **No external API calls.** Internal filesystem + git operations only.
@@ -73,18 +75,165 @@ Reconciler triggers (per Q1 mapping ratified C — both):
 
 ---
 
+## Amendment §0 — Template-schema (AH1-authored 2026-05-18)
+
+> **Authorship + audit chain:** AH1 authored 2026-05-18 after Director-ratified withdrawal of AID delegation (bus #389). Self-audited against actual decision-log data in 8 Phase 1 matters (mrci, aukera, lilienmatt, capital-call, annaberg, mo-vie-am, hagenauer-rg7, oskolkov). Self-audit surfaced two engineering findings (A1 + A2 below) that REVISE Step 3 implementation; the rest of Step 3 stands. Skepticism rule applied to AH1's own output: this amendment is dispatched to AH2 cross-lane and reviewed under the same standard AID would have faced.
+
+### §0.1 — Region marker syntax (canonical, v1)
+
+Single AUTO-GENERATED region per cortex-config file in Phase 1. Region name: `recent-ratifications`. Marker form (line-anchored):
+
+```
+<!-- AUTO-GENERATED-START: recent-ratifications schema=v1 -->
+<inner body — see §0.3>
+<!-- AUTO-GENERATED-END: recent-ratifications -->
+```
+
+Position in the matter cortex-config file: inserted immediately after the first `# <H1 title>` line (after one blank line). Migration in Step 2 places it there once; reconciler thereafter never moves it.
+
+**HTML-comment markers chosen over alternatives** (YAML block, Markdown fences) because: (a) invisible in rendered Markdown for Obsidian / Director eyeball view, (b) survive copy-paste, (c) line-anchored regex finds them reliably without confusion with code fences in surrounding hand-curated content.
+
+### §0.2 — Frontmatter contract (what reconciler may touch)
+
+| Field | Reconciler action | On absence |
+|---|---|---|
+| `updated:` | OVERWRITE with today's UTC date (`'YYYY-MM-DD'`, single-quoted) | exit 1 (Phase 1 invariant — file must have `updated:`) |
+| `schema_version:` | INSERT `v1` if absent; preserve if present | n/a (idempotent) |
+| All others (`slug`, `severity_floor`, `default_specialists`, `cycle_timeout_seconds`, `specialist_cap_per_cycle`, `last_curated_at`, ad-hoc Director-tuned keys) | PRESERVE BYTE-FOR-BYTE | n/a — reconciler never reads, only writes the two fields above |
+
+Implementation MUST use surgical line-replacement (anchored regex per field), NOT `yaml.safe_load` + `yaml.safe_dump` round-trip — round-trip reformats quoted strings, normalizes dates, drops comments, and produces cosmetic diffs on hand-tuned fields. The byte-for-byte preservation invariant is only deliverable via surgical edits. (Already correctly implemented in Step 3 `_update_frontmatter_updated_field`; this contract codifies the rule.)
+
+### §0.3 — Region body grammar (v1)
+
+```
+## Recent ratifications (auto-generated; do not edit)
+
+- **<id>** (<YYYY-MM-DD>) — <title>
+- **<id>** (<YYYY-MM-DD>) — <title>
+...
+
+(Source: curated/06_decisions_log.md — see `.reconciler-state.json` for last-run timestamp.)
+```
+
+Empty-decisions case (rendered when zero decisions parsed):
+
+```
+## Recent ratifications (auto-generated; do not edit)
+
+_No dated ratifications parsed from 06_decisions_log._
+
+(Source: curated/06_decisions_log.md — see `.reconciler-state.json` for last-run timestamp.)
+```
+
+The render is a **pure function of `decisions: list[Decision]`** — no `datetime.now()`, no live-clock state, no inputs other than the parsed decision list. Last-run timestamp lives ONLY in `.reconciler-state.json` sidecar, not in the rendered body. Test `TestRender::test_render_is_pure` asserts identical bytes from two renders one hour apart.
+
+### §0.4 — Sort + cap
+
+- **Sort:** date DESC primary; on date tie, **numerically-extracted** D-id DESC tiebreak (parse the integer suffix; `D-12` < `D-211` because `12 < 211` — NOT lex sort which would say `D211 < D2` for un-padded data).
+- **Cap:** 8 most recent decisions (`RECENT_RATIFICATIONS_CAP = 8`). Rationale: covers ~last 4-6 weeks of typical ratification cadence; long enough to surface drift, short enough not to dominate the file. Director-tunable post-ship via constant flip in `state_reconciler.py`.
+
+### §0.5 — Decision parser (REVISES Step 3 `_parse_decisions`)
+
+**Self-audit finding A1 (BLOCKER, folded here):** Step 3's `DECISION_HEADING_RE` regex `^##\s+(D-\d+)\s*—\s*(.+?)\s*\((\d{4}-\d{2}-\d{2})\)` requires (a) dashed-padded ID and (b) bare ISO date in parens. Real data violates both — `D-201` vs `D1`, `(2026-04-22)` vs `(Q4 ratified 2026-05-01)` vs `(2026-04-02/03)` vs no date in heading at all (~70% of inspected entries across the 8 matters).
+
+**Revised parser contract (B-code to implement):**
+
+1. **Two heading-ID forms accepted:**
+   - Dashed: `^##\s+D-(\d+)\s*[—–-]\s*` (aukera/oskolkov style)
+   - Undashed: `^##\s+D(\d+)\s*[—–-]\s*` (annaberg/mo-vie-am style)
+   - Strikethrough prefix (e.g. `## ~~D3 — title~~ — SUPERSEDED`) NOT accepted — superseded decisions are excluded from the auto-region by design (they're historical, not "recent ratifications").
+
+2. **Date extraction with three-tier fallback:**
+   - **Tier 1 (preferred):** ISO date `\d{4}-\d{2}-\d{2}` anywhere inside the FIRST parenthetical group of the H2 heading line. Examples that MATCH: `(2026-04-22)`, `(Q4 ratified 2026-05-01)`, `(2026-05-02 Q3.5b)`. Examples that do NOT match: `(2026-04-02/03)` (range), no parens at all.
+   - **Tier 2 (fallback):** Scan body of the decision (lines between this H2 and the next H2) for the first ISO date `\d{4}-\d{2}-\d{2}` — typically embedded in `**Decision (Director T1, 2026-04-28):**` patterns. Maximum scan: 20 body lines (cap to bound parse cost; decision bodies vary 5-40 lines).
+   - **Tier 3 (no date found):** SKIP decision from rendering AND emit a structured log entry `parser_skip:{slug}:{id}:no_date_found`. Layer C audit (BRIEF_STATE_FILE_REFRESH_1) reads this log on next nightly fire and surfaces the count to drift-sentinel ClickUp task — Director sees "N decisions un-parseable" and can patch decision-log headings.
+
+3. **Title extraction:** content between em-dash (`—`, `–`, or `-`) after the ID and the FIRST opening paren `(`, OR end of line if no paren. Strip trailing whitespace. Truncate at 100 chars with ellipsis for render safety.
+
+**Why Tier 1+2 not just strict Tier 1:** strict Tier 1 would surface 0 decisions for 6 of the 8 Phase 1 matters and 2 of 10 for aukera/oskolkov — the auto-region would render empty placeholders almost everywhere. Tier 2 body-fallback recovers ~60-80% of real data (sampled from aukera + annaberg + mo-vie-am inspection). Remaining un-parseable entries (Tier 3 skips) become a *signal* the audit layer surfaces — exactly the drift-detection purpose of this whole brief.
+
+**Test additions (added to Step 6 `TestDecisionParsing`):**
+- `test_dashed_id_format` (aukera-shape input)
+- `test_undashed_id_format` (annaberg-shape input)
+- `test_date_in_first_paren_q_prefix` (`(Q4 ratified 2026-05-01)` → date extracted)
+- `test_date_in_body_fallback` (no date in H2, ISO date on `**Decision (... 2026-04-28):**` line in body)
+- `test_strikethrough_heading_excluded` (`## ~~D3 — title~~ — SUPERSEDED` → not in output)
+- `test_date_range_in_heading_no_match` (`(2026-04-02/03)` → Tier 1 fails, body fallback tried)
+- `test_unparseable_decision_skipped_and_logged` (no date anywhere → skipped + log entry emitted)
+
+Test count revision: **22 → 28 tests** (six new cases in `TestDecisionParsing` + existing classes). Ship gate becomes literal `pytest` showing 28 passed.
+
+### §0.6 — Schema-version upgrade rules
+
+- Phase 1 ships `schema=v1`. Reconciler refuses to write to a region marked `schema=vN` where `N > MAX_SUPPORTED`. Currently `MAX_SUPPORTED = 1`. Out-of-range emits structured error `error_schema_too_new` per matter.
+- Phase 2+ adds new schemas (`v2` for cycle register, etc.). When a v2 schema lands AND backward-compatible, the reconciler may re-render `v1` regions under `v2` markers automatically. NON-backward-compatible schema bumps require explicit migration step + Director ratification (same pattern as DB migrations).
+- Files predating Phase 1 (no `schema_version` in frontmatter, no markers in body) are NOT touched by reconciler — migration step adds the markers + version BEFORE reconciler ever sees the file (Step 2).
+
+### §0.7 — Hook identity / cron identity contract (folds engineering audit Finding 5)
+
+| Surface | Git identity | Cascade-back-prop hook fires? |
+|---|---|---|
+| Pre-commit reconciler hook (in-commit regeneration) | **Inherits committer's identity** (Baker PL / AH / B-code / Director — whoever ran `git commit`) | YES — runs at commit-msg; reads full staged set including reconciler-added cortex-config |
+| Nightly cron reconciler (Mac Mini, 02:30 UTC) | **Distinct fixed identity** `Baker State Reconciler <noreply@brisengroup.com>` (see Step 5 `nightly_cron.sh`) | NO — cron commit message includes `Cascade-backprop-exempt: nightly auto-reconciliation (not a Director ratification)` per cascade-back-prop bypass mechanism |
+
+Rationale: pre-commit identity stays inherited so audit trail attributes the actual ratification author. Cron-side gets a distinct synthetic identity so `git log --author='Baker State Reconciler'` cleanly isolates cron activity from human activity for debugging + drift-sentinel filtering.
+
+### §0.8 — Step 2 migration scope expansion (folds finding A2)
+
+**Self-audit finding A2 (MEDIUM, folded here):** Step 2's migration script as written assumes decision-log headings are already in the canonical `D-NNN (YYYY-MM-DD)` form. Real data shows ~6 of 8 matters use undashed `D1`/`D2` IDs and ~70% of headings lack ISO dates in parens. Without addressing this, Phase 1 ships with most matters rendering near-empty auto-regions on first migration.
+
+**Revised migration in Step 2 (per B-code):**
+
+The migration script also performs a **READ-ONLY survey pass** (no writes) BEFORE running the reconciler on the 8 matters:
+
+```python
+def survey_decision_logs(vault_root: Path) -> dict:
+    """For each of 8 Phase 1 matters, parse the decisions log with the §0.5
+    revised parser and report: (a) total D-headings found, (b) Tier 1 date
+    hits, (c) Tier 2 body-fallback hits, (d) Tier 3 skips.
+
+    Output is a markdown table written to /tmp/state_reconciler_survey.md
+    for Director review BEFORE the migration commit is staged. If Tier 3
+    skips exceed 20% of any matter's total, B-code surfaces to AH1 via
+    mailbox UPDATE pre-PR — fold heading canonicalization into migration
+    or accept the skip-count.
+    """
+```
+
+**Director decision gate inside migration (Step 2 ratification surface):**
+
+B-code presents the survey + 8 generated diffs to Director (one paste-block via AH1) before committing the migration. Director ratifies one of two paths:
+
+- **Path A (recommended default):** Accept Tier 3 skips as drift-detection signal. Migration commits the 8 cortex-config files as-is; un-parseable decisions render as a single "**See decisions log directly — N entries un-parseable**" line in the auto-region with the parseable subset above. Ships fast, surfaces gaps as signal.
+- **Path B:** Pre-canonicalize 6 affected decision-log files (annaberg, mo-vie-am, mrci, lilienmatt, capital-call, hagenauer-rg7 — survey confirms which) to add ISO dates to headings before migration. Adds ~0.5-1 builder-day; cleaner end-state but the work is hand-curation by AH1 or a desk, not B-code (each decision's true date lives in body context / git history).
+
+**Recommendation: Path A.** Drift-detection IS the point of this brief — leaving the un-parseable signal visible until manually canonicalized is more honest than synthesizing dates from git blame or guessing. Path B can run as a separate cleanup brief post-Phase-1 if Director wants.
+
+### §0.9 — Cap on cap
+
+If a matter has more than `RECENT_RATIFICATIONS_CAP` (=8) parseable decisions in the most recent 30 days, the top 8 by date+id render — older decisions silently drop. This is intentional: the auto-region is "recent ratifications", not the canonical archive (which remains the full 06_decisions_log.md, untouched). Auditors should always cross-read both files.
+
+### §0.10 — Schema spec lock + dispatch gate
+
+This amendment §0 is the **template-schema deliverable** that gated brief dispatch under the original AID-owned plan. With §0 inline + AH1 self-audited + cross-lane AH2 review pending, the brief is dispatch-ready once §0 + the revised Step 6 test plan are Director-ratified.
+
+**Director's ratification surface:** approve §0 + any of §0.8's Path A/B before B-code claims this brief.
+
+**Builder-day delta from amendment:**
+- Step 3 parser revision (§0.5): +0.5d
+- Step 6 test additions (§0.5): +0.5d
+- Step 2 survey pass (§0.8): +0.25d
+- **Revised total: ~8 builder-days** (was 7).
+
+---
+
 ## Implementation
 
-### Step 0: AID template-schema draft (BLOCKING precondition, AID's lane)
+### Step 0: Template-schema (AH1-authored, see Amendment §0 below — was AID's lane, withdrawn 2026-05-18)
 
-AID drafts `wiki/_ai-it/aid-t/library/state-reconciler-template-schema-cortex-config.md` covering:
-- Exact format of the AUTO-GENERATED region (heading, table or bullet structure)
-- Which fields per ratification to pull from 06_decisions_log (D-id, date, title, optional 1-sentence summary)
-- Sort order (newest first; cap at N most recent; what N?)
-- Frontmatter field rules (which fields are auto vs hand)
-- Schema-version bump rules
+Template-schema is now defined inline as **Amendment §0** below. B-code reads §0 + Step 3 code together; the two are a matched pair (§0 is the contract; Step 3 is the implementation). If §0 and Step 3 disagree, §0 wins — flag the disagreement to AH1 via mailbox UPDATE pre-PR.
 
-**AH1 engineering-audits AID's draft, then this brief proceeds to Step 1.** If AID's draft proposes regenerating fields the audit deems hand-curated (severity_floor, etc.), AH1 pushes back per skepticism standing rule.
+**Director ratification of §0 is the gate** that releases this brief for dispatch.
 
 ### Step 1: Delimiter convention + schema-version marker (B-code, ~0.5d)
 
@@ -252,6 +401,12 @@ PHASE_1_RATIFIED_MATTERS: frozenset[str] = frozenset({
 })
 RECENT_RATIFICATIONS_CAP = 8  # AID-template-schema-ratified
 SUPPORTED_SCHEMA_VERSIONS: frozenset[str] = frozenset({"v1"})  # architect 2nd-pass M4 — TODO Phase 2 adds v2 upgrade path
+# NOTE: Amendment §0.5 SUPERSEDES this single regex with a two-tier parser
+# (dashed + undashed IDs, Tier-1 paren-date / Tier-2 body-fallback / Tier-3
+# skip-and-log). The original-Step-3 single-regex below is retained for
+# implementation-reference context only. B-code: implement per §0.5; the
+# single regex below does NOT match ~70% of real decision-log entries and
+# would render near-empty auto-regions for most matters.
 DECISION_HEADING_RE = re.compile(
     r"^##\s+(D-\d+)\s*—\s*(.+?)\s*\((\d{4}-\d{2}-\d{2})\)"
 )
@@ -799,7 +954,7 @@ NEW `tests/test_state_reconciler.py` (lives in baker-vault so tests run with the
 7. **`TestAtomicity`** — concurrent invocations on same matter don't corrupt file (uses `multiprocessing` 2x runner on same target; assert final state is one or the other, never partial).
 8. **`TestMigrationRoundtrip`** (NEW — architect M2) — for each of 8 Phase 1 matters, parse pre-migration cortex-config, run migration script, parse post-migration cortex-config; assert: (a) frontmatter hand-fields preserved byte-for-byte except `updated:` + new `schema_version:`, (b) hand-curated body (outside delimiter region) byte-for-byte equal to pre-migration body. Catches Step 2 regressions deterministically.
 
-**Ship gate: 22 tests pass on literal `pytest` output. Not "by inspection."** (Bumped from 18 to 22 to cover the 4 added test cases per 2nd-pass findings.)
+**Ship gate: 28 tests pass on literal `pytest` output. Not "by inspection."** (Bumped from 18 → 22 in 2nd-pass review; further bumped to 28 in Amendment §0.5 for the six new `TestDecisionParsing` cases covering format variance.)
 
 ### Step 7: Dual-write check (B-code, ~0.5d) — pre-push hook (NOT GitHub Actions)
 
@@ -868,7 +1023,7 @@ cd /Users/dimitry/baker-vault
 pytest tests/test_state_reconciler.py -v
 ```
 
-**Expected: 22 passed.** (Brief writer: 8 test classes per Step 6; ~22 individual test methods. Ship-report MUST include actual pytest output, not "by inspection". 4 of the 22 tests were added in 2nd-pass review — code-rev C2/H1/H3/M2 + architect H2/H4/M2.)
+**Expected: 28 passed.** (8 test classes per Step 6; the 22 from 2nd-pass review + 6 added in Amendment §0.5 for decision-parser format variance. Ship-report MUST include actual pytest output, not "by inspection".)
 
 ### Dry-run on actual 8 matters
 
@@ -931,7 +1086,7 @@ baker-vault (this brief's scope):
 - **NEW** `.githooks/state_reconciler_pre_commit.sh` — pre-commit invocation (env-var bypass)
 - **MODIFY** `.githooks/pre-commit` (or create) — wire reconciler in
 - **NEW** `.githooks/pre-push` (or extend) — dry-run drift warning
-- **NEW** `tests/test_state_reconciler.py` — 22 tests across 8 test classes
+- **NEW** `tests/test_state_reconciler.py` — 28 tests across 8 test classes
 - **MODIFY** 8 cortex-config files (migration step — adds delimiters + schema_version; preserves all hand-curated content)
 - **MODIFY** root `README.md` — link to reconciler README
 
@@ -952,7 +1107,7 @@ baker-master: **no changes.** Reconciler lives in baker-vault.
 
 ## Quality Checkpoints
 
-1. Pytest passes literal `18/18` — not "by inspection" (Lesson #8).
+1. Pytest passes literal `28/28` — not "by inspection" (Lesson #8).
 2. Hand-curated content byte-for-byte preserved across reconciliation (tests assert).
 3. Pre-commit hook only fires on relevant staged files (no perf hit on unrelated commits).
 4. Failure modes (malformed delimiters, missing region, frontmatter parse fail) exit 1, block commit, emit human-readable error pointing to the bypass trailer.
@@ -1027,7 +1182,7 @@ Phase 1 establishes the delimiter convention, the reconciler skeleton, the hook/
 
 - [ ] AID template-schema draft committed + AH1 engineering-audited.
 - [ ] Migration commit ratified by Director + landed (8 cortex-config files have delimiters + schema_version, hand-curated content preserved byte-for-byte).
-- [ ] Reconciler module committed, 18 tests green (literal pytest).
+- [ ] Reconciler module committed, 28 tests green (literal pytest).
 - [ ] Pre-commit hook live in `.githooks/`.
 - [ ] Mac Mini LaunchAgent installed (AH1-A1 Tier-B action post-merge).
 - [ ] First nightly fire produces clean run (no error statuses).
