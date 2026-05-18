@@ -1,7 +1,12 @@
 ---
-status: CLAIMED
+status: SHIPPED_AWAITING_GATES
 claimed_at: 2026-05-18T14:25:00Z
 claimed_by: b3
+pr: https://github.com/vallen300-bit/baker-vault/pull/98
+head_sha: 9c8dc82
+pr_opened_at: 2026-05-18T14:33:00Z
+bus_ship_msg_id: 441
+tests_passed: 54
 brief: briefs/BRIEF_STATE_RECONCILER_2.md
 brief_id: STATE_RECONCILER_2
 target_repo: baker-vault
