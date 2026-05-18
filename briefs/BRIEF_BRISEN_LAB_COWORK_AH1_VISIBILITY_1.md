@@ -12,10 +12,10 @@ Result today: `forge_snapshot_push.sh` fires every 30s and gets HTTP 400 for cow
 
 This brief patches the whitelist in 2-3 places so the cowork-ah1 card renders + git/mailbox snapshots accept.
 
-## Estimated time: ~20-30 minutes
-## Complexity: Low
+## Estimated time: ~1-2 hours (revised 2026-05-18 per Path B amendment)
+## Complexity: Medium (was Low; bus.py:997 refactor + renderCoworkCard delete bumped scope)
 ## Working repo: brisen-lab (NOT baker-master)
-## Trigger class: LOW (single-array additions in already-shared TERMINALS lists; no auth/DB schema/external surface change)
+## Trigger class: MEDIUM (was LOW; bus.py refactor + dead-code delete + multi-file coordinated change; still no auth/DB schema/external surface change)
 ## Prerequisites
 - `~/brisen-lab-staging` clone (or fresh clone from `https://github.com/vallen300-bit/brisen-lab` if missing).
 - Existing forge_snapshots DB table accepts arbitrary `terminal_alias` strings (no schema enum constraint to update — verified 2026-05-17 by reading INSERT statement at `app.py:333-348`).
@@ -33,15 +33,33 @@ The AH1 split is operationally live on the bus + bus_post.sh + drain hook + work
 - No UI card for cowork-ah1 — Director can't visually distinguish "AH1-App working" from "AH1-Terminal working."
 - Snapshot pusher's 30s-interval log accumulates harmless HTTP 400 noise.
 
-## Files to update (3 expected; B-code grep + confirm at edit time)
+## Amendment 2026-05-18 — Path B ratified by AH1
 
-1. **`app.py`** — line 40 (or wherever `TERMINALS = [...]` is defined): add `"cowork-ah1"` to the list. Place it between `"lead"` and `"deputy"` to mirror its peer-of-AH1 role.
+B1 surfaced via bus #393 that the brief's assumed repo state was stale. Real state: `cowork-ah1` is ALREADY wired as a SYSTEM_CARD across 6 files (`static/app.js:10`, `static/index.html:39`, `bus.py:896` KNOWN_CARD_SLUGS, `db.py:226`, `lifecycle.py:493`, `tests/conftest.py:83`) with its own `renderCoworkCard()` at `app.js:253` that renders bus-only (no git/mailbox state visible). The true gap is `app.py:40 TERMINALS` rejecting `/api/snapshot` calls for cowork-ah1 (HTTP 400 every 30s) — which means snapshots don't even land in the DB.
 
-2. **`static/app.js`** — line 9 (`const TERMINALS = [...]`): same addition. Same position.
+B1 surfaced three paths. **AH1 ratifies Path B (brief-literal, brief's intent honored):**
 
-3. **`bus.py`** — grep for any TERMINALS-like constant or hardcoded slug list. If present, add `"cowork-ah1"`. If not, skip.
+- ❌ Path A (MINIMUM, app.py:40 only) — snapshots land but cowork-ah1 card stays bus-only. Does NOT deliver the brief's stated goal of git/mailbox visibility for cowork-ah1.
+- ✅ **Path B (BRIEF-LITERAL)** — add `cowork-ah1` to TERMINALS (Python + JS); refactor `_build_terminals_response` cowork-ah1 branch at `bus.py:997` to pull from `forge_snapshots`; let `renderCoworkCard` become dead code (delete in same PR). cowork-ah1 becomes a full terminal card showing both bus AND git/mailbox state — same surface as lead/deputy.
+- ❌ Path C (FULL DEMOTE) — overkill for this scope.
 
-4. **(Optional)** — any test fixture that hardcodes the 6-slug list. Grep `tests/` for `\["lead".*"b4"\]` patterns; update if found. Likely 0-2 files.
+**Scope revision:** LOW → **MEDIUM** trigger class. Estimate revised from 20-30 min → **~1-2h**. Still no auth / DB schema / external surface change; `/security-review` skip-eligible.
+
+## Files to update (B-code grep + confirm at edit time)
+
+1. **`app.py:40`** — `TERMINALS` constant: add `"cowork-ah1"` between `"lead"` and `"deputy"` (peer-of-AH1 position).
+
+2. **`static/app.js:9`** — `const TERMINALS = [...]`: same addition. Same position.
+
+3. **`bus.py:997`** — `_build_terminals_response` cowork-ah1 branch: refactor to pull git/mailbox state from `forge_snapshots` (mirror the `lead`/`deputy`/`b1`-`b4` pattern). Without this refactor, the new terminal card renders empty for cowork-ah1.
+
+4. **`static/app.js:253` `renderCoworkCard()`** — becomes dead code. Delete the function definition + its invocation site at the dispatch layer (`renderForAlias` at `app.js:591` should now fall through to the TERMINALS branch for cowork-ah1).
+
+5. **`static/index.html:39`** — move cowork-ah1 placeholder from `row-system` to `row-supervisors` (alongside lead/deputy) if HTML structure pre-positions cards; otherwise leave for JS to render dynamically.
+
+6. **`bus.py:896` `KNOWN_CARD_SLUGS`** — leave alone (cowork-ah1 stays valid as a card slug; the SYSTEM_CARDS-vs-TERMINALS distinction is in the rendering paths above, not in the slug registry).
+
+7. **Tests** — `tests/conftest.py:83`: update cowork-ah1 to TERMINALS fixture. Grep `tests/` for any hardcoded SYSTEM_CARDS-cowork assumption; update if found.
 
 ## Acceptance criteria
 
