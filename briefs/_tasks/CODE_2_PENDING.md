@@ -1,5 +1,11 @@
 ---
-status: PENDING
+status: COMPLETE
+completed_at: 2026-05-19T22:02:56+00:00
+pr: 227
+pr_url: https://github.com/vallen300-bit/baker-master/pull/227
+merge_sha: 5cb9a3e0
+deploy: cowork-ah1 ran deploy_to_user_global.sh from ~/bm-b2 — clean; 8 hooks + lib/call_validator.py + 2 skills + pack live in ~/.claude/
+ship_anchor_bus: event 572 (cowork-ah1 → b2, 2026-05-19T22:02:56Z)
 brief: ~/baker-vault/_ops/briefs/director-facing-filter-v1_1.md
 brief_id: DIRECTOR_FACING_FILTER_V1_1_PHASE_2
 target_repo: baker-master
