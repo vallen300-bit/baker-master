@@ -1,61 +1,88 @@
 ---
-status: COMPLETE
-pr: https://github.com/vallen300-bit/baker-master/pull/214
-brief: briefs/BRIEF_GROK_API_CAPABILITY_1.md
-brief_id: GROK_API_CAPABILITY_1
-trigger_class: MEDIUM (new external API surface + new MCP tools + new migration; mandatory 2nd-pass review)
-target_branch: b2/grok-api-capability-1
+status: PENDING
+brief: _ops/briefs/BRIEF_UI_SURFACE_PREBRIEF_V2.md (baker-vault)
+brief_id: UI_SURFACE_PREBRIEF_V2
+target_repo: baker-vault
+working_dir: baker-vault clone of B2's choice (no bm-b2-baker-vault worktree exists yet — B2 may use a /tmp clone or set one up; see Pre-requisites)
 matter_slug: baker-internal
-cross_matter_usage: [all-matter-desks]
-dispatched_at: 2026-05-17T11:45:43Z
-dispatched_by: AH1
-merge_commit: 99db952c
-merged_at: 2026-05-17T15:45:41Z
-ship_report: briefs/_reports/B2_GROK_API_CAPABILITY_1_20260517.md
-closeout_ts: 2026-05-18T07:55:00Z
-closeout_by: lead
-closeout_anchor: b2 bus #379 (status/idle) flagged stale PENDING status post-merge; AH1 closed mailbox per b-code-dispatch-coordination.md
-director_auth: 2026-05-17 chat — "Draft the brief now. Send it to B2. By bus. Don't worry about confidentiality. Let's try to use it. See what happens."
-pattern_source: BRIEF_CLAIMSMAX_API_CAPABILITY_1 (commit 3cbc287)
-prior_brief_state: |
-  Mailbox previously held WORKER_SELFWAKE_PHASE_1 in PARKED state (Director directive 2026-05-15).
-  Preserved at briefs/_tasks/CODE_2_PARKED_WORKER_SELFWAKE_20260515.md for future resume.
-  Director authorized override 2026-05-17 ("Send it to B2") — Grok dispatch supersedes mailbox slot.
-hardening_followup: GROK_API_HARDENING_1 dispatched to b3 (branch b3/grok-api-hardening-1, mailbox commit 37b9e9f) 2026-05-17T20:05Z. 5 nits (M1/M3/M4/MED/LOW). Not b2's lane.
+cross_matter_usage: [all-matters] (hook gates brief-authoring across all matter work)
+dispatched_at: 2026-05-19T13:55:00Z
+dispatched_by: lead
+director_auth: 2026-05-19 chat — "ratified"
+trigger_class: LOW-MEDIUM
+gate_chain:
+  gate_1_static: REQUIRED (deputy / AH2 cross-lane)
+  gate_2_security_review: REQUIRED (hook is security-perimeter component — gates agent tool use)
+  gate_3_cross_lane_architecture: NOT required (no auth/DB schema/architecture-affecting changes)
+  gate_4_2nd_pass_code_reviewer: NOT required (no auth/DB schema/operation-ordering per SKILL.md trigger list)
+estimated_effort: 1-2h
+working_branch_suggestion: b2/ui-surface-prebrief-v2-hook
+reply_target: lead (bus topic `ship/ui-surface-prebrief-v2`)
 ---
 
-# Dispatch: GROK_API_CAPABILITY_1
+# CODE_2_PENDING — UI_SURFACE_PREBRIEF_V2 — 2026-05-19
 
-B2 — full brief at `briefs/BRIEF_GROK_API_CAPABILITY_1.md`.
+## Brief
 
-**TL;DR:** Wire xAI Grok Heavy API (`https://api.x.ai/v1`) into Baker as a permanent capability. Three MCP tools: `baker_grok_x_search`, `baker_grok_web_search`, `baker_grok_ask`. Mirror ClaimsMax pattern end-to-end (commit 3cbc287). Auth via `XAI_API_KEY` env var (AH1 provisions before merge). `capability_type='archive'` per ClaimsMax PR #213 C1 lesson.
+`~/baker-vault/_ops/briefs/BRIEF_UI_SURFACE_PREBRIEF_V2.md` (baker-vault repo, commit `c64e46c` 2026-05-19). Read end-to-end before starting — Director Q1+Q2+Q3+Q5 answers baked into the brief; do not re-litigate.
 
-**Pilot framing (Director 2026-05-17):** *"Let's try to use it. See what happens."* Not high-stakes — goal is to learn what Grok delivers in our context. Don't gold-plate. Mirror ClaimsMax structure and ship.
+## Target repo + working branch
 
-**Working dir:** `~/bm-b2`
-**Branch:** `b2/grok-api-capability-1` off `main`
-**Estimated touch:** ~6 files, ~400 LOC including tests + migration.
-**Trigger class:** MEDIUM (mandatory 2nd-pass review per gate protocol — `/security-review` + `feature-dev:code-reviewer` 2nd-pass).
+- **Repo:** baker-vault.
+- **Branch:** `b2/ui-surface-prebrief-v2-hook` cut from baker-vault `main` after `git pull --ff-only origin main`.
+- **Working dir options (B2 picks):**
+  1. Use `~/baker-vault` directly (shared FS — apply branch isolation per 2026-04-30 shared-FS race lesson; avoid concurrent agent edits).
+  2. Create `~/bm-b2-baker-vault` worktree: `git worktree add ~/bm-b2-baker-vault b2/ui-surface-prebrief-v2-hook` from `~/baker-vault`. **Recommended** — cleaner isolation.
+  3. Fresh `/tmp/bv-b2-uisp/` clone as ephemeral. Acceptable for short brief.
 
-## Pre-flight
+## Pre-requisites
 
-1. `cd ~/bm-b2 && git pull --ff-only origin main`
-2. Read `briefs/BRIEF_GROK_API_CAPABILITY_1.md` end-to-end
-3. Read `kbl/claimsmax_client.py` + `tools/claimsmax.py` + `migrations/20260517_claimsmax_capability_set.sql` — the exact template you're mirroring (commit 3cbc287)
-4. **WebFetch `https://docs.x.ai/docs` FIRST** to verify §Scope assumptions before any coding
-5. If xAI docs diverge materially from brief §Scope → bus-post `lead` topic `grok-api-spec-mismatch` BEFORE coding
+- `jq` on PATH (`command -v jq` — verify before starting; install via `brew install jq` if absent, surface to AH1 if Director-time install needed).
+- Read current Claude Code hooks docs at https://code.claude.com/docs/en/hooks — cite URL + fetch date in PR description per Code Brief Standards. Confirm PreToolUse contract + exit-code semantics match brief's behavior contract.
+
+## Scope summary (full detail in brief)
+
+1. **Hook script:** `~/baker-vault/_ops/hooks/ui-surface-prebrief-check.sh`. Bash. Reads PreToolUse JSON from stdin via `jq`. Fires on Write to `briefs/BRIEF_*.md` OR `_ops/briefs/BRIEF_*.md` OR on Edit/MultiEdit adding new `## Acceptance criteria` heading or new `file:line` reference. Greps target content for `### Surface contract` block. Exit 2 if absent (with specific stderr message naming N/A escape valve). Fail-open on malformed JSON.
+2. **Test harness:** `~/baker-vault/_ops/hooks/tests/test_ui_surface_prebrief_check.sh`. 8 cases (full list in brief § Test plan). Asserts exit codes + stderr substring. Includes latency assertion <100ms per invocation.
+3. **Documentation:** `~/baker-vault/_ops/hooks/README.md` — create if absent. One-line entry for this hook minimum.
+4. **Cross-reference:** add `## Hook companion` section to `~/baker-vault/_ops/skills/ui-surface-prebrief/SKILL.md` (~10 lines) linking to the hook script + naming firing conditions.
+
+## Out of scope (DO NOT touch)
+
+- Picker-side install (symlinks into `~/bm-aihead1/.claude/hooks/` + `~/bm-aihead2/.claude/hooks/`, settings.json updates). AH1 does this post-merge as Tier A.
+- Propagation to AID-T / Architect / Researcher pickers. Q3 ratification: one-shot, not general policy.
+- Generalization to other skills (cascade-back-prop already has a hook; pre-mortem stays advisory).
+
+## Ship gate (literal)
+
+1. `bash ~/baker-vault/_ops/hooks/tests/test_ui_surface_prebrief_check.sh` — full literal output in ship report. All 8 cases pass + latency assertion green. No "pass by inspection."
+2. Anthropic docs URL + fetch date cited in PR description.
+3. Settings.json snippet for AH1 to install post-merge included in PR description (so AH1 can paste-install without re-deriving).
+4. README.md hooks index entry visible.
+
+## Self-check before claiming ship
+
+- [ ] Anthropic hooks docs URL fresh (within 30 days), confirmed PreToolUse JSON shape unchanged.
+- [ ] Hook fails OPEN on malformed JSON (gate bugs must never block legitimate tool use).
+- [ ] `file:line` regex doesn't false-positive on common prose ("Section 4:1 of the contract" stays safe).
+- [ ] All 8 test cases green via literal harness run.
+- [ ] Latency <100ms per invocation (each case `time`-wrapped).
+- [ ] Settings.json snippet for picker install written out verbatim — AH1 can paste-and-go without thinking.
+- [ ] No modifications to AID-T / Architect / Researcher picker paths (one-shot scope).
+- [ ] No modifications to existing brisen-lab / baker-master / brisen-docs hooks.
 
 ## Reporting
 
-- Bus-post `lead` on claim (topic `claim/grok-api-capability-1`)
-- Bus-post `lead` on PR open (topic `pr-open/grok-api-capability-1`)
-- AH1 runs `/security-review` (mandatory per Lesson #52 + trigger-class MEDIUM) + `feature-dev:code-reviewer` 2nd-pass
-- AH1 sets Render env var `XAI_API_KEY` before merge (separate Tier B; runs parallel to your coding — do NOT block PR open on it)
-- AH1 merges on green; runs one live smoke test against prod deploy
+- Open PR with title `UI_SURFACE_PREBRIEF_V2: skill+hook hybrid hardening`.
+- Bus-post `ship/ui-surface-prebrief-v2` to `lead` with: PR link, commit SHA, literal test harness output presence, Anthropic docs URL + fetch date, settings.json snippet preview, latency assertion result.
+- Heartbeat every 12h while in progress (likely a single-session brief, but follow the rule).
 
-## Co-Authored-By
+## Surface contract: N/A — pure tooling brief, no user-clickable surface added (the hook gates other agents' tool use; produces no UI artifact)
 
-```
-Co-authored-by: Code Brisen #2 <b2@brisengroup.com>
-Co-Authored-By: Claude Opus 4.7 (1M context) <noreply@anthropic.com>
-```
+## Anchors
+
+- Brief: `~/baker-vault/_ops/briefs/BRIEF_UI_SURFACE_PREBRIEF_V2.md`
+- Skill being hardened: `~/baker-vault/_ops/skills/ui-surface-prebrief/SKILL.md` (v1.1, commit `6467edd`)
+- Researcher market scan: `~/baker-vault/wiki/research/2026-05-19-ui-surface-prebrief-market-scan.md` (Action 1 source)
+- Precedent for bash-native hook in Brisen: `~/baker-vault/.githooks/cascade_backprop_check.sh`
+- Anchor incident: brisen-lab PR #22 / #23 ship-time discovery 2026-05-19 ~07:35Z
