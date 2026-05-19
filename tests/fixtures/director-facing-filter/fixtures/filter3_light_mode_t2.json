@@ -1,0 +1,18 @@
+{
+  "_doc": "Filter #3 in light mode — T2 (M1-M5 untagged). Validator BLOCKs but mode=light → no stdout block; annotation queued in pending-annotations.json.",
+  "hook": "contract-gate-trigger.sh",
+  "mode": "light",
+  "transcript": [
+    {"type": "user", "message": {"content": [{"type": "text", "text": "options?"}]}},
+    {"type": "assistant", "message": {"content": [{"type": "text", "text": "Five strategic options:\n\n1. M1 — pursue MOHG-led model\n2. M2 — pivot to lease-out\n3. M3 — partial closure of F&B\n4. M4 — owner-led operating model\n5. M5 — hold status quo"}]}}
+  ],
+  "mock": {
+    "behavior": "success",
+    "verdict_json": "{\"decision\":\"block\",\"reason\":\"5 options surfaced with no feasibility tags.\"}"
+  },
+  "expected": {
+    "exit_code": 0,
+    "stdout_not_contains": "\"decision\": \"block\"",
+    "pending_annotations_filter": "contract-gate"
+  }
+}

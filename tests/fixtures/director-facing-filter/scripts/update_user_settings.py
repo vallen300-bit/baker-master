@@ -36,10 +36,18 @@ HOOKS_TO_WIRE = {
         "$HOME/.claude/hooks/strategic-mode-router.sh",
         "$HOME/.claude/hooks/authority-profile-preload.sh",
         "$HOME/.claude/hooks/pre-send-checklist.sh",
+        # Phase 2 (v1.1): inject any pending light-mode annotations on next turn.
+        # Order after pre-send-checklist so it runs last in the UserPromptSubmit pipe.
+        "$HOME/.claude/hooks/annotate-pending-checker.sh",
     ],
     "Stop": [
         "$HOME/.claude/hooks/synthesis-vs-taxonomy.sh",
         "$HOME/.claude/hooks/standing-rules-scan.sh",
+        # Phase 2 (v1.1): judgment-layer triggers. Both call Haiku via
+        # lib/call_validator.py (1Password-fetched key); both degrade to no-op
+        # on any infra failure so they never block legitimate work.
+        "$HOME/.claude/hooks/stakeholder-authority-trigger.sh",
+        "$HOME/.claude/hooks/contract-gate-trigger.sh",
     ],
 }
 

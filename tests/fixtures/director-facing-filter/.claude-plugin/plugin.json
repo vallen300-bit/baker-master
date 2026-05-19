@@ -1,7 +1,7 @@
 {
   "name": "director-facing-filter",
-  "version": "1.0.0",
-  "description": "Brisen fleet pre-send filter — blocks taxonomy-without-synthesis, missing recommendations, invented abbreviations. Mode-gated (deliberate / light). Authority-profile preload + pre-send checklist included.",
+  "version": "1.1.0",
+  "description": "Brisen fleet pre-send filter — Phase 1 deterministic layer (blocks taxonomy-without-synthesis, missing recommendations, invented abbreviations) + Phase 2 judgment layer (Stakeholder-Authority and Contract-Gate validators via Haiku 4.5). Mode-gated (deliberate / light) with light-mode annotate-on-next-turn.",
   "author": "Brisen Group / AH1",
   "homepage": "https://github.com/vallen300-bit/baker-master/tree/main/tests/fixtures/director-facing-filter",
   "license": "Apache-2.0",
@@ -9,11 +9,14 @@
     "UserPromptSubmit": [
       "hooks/strategic-mode-router.sh",
       "hooks/authority-profile-preload.sh",
-      "hooks/pre-send-checklist.sh"
+      "hooks/pre-send-checklist.sh",
+      "hooks/annotate-pending-checker.sh"
     ],
     "Stop": [
       "hooks/synthesis-vs-taxonomy.sh",
-      "hooks/standing-rules-scan.sh"
+      "hooks/standing-rules-scan.sh",
+      "hooks/stakeholder-authority-trigger.sh",
+      "hooks/contract-gate-trigger.sh"
     ]
   },
   "depends_on": {
@@ -22,7 +25,17 @@
         "_ops/people/authority-profiles.yml",
         "_ops/processes/standing-rules-pack.md"
       ]
+    },
+    "python_env": {
+      "packages": ["anthropic", "pyyaml"],
+      "install_hint": "pip3 install --user anthropic pyyaml"
+    },
+    "secrets": {
+      "1password": {
+        "item": "op://Baker API Keys/API Anthropic/credential",
+        "purpose": "Phase 2 validator calls to Anthropic Haiku 4.5"
+      }
     }
   },
-  "tested_against_models": ["claude-opus-4-6", "claude-opus-4-7"]
+  "tested_against_models": ["claude-opus-4-6", "claude-opus-4-7", "claude-haiku-4-5"]
 }

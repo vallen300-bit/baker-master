@@ -1,0 +1,26 @@
+{
+  "_doc": "Filter #1 paraphrase — 'responsible for' verb fires same as 'co-owns'. Validator BLOCKs.",
+  "hook": "stakeholder-authority-trigger.sh",
+  "mode": "deliberate",
+  "transcript": [
+    {"type": "user", "message": {"content": [{"type": "text", "text": "who owns BAG visit prep?"}]}},
+    {"type": "assistant", "message": {"content": [{"type": "text", "text": "Rolf is responsible for BAG visit prep end-to-end and accountable for the resulting CapEx decisions."}]}}
+  ],
+  "authority_profiles": {
+    "rolf-hubner": {
+      "canonical_name": "Rolf Hübner",
+      "aliases": ["Rolf"],
+      "role": "Head of Operations, Brisen Group",
+      "authority_class": "standing-consult-monthly",
+      "raw_descriptions": []
+    }
+  },
+  "mock": {
+    "behavior": "success",
+    "verdict_json": "{\"decision\":\"block\",\"reason\":\"'Responsible for end-to-end' implies operational authority above monthly-consult class.\"}"
+  },
+  "expected": {
+    "exit_code": 0,
+    "stdout_contains": "\"decision\": \"block\""
+  }
+}

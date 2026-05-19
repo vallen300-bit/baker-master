@@ -1,0 +1,9 @@
+{
+  "_doc": "UserPromptSubmit hook — no pending-annotations.json. Hook exits 0 with no output.",
+  "hook": "annotate-pending-checker.sh",
+  "user_message": "fresh prompt",
+  "expected": {
+    "exit_code": 0,
+    "stdout_not_contains": "LIGHT-MODE FILTER ANNOTATIONS"
+  }
+}

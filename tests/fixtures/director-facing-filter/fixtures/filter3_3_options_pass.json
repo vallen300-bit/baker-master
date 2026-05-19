@@ -1,0 +1,17 @@
+{
+  "_doc": "Filter #3 — only 3 options surfaced. Below 4-option threshold → no trigger fire, no validator call, no block.",
+  "hook": "contract-gate-trigger.sh",
+  "mode": "deliberate",
+  "transcript": [
+    {"type": "user", "message": {"content": [{"type": "text", "text": "give me the path forward"}]}},
+    {"type": "assistant", "message": {"content": [{"type": "text", "text": "Three viable paths:\n\n1. Renegotiate HMA terms\n2. Trigger early termination\n3. Hold and re-evaluate Q4\n\nRecommendation: 1 — least disruptive."}]}}
+  ],
+  "mock": {
+    "behavior": "success",
+    "verdict_json": "{\"decision\":\"block\",\"reason\":\"should not be called — threshold bypass\"}"
+  },
+  "expected": {
+    "exit_code": 0,
+    "stdout_not_contains": "\"decision\": \"block\""
+  }
+}
