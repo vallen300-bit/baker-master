@@ -329,6 +329,9 @@ async def _run_cycle_inner(
                     await _safe_emit_heartbeat(cycle, "propose", "tier_b_pending")
                     await _safe_emit_ratify_required(cycle)
                     proposal_card_posted = True
+                    # Phase 4.5 — plain-English Director Card. Fail-open;
+                    # cycle is already at tier_b_pending and reachable.
+                    await _phase4_5_director_card(cycle)
             except Exception as e:
                 logger.error(
                     "Phase 4 failed",
@@ -611,6 +614,49 @@ async def _phase4_propose(cycle: CortexCycle) -> bool:
     cycle.proposal_id = card.proposal_id
     cycle.status = "tier_b_pending"
     return True
+
+
+# --------------------------------------------------------------------------
+# Phase 4.5 — Director Card translation (fail-open)
+# --------------------------------------------------------------------------
+
+
+async def _phase4_5_director_card(cycle: CortexCycle) -> None:
+    """Translate the technical proposal into a plain-English Director Card.
+
+    Fail-open by contract: any exception is swallowed, and the cycle
+    remains reachable via the existing ``proposal_text`` rendering path.
+    Runs AFTER Phase 4 has emitted the ratify signal — card generation
+    must NEVER block the Director from seeing the cycle.
+    """
+    try:
+        from orchestrator.cortex_phase4_5_director_card import (
+            run_phase4_5_director_card,
+        )
+        proposal_text = getattr(cycle.phase3c_result, "proposal_text", "") or ""
+        if not proposal_text:
+            return
+        await run_phase4_5_director_card(
+            cycle_id=str(cycle.cycle_id),
+            matter_slug=cycle.matter_slug,
+            proposal_text=proposal_text,
+            cost_telemetry={
+                "cost_dollars": float(getattr(cycle, "cost_dollars", 0.0) or 0.0),
+                "cost_tokens": int(getattr(cycle, "cost_tokens", 0) or 0),
+            },
+        )
+    except Exception as e:
+        # Belt-and-braces — the wrapper is already fail-open, but if its
+        # import itself fails we still want the cycle to land cleanly.
+        logger.warning(
+            "Phase 4.5 director-card failed (fail-open)",
+            extra={
+                "cycle_id": str(cycle.cycle_id),
+                "phase": "propose-card",
+                "error_class": type(e).__name__,
+                "matter_slug": getattr(cycle, "matter_slug", None),
+            },
+        )
 
 
 # --------------------------------------------------------------------------
