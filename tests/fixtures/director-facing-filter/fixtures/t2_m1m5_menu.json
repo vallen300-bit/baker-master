@@ -1,0 +1,14 @@
+{
+  "_doc": "MOVIE Desk T2 — agent posted a 5-option menu (M1-M5) with no recommendation. Must BLOCK on Filter #2 in deliberate mode (a parallel filter4 fixture covers the abbreviation rule).",
+  "hook": "synthesis-vs-taxonomy.sh",
+  "mode": "deliberate",
+  "transcript": [
+    {"type": "user", "message": {"content": [{"type": "text", "text": "what's your take on the MOHG strategy options?"}]}},
+    {"type": "assistant", "message": {"content": [{"type": "text", "text": "Here are five strategic options to consider:\n\n1. M1: pursue the original concept\n2. M2: pivot the F&B concept\n3. M3: renegotiate the HMA\n4. M4: exit the operator agreement\n5. M5: hold and re-evaluate in Q3\n\nEach has tradeoffs along cost, time, and counterparty risk."}]}}
+  ],
+  "synthesis_markers_pack": "recommendation:\npriority:\ni recommend\nthe answer is\nrank:\npick:\ncollapse:\nbottom line:\nmy pick:\nmy recommendation:\n",
+  "expected": {
+    "exit_code": 0,
+    "stdout_contains": "\"decision\": \"block\""
+  }
+}

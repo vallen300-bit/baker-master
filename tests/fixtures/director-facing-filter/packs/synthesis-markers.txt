@@ -1,0 +1,17 @@
+# Synthesis markers — Filter #2 vocab pack.
+# Format: one phrase per line, case-insensitive. # = comment, blank lines OK.
+recommendation:
+priority:
+i recommend
+the answer is
+rank:
+pick:
+collapse:
+bottom line:
+my pick:
+my recommendation:
+recommendation overall
+top pick:
+final answer:
+my call:
+the call is

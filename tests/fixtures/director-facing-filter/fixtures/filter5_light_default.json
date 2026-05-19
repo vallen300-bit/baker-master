@@ -1,0 +1,9 @@
+{
+  "_doc": "Filter #5 router: casual message with no trigger keywords → state file writes 'light'.",
+  "hook": "strategic-mode-router.sh",
+  "user_message": "ack thanks",
+  "expected": {
+    "exit_code": 0,
+    "state_file_equals": "light"
+  }
+}

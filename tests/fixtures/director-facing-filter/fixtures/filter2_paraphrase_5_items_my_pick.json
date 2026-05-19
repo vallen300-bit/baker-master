@@ -1,0 +1,12 @@
+{
+  "_doc": "Filter #2 paraphrase variant: 5 items, synthesis marker 'My pick:' (not the canonical 'Recommendation:') → PASS.",
+  "hook": "synthesis-vs-taxonomy.sh",
+  "mode": "deliberate",
+  "transcript": [
+    {"type": "assistant", "message": {"content": [{"type": "text", "text": "Five candidate paths:\n\n1. Path one\n2. Path two\n3. Path three\n4. Path four\n5. Path five\n\nMy pick: path three — fastest to close."}]}}
+  ],
+  "expected": {
+    "exit_code": 0,
+    "stdout_not_contains": "block"
+  }
+}

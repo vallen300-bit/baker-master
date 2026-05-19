@@ -1,0 +1,10 @@
+{
+  "_doc": "ADD-ON #3 pre-send-checklist: deliberate mode → JSON injection contains 'PRE-SEND CHECKLIST'.",
+  "hook": "pre-send-checklist.sh",
+  "mode": "deliberate",
+  "user_message": "what's your take on the deal?",
+  "expected": {
+    "exit_code": 0,
+    "stdout_contains": "PRE-SEND CHECKLIST"
+  }
+}

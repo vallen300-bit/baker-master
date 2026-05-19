@@ -1,0 +1,12 @@
+{
+  "_doc": "Filter #2 paraphrase variant: 4 bullet items + 'Priority:' marker → PASS.",
+  "hook": "synthesis-vs-taxonomy.sh",
+  "mode": "deliberate",
+  "transcript": [
+    {"type": "assistant", "message": {"content": [{"type": "text", "text": "Considerations:\n\n- First bullet\n- Second bullet\n- Third bullet\n- Fourth bullet\n\nPriority: address the second bullet this week."}]}}
+  ],
+  "expected": {
+    "exit_code": 0,
+    "stdout_not_contains": "block"
+  }
+}

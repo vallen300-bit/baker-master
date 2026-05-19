@@ -1,0 +1,13 @@
+{
+  "_doc": "Baseline Filter #2: 4 enumerated items, no synthesis marker, deliberate mode → BLOCK.",
+  "hook": "synthesis-vs-taxonomy.sh",
+  "mode": "deliberate",
+  "transcript": [
+    {"type": "assistant", "message": {"content": [{"type": "text", "text": "Options:\n\n1. First option\n2. Second option\n3. Third option\n4. Fourth option\n\nLet me know which path."}]}}
+  ],
+  "expected": {
+    "exit_code": 0,
+    "stdout_contains": "\"decision\": \"block\"",
+    "stdout_not_contains": "Recommendation:"
+  }
+}

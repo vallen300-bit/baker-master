@@ -1,0 +1,9 @@
+{
+  "_doc": "Filter #5 router: user message contains 'strategy' → state file writes 'deliberate'.",
+  "hook": "strategic-mode-router.sh",
+  "user_message": "what's the strategy on the next phase?",
+  "expected": {
+    "exit_code": 0,
+    "state_file_equals": "deliberate"
+  }
+}
