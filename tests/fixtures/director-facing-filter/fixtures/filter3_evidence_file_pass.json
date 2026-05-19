@@ -1,0 +1,27 @@
+{
+  "_doc": "Filter #3 — 5 options, no inline tags, but evidence-file pre-tags all 5 with valid feasibility tags. Trigger short-circuits before validator call.",
+  "hook": "contract-gate-trigger.sh",
+  "mode": "deliberate",
+  "transcript": [
+    {"type": "user", "message": {"content": [{"type": "text", "text": "MOHG menu?"}]}},
+    {"type": "assistant", "message": {"content": [{"type": "text", "text": "Five strategic paths:\n\n1. M1 — MOHG-led\n2. M2 — lease-out\n3. M3 — partial closure\n4. M4 — owner-led\n5. M5 — status quo"}]}}
+  ],
+  "feasibility_tags": {
+    "turn_id": "2026-05-19T14:30:00Z",
+    "options": [
+      {"label": "M1 — MOHG-led", "feasibility": "amendment-required", "rationale": "HMA §7.3 consent for op-model change"},
+      {"label": "M2 — lease-out", "feasibility": "consent-required", "rationale": "CSA 3.13 sublease w/ non-objection"},
+      {"label": "M3 — partial closure", "feasibility": "breach-required", "rationale": "HMA §11 forbids partial closure"},
+      {"label": "M4 — owner-led", "feasibility": "litigation", "rationale": "MOHG already filed objection Q2 2026"},
+      {"label": "M5 — status quo", "feasibility": "unilateral", "rationale": "default state"}
+    ]
+  },
+  "mock": {
+    "behavior": "success",
+    "verdict_json": "{\"decision\":\"block\",\"reason\":\"should not be called — evidence-file bypass\"}"
+  },
+  "expected": {
+    "exit_code": 0,
+    "stdout_not_contains": "\"decision\": \"block\""
+  }
+}

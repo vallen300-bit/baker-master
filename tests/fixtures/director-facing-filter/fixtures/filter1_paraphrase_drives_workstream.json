@@ -1,0 +1,26 @@
+{
+  "_doc": "Filter #1 paraphrase — 'drives' verb. Validator BLOCKs (operational ownership framing).",
+  "hook": "stakeholder-authority-trigger.sh",
+  "mode": "deliberate",
+  "transcript": [
+    {"type": "user", "message": {"content": [{"type": "text", "text": "status on F&B fix?"}]}},
+    {"type": "assistant", "message": {"content": [{"type": "text", "text": "Rolf drives the F&B recovery workstream and leads the weekly counterparty calls."}]}}
+  ],
+  "authority_profiles": {
+    "rolf-hubner": {
+      "canonical_name": "Rolf Hübner",
+      "aliases": ["Rolf"],
+      "role": "Head of Operations, Brisen Group",
+      "authority_class": "standing-consult-monthly",
+      "raw_descriptions": []
+    }
+  },
+  "mock": {
+    "behavior": "success",
+    "verdict_json": "{\"decision\":\"block\",\"reason\":\"'Drives the workstream' / 'leads weekly calls' exceeds monthly-consult class.\"}"
+  },
+  "expected": {
+    "exit_code": 0,
+    "stdout_contains": "\"decision\": \"block\""
+  }
+}

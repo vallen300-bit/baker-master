@@ -1,0 +1,26 @@
+{
+  "_doc": "Filter #1 — Müller not in profiles. Trigger short-circuits before validator call (no known VIP match). No block, no annotation.",
+  "hook": "stakeholder-authority-trigger.sh",
+  "mode": "deliberate",
+  "transcript": [
+    {"type": "user", "message": {"content": [{"type": "text", "text": "where do we stand on the bank?"}]}},
+    {"type": "assistant", "message": {"content": [{"type": "text", "text": "Müller decides on the refinancing and has been driving the process since Q2."}]}}
+  ],
+  "authority_profiles": {
+    "rolf-hubner": {
+      "canonical_name": "Rolf Hübner",
+      "aliases": ["Rolf"],
+      "role": "Head of Operations",
+      "authority_class": "standing-consult-monthly",
+      "raw_descriptions": []
+    }
+  },
+  "mock": {
+    "behavior": "success",
+    "verdict_json": "{\"decision\":\"block\",\"reason\":\"should not be called — Müller not in profiles\"}"
+  },
+  "expected": {
+    "exit_code": 0,
+    "stdout_not_contains": "\"decision\": \"block\""
+  }
+}

@@ -1,4 +1,4 @@
-# director-facing-filter (Phase 1)
+# director-facing-filter (v1.1 — Phase 1 + Phase 2)
 
 Brisen fleet pre-send filter. Catches the common failure modes that show up when
 an AI agent is about to reply to the Director with something he'll have to
@@ -9,13 +9,18 @@ rewrite or push back on.
 Two modes:
 
 - **light** (default): hooks are passive. Authority profiles preload when a VIP
-  is named; nothing blocks.
+  is named; Phase 2 judgment-layer hooks queue annotations for the next turn
+  instead of blocking.
 - **deliberate**: triggered automatically when your message uses words like
   *strategy*, *take*, *purpose*, *frame*, *hinge*. Blocks replies that:
   - present 4+ enumerated items without a synthesis line (recommendation /
-    priority / pick / bottom line);
+    priority / pick / bottom line) — Filter #2;
   - violate Brisen standing rules (e.g. using invented abbreviations like
-    "M1 / H2" without spelling them out).
+    "M1 / H2" without spelling them out) — Filter #4;
+  - assert authority a named VIP doesn't have per `authority-profiles.yml` —
+    **Filter #1, Phase 2**;
+  - surface 4+ options/paths without explicit per-option feasibility tags —
+    **Filter #3, Phase 2**.
 
 *Brainstorm* / *thinking out loud* / *let's explore* always force light mode,
 even if a deliberate trigger word is also present (Rule 4 from
@@ -28,17 +33,49 @@ even if a deliberate trigger word is also present (Rule 4 from
 | UserPromptSubmit | `strategic-mode-router.sh` | Detect mode, write `~/.claude/state/brisen-filter-mode`. |
 | UserPromptSubmit | `authority-profile-preload.sh` | Inject compact VIP profile when a name is mentioned (caps 3/turn). |
 | UserPromptSubmit | `pre-send-checklist.sh` | Inject 3-question checklist in deliberate mode. |
+| UserPromptSubmit | `annotate-pending-checker.sh` *(Phase 2)* | Inject any pending light-mode filter annotations on the next turn; clears the queue. |
 | Stop | `synthesis-vs-taxonomy.sh` | Block enumerated-without-synthesis replies in deliberate mode. |
 | Stop | `standing-rules-scan.sh` | Block standing-rule violations in deliberate mode. |
+| Stop | `stakeholder-authority-trigger.sh` *(Phase 2)* | Filter #1 — VIP authority assertion → Haiku validator → block (deliberate) or annotate (light). |
+| Stop | `contract-gate-trigger.sh` *(Phase 2)* | Filter #3 — untagged options menu → Haiku validator → block (deliberate) or annotate (light). |
 
 All hooks are reentrancy-guarded — when Claude rewrites in response to a block,
 the hook sees `stop_hook_active=true` and exits clean (no infinite loop).
+
+## Phase 2 architecture (judgment layer)
+
+Filters #1 and #3 each run a two-stage chain:
+
+1. **Deterministic trigger** (regex in the Stop hook) decides whether to call
+   the validator at all. Keeps the LLM call cost bounded — most turns never fire.
+2. **Validator** — `lib/call_validator.py` fetches the Anthropic API key from
+   1Password (`op://Baker API Keys/API Anthropic/credential`, cached
+   per-process) and calls Haiku 4.5 with the relevant `SKILL.md` system prompt.
+   Returns `{decision: block|pass, reason: ...}`. 3 s hard timeout.
+
+**Fail-safe contract:** every error path in the validator chain (1Password
+fails, anthropic SDK missing, API timeout, rate limit, malformed JSON, etc.)
+degrades to **pass + diagnostic reason**. A broken validator must never
+block legitimate work.
+
+Filter #3 also honors an **evidence file**: if the agent pre-tags surfaced
+options in `~/.claude/state/feasibility-tags.json` (schema in
+`~/.claude/skills/director-facing-filter-contract-validator/EVIDENCE_FILE_FORMAT.md`)
+within the last 5 minutes, the validator call is skipped and the turn passes.
+
+## Cost
+
+- Per validator call: ~$0.0005–0.002 (Haiku 4.5; ~500-2000 input tokens + ~50-150 output).
+- Per session: 0–3 validator fires (Filter #1 caps 1/turn; Filter #3 caps 1/turn).
+- Per day across all Director sessions: estimate ~$0.05–0.10/day.
 
 ## How to disable
 
 Comment out the matching `hooks.UserPromptSubmit` / `hooks.Stop` entries in
 `~/.claude/settings.json`. The filter is hook-based; removing the wiring removes
-the behavior.
+the behavior. To disable just Phase 2, comment out
+`stakeholder-authority-trigger.sh`, `contract-gate-trigger.sh`, and
+`annotate-pending-checker.sh`.
 
 ## Dependencies
 
@@ -46,21 +83,21 @@ the behavior.
   `tests/fixtures/director-facing-filter/scripts/build_authority_profiles.py`.
 - `~/baker-vault/_ops/processes/standing-rules-pack.md` — rule pack.
   Director-ratified; new rules added via PR.
+- **Phase 2:** Python `anthropic` SDK + `pyyaml` importable from hook env.
+  Install: `pip3 install --user anthropic pyyaml` (deploy script does this).
+- **Phase 2:** 1Password CLI authenticated (`op whoami` returns identity) so the
+  validator can fetch the Anthropic API key. If not authenticated, validator
+  hooks degrade to pass.
 
-## Known limitations (Phase 1)
+## Known limitations
 
 - **Multi-session race on the mode state file.** `~/.claude/state/brisen-filter-mode`
   is a single file shared across every Claude Code session on this machine.
   If session A writes `deliberate` while session B is still in `light`, the
   next Stop hook in either session reads whichever value was written most
-  recently. In practice this only matters if Director runs two sessions in
-  parallel and switches modes on one without re-triggering the router on the
-  other. Phase 2 fixes via `$CLAUDE_SESSION_ID`-namespaced state files (or a
-  SessionStart hook that resets to `light`). Workaround for Phase 1: open a
-  new prompt in the affected session — `strategic-mode-router.sh` will
-  recompute mode from your latest message and rewrite the file.
-
-## Phase 2 (not shipped here)
-
-Validator subagents for Filter #1 (Stakeholder-Authority) and Filter #3
-(Contract-Gate). Separate brief.
+  recently. Phase 1 + Phase 2 both share this gap. Workaround: open a new
+  prompt in the affected session — `strategic-mode-router.sh` will recompute
+  mode from your latest message and rewrite the file.
+- **`pending-annotations.json` is shared across sessions** (same root cause).
+  If two sessions queue annotations concurrently, both sets surface on the
+  next prompt of either session and get cleared together.

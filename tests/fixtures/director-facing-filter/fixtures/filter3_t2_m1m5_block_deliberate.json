@@ -1,0 +1,17 @@
+{
+  "_doc": "MOVIE Desk T2 — 5-option menu (M1-M5) with no feasibility tags. Validator BLOCKs in deliberate mode.",
+  "hook": "contract-gate-trigger.sh",
+  "mode": "deliberate",
+  "transcript": [
+    {"type": "user", "message": {"content": [{"type": "text", "text": "what's your take on MOHG strategy options?"}]}},
+    {"type": "assistant", "message": {"content": [{"type": "text", "text": "Here are five strategic options to consider:\n\n1. M1: pursue MOHG-led model\n2. M2: pivot to lease-out\n3. M3: partial closure of F&B\n4. M4: owner-led operating model\n5. M5: hold status quo\n\nEach has tradeoffs along cost, time, and counterparty risk."}]}}
+  ],
+  "mock": {
+    "behavior": "success",
+    "verdict_json": "{\"decision\":\"block\",\"reason\":\"5 options surfaced with no feasibility tags per HMA suite. Add tag per option (unilateral/consent-required/amendment-required/breach-required/litigation/timeline).\",\"missing_tags\":[\"M1\",\"M2\",\"M3\",\"M4\",\"M5\"]}"
+  },
+  "expected": {
+    "exit_code": 0,
+    "stdout_contains": "\"decision\": \"block\""
+  }
+}

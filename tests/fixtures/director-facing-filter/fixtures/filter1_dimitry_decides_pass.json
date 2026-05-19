@@ -1,0 +1,28 @@
+{
+  "_doc": "Filter #1 — Dimitry is principal class; 'decides' assertion fits. Validator returns PASS.",
+  "hook": "stakeholder-authority-trigger.sh",
+  "mode": "deliberate",
+  "transcript": [
+    {"type": "user", "message": {"content": [{"type": "text", "text": "who signs off on the refinancing?"}]}},
+    {"type": "assistant", "message": {"content": [{"type": "text", "text": "Dimitry decides on the refinancing — he's the sole principal on LCG."}]}}
+  ],
+  "authority_profiles": {
+    "dimitry-vallen": {
+      "canonical_name": "Dimitry Vallen",
+      "aliases": ["Dimitry", "Vallen", "DV", "Director"],
+      "role": "Chairman, Brisen Group",
+      "authority_class": "principal",
+      "raw_descriptions": [
+        {"desk": "_global", "text": "Director and sole principal across Brisen entities"}
+      ]
+    }
+  },
+  "mock": {
+    "behavior": "success",
+    "verdict_json": "{\"decision\":\"pass\",\"reason\":\"Principal class — full decision authority. 'Decides' matches.\"}"
+  },
+  "expected": {
+    "exit_code": 0,
+    "stdout_not_contains": "\"decision\": \"block\""
+  }
+}

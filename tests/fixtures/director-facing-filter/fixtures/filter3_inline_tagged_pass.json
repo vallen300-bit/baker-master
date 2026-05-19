@@ -1,0 +1,17 @@
+{
+  "_doc": "Filter #3 — 4 options with inline feasibility tags (one per option). Trigger short-circuits before validator call. No block.",
+  "hook": "contract-gate-trigger.sh",
+  "mode": "deliberate",
+  "transcript": [
+    {"type": "user", "message": {"content": [{"type": "text", "text": "options on F&B?"}]}},
+    {"type": "assistant", "message": {"content": [{"type": "text", "text": "Four options on the table:\n\n1. A: do nothing (unilateral)\n2. B: amend SLA (amendment-required)\n3. C: sublease F&B (consent-required)\n4. D: pursue litigation against operator (litigation)\n\nRecommendation: B — amendment-required is the cleanest path."}]}}
+  ],
+  "mock": {
+    "behavior": "success",
+    "verdict_json": "{\"decision\":\"block\",\"reason\":\"should not be called — inline tags bypass\"}"
+  },
+  "expected": {
+    "exit_code": 0,
+    "stdout_not_contains": "\"decision\": \"block\""
+  }
+}

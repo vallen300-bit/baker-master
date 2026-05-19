@@ -1,0 +1,29 @@
+{
+  "_doc": "MOVIE Desk T1 — Phase 2 ship-criterion. Rolf is standing-consult-monthly per profile; assistant asserts operational co-ownership. Validator BLOCKs in deliberate mode.",
+  "hook": "stakeholder-authority-trigger.sh",
+  "mode": "deliberate",
+  "transcript": [
+    {"type": "user", "message": {"content": [{"type": "text", "text": "what's the F&B variance picture?"}]}},
+    {"type": "assistant", "message": {"content": [{"type": "text", "text": "Rolf operationally co-owns the F&B problem and has been driving the recovery plan since Q1."}]}}
+  ],
+  "authority_profiles": {
+    "rolf-hubner": {
+      "canonical_name": "Rolf Hübner",
+      "aliases": ["Rolf", "Hübner"],
+      "role": "Head of Operations, Brisen Group",
+      "authority_class": "standing-consult-monthly",
+      "source_desks": ["movie-desk"],
+      "raw_descriptions": [
+        {"desk": "movie-desk", "text": "standing monthly P&L reviewer · BAG visit owner"}
+      ]
+    }
+  },
+  "mock": {
+    "behavior": "success",
+    "verdict_json": "{\"decision\":\"block\",\"reason\":\"Rolf is monthly P&L reviewer, not operational co-owner. Profile class=standing-consult-monthly disallows operational co-ownership framing.\"}"
+  },
+  "expected": {
+    "exit_code": 0,
+    "stdout_contains": "\"decision\": \"block\""
+  }
+}

@@ -1,0 +1,27 @@
+{
+  "_doc": "Filter #1 in light mode — T1 (Rolf co-owns) message. Validator BLOCKs but mode=light → no stdout block; annotation written to pending-annotations.json.",
+  "hook": "stakeholder-authority-trigger.sh",
+  "mode": "light",
+  "transcript": [
+    {"type": "user", "message": {"content": [{"type": "text", "text": "F&B picture?"}]}},
+    {"type": "assistant", "message": {"content": [{"type": "text", "text": "Rolf operationally co-owns the F&B problem and signs off on weekly variance."}]}}
+  ],
+  "authority_profiles": {
+    "rolf-hubner": {
+      "canonical_name": "Rolf Hübner",
+      "aliases": ["Rolf"],
+      "role": "Head of Operations, Brisen Group",
+      "authority_class": "standing-consult-monthly",
+      "raw_descriptions": []
+    }
+  },
+  "mock": {
+    "behavior": "success",
+    "verdict_json": "{\"decision\":\"block\",\"reason\":\"Operational co-ownership exceeds Rolf's monthly-consult class.\"}"
+  },
+  "expected": {
+    "exit_code": 0,
+    "stdout_not_contains": "\"decision\": \"block\"",
+    "pending_annotations_filter": "stakeholder-authority"
+  }
+}

@@ -1,0 +1,28 @@
+{
+  "_doc": "Filter #1 — assertion fits Rolf's monthly-consult profile. Trigger fires (Rolf + auth verb 'reviews'), validator returns PASS. No block.",
+  "hook": "stakeholder-authority-trigger.sh",
+  "mode": "deliberate",
+  "transcript": [
+    {"type": "user", "message": {"content": [{"type": "text", "text": "remind me Rolf's role on F&B"}]}},
+    {"type": "assistant", "message": {"content": [{"type": "text", "text": "Rolf reviews monthly P&L and approves the F&B variance write-ups before they hit the operator."}]}}
+  ],
+  "authority_profiles": {
+    "rolf-hubner": {
+      "canonical_name": "Rolf Hübner",
+      "aliases": ["Rolf", "Hübner"],
+      "role": "Head of Operations, Brisen Group",
+      "authority_class": "standing-consult-monthly",
+      "raw_descriptions": [
+        {"desk": "movie-desk", "text": "standing monthly P&L reviewer"}
+      ]
+    }
+  },
+  "mock": {
+    "behavior": "success",
+    "verdict_json": "{\"decision\":\"pass\",\"reason\":\"Matches profile — monthly P&L review is exactly Rolf's authority class.\"}"
+  },
+  "expected": {
+    "exit_code": 0,
+    "stdout_not_contains": "\"decision\": \"block\""
+  }
+}

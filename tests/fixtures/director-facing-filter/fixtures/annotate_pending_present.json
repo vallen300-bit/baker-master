@@ -1,0 +1,25 @@
+{
+  "_doc": "UserPromptSubmit hook — pending-annotations.json has 2 entries. Hook injects additionalContext + clears file to [].",
+  "hook": "annotate-pending-checker.sh",
+  "user_message": "let's continue",
+  "pending_annotations": [
+    {
+      "filter": "stakeholder-authority",
+      "reason": "Rolf operational co-ownership exceeds monthly-consult class.",
+      "asserted_claim": "Rolf operationally co-owns the F&B problem",
+      "vip": "Rolf Hübner",
+      "added_at": "2026-05-19T16:00:00Z"
+    },
+    {
+      "filter": "contract-gate",
+      "reason": "5 options surfaced with no feasibility tags.",
+      "options_count": 5,
+      "added_at": "2026-05-19T16:01:00Z"
+    }
+  ],
+  "expected": {
+    "exit_code": 0,
+    "stdout_contains": "LIGHT-MODE FILTER ANNOTATIONS",
+    "pending_annotations_cleared": true
+  }
+}
