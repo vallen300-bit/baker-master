@@ -1,57 +1,77 @@
 ---
-status: SHIPPED_AWAITING_GATES
-claimed_at: 2026-05-18T14:55:30Z
-claimed_by: b3
-pr: https://github.com/vallen300-bit/baker-master/pull/220
-head_sha: 72a9edd
-pr_opened_at: 2026-05-18T15:08:00Z
-bus_ship_msg_id: 452
-tests_passed: 7
-brief: briefs/BRIEF_BAKER_CORTEX_BUS_HEARTBEAT_1.md
-brief_id: BAKER_CORTEX_BUS_HEARTBEAT_1
+status: PENDING
+brief: ~/baker-vault/_ops/briefs/director-facing-filter-v1.md
+brief_id: DIRECTOR_FACING_FILTER_V1_PHASE_1
 target_repo: baker-master
+working_dir: ~/bm-b3
 matter_slug: baker-internal
-cross_matter_usage: [all-matters — observability for any cortex cycle]
-dispatched_at: 2026-05-18T14:55:00Z
+cross_matter_usage: [all-matters — fleet-wide pre-send filter affects every desk + AH1/AH2]
+dispatched_at: 2026-05-19T11:20:00Z
 dispatched_by: cowork-ah1
-director_auth: 2026-05-18 chat via deputy bus #440 — Director ratified plan; deputy routed dispatch to cowork-ah1
-trigger_class: LOW (no new external surface, no auth/DB schema change, no MCP tool, no Render env flip; ≤80 LOC delta expected; emits to existing brisen-lab /msg/ with existing cortex slug)
-gate_chain_required:
-  gate_1_ah2_static: REQUIRED
-  gate_2_security_review: REQUIRED
-  gate_3_picker_architect: NOT_REQUIRED (LOW trigger class)
-  gate_4_2nd_pass_code_reviewer: NOT_REQUIRED (LOW trigger class)
-sequenced_after:
-  brief: STATE_RECONCILER_2
-  pr: https://github.com/vallen300-bit/baker-vault/pull/98
-  merge_commit: 87b23c0
-  merged_at: 2026-05-18T14:50:00Z
-  merged_by: ai-head-1 (AH1, lead)
-  note: STATE_RECONCILER_2 merged baker-vault 87b23c0 by lead while this brief was being authored. Different repo, no file overlap. B3 truly free now. Prior COMPLETE record archived to briefs/_tasks/CODE_3_COMPLETE.md.
-related_brief_pending:
-  brief_id: BAKER_CORTEX_CARD_DRILLDOWN_1 (Fix #2)
-  sequenced_after_this_pr_merges: true
-  note: Fix #2 = card click → modal listing tier_b_pending cycles; brisen-lab + baker-master pair. Brief authored by cowork-ah1 after this PR merges.
-estimated_loc: ~80
-estimated_tests_added: 7
-branch: b3/cortex-bus-heartbeat-1
-commit_identity: Code Brisen #3 <b3@brisengroup.com>
-ship_report_to: deputy
-ship_report_topic: dispatch/cortex-card-fixes/ship-1
+director_auth: 2026-05-19 chat — "ratified"
+trigger_class: MEDIUM-HIGH
+gate_chain:
+  gate_1_static: REQUIRED (deputy / AH2 cross-lane)
+  gate_2_security_review: REQUIRED (touches user-global hooks + ~/.claude/settings.json wiring + new vault build step)
+  gate_3_cross_lane_architecture: REQUIRED (fleet-wide tooling, new plugin packaging pattern for Brisen, blast-radius covers every Claude Code session on Director's Mac)
+  gate_4_2nd_pass_code_reviewer: REQUIRED (per ai-head/SKILL.md §Code-reviewer 2nd-pass Protocol trigger #4 — touches external-surface perimeter via user-global hooks + settings.json + new Anthropic plugin schema; high blast radius if a hook hangs/loops)
+estimated_effort: 12-14h (multi-component, 15 stress fixtures, settings.json idempotent merge, plugin metadata)
+working_branch_suggestion: b3/director-facing-filter-v1
+reply_target: cowork-ah1 (bus topic `ship/director-facing-filter-v1`)
+ship_target: 2026-05-22
+phase_2_note: Filter #1 (Stakeholder-Authority validator subagent) + Filter #3 (Contract-Gate evidence-file) ship in separate brief, target 27 May, b2 lane parallel. Out of scope for THIS brief.
 ---
 
-# Dispatch — BAKER_CORTEX_BUS_HEARTBEAT_1 (Fix #1 of cortex-card-fixes pair)
+# CODE_3_PENDING — DIRECTOR_FACING_FILTER_V1_PHASE_1 — 2026-05-19
 
-Brief: `briefs/BRIEF_BAKER_CORTEX_BUS_HEARTBEAT_1.md`. Add `_emit_cortex_heartbeat()` helper to `orchestrator/cortex_runner.py` + emit at every phase boundary in `run_cycle()` + emit `ratify-required` topic on Phase 4 success. Best-effort, never blocks phase progression.
+## Brief
 
-**Scope:** ~80 LOC delta, 7 new tests, all in baker-master. No DDL, no new MCP tool, no Render env flip. Auth via existing `BRISEN_LAB_TERMINAL_KEY_CORTEX` env var (1P key already provisioned, `bus.py` budget cap already includes `cortex` slug at 5/cycle).
+Brief lives in baker-vault (fleet tooling, not pure baker-master code):
 
-**Trigger class:** LOW. Gate-1 (AH2 static) + Gate-2 (/security-review) required; Gate-3 + Gate-4 NOT required.
+`~/baker-vault/_ops/briefs/director-facing-filter-v1.md` (committed baker-vault b5b0032)
 
-**Standard contract:** branch `b3/cortex-bus-heartbeat-1`, commit identity `Code Brisen #3 <b3@brisengroup.com>`, no `--no-verify`.
+Read end-to-end before starting. The brief is structured as 9 self-contained components — most have skeleton code + spec for you to flesh out. Stress fixtures are the source of truth for filter behavior; regex shape is for you to finalize against fixture expectations.
 
-**Ship-report routing:** bus-post topic `dispatch/cortex-card-fixes/ship-1` to `deputy` on PR open (deputy will cross-lane review + surface to Director; merge under standing Tier A by cowork-ah1).
+## Working branch
 
-**Mailbox-state note:** your prior brief STATE_RECONCILER_2 merged at baker-vault `87b23c0` 14:50Z. COMPLETE record archived to `briefs/_tasks/CODE_3_COMPLETE.md`. Stand down on STATE_RECONCILER_2; pick this up.
+`b3/director-facing-filter-v1` in baker-master (`~/bm-b3`).
 
-Open the brief + go.
+baker-vault changes (`_ops/people/authority-profiles.yml`, `_ops/people/README.md`, `_ops/processes/standing-rules-pack.md`) ship in a sibling vault PR — use `~/baker-vault` working tree. Coordinate both PRs in the same chat turn.
+
+## Pre-requisites
+
+- b3 idle confirmed by lead (bus #508).
+- No upstream blockers — standalone build.
+- baker-vault clean for new commits (specific-file adds; coordinate via bus with lead/cowork-ah1 before pushes).
+
+## Acceptance criteria
+
+Per brief §Ship gate (verbatim):
+
+1. `pytest tests/test_director_facing_filter_v1.py -v` — all 15 fixtures green. Literal stdout in PR description.
+2. `bash -n tests/fixtures/director-facing-filter/hooks/*.sh` — syntax-check on every hook.
+3. `python3 -c "import json; json.load(open('tests/fixtures/director-facing-filter/.claude-plugin/plugin.json'))"` — plugin.json parseable.
+4. `python3 tests/fixtures/director-facing-filter/scripts/build_authority_profiles.py --dry-run | python3 -c "import sys,yaml; d=yaml.safe_load(sys.stdin); assert 'rolf-hubner' in d['authority_profiles'], 'rolf-hubner profile missing'"` — Rolf profile builds correctly.
+5. T1 + T2 fixtures pass (the ship criterion from MOVIE Desk brief).
+6. Reentrancy: re-run any blocked fixture with `stop_hook_active=true` in payload → expect exit 0 (no block).
+7. /security-review on the PR — pass / NO_FINDINGS.
+
+## Ship gate
+
+Literal `pytest` output (no "pass by inspection"). PR description includes pytest stdout + cross-link to baker-vault sibling PR (authority-profiles.yml + README + standing-rules-pack.md).
+
+## Reporting (bus reply-to-sender — Director-ratified 2026-05-17)
+
+On PR open, bus-post `cowork-ah1` (NOT `lead`) per `dispatched_by` field:
+
+```bash
+BAKER_ROLE=b3 ~/Desktop/baker-code/scripts/bus_post.sh cowork-ah1 \
+  "ship/director-facing-filter-v1 — PR #<N> open; pytest <X/X>; T1+T2 ship criterion met; sibling baker-vault PR #<M>. Awaiting AH1+AH2 gate chain (gates 1-4 required per coordination header)." \
+  ship/director-facing-filter-v1
+```
+
+cowork-ah1 (this brief's author) handles gate orchestration + merge.
+
+## Heartbeat cadence (per §B-code stall chase — Director-ratified 2026-05-05)
+
+Minimum every 12h while actively building. Two consecutive 12h misses → cowork-ah1 auto-surfaces stall to Director. Heartbeat = (a) UPDATE entry in this mailbox file with ISO timestamp, OR (b) commit on working branch with `mailbox(b3): heartbeat <ISO> — <where>` pattern, OR (c) ship-report file write.
