@@ -10197,13 +10197,17 @@ function _toggleAOSection(el) {
 
 /* ── Cortex Intent Feed (CORTEX-PHASE-3) ── */
 var _cortexCurrentTab = 'events';
-var _cortexData = { events: [], dedup: [], lint: [], stats: {} };
+var _cortexData = { events: [], dedup: [], lint: [], pending: [], stats: {} };
+var _cortexPendingExpanded = {};   // cycle_id -> { proposal, trace } cache
+var _cortexPendingPoller = null;
+var _cortexActionInFlight = {};    // cycle_id -> bool
 
 async function loadCortexFeed() {
     try {
-        var [eventsRes, lintRes, statsRes] = await Promise.all([
+        var [eventsRes, lintRes, pendingRes, statsRes] = await Promise.all([
             bakerFetch('/api/cortex/events?limit=30'),
             bakerFetch('/api/cortex/lint?status=open&limit=20'),
+            bakerFetch('/api/cortex/cycles/pending?limit=50'),
             bakerFetch('/api/cortex/stats'),
         ]);
         if (eventsRes.ok) {
@@ -10217,6 +10221,10 @@ async function loadCortexFeed() {
             var d2 = await lintRes.json();
             _cortexData.lint = d2.lint_results || [];
         }
+        if (pendingRes.ok) {
+            var d3 = await pendingRes.json();
+            _cortexData.pending = d3.cycles || [];
+        }
         if (statsRes.ok) {
             _cortexData.stats = await statsRes.json();
         }
@@ -10224,10 +10232,14 @@ async function loadCortexFeed() {
         var card = document.getElementById('cortexFeedCard');
         var total = (_cortexData.events.length || 0);
         var lintOpen = (_cortexData.lint.length || 0);
-        if (total > 0 || lintOpen > 0) {
+        var pendingN = (_cortexData.pending.length || 0);
+        if (total > 0 || lintOpen > 0 || pendingN > 0) {
             card.hidden = false;
-            document.getElementById('cortexCount').textContent =
-                total + ' events' + (lintOpen > 0 ? ', ' + lintOpen + ' lint' : '');
+            var parts = [];
+            if (total > 0) parts.push(total + ' events');
+            if (lintOpen > 0) parts.push(lintOpen + ' lint');
+            if (pendingN > 0) parts.push(pendingN + ' pending');
+            document.getElementById('cortexCount').textContent = parts.join(', ');
         } else {
             card.hidden = true;
             return;
@@ -10238,10 +10250,24 @@ async function loadCortexFeed() {
     }
 }
 
+async function _reloadCortexPending() {
+    try {
+        var resp = await bakerFetch('/api/cortex/cycles/pending?limit=50');
+        if (!resp.ok) return;
+        var data = await resp.json();
+        _cortexData.pending = data.cycles || [];
+        if (_cortexCurrentTab === 'pending') _renderCortexTab('pending');
+    } catch (e) { /* silent — next poll retries */ }
+}
+
 function _cortexTab(tab) {
     _cortexCurrentTab = tab;
     document.querySelectorAll('.cortex-tab').forEach(function(t) { t.classList.remove('active'); });
     document.getElementById('cortexTab' + tab.charAt(0).toUpperCase() + tab.slice(1)).classList.add('active');
+    if (_cortexPendingPoller) { clearInterval(_cortexPendingPoller); _cortexPendingPoller = null; }
+    if (tab === 'pending') {
+        _cortexPendingPoller = setInterval(_reloadCortexPending, 30000);
+    }
     _renderCortexTab(tab);
 }
 
@@ -10249,7 +10275,13 @@ function _renderCortexTab(tab) {
     var body = document.getElementById('cortexFeedBody');
     var items = tab === 'dedup' ? _cortexData.dedup :
                 tab === 'lint' ? _cortexData.lint :
+                tab === 'pending' ? _cortexData.pending :
                 _cortexData.events;
+
+    if (tab === 'pending') {
+        _renderCortexPending(body, items || []);
+        return;
+    }
 
     if (!items || items.length === 0) {
         body.innerHTML = '<div class="grid-empty">No ' + tab + ' data yet.</div>';
@@ -10282,6 +10314,270 @@ function _renderCortexTab(tab) {
             '<span class="cortex-event-time">' + esc(time) + '</span>' +
             '</div>';
     }).join('');
+}
+
+/* ── Cortex Pending tab — Director ratify panel (DASHBOARD_CORTEX_RATIFY_PANEL_1) ── */
+
+function _cortexFmtAge(minutes) {
+    var m = Math.max(0, Math.round(Number(minutes) || 0));
+    if (m < 60) return m + 'm ago';
+    var h = Math.floor(m / 60);
+    if (h < 48) return h + 'h ago';
+    return Math.floor(h / 24) + 'd ago';
+}
+
+function _cortexFmtMoney(n) {
+    var v = Number(n);
+    if (!isFinite(v)) return '$0.00';
+    return '$' + v.toFixed(2);
+}
+
+function _renderCortexPending(body, cycles) {
+    if (!cycles.length) {
+        body.innerHTML = '<div class="grid-empty">No cycles awaiting ratification.</div>';
+        return;
+    }
+    // All dynamic text sanitized via esc() and escAttr() — safe innerHTML pattern per codebase convention
+    body.innerHTML = cycles.map(function(c) {
+        var cid = c.cycle_id;
+        var preview = (c.proposal_preview || '').slice(0, 200);
+        var isOpen = !!_cortexPendingExpanded[cid];
+        var expHtml = isOpen ? _cortexPendingExpansionHtml(cid) :
+            '<div class="cortex-pending-collapsed">click to expand</div>';
+        return '<div class="cortex-pending-row" data-cycle="' + escAttr(cid) + '">' +
+            '<div class="cortex-pending-head" onclick="_cortexPendingToggle(\'' + escAttr(cid) + '\')">' +
+                '<span class="cortex-pending-matter">' + esc(c.matter_slug || '—') + '</span>' +
+                '<span class="cortex-pending-age">' + esc(_cortexFmtAge(c.age_minutes)) + '</span>' +
+                '<span class="cortex-pending-preview" title="' + escAttr(preview) + '">' + esc(preview) + (c.has_proposal ? '' : ' (no proposal yet)') + '</span>' +
+            '</div>' +
+            '<div class="cortex-pending-body" id="cortexPendingBody-' + escAttr(cid) + '">' +
+                expHtml +
+            '</div>' +
+        '</div>';
+    }).join('');
+}
+
+async function _cortexPendingToggle(cycleId) {
+    var bodyEl = document.getElementById('cortexPendingBody-' + cycleId);
+    if (!bodyEl) return;
+    if (_cortexPendingExpanded[cycleId]) {
+        delete _cortexPendingExpanded[cycleId];
+        bodyEl.innerHTML = '<div class="cortex-pending-collapsed">click to expand</div>';
+        return;
+    }
+    _cortexPendingExpanded[cycleId] = { loading: true };
+    bodyEl.innerHTML = '<div class="cortex-pending-loading">Loading proposal + trace…</div>';
+    try {
+        var [propResp, traceResp] = await Promise.all([
+            bakerFetch('/api/cortex/cycles/' + encodeURIComponent(cycleId) + '/proposal'),
+            bakerFetch('/api/cortex/cycles/' + encodeURIComponent(cycleId) + '/trace'),
+        ]);
+        if (!propResp.ok) throw new Error('proposal HTTP ' + propResp.status);
+        if (!traceResp.ok) throw new Error('trace HTTP ' + traceResp.status);
+        var prop = await propResp.json();
+        var trace = await traceResp.json();
+        _cortexPendingExpanded[cycleId] = { proposal: prop, trace: trace };
+        bodyEl.innerHTML = _cortexPendingExpansionHtml(cycleId);
+    } catch (e) {
+        _cortexPendingExpanded[cycleId] = { error: String(e) };
+        bodyEl.innerHTML = '<div class="cortex-pending-error">Failed to load: ' + esc(String(e)) + '</div>';
+    }
+}
+
+function _cortexPendingExpansionHtml(cycleId) {
+    var state = _cortexPendingExpanded[cycleId] || {};
+    if (state.loading) return '<div class="cortex-pending-loading">Loading…</div>';
+    if (state.error) return '<div class="cortex-pending-error">' + esc(state.error) + '</div>';
+    var prop = state.proposal || {};
+    var trace = state.trace || {};
+    var proposalText = prop.proposal_text || '';
+    var costStr = _cortexFmtMoney(prop.cost_dollars) +
+        ' · ' + (Number(prop.cost_tokens) || 0).toLocaleString() + ' tokens' +
+        ' · ' + _cortexPendingDuration(prop.started_at, prop.completed_at);
+    var btnsId = escAttr(cycleId);
+    return '' +
+        '<div class="cortex-pending-cost">' + esc(costStr) + '</div>' +
+        '<div class="cortex-pending-proposal md-content">' + md(proposalText || '(no proposal text yet)') + '</div>' +
+        '<div class="cortex-pending-buttons">' +
+            '<button class="cortex-pending-btn approve" onclick="_cortexPendingAction(\'' + btnsId + '\',\'approve\')">Approve</button>' +
+            '<button class="cortex-pending-btn edit"    onclick="_cortexPendingEdit(\'' + btnsId + '\')">Edit</button>' +
+            '<button class="cortex-pending-btn refresh" onclick="_cortexPendingAction(\'' + btnsId + '\',\'refresh\')">Refresh</button>' +
+            '<button class="cortex-pending-btn reject"  onclick="_cortexPendingReject(\'' + btnsId + '\')">Reject</button>' +
+        '</div>' +
+        '<div class="cortex-pending-toast" id="cortexPendingToast-' + btnsId + '"></div>' +
+        _cortexPendingTier2Html(cycleId, trace);
+}
+
+function _cortexPendingDuration(startedAt, completedAt) {
+    if (!startedAt) return 'n/a';
+    var end = completedAt ? new Date(completedAt) : new Date();
+    var start = new Date(startedAt);
+    var sec = Math.max(0, Math.round((end - start) / 1000));
+    if (sec < 60) return sec + 's';
+    if (sec < 3600) return Math.round(sec / 60) + 'm';
+    return Math.round(sec / 3600 * 10) / 10 + 'h';
+}
+
+/* ── Tier-2 subsections: phase trace + specialists + citations ── */
+
+function _cortexPendingTier2Html(cycleId, trace) {
+    var outs = (trace && trace.phase_outputs) || [];
+    var phaseHtml = _cortexPhaseTraceHtml(outs);
+    var specialistHtml = _cortexSpecialistBreakdownHtml(outs);
+    var proposalText = (_cortexPendingExpanded[cycleId] && _cortexPendingExpanded[cycleId].proposal &&
+        _cortexPendingExpanded[cycleId].proposal.proposal_text) || '';
+    var citationsHtml = _cortexCitationsHtml(proposalText);
+    var sid = escAttr(cycleId);
+    return '' +
+        '<div class="cortex-pending-tier2">' +
+            _collapsibleSection('Phase trace (' + outs.length + ')', 'cxPh-' + sid, phaseHtml) +
+            _collapsibleSection('Specialist breakdown', 'cxSp-' + sid, specialistHtml) +
+            _collapsibleSection('Citations', 'cxCi-' + sid, citationsHtml) +
+        '</div>';
+}
+
+function _collapsibleSection(title, id, innerHtml) {
+    return '<div class="cortex-pending-section">' +
+        '<div class="cortex-pending-section-head" onclick="_cortexToggleSection(\'' + escAttr(id) + '\')">' +
+            '<span class="arrow">&#9656;</span> ' + esc(title) +
+        '</div>' +
+        '<div class="cortex-pending-section-body" id="' + escAttr(id) + '">' + innerHtml + '</div>' +
+    '</div>';
+}
+
+function _cortexToggleSection(id) {
+    var b = document.getElementById(id);
+    if (!b) return;
+    b.classList.toggle('open');
+}
+
+function _cortexPhaseTraceHtml(outs) {
+    if (!outs.length) return '<div class="grid-empty">No phase outputs.</div>';
+    return outs.map(function(o) {
+        var payload = o.payload;
+        if (typeof payload === 'string') {
+            try { payload = JSON.parse(payload); } catch (e) { /* keep as string */ }
+        }
+        var summary = '';
+        if (typeof payload === 'object' && payload !== null) {
+            try { summary = JSON.stringify(payload); } catch (e) { summary = String(payload); }
+        } else {
+            summary = String(payload || '');
+        }
+        var preview = summary.slice(0, 500);
+        var hasMore = summary.length > 500;
+        var time = o.created_at ? new Date(o.created_at).toLocaleString('en-GB', {
+            day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit'
+        }) : '';
+        return '<div class="cortex-phase-row">' +
+            '<span class="cortex-phase-name">' + esc(o.phase || '—') + '</span>' +
+            '<span class="cortex-phase-artifact">' + esc(o.artifact_type || '') + '</span>' +
+            '<span class="cortex-phase-time">' + esc(time) + '</span>' +
+            '<pre class="cortex-phase-payload">' + esc(preview) + (hasMore ? '…' : '') + '</pre>' +
+        '</div>';
+    }).join('');
+}
+
+function _cortexSpecialistBreakdownHtml(outs) {
+    // Read-only V1 — parse reason-phase payloads for invoked specialists.
+    // Looks for payload.specialists / payload.invocations / payload.invoked_specialists.
+    var specialists = [];
+    outs.forEach(function(o) {
+        if (o.phase !== 'reason') return;
+        var p = o.payload;
+        if (typeof p === 'string') { try { p = JSON.parse(p); } catch (e) { return; } }
+        if (!p || typeof p !== 'object') return;
+        var cands = p.specialists || p.invocations || p.invoked_specialists || [];
+        if (!Array.isArray(cands)) return;
+        cands.forEach(function(s) {
+            if (!s || typeof s !== 'object') return;
+            specialists.push({
+                name: s.name || s.specialist || s.capability || s.slug || '(unnamed)',
+                cost: s.cost_dollars != null ? s.cost_dollars : (s.cost != null ? s.cost : null),
+                latency_ms: s.latency_ms != null ? s.latency_ms : s.latency,
+                output: s.output || s.response || s.text || s.summary || '',
+            });
+        });
+    });
+    if (!specialists.length) return '<div class="grid-empty">No specialist invocations in reason phase.</div>';
+    return specialists.map(function(s) {
+        var costStr = s.cost != null ? _cortexFmtMoney(s.cost) : '—';
+        var latStr = s.latency_ms != null ? (Math.round(Number(s.latency_ms))) + 'ms' : '—';
+        var outStr = String(s.output || '').slice(0, 300);
+        return '<div class="cortex-specialist-row">' +
+            '<span class="cortex-specialist-name">' + esc(s.name) + '</span>' +
+            '<span class="cortex-specialist-cost">' + esc(costStr) + '</span>' +
+            '<span class="cortex-specialist-latency">' + esc(latStr) + '</span>' +
+            '<pre class="cortex-specialist-output">' + esc(outStr) + (String(s.output || '').length > 300 ? '…' : '') + '</pre>' +
+        '</div>';
+    }).join('');
+}
+
+function _cortexCitationsHtml(proposalText) {
+    if (!proposalText) return '<div class="grid-empty">No proposal text.</div>';
+    var seen = {};
+    var citations = [];
+    var curMatches = String(proposalText).matchAll(/\[curated\/([^\]]+\.md)\]/g);
+    for (var m of curMatches) {
+        var k = 'cur:' + m[1];
+        if (!seen[k]) { seen[k] = true; citations.push({ kind: 'curated', ref: m[1] }); }
+    }
+    var sigMatches = String(proposalText).matchAll(/\[signal_queue:([^\]]+)\]/g);
+    for (var n of sigMatches) {
+        var k2 = 'sig:' + n[1];
+        if (!seen[k2]) { seen[k2] = true; citations.push({ kind: 'signal_queue', ref: n[1] }); }
+    }
+    if (!citations.length) return '<div class="grid-empty">No citations found in proposal.</div>';
+    return '<ul class="cortex-citations-list">' + citations.map(function(c) {
+        if (c.kind === 'curated') {
+            return '<li><span class="cortex-citation-kind">curated</span> ' + esc(c.ref) + '</li>';
+        }
+        return '<li><span class="cortex-citation-kind">signal</span> #' + esc(c.ref) + '</li>';
+    }).join('') + '</ul>';
+}
+
+/* ── Pending tab — POST action handlers ── */
+
+async function _cortexPendingAction(cycleId, action, extras) {
+    if (_cortexActionInFlight[cycleId]) return;
+    _cortexActionInFlight[cycleId] = true;
+    var toast = document.getElementById('cortexPendingToast-' + cycleId);
+    if (toast) { toast.textContent = action + '…'; toast.className = 'cortex-pending-toast in-flight'; }
+    try {
+        var body = Object.assign({ action: action }, extras || {});
+        var resp = await bakerFetch('/cortex/cycle/' + encodeURIComponent(cycleId) + '/action', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(body),
+        });
+        if (!resp.ok) {
+            var errBody = '';
+            try { errBody = await resp.text(); } catch (e) {}
+            if (toast) { toast.textContent = action + ' failed: HTTP ' + resp.status + ' ' + errBody.slice(0, 200); toast.className = 'cortex-pending-toast error'; }
+            return;
+        }
+        if (toast) { toast.textContent = action + ' OK — refreshing'; toast.className = 'cortex-pending-toast ok'; }
+        delete _cortexPendingExpanded[cycleId];
+        await _reloadCortexPending();
+    } catch (e) {
+        if (toast) { toast.textContent = action + ' error: ' + String(e); toast.className = 'cortex-pending-toast error'; }
+    } finally {
+        delete _cortexActionInFlight[cycleId];
+    }
+}
+
+function _cortexPendingEdit(cycleId) {
+    var state = _cortexPendingExpanded[cycleId] || {};
+    var current = (state.proposal && state.proposal.proposal_text) || '';
+    var edited = window.prompt('Edit proposal text (will POST as action=edit):', current);
+    if (edited === null) return;     // user cancelled
+    _cortexPendingAction(cycleId, 'edit', { edits: edited });
+}
+
+function _cortexPendingReject(cycleId) {
+    var reason = window.prompt('Optional reject reason:', '');
+    if (reason === null) return;     // user cancelled
+    _cortexPendingAction(cycleId, 'reject', { reason: reason });
 }
 
 // ═══ KBL PIPELINE TAB — observability for 7-step pipeline (MVP) ═══

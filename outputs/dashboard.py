@@ -4536,6 +4536,163 @@ async def get_cortex_cycle_proposal(cycle_id: str):
         store._put_conn(conn)
 
 
+@app.get(
+    "/api/cortex/cycles/pending",
+    tags=["cortex"],
+    dependencies=[Depends(verify_api_key)],
+)
+async def list_cortex_cycles_pending(limit: int = 50):
+    """List Cortex cycles awaiting Director ratification.
+
+    Returns cycles where status='tier_b_pending' with a 200-char
+    proposal_preview pulled from the latest synthesis phase_output.
+    Read-only. Backs the Cortex Intent Feed "Pending" tab
+    (DASHBOARD_CORTEX_RATIFY_PANEL_1).
+    """
+    store = _get_store()
+    conn = store._get_conn()
+    if not conn:
+        raise HTTPException(status_code=503, detail="Database unavailable")
+    safe_limit = min(max(limit, 1), 100)
+    try:
+        import psycopg2.extras
+        cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+        cur.execute(
+            """
+            SELECT
+                c.cycle_id::text AS cycle_id,
+                c.matter_slug,
+                c.triggered_by,
+                c.current_phase,
+                c.cost_dollars,
+                c.cost_tokens,
+                c.started_at,
+                EXTRACT(EPOCH FROM (NOW() - c.started_at))/60 AS age_minutes,
+                (
+                  SELECT po.payload->>'proposal_text'
+                  FROM cortex_phase_outputs po
+                  WHERE po.cycle_id = c.cycle_id
+                    AND po.artifact_type = 'synthesis'
+                  ORDER BY po.created_at DESC
+                  LIMIT 1
+                ) AS proposal_text
+            FROM cortex_cycles c
+            WHERE c.status = 'tier_b_pending'
+            ORDER BY c.started_at DESC
+            LIMIT %s
+            """,
+            (safe_limit,),
+        )
+        rows = cur.fetchall()
+        cur.close()
+        conn.commit()
+        cycles = []
+        for r in rows:
+            proposal_text = r.get("proposal_text") or ""
+            preview = proposal_text[:200] if proposal_text else ""
+            cycles.append(_serialize({
+                "cycle_id": r["cycle_id"],
+                "matter_slug": r.get("matter_slug"),
+                "triggered_by": r.get("triggered_by"),
+                "current_phase": r.get("current_phase"),
+                "cost_dollars": float(r.get("cost_dollars") or 0.0),
+                "cost_tokens": int(r.get("cost_tokens") or 0),
+                "started_at": r.get("started_at"),
+                "age_minutes": float(r.get("age_minutes") or 0.0),
+                "proposal_preview": preview,
+                "has_proposal": bool(proposal_text),
+            }))
+        return {"cycles": cycles, "count": len(cycles)}
+    except Exception as e:
+        try:
+            conn.rollback()
+        except Exception:
+            pass
+        logger.error("list_cortex_cycles_pending: %s", e)
+        raise HTTPException(status_code=500, detail=str(e))
+    finally:
+        store._put_conn(conn)
+
+
+@app.get(
+    "/api/cortex/cycles/{cycle_id}/trace",
+    tags=["cortex"],
+    dependencies=[Depends(verify_api_key)],
+)
+async def get_cortex_cycle_trace(cycle_id: str):
+    """Return all phase outputs for a cycle, chronologically ordered.
+
+    Backs the Tier-2 "Show your work" expansion in the ratify panel:
+    phase trace + specialist breakdown + citations + cost telemetry.
+    Read-only; 400 on bad UUID, 404 on missing cycle. Mirrors auth +
+    UUID-validation pattern from get_cortex_cycle_proposal above.
+    """
+    import uuid as _uuid
+    try:
+        _uuid.UUID(cycle_id)
+    except (ValueError, TypeError):
+        raise HTTPException(status_code=400, detail="Invalid cycle_id")
+
+    store = _get_store()
+    conn = store._get_conn()
+    if not conn:
+        raise HTTPException(status_code=503, detail="Database unavailable")
+    try:
+        import psycopg2.extras
+        cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+        cur.execute(
+            """
+            SELECT cycle_id::text AS cycle_id, matter_slug, status,
+                   current_phase, cost_dollars, cost_tokens,
+                   started_at, completed_at
+            FROM cortex_cycles
+            WHERE cycle_id = %s
+            LIMIT 1
+            """,
+            (cycle_id,),
+        )
+        cyc = cur.fetchone()
+        if not cyc:
+            cur.close()
+            conn.commit()
+            raise HTTPException(status_code=404, detail="Cycle not found")
+        cur.execute(
+            """
+            SELECT phase, phase_order, artifact_type, payload, created_at
+            FROM cortex_phase_outputs
+            WHERE cycle_id = %s
+            ORDER BY created_at ASC, phase_order ASC NULLS LAST
+            """,
+            (cycle_id,),
+        )
+        outputs = [_serialize(dict(r)) for r in cur.fetchall()]
+        cur.close()
+        conn.commit()
+        return _serialize({
+            "cycle_id": cyc["cycle_id"],
+            "matter_slug": cyc.get("matter_slug"),
+            "status": cyc.get("status"),
+            "current_phase": cyc.get("current_phase"),
+            "cost_dollars": float(cyc.get("cost_dollars") or 0.0),
+            "cost_tokens": int(cyc.get("cost_tokens") or 0),
+            "started_at": cyc.get("started_at"),
+            "completed_at": cyc.get("completed_at"),
+            "phase_outputs": outputs,
+            "count": len(outputs),
+        })
+    except HTTPException:
+        raise
+    except Exception as e:
+        try:
+            conn.rollback()
+        except Exception:
+            pass
+        logger.error("get_cortex_cycle_trace: %s", e)
+        raise HTTPException(status_code=500, detail=str(e))
+    finally:
+        store._put_conn(conn)
+
+
 @app.get("/api/cortex/lint", tags=["cortex"], dependencies=[Depends(verify_api_key)])
 async def get_cortex_lint(status: str = "open", limit: int = 50):
     """Lint results — wiki health findings."""
