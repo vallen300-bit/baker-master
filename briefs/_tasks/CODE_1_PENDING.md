@@ -1,77 +1,77 @@
 ---
-status: CLAIMED
-brief: briefs/BRIEF_DASHBOARD_CORTEX_RATIFY_PANEL_1.md
-brief_id: DASHBOARD_CORTEX_RATIFY_PANEL_1
-target_repo: baker-master
-working_dir: ~/bm-b1
+status: PENDING
+brief: _ops/briefs/BRIEF_BRISEN_LAB_PR22_BUTTON_REPOINT_1.md (baker-vault)
+brief_id: BRISEN_LAB_PR22_BUTTON_REPOINT_1
+target_repo: brisen-lab
+working_dir: ~/bm-b1-brisen-lab
 matter_slug: baker-internal
-cross_matter_usage: [all-matters] (every matter's Cortex cycles ratify through this panel)
-dispatched_at: 2026-05-19T12:55:00Z
+cross_matter_usage: [all-matters] (every matter's Cortex cycles route through brisen-lab card → baker-master ratify panel)
+dispatched_at: 2026-05-19T13:00:00Z
 dispatched_by: lead
-director_auth: 2026-05-19 chat — "ratified , go ahead."
-trigger_class: LOW-MEDIUM
-gate_chain:
-  gate_1_static: REQUIRED (deputy / AH2 cross-lane)
-  gate_2_security_review: REQUIRED (touches dashboard frontend + new API routes)
-  gate_3_cross_lane_architecture: NOT required (no auth/DB schema/architecture-affecting changes)
-  gate_4_2nd_pass_code_reviewer: NOT required (no auth/DB schema/operation-ordering per SKILL.md trigger list)
-estimated_effort: 3-5h (Tier 1 ~1.5h + Tier 2 ~2-3h)
-working_branch_suggestion: b1/dashboard-cortex-ratify-panel-1
-reply_target: lead (bus topic `ship/dashboard-cortex-ratify-panel-1`)
+director_auth: 2026-05-19 chat — "ratified , go ahead." (covers chain including this fast-follow per brief HOLD-trigger convention)
+trigger_class: LOW
+estimated_effort: 15-30 min
+working_branch_suggestion: b1/pr22-button-repoint-1
+reply_target: lead (bus topic `ship/brisen-lab-pr22-button-repoint-1`)
+prior_dispatch_closeout: |
+  DASHBOARD_CORTEX_RATIFY_PANEL_1 merged 2026-05-19 — squash commit 1264ca8 on baker-master main.
+  PR #223 closed. Mailbox previously held CLAIMED status; now flipped to PENDING for fast-follow dispatch.
 ---
 
-# CODE_1_PENDING — DASHBOARD_CORTEX_RATIFY_PANEL_1 — 2026-05-19
+# CODE_1_PENDING — BRISEN_LAB_PR22_BUTTON_REPOINT_1 — 2026-05-19
 
 ## Brief
 
-`briefs/BRIEF_DASHBOARD_CORTEX_RATIFY_PANEL_1.md` (same commit). Read end-to-end before starting — Surface contract block at top has all verified `file:line` references for the endpoints.
+`~/baker-vault/_ops/briefs/BRIEF_BRISEN_LAB_PR22_BUTTON_REPOINT_1.md`. Pre-authored 2026-05-19 ~13:40Z when the destination didn't yet exist; now activated post-merge. Read end-to-end — Surface Contract block at top has all verified `file:line` references including the destination URL pattern.
 
-## Working branch
+## What ships
 
-`b1/dashboard-cortex-ratify-panel-1`. Cut from `main` after `git pull --ff-only origin main`.
+1-3 line patch in `app.js` (brisen-lab repo) — change the "Open in baker-master" anchor URL from `/api/cortex/gate/decide?cycle_id=<id>` (wrong endpoint, returns 400) to the new ratify panel destination. Plus cache-bust `index.html` (current `v=11` → `v=12`).
 
-## Pre-requisites
+## Destination URL — verify before patching
 
-- `~/bm-b1` checkout sync'd to origin/main (`git fetch && git status` clean before branch cut — per 2026-05-03 local-checkout-drift lesson).
-- `BAKER_KEY` env var available for smoke-test curls (B1 has it; if not, op CLI fetch from 1Password).
-- A test cycle with `status='tier_b_pending'` in DB for manual smoke. If none exists in prod, use the mrci probe envelope `db3d43a3-a623-45e8-aa13-b43d0a55b37d` from 2026-05-18 night (still sitting pending per the prior handover § Live state).
+The new baker-master ratify panel is the Pending tab on the Cortex Intent Feed card. **B1 must verify the actual anchor/query convention in the merged commit (1264ca8) BEFORE writing the URL.** Read `outputs/static/index.html:233-237` for the tab button id `cortexTabPending` + `outputs/static/app.js` for the `_cortexTab('pending')` JS — confirm whether the panel responds to a fragment anchor (e.g., `#cortex-pending-<cycle_id>`) or a query string (e.g., `?cortex_cycle=<cycle_id>`) for deep-linking to a specific cycle row.
 
-## Scope summary (full detail in brief)
+If neither anchor nor query is currently supported (likely — the panel was built without deep-link support), the simplest right answer is: re-point at the dashboard root (`https://baker-master.onrender.com/`) and let Director click the Pending tab manually. Tag a fast-follow brief candidate `BRIEF_DASHBOARD_CORTEX_RATIFY_DEEPLINK_1` in your ship report if you take this path.
 
-**Tier 1 (must-ship):** New "Pending" tab on Cortex Intent Feed card. List of `tier_b_pending` cycles. Per-row expansion shows full proposal text. Four buttons: Approve / Edit / Refresh / Reject. POST to existing `/cortex/cycle/{cycle_id}/action`.
+## Working dir / branch
 
-**Tier 2 (must-ship in same PR):** Phase trace + specialist breakdown (read-only — no flag button in V1) + citations panel + cost telemetry. All under the expanded row, collapsible.
+- **Repo:** brisen-lab.
+- **Working dir:** `~/bm-b1-brisen-lab`.
+- **Branch:** `b1/pr22-button-repoint-1` cut from brisen-lab `main` after `git pull --ff-only origin main`.
 
-**New API routes (read-only, both):**
-- `GET /api/cortex/cycles/pending`
-- `GET /api/cortex/cycles/{cycle_id}/trace`
+## Pre-flight
 
-**Out of scope:** Tier 3-5 (gold-tag / devils-advocate fire / convert-to-brief / stale-cycle list inline / cost-cap monitor). Named explicitly in brief's `## Out of scope` — do not implement.
+1. `cd ~/bm-b1-brisen-lab && git pull --ff-only origin main && git status` (clean).
+2. `cd ~/bm-aihead1 && git log --oneline -5` to see the merged baker-master commit `1264ca8` — confirm the Pending tab + new endpoints landed.
+3. Read the new code in baker-master at the file:line refs above before deciding destination URL pattern.
 
-## Ship gate (literal)
+## Test plan
 
-1. `pytest tests/test_dashboard_cortex_ratify.py -v` — full literal output in ship report. No "pass by inspection."
-2. `pytest tests/test_dashboard*.py -v` — confirm no regressions.
-3. `bash scripts/check_singletons.sh` — clean.
-4. Manual smoke per brief § Test plan step 2 — screenshot of new tab + curl-success log of both new endpoints included in ship report.
+1. Local smoke: load brisen-lab on local server (uvicorn or equivalent) → click "Open in baker-master" on a tier_b_pending cycle card → confirm browser navigates to baker-master Pending tab (or root if no deep-link).
+2. Screenshot of destination after click included in ship report.
+3. No new automated tests required (15-LOC UI patch under existing render path).
+
+## Ship gate
+
+- Manual click-test confirmed (screenshot in ship report).
+- `pytest tests/ -v` on brisen-lab side — confirm no regressions.
+- Cache-bust version incremented.
+
+## Gate chain
+
+- Gate-1 (deputy static) + Gate-2 (`/security-review` skip-eligible per existing brisen-lab UI-only-diff precedent — B1 surfaces to AH1 if uncertain).
+- Gate-3 + Gate-4 NOT required.
 
 ## Reporting
 
-- Open PR with title `DASHBOARD_CORTEX_RATIFY_PANEL_1: web ratify panel for Cortex Tier-B proposals`.
-- Bus-post `ship/dashboard-cortex-ratify-panel-1` to `lead` with: PR link, commit SHA, literal pytest output presence, 4-gate readiness (G3+G4 not required per trigger class), smoke screenshot path.
-- Heartbeat every 12h while in progress per 2026-05-05 stall-chase protocol.
-
-## Self-check before claiming ship
-
-- [ ] Surface Contract block from brief is preserved unchanged in the PR description (so reviewers see it inline).
-- [ ] Reviewer instructions per `ui-surface-prebrief` skill check 6 are quoted in PR description.
-- [ ] Both new GET endpoints curl-tested locally with `X-Baker-Key` header → 200 + valid JSON shape.
-- [ ] Each of the 4 action buttons clicked at least once on local dashboard against the test cycle → POST 200 + row removes.
-- [ ] No removal or modification of the Slack ratify path in `orchestrator/cortex_phase4_proposal.py:175-188`.
+- Bus-post `ship/brisen-lab-pr22-button-repoint-1` to `lead`.
+- Heartbeat unnecessary for sub-30-min brief.
 
 ## Anchors
 
-- Brief: `briefs/BRIEF_DASHBOARD_CORTEX_RATIFY_PANEL_1.md`
-- Skill that gated this brief (read for Surface Contract context): `~/baker-vault/_ops/skills/ui-surface-prebrief/SKILL.md` (v1.1)
-- Researcher market scan (informed scope — not blocking): `~/baker-vault/wiki/research/2026-05-19-ui-surface-prebrief-market-scan.md`
-- Anchor incident: brisen-lab PR #22 shipped 2026-05-19 with broken "Open in baker-master" URL; this brief builds the destination that URL should have pointed at.
+- Brief: `~/baker-vault/_ops/briefs/BRIEF_BRISEN_LAB_PR22_BUTTON_REPOINT_1.md`
+- Source brief that introduced the bug: `briefs/BRIEF_BRISEN_LAB_CORTEX_DRILLDOWN_1.md` (commit dac3b90 on brisen-lab main)
+- Destination brief that created the correct URL: now-merged baker-master commit `1264ca8` (PR #223)
+- Skill that gated this fast-follow: `~/baker-vault/_ops/skills/ui-surface-prebrief/SKILL.md` (v1.1)
+- Anchor incident: 2026-05-19 ~07:45Z Director smoke-test of PR #22 drilldown caught the broken URL
