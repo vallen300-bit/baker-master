@@ -1,5 +1,5 @@
 ---
-status: PENDING
+status: CLAIMED
 brief: _ops/briefs/BRIEF_BRISEN_LAB_PR22_BUTTON_REPOINT_1.md (baker-vault)
 brief_id: BRISEN_LAB_PR22_BUTTON_REPOINT_1
 target_repo: brisen-lab
