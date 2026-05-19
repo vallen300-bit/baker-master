@@ -1,5 +1,5 @@
 ---
-status: PENDING
+status: COMPLETE
 brief: ~/baker-vault/_ops/briefs/director-facing-filter-v1.md
 brief_id: DIRECTOR_FACING_FILTER_V1_PHASE_1
 target_repo: baker-master
