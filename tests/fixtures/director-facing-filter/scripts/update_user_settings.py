@@ -44,38 +44,65 @@ HOOKS_TO_WIRE = {
 }
 
 
-def _hook_entry(command: str) -> dict:
-    """Claude Code hook entry shape (matcher + hooks list)."""
-    return {
-        "matcher": "*",
-        "hooks": [{"type": "command", "command": command}],
-    }
+def _normalize(cmd: str) -> str:
+    """Idempotency comparator: collapse $HOME / ~ / symlinks so two spellings of
+    the same path compare equal (Gate-2 MEDIUM)."""
+    if not cmd:
+        return ""
+    expanded = os.path.expandvars(os.path.expanduser(cmd))
+    try:
+        return os.path.realpath(expanded)
+    except OSError:
+        return expanded
 
 
-def _hook_command_set(matcher_entries: list) -> set:
-    """Pull every command string out of a list of matcher entries."""
-    commands = set()
+def _existing_commands(matcher_entries: list) -> set:
+    """All commands already wired under this event, normalized."""
+    out: set = set()
     for entry in matcher_entries or []:
-        for h in entry.get("hooks", []) or []:
+        for h in (entry.get("hooks") or []):
             cmd = h.get("command")
             if cmd:
-                commands.add(cmd)
-    return commands
+                out.add(_normalize(cmd))
+    return out
+
+
+def _find_or_create_matcher_entry(bucket: list) -> dict:
+    """Return the first existing `matcher: "*"` entry, or create one and append.
+
+    Bundling all hooks for an event under a single matcher entry is what
+    guarantees execution order — Claude Code preserves the `hooks: [...]` array
+    ordering within one matcher entry. Multiple matcher entries can interleave
+    based on which Claude Code's matcher fires first (per Gate-3 HIGH 2026-05-19).
+    """
+    for entry in bucket:
+        if entry.get("matcher") == "*":
+            entry.setdefault("hooks", [])
+            return entry
+    entry = {"matcher": "*", "hooks": []}
+    bucket.append(entry)
+    return entry
 
 
 def merge_settings(settings: dict) -> tuple[dict, list[str]]:
-    """Return (merged_settings, list_of_actions_taken)."""
+    """Return (merged_settings, list_of_actions_taken).
+
+    Per-event: all wire-list commands go into ONE matcher entry's hooks[] array
+    so execution order is deterministic. Idempotent via path-normalized compare.
+    """
     actions: list[str] = []
     hooks_root = settings.setdefault("hooks", {})
 
     for event, commands in HOOKS_TO_WIRE.items():
         bucket = hooks_root.setdefault(event, [])
-        existing = _hook_command_set(bucket)
+        existing = _existing_commands(bucket)
+        entry = _find_or_create_matcher_entry(bucket)
         for cmd in commands:
-            if cmd in existing:
+            if _normalize(cmd) in existing:
                 actions.append(f"skip (already wired): {event} → {cmd}")
                 continue
-            bucket.append(_hook_entry(cmd))
+            entry["hooks"].append({"type": "command", "command": cmd})
+            existing.add(_normalize(cmd))
             actions.append(f"add: {event} → {cmd}")
 
     return settings, actions

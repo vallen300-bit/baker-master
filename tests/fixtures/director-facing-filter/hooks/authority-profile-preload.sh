@@ -24,7 +24,8 @@ except Exception:
 if not user_text:
     sys.exit(0)
 try:
-    profiles = (yaml.safe_load(open(os.environ["PROFILES"])) or {}).get("authority_profiles", {})
+    with open(os.environ["PROFILES"], encoding="utf-8") as _pf:
+        profiles = (yaml.safe_load(_pf) or {}).get("authority_profiles", {})
 except Exception:
     sys.exit(0)
 

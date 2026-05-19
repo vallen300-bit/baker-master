@@ -37,7 +37,10 @@ SIZE="$(wc -c <"$TRANSCRIPT" 2>/dev/null | tr -d ' ')"
 PACK="${BRISEN_STANDING_RULES_PACK:-$HOME/baker-vault/_ops/processes/standing-rules-pack.md}"
 [ ! -f "$PACK" ] && exit 0
 
-WARNING="$(TRANSCRIPT="$TRANSCRIPT" PACK="$PACK" python3 - <<'PY' 2>/dev/null
+# Note: no `2>/dev/null` here — Gate-4 fix expects WARN lines on malformed
+# pack entries to reach the user. Python's try/except still swallows runtime
+# errors, so only the explicit sys.stderr.write calls below produce output.
+WARNING="$(TRANSCRIPT="$TRANSCRIPT" PACK="$PACK" python3 - <<'PY'
 import json, os, re, sys
 path = os.environ["TRANSCRIPT"]
 pack_path = os.environ["PACK"]
@@ -67,21 +70,32 @@ if not text.strip():
     sys.exit(0)
 
 # Pack format: each non-blank, non-comment line = <regex>::<rule-name>::<block-reason>
+# Malformed lines (too few :: fields, regex fails to compile) emit one stderr
+# WARN each instead of failing silently. :: is a reserved delimiter (pack header).
 violations = []
 try:
     with open(pack_path, "r", encoding="utf-8", errors="replace") as f:
-        for line in f:
-            line = line.rstrip("\n")
+        for lineno, raw in enumerate(f, start=1):
+            line = raw.rstrip("\n")
             if not line.strip() or line.lstrip().startswith("#"):
                 continue
             parts = line.split("::", 2)
             if len(parts) != 3:
+                sys.stderr.write(
+                    "standing-rules-scan.sh WARN: " + pack_path + ":" + str(lineno) +
+                    " skipped \u2014 expected <regex>::<name>::<reason>, got " +
+                    str(len(parts)) + " field(s).\n"
+                )
                 continue
             rx, name, reason = parts
             try:
                 if re.search(rx, text, re.IGNORECASE | re.MULTILINE):
                     violations.append((name, reason))
-            except re.error:
+            except re.error as e:
+                sys.stderr.write(
+                    "standing-rules-scan.sh WARN: " + pack_path + ":" + str(lineno) +
+                    " skipped \u2014 regex " + repr(rx) + " did not compile (" + str(e) + ").\n"
+                )
                 continue
 except Exception:
     sys.exit(0)

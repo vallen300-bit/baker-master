@@ -47,6 +47,19 @@ the behavior.
 - `~/baker-vault/_ops/processes/standing-rules-pack.md` — rule pack.
   Director-ratified; new rules added via PR.
 
+## Known limitations (Phase 1)
+
+- **Multi-session race on the mode state file.** `~/.claude/state/brisen-filter-mode`
+  is a single file shared across every Claude Code session on this machine.
+  If session A writes `deliberate` while session B is still in `light`, the
+  next Stop hook in either session reads whichever value was written most
+  recently. In practice this only matters if Director runs two sessions in
+  parallel and switches modes on one without re-triggering the router on the
+  other. Phase 2 fixes via `$CLAUDE_SESSION_ID`-namespaced state files (or a
+  SessionStart hook that resets to `light`). Workaround for Phase 1: open a
+  new prompt in the affected session — `strategic-mode-router.sh` will
+  recompute mode from your latest message and rewrite the file.
+
 ## Phase 2 (not shipped here)
 
 Validator subagents for Filter #1 (Stakeholder-Authority) and Filter #3
