@@ -1472,6 +1472,23 @@ body {
     display: flex;
     gap: 4px;
     margin-left: auto;
+    flex-shrink: 0;
+    position: relative;
+    z-index: 1;
+}
+/* Override absolute-positioned count for cortex header: count was overlapping
+   tabs and intercepting clicks via elementFromPoint. Put it back in flex flow. */
+.grid-cell-header.grid-header-cortex .grid-cell-count {
+    position: static;
+    margin-left: 8px;
+    font-size: 11px;
+    font-weight: 500;
+    color: var(--text3);
+    white-space: nowrap;
+    flex-shrink: 1;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
 }
 .cortex-tab {
     background: none;
