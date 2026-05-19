@@ -1605,6 +1605,37 @@ body {
     overflow-y: auto;
     margin-bottom: 8px;
 }
+/* Director Card (Phase 4.5) — plain-English ratify view. */
+.cortex-director-card {
+    background: var(--card);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 10px 12px;
+    margin-bottom: 8px;
+}
+.cortex-card-header {
+    font-size: 12px;
+    font-weight: 700;
+    color: var(--text1);
+    padding-bottom: 6px;
+    margin-bottom: 6px;
+    border-bottom: 1px solid var(--border);
+}
+.cortex-card-row {
+    display: grid;
+    grid-template-columns: minmax(140px, 30%) 1fr;
+    gap: 8px;
+    padding: 4px 0;
+    font-size: 11px;
+    line-height: 1.4;
+}
+.cortex-card-label { color: var(--text3); font-weight: 600; }
+.cortex-card-value { color: var(--text1); word-wrap: break-word; }
+@media (max-width: 480px) {
+    .cortex-card-row { grid-template-columns: 1fr; gap: 2px; }
+    .cortex-card-label { font-size: 10px; }
+}
+
 .cortex-pending-buttons { display: flex; gap: 6px; flex-wrap: wrap; }
 .cortex-pending-btn {
     border: 1px solid var(--border);

@@ -4498,12 +4498,29 @@ async def get_cortex_cycle_proposal(cycle_id: str):
             (cycle_id,),
         )
         syn = cur.fetchone()
+
+        cur.execute(
+            """
+            SELECT payload, created_at
+            FROM cortex_phase_outputs
+            WHERE cycle_id = %s
+              AND artifact_type = 'director_card'
+            ORDER BY created_at DESC
+            LIMIT 1
+            """,
+            (cycle_id,),
+        )
+        card_row = cur.fetchone()
         cur.close()
         conn.commit()
 
         proposal_text = None
         if syn and isinstance(syn.get("payload"), dict):
             proposal_text = syn["payload"].get("proposal_text")
+
+        director_card = None
+        if card_row and isinstance(card_row.get("payload"), dict):
+            director_card = card_row["payload"]
 
         result = _serialize({
             "cycle_id": cyc["cycle_id"],
@@ -4522,6 +4539,8 @@ async def get_cortex_cycle_proposal(cycle_id: str):
         # SSE, not from this endpoint.
         result["proposal_text"] = proposal_text
         result["has_proposal"] = bool(proposal_text)
+        result["director_card"] = director_card
+        result["has_director_card"] = director_card is not None
         return result
     except HTTPException:
         raise
@@ -4575,7 +4594,15 @@ async def list_cortex_cycles_pending(limit: int = 50):
                     AND po.artifact_type = 'synthesis'
                   ORDER BY po.created_at DESC
                   LIMIT 1
-                ) AS proposal_text
+                ) AS proposal_text,
+                (
+                  SELECT po.payload
+                  FROM cortex_phase_outputs po
+                  WHERE po.cycle_id = c.cycle_id
+                    AND po.artifact_type = 'director_card'
+                  ORDER BY po.created_at DESC
+                  LIMIT 1
+                ) AS director_card
             FROM cortex_cycles c
             WHERE c.status = 'tier_b_pending'
             ORDER BY c.started_at DESC
@@ -4590,6 +4617,7 @@ async def list_cortex_cycles_pending(limit: int = 50):
         for r in rows:
             proposal_text = r.get("proposal_text") or ""
             preview = proposal_text[:200] if proposal_text else ""
+            director_card = r.get("director_card")
             cycles.append(_serialize({
                 "cycle_id": r["cycle_id"],
                 "matter_slug": r.get("matter_slug"),
@@ -4601,6 +4629,8 @@ async def list_cortex_cycles_pending(limit: int = 50):
                 "age_minutes": float(r.get("age_minutes") or 0.0),
                 "proposal_preview": preview,
                 "has_proposal": bool(proposal_text),
+                "director_card": director_card if isinstance(director_card, dict) else None,
+                "has_director_card": isinstance(director_card, dict),
             }))
         return {"cycles": cycles, "count": len(cycles)}
     except Exception as e:

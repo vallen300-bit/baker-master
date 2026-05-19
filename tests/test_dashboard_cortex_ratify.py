@@ -121,8 +121,8 @@ def test_pending_tab_button_in_static_index_html():
     src = Path("outputs/static/index.html").read_text()
     assert 'id="cortexTabPending"' in src
     assert "_cortexTab('pending')" in src
-    # Cache-bust bumped
-    assert "app.js?v=115" in src
+    # Cache-bust bumped (CORTEX_DIRECTOR_CARD_V1)
+    assert "app.js?v=116" in src
 
 
 def test_cortex_ratify_js_helpers_exist():
@@ -138,6 +138,8 @@ def test_cortex_ratify_js_helpers_exist():
         "_cortexPendingAction",
         "_cortexPendingEdit",
         "_cortexPendingReject",
+        # CORTEX_DIRECTOR_CARD_V1 — plain-English card renderer
+        "_cortexDirectorCardHtml",
     ):
         assert fn in src, f"missing JS helper: {fn}"
     # Pending tab polls /pending
@@ -149,7 +151,7 @@ def test_cortex_ratify_js_helpers_exist():
 # ─── /api/cortex/cycles/pending — TestClient happy + auth + empty ───
 
 
-def _pending_row(cyc_id, proposal_text=None):
+def _pending_row(cyc_id, proposal_text=None, director_card=None):
     return {
         "cycle_id": cyc_id,
         "matter_slug": "hagenauer-rg7",
@@ -160,6 +162,22 @@ def _pending_row(cyc_id, proposal_text=None):
         "started_at": None,
         "age_minutes": 12.5,
         "proposal_text": proposal_text,
+        "director_card": director_card,
+    }
+
+
+def _sample_director_card():
+    """9-field card payload matching the schema from CORTEX_DIRECTOR_CARD_V1."""
+    return {
+        "matter": "Hagenauer RG7",
+        "situation": "The administrator missed a filing deadline.",
+        "action": "Send a follow-up letter giving 7 days.",
+        "rationale": "We need to preserve our position. A polite letter costs nothing.",
+        "downside": "Admin could push back on tone.",
+        "no_action_consequence": "Deadline expires uncontested.",
+        "cost": {"ai_money_eur": 0.0034, "real_world_money_eur": None, "action_sends_money": False},
+        "recommendation": "approve",
+        "confidence": "medium",
     }
 
 
@@ -212,6 +230,41 @@ def test_pending_marks_has_proposal_false_when_no_synthesis(monkeypatch):
     c = resp.json()["cycles"][0]
     assert c["has_proposal"] is False
     assert c["proposal_preview"] == ""
+
+
+# ─── Director Card (Phase 4.5) — CORTEX_DIRECTOR_CARD_V1 ───
+
+
+def test_pending_returns_director_card_when_present(monkeypatch):
+    _set_api_key(monkeypatch)
+    cyc_id = str(uuid.uuid4())
+    card = _sample_director_card()
+    rows = [_pending_row(cyc_id, proposal_text="**Proposed:** Send letter.", director_card=card)]
+    from outputs import dashboard
+    monkeypatch.setattr(dashboard, "_get_store", lambda: _StubStore([rows]))
+
+    resp = _client().get("/api/cortex/cycles/pending", headers=_hdr())
+    assert resp.status_code == 200, resp.text
+    c = resp.json()["cycles"][0]
+    assert c["has_director_card"] is True
+    assert isinstance(c["director_card"], dict)
+    assert c["director_card"]["matter"] == "Hagenauer RG7"
+    assert c["director_card"]["recommendation"] == "approve"
+    assert c["director_card"]["confidence"] == "medium"
+
+
+def test_pending_director_card_null_when_absent(monkeypatch):
+    _set_api_key(monkeypatch)
+    cyc_id = str(uuid.uuid4())
+    rows = [_pending_row(cyc_id, proposal_text="x", director_card=None)]
+    from outputs import dashboard
+    monkeypatch.setattr(dashboard, "_get_store", lambda: _StubStore([rows]))
+
+    resp = _client().get("/api/cortex/cycles/pending", headers=_hdr())
+    assert resp.status_code == 200
+    c = resp.json()["cycles"][0]
+    assert c["has_director_card"] is False
+    assert c["director_card"] is None
 
 
 # ─── /api/cortex/cycles/{cycle_id}/trace — happy + 400 + 404 ───

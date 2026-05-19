@@ -10398,13 +10398,36 @@ function _cortexPendingExpansionHtml(cycleId) {
     var prop = state.proposal || {};
     var trace = state.trace || {};
     var proposalText = prop.proposal_text || '';
+    var card = prop.director_card || null;
     var costStr = _cortexFmtMoney(prop.cost_dollars) +
         ' · ' + (Number(prop.cost_tokens) || 0).toLocaleString() + ' tokens' +
         ' · ' + _cortexPendingDuration(prop.started_at, prop.completed_at);
     var btnsId = escAttr(cycleId);
+
+    var bodyHtml;
+    if (card) {
+        // Director Card present — render structured 9-field view first,
+        // collapse the technical proposal_text behind a "Show full reasoning" toggle.
+        bodyHtml =
+            _cortexDirectorCardHtml(card) +
+            _collapsibleSection(
+                'Show full reasoning',
+                'cxFR-' + btnsId,
+                '<div class="cortex-pending-proposal md-content">' +
+                    md(proposalText || '(no proposal text)') +
+                '</div>'
+            );
+    } else {
+        // Fallback: legacy cycles (pre-this-PR) have no card — render the
+        // existing technical proposal_text directly.
+        bodyHtml = '<div class="cortex-pending-proposal md-content">' +
+            md(proposalText || '(no proposal text yet)') +
+        '</div>';
+    }
+
     return '' +
         '<div class="cortex-pending-cost">' + esc(costStr) + '</div>' +
-        '<div class="cortex-pending-proposal md-content">' + md(proposalText || '(no proposal text yet)') + '</div>' +
+        bodyHtml +
         '<div class="cortex-pending-buttons">' +
             '<button class="cortex-pending-btn approve" onclick="_cortexPendingAction(\'' + btnsId + '\',\'approve\')">Approve</button>' +
             '<button class="cortex-pending-btn edit"    onclick="_cortexPendingEdit(\'' + btnsId + '\')">Edit</button>' +
@@ -10413,6 +10436,43 @@ function _cortexPendingExpansionHtml(cycleId) {
         '</div>' +
         '<div class="cortex-pending-toast" id="cortexPendingToast-' + btnsId + '"></div>' +
         _cortexPendingTier2Html(cycleId, trace);
+}
+
+/* Render the plain-English Director Card (Phase 4.5 output). Every field
+   passes through esc() — backend already strips HTML/markdown/JS from
+   string fields, but defense-in-depth on the rendering side. */
+function _cortexDirectorCardHtml(card) {
+    function row(label, value) {
+        return '<div class="cortex-card-row">' +
+            '<div class="cortex-card-label">' + esc(label) + '</div>' +
+            '<div class="cortex-card-value">' + esc(value || '—') + '</div>' +
+        '</div>';
+    }
+    var cost = (card.cost && typeof card.cost === 'object') ? card.cost : {};
+    var aiMoney = (cost.ai_money_eur !== undefined && cost.ai_money_eur !== null)
+        ? '€' + Number(cost.ai_money_eur).toFixed(4)
+        : '—';
+    var rwMoney;
+    if (cost.action_sends_money === true && cost.real_world_money_eur != null) {
+        rwMoney = '€' + Number(cost.real_world_money_eur).toFixed(2);
+    } else if (cost.action_sends_money === true) {
+        rwMoney = 'unspecified';
+    } else {
+        rwMoney = 'no money sent';
+    }
+    var costText = aiMoney + ' AI compute · ' + rwMoney;
+    return '<div class="cortex-director-card">' +
+        '<div class="cortex-card-header">What I\'m Asking</div>' +
+        row('Matter', card.matter) +
+        row('What\'s going on', card.situation) +
+        row('What I want to do', card.action) +
+        row('Why I\'m recommending this', card.rationale) +
+        row('What could go wrong if you say yes', card.downside) +
+        row('What happens if you say no', card.no_action_consequence) +
+        row('Cost', costText) +
+        row('Recommendation', card.recommendation) +
+        row('Confidence', card.confidence) +
+    '</div>';
 }
 
 function _cortexPendingDuration(startedAt, completedAt) {
