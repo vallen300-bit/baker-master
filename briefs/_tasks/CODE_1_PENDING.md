@@ -1,7 +1,11 @@
 ---
-status: CLAIMED
+status: COMPLETE
 brief: _ops/briefs/BRIEF_BRISEN_LAB_PR22_BUTTON_REPOINT_1.md (baker-vault)
 brief_id: BRISEN_LAB_PR22_BUTTON_REPOINT_1
+merge_commit: 0afb432afd8b00bf8ed57d3dd409cf7b780dd34a
+merged_at: 2026-05-19T13:14:10Z
+merged_by: ai-head-1 (AH1, lead)
+pr: https://github.com/vallen300-bit/brisen-lab/pull/24
 target_repo: brisen-lab
 working_dir: ~/bm-b1-brisen-lab
 matter_slug: baker-internal
