@@ -122,7 +122,7 @@ def test_pending_tab_button_in_static_index_html():
     assert 'id="cortexTabPending"' in src
     assert "_cortexTab('pending')" in src
     # Cache-bust bumped
-    assert "app.js?v=114" in src
+    assert "app.js?v=115" in src
 
 
 def test_cortex_ratify_js_helpers_exist():

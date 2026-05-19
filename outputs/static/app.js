@@ -10266,6 +10266,13 @@ function _cortexTab(tab) {
     document.getElementById('cortexTab' + tab.charAt(0).toUpperCase() + tab.slice(1)).classList.add('active');
     if (_cortexPendingPoller) { clearInterval(_cortexPendingPoller); _cortexPendingPoller = null; }
     if (tab === 'pending') {
+        // Fresh fetch on tab activation — render-on-click race fix:
+        // _renderCortexTab below reads cached _cortexData.pending, which can be
+        // empty (loadCortexFeed race with /api/client-config apiKey load, or
+        // transient miss). Without this immediate fetch, Director sees
+        // "No cycles awaiting ratification." for up to 30s after click even
+        // when cycles are pending. (deputy smoke find, PR #223.)
+        _reloadCortexPending();
         _cortexPendingPoller = setInterval(_reloadCortexPending, 30000);
     }
     _renderCortexTab(tab);
