@@ -10434,6 +10434,14 @@ function _cortexPendingExpansionHtml(cycleId) {
             '<button class="cortex-pending-btn refresh" onclick="_cortexPendingAction(\'' + btnsId + '\',\'refresh\')">Refresh</button>' +
             '<button class="cortex-pending-btn reject"  onclick="_cortexPendingReject(\'' + btnsId + '\')">Reject</button>' +
         '</div>' +
+        '<div class="cortex-pending-edit-form" id="cortexPendingEditForm-' + btnsId + '" style="display:none">' +
+            '<div class="cortex-pending-edit-label">What\'s wrong with this proposal, or how should it change?</div>' +
+            '<textarea class="cortex-pending-edit-textarea" id="cortexPendingEditTextarea-' + btnsId + '" rows="6" placeholder="Describe what needs to change. The system will use this feedback to rework the proposal."></textarea>' +
+            '<div class="cortex-pending-edit-actions">' +
+                '<button class="cortex-pending-btn edit-save"   onclick="_cortexPendingEditSave(\'' + btnsId + '\')">Save edits</button>' +
+                '<button class="cortex-pending-btn edit-cancel" onclick="_cortexPendingEditCancel(\'' + btnsId + '\')">Cancel</button>' +
+            '</div>' +
+        '</div>' +
         '<div class="cortex-pending-toast" id="cortexPendingToast-' + btnsId + '"></div>' +
         _cortexPendingTier2Html(cycleId, trace);
 }
@@ -10634,11 +10642,40 @@ async function _cortexPendingAction(cycleId, action, extras) {
 }
 
 function _cortexPendingEdit(cycleId) {
-    var state = _cortexPendingExpanded[cycleId] || {};
-    var current = (state.proposal && state.proposal.proposal_text) || '';
-    var edited = window.prompt('Edit proposal text (will POST as action=edit):', current);
-    if (edited === null) return;     // user cancelled
-    _cortexPendingAction(cycleId, 'edit', { edits: edited });
+    /* Show the inline textarea edit form. Replaces window.prompt() which
+       was one-line and unusable on mobile + desktop for proposal-length
+       feedback. Director feedback 2026-05-20 ("the window is one line ...
+       practically impossible to edit"). */
+    var form = document.getElementById('cortexPendingEditForm-' + cycleId);
+    if (!form) return;
+    var ta = document.getElementById('cortexPendingEditTextarea-' + cycleId);
+    if (ta) ta.value = '';
+    form.style.display = 'block';
+    if (ta) { try { ta.focus(); } catch (e) { /* no-op */ } }
+}
+
+function _cortexPendingEditSave(cycleId) {
+    var ta = document.getElementById('cortexPendingEditTextarea-' + cycleId);
+    var text = (ta && ta.value || '').trim();
+    if (!text) {
+        var toast = document.getElementById('cortexPendingToast-' + cycleId);
+        if (toast) {
+            toast.textContent = 'No edits entered — type your feedback first or press Cancel.';
+            toast.style.color = '#b34a00';
+        }
+        if (ta) { try { ta.focus(); } catch (e) { /* no-op */ } }
+        return;
+    }
+    var form = document.getElementById('cortexPendingEditForm-' + cycleId);
+    if (form) form.style.display = 'none';
+    _cortexPendingAction(cycleId, 'edit', { edits: text });
+}
+
+function _cortexPendingEditCancel(cycleId) {
+    var form = document.getElementById('cortexPendingEditForm-' + cycleId);
+    if (form) form.style.display = 'none';
+    var ta = document.getElementById('cortexPendingEditTextarea-' + cycleId);
+    if (ta) ta.value = '';
 }
 
 function _cortexPendingReject(cycleId) {
