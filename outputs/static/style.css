@@ -1541,6 +1541,155 @@ body {
 .cortex-lint-warning { color: var(--amber, #d4a535); }
 .cortex-lint-info { color: var(--text3); }
 
+/* ═══ Cortex Pending tab — Director ratify panel (DASHBOARD_CORTEX_RATIFY_PANEL_1) ═══ */
+.cortex-pending-row {
+    border-bottom: 1px solid var(--border);
+    font-size: 12px;
+}
+.cortex-pending-row:last-child { border-bottom: none; }
+.cortex-pending-head {
+    display: flex;
+    align-items: baseline;
+    gap: 10px;
+    padding: 6px 18px;
+    cursor: pointer;
+}
+.cortex-pending-head:hover { background: rgba(100, 120, 180, 0.06); }
+.cortex-pending-matter {
+    font-weight: 600;
+    color: var(--text1);
+    min-width: 130px;
+    flex-shrink: 0;
+}
+.cortex-pending-age {
+    font-size: 10px;
+    color: var(--text3);
+    min-width: 56px;
+    flex-shrink: 0;
+}
+.cortex-pending-preview {
+    flex: 1;
+    color: var(--text2, var(--text1));
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+.cortex-pending-body { padding: 0 18px 8px 18px; }
+.cortex-pending-collapsed { font-size: 10px; color: var(--text3); padding: 2px 0 6px; }
+.cortex-pending-loading { font-size: 11px; color: var(--text3); padding: 6px 0; }
+.cortex-pending-error { font-size: 11px; color: var(--fire, #c75050); padding: 6px 0; }
+.cortex-pending-cost { font-size: 10px; color: var(--text3); padding: 4px 0 8px; }
+.cortex-pending-proposal {
+    background: var(--bg);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 8px 10px;
+    max-height: 360px;
+    overflow-y: auto;
+    margin-bottom: 8px;
+}
+.cortex-pending-buttons { display: flex; gap: 6px; flex-wrap: wrap; }
+.cortex-pending-btn {
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    padding: 4px 10px;
+    font-size: 11px;
+    font-family: inherit;
+    cursor: pointer;
+    background: var(--card);
+    color: var(--text1);
+}
+.cortex-pending-btn.approve { background: var(--green, #5b9a6f); color: #fff; border-color: transparent; }
+.cortex-pending-btn.reject  { background: var(--fire,  #c75050); color: #fff; border-color: transparent; }
+.cortex-pending-btn.edit,
+.cortex-pending-btn.refresh { background: var(--card); }
+.cortex-pending-btn:disabled { opacity: 0.5; cursor: not-allowed; }
+.cortex-pending-toast { font-size: 11px; padding: 4px 0; min-height: 16px; }
+.cortex-pending-toast.in-flight { color: var(--text3); }
+.cortex-pending-toast.ok    { color: var(--green, #5b9a6f); }
+.cortex-pending-toast.error { color: var(--fire,  #c75050); }
+.cortex-pending-tier2 { margin-top: 8px; border-top: 1px dashed var(--border); padding-top: 6px; }
+.cortex-pending-section { margin-bottom: 4px; }
+.cortex-pending-section-head {
+    font-size: 11px;
+    font-weight: 600;
+    color: var(--text2, var(--text1));
+    cursor: pointer;
+    padding: 4px 0;
+}
+.cortex-pending-section-head .arrow {
+    display: inline-block;
+    width: 12px;
+    transition: transform 0.15s ease;
+}
+.cortex-pending-section-body { display: none; padding: 4px 0 8px 16px; }
+.cortex-pending-section-body.open { display: block; }
+.cortex-phase-row {
+    display: grid;
+    grid-template-columns: 80px 100px 90px 1fr;
+    gap: 8px;
+    align-items: start;
+    padding: 4px 0;
+    border-bottom: 1px solid var(--border);
+    font-size: 11px;
+}
+.cortex-phase-row:last-child { border-bottom: none; }
+.cortex-phase-name { font-weight: 600; color: var(--text1); }
+.cortex-phase-artifact { color: var(--text3); }
+.cortex-phase-time { color: var(--text3); font-size: 10px; }
+.cortex-phase-payload {
+    grid-column: 1 / -1;
+    background: var(--bg);
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    padding: 4px 6px;
+    font-size: 10px;
+    white-space: pre-wrap;
+    word-break: break-all;
+    margin: 0;
+    max-height: 160px;
+    overflow: auto;
+}
+.cortex-specialist-row {
+    display: grid;
+    grid-template-columns: 120px 70px 70px 1fr;
+    gap: 8px;
+    padding: 4px 0;
+    border-bottom: 1px solid var(--border);
+    font-size: 11px;
+}
+.cortex-specialist-row:last-child { border-bottom: none; }
+.cortex-specialist-name { font-weight: 600; color: var(--text1); }
+.cortex-specialist-cost,
+.cortex-specialist-latency { color: var(--text3); }
+.cortex-specialist-output {
+    grid-column: 1 / -1;
+    background: var(--bg);
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    padding: 4px 6px;
+    font-size: 10px;
+    white-space: pre-wrap;
+    margin: 0;
+    max-height: 120px;
+    overflow: auto;
+}
+.cortex-citations-list {
+    margin: 0;
+    padding-left: 18px;
+    font-size: 11px;
+    color: var(--text1);
+}
+.cortex-citations-list li { margin-bottom: 2px; }
+.cortex-citation-kind {
+    display: inline-block;
+    font-size: 9px;
+    font-weight: 600;
+    text-transform: uppercase;
+    color: var(--text3);
+    margin-right: 4px;
+}
+
 /* ═══ KBL Pipeline tab — observability widgets ═══ */
 .kbl-header {
     display: flex;

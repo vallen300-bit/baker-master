@@ -1,5 +1,5 @@
 ---
-status: PENDING
+status: CLAIMED
 brief: briefs/BRIEF_DASHBOARD_CORTEX_RATIFY_PANEL_1.md
 brief_id: DASHBOARD_CORTEX_RATIFY_PANEL_1
 target_repo: baker-master
