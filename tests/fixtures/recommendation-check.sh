@@ -25,6 +25,18 @@
 # Read stop-event JSON from stdin.
 INPUT="$(cat 2>/dev/null || true)"
 
+# Reentrancy guard — skip on hook-induced rewrite turns (Component 6a of
+# director-facing-filter-v1; prevents infinite loop when a sibling Stop hook
+# blocks → Claude rewrites → recommendation-check fires again on rewrite turn).
+ACTIVE="$(printf '%s' "$INPUT" | python3 -c '
+import json, sys
+try:
+    print(json.loads(sys.stdin.read()).get("stop_hook_active", False))
+except Exception:
+    pass
+' 2>/dev/null)"
+[ "$ACTIVE" = "True" ] && exit 0
+
 TRANSCRIPT="$(printf '%s' "$INPUT" | python3 -c '
 import json, sys
 try:

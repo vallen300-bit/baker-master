@@ -1,0 +1,12 @@
+{
+  "_doc": "Filter #2 PASS path: 4 items + explicit Recommendation line → no block.",
+  "hook": "synthesis-vs-taxonomy.sh",
+  "mode": "deliberate",
+  "transcript": [
+    {"type": "assistant", "message": {"content": [{"type": "text", "text": "Options:\n\n1. First option\n2. Second option\n3. Third option\n4. Fourth option\n\nRecommendation: go with option 2 — best risk-adjusted return."}]}}
+  ],
+  "expected": {
+    "exit_code": 0,
+    "stdout_not_contains": "block"
+  }
+}

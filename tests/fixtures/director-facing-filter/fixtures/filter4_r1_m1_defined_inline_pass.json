@@ -1,0 +1,13 @@
+{
+  "_doc": "Filter #4 R1 PASS path: 'M1 (MOHG-led)' — abbreviation defined inline via paren+capital → no block.",
+  "hook": "standing-rules-scan.sh",
+  "mode": "deliberate",
+  "transcript": [
+    {"type": "assistant", "message": {"content": [{"type": "text", "text": "Recommend M1 (MOHG-led approach) over the alternatives — best fit with current operator."}]}}
+  ],
+  "standing_rules_pack": "# Test pack\n\\b(M[1-9]|H[1-9]|S[1-9])\\b(?!\\s*[\\u2014\\u2013\\-(:]\\s*[A-Z])::R1-no-invented-abbreviations::Abbreviations used without inline definition.\n",
+  "expected": {
+    "exit_code": 0,
+    "stdout_not_contains": "block"
+  }
+}

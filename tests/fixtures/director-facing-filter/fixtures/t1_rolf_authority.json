@@ -1,0 +1,21 @@
+{
+  "_doc": "MOVIE Desk T1 — Filter #1 (stakeholder-authority) is Phase 2 / not built; Phase 1 deferred-pass. We test that authority-profile-preload injects Rolf when named, which is the Phase-1 surface that does fire on this case.",
+  "hook": "authority-profile-preload.sh",
+  "user_message": "what's Rolf's view on the BAG visit schedule?",
+  "authority_profiles": {
+    "rolf-hubner": {
+      "canonical_name": "Rolf Hübner",
+      "aliases": ["Rolf", "Hübner"],
+      "role": "Head of Operations, Brisen Group",
+      "authority_class": "standing-consult-monthly",
+      "source_desks": ["movie-desk"],
+      "raw_descriptions": [
+        {"desk": "movie-desk", "text": "Head of Operations, Brisen Group · standing monthly P&L reviewer · BAG visit owner"}
+      ]
+    }
+  },
+  "expected": {
+    "exit_code": 0,
+    "stdout_contains": "Rolf Hübner"
+  }
+}

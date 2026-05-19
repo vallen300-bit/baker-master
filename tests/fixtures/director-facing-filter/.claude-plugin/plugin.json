@@ -1,0 +1,28 @@
+{
+  "name": "director-facing-filter",
+  "version": "1.0.0",
+  "description": "Brisen fleet pre-send filter — blocks taxonomy-without-synthesis, missing recommendations, invented abbreviations. Mode-gated (deliberate / light). Authority-profile preload + pre-send checklist included.",
+  "author": "Brisen Group / AH1",
+  "homepage": "https://github.com/vallen300-bit/baker-master/tree/main/tests/fixtures/director-facing-filter",
+  "license": "Apache-2.0",
+  "hooks": {
+    "UserPromptSubmit": [
+      "hooks/strategic-mode-router.sh",
+      "hooks/authority-profile-preload.sh",
+      "hooks/pre-send-checklist.sh"
+    ],
+    "Stop": [
+      "hooks/synthesis-vs-taxonomy.sh",
+      "hooks/standing-rules-scan.sh"
+    ]
+  },
+  "depends_on": {
+    "baker-vault": {
+      "files": [
+        "_ops/people/authority-profiles.yml",
+        "_ops/processes/standing-rules-pack.md"
+      ]
+    }
+  },
+  "tested_against_models": ["claude-opus-4-6", "claude-opus-4-7"]
+}

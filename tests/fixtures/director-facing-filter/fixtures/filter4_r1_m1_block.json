@@ -1,0 +1,13 @@
+{
+  "_doc": "Filter #4 R1: bare 'M1' without inline definition, deliberate mode → BLOCK with rule R1-no-invented-abbreviations.",
+  "hook": "standing-rules-scan.sh",
+  "mode": "deliberate",
+  "transcript": [
+    {"type": "assistant", "message": {"content": [{"type": "text", "text": "Recommend we proceed with M1 next quarter, then revisit."}]}}
+  ],
+  "standing_rules_pack": "# Test pack\n\\b(M[1-9]|H[1-9]|S[1-9])\\b(?!\\s*[\\u2014\\u2013\\-(:]\\s*[A-Z])::R1-no-invented-abbreviations::Abbreviations (M1/H2/etc.) used without inline definition. Spell out on first use.\n",
+  "expected": {
+    "exit_code": 0,
+    "stdout_contains": "R1-no-invented-abbreviations"
+  }
+}

@@ -1,0 +1,12 @@
+{
+  "_doc": "Filter #2 paraphrase variant: 4 numbered items embedded in long prose, no marker → BLOCK.",
+  "hook": "synthesis-vs-taxonomy.sh",
+  "mode": "deliberate",
+  "transcript": [
+    {"type": "assistant", "message": {"content": [{"type": "text", "text": "There are several considerations here. The market is shifting and counterparty positions have changed materially since last quarter. Below is a summary of what we're tracking.\n\n1. The first consideration involves operator economics.\n2. The second is the regulatory backdrop.\n3. The third is the recent valuation print.\n4. The fourth is the financing window.\n\nMore detail in the appendix."}]}}
+  ],
+  "expected": {
+    "exit_code": 0,
+    "stdout_contains": "\"decision\": \"block\""
+  }
+}

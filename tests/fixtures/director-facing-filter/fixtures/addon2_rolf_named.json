@@ -1,0 +1,21 @@
+{
+  "_doc": "ADD-ON #2 authority-profile-preload: user message names Rolf → JSON injection contains 'Rolf Hübner'.",
+  "hook": "authority-profile-preload.sh",
+  "user_message": "what's Rolf's view on this?",
+  "authority_profiles": {
+    "rolf-hubner": {
+      "canonical_name": "Rolf Hübner",
+      "aliases": ["Rolf", "Hübner"],
+      "role": "Head of Operations, Brisen Group",
+      "authority_class": "standing-consult-monthly",
+      "source_desks": ["movie-desk"],
+      "raw_descriptions": [
+        {"desk": "movie-desk", "text": "Head of Operations · standing monthly P&L reviewer"}
+      ]
+    }
+  },
+  "expected": {
+    "exit_code": 0,
+    "stdout_contains": "Rolf Hübner"
+  }
+}

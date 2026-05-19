@@ -1,0 +1,13 @@
+{
+  "_doc": "Filter #4 R1 paraphrase variant: bare 'H2' (not M-series) → BLOCK.",
+  "hook": "standing-rules-scan.sh",
+  "mode": "deliberate",
+  "transcript": [
+    {"type": "assistant", "message": {"content": [{"type": "text", "text": "The H2 plan is preferable for now — proceed there."}]}}
+  ],
+  "standing_rules_pack": "# Test pack\n\\b(M[1-9]|H[1-9]|S[1-9])\\b(?!\\s*[\\u2014\\u2013\\-(:]\\s*[A-Z])::R1-no-invented-abbreviations::Abbreviations used without inline definition.\n",
+  "expected": {
+    "exit_code": 0,
+    "stdout_contains": "R1-no-invented-abbreviations"
+  }
+}

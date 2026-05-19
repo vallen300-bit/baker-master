@@ -1,0 +1,9 @@
+{
+  "_doc": "Filter #5 router: 'brainstorm' wins over 'strategy' — state file writes 'light' even with deliberate trigger present.",
+  "hook": "strategic-mode-router.sh",
+  "user_message": "let's brainstorm strategy options here",
+  "expected": {
+    "exit_code": 0,
+    "state_file_equals": "light"
+  }
+}
