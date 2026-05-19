@@ -159,6 +159,12 @@ if mode == "deliberate":
     sys.exit(0)
 
 # Light mode -> annotation queue.
+# Stamped with $CLAUDE_SESSION_ID so crashed-session pending entries do not
+# leak into the next session UserPromptSubmit injection (Gate-3 HIGH #2).
+# Capped at last 20 entries to bound file growth (Gate-3 HIGH #1).
+# Atomic write via tempfile + os.replace (Deputy LOW #6).
+# (No apostrophes inside this heredoc — bash $(...) parser tracks single
+# quotes through nested heredocs; an unmatched one breaks parsing.)
 state_dir = os.path.expanduser("~/.claude/state")
 try:
     os.makedirs(state_dir, exist_ok=True)
@@ -177,10 +183,14 @@ try:
         "filter": "contract-gate",
         "reason": reason_text,
         "options_count": len(items),
+        "session_id": os.environ.get("CLAUDE_SESSION_ID", ""),
         "added_at": datetime.datetime.utcnow().isoformat() + "Z",
     })
-    with open(pending_file, "w", encoding="utf-8") as f:
+    existing = existing[-20:]
+    tmp_file = pending_file + ".tmp." + str(os.getpid())
+    with open(tmp_file, "w", encoding="utf-8") as f:
         json.dump(existing, f)
+    os.replace(tmp_file, pending_file)
 except Exception:
     pass
 PY

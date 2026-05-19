@@ -43,23 +43,86 @@ _HAIKU_MODEL = "claude-haiku-4-5-20251001"
 _TIMEOUT_S = 3.0
 _MAX_OUTPUT_TOKENS = 256
 _OP_TIMEOUT_S = 5.0
+_DAILY_CALL_CAP = 500
+_COUNTER_PATH = "~/.claude/state/validator-call-counter.json"
+
+
+class _SafeDict(dict):
+    """format_map sidekick: missing keys preserve the visible placeholder
+    in the rendered prompt rather than raising KeyError. The LLM then sees
+    the bare {placeholder} and can answer 'missing context' itself instead
+    of the hook degrading to PASS on a benign template glitch.
+    """
+
+    def __missing__(self, key):
+        return "{" + key + "}"
+
+
+def _atomic_write_text(path: str, text: str) -> None:
+    """tempfile + os.replace — never leave a half-written file behind."""
+    path = os.path.expanduser(path)
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    tmp = f"{path}.tmp.{os.getpid()}"
+    with open(tmp, "w", encoding="utf-8") as f:
+        f.write(text)
+    os.replace(tmp, path)
+
+
+def _today_utc_date() -> str:
+    import datetime as _dt
+    return _dt.datetime.utcnow().strftime("%Y-%m-%d")
+
+
+def _check_and_increment_daily_counter() -> tuple[bool, int]:
+    """Return (under_cap, current_count_after_increment).
+
+    Hard cap _DAILY_CALL_CAP per UTC calendar day to bound runaway API spend
+    if Filter #1/#3 triggers fire abnormally (e.g., agent in a stuck loop).
+    """
+    path = os.path.expanduser(_COUNTER_PATH)
+    today = _today_utc_date()
+    data = {"date": today, "count": 0}
+    if os.path.isfile(path):
+        try:
+            with open(path, "r", encoding="utf-8") as f:
+                loaded = json.load(f)
+            if isinstance(loaded, dict) and loaded.get("date") == today:
+                data["count"] = int(loaded.get("count", 0))
+        except Exception:
+            data = {"date": today, "count": 0}
+
+    if data["count"] >= _DAILY_CALL_CAP:
+        return False, data["count"]
+
+    data["count"] += 1
+    try:
+        _atomic_write_text(path, json.dumps(data))
+    except Exception:
+        # Counter persistence is best-effort; if it fails we still allow the
+        # call (better to over-call than to block on counter IO).
+        pass
+    return True, data["count"]
 
 
 def _get_api_key() -> str | None:
-    """Fetch Anthropic API key from 1Password. Cached in process. Never logged."""
+    """Fetch Anthropic API key from 1Password. Cached in process. Never logged.
+
+    stderr is explicitly discarded (DEVNULL) so 1P CLI diagnostics can't leak
+    into hook log streams. Key itself is held in memory only.
+    """
     global _API_KEY
     if _API_KEY is not None:
         return _API_KEY
     try:
         r = subprocess.run(
             ["op", "read", "op://Baker API Keys/API Anthropic/credential"],
-            capture_output=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.DEVNULL,
             text=True,
             timeout=_OP_TIMEOUT_S,
         )
     except Exception:
         return None
-    # Explicitly drop stderr — never log key or 1P internals.
     if r.returncode != 0 or not r.stdout.strip():
         return None
     _API_KEY = r.stdout.strip()
@@ -100,11 +163,18 @@ def _load_skill(skill_path: str) -> dict | None:
 
 
 def _fill_template(template: str, context: dict[str, Any]) -> str:
-    """Render user_template with context dict; non-string values json.dumps'd."""
-    rendered_context = {}
+    """Render user_template with context dict; non-string values json.dumps'd.
+
+    Uses format_map(_SafeDict) so a template that references an unknown key
+    leaves the bare placeholder visible to the LLM (which can self-report
+    'missing context') instead of crashing the validator. Substituted values
+    are inserted literally — format_map does not re-parse them, so stray
+    '{' / '}' in user-supplied strings pose no further risk.
+    """
+    rendered_context = _SafeDict()
     for k, v in context.items():
         rendered_context[k] = v if isinstance(v, str) else json.dumps(v, ensure_ascii=False)
-    return template.format(**rendered_context)
+    return template.format_map(rendered_context)
 
 
 def _strip_fences(text: str) -> str:
@@ -144,15 +214,19 @@ def validate(skill_path: str, context: dict[str, Any]) -> dict[str, str]:
 
     try:
         user_msg = _fill_template(skill["user_template"], context)
-    except KeyError as e:
-        return {
-            "decision": "pass",
-            "reason": f"validator unavailable: missing context key {e}",
-        }
     except Exception as e:
         return {
             "decision": "pass",
             "reason": f"validator unavailable: template render {type(e).__name__}",
+        }
+
+    # Daily cap — bound runaway API spend. Counter persists at
+    # ~/.claude/state/validator-call-counter.json, atomic write, daily UTC reset.
+    under_cap, count = _check_and_increment_daily_counter()
+    if not under_cap:
+        return {
+            "decision": "pass",
+            "reason": f"validator unavailable: daily cap exceeded ({_DAILY_CALL_CAP} calls)",
         }
 
     try:
@@ -205,7 +279,9 @@ def _self_test() -> int:
 
     key = _get_api_key()
     if key:
-        print(f"  1Password fetch: OK (key starts with {key[:14]}...)")
+        # Never print any prefix of the key. Reviewer's "no log leak" contract
+        # (Gate-2 LOW): length signal only, no character disclosure.
+        print(f"  1Password fetch: OK (key present, length {len(key)})")
     else:
         print("  1Password fetch: FAILED (validator will degrade to PASS at runtime)")
 
