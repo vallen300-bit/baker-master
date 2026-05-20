@@ -300,7 +300,16 @@ def _mark_dry_run(cycle_id: str) -> None:
 
 
 def _post_to_slack(card: ProposalCard) -> bool:
-    """Post Block Kit card to Director DM. Non-fatal on failure."""
+    """Post Block Kit card to Director DM. Non-fatal on failure.
+
+    DM-kill 2026-05-20: Director-ratified removal of Cortex proposal DM
+    pushes; ratify panel on baker-master dashboard is the canonical
+    surface. Gated on BAKER_DM_PUSH_ENABLED for recoverability.
+    """
+    import os
+    if os.getenv("BAKER_DM_PUSH_ENABLED", "false").lower() != "true":
+        logger.info("cortex_phase4 Slack post skipped (DM-kill): cycle=%s", card.cycle_id[:8])
+        return False
     try:
         from outputs.slack_notifier import _get_webclient
         from config.settings import config
