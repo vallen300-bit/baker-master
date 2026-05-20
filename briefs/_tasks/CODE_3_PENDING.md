@@ -1,77 +1,68 @@
 ---
-status: COMPLETE
-brief: ~/baker-vault/_ops/briefs/director-facing-filter-v1.md
-brief_id: DIRECTOR_FACING_FILTER_V1_PHASE_1
+status: PENDING
+brief: briefs/BRIEF_RENDER_ENV_WIPE_PRECOMMIT_GUARD_1.md
+brief_id: RENDER_ENV_WIPE_PRECOMMIT_GUARD_1
 target_repo: baker-master
 working_dir: ~/bm-b3
+working_branch: b3/render-env-wipe-precommit-guard-1
 matter_slug: baker-internal
-cross_matter_usage: [all-matters — fleet-wide pre-send filter affects every desk + AH1/AH2]
-dispatched_at: 2026-05-19T11:20:00Z
-dispatched_by: cowork-ah1
-director_auth: 2026-05-19 chat — "ratified"
-trigger_class: MEDIUM-HIGH
-gate_chain:
-  gate_1_static: REQUIRED (deputy / AH2 cross-lane)
-  gate_2_security_review: REQUIRED (touches user-global hooks + ~/.claude/settings.json wiring + new vault build step)
-  gate_3_cross_lane_architecture: REQUIRED (fleet-wide tooling, new plugin packaging pattern for Brisen, blast-radius covers every Claude Code session on Director's Mac)
-  gate_4_2nd_pass_code_reviewer: REQUIRED (per ai-head/SKILL.md §Code-reviewer 2nd-pass Protocol trigger #4 — touches external-surface perimeter via user-global hooks + settings.json + new Anthropic plugin schema; high blast radius if a hook hangs/loops)
-estimated_effort: 12-14h (multi-component, 15 stress fixtures, settings.json idempotent merge, plugin metadata)
-working_branch_suggestion: b3/director-facing-filter-v1
-reply_target: cowork-ah1 (bus topic `ship/director-facing-filter-v1`)
-ship_target: 2026-05-22
-phase_2_note: Filter #1 (Stakeholder-Authority validator subagent) + Filter #3 (Contract-Gate evidence-file) ship in separate brief, target 27 May, b2 lane parallel. Out of scope for THIS brief.
+cross_matter_usage: [all-matters — guards every Baker repo against env-wipe regressions]
+dispatched_at: 2026-05-20T13:55:00Z
+dispatched_by: lead
+director_auth: 2026-05-20 chat — "go"
+estimated_effort: ~45-60 builder-minutes
+complexity: Low
+priority: medium (closes the bypass gap left by 2026-05-17 runtime guard)
+reply_target: lead (bus topic `ship/render-env-wipe-precommit-guard-1`)
 ---
 
-# CODE_3_PENDING — DIRECTOR_FACING_FILTER_V1_PHASE_1 — 2026-05-19
+# CODE_3_PENDING — RENDER_ENV_WIPE_PRECOMMIT_GUARD_1 — 2026-05-20
+
+## What
+
+Add **Part 4** to `.githooks/pre-commit` that blocks the 2026-05-17 env-wipe pattern (raw `PUT /v1/services/{id}/env-vars` with array body) at commit time. Layered above the runtime guard `tools.render_env_guard.safe_env_put()` (already shipped 2026-05-17 by you).
+
+## Why you (B3)
+
+You shipped the original runtime guard (`BRIEF_RENDER_ENV_WRITE_GUARD_1`, 2026-05-17). Same lane, same context. Estimated ~45-60 min.
 
 ## Brief
 
-Brief lives in baker-vault (fleet tooling, not pure baker-master code):
+Full spec: `briefs/BRIEF_RENDER_ENV_WIPE_PRECOMMIT_GUARD_1.md` (read end-to-end before starting).
 
-`~/baker-vault/_ops/briefs/director-facing-filter-v1.md` (committed baker-vault b5b0032)
+## Acceptance criteria (summary — full list in the brief)
 
-Read end-to-end before starting. The brief is structured as 9 self-contained components — most have skeleton code + spec for you to flesh out. Stress fixtures are the source of truth for filter behavior; regex shape is for you to finalize against fixture expectations.
-
-## Working branch
-
-`b3/director-facing-filter-v1` in baker-master (`~/bm-b3`).
-
-baker-vault changes (`_ops/people/authority-profiles.yml`, `_ops/people/README.md`, `_ops/processes/standing-rules-pack.md`) ship in a sibling vault PR — use `~/baker-vault` working tree. Coordinate both PRs in the same chat turn.
-
-## Pre-requisites
-
-- b3 idle confirmed by lead (bus #508).
-- No upstream blockers — standalone build.
-- baker-vault clean for new commits (specific-file adds; coordinate via bus with lead/cowork-ah1 before pushes).
-
-## Acceptance criteria
-
-Per brief §Ship gate (verbatim):
-
-1. `pytest tests/test_director_facing_filter_v1.py -v` — all 15 fixtures green. Literal stdout in PR description.
-2. `bash -n tests/fixtures/director-facing-filter/hooks/*.sh` — syntax-check on every hook.
-3. `python3 -c "import json; json.load(open('tests/fixtures/director-facing-filter/.claude-plugin/plugin.json'))"` — plugin.json parseable.
-4. `python3 tests/fixtures/director-facing-filter/scripts/build_authority_profiles.py --dry-run | python3 -c "import sys,yaml; d=yaml.safe_load(sys.stdin); assert 'rolf-hubner' in d['authority_profiles'], 'rolf-hubner profile missing'"` — Rolf profile builds correctly.
-5. T1 + T2 fixtures pass (the ship criterion from MOVIE Desk brief).
-6. Reentrancy: re-run any blocked fixture with `stop_hook_active=true` in payload → expect exit 0 (no block).
-7. /security-review on the PR — pass / NO_FINDINGS.
+1. `.githooks/pre-commit` gains Part 4 (insert AFTER Part 3's `fi`, BEFORE Part 1's `exec` — anything after the `exec` never runs).
+2. New `tests/test_pre_commit_env_guard.py` covers 6 scenarios (3 positive — Python httpx array PUT, bash curl array PUT, single-key safe path baseline; 3 negative — `safe_env_put()` call, single-key URL, allowlisted file).
+3. `.claude/rules/python-backend.md` Render env-vars rule gets a one-line append referencing Part 4.
+4. Existing Parts 1-3 untouched + still functional (manual smoke on Part 2 OR Part 3 in ship report).
+5. Literal `pytest tests/test_pre_commit_env_guard.py -v` green — paste full output in ship report.
+6. Manual POSITIVE smoke on Part 4 itself — throwaway fixture blocks the commit, then cleaned up.
 
 ## Ship gate
 
-Literal `pytest` output (no "pass by inspection"). PR description includes pytest stdout + cross-link to baker-vault sibling PR (authority-profiles.yml + README + standing-rules-pack.md).
+- Literal pytest output in PR description (no "pass by inspection").
+- Manual Part-4 POSITIVE smoke captured (throwaway fixture blocked → reverted) noted in ship report.
+- `git config core.hooksPath` still returns `.githooks`.
 
-## Reporting (bus reply-to-sender — Director-ratified 2026-05-17)
+## Reporting (bus reply-to-sender per Director-ratified 2026-05-17 rule)
 
-On PR open, bus-post `cowork-ah1` (NOT `lead`) per `dispatched_by` field:
+On PR open, bus-post `lead` (per `dispatched_by: lead` above):
 
 ```bash
-BAKER_ROLE=b3 ~/Desktop/baker-code/scripts/bus_post.sh cowork-ah1 \
-  "ship/director-facing-filter-v1 — PR #<N> open; pytest <X/X>; T1+T2 ship criterion met; sibling baker-vault PR #<M>. Awaiting AH1+AH2 gate chain (gates 1-4 required per coordination header)." \
-  ship/director-facing-filter-v1
+BAKER_ROLE=b3 ~/Desktop/baker-code/scripts/bus_post.sh lead \
+  "ship/render-env-wipe-precommit-guard-1 — PR #<N> open; pytest <X/X> green; Part 4 smoke blocks the wipe pattern; Parts 1-3 still functional." \
+  ship/render-env-wipe-precommit-guard-1
 ```
 
-cowork-ah1 (this brief's author) handles gate orchestration + merge.
+`lead` (AH1-Terminal, this brief's author) handles review + merge.
 
 ## Heartbeat cadence (per §B-code stall chase — Director-ratified 2026-05-05)
 
-Minimum every 12h while actively building. Two consecutive 12h misses → cowork-ah1 auto-surfaces stall to Director. Heartbeat = (a) UPDATE entry in this mailbox file with ISO timestamp, OR (b) commit on working branch with `mailbox(b3): heartbeat <ISO> — <where>` pattern, OR (c) ship-report file write.
+Minimum every 12h while actively building. Two consecutive 12h misses → AH1 auto-surfaces stall to Director. Heartbeat = (a) UPDATE entry in this mailbox file with ISO timestamp, OR (b) commit on working branch with `mailbox(b3): heartbeat <ISO> — <where>` pattern, OR (c) ship-report file write.
+
+## Anchors
+
+- Original runtime guard: `BRIEF_RENDER_ENV_WRITE_GUARD_1.md` + your ship at `briefs/_reports/B3_render_env_write_guard_1_20260517.md`.
+- 2026-05-17 wipe + 2026-05-20 restoration lessons: `tasks/lessons.md` (search "env-var wipe" / "Render's array-form").
+- Director ratification: 2026-05-20 chat "go" + "use /write-brief sop".
