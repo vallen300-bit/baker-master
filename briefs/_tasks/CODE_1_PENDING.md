@@ -1,5 +1,5 @@
 ---
-status: PENDING
+status: COMPLETE
 brief: briefs/BRIEF_CORTEX_DIRECTOR_CARD_V1_1_HOTFIX_GEMINI_JSON_1.md
 brief_id: CORTEX_DIRECTOR_CARD_V1_1_HOTFIX_GEMINI_JSON_1
 target_repo: baker-master
@@ -14,6 +14,12 @@ estimated_effort: ~30-45 builder-minutes
 complexity: Low
 priority: medium-high (100% Sonnet fallback rate = ~4-5x cost regression vs Haiku baseline; quality lift from Gemini swap deferred until shipped)
 reply_target: lead (bus topic `ship/cortex-director-card-v1-1-hotfix-gemini-json-1`)
+merge_closeout: |
+  CORTEX_DIRECTOR_CARD_V1_1_HOTFIX_GEMINI_JSON_1 merged 2026-05-20 13:25:13Z — baker-master squash 9328e16 (PR #231).
+  Gates cleared: AH1 static + 18/18 pytest + diff inspection (backward-compat default None confirmed; Sonnet path unchanged).
+  No 2nd-pass / no /security-review — small hot-fix on already-cleared surface, no new attack vectors.
+  Render auto-deploy fires; AH1 post-merge smoke on oskolkov pending to confirm Gemini-primary path active (assert _meta.model=gemini-2.5-pro + fallback_used=false; ZERO [phase4_5] warnings).
+  Acked bus #601 same turn as mailbox flip.
 ---
 
 # CODE_1_PENDING — CORTEX_DIRECTOR_CARD_V1_1_HOTFIX_GEMINI_JSON_1 — 2026-05-20
