@@ -1,8 +1,12 @@
 ---
-status: CLAIMED
+status: COMPLETE
 claimed_at: 2026-05-21T07:00:00Z
 claimed_by: b2
 branch: b2/waha-outbound-capture-1
+pr: 235
+pr_url: https://github.com/vallen300-bit/baker-master/pull/235
+shipped_at: 2026-05-21T07:30:00Z
+ship_report: briefs/_reports/B2_waha_outbound_capture_1_20260521.md
 brief: briefs/BRIEF_WAHA_OUTBOUND_CAPTURE_1.md
 brief_id: WAHA_OUTBOUND_CAPTURE_1
 target_repo: baker-master

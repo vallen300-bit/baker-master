@@ -3,7 +3,8 @@ brief_id: WAHA_OUTBOUND_CAPTURE_1
 worker: b2
 date: 2026-05-21
 branch: b2/waha-outbound-capture-1
-pr: TBD
+pr: 235
+pr_url: https://github.com/vallen300-bit/baker-master/pull/235
 status: PR_OPEN
 ---
 
