@@ -1,12 +1,15 @@
-"""ClaimsMax MCP tools — search, investigate, and render outputs.
+"""ClaimsMax MCP tools — search, investigate, ask, and render outputs.
 
-Seven MCP tools backed by ``kbl.claimsmax_client`` and ``kbl.report_renderer``:
+Eight MCP tools backed by ``kbl.claimsmax_client`` and ``kbl.report_renderer``:
 
     Read / search:
       - baker_claimsmax_search
       - baker_claimsmax_investigate
       - baker_claimsmax_check_investigation
       - baker_claimsmax_get_document
+
+    Ask synthesis:
+      - baker_claimsmax_ask                   (RAG-grounded answer + citations)
 
     Investigation output flow:
       - baker_claimsmax_save_investigation    (always; cheap default)
@@ -173,6 +176,33 @@ CLAIMSMAX_TOOLS: list[Tool] = [
         },
     ),
     Tool(
+        name="baker_claimsmax_ask",
+        description=(
+            "RAG-grounded synthesis against the ClaimsMax corpus. Returns "
+            "{answer, citations, used_chunks, confidence, retrieval, ...}. "
+            "Answer markdown carries inline [D1]-style refs into the citations "
+            "list. Use for single-shot Q&A; investigations remain the right tool "
+            "for multi-step research. Optional claim_id narrows the corpus."
+        ),
+        inputSchema={
+            "type": "object",
+            "properties": {
+                "question": {"type": "string", "description": "Natural-language question."},
+                "claim_id": {
+                    "type": "string",
+                    "description": "Optional ClaimsMax claim id to scope retrieval.",
+                },
+                "language": {
+                    "type": "string",
+                    "description": "Answer language: en | de.",
+                    "enum": ["en", "de"],
+                    "default": "en",
+                },
+            },
+            "required": ["question"],
+        },
+    ),
+    Tool(
         name="baker_claimsmax_save_investigation",
         description=(
             "Persist a completed ClaimsMax investigation's final state as JSON in "
@@ -275,6 +305,14 @@ def dispatch_claimsmax(name: str, args: dict[str, Any]) -> str:
             payload = _get_client().get_document(
                 args["doc_id"],
                 include_text=args.get("include_text", False),
+            )
+            return json.dumps(payload, ensure_ascii=False)
+
+        if name == "baker_claimsmax_ask":
+            payload = _get_client().ask(
+                question=args["question"],
+                claim_id=args.get("claim_id"),
+                language=args.get("language", "en"),
             )
             return json.dumps(payload, ensure_ascii=False)
 

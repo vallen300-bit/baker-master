@@ -17,8 +17,7 @@ Error surface:
     - timeout / network → ClaimsmaxTransportError
     - All HTTP calls wrapped try/except per repo hard rule.
 
-``/ask`` is deliberately unimplemented — vendor bug pending Ellie Technologies
-fix as of 2026-05-16 (temperature parameter deprecated server-side).
+``/ask`` is live: RAG-grounded synthesis with inline citations.
 """
 from __future__ import annotations
 
@@ -263,18 +262,17 @@ class ClaimsmaxClient:
         """GET /investigate/{run_id}/events — full event log (can be large)."""
         return self._request("GET", f"investigate/{run_id}/events")
 
-    def ask(self, *args: Any, **kwargs: Any) -> dict:
-        """POST /ask — DISABLED pending vendor fix.
-
-        ClaimsMax /ask endpoint disabled — vendor bug under repair (temperature
-        deprecated server-side as of 2026-05-16). Re-enable when Ellie
-        Technologies confirms fix.
-        """
-        raise NotImplementedError(
-            "ClaimsMax /ask endpoint disabled — vendor bug under repair "
-            "(temperature deprecated server-side as of 2026-05-16). "
-            "Re-enable when Ellie Technologies confirms fix."
-        )
+    def ask(
+        self,
+        question: str,
+        claim_id: Optional[str] = None,
+        language: str = "en",
+    ) -> dict:
+        """POST /ask — RAG-grounded synthesis with citations."""
+        body: dict[str, Any] = {"question": question, "language": language}
+        if claim_id is not None:
+            body["claim_id"] = claim_id
+        return self._request("POST", "ask", json=body)
 
 
 # ─────────────────────────── helpers ───────────────────────────
