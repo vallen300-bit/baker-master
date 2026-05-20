@@ -288,6 +288,7 @@ def test_ask_returns_response() -> None:
     assert sent_body["question"] == "What is the Pagitsch defect count?"
     assert sent_body["claim_id"] == "c-7"
     assert sent_body["language"] == "en"
+    assert out["query_terms"] == ["pagitsch", "defect"]
 
 
 def test_ask_omits_claim_id_when_none() -> None:
@@ -325,6 +326,21 @@ def test_mcp_baker_claimsmax_ask_dispatch(monkeypatch: pytest.MonkeyPatch) -> No
         claim_id="c-7",
         language="en",
     )
+
+
+def test_mcp_baker_claimsmax_ask_dispatch_omits_claim_id(monkeypatch: pytest.MonkeyPatch) -> None:
+    """MCP dispatch path forwards claim_id=None when caller omits it."""
+    from tools import claimsmax as claimsmax_tools
+
+    stub = MagicMock()
+    stub.ask = MagicMock(return_value=_ASK_RESPONSE_FIXTURE)
+    monkeypatch.setattr(claimsmax_tools, "_get_client", lambda: stub)
+
+    claimsmax_tools.dispatch_claimsmax(
+        "baker_claimsmax_ask", {"question": "anything"}
+    )
+
+    stub.ask.assert_called_once_with(question="anything", claim_id=None, language="en")
 
 
 def test_mcp_baker_claimsmax_ask_registered() -> None:

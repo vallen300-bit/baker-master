@@ -195,6 +195,7 @@ CLAIMSMAX_TOOLS: list[Tool] = [
                 "language": {
                     "type": "string",
                     "description": "Answer language: en | de.",
+                    "enum": ["en", "de"],
                     "default": "en",
                 },
             },
