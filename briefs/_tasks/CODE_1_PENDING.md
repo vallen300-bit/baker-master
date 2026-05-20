@@ -1,5 +1,5 @@
 ---
-status: PENDING
+status: COMPLETE
 brief: briefs/BRIEF_CORTEX_DIRECTOR_CARD_V1_1.md
 brief_id: CORTEX_DIRECTOR_CARD_V1_1
 target_repo: baker-master
@@ -18,6 +18,12 @@ gate_chain:
 estimated_effort: 3h
 working_branch_suggestion: b1/cortex-director-card-v1-1
 reply_target: lead (bus topic `ship/cortex-director-card-v1-1`)
+merge_closeout: |
+  CORTEX_DIRECTOR_CARD_V1_1 merged 2026-05-20 12:26:38Z — baker-master squash d9065ae (PR #229).
+  Gate chain cleared: AH1 static + 35/35 pytest + deputy /security-review PASS (AuthN/SQLi/XSS/prompt-injection/cache-bust/fail-open all within threshold).
+  Render auto-deploy fires post-merge; Director smoke pending per brief §Verification.
+  Brief-defect catch (cortex_cycles.signal_text missing → proposal_text ILIKE substitution) flagged by AH1 as right engineering call; lessons.md entry queued.
+  Acked bus #588 same turn as mailbox flip.
 prior_dispatch_closeout: |
   CORTEX_DIRECTOR_CARD_V1 merged 2026-05-19 23:45Z — baker-master squash 5db210a (PR #226).
   Cortex Edit textarea hot-fix merged 2026-05-20 22:13Z — squash 266ca09 (PR #228).
