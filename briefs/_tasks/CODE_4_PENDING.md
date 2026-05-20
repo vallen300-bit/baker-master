@@ -1,5 +1,5 @@
 ---
-status: PENDING
+status: COMPLETE
 brief: briefs/BRIEF_CLAIMSMAX_ASK_ENDPOINT_1.md
 brief_id: CLAIMSMAX_ASK_ENDPOINT_1
 target_repo: baker-master
@@ -10,6 +10,9 @@ target: b4
 working_branch: b4/claimsmax-ask-endpoint-1
 parent_brief: CLAIMSMAX_API_CAPABILITY_1
 reply_to: lead
+pr: 236
+shipped_at: 2026-05-21T22:01:00Z
+ship_report: briefs/_reports/B4_claimsmax_ask_endpoint_1_20260521.md
 ---
 
 # CODE_4_PENDING — CLAIMSMAX_ASK_ENDPOINT_1
