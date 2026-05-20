@@ -1,5 +1,5 @@
 ---
-status: COMPLETE
+status: PENDING
 brief: briefs/BRIEF_CLAIMSMAX_ASK_ENDPOINT_1.md
 brief_id: CLAIMSMAX_ASK_ENDPOINT_1
 target_repo: baker-master
@@ -11,35 +11,45 @@ working_branch: b4/claimsmax-ask-endpoint-1
 parent_brief: CLAIMSMAX_API_CAPABILITY_1
 reply_to: lead
 pr: 236
-shipped_at: 2026-05-21T22:01:00Z
-ship_report: briefs/_reports/B4_claimsmax_ask_endpoint_1_20260521.md
+round: 2
+round_2_requested_at: 2026-05-21T22:30:00Z
 ---
 
-# CODE_4_PENDING — CLAIMSMAX_ASK_ENDPOINT_1
+# CODE_4_PENDING — CLAIMSMAX_ASK_ENDPOINT_1 (ROUND 2)
 
-**Brief:** `briefs/BRIEF_CLAIMSMAX_ASK_ENDPOINT_1.md`
-**Working branch:** `b4/claimsmax-ask-endpoint-1`
-**Parent brief:** `CLAIMSMAX_API_CAPABILITY_1` (PR #213 merged `3cbc287`).
-**Pre-requisites:** none — vendor `/ask` endpoint live-verified by AH1
-2026-05-20 ~23:50Z (HTTP 200, full RAG response).
-**Reply target:** bus-post `lead` on PR open (per reply-to-sender rule).
+**PR:** #236 (https://github.com/vallen300-bit/baker-master/pull/236) — request-changes round 2.
+**Branch:** `b4/claimsmax-ask-endpoint-1` (push on top, same branch).
+**Reply target:** bus-post `lead` on push.
 
-**Acceptance criteria summary** (full criteria in brief):
+## Round-2 asks (from PR #236 review comment)
 
-1. Implement `ClaimsmaxClient.ask(question, claim_id=None, language="en")`
-   in `kbl/claimsmax_client.py`.
-2. Flip `test_ask_raises_not_implemented` → `test_ask_returns_response`
-   with mocked 200 + documented shape.
-3. Add `baker_claimsmax_ask` MCP tool in `tools/claimsmax.py` mirroring
-   `baker_claimsmax_search` pattern.
-4. Append MCP-surface test to `tests/test_claimsmax_client.py`.
-5. Strip "pending vendor fix" framing from module docstrings.
+### MED-1 — MCP dispatch test missing omit-claim-id path
 
-**Ship gate:** literal `pytest tests/test_claimsmax_client.py -v` green +
-full suite delta ≥ 0 failures vs baseline 2213 passed / 79 failed.
+Add a second test next to `test_mcp_baker_claimsmax_ask_dispatch`:
+```python
+def test_mcp_baker_claimsmax_ask_dispatch_omits_claim_id(monkeypatch):
+    stub = MagicMock()
+    stub.ask = MagicMock(return_value=_ASK_RESPONSE_FIXTURE)
+    monkeypatch.setattr(claimsmax_tools, "_get_client", lambda: stub)
+    claimsmax_tools.dispatch_claimsmax("baker_claimsmax_ask", {"question": "anything"})
+    stub.ask.assert_called_once_with(question="anything", claim_id=None, language="en")
+```
 
-**Reporting:**
+### MED-2 — `query_terms` not asserted
 
-- On PR open: bus-post `lead` with PR number + `pytest` summary line +
-  diff stats.
-- Live smoke runs post-merge by AH1; failure → REQUEST_CHANGES.
+In `test_ask_returns_response`, add:
+```python
+assert out["query_terms"] == ["pagitsch", "defect"]
+```
+
+### LOW-1 — `language` schema enum
+
+In `tools/claimsmax.py` `baker_claimsmax_ask` Tool schema, add `"enum": ["en", "de"]` to the `language` property. (Pick this option over loosening the description — tighter contract, vendor `/ask` doc + AH1 live probe confirm `en`/`de` only.)
+
+## Ship gate
+
+`pytest tests/test_claimsmax_client.py -v` green; full suite delta ≥ 0 failures vs baseline.
+
+## Reporting
+
+Bus-post `lead` on push with the three commit shas / summary.
