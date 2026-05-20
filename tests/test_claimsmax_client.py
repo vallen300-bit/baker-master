@@ -230,10 +230,111 @@ def test_http_error_raises_transport_error() -> None:
         client.search("x")
 
 
-# --------------------------- /ask placeholder ---------------------------
+# --------------------------- /ask ---------------------------
 
 
-def test_ask_raises_not_implemented() -> None:
-    client = ClaimsmaxClient()
-    with pytest.raises(NotImplementedError, match="vendor bug"):
-        client.ask(question="anything")
+_ASK_RESPONSE_FIXTURE: dict[str, Any] = {
+    "question": "What is the Pagitsch defect count?",
+    "language": "en",
+    "model": "claude-opus-4-7",
+    "answer": "Per the audit, 14 defects remain open [D1].",
+    "citations": [
+        {
+            "id": "D1",
+            "doc_id": "11111111-1111-1111-1111-111111111111",
+            "original_filename": "audit.pdf",
+            "doc_date": "2026-05-01",
+            "l1": "report",
+            "l2": "audit",
+            "chunk_index": 3,
+            "score": 0.91,
+            "snippet": "14 defects open as of audit close.",
+        }
+    ],
+    "used_chunks": [
+        {
+            "citation_id": "D1",
+            "doc_id": "11111111-1111-1111-1111-111111111111",
+            "chunk_index": 3,
+            "score": 0.91,
+        }
+    ],
+    "confidence": 0.585,
+    "query_terms": ["pagitsch", "defect"],
+    "retrieval": {
+        "docs_considered": 24,
+        "docs_included": 5,
+        "total_context_chars": 18000,
+        "chunks_searched": 412,
+        "query_ms": 220,
+        "generation_ms": 17480,
+        "total_ms": 17700,
+    },
+}
+
+
+def test_ask_returns_response() -> None:
+    http = _make_http_client_mock(_make_response(200, _ASK_RESPONSE_FIXTURE))
+    client = ClaimsmaxClient(_http_client=http)
+    out = client.ask(question="What is the Pagitsch defect count?", claim_id="c-7")
+    assert out["answer"].startswith("Per the audit")
+    assert out["citations"][0]["id"] == "D1"
+    assert out["confidence"] == 0.585
+    assert out["retrieval"]["docs_considered"] == 24
+    call = http.request.call_args
+    assert call.args[0] == "POST"
+    assert call.args[1].endswith("/ask")
+    sent_body = call.kwargs["json"]
+    assert sent_body["question"] == "What is the Pagitsch defect count?"
+    assert sent_body["claim_id"] == "c-7"
+    assert sent_body["language"] == "en"
+
+
+def test_ask_omits_claim_id_when_none() -> None:
+    http = _make_http_client_mock(_make_response(200, _ASK_RESPONSE_FIXTURE))
+    client = ClaimsmaxClient(_http_client=http)
+    client.ask(question="anything")
+    sent_body = http.request.call_args.kwargs["json"]
+    assert "claim_id" not in sent_body
+    assert sent_body["language"] == "en"
+
+
+# --------------------------- MCP dispatch surface ---------------------------
+
+
+def test_mcp_baker_claimsmax_ask_dispatch(monkeypatch: pytest.MonkeyPatch) -> None:
+    """baker_claimsmax_ask round-trips the client payload as JSON."""
+    import json as _json
+
+    from tools import claimsmax as claimsmax_tools
+
+    stub = MagicMock()
+    stub.ask = MagicMock(return_value=_ASK_RESPONSE_FIXTURE)
+    monkeypatch.setattr(claimsmax_tools, "_get_client", lambda: stub)
+
+    out = claimsmax_tools.dispatch_claimsmax(
+        "baker_claimsmax_ask",
+        {"question": "What is the Pagitsch defect count?", "claim_id": "c-7"},
+    )
+
+    parsed = _json.loads(out)
+    assert parsed["answer"].startswith("Per the audit")
+    assert parsed["citations"][0]["id"] == "D1"
+    stub.ask.assert_called_once_with(
+        question="What is the Pagitsch defect count?",
+        claim_id="c-7",
+        language="en",
+    )
+
+
+def test_mcp_baker_claimsmax_ask_registered() -> None:
+    """Catalog + name set carry the new tool."""
+    from tools.claimsmax import CLAIMSMAX_TOOL_NAMES, CLAIMSMAX_TOOLS
+
+    assert "baker_claimsmax_ask" in CLAIMSMAX_TOOL_NAMES
+    tool = next(t for t in CLAIMSMAX_TOOLS if t.name == "baker_claimsmax_ask")
+    props = tool.inputSchema["properties"]
+    assert "question" in props
+    assert "claim_id" in props
+    assert "language" in props
+    assert tool.inputSchema["required"] == ["question"]
