@@ -4560,13 +4560,30 @@ async def get_cortex_cycle_proposal(cycle_id: str):
     tags=["cortex"],
     dependencies=[Depends(verify_api_key)],
 )
-async def list_cortex_cycles_pending(limit: int = 50):
+async def list_cortex_cycles_pending(
+    limit: int = 50,
+    include_smoke: bool = False,
+):
     """List Cortex cycles awaiting Director ratification.
 
     Returns cycles where status='tier_b_pending' with a 200-char
     proposal_preview pulled from the latest synthesis phase_output.
-    Read-only. Backs the Cortex Intent Feed "Pending" tab
-    (DASHBOARD_CORTEX_RATIFY_PANEL_1).
+    Read-only. Backs the Cortex Intent Feed "Pending" tab.
+
+    Smoke filter (CORTEX_DIRECTOR_CARD_V1_1): by default,
+    smoke / heartbeat / health-check cycles are EXCLUDED so Director
+    sees only real cycles. Pass ``include_smoke=true`` for the full
+    set (used by the frontend "Show all" toggle). A cycle is smoke
+    when ANY of:
+      - triggered_by ILIKE '%smoke%' OR '%health%' OR '%self_wake_smoke%'
+        OR '%heartbeat%'
+      - first 200 chars of latest synthesis proposal_text ILIKE
+        '%smoke #%' OR '%health check%' OR '%heartbeat%'
+    Brief originally referenced ``cortex_cycles.signal_text`` but that
+    column does not exist (schema verified against memory/store_back.py
+    bootstrap + migrations/20260428_cortex_cycles.sql); the triggered_by
+    + proposal_text branches cover the actual smoke cycles in prod
+    (Oskolkov ``self_wake_smoke`` triggered_by + 'Smoke #N' proposal markers).
     """
     store = _get_store()
     conn = store._get_conn()
@@ -4578,39 +4595,87 @@ async def list_cortex_cycles_pending(limit: int = 50):
         cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
         cur.execute(
             """
-            SELECT
-                c.cycle_id::text AS cycle_id,
-                c.matter_slug,
-                c.triggered_by,
-                c.current_phase,
-                c.cost_dollars,
-                c.cost_tokens,
-                c.started_at,
-                EXTRACT(EPOCH FROM (NOW() - c.started_at))/60 AS age_minutes,
-                (
-                  SELECT po.payload->>'proposal_text'
-                  FROM cortex_phase_outputs po
-                  WHERE po.cycle_id = c.cycle_id
-                    AND po.artifact_type = 'synthesis'
-                  ORDER BY po.created_at DESC
-                  LIMIT 1
-                ) AS proposal_text,
-                (
-                  SELECT po.payload
-                  FROM cortex_phase_outputs po
-                  WHERE po.cycle_id = c.cycle_id
-                    AND po.artifact_type = 'director_card'
-                  ORDER BY po.created_at DESC
-                  LIMIT 1
-                ) AS director_card
-            FROM cortex_cycles c
-            WHERE c.status = 'tier_b_pending'
-            ORDER BY c.started_at DESC
-            LIMIT %s
+            WITH base AS (
+                SELECT
+                    c.cycle_id::text AS cycle_id,
+                    c.matter_slug,
+                    c.triggered_by,
+                    c.current_phase,
+                    c.cost_dollars,
+                    c.cost_tokens,
+                    c.started_at,
+                    EXTRACT(EPOCH FROM (NOW() - c.started_at))/60 AS age_minutes,
+                    (
+                      SELECT po.payload->>'proposal_text'
+                      FROM cortex_phase_outputs po
+                      WHERE po.cycle_id = c.cycle_id
+                        AND po.artifact_type = 'synthesis'
+                      ORDER BY po.created_at DESC
+                      LIMIT 1
+                    ) AS proposal_text,
+                    (
+                      SELECT po.payload
+                      FROM cortex_phase_outputs po
+                      WHERE po.cycle_id = c.cycle_id
+                        AND po.artifact_type = 'director_card'
+                      ORDER BY po.created_at DESC
+                      LIMIT 1
+                    ) AS director_card
+                FROM cortex_cycles c
+                WHERE c.status = 'tier_b_pending'
+            ),
+            flagged AS (
+                SELECT
+                    b.*,
+                    (
+                            COALESCE(b.triggered_by, '') ILIKE '%%smoke%%'
+                         OR COALESCE(b.triggered_by, '') ILIKE '%%health%%'
+                         OR COALESCE(b.triggered_by, '') ILIKE '%%self_wake_smoke%%'
+                         OR COALESCE(b.triggered_by, '') ILIKE '%%heartbeat%%'
+                         OR LEFT(COALESCE(b.proposal_text, ''), 200) ILIKE '%%smoke #%%'
+                         OR LEFT(COALESCE(b.proposal_text, ''), 200) ILIKE '%%health check%%'
+                         OR LEFT(COALESCE(b.proposal_text, ''), 200) ILIKE '%%heartbeat%%'
+                    ) AS is_smoke
+                FROM base b
+            )
+            SELECT *
+            FROM flagged
+            WHERE (%(include_smoke)s OR NOT is_smoke)
+            ORDER BY started_at DESC
+            LIMIT %(limit)s
             """,
-            (safe_limit,),
+            {"include_smoke": bool(include_smoke), "limit": safe_limit},
         )
         rows = cur.fetchall()
+        # Hidden-count: only meaningful when the toggle is hiding smoke.
+        smoke_hidden_count = 0
+        if not include_smoke:
+            cur.execute(
+                """
+                SELECT COUNT(*) AS hidden
+                FROM cortex_cycles c
+                LEFT JOIN LATERAL (
+                    SELECT po.payload->>'proposal_text' AS proposal_text
+                    FROM cortex_phase_outputs po
+                    WHERE po.cycle_id = c.cycle_id
+                      AND po.artifact_type = 'synthesis'
+                    ORDER BY po.created_at DESC
+                    LIMIT 1
+                ) syn ON TRUE
+                WHERE c.status = 'tier_b_pending'
+                  AND (
+                        COALESCE(c.triggered_by, '') ILIKE '%smoke%'
+                     OR COALESCE(c.triggered_by, '') ILIKE '%health%'
+                     OR COALESCE(c.triggered_by, '') ILIKE '%self_wake_smoke%'
+                     OR COALESCE(c.triggered_by, '') ILIKE '%heartbeat%'
+                     OR LEFT(COALESCE(syn.proposal_text, ''), 200) ILIKE '%smoke #%'
+                     OR LEFT(COALESCE(syn.proposal_text, ''), 200) ILIKE '%health check%'
+                     OR LEFT(COALESCE(syn.proposal_text, ''), 200) ILIKE '%heartbeat%'
+                  )
+                """
+            )
+            hidden_row = cur.fetchone()
+            smoke_hidden_count = int(hidden_row["hidden"] or 0) if hidden_row else 0
         cur.close()
         conn.commit()
         cycles = []
@@ -4631,8 +4696,14 @@ async def list_cortex_cycles_pending(limit: int = 50):
                 "has_proposal": bool(proposal_text),
                 "director_card": director_card if isinstance(director_card, dict) else None,
                 "has_director_card": isinstance(director_card, dict),
+                "is_smoke": bool(r.get("is_smoke")),
             }))
-        return {"cycles": cycles, "count": len(cycles)}
+        return {
+            "cycles": cycles,
+            "count": len(cycles),
+            "smoke_hidden_count": smoke_hidden_count,
+            "include_smoke": bool(include_smoke),
+        }
     except Exception as e:
         try:
             conn.rollback()
