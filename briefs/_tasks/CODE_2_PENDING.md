@@ -1,104 +1,85 @@
 ---
-status: COMPLETE
-completed_at: 2026-05-19T22:02:56+00:00
-pr: 227
-pr_url: https://github.com/vallen300-bit/baker-master/pull/227
-merge_sha: 5cb9a3e0
-deploy: cowork-ah1 ran deploy_to_user_global.sh from ~/bm-b2 — clean; 8 hooks + lib/call_validator.py + 2 skills + pack live in ~/.claude/
-ship_anchor_bus: event 572 (cowork-ah1 → b2, 2026-05-19T22:02:56Z)
-brief: ~/baker-vault/_ops/briefs/director-facing-filter-v1_1.md
-brief_id: DIRECTOR_FACING_FILTER_V1_1_PHASE_2
+status: PENDING
+brief: briefs/BRIEF_WAHA_OUTBOUND_CAPTURE_1.md
+brief_id: WAHA_OUTBOUND_CAPTURE_1
 target_repo: baker-master
 working_dir: ~/bm-b2
 matter_slug: baker-internal
-cross_matter_usage: [all-matters — fleet-wide pre-send filter judgment layer affects every desk + AH1/AH2]
-dispatched_at: 2026-05-19T17:48:00Z
-dispatched_by: cowork-ah1
-director_auth: 2026-05-19 chat — "ratified" (Phase 2 brief af69e89; lane assignment via lead routing bus #554)
-trigger_class: HIGH (novel ground — first Brisen hook calling Anthropic API at runtime + 1Password key fetch + 2 new validator skills + evidence-file pattern + annotation pass-through)
+cross_matter_usage: [all-matters — WhatsApp capture-shape affects every desk that reads whatsapp_messages]
+dispatched_at: 2026-05-21T06:30:00Z
+dispatched_by: lead
+director_auth: 2026-05-21 chat — "go ahead, draft the brief" + "go" on dispatch ratification (Phase 5 of slow-path protocol per Director directive 2026-05-20 ~16:00Z)
+trigger_class: HIGH (capture-authority change — lifts the fromMe filter; downstream consumers assumed inbound-only)
 gate_chain:
-  gate_1_static: REQUIRED (deputy / AH2 cross-lane)
-  gate_2_security_review: REQUIRED — API-key handling especially (1Password fetch, no disk write, no log leak in error reasons, subprocess stderr explicitly dropped)
-  gate_3_cross_lane_architecture: REQUIRED (cross-turn state file pending-annotations.json + first runtime Anthropic API call from hook layer + new SKILL.md prompt-template runtime pattern + multi-session race interaction with Phase 1 mode state)
-  gate_4_2nd_pass_code_reviewer: REQUIRED (external-surface perimeter + API key handling + new dependency on anthropic SDK in hook Python env)
-estimated_effort: 10-12h (lib/call_validator.py + 2 trigger Stop hooks + 2 validator SKILL.md files + UserPromptSubmit annotation passthrough + 17 stress fixtures with mocked SDK + plugin.json v1.1.0 update + settings.json wiring + deploy script extension + EVIDENCE_FILE_FORMAT.md documentation)
-working_branch_suggestion: b2/director-facing-filter-v1-1
-reply_target: cowork-ah1 (bus topic `ship/director-facing-filter-v1-1`)
-ship_target: 2026-05-27
-phase_1_anchor: baker-vault e17f9b7 + baker-master a59e07e (merged + deployed 2026-05-19T17:33Z)
-hot_dependencies:
-  - ~/baker-vault/_ops/people/authority-profiles.yml (16 profiles incl. rolf-hubner — verified loadable)
-  - ~/baker-vault/_ops/processes/standing-rules-pack.md (R1 ratified)
-  - ~/.claude/state/brisen-filter-mode (lazily-created by strategic-mode-router.sh; Phase 1 ships this)
-  - op CLI authenticated (op://Baker API Keys/API Anthropic/credential resolves)
-  - anthropic Python SDK installable in hook env (pip3 install --user anthropic pyyaml)
-prior_mailbox_state: superseded — previous CODE_2_PENDING.md was UI_SURFACE_PREBRIEF_V2 COMPLETE 2026-05-19T16:34:28Z (preserved in CODE_2_COMPLETE.md). b2 idle since.
+  gate_1_static: REQUIRED (AH2 cross-lane)
+  gate_2_security_review: REQUIRED (external-surface — webhook capture semantics, RAG context shape)
+  gate_3_cross_lane_architecture: REQUIRED (architect verdict locked in investigation Phase 3; gate 3 validates implementation matches the locked model)
+  gate_4_2nd_pass_code_reviewer: REQUIRED per SKILL.md §Code-reviewer 2nd-pass criteria 4 (external-surface) + 7 (high-stakes judgment)
+estimated_effort: 1.5-2.5h
+working_branch_suggestion: b2/waha-outbound-capture-1
+reply_target: lead (bus topic `ship/waha-outbound-capture-1`)
+investigation_anchor: baker-vault _ops/investigations/2026-05-20-waha-capture-gaps.md (commit dcf0c2a + addendum 4562f19)
+prior_mailbox_state: superseded — previous CODE_2_PENDING.md was DIRECTOR_FACING_FILTER_V1_1_PHASE_2 COMPLETE (PR #227 merged 2026-05-19T22:02:56Z). b2 idle since.
 ---
 
-# CODE_2_PENDING — DIRECTOR_FACING_FILTER_V1_1_PHASE_2 — 2026-05-19
+# CODE_2_PENDING — WAHA_OUTBOUND_CAPTURE_1 — 2026-05-21
 
 ## Brief
 
-Brief lives in baker-vault (fleet tooling, not pure baker-master code):
+`briefs/BRIEF_WAHA_OUTBOUND_CAPTURE_1.md` (this repo, baker-master main).
 
-`~/baker-vault/_ops/briefs/director-facing-filter-v1_1.md` (committed baker-vault — pull latest before reading; today's commit landed on main)
-
-Read end-to-end before starting. Structured as 7 self-contained components (lib + 2 Stop hook triggers + 2 validator SKILL.md + 1 UserPromptSubmit + fixtures). Most components have skeleton code + spec; fixtures are source of truth for behavior.
-
-**Phase 1 context for you (b2):** Phase 1 shipped + deployed on Director's Mac 2026-05-19. 5 new hooks live (strategic-mode-router, authority-profile-preload, pre-send-checklist, synthesis-vs-taxonomy, standing-rules-scan) + recommendation-check.sh patched. Your Phase 2 hooks (stakeholder-authority-trigger, contract-gate-trigger, annotate-pending-checker) layer ON TOP — don't disturb existing wiring. `update_user_settings.py` is idempotent — re-run safely.
+Read end-to-end before starting. 9 Fixes (1 shared helper + webhook filter lift + chat_id normalization + Director routing discriminator + RAG direction tagging + SQL guards + endpoint exposure + one-shot data migration + tests). Slow-path investigation already ran: architect verdict locked Q1-Q4 (Q4 dropped per Director); reviewer audit found 2 HIGH (encoded as Fix 4 + Fix 5) + 4 MEDIUM (encoded as Fix 6 + Fix 7). All `file:line` citations verified at HEAD `7e5657c` by AH1 2026-05-21.
 
 ## Working branch
 
-`b2/director-facing-filter-v1-1` in baker-master (`~/bm-b2`).
+`b2/waha-outbound-capture-1` in baker-master (`~/bm-b2`).
 
 ## Pre-requisites
 
-- b2 idle confirmed by lead (bus #554) — UI_SURFACE_PREBRIEF_V2 PR #99 merged + mailbox COMPLETE.
-- Phase 1 MERGED + DEPLOYED — vault e17f9b7 + master a59e07e + ~/.claude/hooks/*.sh present.
-- Vault deps loaded: authority-profiles.yml has 16 entries, standing-rules-pack.md has R1.
-- 1Password CLI authed: `op whoami` returns identity (verified by cowork-ah1 during Phase 2 brief authoring).
-- anthropic SDK + pyyaml installable for hook Python env (deploy script pip-installs --user).
+- b2 idle confirmed (CODE_2_PENDING was COMPLETE state from PR #227, merged 2026-05-19).
+- Investigation report at baker-vault `_ops/investigations/2026-05-20-waha-capture-gaps.md` — READ this for full context before touching code.
+- Migration script (Fix 8) runs BEFORE deploy. b2 ships PR; AH1 owns running the migration on Render shell after merge, before re-checking smoke gate.
+
+## Open question (encoded in brief Fix 4) — STOP gate
+
+**`BAKER_SELF_CHAT` constant.** The Director routing discriminator needs to know which `chat_id` value corresponds to "Director-to-Baker" (Baker's self-chat / Baker's bot number). If grep finds no existing constant, brief tells you to derive via the SQL query in Fix 4. **If both grep AND SQL come up empty: STOP. Surface to `lead` via bus. Do NOT guess.**
 
 ## Acceptance criteria
 
-Per brief §Ship gate (verbatim):
+Per brief §Quality Checkpoints + §Ship gate:
 
-1. `pytest tests/test_director_facing_filter_v1.py -v` — 32 fixtures green (15 from Phase 1 + 17 new). Literal stdout in PR.
-2. `bash -n tests/fixtures/director-facing-filter/hooks/*.sh` — syntax-check on every hook including Phase 1's (no regression).
-3. `python3 tests/fixtures/director-facing-filter/lib/call_validator.py --self-test` — module loads, op fetch works (or degrades cleanly).
-4. Plugin.json v1.1.0 parseable + lists all 8 hooks (5 from Phase 1 + 3 from Phase 2).
-5. T1 (Rolf authority) MUST BLOCK in deliberate mode (the Phase 2 ship-criterion from MOVIE Desk brief; this was DEFERRED-PASS in Phase 1 → Phase 2 closes it).
-6. T2 (M1-M5) continues to BLOCK on Filter #2 + Filter #4 (Phase 1) AND now ALSO on Filter #3 (Phase 2) — verify multi-block path.
-7. Mode degradation: every Phase 2 BLOCK fixture in light mode → no block + annotation file populated.
-8. Validator degradation: every `lib_validate_*` fixture → PASS with reason (never blocks on infra failure).
-9. /security-review on the PR — pass / NO_FINDINGS (API key handling especially).
-10. Live smoke: deploy to ~/.claude/hooks, send a deliberate prompt with Rolf authority assertion in a fresh session, verify block fires.
+1. `python3 -c "import py_compile; py_compile.compile('triggers/waha_webhook.py', doraise=True)"` clean across all 6 modified + 3 new files
+2. `bash scripts/check_singletons.sh` exits 0
+3. `pytest tests/test_waha_outbound_capture.py -v` — literal green; PR description includes pytest stdout
+4. Full `pytest` — literal green (or pre-existing-baseline failures only, named in PR)
+5. /security-review on the PR — pass / NO_FINDINGS (external-surface change — webhook capture semantics)
+6. NO "pass by inspection." Literal pytest output mandatory.
 
 ## Ship gate
 
-Literal `pytest` output (no "pass by inspection"). PR description includes pytest stdout. Sibling baker-vault PR if any (Phase 2 doesn't add vault files; just consumes Phase 1's authority-profiles.yml).
+Per brief §Ship gate — literal `pytest` output in PR. AH1 owns the post-deploy live smoke (Quality Checkpoint #6 in brief), so b2 ships when CI is green; smoke is AH1's responsibility.
 
 ## Reporting (bus reply-to-sender — Director-ratified 2026-05-17)
 
-On PR open, bus-post `cowork-ah1` (NOT `lead`) per `dispatched_by`:
+On PR open, bus-post `lead` per `dispatched_by`:
 
 ```bash
-BAKER_ROLE=b2 ~/Desktop/baker-code/scripts/bus_post.sh cowork-ah1 \
-  "ship/director-facing-filter-v1-1 — PR #<N> open; pytest <X/X>; T1 (Rolf) BLOCK verified in deliberate; mocked SDK clean in CI. Awaiting AH1+AH2 gate chain (all 4 required per coordination header)." \
-  ship/director-facing-filter-v1-1
+BAKER_ROLE=b2 ~/bm-b2/scripts/bus_post.sh lead \
+  "ship/waha-outbound-capture-1 — PR #<N> open; pytest <X/X>; BAKER_SELF_CHAT resolved as <value> via <grep|sql>; awaiting AH1+AH2 gate chain (all 4 required)." \
+  ship/waha-outbound-capture-1
 ```
 
-cowork-ah1 handles gate orchestration + merge sequence.
+`lead` (AH1-Terminal) handles gate orchestration + merge sequence.
 
-## Lessons from Phase 1 ship (apply proactively)
+## Lessons from prior WAHA / DB work (apply proactively)
 
-1. **shared-FS race on baker-vault clones** — always `git checkout -b X origin/main` (explicit) when branching from baker-vault. Local main can be advanced by unpushed commits from concurrent agents. Scar: Phase 1 vault PR #100 closed for scope creep.
-2. **Specific-file adds in vault** — never `git add -A` for vault commits. List specific paths.
-3. **Path-normalize before set comparison** — `update_user_settings.py` does this now (Phase 1 final form); follow the same pattern if extending settings-merger.
-4. **Bundle hooks per matcher entry on shared-event ordering** — Phase 1's `_find_or_create_matcher_entry()` is the pattern. Phase 2 adds 3 more hooks (2 Stop + 1 UserPromptSubmit) — bundle Stop ones into existing Phase 1 Stop matcher OR a new matcher; UserPromptSubmit ones append to existing matcher.
-5. **stop_hook_active reentrancy guard** — required on every NEW Stop hook (Filter #1 + #3 triggers both).
-6. **Stress-fixture-first** — define expected behavior in fixtures BEFORE writing hook code. Phase 1's 12-min initial build relied on this.
+1. **Lesson #28 — @lid don't filter, normalize** — this brief IS the "future improvement" called for. Fix 3 closes it.
+2. **Lesson #35 — migrations shipped but never applied** — Fix 8 is a Python data-patch script, NOT a SQL migration. AH1 invokes it on Render shell post-deploy. Brief explicitly encodes this in Operational handoff.
+3. **Lesson #36 — schema in migrations, not Python** — Fix 8 explicitly NO `ALTER TABLE`. Data-only. Compatible with the lesson.
+4. **Lesson #42 — fixture tests ≠ real schema** — Fix 9 test class 6 uses ephemeral Neon branch via CI (auto-skip when `TEST_DATABASE_URL` unset).
+5. **Lesson #62 — probe third-party first** — Phase 2 of investigation did this (direct WAHA `/chats` probe). Brief encodes mock-payload tests, not real WAHA calls.
+6. **Lesson #100 — compile-clean ≠ done** — Quality Checkpoint #6 in brief is a post-deploy live smoke; AH1 owns.
 
 ## Heartbeat cadence (per §B-code stall chase — Director-ratified 2026-05-05)
 
-Minimum every 12h while actively building. Two consecutive 12h misses → cowork-ah1 auto-surfaces stall to Director. Heartbeat = (a) UPDATE entry in this mailbox file with ISO timestamp, OR (b) commit on working branch with `mailbox(b2): heartbeat <ISO> — <where>` pattern, OR (c) ship-report file write.
+Minimum every 12h while actively building. Two consecutive 12h misses → `lead` auto-surfaces stall to Director. Heartbeat = (a) UPDATE entry in this mailbox file with ISO timestamp, OR (b) commit on working branch with `mailbox(b2): heartbeat <ISO> — <where>` pattern, OR (c) ship-report file write.
