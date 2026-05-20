@@ -12,6 +12,7 @@ Level 1: exact title+tier match → 1h window.
 Level 2: topic entity+tier match → 4h window.
 """
 import logging
+import os
 import re
 import time
 from typing import Optional
@@ -143,6 +144,9 @@ def post_to_channel(
     """
     if not config.outputs.slack_bot_token:
         logger.warning("post_to_channel skipped: SLACK_BOT_TOKEN not configured")
+        return False
+    if channel_id.startswith("D") and os.getenv("BAKER_DM_PUSH_ENABLED", "false").lower() != "true":
+        logger.info(f"post_to_channel skipped (DM-kill): channel={channel_id}")
         return False
     try:
         client = _get_webclient()
