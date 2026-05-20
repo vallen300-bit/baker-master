@@ -1,10 +1,12 @@
 #!/usr/bin/env bash
-# Baker pre-commit — three independent checks.
+# Baker pre-commit — four independent checks.
 #
 # Part 1: migration immutability         (HAS BYPASS — see below)
 # Part 2: subagent location enforcement  (NO BYPASS — add to ~/.claude/agents/, not picker)
 # Part 3: retired Anthropic model ID enforcement
 #                                        (NO BYPASS — use claude-opus-4-6/4-7 or claude-sonnet-4-5/4-6)
+# Part 4: render env-var wipe-pattern detection
+#                                        (bypass via --no-verify only — 2026-05-17 wipe anchor)
 #
 # Activation (one-time per clone):
 #   git config core.hooksPath .githooks
@@ -64,6 +66,36 @@ if [ -n "$FILES_WITH_HITS" ]; then
   echo "$FILES_WITH_HITS" | sed 's/^/  - /' >&2
   echo "[pre-commit] NO BYPASS. Exclusions: briefs/, tasks/lessons.md, docs-site/, .githooks/pre-commit (historical/audit-trail + enforcement code)." >&2
   exit 1
+fi
+
+# ---------------------------------------------------------------------------
+# Part 4: render env-var wipe-pattern detection (bypass via --no-verify only)
+# Catches the 2026-05-17 wipe pattern at commit time. Layered above
+# tools/render_env_guard.safe_env_put() runtime guard — the wrapper protects
+# imported-Python paths; this hook protects bash/curl/raw-httpx escape routes.
+# Pattern: PUT to /env-vars NOT followed by /KEY suffix (the foot-cannon URL).
+# ---------------------------------------------------------------------------
+RENDER_ENV_GUARD_ALLOWLIST_RE='^(tools/render_env_guard\.py|tests/test_render_env_guard\.py|tests/test_pre_commit_env_guard\.py|briefs/.*|tasks/lessons\.md|\.claude/rules/python-backend\.md|\.githooks/pre-commit)$'
+
+STAGED_NON_ALLOWLISTED="$(git diff --cached --name-only --diff-filter=ACMR | grep -Ev "$RENDER_ENV_GUARD_ALLOWLIST_RE" || true)"
+
+if [ -n "$STAGED_NON_ALLOWLISTED" ]; then
+  OFFENDERS=""
+  for f in $STAGED_NON_ALLOWLISTED; do
+    if git diff --cached -- "$f" | grep -E '^\+' | grep -vE '^\+\+\+ ' | grep -qE 'services/[^/[:space:]"]+/env-vars($|[^/A-Za-z0-9_])'; then
+      OFFENDERS="$OFFENDERS $f"
+    fi
+  done
+  if [ -n "$OFFENDERS" ]; then
+    echo "[pre-commit] BLOCKED (Part 4): staged diff contains a raw PUT to /env-vars (no /KEY suffix)." >&2
+    echo "[pre-commit] This is the 2026-05-17 wipe pattern. Array-form PUT REPLACES the entire env set." >&2
+    echo "[pre-commit] Use tools.render_env_guard.safe_env_put(service_id, KEY, value) — single-key PUT path." >&2
+    echo "[pre-commit] Note: comments/docstrings in non-allowlisted files also block (move to briefs/ or python-backend.md if intentional)." >&2
+    echo "[pre-commit] Offending files:" >&2
+    for f in $OFFENDERS; do echo "  - $f" >&2; done
+    echo "[pre-commit] If you genuinely need the array form (you don't), bypass with: git commit --no-verify" >&2
+    exit 1
+  fi
 fi
 
 # ---------------------------------------------------------------------------
