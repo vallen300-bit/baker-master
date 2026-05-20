@@ -1033,7 +1033,7 @@ class SentinelRetriever:
             cur = conn.cursor()
             cur.execute(
                 """
-                SELECT id, sender, sender_name, full_text, timestamp
+                SELECT id, sender, sender_name, full_text, timestamp, is_director
                 FROM whatsapp_messages
                 WHERE sender_name ILIKE %s
                    OR full_text ILIKE %s
@@ -1043,7 +1043,7 @@ class SentinelRetriever:
                 (f"%{query}%", f"%{query}%", limit),
             )
             rows = cur.fetchall()
-            cols = ["id", "sender", "sender_name", "full_text", "timestamp"]
+            cols = ["id", "sender", "sender_name", "full_text", "timestamp", "is_director"]
             cur.close()
 
             contexts = []
@@ -1053,8 +1053,11 @@ class SentinelRetriever:
                 sender = data.get("sender_name") or data.get("sender") or "Unknown"
                 date = data.get("timestamp", "")
                 date_str = str(date)[:10] if date else ""
+                # BRIEF_WAHA_OUTBOUND_CAPTURE_1: tag direction so LLM distinguishes
+                # Director's outbound commitments from counterparty inbound asks.
+                tag = "WHATSAPP-OUTBOUND" if data.get("is_director") else "WHATSAPP-INBOUND"
 
-                content = f"[WHATSAPP] {sender} ({date_str}): {text}"
+                content = f"[{tag}] {sender} ({date_str}): {text}"
                 contexts.append(RetrievedContext(
                     content=content,
                     source="whatsapp",
@@ -1064,6 +1067,7 @@ class SentinelRetriever:
                         "label": f"WhatsApp: {sender}",
                         "date": date_str,
                         "msg_id": data.get("id"),
+                        "is_director": bool(data.get("is_director")),
                     },
                     token_estimate=self._estimate_tokens(content),
                 ))
@@ -1080,7 +1084,7 @@ class SentinelRetriever:
             cur = conn.cursor()
             cur.execute(
                 """
-                SELECT id, sender, sender_name, full_text, timestamp
+                SELECT id, sender, sender_name, full_text, timestamp, is_director
                 FROM whatsapp_messages
                 ORDER BY timestamp DESC NULLS LAST
                 LIMIT %s
@@ -1088,7 +1092,7 @@ class SentinelRetriever:
                 (limit,),
             )
             rows = cur.fetchall()
-            cols = ["id", "sender", "sender_name", "full_text", "timestamp"]
+            cols = ["id", "sender", "sender_name", "full_text", "timestamp", "is_director"]
             cur.close()
 
             contexts = []
@@ -1098,8 +1102,11 @@ class SentinelRetriever:
                 sender = data.get("sender_name") or data.get("sender") or "Unknown"
                 date = data.get("timestamp", "")
                 date_str = str(date)[:10] if date else ""
+                # BRIEF_WAHA_OUTBOUND_CAPTURE_1: tag direction so LLM distinguishes
+                # Director's outbound commitments from counterparty inbound asks.
+                tag = "WHATSAPP-OUTBOUND" if data.get("is_director") else "WHATSAPP-INBOUND"
 
-                content = f"[WHATSAPP] {sender} ({date_str}): {text}"
+                content = f"[{tag}] {sender} ({date_str}): {text}"
                 contexts.append(RetrievedContext(
                     content=content,
                     source="whatsapp",
@@ -1108,6 +1115,7 @@ class SentinelRetriever:
                         "type": "whatsapp_message",
                         "label": f"WhatsApp: {sender}",
                         "date": date_str,
+                        "is_director": bool(data.get("is_director")),
                     },
                     token_estimate=self._estimate_tokens(content),
                 ))
