@@ -826,23 +826,30 @@ async def waha_webhook(
 
         return {"status": "session_event", "session_status": session_status}
 
-    # Only process incoming messages (not our own outbound)
+    # Only process message events (session events handled above)
     if event_type != "message":
         return {"status": "ignored", "event": event_type}
 
     payload = body.get("payload", {})
-    if payload.get("fromMe", False):
-        return {"status": "ignored", "reason": "outbound"}
+    from_me = payload.get("fromMe", False)
 
     # Extract message data
-    sender = payload.get("from", "")
-    sender_name = payload.get("_data", {}).get("notifyName", sender)
+    raw_sender = payload.get("from", "")
+    raw_sender_name = payload.get("_data", {}).get("notifyName", raw_sender)
+
+    # BRIEF_WAHA_OUTBOUND_CAPTURE_1: shared sender attribution. When fromMe=True,
+    # re-attribute sender to Director (the "from" field is the remote party).
+    from triggers.waha_message_utils import attribute_sender, is_baker_self_chat
+    sender, sender_name, is_director_msg = attribute_sender(raw_sender, raw_sender_name, from_me)
+
     message_body = payload.get("body", "")
     timestamp = payload.get("timestamp", 0)
     has_media = payload.get("hasMedia", False)
     msg_id = payload.get("id", "")
 
     # WHATSAPP-LID-RESOLUTION-1: Resolve @lid to @c.us phone number
+    # For fromMe=True the sender is already @c.us (set by attribute_sender), so
+    # this branch becomes a no-op.
     original_lid = None
     if sender.endswith("@lid"):
         original_lid = sender
@@ -856,6 +863,28 @@ async def waha_webhook(
                 logger.info(f"LID unresolved: {original_lid} (sender_name={sender_name})")
         except Exception as e:
             logger.warning(f"LID resolution failed for {sender}: {e}")
+
+    # BRIEF_WAHA_OUTBOUND_CAPTURE_1: chat_id canonicalization.
+    # Webhook delivers chat_id in @lid form; backfill stores @s.whatsapp.net form
+    # for the same conversation. Normalize @lid → phone-form via resolve_lid.
+    # For fromMe=True the conversation counterparty is in payload["to"]; for
+    # inbound it's in payload["chatId"] or payload["from"]. Store raw LID with
+    # warning if resolution fails (don't drop the row).
+    chat_id = payload.get("chatId") or payload.get("from") or sender
+    if from_me:
+        chat_id = payload.get("to") or chat_id
+
+    if isinstance(chat_id, str) and chat_id.endswith("@lid"):
+        try:
+            from triggers.waha_client import resolve_lid as _resolve_chat_lid
+            _resolved_chat = _resolve_chat_lid(chat_id)
+            if _resolved_chat:
+                logger.info(f"chat_id LID normalized: {chat_id} → {_resolved_chat}")
+                chat_id = _resolved_chat
+            else:
+                logger.warning(f"chat_id LID unresolved (storing raw): {chat_id}")
+        except Exception as _e_chat:
+            logger.warning(f"chat_id LID resolution failed for {chat_id}: {_e_chat}")
 
     # If sender_name is still a raw number, try VIP name lookup by resolved phone
     if sender_name and sender_name.replace("@lid", "").replace("@c.us", "").isdigit():
@@ -943,6 +972,8 @@ async def waha_webhook(
     combined_body = "\n".join(body_parts)
 
     # ARCH-7: Store full WhatsApp message to PostgreSQL
+    # BRIEF_WAHA_OUTBOUND_CAPTURE_1: chat_id is the normalized conversation
+    # id (Fix 3); is_director_msg comes from attribute_sender (Fix 1/2).
     try:
         from memory.store_back import SentinelStoreBack
         store = SentinelStoreBack._get_global_instance()
@@ -950,10 +981,10 @@ async def waha_webhook(
             msg_id=msg_id,
             sender=sender,
             sender_name=sender_name,
-            chat_id=original_lid or sender,
+            chat_id=chat_id,
             full_text=combined_body,
             timestamp=datetime.fromtimestamp(timestamp, tz=timezone.utc).isoformat() if timestamp else None,
-            is_director=(sender == DIRECTOR_WHATSAPP),
+            is_director=is_director_msg,
             media_mimetype=media_mimetype,
             media_dropbox_path=media_dropbox_path,
             media_size_bytes=media_size_bytes,
@@ -991,17 +1022,20 @@ async def waha_webhook(
         pass  # Non-fatal
 
     # TRIP-INTELLIGENCE-1: Auto-link to active trip if content mentions destination
-    try:
-        from memory.store_back import SentinelStoreBack
-        _store_tc = SentinelStoreBack._get_global_instance()
-        _wa_ts2 = datetime.fromtimestamp(timestamp, tz=timezone.utc).isoformat() if timestamp else None
-        _store_tc.link_to_trip_context(
-            content=combined_body[:500] if combined_body else "",
-            source_type="whatsapp", source_ref=f"wa:{msg_id}",
-            timestamp=_wa_ts2,
-        )
-    except Exception:
-        pass
+    # BRIEF_WAHA_OUTBOUND_CAPTURE_1: only counterparty mentions link to trip
+    # intelligence — Director's own outbound is not "incoming intelligence."
+    if sender != DIRECTOR_WHATSAPP:
+        try:
+            from memory.store_back import SentinelStoreBack
+            _store_tc = SentinelStoreBack._get_global_instance()
+            _wa_ts2 = datetime.fromtimestamp(timestamp, tz=timezone.utc).isoformat() if timestamp else None
+            _store_tc.link_to_trip_context(
+                content=combined_body[:500] if combined_body else "",
+                source_type="whatsapp", source_ref=f"wa:{msg_id}",
+                timestamp=_wa_ts2,
+            )
+        except Exception:
+            pass
 
     # Auto-create contact for every WhatsApp sender (WhatsApp = real people, no spam)
     if sender and sender != DIRECTOR_WHATSAPP and sender_name:
@@ -1072,9 +1106,20 @@ async def waha_webhook(
     except Exception as _e:
         logger.warning(f"Decision Engine scoring failed (non-fatal): {_e}")
 
+    # BRIEF_WAHA_OUTBOUND_CAPTURE_1: Director routing discriminator.
+    # Director-to-Baker (chat_id == BAKER_SELF_CHAT) → full RAG / action / deadline path.
+    # Director-to-counterparty (any other chat_id) → storage + PM-signal-outbound only.
+    # Both share PM-signal-outbound; only Baker self-chat fires RAG / YouTube /
+    # deadlines / obligations / question handler.
+    _baker_self = is_baker_self_chat(chat_id)
+    director_to_baker = (sender == DIRECTOR_WHATSAPP and _baker_self and bool(combined_body))
+    director_to_counterparty = (sender == DIRECTOR_WHATSAPP and not _baker_self and bool(combined_body))
+
     # PM-SIGNAL: Detect PM-relevant outbound WhatsApp (Director messaging PM contacts)
     # Outbound uses ORBIT ONLY — avoids false positives on generic terms. Cowork Q3.
-    if sender == DIRECTOR_WHATSAPP and combined_body:
+    # Fires for both Director-to-Baker and Director-to-counterparty: capturing
+    # outbound IS the point.
+    if director_to_baker or director_to_counterparty:
         try:
             from orchestrator.pm_signal_detector import detect_relevant_pms_outbound, flag_pm_signal
             for _pm_slug in detect_relevant_pms_outbound(combined_body):
@@ -1083,7 +1128,9 @@ async def waha_webhook(
             pass
 
     # YOUTUBE-GEMMA-INGEST-1: Auto-detect YouTube URLs in Director WhatsApp messages
-    if sender == DIRECTOR_WHATSAPP and combined_body:
+    # Director-to-Baker only — sharing a YouTube link with a counterparty is
+    # not a Baker-ingest signal.
+    if director_to_baker:
         try:
             from triggers.youtube_ingest import detect_youtube_urls, ingest_youtube_video
             from triggers.state import trigger_state as _yt_ts
@@ -1098,8 +1145,11 @@ async def waha_webhook(
             logger.debug(f"YouTube WhatsApp auto-ingest failed (non-fatal): {_yt_e}")
 
     # WHATSAPP-ACTION-1: Director messages → action detection first
+    # Director-to-Baker only. Director-to-counterparty messages are stored
+    # (above) and PM-signaled (above); they do NOT enter the action / deadline /
+    # obligations / question-handler path.
     _wa_intent = None
-    if sender == DIRECTOR_WHATSAPP and combined_body:
+    if director_to_baker:
         try:
             handled = _handle_director_message(combined_body, msg_id, sender_name)
             if handled is True:
@@ -1157,6 +1207,13 @@ async def waha_webhook(
         except Exception as e:
             logger.error(f"WA question handler failed: {e}")
             return {"status": "error", "sender": sender_name}
+
+    # BRIEF_WAHA_OUTBOUND_CAPTURE_1: Director-to-counterparty short-circuit.
+    # Storage (above) + PM-signal-outbound (above) are the only handlers
+    # Director's outbound to counterparties triggers; do NOT enter the
+    # pipeline / classifier path below, which is for counterparty INBOUND.
+    if director_to_counterparty:
+        return {"status": "director_outbound_stored", "sender": sender_name}
 
     # Non-Director messages: background intelligence via pipeline (no reply)
     text = f"WhatsApp message from {sender_name}:\n[{datetime.fromtimestamp(timestamp, tz=timezone.utc).isoformat()[:19]}] {sender_name}: {combined_body}"

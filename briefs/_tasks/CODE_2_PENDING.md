@@ -1,5 +1,8 @@
 ---
-status: PENDING
+status: CLAIMED
+claimed_at: 2026-05-21T07:00:00Z
+claimed_by: b2
+branch: b2/waha-outbound-capture-1
 brief: briefs/BRIEF_WAHA_OUTBOUND_CAPTURE_1.md
 brief_id: WAHA_OUTBOUND_CAPTURE_1
 target_repo: baker-master

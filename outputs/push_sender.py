@@ -129,18 +129,22 @@ def gather_morning_items() -> list:
                 })
 
             # 4. Unanswered VIP messages (>4h)
+            # BRIEF_WAHA_OUTBOUND_CAPTURE_1: whatsapp_messages has no `direction`
+            # column; direction is encoded in is_director. Inbound = NOT
+            # is_director; outbound = is_director (Director's reply suppresses
+            # the alert). Replaces silently-broken `wm.direction` references.
             cur.execute("""
                 SELECT vc.name, wm.full_text, wm.timestamp
                 FROM whatsapp_messages wm
                 JOIN vip_contacts vc ON wm.sender = vc.whatsapp_id
                 WHERE vc.tier <= 2
                   AND wm.timestamp >= NOW() - INTERVAL '24 hours'
-                  AND wm.direction = 'inbound'
+                  AND wm.is_director = FALSE
                   AND wm.timestamp <= NOW() - INTERVAL '4 hours'
                   AND NOT EXISTS (
                       SELECT 1 FROM whatsapp_messages wm2
                       WHERE wm2.chat_id = wm.chat_id
-                        AND wm2.direction = 'outbound'
+                        AND wm2.is_director = TRUE
                         AND wm2.timestamp > wm.timestamp
                   )
                 ORDER BY wm.timestamp DESC LIMIT 5

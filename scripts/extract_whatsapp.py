@@ -28,15 +28,20 @@ if str(_PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(_PROJECT_ROOT))
 
 from config.settings import config
+from triggers.waha_message_utils import (
+    DIRECTOR_WHATSAPP_CUS,
+    DIRECTOR_WHATSAPP_JID,
+    attribute_sender,
+)
 
 logger = logging.getLogger("baker.extract_whatsapp")
 
 # Concurrency guard — prevent backfill + scheduler poll from running simultaneously
 _backfill_running = False
 
-
-DIRECTOR_WHATSAPP_JID = "41799605092@s.whatsapp.net"
-DIRECTOR_WHATSAPP_CUS = "41799605092@c.us"
+# BRIEF_WAHA_OUTBOUND_CAPTURE_1: DIRECTOR_WHATSAPP_{CUS,JID} now sourced from
+# triggers.waha_message_utils (single source of truth); attribute_sender()
+# replaces the inline fromMe re-attribution below.
 
 
 def _store_messages_to_postgres(msgs: list, chat_id: str):
@@ -55,19 +60,14 @@ def _store_messages_to_postgres(msgs: list, chat_id: str):
             if not msg_id:
                 continue
 
-            sender_jid = m.get("from", "")
+            raw_sender = m.get("from", "")
             from_me = m.get("fromMe", False)
-            name = _sender_name(m)
+            raw_name = _sender_name(m)
             body = m.get("body", "") or ""
             ts = m.get("timestamp", 0)
 
-            # WAHA-HEALTH-FIXES-1: Fix sender attribution for outbound messages.
-            # When fromMe=True, WAHA's "from" field is the remote party, not Director.
-            if from_me:
-                sender_jid = DIRECTOR_WHATSAPP_CUS  # "41799605092@c.us"
-                name = "Director"
-
-            is_director = from_me or sender_jid in (DIRECTOR_WHATSAPP_JID, DIRECTOR_WHATSAPP_CUS)
+            # BRIEF_WAHA_OUTBOUND_CAPTURE_1: shared sender attribution.
+            sender_jid, name, is_director = attribute_sender(raw_sender, raw_name, from_me)
 
             ts_iso = None
             if ts:

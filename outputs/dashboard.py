@@ -1049,7 +1049,8 @@ async def whatsapp_messages_endpoint(
         cur.execute(
             """
             SELECT id, timestamp, sender, sender_name, chat_id, full_text,
-                   (media_dropbox_path IS NOT NULL) AS has_media
+                   (media_dropbox_path IS NOT NULL) AS has_media,
+                   is_director
             FROM whatsapp_messages
             WHERE (sender ILIKE %s OR sender_name ILIKE %s OR chat_id ILIKE %s)
               AND timestamp >= %s
@@ -1084,6 +1085,7 @@ async def whatsapp_messages_endpoint(
             "chat_id": m.get("chat_id"),
             "full_text": m.get("full_text"),
             "has_media": bool(m.get("has_media")),
+            "is_director": bool(m.get("is_director")),
         })
     return {
         "status": "ok",
