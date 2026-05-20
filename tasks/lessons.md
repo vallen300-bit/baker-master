@@ -4,6 +4,44 @@ Review at session start. Add new lessons after any correction. Remove stale ones
 
 ---
 
+## Operations
+
+### Env-var wipe demands a forensic completeness audit (2026-05-20 anchor)
+
+**Mistake (2026-05-17, surfaced 2026-05-20):** Catastrophic Render env-var wipe on `baker-master` reduced 50 env vars to 22. Eleven keys were restored via single-key PUT the same night ("partial recovery"). Twenty-nine keys stayed missing for THREE DAYS because:
+
+1. Every external API call in Baker is wrapped in fault-tolerant `try/except` — so `GEMINI_API_KEY not set` errors fired hundreds of times in Render logs without surfacing as a sentinel alert. Resilience became a silencer.
+2. No "env-var presence" sentinel exists. Sentinel-health tracks symptoms (WAHA inbound silence, RSS disabled, Gmail stuck), never the env layer itself.
+3. The recovery checklist focused on keys that would 500 the dashboard immediately (DB / Anthropic / Tavily / Qdrant). It did NOT diff "pre-wipe key list (50) vs post-restore key list (22)" before declaring recovery complete.
+4. Director-facing surfaces (Cortex panel, Director Card, dashboard, bus, Pending tab) don't depend on the wiped keys. The system looked fine from the outside; ingestion + outbound layers degraded silently.
+
+**Rule:** every env-wipe / env-restore incident MUST end with a literal `pre_count` vs `post_count` diff AND a per-key audit (have-value / vendor-regen-needed / intentionally-retired) committed alongside the recovery. Recovery is not "done" until the diff is zero or every gap is explicitly classified.
+
+**Anchor:** 2026-05-20 night restoration sweep. 27 keys restored (1P + Todoist BAKER-PROJECT > API KEYS & PW + Chrome MCP → Google AI Studio for Gemini). Final Render count 60. Bus #579 dispatched DIRECTOR_CARD_V1_1 only after Gemini key was confirmed live + Render deploy succeeded. Director directive: "why nobody noticed this" — caught the silent-degradation class of failure.
+
+**Operational follow-up queued:**
+- `briefs/BRIEF_ENV_PRESENCE_SENTINEL_1.md` (TBD) — daily cron diffs Render env-var key list against checked-in `expected_keys.yml`, alerts on missing.
+- `config/.env.backup.render` (Director-suggested, Envars.png note 2026-05-20) — snapshot on Mac, refreshed after any env mutation.
+- 1Password coverage: every Render env key now has a 1P home (`API Gemini`, `Bluewin IMAP` items created same session; `API Dropbox` + `API Whoop` updated with refresh tokens; `API Apollo` annotated as `LINKEDIN_API_KEY` alias).
+
+### Never use Render's array-form `PUT /v1/services/{id}/env-vars` (2026-05-17 anchor, reinforced 2026-05-20)
+
+Already in `tools/render_env_guard.py` + `.claude/rules/python-backend.md`. Reinforced here as scar context: the 2026-05-17 wipe was caused by an array-body PUT replacing the entire env set. Always use single-key path `PUT /env-vars/{KEY}` with body `{"value": "..."}`. The 2026-05-20 restoration used 27 successful single-key PUTs with zero collateral damage as live proof the safe path works.
+
+### Deliberate env-var retirements (2026-05-20)
+
+Some env vars in the pre-wipe AID April snapshot are deliberately NOT restored — they reflect retired integrations. Recovery audits should leave these absent (not "missing"). Current list:
+
+| Env var | Reason retired |
+|---|---|
+| `OLLAMA_HOST` | Ollama is local-Mac-only (Director's hardware via `localhost:11434` for agent picker brainstorm via `local-research-via-gemma` skill). Baker production code never had an Ollama call path on Render — Gemini API covers cheap-tier; Anthropic covers high-stakes. Restore only if `BRIEF_DOMAIN_SLM_PERSISTENT_INFERENCE_1` (queued 2026-05-20 for Director ratification) ratifies Part A — that swaps `classify_intent()` to local SLM via Tailscale to Mac Mini, which would re-introduce `OLLAMA_HOST` as `tailscale://mac-mini:11434`. |
+| `BLUEWIN_PASS` / `BLUEWIN_USER` | RE-STORED 2026-05-20 (not retired; was wiped + recovered from Todoist). Active per `triggers/bluewin_poller.py`. |
+| `EXCHANGE_PASS` | NOT retired — genuinely lost. Only EVOK can reset via Florian Bourqui. Director email queued for morning send 2026-05-21. |
+
+**Rule:** any deliberate retirement gets a row in this table. Future env audits MUST treat the table as the source of truth for "missing-by-design vs missing-by-accident".
+
+---
+
 ## Frontend
 
 ### 1. Don't use HTML5 Drag API in scrollable containers
