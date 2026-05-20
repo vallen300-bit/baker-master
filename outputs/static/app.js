@@ -10201,13 +10201,23 @@ var _cortexData = { events: [], dedup: [], lint: [], pending: [], stats: {} };
 var _cortexPendingExpanded = {};   // cycle_id -> { proposal, trace } cache
 var _cortexPendingPoller = null;
 var _cortexActionInFlight = {};    // cycle_id -> bool
+// CORTEX_DIRECTOR_CARD_V1_1: per-page-session smoke-cycle filter state.
+// Default false → hide smoke/test cycles so real cycles surface. Toggle in
+// the Pending tab body flips this + re-fetches.
+var _cortexPendingIncludeSmoke = false;
+var _cortexPendingSmokeHidden = 0;   // last-known hidden count for button label
+
+function _cortexPendingFetchUrl() {
+    return '/api/cortex/cycles/pending?limit=50&include_smoke=' +
+        (_cortexPendingIncludeSmoke ? 'true' : 'false');
+}
 
 async function loadCortexFeed() {
     try {
         var [eventsRes, lintRes, pendingRes, statsRes] = await Promise.all([
             bakerFetch('/api/cortex/events?limit=30'),
             bakerFetch('/api/cortex/lint?status=open&limit=20'),
-            bakerFetch('/api/cortex/cycles/pending?limit=50'),
+            bakerFetch(_cortexPendingFetchUrl()),
             bakerFetch('/api/cortex/stats'),
         ]);
         if (eventsRes.ok) {
@@ -10224,6 +10234,7 @@ async function loadCortexFeed() {
         if (pendingRes.ok) {
             var d3 = await pendingRes.json();
             _cortexData.pending = d3.cycles || [];
+            _cortexPendingSmokeHidden = d3.smoke_hidden_count || 0;
         }
         if (statsRes.ok) {
             _cortexData.stats = await statsRes.json();
@@ -10252,12 +10263,22 @@ async function loadCortexFeed() {
 
 async function _reloadCortexPending() {
     try {
-        var resp = await bakerFetch('/api/cortex/cycles/pending?limit=50');
+        var resp = await bakerFetch(_cortexPendingFetchUrl());
         if (!resp.ok) return;
         var data = await resp.json();
         _cortexData.pending = data.cycles || [];
+        _cortexPendingSmokeHidden = data.smoke_hidden_count || 0;
         if (_cortexCurrentTab === 'pending') _renderCortexTab('pending');
     } catch (e) { /* silent — next poll retries */ }
+}
+
+// CORTEX_DIRECTOR_CARD_V1_1: toggle handler for the Pending tab's
+// "Show all / Hide smoke" button. Flips local state + re-fetches +
+// re-renders. Toggle button lives inside the Pending tab body (NOT
+// the tab strip — PR #224 hitbox lesson).
+function _cortexPendingToggleSmoke() {
+    _cortexPendingIncludeSmoke = !_cortexPendingIncludeSmoke;
+    _reloadCortexPending();
 }
 
 function _cortexTab(tab) {
@@ -10339,21 +10360,51 @@ function _cortexFmtMoney(n) {
     return '$' + v.toFixed(2);
 }
 
+function _cortexPendingFilterRowHtml() {
+    // CORTEX_DIRECTOR_CARD_V1_1: smoke-toggle button rendered INSIDE the
+    // Pending tab body (NOT the tab strip — PR #224 hitbox lesson).
+    // Static literals + esc() on the label only. Always rendered so the
+    // Director can flip back to "Show all" even from an empty filtered view.
+    var hiddenN = _cortexPendingSmokeHidden || 0;
+    var label;
+    if (_cortexPendingIncludeSmoke) {
+        label = 'Hide smoke/test cycles';
+    } else if (hiddenN > 0) {
+        label = 'Show all (incl. ' + hiddenN + ' smoke)';
+    } else {
+        label = 'Show all';
+    }
+    return '<div class="pending-filter-row">' +
+        '<button type="button" class="pending-smoke-toggle" ' +
+            'onclick="_cortexPendingToggleSmoke()">' +
+            esc(label) +
+        '</button>' +
+    '</div>';
+}
+
 function _renderCortexPending(body, cycles) {
+    var headerHtml = _cortexPendingFilterRowHtml();
     if (!cycles.length) {
-        body.innerHTML = '<div class="grid-empty">No cycles awaiting ratification.</div>';
+        // Safe — static literal + sanitized header from helper above.
+        body.innerHTML = headerHtml +
+            '<div class="grid-empty">No cycles awaiting ratification.</div>';
         return;
     }
     // All dynamic text sanitized via esc() and escAttr() — safe innerHTML pattern per codebase convention
-    body.innerHTML = cycles.map(function(c) {
+    var rowsHtml = cycles.map(function(c) {
         var cid = c.cycle_id;
         var preview = (c.proposal_preview || '').slice(0, 200);
         var isOpen = !!_cortexPendingExpanded[cid];
         var expHtml = isOpen ? _cortexPendingExpansionHtml(cid) :
             '<div class="cortex-pending-collapsed">click to expand</div>';
+        // V1.1 smoke chip — visible only on smoke rows (only when "Show all"
+        // mode is on, since filtered mode hides smoke rows entirely).
+        var smokeChip = c.is_smoke
+            ? '<span class="cycle-smoke-tag">smoke</span>'
+            : '';
         return '<div class="cortex-pending-row" data-cycle="' + escAttr(cid) + '">' +
             '<div class="cortex-pending-head" onclick="_cortexPendingToggle(\'' + escAttr(cid) + '\')">' +
-                '<span class="cortex-pending-matter">' + esc(c.matter_slug || '—') + '</span>' +
+                '<span class="cortex-pending-matter">' + esc(c.matter_slug || '—') + smokeChip + '</span>' +
                 '<span class="cortex-pending-age">' + esc(_cortexFmtAge(c.age_minutes)) + '</span>' +
                 '<span class="cortex-pending-preview" title="' + escAttr(preview) + '">' + esc(preview) + (c.has_proposal ? '' : ' (no proposal yet)') + '</span>' +
             '</div>' +
@@ -10362,6 +10413,7 @@ function _renderCortexPending(body, cycles) {
             '</div>' +
         '</div>';
     }).join('');
+    body.innerHTML = headerHtml + rowsHtml;
 }
 
 async function _cortexPendingToggle(cycleId) {
