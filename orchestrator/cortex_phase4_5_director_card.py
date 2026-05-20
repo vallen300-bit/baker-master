@@ -20,13 +20,21 @@ logger = logging.getLogger(__name__)
 
 # --- Model / pricing constants ------------------------------------------------
 
-_DEFAULT_MODEL = "claude-haiku-4-5-20251001"
-_MODEL_ENV = "ANTHROPIC_MODEL_HAIKU"
-_API_KEY_ENV = "ANTHROPIC_API_KEY"
+# Primary: Gemini 2.5 Pro via orchestrator.gemini_client.
+# Fallback: Anthropic Sonnet 4.6 on ANY Gemini call/parse/schema failure.
+# Director-ratified 2026-05-20: Haiku-distrust on Director-facing surfaces.
+_PRIMARY_MODEL = "gemini-2.5-pro"
+_PRIMARY_MODEL_ENV = "GEMINI_MODEL_DIRECTOR_CARD"
+_FALLBACK_MODEL = "claude-sonnet-4-6"
+_FALLBACK_MODEL_ENV = "ANTHROPIC_MODEL_DIRECTOR_CARD_FALLBACK"
+_ANTHROPIC_API_KEY_ENV = "ANTHROPIC_API_KEY"
 
-# USD per 1M tokens (mirrors kbl.cost.PRICING for the haiku-4 family).
-_PRICE_HAIKU_INPUT_PER_M = float(os.getenv("PRICE_HAIKU4_IN", "0.80"))
-_PRICE_HAIKU_OUTPUT_PER_M = float(os.getenv("PRICE_HAIKU4_OUT", "4.00"))
+# USD per 1M tokens — Gemini 2.5 Pro public list pricing (May 2026):
+# input $1.25 / output $5.00. Sonnet 4.6 fallback: $3.00 / $15.00.
+_PRICE_GEMINI_PRO_INPUT_PER_M = float(os.getenv("PRICE_GEMINI_PRO_IN", "1.25"))
+_PRICE_GEMINI_PRO_OUTPUT_PER_M = float(os.getenv("PRICE_GEMINI_PRO_OUT", "5.00"))
+_PRICE_SONNET_INPUT_PER_M = float(os.getenv("PRICE_SONNET4_IN", "3.00"))
+_PRICE_SONNET_OUTPUT_PER_M = float(os.getenv("PRICE_SONNET4_OUT", "15.00"))
 
 _MAX_TOKENS = 600
 _TEMPERATURE = 0.0
@@ -106,27 +114,27 @@ def _get_store():
     return SentinelStoreBack._get_global_instance()
 
 
-# --- Anthropic client (lazy, test-overridable) -------------------------------
+# --- Anthropic fallback client (lazy, test-overridable) ----------------------
 
-_client = None
+_anthropic_client = None
 
 
-def _get_client():
-    """Return a cached ``anthropic.Anthropic`` client. Lazy so tests can
-    stub the SDK before first use."""
-    global _client
-    if _client is None:
+def _get_anthropic_fallback_client():
+    """Return a cached ``anthropic.Anthropic`` client used for the Sonnet 4.6
+    fallback path. Lazy so tests can stub the SDK before first use."""
+    global _anthropic_client
+    if _anthropic_client is None:
         import anthropic
-        key = os.environ.get(_API_KEY_ENV)
+        key = os.environ.get(_ANTHROPIC_API_KEY_ENV)
         if not key:
-            raise RuntimeError(f"{_API_KEY_ENV} env var not set")
-        _client = anthropic.Anthropic(api_key=key)
-    return _client
+            raise RuntimeError(f"{_ANTHROPIC_API_KEY_ENV} env var not set")
+        _anthropic_client = anthropic.Anthropic(api_key=key)
+    return _anthropic_client
 
 
 def _reset_client_for_tests() -> None:
-    global _client
-    _client = None
+    global _anthropic_client
+    _anthropic_client = None
 
 
 # --- Sanitization -------------------------------------------------------------
@@ -202,12 +210,22 @@ def _validate_card_schema(card: Any) -> Optional[str]:
 # --- Cost computation --------------------------------------------------------
 
 
-def _compute_haiku_cost_eur(input_tokens: int, output_tokens: int) -> float:
-    """Per-call EUR cost. Pricing table is USD-per-1M; §9.2 reconciliation
-    in kbl.cost treats USD == EUR for Phase-1 single-currency accounting."""
+def _compute_gemini_pro_cost_eur(input_tokens: int, output_tokens: int) -> float:
+    """Per-call EUR cost for Gemini 2.5 Pro. Pricing table is USD-per-1M;
+    §9.2 reconciliation in kbl.cost treats USD == EUR for Phase-1
+    single-currency accounting."""
     total_per_m = (
-        input_tokens * _PRICE_HAIKU_INPUT_PER_M
-        + output_tokens * _PRICE_HAIKU_OUTPUT_PER_M
+        input_tokens * _PRICE_GEMINI_PRO_INPUT_PER_M
+        + output_tokens * _PRICE_GEMINI_PRO_OUTPUT_PER_M
+    )
+    return float(total_per_m / 1_000_000.0)
+
+
+def _compute_sonnet_cost_eur(input_tokens: int, output_tokens: int) -> float:
+    """Per-call EUR cost for Sonnet 4.6 fallback. Same USD==EUR caveat."""
+    total_per_m = (
+        input_tokens * _PRICE_SONNET_INPUT_PER_M
+        + output_tokens * _PRICE_SONNET_OUTPUT_PER_M
     )
     return float(total_per_m / 1_000_000.0)
 
@@ -261,6 +279,13 @@ def translate_to_director_card(
 ) -> Optional[dict]:
     """Translate technical ``proposal_text`` into a 9-field Director Card.
 
+    Primary: Gemini 2.5 Pro via ``orchestrator.gemini_client.generate``.
+    Fallback (on any Gemini call / parse / schema failure): Anthropic
+    Sonnet 4.6. Both paths share ``SYSTEM_PROMPT``, schema validation,
+    and sanitization. The card on return has ``_meta.fallback_used``
+    stamped (False on Gemini path, True on Sonnet path) so audit /
+    cost reconciliation can attribute spend.
+
     Args:
         cycle_id: parent Cortex cycle id (for logging only).
         proposal_text: the Phase 3c synthesis output. May be empty —
@@ -271,29 +296,73 @@ def translate_to_director_card(
             Currently surfaced into the user prompt but not enforced.
 
     Returns:
-        9-field card dict on success. None on any failure (fail-open).
-        Never raises.
+        9-field card dict on success. ``FAIL_OPEN_SENTINEL`` (None) on
+        double failure. Never raises.
     """
     if not proposal_text:
         return None
-    try:
-        client = _get_client()
-    except Exception as e:
-        logger.warning(
-            "[phase4_5] no Anthropic client for cycle %s: %s", cycle_id, e
-        )
-        return FAIL_OPEN_SENTINEL
 
-    model = os.environ.get(_MODEL_ENV, _DEFAULT_MODEL)
+    primary_model = os.environ.get(_PRIMARY_MODEL_ENV, _PRIMARY_MODEL)
+    fallback_model = os.environ.get(_FALLBACK_MODEL_ENV, _FALLBACK_MODEL)
     user_text = _build_user_prompt(
         matter_slug=matter_slug,
         proposal_text=proposal_text[:_PROPOSAL_INPUT_TRIM],
         cost_telemetry=cost_telemetry or {},
     )
 
+    # --- Primary: Gemini 2.5 Pro --------------------------------------------
+    try:
+        from orchestrator.gemini_client import generate as gemini_generate
+        resp = gemini_generate(
+            model=primary_model,
+            messages=[{"role": "user", "content": user_text}],
+            max_tokens=_MAX_TOKENS,
+            system=SYSTEM_PROMPT,
+        )
+        raw_text = getattr(resp, "text", "") or ""
+        usage = getattr(resp, "usage", None)
+        in_tok = int(getattr(usage, "input_tokens", 0) or 0)
+        out_tok = int(getattr(usage, "output_tokens", 0) or 0)
+        parsed = _parse_json_response(raw_text)
+        if parsed is not None:
+            sanitized = _sanitize_card(parsed)
+            err = _validate_card_schema(sanitized)
+            if err is None:
+                sanitized["_meta"] = {
+                    "model": primary_model,
+                    "input_tokens": in_tok,
+                    "output_tokens": out_tok,
+                    "card_gen_cost_eur": _compute_gemini_pro_cost_eur(in_tok, out_tok),
+                    "fallback_used": False,
+                }
+                return sanitized
+            logger.warning(
+                "[phase4_5] cycle %s: gemini schema invalid (%s); trying Sonnet fallback",
+                cycle_id, err,
+            )
+        else:
+            logger.warning(
+                "[phase4_5] cycle %s: gemini returned non-JSON; trying Sonnet fallback",
+                cycle_id,
+            )
+    except Exception as e:
+        logger.warning(
+            "[phase4_5] cycle %s: gemini call failed (%s); trying Sonnet fallback",
+            cycle_id, e,
+        )
+
+    # --- Fallback: Anthropic Sonnet 4.6 -------------------------------------
+    try:
+        client = _get_anthropic_fallback_client()
+    except Exception as e:
+        logger.warning(
+            "[phase4_5] cycle %s: no anthropic client for fallback: %s", cycle_id, e
+        )
+        return FAIL_OPEN_SENTINEL
+
     try:
         response = client.messages.create(
-            model=model,
+            model=fallback_model,
             max_tokens=_MAX_TOKENS,
             temperature=_TEMPERATURE,
             system=SYSTEM_PROMPT,
@@ -301,7 +370,7 @@ def translate_to_director_card(
         )
     except Exception as e:
         logger.warning(
-            "[phase4_5] Haiku call failed for cycle %s: %s", cycle_id, e
+            "[phase4_5] cycle %s: sonnet fallback also failed: %s", cycle_id, e
         )
         return FAIL_OPEN_SENTINEL
 
@@ -309,30 +378,27 @@ def translate_to_director_card(
     parsed = _parse_json_response(raw_text)
     if parsed is None:
         logger.warning(
-            "[phase4_5] cycle %s: model returned non-JSON or empty body", cycle_id
+            "[phase4_5] cycle %s: sonnet fallback returned non-JSON", cycle_id
         )
         return FAIL_OPEN_SENTINEL
 
-    # Sanitize before validating — the schema validator only checks shape,
-    # and we want shape-valid output that's also free of HTML/JS/markdown.
     sanitized = _sanitize_card(parsed)
     err = _validate_card_schema(sanitized)
     if err:
         logger.warning(
-            "[phase4_5] cycle %s: schema validation failed: %s", cycle_id, err
+            "[phase4_5] cycle %s: sonnet fallback schema invalid: %s", cycle_id, err
         )
         return FAIL_OPEN_SENTINEL
 
-    # Stamp model + cost telemetry on the card for audit. These fields are
-    # additive — schema validator allows extras.
     usage = getattr(response, "usage", None)
     in_tok = int(getattr(usage, "input_tokens", 0) or 0)
     out_tok = int(getattr(usage, "output_tokens", 0) or 0)
     sanitized["_meta"] = {
-        "model": getattr(response, "model", model),
+        "model": getattr(response, "model", fallback_model),
         "input_tokens": in_tok,
         "output_tokens": out_tok,
-        "card_gen_cost_eur": _compute_haiku_cost_eur(in_tok, out_tok),
+        "card_gen_cost_eur": _compute_sonnet_cost_eur(in_tok, out_tok),
+        "fallback_used": True,
     }
     return sanitized
 
