@@ -826,8 +826,11 @@ async def waha_webhook(
 
         return {"status": "session_event", "session_status": session_status}
 
-    # Only process message events (session events handled above)
-    if event_type != "message":
+    # Only process message events (session events handled above).
+    # `message` = inbound-only (legacy event); `message.any` = inbound + fromMe
+    # (the subscription required for Director outbound real-time capture per
+    # BRIEF_WAHA_OUTBOUND_CAPTURE_1). Accept both for forward + backward compat.
+    if event_type not in ("message", "message.any"):
         return {"status": "ignored", "event": event_type}
 
     payload = body.get("payload", {})
