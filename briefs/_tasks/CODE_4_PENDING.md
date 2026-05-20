@@ -1,33 +1,23 @@
 ---
-status: PENDING
+status: COMPLETE
 brief: briefs/BRIEF_COCKPIT_ALERT_PROMPT_REWRITE_1.md
 brief_id: COCKPIT_ALERT_PROMPT_REWRITE_1
 target_repo: baker-master
 matter_slug: baker-internal
-cross_matter_usage: [all-matters — prompt change applies to every signal classified into an alert]
 dispatched_at: 2026-05-20T14:32:00Z
 dispatched_by: lead
-director_auth: 2026-05-20 chat — "go for 3 ( prompt correction )" + "ratified, go" (5-item batch)
-trigger_class: LOW
-working_dir: ~/bm-b4
-working_branch: b4/cockpit-alert-prompt-rewrite-1
-expected_build_min: 30-45
-acceptance_summary: |
-  Rewrite BAKER_SYSTEM_PROMPT in orchestrator/prompt_builder.py to force
-  4-element strategic-synthesis shape on alert body (interpretation /
-  counterparty intent / risk if ignored / suggested move). Add 1-2 few-shot
-  examples contrasting summary vs synthesis. Add tests/test_alert_prompt_strategic_synthesis.py.
-  No model swap. No JSON shape change. Tier rules preserved verbatim.
+completed_at: 2026-05-20T14:50:00Z
+completed_by: b4
+pr: 234
+pr_url: https://github.com/vallen300-bit/baker-master/pull/234
+branch: b4/cockpit-alert-prompt-rewrite-1
+commit: c90ca48
 ship_gate: |
-  Literal `pytest tests/test_alert_prompt_strategic_synthesis.py -v` green.
-  Plus `pytest tests/test_prompt_builder*.py tests/test_alert*.py` green for
-  regression coverage. No pass-by-inspection.
+  - tests/test_alert_prompt_strategic_synthesis.py — 9 passed
+  - Regression (prompt_cache_audit + prompt_caching_1 + alerts_to_signal_cortex_dispatch + bridge_alerts_to_signal + dashboard_alert_fold) — all green
+  - test_scan_prompt failure pre-existing on main (separate prompt file, out-of-scope)
 reply_to: lead
-notes: |
-  Brief was authored after Slack DM-kill PR #233 merged. This brief is the
-  surviving Cockpit-quality lever (DM is dead; Cockpit gets the prompt fix).
-  Don't touch tier classification, model routing, or DM-posting paths —
-  all out-of-scope per brief.
+report: briefs/_reports/B4_cockpit-alert-prompt-rewrite-1_2026-05-20.md
 ---
 
-Read `briefs/BRIEF_COCKPIT_ALERT_PROMPT_REWRITE_1.md` for full spec.
+PR #234 open for AH1 review. See report for details.
