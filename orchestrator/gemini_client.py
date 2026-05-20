@@ -52,6 +52,7 @@ def generate(
     messages: list,
     max_tokens: int = 2000,
     system: str = None,
+    response_format: str = None,
 ) -> GeminiResponse:
     """
     Call Gemini API with Claude-style message format.
@@ -61,6 +62,11 @@ def generate(
         messages: [{"role": "user", "content": "..."}] — Claude format
         max_tokens: max output tokens
         system: system prompt (optional)
+        response_format: when "json", sets ``response_mime_type=
+            "application/json"`` on the generation config so Gemini emits
+            strict JSON (no markdown fences, no leading/trailing prose).
+            Other values are ignored. Backward compatible — existing
+            callers omit the kwarg and get the original behavior.
     """
     from google.genai import types
 
@@ -96,12 +102,14 @@ def generate(
                 parts=[types.Part.from_text(text=str(content))],
             ))
 
-    # Build config
-    gen_config = types.GenerateContentConfig(
-        max_output_tokens=max_tokens,
-    )
+    # Build config — kwargs pattern to play nice with frozen pydantic-v2
+    # model configs in newer google-genai SDK versions.
+    config_kwargs = {"max_output_tokens": max_tokens}
     if system:
-        gen_config.system_instruction = system
+        config_kwargs["system_instruction"] = system
+    if response_format == "json":
+        config_kwargs["response_mime_type"] = "application/json"
+    gen_config = types.GenerateContentConfig(**config_kwargs)
 
     # Retry with exponential backoff for transient errors (503, 429)
     max_retries = 3
