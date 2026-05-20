@@ -1,5 +1,5 @@
 ---
-status: PENDING
+status: COMPLETE
 brief: briefs/BRIEF_RENDER_ENV_WIPE_PRECOMMIT_GUARD_1.md
 brief_id: RENDER_ENV_WIPE_PRECOMMIT_GUARD_1
 target_repo: baker-master
@@ -14,6 +14,9 @@ estimated_effort: ~45-60 builder-minutes
 complexity: Low
 priority: medium (closes the bypass gap left by 2026-05-17 runtime guard)
 reply_target: lead (bus topic `ship/render-env-wipe-precommit-guard-1`)
+shipped_at: 2026-05-20T12:25:00Z
+pr: 230
+report: briefs/_reports/B3_render_env_wipe_precommit_guard_1_20260520.md
 ---
 
 # CODE_3_PENDING — RENDER_ENV_WIPE_PRECOMMIT_GUARD_1 — 2026-05-20
