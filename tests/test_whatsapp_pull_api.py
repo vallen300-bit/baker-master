@@ -143,9 +143,44 @@ def test_whatsapp_messages_happy_path_json(client_authed, monkeypatch):
     assert store.put_called  # connection released
 
 
+def test_whatsapp_messages_lid_row_surfaces_via_phone_substring(client_authed, monkeypatch):
+    """LID-encoded row (post-2026 WAHA migration): sender_name and chat_id
+    hold `<digits>@lid`, phone digits only in sender column. Phone-substring
+    probe must still find it. Anchor: 2026-05-20 Brisen Desk diagnostic on
+    Julia Kvashnina Stadnik (chat 41796720083) — endpoint was half-blind to
+    LID rows."""
+    lid_row = (
+        "false_16462794231969@lid_3AA3613A1FBABBF17384",       # id
+        datetime(2026, 5, 18, 19, 1, 4, tzinfo=timezone.utc),  # timestamp
+        "41796720083@c.us",                                    # sender — phone HERE
+        "16462794231969@lid",                                  # sender_name — LID
+        "16462794231969@lid",                                  # chat_id — LID
+        "Дима, привет!",                                       # full_text
+        False,                                                 # has_media
+    )
+    _install_fake_store(monkeypatch, [lid_row])
+
+    resp = client_authed.get(
+        "/api/whatsapp/messages",
+        params={"contact": "796720083", "from": "2026-05-18", "to": "2026-05-18"},
+    )
+
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["status"] == "ok"
+    assert body["count"] == 1
+    msg = body["messages"][0]
+    assert msg["sender"] == "41796720083@c.us"
+    assert msg["sender_name"] == "16462794231969@lid"
+    assert msg["chat_id"] == "16462794231969@lid"
+    assert msg["full_text"] == "Дима, привет!"
+
+
 def test_whatsapp_messages_sql_uses_canonical_media_column(client_authed, monkeypatch):
     """Drift guard: brief said `media_path`, real schema (per
-    `_ensure_whatsapp_messages_table`) is `media_dropbox_path`."""
+    `_ensure_whatsapp_messages_table`) is `media_dropbox_path`. Also pins
+    the 3-column WHERE (sender, sender_name, chat_id) added in
+    WHATSAPP_API_SENDER_PROBE_1 — phone substrings must hit `sender`."""
     _, cursor = _install_fake_store(monkeypatch, [])
 
     resp = client_authed.get(
@@ -156,10 +191,14 @@ def test_whatsapp_messages_sql_uses_canonical_media_column(client_authed, monkey
     assert resp.status_code == 200
     assert "media_dropbox_path IS NOT NULL" in cursor.last_sql
     assert "media_path " not in cursor.last_sql
-    # Param order: contact ILIKE x2, from_date, to_date, limit
+    assert "sender ILIKE" in cursor.last_sql
+    assert "sender_name ILIKE" in cursor.last_sql
+    assert "chat_id ILIKE" in cursor.last_sql
+    # Param order: contact ILIKE x3 (sender, sender_name, chat_id), from_date, to_date, limit
     assert cursor.last_params[0] == "%X%"
     assert cursor.last_params[1] == "%X%"
-    assert cursor.last_params[4] == 200  # default limit
+    assert cursor.last_params[2] == "%X%"
+    assert cursor.last_params[5] == 200  # default limit
 
 
 def test_whatsapp_messages_markdown_format(client_authed, monkeypatch):

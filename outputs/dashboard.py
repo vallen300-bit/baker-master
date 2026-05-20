@@ -1015,7 +1015,7 @@ def _format_wa_md(messages: list[dict]) -> str:
 
 @app.get("/api/whatsapp/messages", tags=["whatsapp"], dependencies=[Depends(verify_api_key)])
 async def whatsapp_messages_endpoint(
-    contact: str = Query(..., min_length=1, description="Match on sender_name ILIKE or chat_id substring"),
+    contact: str = Query(..., min_length=1, description="Match on sender, sender_name OR chat_id substring (ILIKE)"),
     from_date: date = Query(..., alias="from", description="Inclusive lower bound (YYYY-MM-DD)"),
     to_date: date = Query(..., alias="to", description="Inclusive upper bound (YYYY-MM-DD)"),
     limit: int = Query(200, ge=1, le=1000),
@@ -1023,8 +1023,15 @@ async def whatsapp_messages_endpoint(
 ):
     """Read-only WhatsApp message pull for desk consumption.
 
-    Matches sender_name OR chat_id via ILIKE %contact%, timestamp inclusive
-    between `from` and `to` (end-of-day on `to`). Returns oldest-first.
+    Matches sender, sender_name OR chat_id via ILIKE %contact%, timestamp
+    inclusive between `from` and `to` (end-of-day on `to`). Returns
+    oldest-first.
+
+    WAHA migrated to LID-encoded chat_ids in early-mid 2026; sender_name +
+    chat_id now often hold `<digits>@lid` strings, so the phone substring
+    only lives in the `sender` column. Probing all three keeps phone-fragment
+    queries surfacing the rows. Human-name resolution for LID-only rows is
+    out of scope here — separate brief.
 
     has_media derives from `media_dropbox_path IS NOT NULL` (the canonical
     media-presence flag per `_ensure_whatsapp_messages_table`; the brief's
@@ -1044,13 +1051,13 @@ async def whatsapp_messages_endpoint(
             SELECT id, timestamp, sender, sender_name, chat_id, full_text,
                    (media_dropbox_path IS NOT NULL) AS has_media
             FROM whatsapp_messages
-            WHERE (sender_name ILIKE %s OR chat_id ILIKE %s)
+            WHERE (sender ILIKE %s OR sender_name ILIKE %s OR chat_id ILIKE %s)
               AND timestamp >= %s
               AND timestamp < %s::date + INTERVAL '1 day'
             ORDER BY timestamp ASC
             LIMIT %s
             """,
-            (f"%{contact}%", f"%{contact}%", from_date, to_date, limit),
+            (f"%{contact}%", f"%{contact}%", f"%{contact}%", from_date, to_date, limit),
         )
         cols = [d[0] for d in cur.description]
         for row in cur.fetchall():
