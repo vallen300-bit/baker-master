@@ -1,5 +1,5 @@
 ---
-status: PENDING
+status: COMPLETE
 brief: briefs/BRIEF_WHATSAPP_API_SENDER_PROBE_1.md
 brief_id: WHATSAPP_API_SENDER_PROBE_1
 target_repo: baker-master
@@ -14,6 +14,13 @@ estimated_effort: ~10-15 builder-minutes
 complexity: Low
 priority: medium (Brisen Desk surfaced live; Director worked around once but pattern is generalizable)
 reply_target: lead (bus topic `ship/whatsapp-api-sender-probe-1`)
+merge_closeout: |
+  WHATSAPP_API_SENDER_PROBE_1 merged 2026-05-20 14:18:03Z — baker-master squash f2f7aaf (PR #232).
+  Render deploy dep-d86s57gjs32c738r080g LIVE 14:20:55Z.
+  Post-merge live probe PASS: contact=796720083 from=2026-05-17 to=2026-05-20 returned 14 rows
+  (incl. 2026-05-20 13:28 message previously invisible to all phone-substring queries).
+  Gates cleared at ship: 14/14 pytest + py_compile + check_singletons + pre-commit Parts 1-4.
+  Bus dispatch #609 acked; ship #610 posted; closeout #611 acked.
 ---
 
 # CODE_1_PENDING — WHATSAPP_API_SENDER_PROBE_1 — 2026-05-20
