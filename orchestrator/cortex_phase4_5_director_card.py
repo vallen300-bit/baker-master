@@ -36,7 +36,11 @@ _PRICE_GEMINI_PRO_OUTPUT_PER_M = float(os.getenv("PRICE_GEMINI_PRO_OUT", "5.00")
 _PRICE_SONNET_INPUT_PER_M = float(os.getenv("PRICE_SONNET4_IN", "3.00"))
 _PRICE_SONNET_OUTPUT_PER_M = float(os.getenv("PRICE_SONNET4_OUT", "15.00"))
 
-_MAX_TOKENS = 600
+_MAX_TOKENS = 600                # Sonnet 4.6 fallback (unchanged from v1.0).
+# Gemini 2.5 Pro: thinking-mode reserve consumes part of max_output_tokens
+# before visible text streams; 600 was tight enough to truncate the 9-field
+# card. 2000 covers the thinking reserve + the card. (V1.1 hot-fix.)
+_MAX_TOKENS_GEMINI = 2000
 _TEMPERATURE = 0.0
 _PROPOSAL_INPUT_TRIM = 6000  # guard against pathological proposal_text length
 
@@ -246,23 +250,48 @@ def _extract_text(content: Any) -> str:
 
 
 def _parse_json_response(raw: str) -> Optional[dict]:
-    """Tolerate a model that wraps JSON in code-fences or adds a leading
-    sentence. Strict JSON only after extraction."""
+    """Tolerate a model that wraps JSON in code-fences, adds a leading
+    sentence, OR appends trailing commentary. Strict JSON only after the
+    object boundary is identified by a brace-balanced, string-aware walk
+    (V1.1 hot-fix: Gemini 2.5 Pro occasionally emits ``{...}\\n\\nHere is
+    the JSON above.`` even in JSON-mode; this widens the safety net)."""
     if not raw:
         return None
     s = raw.strip()
     if s.startswith("```"):
-        # Strip first fence line and trailing fence.
         s = re.sub(r"^```(?:json)?\s*\n", "", s)
         s = re.sub(r"\n```\s*$", "", s)
-    # If model added prose before the JSON, find the first '{' and parse from there.
-    if not s.startswith("{"):
-        idx = s.find("{")
-        if idx == -1:
-            return None
-        s = s[idx:]
+    start = s.find("{")
+    if start == -1:
+        return None
+    depth = 0
+    in_str = False
+    escape = False
+    end = -1
+    for i in range(start, len(s)):
+        ch = s[i]
+        if escape:
+            escape = False
+            continue
+        if ch == "\\":
+            escape = True
+            continue
+        if ch == '"':
+            in_str = not in_str
+            continue
+        if in_str:
+            continue
+        if ch == "{":
+            depth += 1
+        elif ch == "}":
+            depth -= 1
+            if depth == 0:
+                end = i
+                break
+    if end == -1:
+        return None
     try:
-        return json.loads(s)
+        return json.loads(s[start:end + 1])
     except (ValueError, json.JSONDecodeError):
         return None
 
@@ -316,8 +345,9 @@ def translate_to_director_card(
         resp = gemini_generate(
             model=primary_model,
             messages=[{"role": "user", "content": user_text}],
-            max_tokens=_MAX_TOKENS,
+            max_tokens=_MAX_TOKENS_GEMINI,
             system=SYSTEM_PROMPT,
+            response_format="json",
         )
         raw_text = getattr(resp, "text", "") or ""
         usage = getattr(resp, "usage", None)

@@ -165,7 +165,10 @@ def test_a_happy_path_returns_valid_9_field_card(monkeypatch):
     assert card["_meta"]["card_gen_cost_eur"] > 0
     assert len(gemini.calls) == 1
     assert gemini.calls[0]["model"] == p45._PRIMARY_MODEL
-    assert gemini.calls[0]["max_tokens"] == p45._MAX_TOKENS
+    # V1.1 hot-fix: Gemini path uses the wider token budget; Sonnet stays at 600.
+    assert gemini.calls[0]["max_tokens"] == p45._MAX_TOKENS_GEMINI
+    # V1.1 hot-fix: Gemini call must request strict JSON output mime.
+    assert gemini.calls[0].get("response_format") == "json"
     assert anthropic.calls == []
 
 
@@ -412,6 +415,94 @@ def test_gemini_no_api_key_falls_back(monkeypatch):
     assert card is not None
     assert card["_meta"]["fallback_used"] is True
     assert len(msgs.calls) == 1
+
+
+# --- V1.1 hot-fix: trailing-prose tolerance ----------------------------------
+
+
+def test_gemini_response_with_trailing_prose_parses(monkeypatch):
+    """Gemini occasionally emits the JSON object followed by a sentence
+    of trailing commentary (even when ``response_mime_type=application/json``
+    is requested). The brace-balanced parser must extract the object slice
+    and the Gemini-primary path must serve the card without firing the
+    Sonnet fallback."""
+    card_json = _valid_card_json()
+    messy = card_json + "\n\nHere is the JSON above for your review."
+    gemini = _install_gemini_stub(monkeypatch, messy)
+    anthropic = _install_anthropic_stub(
+        monkeypatch, raise_exc=AssertionError("fallback fired")
+    )
+    card = p45.translate_to_director_card(
+        cycle_id="cyc-hotfix-trailing",
+        proposal_text="hot-fix smoke",
+        matter_slug="movie",
+    )
+    assert card is not None
+    assert card["_meta"]["model"] == p45._PRIMARY_MODEL
+    assert card["_meta"]["fallback_used"] is False
+    assert len(gemini.calls) == 1
+    assert anthropic.calls == []
+
+
+def test_gemini_response_with_fences_and_trailing_prose_parses(monkeypatch):
+    """Fenced JSON followed by trailing prose — the existing fence stripper
+    handles the leading ``` and the new brace-balanced walk handles the
+    trailing sentence after the closing ```."""
+    card_json = _valid_card_json()
+    messy = "```json\n" + card_json + "\n```\n\nLet me know if you need anything."
+    gemini = _install_gemini_stub(monkeypatch, messy)
+    anthropic = _install_anthropic_stub(
+        monkeypatch, raise_exc=AssertionError("fallback fired")
+    )
+    card = p45.translate_to_director_card(
+        cycle_id="cyc-hotfix-fences",
+        proposal_text="hot-fix smoke",
+        matter_slug="movie",
+    )
+    assert card is not None
+    assert card["_meta"]["model"] == p45._PRIMARY_MODEL
+    assert card["_meta"]["fallback_used"] is False
+    assert len(gemini.calls) == 1
+    assert anthropic.calls == []
+
+
+def test_parse_json_response_strips_trailing_prose_unit():
+    """Direct unit test on the parser:
+    - clean JSON parses (regression guard);
+    - JSON + trailing prose parses to just the object;
+    - JSON with leading + trailing prose parses;
+    - JSON with a ``}`` inside a string value is NOT cut at that brace;
+    - garbage with no JSON returns None;
+    - empty / None input returns None.
+    """
+    clean = '{"a": 1, "b": "two"}'
+    assert p45._parse_json_response(clean) == {"a": 1, "b": "two"}
+
+    trailing = '{"a": 1, "b": "two"}\n\nHere is your JSON.'
+    assert p45._parse_json_response(trailing) == {"a": 1, "b": "two"}
+
+    both = 'Sure — here is the data:\n{"a": 1, "b": "two"}\nThanks!'
+    assert p45._parse_json_response(both) == {"a": 1, "b": "two"}
+
+    # Closing brace INSIDE a string value must not terminate the walk.
+    embedded = '{"key": "value with } brace inside", "n": 7}'
+    assert p45._parse_json_response(embedded) == {
+        "key": "value with } brace inside",
+        "n": 7,
+    }
+
+    # Escaped quote inside a string must not toggle the in_str state out.
+    escaped = '{"q": "she said \\"hi\\"", "n": 1}'
+    assert p45._parse_json_response(escaped) == {
+        "q": 'she said "hi"',
+        "n": 1,
+    }
+
+    assert p45._parse_json_response("") is None
+    assert p45._parse_json_response(None) is None
+    assert p45._parse_json_response("no json at all here") is None
+    # Unterminated object → None (no closing brace).
+    assert p45._parse_json_response('{"a": 1') is None
 
 
 # --- Persistence (bonus coverage) --------------------------------------------
