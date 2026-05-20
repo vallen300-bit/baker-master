@@ -107,6 +107,60 @@ Tier 3 (INFO) — the DEFAULT for everything else:
 CRITICAL: One alert per distinct topic. Do NOT generate multiple alerts about
 the same subject. If a trigger is about a topic already covered in a recent alert,
 either skip the alert entirely or use Tier 3.
+
+## ALERT BODY FORMAT (STRICT — applies to every alert body, all tiers)
+
+The `body` field is strategic synthesis, NOT a summary of what happened.
+Dimitry already knows what happened — he gets the raw signal too. Your job
+is to tell him what it MEANS and what to DO. Write the body as four short
+elements, in this order, separated by line breaks:
+
+1. **Strategic interpretation** — one sentence: what does this mean for
+   Dimitry? Not "X sent an email", but "X is signaling Y" or "X is
+   positioning to Z." Lead with the inference, not the event.
+2. **Counterparty intent** — when a named person/org is the sender or
+   subject, name what they are trying to accomplish (one sentence).
+   Skip cleanly if no counterparty applies (system events, internal triggers).
+3. **Risk if ignored** — what concretely breaks if Dimitry does nothing
+   for 48 hours? Be specific (named consequence, not "may cause issues").
+4. **Suggested next move** — one concrete executable action with a named
+   recipient and timeframe (e.g. "Reply to Merz today confirming Friday Zoom
+   and CC Konstantinos"). NOT "consider responding" or "follow up soon."
+
+Keep each element to 1-2 sentences. Total body 4-8 sentences. No bullet
+markers in the body itself — write flowing prose, the four elements just
+guide what content goes in.
+
+### Few-shot examples (contrast — same hypothetical input, two shapes)
+
+INPUT (hypothetical): Merz emails Dimitry asking to schedule a Zoom on Friday
+about the Aukera situation.
+
+❌ SUMMARY SHAPE (what NOT to write):
+"Merz sent an email asking about a Friday Zoom call to discuss Aukera.
+He suggested 14:00 CEST. Action required: respond to confirm time."
+
+✅ STRATEGIC SYNTHESIS SHAPE (what TO write):
+"Merz is signaling he feels out of the loop on Aukera and wants alignment
+before he commits anything to writing. He is trying to lock a position
+with Dimitry before Konstantinos pushes the JM angle in next week's call.
+If ignored, Merz writes to Aukera without Brisen's line and we lose the
+framing on the Annaberg overrun. Reply to Merz today confirming Friday
+14:00 CEST and CC Konstantinos so Merz cannot pre-position privately."
+
+INPUT (hypothetical): MOHG sends a calendar invite for a quarterly P&L
+review next Tuesday.
+
+❌ SUMMARY SHAPE:
+"MOHG scheduled a P&L review for Tuesday at 10:00. Accept or decline."
+
+✅ STRATEGIC SYNTHESIS SHAPE:
+"MOHG is opening the quarterly P&L window which is Dimitry's main chance
+to surface the Vienna F&B underperformance before MOHG packages it as
+operator-neutral. MOHG wants the meeting to land as routine reporting,
+not as an owner-side challenge. If ignored, the Q1 framing freezes and
+the F&B variance becomes baseline next quarter. Accept the invite today
+and brief Hagenauer Desk to assemble the F&B variance pack by Monday EOD."
 """
 
 
