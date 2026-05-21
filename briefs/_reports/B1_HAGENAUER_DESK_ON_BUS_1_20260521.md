@@ -1,20 +1,27 @@
 ---
 brief_id: HAGENAUER_DESK_ON_BUS_1
+brief_amended_anchor: f1dd73d
 target: b1
 reply_to: lead
-shipped_at: 2026-05-21T14:55:00Z
-status: shipped (AC1-AC4) — AC5/AC6 await AH1 Tier-B
+shipped_at: 2026-05-21T15:15:00Z
+status: shipped (AC1-AC4 + AC7) — AC5/AC6 await AH1 Tier-B
 baker_master_pr: https://github.com/vallen300-bit/baker-master/pull/237
 baker_master_anchor: 4b17d36
 baker_vault_pr: https://github.com/vallen300-bit/baker-vault/pull/103
 baker_vault_anchor: 6c2bb29
+brisen_lab_pr: https://github.com/vallen300-bit/brisen-lab/pull/25
+brisen_lab_anchor: ec3310b
 ---
+
+# Amendment fold note
+
+Brief was amended mid-flight (bus msg #642, anchor `f1dd73d`, 2026-05-21T14:39:51Z) — AC7 added for brisen-lab cockpit Hag Desk card + 3rd PR target. b1 had already shipped AC1-AC4 + opened PRs #237 / #103 + drafted v1 of this report before amendment landed. Amendment fold: `git checkout origin/main -- briefs/BRIEF_HAGENAUER_DESK_ON_BUS_1.md` + re-claim mailbox (commit `909a78d`), then AC7 implementation against fresh brisen-lab clone branch.
 
 # B1 ship report — HAGENAUER_DESK_ON_BUS_1
 
 ## Bottom line
 
-AC1–AC4 shipped. Two PRs open. `~/.claude/hooks/session-start-bus-drain.sh` edited in-place. `~/bm-hag-desk/` picker created with picker-scoped SKILL.md (V17-aligned — see §"Brief path divergence" below). AC5/AC6 await AH1 Tier-B (1Password key + Render env PUT + redeploy + live smoke fires).
+AC1–AC4 + AC7 shipped. Three PRs open. `~/.claude/hooks/session-start-bus-drain.sh` edited in-place. `~/bm-hag-desk/` picker created with picker-scoped SKILL.md (V17-aligned — see §"Brief path divergence" below). AC5/AC6 await AH1 Tier-B (1Password key + Render env PUT + redeploy + live smoke fires + browser confirm of Hag Desk card render at brisen-lab.onrender.com per AC7 Gate-1+2 reviewer instruction).
 
 ## PR anchors
 
@@ -22,6 +29,7 @@ AC1–AC4 shipped. Two PRs open. `~/.claude/hooks/session-start-bus-drain.sh` ed
 |---|---|---|---|---|
 | AC1 (bus_post.sh whitelist + role map) | baker-master | [#237](https://github.com/vallen300-bit/baker-master/pull/237) | `b1/hagenauer-desk-on-bus-1` | `4b17d36` |
 | AC4 (skill SKILL.md pilot note) | baker-vault | [#103](https://github.com/vallen300-bit/baker-vault/pull/103) | `b1/hag-desk-bus-pilot-skill` | `6c2bb29` |
+| AC7 (brisen-lab cockpit Hag Desk card) | brisen-lab | [#25](https://github.com/vallen300-bit/brisen-lab/pull/25) | `b1/hagenauer-desk-on-bus-1` | `ec3310b` |
 | AC2 (drain hook) | filesystem (user-global, no repo) | n/a | n/a | in-place edit |
 | AC3 (picker) | filesystem (`~/bm-hag-desk/`, no repo) | n/a | n/a | new dir + CLAUDE.md |
 
@@ -129,6 +137,57 @@ $ stat -f '%i %N' ~/.claude/skills/agent-bus-posting-contract/SKILL.md ~/baker-v
 
 Post-merge `cd ~/baker-vault && git pull` propagates the edit to the Cowork user-global mirror automatically via the hardlink — no separate `cp` required. b1 did NOT touch user-global Cowork directly to avoid (a) breaking the hardlink and (b) introducing an uncommitted edit to Director's `~/baker-vault` working tree which already carries 18+ unrelated in-flight edits.
 
+## AC7 — brisen-lab cockpit Hag Desk card
+
+Repo: brisen-lab. Branch: `b1/hagenauer-desk-on-bus-1` (separate clone at `~/bm-b1-brisen-lab/`). PR #25 — `ec3310b`. 3 files, 8 insertions, 3 deletions.
+
+### Files
+
+| File | Change |
+|---|---|
+| `static/index.html` | New `<div class="row row-desks">` after closing `row-system` div, containing `<article class="card card-desk" data-alias="hag-desk"></article>`. Cache-bust: `styles.css?v=10` → `?v=11`, `app.js?v=12` → `?v=13`. |
+| `static/app.js` | TERMINALS array (L9): append `"hag-desk"`. TERMINAL_LABELS: add `"hag-desk": "Hag Desk"`. Existing `renderCard()` loop activates Hag Desk automatically. XSS-safe DOM contract intact (no new `innerHTML` / template-literal sinks; QC #15 grep contract preserved). |
+| `static/styles.css` | Single line: `.row-desks { grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); }`. `.card-desk` class wired in HTML but unstyled — `.card` defaults suffice per brief AC7 guidance. |
+
+### Verification (literal)
+
+```
+$ PATH="$HOME/Library/Python/3.12/bin:$PATH" python3 -m pytest -q --no-header
+120 skipped, 1 warning in 0.15s
+```
+
+```
+$ node --check static/app.js
+(exit 0)
+
+$ grep -nE 'row-desks|hag-desk|styles\.css\?v=|app\.js\?v=' static/index.html
+7:  <link rel="stylesheet" href="/static/styles.css?v=11">
+42:          <div class="row row-desks">
+43:            <article class="card card-desk" data-alias="hag-desk"></article>
+80:  <script src="/static/app.js?v=13"></script>
+
+$ sed -n '9p' static/app.js
+const TERMINALS = ["lead", "cowork-ah1", "deputy", "b1", "b2", "b3", "b4", "hag-desk"];
+
+$ grep -E '^\.row-' static/styles.css
+.row-supervisors { grid-template-columns: repeat(3, 1fr); }
+.row-workers     { grid-template-columns: repeat(4, 1fr); }
+.row-system      { grid-template-columns: 1fr; }
+.row-desks       { grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); }
+
+HTML tag balance: <div 14 / </div> 14; <article 9 / </article> 9. Balanced.
+```
+
+### Local browser-render check — blocked
+
+Tried `uvicorn app:app --port 18080` locally to curl the rendered HTML. Blocked: brisen-lab requires Postgres at startup (`psycopg2.OperationalError: connection to server at "localhost"... port 5432 failed: Connection refused`). No local DB on b1's machine. Static files served byte-verbatim via FastAPI `StaticFiles` mount + `FileResponse("static/index.html")` so on-disk content == response body — file-content grep above is functionally equivalent to a server-curl for these specific edits.
+
+**Gate-1+2 reviewer browser-on-deployed check is therefore load-bearing** for render confirmation. Per brief §"Gate-1 + Gate-2 reviewer instructions": reviewers MUST load `https://brisen-lab.onrender.com/` after merge + confirm Hag Desk card renders in `row-desks` below Cortex (grey state acceptable pre-AC5; post-AC5 smoke fire it flips to green with "Just shipped: …" line).
+
+### Pre-smoke state
+
+Card renders grey ("no bus traffic") until AH1 Tier-B: 1Password key generation + Render env PUT (`BRISEN_LAB_TERMINAL_KEYS`) + redeploy + smoke fire (AC5). After AC5 it flips to green showing the smoke body.
+
 ## Out of scope — AH1 Tier-B post-merge
 
 Per brief §"Out-of-band Tier-B AH1 actions":
@@ -155,6 +214,10 @@ Per brief §"Out-of-band Tier-B AH1 actions":
 - [x] AC4 — baker-vault skill update (`6c2bb29`)
 - [x] baker-master PR opened (#237)
 - [x] baker-vault PR opened (#103)
+- [x] Amended brief folded + re-CLAIM (`909a78d`)
+- [x] AC7 — brisen-lab HTML + JS + CSS edits (`ec3310b`)
+- [x] AC7 — pytest 120 skipped (DB-gated; zero failures), `node --check` PASS, file-content grep + tag balance OK
+- [x] brisen-lab PR opened (#25)
 - [x] Ship report (this file)
 - [x] Bus-post lead — PR-open + ship-complete (see §Bus posts)
 
@@ -164,4 +227,5 @@ Per brief §"Out-of-band Tier-B AH1 actions":
 |---|---|---|---|
 | ship — baker-master PR open | `ship/hagenauer-desk-on-bus-1-master` | `lead` | PR #237 anchor `4b17d36` + smoke output reference |
 | ship — baker-vault PR open | `ship/hagenauer-desk-on-bus-1-vault` | `lead` | PR #103 anchor `6c2bb29` + hardlink-propagation note |
-| ship-complete | `ship/hagenauer-desk-on-bus-1-complete` | `lead` | Both PR anchors + drain hook + picker filesystem state + brief-path-divergence flag |
+| ship — brisen-lab PR open | `ship/hagenauer-desk-on-bus-1-cockpit` | `lead` | PR #25 anchor `ec3310b` + Gate-1+2 reviewer browser-confirm flag |
+| ship-complete | `ship/hagenauer-desk-on-bus-1-complete` | `lead` | All 3 PR anchors + drain hook + picker filesystem state + brief-path-divergence flag + local-render-blocked note |
