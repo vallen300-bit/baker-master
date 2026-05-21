@@ -1,5 +1,5 @@
 ---
-status: CLAIMED
+status: COMPLETE
 brief: briefs/BRIEF_HAGENAUER_DESK_ON_BUS_1.md
 brief_id: HAGENAUER_DESK_ON_BUS_1
 target_repo: baker-master + baker-vault + brisen-lab + filesystem
@@ -14,6 +14,12 @@ deadline: 2026-05-22T18:00:00Z
 priority: tier-b
 claimed_at: 2026-05-21T14:35:00Z
 amendment_acked_at: 2026-05-21T14:58:00Z
+completed_at: 2026-05-21T17:39:00Z
+pr_baker_master: vallen300-bit/baker-master#237 (8e3c62c)
+pr_baker_vault: vallen300-bit/baker-vault#103 (e45132f)
+pr_brisen_lab: vallen300-bit/brisen-lab#25 (8cbf878)
+smoke_ac5: msg_id=647 (hag-desk→lead)
+smoke_ac6: msg_id=648 (lead→hag-desk)
 ---
 
 # CODE_1_PENDING — HAGENAUER_DESK_ON_BUS_1 — 2026-05-21
