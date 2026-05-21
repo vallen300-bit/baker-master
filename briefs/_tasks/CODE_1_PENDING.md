@@ -1,46 +1,41 @@
 ---
-status: COMPLETE
-brief: briefs/BRIEF_AID_EDGE_SCOUT_VAULT_CACHE_1.md
-brief_id: AID_EDGE_SCOUT_VAULT_CACHE_1
-target_repo: baker-vault
+status: PENDING
+brief: briefs/BRIEF_HAGENAUER_DESK_ON_BUS_1.md
+brief_id: HAGENAUER_DESK_ON_BUS_1
+target_repo: baker-master + baker-vault + filesystem
 matter_slug: baker-internal
-dispatched_at: 2026-05-21T00:55:00Z
+dispatched_at: 2026-05-21T14:15:00Z
 dispatched_by: lead
 target: b1
-working_branch: b1/aid-edge-scout-vault-cache-1
+working_branch: b1/hagenauer-desk-on-bus-1
 reply_to: lead
-deadline: 2026-05-23T12:00:00Z
-completed_at: 2026-05-21T06:21:00Z
-pr: vallen300-bit/baker-vault#102
-ship_report: briefs/_reports/B1_AID_EDGE_SCOUT_VAULT_CACHE_1_20260521.md
+deadline: 2026-05-22T18:00:00Z
+priority: tier-b
 ---
 
-# CODE_1_PENDING — AID_EDGE_SCOUT_VAULT_CACHE_1
+# CODE_1_PENDING — HAGENAUER_DESK_ON_BUS_1 — 2026-05-21
 
-**Brief:** `briefs/BRIEF_AID_EDGE_SCOUT_VAULT_CACHE_1.md` (in baker-master `196bc01`).
-**Working branch:** `b1/aid-edge-scout-vault-cache-1` on baker-vault.
-**Deadline:** Sat 2026-05-23 ~12:00 UTC (5h buffer before Mac Mini's first launchd fire at 17:00 UTC).
-**Reply target:** bus-post `lead` on PR open.
+**Brief:** `briefs/BRIEF_HAGENAUER_DESK_ON_BUS_1.md`
+**Working branches:**
+- baker-master: `b1/hagenauer-desk-on-bus-1`
+- baker-vault: fresh `/tmp/bv-hag-desk-bus-pilot/` clone per orientation branch-isolation rule
+- user-global: in-place edits to `~/.claude/hooks/session-start-bus-drain.sh` + new `~/bm-hag-desk/CLAUDE.md` (no repo)
 
-## Summary (full body in brief)
+**Pre-requisites:**
+- b1 working tree current (`cd ~/bm-b1 && git pull --ff-only`).
+- Read `briefs/BRIEF_HAGENAUER_DESK_ON_BUS_1.md` in full before editing.
+- Reference picker pattern: read `~/bm-ben/CLAUDE.md` for the structure to mirror in `~/bm-hag-desk/CLAUDE.md`.
 
-Pre-fetch the 4 edge-scout RSS/atom feeds via a Saturday Mac Mini launchd job;
-cron reads cached XMLs from `_ops/edge-scout-cache/` instead of WebFetch.
+**Acceptance criteria (testable):** see brief §"Acceptance criteria" — 6 ACs (AC1-AC4 = b1 ships; AC5-AC6 = AH1 fires post-merge after Render env update).
 
-Five deliverables:
+**Ship gate:**
+- baker-master PR with literal local smoke output (placeholder-key 401 is expected — that's fine, confirms client-side whitelist).
+- baker-vault PR with skill update.
+- Capture in-place edits (drain hook + picker CLAUDE.md) as diff/file content in ship report.
 
-1. `scripts/edge-scout-prefetch.sh` — bash script with `--dry-run` mode + status JSON.
-2. `scripts/com.baker.edge-scout-prefetch.plist` — launchd template, Saturday 17:00 UTC, TZ=UTC.
-3. `_ops/edge-scout-cache/{README.md, simonwillison.xml, hamel.xml, eugeneyan.xml, huggingface.xml, _status.json}` — initial seed via fire-once.
-4. `~/.claude/skills/aidennis-edge-scout/SKILL.md` — invocation prompt + sources section + guardrails section updated to reflect cache-read instead of WebFetch.
-5. Mac Mini install (via `ssh macmini`): plist + script + bootstrap + force-fire verify.
+**Reporting:**
+- Bus-post `lead` on each PR open.
+- Bus-post `lead` on ship-complete with both PR anchors + filesystem state.
+- Ship report at `briefs/_reports/B1_HAGENAUER_DESK_ON_BUS_1_20260521.md`.
 
-## Ship gate
-
-- Local fire-once: 4 XMLs land in `_ops/edge-scout-cache/`, `_status.json` written correctly, commit + push succeeds.
-- `shellcheck` clean on the bash script.
-- Mac Mini `launchctl kickstart` produces 4 XMLs in vault on origin/main + log shows success + no TCC error.
-
-## Reporting
-
-Bus-post `lead` on PR open. Then bus `lead` again post-Mac-Mini-install with the first launchd-fired commit sha + log paths. AH1 handles RemoteTrigger update post-verify.
+**Out of scope for b1:** 1Password key generation + Render env PUT + brisen-lab redeploy + live smoke fires (AC5/AC6) — AH1 Tier-B lane post-merge.
