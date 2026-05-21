@@ -1,5 +1,5 @@
 ---
-status: PENDING
+status: CLAIMED
 brief: briefs/BRIEF_HAGENAUER_DESK_ON_BUS_1.md
 brief_id: HAGENAUER_DESK_ON_BUS_1
 target_repo: baker-master + baker-vault + filesystem
@@ -11,6 +11,7 @@ working_branch: b1/hagenauer-desk-on-bus-1
 reply_to: lead
 deadline: 2026-05-22T18:00:00Z
 priority: tier-b
+claimed_at: 2026-05-21T14:35:00Z
 ---
 
 # CODE_1_PENDING — HAGENAUER_DESK_ON_BUS_1 — 2026-05-21
