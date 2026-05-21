@@ -1,5 +1,5 @@
 ---
-status: PENDING
+status: COMPLETE
 brief: briefs/BRIEF_AID_EDGE_SCOUT_VAULT_CACHE_1.md
 brief_id: AID_EDGE_SCOUT_VAULT_CACHE_1
 target_repo: baker-vault
@@ -10,6 +10,9 @@ target: b1
 working_branch: b1/aid-edge-scout-vault-cache-1
 reply_to: lead
 deadline: 2026-05-23T12:00:00Z
+completed_at: 2026-05-21T06:21:00Z
+pr: vallen300-bit/baker-vault#102
+ship_report: briefs/_reports/B1_AID_EDGE_SCOUT_VAULT_CACHE_1_20260521.md
 ---
 
 # CODE_1_PENDING — AID_EDGE_SCOUT_VAULT_CACHE_1
