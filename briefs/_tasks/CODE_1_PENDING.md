@@ -1,5 +1,5 @@
 ---
-status: PENDING
+status: COMPLETE
 brief: briefs/BRIEF_HAG_DESK_CARDS_LOOP_INCLUDE_1.md
 brief_id: HAG_DESK_CARDS_LOOP_INCLUDE_1
 target_repo: brisen-lab
@@ -11,6 +11,13 @@ working_branch: b1/hag-desk-cards-loop-include-1
 reply_to: lead
 deadline: 2026-05-22T20:00:00Z
 priority: tier-b
+claimed_at: 2026-05-22T10:32:00Z
+shipped_at: 2026-05-22T10:28:13Z
+ship_pr: https://github.com/vallen300-bit/brisen-lab/pull/28
+ship_commit: a4f90fc
+report: briefs/_reports/B1_HAG_DESK_CARDS_LOOP_INCLUDE_1_20260522.md
+bus_dispatch_msg: 669
+bus_ship_msg: 670
 ---
 
 # CODE_1_PENDING — HAG_DESK_CARDS_LOOP_INCLUDE_1 — 2026-05-22
