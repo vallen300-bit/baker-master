@@ -1,79 +1,99 @@
 ---
-status: shipped
-brief: briefs/BRIEF_PLAUD_TRANSCRIPT_BY_MATTER_1.md
-brief_id: PLAUD_TRANSCRIPT_BY_MATTER_1
+status: pending
+brief: briefs/BRIEF_MD_SCHEME_ALLOWLIST_1.md
+brief_id: MD_SCHEME_ALLOWLIST_1
 target_repo: baker-master
 working_dir: ~/bm-b3
-working_branch: b3/plaud-transcript-by-matter-1
-matter_slug: hagenauer-rg7
-cross_matter_usage: [hagenauer-rg7 first; pattern generalizes to AO Desk + MOVIE Desk + Baden-Baden Desk later — read path is slug-scoped]
-dispatched_at: 2026-05-22T12:38:00Z
-dispatched_by: deputy
-authored_by: deputy (AH2)
-brief_commit: 57f898c (squashed into 9431e58 per AH2 #685)
-director_auth: 2026-05-22 chat — "fire B3" (post recommendation accept)
-estimated_effort: ~5h
-complexity: Medium
-priority: tier-b (HARD DEADLINE Tue 2026-05-26 — hag-desk Forderungsanmeldung filing)
-reply_target: deputy (bus topic `ship/plaud-transcript-by-matter-1` → AH2 picker-architect + 2nd-pass reviewer chain)
-two_reviewer_chain_status: pre-cleared by AH2 (feature-dev:code-architect CHANGES_NEEDED → folded; feature-dev:code-reviewer PASS-WITH-NITS → folded; 11 items applied)
-shipped_at: 2026-05-22T12:57:34Z
-shipped_pr: 242
-shipped_commit: 8d5165b
-ship_report: briefs/_reports/B3_PLAUD_TRANSCRIPT_BY_MATTER_1_20260522.md
-bus_ship_msg_id: 694
+working_branch: b3/md-scheme-allowlist-1
+matter_slug: baker-internal
+dispatched_at: 2026-05-22T17:30:00Z
+dispatched_by: lead
+target: b3
+reply_to: lead
+deadline: 2026-05-23T18:00:00Z
+priority: tier-b
+director_auth: 2026-05-22 chat — "go" on §X batch-ratification (Group B item 1)
+severity_anchor: MEDIUM XSS finding from prior gate-2 + deputy review
+prior_mailbox_state: superseded — previous CODE_3_PENDING.md was PLAUD_TRANSCRIPT_BY_MATTER_1 shipped (PR #242 squash-merged fcade01 2026-05-22T13:36Z). b3 idle since.
+gate_chain:
+  gate_1_static: REQUIRED (AH1 fires feature-dev:code-reviewer)
+  gate_2_security_review: REQUIRED (security hardening brief — must run /security-review)
+  gate_3_cross_lane_architecture: SKIPPABLE (no architecture change — pure input sanitization on existing helper)
+  gate_4_2nd_pass_code_reviewer: REQUIRED per SKILL.md §Code-reviewer 2nd-pass criteria 4 (external-surface — dashboard rendering) + 7 (high-stakes judgment — XSS class)
+estimated_effort: 1.5-2h
+ui_surface_prebrief: completed at brief authoring time (brief §Surface contract block satisfies)
 ---
 
-# CODE_3_PENDING — PLAUD_TRANSCRIPT_BY_MATTER_1 — 2026-05-22
+# CODE_3_PENDING — MD_SCHEME_ALLOWLIST_1 — 2026-05-22
 
-**Brief:** `briefs/BRIEF_PLAUD_TRANSCRIPT_BY_MATTER_1.md` (on origin/main, commit 57f898c bundled at 9431e58 per AH2 dispatch #685)
-**Working branch:** `b3/plaud-transcript-by-matter-1` (off main, baker-master)
-**Repo:** baker-master ONLY (no brisen-lab / baker-vault touch)
-**Author:** AH2 (deputy) — full review chain pre-cleared
-**Reply target on PR open + ship:** `deputy` (AH2 owns picker-architect + 2nd-pass reviewer on the implementation PR; lead is NOT in the gate chain)
+**Brief:** `briefs/BRIEF_MD_SCHEME_ALLOWLIST_1.md` (commit `0d9482a` on main, PR #244 merged)
+**Working branch:** `b3/md-scheme-allowlist-1` (off origin/main in baker-master)
+**Target repo:** `baker-master` — clone at `~/bm-b3/`.
+**Pre-requisites:** none.
 
 ## Bottom line
 
-Add `matter_slug` column to `meeting_transcripts`, auto-populate at ingest via existing `_match_matter_slug` + new `slug_registry.normalize` pass, add `GET /api/transcripts/by-matter/{slug}` endpoint (X-Baker-Key auth, active-slugs validation, `include_body=False` default, LIMIT 200), and ship a dry-run-default backfill script.
+`md()` markdown-to-HTML converter at `outputs/static/app.js:567` and `outputs/static/mobile.js:238` renders `[text](url)` into `<a href="$2">` without validating url scheme. `javascript:`, `data:`, `file:`, `vbscript:` schemes pass through esc() (which escapes HTML entities but not URL schemes) and execute on click. Add scheme allowlist; reject non-allowed schemes to inert `#`.
 
-Director ratified Option B — classifier + ratified-backfill + hag-desk gap audit. HARD DEADLINE Tue 2026-05-26 (Hagenauer-RG7 Forderungsanmeldung filing).
+Apply same fix in both files; symmetric implementation.
 
-## Scope (per brief §Solution overview)
+## Pre-flight
 
-1. `migrations/20260522_meeting_transcripts_matter_slug.sql` — ADD COLUMN `matter_slug TEXT` + index.
-2. `memory/store_back.py`:
-   - bootstrap (`_ensure_meeting_transcripts_base` or equivalent) updated to include the new column for fresh DBs (migration-vs-bootstrap drift trap — verify type match with the migration).
-   - `store_meeting_transcript()` auto-assigns via `_match_matter_slug` + `slug_registry.normalize`. Mirrors `create_alert()` at `memory/store_back.py:4453-4459` with the deliberate normalize divergence (read path queries canonical slug; classifier returns raw `matter_name`).
-3. `outputs/dashboard.py` — new `GET /api/transcripts/by-matter/{slug}` route:
-   - X-Baker-Key auth (existing pattern)
-   - active-slugs validation (via `slug_registry`)
-   - `include_body=False` default
-   - LIMIT 200 cap
-4. `scripts/backfill_meeting_transcripts_matter_slug.py` — dry-run-default modeled on `scripts/backfill_matter_slug.py`. **CRITICAL**: `meeting_transcripts.id` is `TEXT` not `INT` (per brief flag); back-fill loop must handle string IDs.
-5. Tests: ~15 cases per brief.
+1. `cd ~/bm-b3 && git fetch origin main && git checkout main && git pull --ff-only origin main`
+2. Confirm `briefs/BRIEF_MD_SCHEME_ALLOWLIST_1.md` exists at HEAD.
+3. `git checkout -b b3/md-scheme-allowlist-1`
 
-## Pre-backfill gate (brief flag)
+## Implementation
 
-`slugs.yml` must have an alias entry mapping the Hagenauer matter_registry `matter_name` → `hagenauer-rg7`. If missing: separate-repo PR on baker-vault BEFORE running `--apply`. b3 verifies pre-flight via `grep -E '^  - slug: hagenauer-rg7' ~/baker-vault/slugs.yml` + alias-block check; if alias missing, surface to deputy via bus + halt before backfill apply.
+Read full brief at `~/bm-b3/briefs/BRIEF_MD_SCHEME_ALLOWLIST_1.md` for spec.
 
-## Ship gate (literal output required — no "pass by inspection")
+Suggested helper (placement: top of `md()` body in both files, before the link regex):
 
-- Bootstrap DDL grep (`grep -n 'matter_slug' memory/store_back.py | grep -i transcript`) to confirm bootstrap mirrors migration.
-- Migration apply against TEST_DATABASE_URL (literal psql output or migration runner stdout).
-- `pytest tests/test_meeting_transcripts_matter_slug.py -v` literal output (new test file expected).
-- `pytest tests/test_api_transcripts_by_matter.py -v` literal output (new test file expected).
-- Backfill script `--dry-run` execution log (no rows changed, summary table only).
-- Hag-desk gap audit per brief: dry-run output proving `hagenauer-rg7` rows get tagged.
+```javascript
+function _safeHref(url) {
+    if (!url) return '#';
+    const trimmed = url.trim();
+    if (trimmed.startsWith('#') || trimmed.startsWith('/') || trimmed.startsWith('?')) return trimmed;
+    const schemeMatch = trimmed.match(/^([a-zA-Z][a-zA-Z0-9+\-.]*):/);
+    if (!schemeMatch) return trimmed;
+    const scheme = schemeMatch[1].toLowerCase();
+    if (scheme === 'https' || scheme === 'http' || scheme === 'mailto' || scheme === 'tel') return trimmed;
+    return '#';
+}
+```
 
-## Reporting
+Then update the link regex (in both files):
 
-- Bus-post `deputy` (NOT lead) on EACH state change:
-  - PR open: topic `pr-open/plaud-transcript-by-matter-1`
-  - Ship complete: topic `ship/plaud-transcript-by-matter-1`
-  - Blocker / pre-backfill-gate fail: topic `blocker/plaud-transcript-by-matter-1`
-- Ship report: `briefs/_reports/B3_PLAUD_TRANSCRIPT_BY_MATTER_1_20260522.md`
-- AH2 will run picker-architect + feature-dev:code-reviewer 2nd-pass on the implementation PR before recommending merge to lead.
+```javascript
+h = h.replace(/\[([^\]]+)\]\(([^)]+)\)/g, function(match, label, url) {
+    return '<a href="' + _safeHref(url) + '" target="_blank" rel="noopener">' + label + '</a>';
+});
+```
 
-## Co-Authored-By
+## Acceptance criteria
 
-Co-Authored-By: Claude Opus 4.7 (1M context) <noreply@anthropic.com>
+Per brief §Acceptance criteria — AC1 (allowlist enforced) + AC2 (symmetric) + AC3 (allow path tested) + AC4 (reject path tested) + AC5 (edge cases tested) + AC6 (code comment documenting esc() interaction) + AC7 (no regression).
+
+## Open question — STOP gate
+
+None. Brief is complete.
+
+## Ship gate
+
+- Literal `pytest` green; PR description includes pytest stdout
+- `bash scripts/check_singletons.sh` exits 0
+- /security-review pass / NO_FINDINGS — REQUIRED gate before merge
+
+## Reporting (bus reply-to-sender)
+
+On PR open, bus-post `lead` per `dispatched_by`:
+
+```bash
+BAKER_ROLE=b3 ~/bm-b3/scripts/bus_post.sh lead \
+  "ship/md-scheme-allowlist-1 — PR #<N> open in baker-master; both md() implementations patched + symmetric; <X> new tests in test_md_scheme_allowlist.py; pytest <Y/Y>; awaiting gate chain (gates 1+2+4 required; 3 skippable)." \
+  ship/md-scheme-allowlist-1
+```
+
+## Heartbeat cadence (per §B-code stall chase)
+
+Minimum every 12h while actively building. Two consecutive 12h misses → `lead` auto-surfaces stall to Director. Given ~1.5-2h scope, expect single completion event.
