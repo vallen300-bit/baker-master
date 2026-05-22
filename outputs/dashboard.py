@@ -847,6 +847,126 @@ async def fireflies_status():
     return result
 
 
+# TODO (follow-up brief, post-hag-desk filing): replace global X-Baker-Key auth
+# with per-matter scoped auth (HMAC-derived per-desk key or scoped-token table).
+# The current global key gives any key-holder read access to ALL matters'
+# transcripts including attorney-client privileged content. Acceptable for the
+# internal-agent perimeter today; not defensible long-term.
+@app.get(
+    "/api/transcripts/by-matter/{matter_slug}",
+    tags=["transcripts"],
+    dependencies=[Depends(verify_api_key)],
+)
+async def get_transcripts_by_matter(
+    matter_slug: str,
+    since: Optional[str] = None,
+    limit: int = 50,
+    include_body: bool = False,
+    source: Optional[str] = None,
+):
+    """Return transcripts tagged to a matter. Matter-desk read-path.
+
+    Slug must be canonical AND active per kbl.slug_registry. Inactive/retired
+    slugs return 404 — desks get a clear signal, not a silent empty result.
+
+    Default response omits full_transcript bodies; set include_body=true to
+    receive bodies. LIMIT defaults to 50, max 200.
+    """
+    from datetime import datetime as _dt
+    from kbl import slug_registry
+
+    # Slug validation — canonical + active. Inactive/retired slugs 404.
+    if matter_slug not in slug_registry.active_slugs():
+        raise HTTPException(
+            status_code=404,
+            detail=(
+                f"Unknown or inactive matter_slug '{matter_slug}'. "
+                f"Must be an active canonical slug from baker-vault/slugs.yml."
+            ),
+        )
+
+    if limit < 1 or limit > 200:
+        raise HTTPException(status_code=400, detail="limit must be 1..200")
+
+    if since:
+        try:
+            _dt.fromisoformat(since.replace("Z", "+00:00"))
+        except ValueError:
+            raise HTTPException(
+                status_code=400,
+                detail="since must be ISO 8601 timestamp (e.g. 2026-05-01T00:00:00Z)",
+            )
+
+    if source is not None and source not in ("plaud", "fireflies", "youtube"):
+        raise HTTPException(
+            status_code=400,
+            detail="source must be one of: plaud, fireflies, youtube",
+        )
+
+    store = _get_store()
+    conn = store._get_conn()
+    if not conn:
+        raise HTTPException(status_code=503, detail="DB unavailable")
+
+    transcripts: list = []
+    try:
+        cur = conn.cursor()
+        try:
+            base_cols = [
+                "id", "title", "meeting_date", "duration", "organizer",
+                "participants", "summary", "source",
+            ]
+            if include_body:
+                base_cols.append("full_transcript")
+            select_cols = ", ".join(base_cols)
+
+            params: list = [matter_slug]
+            where_clauses = ["matter_slug = %s"]
+            if since:
+                where_clauses.append("meeting_date >= %s")
+                params.append(since)
+            if source:
+                where_clauses.append("source = %s")
+                params.append(source)
+            params.append(limit)
+
+            sql = (
+                f"SELECT {select_cols} "
+                f"FROM meeting_transcripts "
+                f"WHERE {' AND '.join(where_clauses)} "
+                f"ORDER BY meeting_date DESC NULLS LAST "
+                f"LIMIT %s"
+            )
+            cur.execute(sql, tuple(params))
+            rows = cur.fetchall()
+            cols = [d[0] for d in cur.description]
+            transcripts = [dict(zip(cols, r)) for r in rows]
+            for t in transcripts:
+                if t.get("meeting_date") is not None:
+                    t["meeting_date"] = t["meeting_date"].isoformat()
+        finally:
+            cur.close()
+    except HTTPException:
+        raise
+    except Exception as e:
+        try:
+            conn.rollback()
+        except Exception:
+            pass
+        logger.error(f"get_transcripts_by_matter failed for {matter_slug}: {e}")
+        raise HTTPException(status_code=500, detail="Internal query error")
+    finally:
+        store._put_conn(conn)
+
+    return {
+        "matter_slug": matter_slug,
+        "count": len(transcripts),
+        "limit": limit,
+        "include_body": include_body,
+        "transcripts": transcripts,
+    }
+
+
 @app.post("/api/fireflies/backfill", tags=["fireflies"], dependencies=[Depends(verify_api_key)])
 async def fireflies_backfill_endpoint():
     """Trigger a one-time Fireflies transcript backfill to PostgreSQL."""

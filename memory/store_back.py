@@ -1414,8 +1414,19 @@ class SentinelStoreBack:
                     summary TEXT,
                     full_transcript TEXT,
                     source TEXT NOT NULL DEFAULT 'fireflies',
+                    matter_slug TEXT,
                     ingested_at TIMESTAMPTZ DEFAULT NOW()
                 )
+            """)
+            # PLAUD_TRANSCRIPT_BY_MATTER_1 — ADD COLUMN for migrated DBs that
+            # bootstrapped before matter_slug existed.
+            cur.execute("""
+                ALTER TABLE meeting_transcripts
+                ADD COLUMN IF NOT EXISTS matter_slug TEXT
+            """)
+            cur.execute("""
+                CREATE INDEX IF NOT EXISTS idx_meeting_transcripts_matter_slug
+                ON meeting_transcripts (matter_slug, meeting_date DESC NULLS LAST)
             """)
             conn.commit()
             cur.close()
@@ -1429,8 +1440,43 @@ class SentinelStoreBack:
                                   meeting_date: str = None, duration: str = None,
                                   organizer: str = None, participants: str = None,
                                   summary: str = None, full_transcript: str = None,
-                                  source: str = "fireflies") -> bool:
-        """Upsert a full meeting transcript. Returns True on success."""
+                                  source: str = "fireflies",
+                                  matter_slug: str = None) -> bool:
+        """Upsert a full meeting transcript. Returns True on success.
+
+        If matter_slug is None, auto-classifies via _match_matter_slug and
+        normalizes to a canonical slug from slugs.yml. Mirrors create_alert's
+        auto-assign pattern (memory/store_back.py:4461-4467) with one
+        deliberate divergence: a slug_registry.normalize() pass on top, because
+        this brief's read endpoint queries by canonical slug while the
+        classifier returns the raw matter_name. Re-ingest with None preserves
+        any previously-assigned slug via COALESCE on the UPDATE path.
+        """
+        # Auto-assign matter_slug if not provided (best-effort; non-fatal).
+        # NOTE: classifier MUST run BEFORE _get_conn() — _match_matter_slug
+        # calls store.get_matters() which acquires its own pool connection.
+        # If conn were already held here, parallel ingestion could deadlock
+        # against pool maxconn.
+        if not matter_slug and (title or full_transcript):
+            try:
+                from orchestrator.pipeline import _match_matter_slug
+                from kbl import slug_registry
+                raw_match = _match_matter_slug(title or "", full_transcript or "", self)
+                if raw_match:
+                    matter_slug = slug_registry.normalize(raw_match)
+                    if matter_slug is None:
+                        # Classifier matched but normalize failed — alias missing
+                        # in slugs.yml. Surface this so silent-failure on a
+                        # matter we care about is visible.
+                        logger.warning(
+                            f"matter_slug auto-assign: classifier matched "
+                            f"{raw_match!r} but slug_registry.normalize() returned "
+                            f"None — check baker-vault/slugs.yml aliases"
+                        )
+            except Exception as _e:
+                logger.debug(f"matter_slug auto-assign failed (non-fatal): {_e}")
+                matter_slug = None
+
         conn = self._get_conn()
         if not conn:
             logger.warning("No DB connection — skipping store_meeting_transcript")
@@ -1440,18 +1486,19 @@ class SentinelStoreBack:
             cur.execute("""
                 INSERT INTO meeting_transcripts
                     (id, title, meeting_date, duration, organizer,
-                     participants, summary, full_transcript, source)
-                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
+                     participants, summary, full_transcript, source, matter_slug)
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
                 ON CONFLICT (id) DO UPDATE SET
                     title = EXCLUDED.title,
                     summary = EXCLUDED.summary,
                     full_transcript = EXCLUDED.full_transcript,
+                    matter_slug = COALESCE(EXCLUDED.matter_slug, meeting_transcripts.matter_slug),
                     ingested_at = NOW()
             """, (transcript_id, title, meeting_date, duration, organizer,
-                  participants, summary, full_transcript, source))
+                  participants, summary, full_transcript, source, matter_slug))
             conn.commit()
             cur.close()
-            logger.info(f"Stored meeting transcript: {title} ({transcript_id})")
+            logger.info(f"Stored meeting transcript: {title} ({transcript_id}) matter_slug={matter_slug}")
             return True
         except Exception as e:
             conn.rollback()
