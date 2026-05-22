@@ -1,92 +1,82 @@
 ---
-status: COMPLETE
-claimed_at: 2026-05-21T07:00:00Z
-claimed_by: b2
-branch: b2/waha-outbound-capture-1
-pr: 235
-pr_url: https://github.com/vallen300-bit/baker-master/pull/235
-shipped_at: 2026-05-21T07:30:00Z
-ship_report: briefs/_reports/B2_waha_outbound_capture_1_20260521.md
-brief: briefs/BRIEF_WAHA_OUTBOUND_CAPTURE_1.md
-brief_id: WAHA_OUTBOUND_CAPTURE_1
-target_repo: baker-master
-working_dir: ~/bm-b2
+status: pending
+brief: briefs/BRIEF_BRISEN_LAB_DESK_CARD_VISUAL_DIFFERENTIATION_1.md
+brief_id: BRISEN_LAB_DESK_CARD_VISUAL_DIFFERENTIATION_1
+target_repo: brisen-lab
 matter_slug: baker-internal
-cross_matter_usage: [all-matters — WhatsApp capture-shape affects every desk that reads whatsapp_messages]
-dispatched_at: 2026-05-21T06:30:00Z
+dispatched_at: 2026-05-22T17:05:00Z
 dispatched_by: lead
-director_auth: 2026-05-21 chat — "go ahead, draft the brief" + "go" on dispatch ratification (Phase 5 of slow-path protocol per Director directive 2026-05-20 ~16:00Z)
-trigger_class: HIGH (capture-authority change — lifts the fromMe filter; downstream consumers assumed inbound-only)
+target: b2
+working_branch: b2/brisen-lab-desk-card-visual-1
+working_dir: ~/bm-b2-brisen-lab
+reply_to: lead
+deadline: 2026-05-23T17:00:00Z
+priority: tier-b
+director_auth: 2026-05-22 chat — "go" on §X batch-ratification (Group A item 22)
+prior_mailbox_state: superseded — previous CODE_2_PENDING.md was WAHA_OUTBOUND_CAPTURE_1 COMPLETE (PR #235 shipped 2026-05-21T07:30:00Z). b2 idle since.
 gate_chain:
-  gate_1_static: REQUIRED (AH2 cross-lane)
-  gate_2_security_review: REQUIRED (external-surface — webhook capture semantics, RAG context shape)
-  gate_3_cross_lane_architecture: REQUIRED (architect verdict locked in investigation Phase 3; gate 3 validates implementation matches the locked model)
-  gate_4_2nd_pass_code_reviewer: REQUIRED per SKILL.md §Code-reviewer 2nd-pass criteria 4 (external-surface) + 7 (high-stakes judgment)
-estimated_effort: 1.5-2.5h
-working_branch_suggestion: b2/waha-outbound-capture-1
-reply_target: lead (bus topic `ship/waha-outbound-capture-1`)
-investigation_anchor: baker-vault _ops/investigations/2026-05-20-waha-capture-gaps.md (commit dcf0c2a + addendum 4562f19)
-prior_mailbox_state: superseded — previous CODE_2_PENDING.md was DIRECTOR_FACING_FILTER_V1_1_PHASE_2 COMPLETE (PR #227 merged 2026-05-19T22:02:56Z). b2 idle since.
+  gate_1_static: REQUIRED (AH1 fires feature-dev:code-reviewer)
+  gate_2_security_review: SKIPPABLE — pure CSS in brisen-lab; AH1 judgment
+  gate_3_cross_lane_architecture: REQUIRED (picker-architect — UI visual change on Director-facing surface)
+  gate_4_2nd_pass_code_reviewer: SKIPPABLE — does not trigger criteria 1-7 (CSS-only, no auth / no DB / no concurrency / no external surface / not >2-week brief / not multi-repo). AH1 may fire anyway if visual judgment requires second eye.
+estimated_effort: 30-45 min (read brief + CSS + screenshot)
+ui_surface_prebrief: completed at brief authoring time (brief §Surface contract block satisfies)
 ---
 
-# CODE_2_PENDING — WAHA_OUTBOUND_CAPTURE_1 — 2026-05-21
+# CODE_2_PENDING — BRISEN_LAB_DESK_CARD_VISUAL_DIFFERENTIATION_1 — 2026-05-22
 
-## Brief
+**Brief:** `briefs/BRIEF_BRISEN_LAB_DESK_CARD_VISUAL_DIFFERENTIATION_1.md` (commit `d1412bb` on main, PR #243 merged)
+**Working branch:** `b2/brisen-lab-desk-card-visual-1` (off origin/main in brisen-lab repo)
+**Target repo:** `brisen-lab` (NOT baker-master). Clone at `~/bm-b2-brisen-lab/`.
+**Pre-requisites:** none.
 
-`briefs/BRIEF_WAHA_OUTBOUND_CAPTURE_1.md` (this repo, baker-master main).
+## Bottom line
 
-Read end-to-end before starting. 9 Fixes (1 shared helper + webhook filter lift + chat_id normalization + Director routing discriminator + RAG direction tagging + SQL guards + endpoint exposure + one-shot data migration + tests). Slow-path investigation already ran: architect verdict locked Q1-Q4 (Q4 dropped per Director); reviewer audit found 2 HIGH (encoded as Fix 4 + Fix 5) + 4 MEDIUM (encoded as Fix 6 + Fix 7). All `file:line` citations verified at HEAD `7e5657c` by AH1 2026-05-21.
+CSS-only ~15 LOC change in `brisen-lab/static/styles.css`. Add `.card-desk` rules so desk cards (hag-desk, researcher) visibly differ from worker cards (b1-b4) while preserving the left-edge status indicator. Director ratified Option A-revised 2026-05-22 afternoon.
 
-## Working branch
+## Pre-flight (mandatory before edit)
 
-`b2/waha-outbound-capture-1` in baker-master (`~/bm-b2`).
+1. `cd ~/bm-b2-brisen-lab && git fetch origin main` — sync.
+2. Check current local state: `git status -sb`. If on a stale branch (e.g. `b2/brisen-lab-sse-daemon-last-seen-fix-1`), `git checkout main && git pull --ff-only origin main`. Discard or stash any uncommitted file local changes before checkout.
+3. `git checkout -b b2/brisen-lab-desk-card-visual-1`
 
-## Pre-requisites
+## Implementation
 
-- b2 idle confirmed (CODE_2_PENDING was COMPLETE state from PR #227, merged 2026-05-19).
-- Investigation report at baker-vault `_ops/investigations/2026-05-20-waha-capture-gaps.md` — READ this for full context before touching code.
-- Migration script (Fix 8) runs BEFORE deploy. b2 ships PR; AH1 owns running the migration on Render shell after merge, before re-checking smoke gate.
+Read the full brief at `~/bm-b2/briefs/BRIEF_BRISEN_LAB_DESK_CARD_VISUAL_DIFFERENTIATION_1.md` for full spec.
 
-## Open question (encoded in brief Fix 4) — STOP gate
+Patch summary: add new `.card-desk` block immediately after the `data-card-state` rules in `brisen-lab/static/styles.css` (currently lines 233-254). Recommended block:
 
-**`BAKER_SELF_CHAT` constant.** The Director routing discriminator needs to know which `chat_id` value corresponds to "Director-to-Baker" (Baker's self-chat / Baker's bot number). If grep finds no existing constant, brief tells you to derive via the SQL query in Fix 4. **If both grep AND SQL come up empty: STOP. Surface to `lead` via bus. Do NOT guess.**
+```css
+/* Desk cards (hag-desk, researcher, future AO/MOVIE/BB) — visual differentiation */
+.card-desk {
+  border-top: 4px solid var(--desk-accent, #5a7a5a);
+  background: color-mix(in srgb, var(--panel) 95%, var(--desk-accent, #5a7a5a) 5%);
+}
+```
+
+You may pick a different muted-sage / warm-beige accent if WCAG AA contrast on `var(--text)` is tighter with another value. Document the choice in the PR description.
 
 ## Acceptance criteria
 
-Per brief §Quality Checkpoints + §Ship gate:
-
-1. `python3 -c "import py_compile; py_compile.compile('triggers/waha_webhook.py', doraise=True)"` clean across all 6 modified + 3 new files
-2. `bash scripts/check_singletons.sh` exits 0
-3. `pytest tests/test_waha_outbound_capture.py -v` — literal green; PR description includes pytest stdout
-4. Full `pytest` — literal green (or pre-existing-baseline failures only, named in PR)
-5. /security-review on the PR — pass / NO_FINDINGS (external-surface change — webhook capture semantics)
-6. NO "pass by inspection." Literal pytest output mandatory.
+Per brief §Acceptance criteria — AC1 (top-edge accent) + AC2 (soft tint) + AC3 (left edge preserved) + AC4 (hover preserved) + AC5 (visual smoke screenshot) + AC6 (no JS / no HTML / no Python diff).
 
 ## Ship gate
 
-Per brief §Ship gate — literal `pytest` output in PR. AH1 owns the post-deploy live smoke (Quality Checkpoint #6 in brief), so b2 ships when CI is green; smoke is AH1's responsibility.
+- Literal `pytest` green in brisen-lab repo (verify no test regression — CSS-only diff should not affect any test).
+- Screenshot in PR description showing hag-desk card + researcher card vs b1-b4 cards side-by-side on the live or local-preview brisen-lab UI.
 
-## Reporting (bus reply-to-sender — Director-ratified 2026-05-17)
+## Reporting (bus reply-to-sender)
 
 On PR open, bus-post `lead` per `dispatched_by`:
 
 ```bash
 BAKER_ROLE=b2 ~/bm-b2/scripts/bus_post.sh lead \
-  "ship/waha-outbound-capture-1 — PR #<N> open; pytest <X/X>; BAKER_SELF_CHAT resolved as <value> via <grep|sql>; awaiting AH1+AH2 gate chain (all 4 required)." \
-  ship/waha-outbound-capture-1
+  "ship/brisen-lab-desk-card-visual-1 — PR #<N> open in brisen-lab; CSS-only +<X> LOC; screenshot in PR; awaiting AH1+architect gate chain (gates 1+3 required; 2+4 skippable per mailbox)." \
+  ship/brisen-lab-desk-card-visual-1
 ```
 
 `lead` (AH1-Terminal) handles gate orchestration + merge sequence.
 
-## Lessons from prior WAHA / DB work (apply proactively)
-
-1. **Lesson #28 — @lid don't filter, normalize** — this brief IS the "future improvement" called for. Fix 3 closes it.
-2. **Lesson #35 — migrations shipped but never applied** — Fix 8 is a Python data-patch script, NOT a SQL migration. AH1 invokes it on Render shell post-deploy. Brief explicitly encodes this in Operational handoff.
-3. **Lesson #36 — schema in migrations, not Python** — Fix 8 explicitly NO `ALTER TABLE`. Data-only. Compatible with the lesson.
-4. **Lesson #42 — fixture tests ≠ real schema** — Fix 9 test class 6 uses ephemeral Neon branch via CI (auto-skip when `TEST_DATABASE_URL` unset).
-5. **Lesson #62 — probe third-party first** — Phase 2 of investigation did this (direct WAHA `/chats` probe). Brief encodes mock-payload tests, not real WAHA calls.
-6. **Lesson #100 — compile-clean ≠ done** — Quality Checkpoint #6 in brief is a post-deploy live smoke; AH1 owns.
-
 ## Heartbeat cadence (per §B-code stall chase — Director-ratified 2026-05-05)
 
-Minimum every 12h while actively building. Two consecutive 12h misses → `lead` auto-surfaces stall to Director. Heartbeat = (a) UPDATE entry in this mailbox file with ISO timestamp, OR (b) commit on working branch with `mailbox(b2): heartbeat <ISO> — <where>` pattern, OR (c) ship-report file write.
+Minimum every 12h while actively building. Two consecutive 12h misses → `lead` auto-surfaces stall to Director. Given the ~30-45 min scope here, expect single completion event, not multiple heartbeats.
