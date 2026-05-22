@@ -1,50 +1,65 @@
 ---
-status: COMPLETE
-brief: briefs/BRIEF_HAGENAUER_DESK_ON_BUS_1.md
-brief_id: HAGENAUER_DESK_ON_BUS_1
-target_repo: baker-master + baker-vault + brisen-lab + filesystem
+status: PENDING
+brief: briefs/BRIEF_HAG_DESK_HEARTBEAT_DAEMON_1.md
+brief_id: HAG_DESK_HEARTBEAT_DAEMON_1
+target_repo: baker-master
 matter_slug: baker-internal
-dispatched_at: 2026-05-21T14:15:00Z
-amended_at: 2026-05-21T14:39:51Z
+dispatched_at: 2026-05-22T05:55:00Z
 dispatched_by: lead
 target: b1
-working_branch: b1/hagenauer-desk-on-bus-1
+working_branch: b1/hag-desk-heartbeat-daemon-1
 reply_to: lead
-deadline: 2026-05-22T18:00:00Z
+deadline: 2026-05-23T18:00:00Z
 priority: tier-b
-claimed_at: 2026-05-21T14:35:00Z
-amendment_acked_at: 2026-05-21T14:58:00Z
-completed_at: 2026-05-21T17:39:00Z
-pr_baker_master: vallen300-bit/baker-master#237 (8e3c62c)
-pr_baker_vault: vallen300-bit/baker-vault#103 (e45132f)
-pr_brisen_lab: vallen300-bit/brisen-lab#25 (8cbf878)
-smoke_ac5: msg_id=647 (hag-desk→lead)
-smoke_ac6: msg_id=648 (lead→hag-desk)
 ---
 
-# CODE_1_PENDING — HAGENAUER_DESK_ON_BUS_1 — 2026-05-21
+# CODE_1_PENDING — HAG_DESK_HEARTBEAT_DAEMON_1 — 2026-05-22
 
-**Brief:** `briefs/BRIEF_HAGENAUER_DESK_ON_BUS_1.md`
-**Working branches:**
-- baker-master: `b1/hagenauer-desk-on-bus-1`
-- baker-vault: fresh `/tmp/bv-hag-desk-bus-pilot/` clone per orientation branch-isolation rule
-- user-global: in-place edits to `~/.claude/hooks/session-start-bus-drain.sh` + new `~/bm-hag-desk/CLAUDE.md` (no repo)
+**Brief:** `briefs/BRIEF_HAG_DESK_HEARTBEAT_DAEMON_1.md`
+**Working branch:** `b1/hag-desk-heartbeat-daemon-1` (branch off `main`)
+**Repo:** baker-master only
+**Pre-requisites:** none — canonical script at `scripts/forge_snapshot_push.sh` is current; deployed copy verified identical 2026-05-22
 
-**Pre-requisites:**
-- b1 working tree current (`cd ~/bm-b1 && git pull --ff-only`).
-- Read `briefs/BRIEF_HAGENAUER_DESK_ON_BUS_1.md` in full before editing.
-- Reference picker pattern: read `~/bm-ben/CLAUDE.md` for the structure to mirror in `~/bm-hag-desk/CLAUDE.md`.
+## Acceptance criteria (testable)
 
-**Acceptance criteria (testable):** see brief §"Acceptance criteria" — 6 ACs (AC1-AC4 = b1 ships; AC5-AC6 = AH1 fires post-merge after Render env update).
+### AC1 — TERMINALS array updated
+- One new line in `scripts/forge_snapshot_push.sh:61-69` TERMINALS array: `"hag-desk:/Users/dimitry/baker-vault"` (appended after `b4` entry).
+- No other changes to the array. No refactoring.
 
-**Ship gate:**
-- baker-master PR with literal local smoke output (placeholder-key 401 is expected — that's fine, confirms client-side whitelist).
-- baker-vault PR with skill update.
-- Capture in-place edits (drain hook + picker CLAUDE.md) as diff/file content in ship report.
+### AC2 — Smoke test Case H added
+- New Case H in `tests/test_forge_snapshot_push.sh` after Case G, per brief's Fix 2 implementation snippet.
+- Verifies: `terminal_alias=="hag-desk"`, `mailbox_status=="n/a"`, `mailbox_brief_name==""`.
+- Reuses existing `run_daemon` + `extract_payload_field` + `assert_no_prod_aliases` helpers.
 
-**Reporting:**
-- Bus-post `lead` on each PR open.
-- Bus-post `lead` on ship-complete with both PR anchors + filesystem state.
-- Ship report at `briefs/_reports/B1_HAGENAUER_DESK_ON_BUS_1_20260521.md`.
+### AC3 — Test suite green
+- `bash tests/test_forge_snapshot_push.sh` exits 0 with **8** PASS lines (A through H).
+- Literal output included in ship report — no "pass by inspection."
 
-**Out of scope for b1:** 1Password key generation + Render env PUT + brisen-lab redeploy + live smoke fires (AC5/AC6) — AH1 Tier-B lane post-merge.
+### AC4 — Deploy verification (post-merge, AH1 Tier-B)
+- AH1 runs `install_forge_push.sh` on whichever hosts run the daemon (Mac Mini + MacBook — both currently active).
+- Verification command (run twice 30s apart):
+  ```bash
+  KEY="$(op read 'op://Baker/brisen-lab-lead-key/credential')"
+  curl -s "https://brisen-lab.onrender.com/api/state?terminal=lead" -H "X-Terminal-Key: $KEY" \
+    | python3 -c "import json,sys; d=json.load(sys.stdin); print(d['snapshots']['hag-desk']['daemon_last_seen'])"
+  ```
+- Both timestamps within last 60s; second > first.
+- Out of b1's scope (AH1 owns post-merge deploy + verification).
+
+## Ship gate
+Literal `bash tests/test_forge_snapshot_push.sh` output showing 8 PASS lines pasted into PR description. No "pass by inspection."
+
+## Reporting
+- Bus-post `lead` on PR open: `BAKER_ROLE=b1 ~/bm-b1/scripts/bus_post.sh lead "PR #<num> opened: HAG_DESK_HEARTBEAT_DAEMON_1" ship/hag-desk-heartbeat`
+- Bus-post `lead` on any blocker: `BAKER_ROLE=b1 ~/bm-b1/scripts/bus_post.sh lead "<blocker>" blocker/hag-desk-heartbeat`
+- Mailbox UPDATE pattern: append CLAIM / IN_PROGRESS / COMPLETE entries with ISO timestamps per b-code-dispatch-coordination protocol.
+
+## Files Modified (expected)
+- `scripts/forge_snapshot_push.sh` — +1 line in TERMINALS array
+- `tests/test_forge_snapshot_push.sh` — +1 Case H (~30 LOC)
+
+## Do NOT Touch
+- `scripts/install_forge_push.sh` — deploy mechanism unchanged
+- `~/Library/Application Support/baker/forge_snapshot_push.sh` — deploy script handles it
+- Anything in `~/bm-b1-brisen-lab/` — front-end already wired
+- The `mailbox_status` classification logic at `scripts/forge_snapshot_push.sh:449` — `^b([1-9])$` regex is correct as-is; hag-desk intentionally falls through to "n/a" default
