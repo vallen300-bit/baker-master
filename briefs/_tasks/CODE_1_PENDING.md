@@ -1,66 +1,56 @@
 ---
-status: CLAIMED
-brief: briefs/BRIEF_HAG_DESK_HEARTBEAT_DAEMON_1.md
-brief_id: HAG_DESK_HEARTBEAT_DAEMON_1
-target_repo: baker-master
+status: PENDING
+brief: briefs/BRIEF_HAG_DESK_BADGE_SLUG_LIST_FIX_1.md
+brief_id: HAG_DESK_BADGE_SLUG_LIST_FIX_1
+target_repo: brisen-lab
 matter_slug: baker-internal
-dispatched_at: 2026-05-22T05:55:00Z
+dispatched_at: 2026-05-22T08:22:00Z
 dispatched_by: lead
 target: b1
-working_branch: b1/hag-desk-heartbeat-daemon-1
+working_branch: b1/hag-desk-badge-slug-list-fix-1
 reply_to: lead
-deadline: 2026-05-23T18:00:00Z
+deadline: 2026-05-22T20:00:00Z
 priority: tier-b
-claimed_at: 2026-05-22T06:20:00Z
 ---
 
-# CODE_1_PENDING — HAG_DESK_HEARTBEAT_DAEMON_1 — 2026-05-22
+# CODE_1_PENDING — HAG_DESK_BADGE_SLUG_LIST_FIX_1 — 2026-05-22
 
-**Brief:** `briefs/BRIEF_HAG_DESK_HEARTBEAT_DAEMON_1.md`
-**Working branch:** `b1/hag-desk-heartbeat-daemon-1` (branch off `main`)
-**Repo:** baker-master only
-**Pre-requisites:** none — canonical script at `scripts/forge_snapshot_push.sh` is current; deployed copy verified identical 2026-05-22
+**Brief:** `briefs/BRIEF_HAG_DESK_BADGE_SLUG_LIST_FIX_1.md`
+**Working branch:** `b1/hag-desk-badge-slug-list-fix-1` (branch off `main` of brisen-lab repo)
+**Repo:** brisen-lab (NOT baker-master)
+**Pre-requisites:** none — HAGENAUER_DESK_ON_BUS_1 already merged 2026-05-21 added hag-desk to bus whitelist + card slot + JS TERMINALS; this brief closes one missed tuple
 
 ## Acceptance criteria (testable)
 
-### AC1 — TERMINALS array updated
-- One new line in `scripts/forge_snapshot_push.sh:61-69` TERMINALS array: `"hag-desk:/Users/dimitry/baker-vault"` (appended after `b4` entry).
-- No other changes to the array. No refactoring.
+### AC1 — KNOWN_CARD_SLUGS tuple updated
+- `bus.py:895-897` includes `"hag-desk"` as the 9th element.
+- No other line in `bus.py` modified.
 
-### AC2 — Smoke test Case H added
-- New Case H in `tests/test_forge_snapshot_push.sh` after Case G, per brief's Fix 2 implementation snippet.
-- Verifies: `terminal_alias=="hag-desk"`, `mailbox_status=="n/a"`, `mailbox_brief_name==""`.
-- Reuses existing `run_daemon` + `extract_payload_field` + `assert_no_prod_aliases` helpers.
+### AC2 — Regression test added
+- New test `test_bus_badge_change_emitted_for_hag_desk` in `tests/test_a3_a8_a9_bus.py`.
+- Mirrors existing positive-case pattern (find the ~lines 200-225 positive-emission test, copy, swap recipient to `hag-desk`).
+- Asserts `bus_badge_change` envelope fires + `badges["hag-desk"]` is present with `unacked_count >= 1`.
 
 ### AC3 — Test suite green
-- `bash tests/test_forge_snapshot_push.sh` exits 0 with **8** PASS lines (A through H).
-- Literal output included in ship report — no "pass by inspection."
+- `pytest tests/test_a3_a8_a9_bus.py -v` exits 0 with all existing tests + new test PASS.
+- Literal output pasted in PR description — no "pass by inspection."
 
-### AC4 — Deploy verification (post-merge, AH1 Tier-B)
-- AH1 runs `install_forge_push.sh` on whichever hosts run the daemon (Mac Mini + MacBook — both currently active).
-- Verification command (run twice 30s apart):
-  ```bash
-  KEY="$(op read 'op://Baker/brisen-lab-lead-key/credential')"
-  curl -s "https://brisen-lab.onrender.com/api/state?terminal=lead" -H "X-Terminal-Key: $KEY" \
-    | python3 -c "import json,sys; d=json.load(sys.stdin); print(d['snapshots']['hag-desk']['daemon_last_seen'])"
-  ```
-- Both timestamps within last 60s; second > first.
-- Out of b1's scope (AH1 owns post-merge deploy + verification).
+### AC4 — Post-deploy smoke (AH1 Tier-B, out of b1 scope)
+- AH1 runs SSE-tap + bus_post on prod after Render auto-deploys.
+- Must observe `bus_badge_change` event for hag-desk.
 
 ## Ship gate
-Literal `bash tests/test_forge_snapshot_push.sh` output showing 8 PASS lines pasted into PR description. No "pass by inspection."
+Literal `pytest tests/test_a3_a8_a9_bus.py -v` output (all green) in PR description.
 
 ## Reporting
-- Bus-post `lead` on PR open: `BAKER_ROLE=b1 ~/bm-b1/scripts/bus_post.sh lead "PR #<num> opened: HAG_DESK_HEARTBEAT_DAEMON_1" ship/hag-desk-heartbeat`
-- Bus-post `lead` on any blocker: `BAKER_ROLE=b1 ~/bm-b1/scripts/bus_post.sh lead "<blocker>" blocker/hag-desk-heartbeat`
-- Mailbox UPDATE pattern: append CLAIM / IN_PROGRESS / COMPLETE entries with ISO timestamps per b-code-dispatch-coordination protocol.
+- Bus-post `lead` on PR open: `BAKER_ROLE=b1 ~/bm-b1/scripts/bus_post.sh lead "PR #<num> opened: HAG_DESK_BADGE_SLUG_LIST_FIX_1" ship/hag-desk-badge-slug-fix`
+- Bus-post `lead` on any blocker: same script, topic `blocker/hag-desk-badge-slug-fix`
 
 ## Files Modified (expected)
-- `scripts/forge_snapshot_push.sh` — +1 line in TERMINALS array
-- `tests/test_forge_snapshot_push.sh` — +1 Case H (~30 LOC)
+- `bus.py` — +1 element in tuple
+- `tests/test_a3_a8_a9_bus.py` — +1 test function
 
 ## Do NOT Touch
-- `scripts/install_forge_push.sh` — deploy mechanism unchanged
-- `~/Library/Application Support/baker/forge_snapshot_push.sh` — deploy script handles it
-- Anything in `~/bm-b1-brisen-lab/` — front-end already wired
-- The `mailbox_status` classification logic at `scripts/forge_snapshot_push.sh:449` — `^b([1-9])$` regex is correct as-is; hag-desk intentionally falls through to "n/a" default
+- Any front-end file (`static/*`) — already wired
+- Any other line in `bus.py`
+- `_build_terminals_response()` — picks up new tuple entry automatically
