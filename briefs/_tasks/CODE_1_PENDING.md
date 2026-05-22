@@ -1,5 +1,5 @@
 ---
-status: PENDING
+status: COMPLETE
 brief: briefs/BRIEF_HAG_DESK_BADGE_SLUG_LIST_FIX_1.md
 brief_id: HAG_DESK_BADGE_SLUG_LIST_FIX_1
 target_repo: brisen-lab
@@ -11,6 +11,13 @@ working_branch: b1/hag-desk-badge-slug-list-fix-1
 reply_to: lead
 deadline: 2026-05-22T20:00:00Z
 priority: tier-b
+claimed_at: 2026-05-22T08:25:00Z
+shipped_at: 2026-05-22T08:29:00Z
+ship_pr: https://github.com/vallen300-bit/brisen-lab/pull/27
+ship_commit: 77831f5
+report: briefs/_reports/B1_HAG_DESK_BADGE_SLUG_LIST_FIX_1_20260522.md
+bus_dispatch_msg: 662
+bus_ship_msg: 663
 ---
 
 # CODE_1_PENDING — HAG_DESK_BADGE_SLUG_LIST_FIX_1 — 2026-05-22
