@@ -52,6 +52,8 @@ case "${BAKER_ROLE:-}" in
     architect|ARCHITECT)                SLUG=architect ;;
     cortex|CORTEX)                      SLUG=cortex ;;
     aid|AID)                            SLUG=aid ;;
+    hag-desk|HAG-DESK|hagenauer-desk)   SLUG=hag-desk ;;
+    researcher|RESEARCHER)              SLUG=researcher ;;
     *)
         # No BAKER_ROLE → silent no-op. Cwd-based fallback intentionally NOT
         # mirrored here to avoid auto-draining for sessions not meant to be on

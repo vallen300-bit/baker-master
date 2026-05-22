@@ -700,5 +700,38 @@ CASE_L_MBRIEF="$(extract_payload_field "$CASE_L_OUT" "hag-desk" "mailbox_brief_n
 [[ -z "$CASE_L_MBRIEF" ]]              || { echo "FAIL Case L: mailbox_brief_name='$CASE_L_MBRIEF' (expected empty)" >&2; exit 1; }
 echo "PASS: Case L — non-b-code single-clone slug (desk pattern) — mailbox stays n/a."
 
+# ─────────────────────────────────────────────────────────────────────────────
+# Case M — RESEARCHER_ON_BUS_1: non-b-code single-clone slug, Cowork-App-only
+# variant (researcher). Same contract as Case L (mailbox stays n/a, brief
+# stays empty), but home-repo is the picker dir itself (~/bm-researcher),
+# not a vault clone. Locks in the Cowork-App-only single-clone slug pattern
+# alongside the desk pattern for future agents installed via Cowork picker
+# (no Terminal sibling, no zsh function).
+# ─────────────────────────────────────────────────────────────────────────────
+CASE_M_REPO="$TMP/case-m-researcher"
+mkdir -p "$CASE_M_REPO"
+(
+  cd "$CASE_M_REPO"
+  git init -q
+  git config user.email "test@test"
+  git config user.name "test"
+  echo "researcher-picker-content" > README.md
+  git add README.md
+  git commit -qm "case-m: researcher picker init"
+)
+
+CASE_M_OUT="$TMP/case-m.out"
+run_daemon "case-m" "researcher:$CASE_M_REPO" > "$CASE_M_OUT"
+assert_no_prod_aliases "$CASE_M_OUT"
+
+CASE_M_ALIAS="$(extract_payload_field "$CASE_M_OUT" "researcher" "terminal_alias")"
+CASE_M_MSTATUS="$(extract_payload_field "$CASE_M_OUT" "researcher" "mailbox_status")"
+CASE_M_MBRIEF="$(extract_payload_field "$CASE_M_OUT" "researcher" "mailbox_brief_name")"
+
+[[ "$CASE_M_ALIAS" == "researcher" ]]  || { echo "FAIL Case M: terminal_alias='$CASE_M_ALIAS'" >&2; exit 1; }
+[[ "$CASE_M_MSTATUS" == "n/a" ]]       || { echo "FAIL Case M: mailbox_status='$CASE_M_MSTATUS'" >&2; exit 1; }
+[[ -z "$CASE_M_MBRIEF" ]]              || { echo "FAIL Case M: mailbox_brief_name='$CASE_M_MBRIEF' (expected empty)" >&2; exit 1; }
+echo "PASS: Case M — non-b-code single-clone slug (Cowork-App-only) — mailbox stays n/a."
+
 echo ""
-echo "All 13 cases PASS."
+echo "All 14 cases PASS."

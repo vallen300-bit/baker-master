@@ -40,12 +40,13 @@ TOPIC="${3:-}"
 # daemon flag is now the only kill-switch (no script-layer drift).
 
 # Validate against canonical slug registry (Director ratified aid 2026-05-10;
-# hag-desk added 2026-05-21 per HAGENAUER_DESK_ON_BUS_1 single-desk pilot).
+# hag-desk added 2026-05-21 per HAGENAUER_DESK_ON_BUS_1 single-desk pilot;
+# researcher added 2026-05-22 per RESEARCHER_ON_BUS_1 Cowork-App-only install).
 case "$RECIPIENT" in
-    director|cowork-ah1|lead|deputy|architect|b1|b2|b3|b4|b5|cortex|daemon|aid|hag-desk) ;;
+    director|cowork-ah1|lead|deputy|architect|b1|b2|b3|b4|b5|cortex|daemon|aid|hag-desk|researcher) ;;
     *)
         echo "ERROR: unknown slug: $RECIPIENT" >&2
-        echo "  Valid: director cowork-ah1 lead deputy architect b1 b2 b3 b4 b5 cortex daemon aid hag-desk" >&2
+        echo "  Valid: director cowork-ah1 lead deputy architect b1 b2 b3 b4 b5 cortex daemon aid hag-desk researcher" >&2
         exit 1
         ;;
 esac
@@ -65,9 +66,10 @@ case "${BAKER_ROLE:-}" in
     cortex|CORTEX)                      SENDER=cortex ;;
     aid|AID)                            SENDER=aid ;;
     hag-desk|HAG-DESK|hagenauer-desk)   SENDER=hag-desk ;;
+    researcher|RESEARCHER)              SENDER=researcher ;;
     *)
         echo "ERROR: BAKER_ROLE not set or unrecognized: '${BAKER_ROLE:-}'" >&2
-        echo "  Valid: AH1 (terminal=lead), AH1-APP (Cowork=cowork-ah1), AH2, B1-B5, architect, cortex, aid, hag-desk" >&2
+        echo "  Valid: AH1 (terminal=lead), AH1-APP (Cowork=cowork-ah1), AH2, B1-B5, architect, cortex, aid, hag-desk, researcher" >&2
         exit 1
         ;;
 esac
