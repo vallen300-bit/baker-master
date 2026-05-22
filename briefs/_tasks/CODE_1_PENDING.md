@@ -1,5 +1,5 @@
 ---
-status: PENDING
+status: CLAIMED
 brief: briefs/BRIEF_HAG_DESK_HEARTBEAT_DAEMON_1.md
 brief_id: HAG_DESK_HEARTBEAT_DAEMON_1
 target_repo: baker-master
@@ -11,6 +11,7 @@ working_branch: b1/hag-desk-heartbeat-daemon-1
 reply_to: lead
 deadline: 2026-05-23T18:00:00Z
 priority: tier-b
+claimed_at: 2026-05-22T06:20:00Z
 ---
 
 # CODE_1_PENDING — HAG_DESK_HEARTBEAT_DAEMON_1 — 2026-05-22

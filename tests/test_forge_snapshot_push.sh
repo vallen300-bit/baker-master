@@ -664,5 +664,41 @@ brief_k="$(extract_payload_field "$OUT_K" b9 mailbox_brief_name)"
 assert_no_prod_aliases "$OUT_K"
 echo "PASS: Case K — cold-clone (no origin/main ref) falls back to local mailbox file."
 
+# ─────────────────────────────────────────────────────────────────────────────
+# Case L — HAG_DESK_HEARTBEAT_DAEMON_1: non-b-code single-clone slug
+# (desk pattern, e.g. hag-desk). Brief's `^b([1-9])$` mailbox-classifier
+# regex must skip non-b-code aliases so mailbox_status defaults to "n/a"
+# and mailbox_brief_name stays empty. Locks in the contract for future
+# desk-on-bus additions (AO Desk / MOVIE Desk / Brisen Desk / Origination
+# Desk / Baden-Baden Desk).
+#
+# Brief authored against a stale snapshot that labelled this "Case H"; the
+# letter was reassigned to L to avoid collision with PR #201's H–K fixtures.
+# ─────────────────────────────────────────────────────────────────────────────
+CASE_L_REPO="$TMP/case-l-desk"
+mkdir -p "$CASE_L_REPO"
+(
+  cd "$CASE_L_REPO"
+  git init -q
+  git config user.email "test@test"
+  git config user.name "test"
+  echo "vault-content" > README.md
+  git add README.md
+  git commit -qm "case-l: desk vault clone init"
+)
+
+CASE_L_OUT="$TMP/case-l.out"
+run_daemon "case-l" "hag-desk:$CASE_L_REPO" > "$CASE_L_OUT"
+assert_no_prod_aliases "$CASE_L_OUT"
+
+CASE_L_ALIAS="$(extract_payload_field "$CASE_L_OUT" "hag-desk" "terminal_alias")"
+CASE_L_MSTATUS="$(extract_payload_field "$CASE_L_OUT" "hag-desk" "mailbox_status")"
+CASE_L_MBRIEF="$(extract_payload_field "$CASE_L_OUT" "hag-desk" "mailbox_brief_name")"
+
+[[ "$CASE_L_ALIAS" == "hag-desk" ]]    || { echo "FAIL Case L: terminal_alias='$CASE_L_ALIAS'" >&2; exit 1; }
+[[ "$CASE_L_MSTATUS" == "n/a" ]]       || { echo "FAIL Case L: mailbox_status='$CASE_L_MSTATUS'" >&2; exit 1; }
+[[ -z "$CASE_L_MBRIEF" ]]              || { echo "FAIL Case L: mailbox_brief_name='$CASE_L_MBRIEF' (expected empty)" >&2; exit 1; }
+echo "PASS: Case L — non-b-code single-clone slug (desk pattern) — mailbox stays n/a."
+
 echo ""
-echo "All 12 cases PASS."
+echo "All 13 cases PASS."
