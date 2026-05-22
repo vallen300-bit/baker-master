@@ -1,71 +1,74 @@
 ---
-status: COMPLETE
-brief: briefs/BRIEF_RENDER_ENV_WIPE_PRECOMMIT_GUARD_1.md
-brief_id: RENDER_ENV_WIPE_PRECOMMIT_GUARD_1
+status: pending
+brief: briefs/BRIEF_PLAUD_TRANSCRIPT_BY_MATTER_1.md
+brief_id: PLAUD_TRANSCRIPT_BY_MATTER_1
 target_repo: baker-master
 working_dir: ~/bm-b3
-working_branch: b3/render-env-wipe-precommit-guard-1
-matter_slug: baker-internal
-cross_matter_usage: [all-matters — guards every Baker repo against env-wipe regressions]
-dispatched_at: 2026-05-20T13:55:00Z
-dispatched_by: lead
-director_auth: 2026-05-20 chat — "go"
-estimated_effort: ~45-60 builder-minutes
-complexity: Low
-priority: medium (closes the bypass gap left by 2026-05-17 runtime guard)
-reply_target: lead (bus topic `ship/render-env-wipe-precommit-guard-1`)
-shipped_at: 2026-05-20T12:25:00Z
-pr: 230
-report: briefs/_reports/B3_render_env_wipe_precommit_guard_1_20260520.md
+working_branch: b3/plaud-transcript-by-matter-1
+matter_slug: hagenauer-rg7
+cross_matter_usage: [hagenauer-rg7 first; pattern generalizes to AO Desk + MOVIE Desk + Baden-Baden Desk later — read path is slug-scoped]
+dispatched_at: 2026-05-22T12:38:00Z
+dispatched_by: deputy
+authored_by: deputy (AH2)
+brief_commit: 57f898c (squashed into 9431e58 per AH2 #685)
+director_auth: 2026-05-22 chat — "fire B3" (post recommendation accept)
+estimated_effort: ~5h
+complexity: Medium
+priority: tier-b (HARD DEADLINE Tue 2026-05-26 — hag-desk Forderungsanmeldung filing)
+reply_target: deputy (bus topic `ship/plaud-transcript-by-matter-1` → AH2 picker-architect + 2nd-pass reviewer chain)
+two_reviewer_chain_status: pre-cleared by AH2 (feature-dev:code-architect CHANGES_NEEDED → folded; feature-dev:code-reviewer PASS-WITH-NITS → folded; 11 items applied)
 ---
 
-# CODE_3_PENDING — RENDER_ENV_WIPE_PRECOMMIT_GUARD_1 — 2026-05-20
+# CODE_3_PENDING — PLAUD_TRANSCRIPT_BY_MATTER_1 — 2026-05-22
 
-## What
+**Brief:** `briefs/BRIEF_PLAUD_TRANSCRIPT_BY_MATTER_1.md` (on origin/main, commit 57f898c bundled at 9431e58 per AH2 dispatch #685)
+**Working branch:** `b3/plaud-transcript-by-matter-1` (off main, baker-master)
+**Repo:** baker-master ONLY (no brisen-lab / baker-vault touch)
+**Author:** AH2 (deputy) — full review chain pre-cleared
+**Reply target on PR open + ship:** `deputy` (AH2 owns picker-architect + 2nd-pass reviewer on the implementation PR; lead is NOT in the gate chain)
 
-Add **Part 4** to `.githooks/pre-commit` that blocks the 2026-05-17 env-wipe pattern (raw `PUT /v1/services/{id}/env-vars` with array body) at commit time. Layered above the runtime guard `tools.render_env_guard.safe_env_put()` (already shipped 2026-05-17 by you).
+## Bottom line
 
-## Why you (B3)
+Add `matter_slug` column to `meeting_transcripts`, auto-populate at ingest via existing `_match_matter_slug` + new `slug_registry.normalize` pass, add `GET /api/transcripts/by-matter/{slug}` endpoint (X-Baker-Key auth, active-slugs validation, `include_body=False` default, LIMIT 200), and ship a dry-run-default backfill script.
 
-You shipped the original runtime guard (`BRIEF_RENDER_ENV_WRITE_GUARD_1`, 2026-05-17). Same lane, same context. Estimated ~45-60 min.
+Director ratified Option B — classifier + ratified-backfill + hag-desk gap audit. HARD DEADLINE Tue 2026-05-26 (Hagenauer-RG7 Forderungsanmeldung filing).
 
-## Brief
+## Scope (per brief §Solution overview)
 
-Full spec: `briefs/BRIEF_RENDER_ENV_WIPE_PRECOMMIT_GUARD_1.md` (read end-to-end before starting).
+1. `migrations/20260522_meeting_transcripts_matter_slug.sql` — ADD COLUMN `matter_slug TEXT` + index.
+2. `memory/store_back.py`:
+   - bootstrap (`_ensure_meeting_transcripts_base` or equivalent) updated to include the new column for fresh DBs (migration-vs-bootstrap drift trap — verify type match with the migration).
+   - `store_meeting_transcript()` auto-assigns via `_match_matter_slug` + `slug_registry.normalize`. Mirrors `create_alert()` at `memory/store_back.py:4453-4459` with the deliberate normalize divergence (read path queries canonical slug; classifier returns raw `matter_name`).
+3. `outputs/dashboard.py` — new `GET /api/transcripts/by-matter/{slug}` route:
+   - X-Baker-Key auth (existing pattern)
+   - active-slugs validation (via `slug_registry`)
+   - `include_body=False` default
+   - LIMIT 200 cap
+4. `scripts/backfill_meeting_transcripts_matter_slug.py` — dry-run-default modeled on `scripts/backfill_matter_slug.py`. **CRITICAL**: `meeting_transcripts.id` is `TEXT` not `INT` (per brief flag); back-fill loop must handle string IDs.
+5. Tests: ~15 cases per brief.
 
-## Acceptance criteria (summary — full list in the brief)
+## Pre-backfill gate (brief flag)
 
-1. `.githooks/pre-commit` gains Part 4 (insert AFTER Part 3's `fi`, BEFORE Part 1's `exec` — anything after the `exec` never runs).
-2. New `tests/test_pre_commit_env_guard.py` covers 6 scenarios (3 positive — Python httpx array PUT, bash curl array PUT, single-key safe path baseline; 3 negative — `safe_env_put()` call, single-key URL, allowlisted file).
-3. `.claude/rules/python-backend.md` Render env-vars rule gets a one-line append referencing Part 4.
-4. Existing Parts 1-3 untouched + still functional (manual smoke on Part 2 OR Part 3 in ship report).
-5. Literal `pytest tests/test_pre_commit_env_guard.py -v` green — paste full output in ship report.
-6. Manual POSITIVE smoke on Part 4 itself — throwaway fixture blocks the commit, then cleaned up.
+`slugs.yml` must have an alias entry mapping the Hagenauer matter_registry `matter_name` → `hagenauer-rg7`. If missing: separate-repo PR on baker-vault BEFORE running `--apply`. b3 verifies pre-flight via `grep -E '^  - slug: hagenauer-rg7' ~/baker-vault/slugs.yml` + alias-block check; if alias missing, surface to deputy via bus + halt before backfill apply.
 
-## Ship gate
+## Ship gate (literal output required — no "pass by inspection")
 
-- Literal pytest output in PR description (no "pass by inspection").
-- Manual Part-4 POSITIVE smoke captured (throwaway fixture blocked → reverted) noted in ship report.
-- `git config core.hooksPath` still returns `.githooks`.
+- Bootstrap DDL grep (`grep -n 'matter_slug' memory/store_back.py | grep -i transcript`) to confirm bootstrap mirrors migration.
+- Migration apply against TEST_DATABASE_URL (literal psql output or migration runner stdout).
+- `pytest tests/test_meeting_transcripts_matter_slug.py -v` literal output (new test file expected).
+- `pytest tests/test_api_transcripts_by_matter.py -v` literal output (new test file expected).
+- Backfill script `--dry-run` execution log (no rows changed, summary table only).
+- Hag-desk gap audit per brief: dry-run output proving `hagenauer-rg7` rows get tagged.
 
-## Reporting (bus reply-to-sender per Director-ratified 2026-05-17 rule)
+## Reporting
 
-On PR open, bus-post `lead` (per `dispatched_by: lead` above):
+- Bus-post `deputy` (NOT lead) on EACH state change:
+  - PR open: topic `pr-open/plaud-transcript-by-matter-1`
+  - Ship complete: topic `ship/plaud-transcript-by-matter-1`
+  - Blocker / pre-backfill-gate fail: topic `blocker/plaud-transcript-by-matter-1`
+- Ship report: `briefs/_reports/B3_PLAUD_TRANSCRIPT_BY_MATTER_1_20260522.md`
+- AH2 will run picker-architect + feature-dev:code-reviewer 2nd-pass on the implementation PR before recommending merge to lead.
 
-```bash
-BAKER_ROLE=b3 ~/Desktop/baker-code/scripts/bus_post.sh lead \
-  "ship/render-env-wipe-precommit-guard-1 — PR #<N> open; pytest <X/X> green; Part 4 smoke blocks the wipe pattern; Parts 1-3 still functional." \
-  ship/render-env-wipe-precommit-guard-1
-```
+## Co-Authored-By
 
-`lead` (AH1-Terminal, this brief's author) handles review + merge.
-
-## Heartbeat cadence (per §B-code stall chase — Director-ratified 2026-05-05)
-
-Minimum every 12h while actively building. Two consecutive 12h misses → AH1 auto-surfaces stall to Director. Heartbeat = (a) UPDATE entry in this mailbox file with ISO timestamp, OR (b) commit on working branch with `mailbox(b3): heartbeat <ISO> — <where>` pattern, OR (c) ship-report file write.
-
-## Anchors
-
-- Original runtime guard: `BRIEF_RENDER_ENV_WRITE_GUARD_1.md` + your ship at `briefs/_reports/B3_render_env_write_guard_1_20260517.md`.
-- 2026-05-17 wipe + 2026-05-20 restoration lessons: `tasks/lessons.md` (search "env-var wipe" / "Render's array-form").
-- Director ratification: 2026-05-20 chat "go" + "use /write-brief sop".
+Co-Authored-By: Claude Opus 4.7 (1M context) <noreply@anthropic.com>
