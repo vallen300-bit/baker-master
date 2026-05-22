@@ -1,5 +1,5 @@
 ---
-status: pending
+status: complete
 brief: briefs/BRIEF_BRISEN_LAB_DESK_CARD_VISUAL_DIFFERENTIATION_1.md
 brief_id: BRISEN_LAB_DESK_CARD_VISUAL_DIFFERENTIATION_1
 target_repo: brisen-lab
@@ -12,6 +12,9 @@ working_dir: ~/bm-b2-brisen-lab
 reply_to: lead
 deadline: 2026-05-23T17:00:00Z
 priority: tier-b
+shipped_at: 2026-05-22T17:00:13Z
+pr: https://github.com/vallen300-bit/brisen-lab/pull/31
+completion_report: briefs/_reports/B2_brisen_lab_desk_card_visual_20260522.md
 director_auth: 2026-05-22 chat — "go" on §X batch-ratification (Group A item 22)
 prior_mailbox_state: superseded — previous CODE_2_PENDING.md was WAHA_OUTBOUND_CAPTURE_1 COMPLETE (PR #235 shipped 2026-05-21T07:30:00Z). b2 idle since.
 gate_chain:
