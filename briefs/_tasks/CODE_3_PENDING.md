@@ -1,5 +1,5 @@
 ---
-status: pending
+status: shipped
 brief: briefs/BRIEF_PLAUD_TRANSCRIPT_BY_MATTER_1.md
 brief_id: PLAUD_TRANSCRIPT_BY_MATTER_1
 target_repo: baker-master
@@ -17,6 +17,11 @@ complexity: Medium
 priority: tier-b (HARD DEADLINE Tue 2026-05-26 — hag-desk Forderungsanmeldung filing)
 reply_target: deputy (bus topic `ship/plaud-transcript-by-matter-1` → AH2 picker-architect + 2nd-pass reviewer chain)
 two_reviewer_chain_status: pre-cleared by AH2 (feature-dev:code-architect CHANGES_NEEDED → folded; feature-dev:code-reviewer PASS-WITH-NITS → folded; 11 items applied)
+shipped_at: 2026-05-22T12:57:34Z
+shipped_pr: 242
+shipped_commit: 8d5165b
+ship_report: briefs/_reports/B3_PLAUD_TRANSCRIPT_BY_MATTER_1_20260522.md
+bus_ship_msg_id: 694
 ---
 
 # CODE_3_PENDING — PLAUD_TRANSCRIPT_BY_MATTER_1 — 2026-05-22
