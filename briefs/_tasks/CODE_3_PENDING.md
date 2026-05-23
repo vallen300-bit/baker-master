@@ -1,152 +1,111 @@
 ---
-status: changes_requested
-brief: briefs/BRIEF_MD_SCHEME_ALLOWLIST_1.md
-brief_id: MD_SCHEME_ALLOWLIST_1
-target_repo: baker-master
-working_dir: ~/bm-b3
-working_branch: b3/md-scheme-allowlist-1
+status: PENDING
+brief: briefs/BRIEF_WRITE_BRIEF_SOP_ENFORCER_HOOK_1.md
+brief_id: WRITE_BRIEF_SOP_ENFORCER_HOOK_1
+target_repo: multi (baker-master + baker-vault)
 matter_slug: baker-internal
-dispatched_at: 2026-05-22T17:30:00Z
+dispatched_at: 2026-05-23T18:30:00Z
 dispatched_by: lead
 target: b3
+working_branch_baker_master: b3/write-brief-sop-enforcer-hook-1
+working_branch_baker_vault: b3/write-brief-sop-enforcer-hook-1
+working_dir_baker_master: ~/bm-b3
+working_dir_baker_vault: ~/bm-b3-baker-vault
 reply_to: lead
-deadline: 2026-05-23T18:00:00Z
 priority: tier-b
-director_auth: 2026-05-22 chat — "go" on §X batch-ratification (Group B item 1); V0.2 fold within same auth scope
-severity_anchor: MEDIUM XSS finding (V0.1) elevated to CRITICAL XSS bypasses on V0.2 (Gate 4)
-v01_pr: 246
-v01_shipped_at: 2026-05-23T10:28Z
-v01_gate_status:
-  gate_1_static: PASS-WITH-NITS (feature-dev:code-reviewer agent a9772c0724454efe2)
-  gate_2_security_review: deferred to V0.2
-  gate_3_cross_lane_architecture: SKIPPED (no arch change)
-  gate_4_2nd_pass_code_reviewer: FAIL (feature-dev:code-reviewer agent a6f4a89af61548ef8) — 2 CRITICAL + 1 HIGH
-v02_required_fixes_count: 4 blocking (2 CRIT + 2 HIGH) + 1 MED + 3 LOW optional
-v02_dispatched_at: 2026-05-23T10:35:00Z
+estimated_time: 4.5-5.5h
+trigger_class: MEDIUM
 gate_chain:
-  gate_1_static: RE-RUN required on V0.2
-  gate_2_security_review: RE-RUN required on V0.2 (deferred from V0.1)
-  gate_3_cross_lane_architecture: SKIPPABLE (no arch change)
-  gate_4_2nd_pass_code_reviewer: RE-RUN required on V0.2
-estimated_effort_v02: 1-1.5h
-ui_surface_prebrief: brief's §Surface contract already satisfies; no re-run needed
+  gate_1_architecture_review: REQUIRED (AH2)
+  gate_2_security_review: REQUIRED — expected NO_FINDINGS (hooks read stdin/transcript only; no network, no auth, no secrets)
+  gate_3_picker_architect: REQUIRED — cross-picker install verification (5 picker pickers)
+  gate_4_code_reviewer_2nd_pass: REQUIRED (AH2 feature-dev:code-reviewer)
+  gate_5_ah1_final: REQUIRED
+prior_mailbox_state: superseded — MD_SCHEME_ALLOWLIST_1 V0.2 status CHANGES_REQUESTED in mailbox but ACTUAL state on main is MERGED via PR #246 (commit 7298a3d). b3 idle since.
+ui_surface_prebrief: brief §Surface contract = N/A (pure harness/hook infra) — gate satisfied
 ---
 
-# CODE_3_PENDING — MD_SCHEME_ALLOWLIST_1 — V0.2 fold dispatch — 2026-05-23
+# CODE_3_PENDING — WRITE_BRIEF_SOP_ENFORCER_HOOK_1 — 2026-05-23
 
-**V0.1 PR:** #246 (https://github.com/vallen300-bit/baker-master/pull/246) — REQUEST_CHANGES posted as comment 4525074080.
-**Working branch:** `b3/md-scheme-allowlist-1` (continue on same branch — DO NOT branch new).
-**Target repo:** `baker-master` — clone at `~/bm-b3/`.
+**Brief:** `briefs/BRIEF_WRITE_BRIEF_SOP_ENFORCER_HOOK_1.md`
+**Target repos:** baker-master + baker-vault (multi-repo brief)
+**Working dirs:** `~/bm-b3` (baker-master) + `~/bm-b3-baker-vault` (baker-vault — clone if missing via `git clone https://github.com/vallen300-bit/baker-vault.git ~/bm-b3-baker-vault`)
+**Pre-requisites:** none
 
 ## Bottom line
 
-Gate 4 (2nd-pass) found **2 CRITICAL XSS bypasses + 1 HIGH redirect** that V0.1 + b3's /security-review missed. Gate 1 found 1 HIGH (embedded whitespace bypass). 4 blocking findings + 1 MEDIUM + 3 LOW optional. Push V0.2 on same branch (additional commits, not force-rewrite); on V0.2 push AH1-T re-fires gate chain.
+Director ratified harness enforcement of /write-brief SOP after weekly reminder cycle. Two-layer enforcement parallel to render_env_guard + pre-commit Part 4 belt-and-braces:
 
-## Blocking findings (MUST fix in V0.2)
+- **Layer 2 (in-session):** PreToolUse hook blocks Write/Edit on brief paths unless /write-brief skill was invoked in the session. Bypass: env `BAKER_BRIEF_SOP_BYPASS=1`.
+- **Layer 3 (git-time):** pre-commit hook scans staged brief diffs for 3+ of 5 canonical SOP section headers. Bypass: commit-msg trailer `Brief-SOP-bypass: <reason>`.
 
-### CRITICAL 1 — `javascript%3Aalert(1)` percent-encoded scheme bypass
+Combined single brief — not split. 12 test cases total. Eat-own-dog-food: this brief itself was authored via /write-brief (AC8).
 
-Files: `outputs/static/app.js` + `outputs/static/mobile.js`, `_safeHref()`
+## Pre-flight (mandatory before edit)
 
-`esc()` does NOT encode `%`. URL `javascript%3Aalert(1)` has no literal `:` so scheme regex `/^([a-zA-Z][a-zA-Z0-9+\-.]*):/` fails to match → function returns string verbatim. Browser URL-decodes href attribute values before navigation (HTML/URL spec §4.1) → `%3A` → `:` at click time → `javascript:alert(1)` executes.
+1. `cd ~/bm-b3 && git fetch origin main && git checkout main && git pull --ff-only` — sync baker-master.
+2. `[ -d ~/bm-b3-baker-vault ] || git clone https://github.com/vallen300-bit/baker-vault.git ~/bm-b3-baker-vault` — ensure baker-vault checkout.
+3. `cd ~/bm-b3-baker-vault && git fetch origin main && git checkout main && git pull --ff-only` — sync baker-vault.
+4. `cd ~/bm-b3 && git checkout -b b3/write-brief-sop-enforcer-hook-1`
+5. `cd ~/bm-b3-baker-vault && git checkout -b b3/write-brief-sop-enforcer-hook-1`
+6. `git config core.hooksPath .githooks` (already configured per CLAUDE.md but verify in both repos).
 
-**FIX (choose one):**
-```javascript
-// Option A: decode before scheme check
-const trimmed = url.trim().replace(/[\t\n\r]/g, '');
-let decoded;
-try { decoded = decodeURIComponent(trimmed); } catch { decoded = trimmed; }
-// then run scheme regex against `decoded`, not `trimmed`
+## Scope (4 features per brief)
 
-// Option B: explicit reject of percent-encoded delimiter
-if (/^[a-zA-Z][a-zA-Z0-9+\-.]*%3[Aa]/.test(trimmed)) return '#';
-// then proceed with existing check on `trimmed`
-```
+1. **Layer 2 hook + 5 picker installs** — canonical at `~/baker-vault/_ops/hooks/write_brief_sop_enforcer.sh` + 5 copies at AH1-T / AH1-cowork / AH2 / Researcher / legacy-AH1-T pickers + 5 `.claude/settings.json` (or `settings.local.json` for researcher) edits
+2. **Layer 3 hook + 2 pre-commit chain edits** — canonical at `~/baker-vault/.githooks/brief_sop_check.sh` + mirror at `~/bm-b3/.githooks/brief_sop_check.sh` + chain into both pre-commit hooks
+3. **Tests** — 12 cases total: Layer 2 (6) at `~/baker-vault/_ops/hooks/tests/test_write_brief_sop_enforcer.sh` + Layer 3 (6) at `~/baker-vault/.githooks/tests/test_brief_sop_check.sh`
+4. **lessons.md append** — Layer 2 vs Layer 3 pattern (in-session harness + git-time audit; render_env_guard parallel)
 
-Recommendation: Option A (decode-first) — closer to actual browser behavior, catches future percent-encoded delimiters too. Wrap `decodeURIComponent` in try/catch (malformed `%XX` throws).
+## Hard constraints
 
-### CRITICAL 2 — `"` in URL breaks href attribute (attribute injection / XSS)
+- **No "by inspection"** — every AC needs literal bash test output pasted verbatim in ship report (Lesson #8)
+- **Fail-open posture** on hook errors — gate-logic bugs must NEVER block legitimate work (mirror `ui-surface-prebrief-check.sh` ERR trap)
+- **Anchored regex `\.md$`** — don't catch `.md.bak` etc.
+- **Excluded paths from BOTH layers:** `briefs/_reports/*` + `briefs/_tasks/CODE_*_<state>.md`
+- **Mirror drift mitigation:** `~/bm-b3/.githooks/brief_sop_check.sh` header MUST comment "MIRROR OF baker-vault/.githooks/brief_sop_check.sh — keep in sync"
+- **Hook completion <1s** for common case — no LLM, no network, regex only
+- **`git show :<path>`** to read staged blob — NOT on-disk file (pre-commit fires before commit)
+- **JSON validity** — every settings.json edit MUST be `jq -e .` valid; if PreToolUse block exists, APPEND to its `hooks` array (don't replace `ui-surface-prebrief-check.sh`)
+- **Researcher picker uses `settings.local.json`** — NOT `settings.json`. Verified at brief authoring time via `find`.
 
-Files: `outputs/static/app.js` link callback + `outputs/static/mobile.js` symmetric
+## Acceptance criteria (AC1-AC13 per brief)
 
-`esc()` (DOM `textContent`-based) encodes `<`, `>`, `&` but NOT `"`. Link regex `([^)]+)` allows `"` in URL capture. URL `https://x.com"onclick=alert(1)//` passes `_safeHref` (https allowlisted) → output `<a href="https://x.com"onclick=alert(1)//" ...>` — `"` terminates attribute, injects arbitrary HTML.
+See brief §Acceptance criteria. Highlights:
+- AC1-AC8 (Layer 2 install + tests + dog-food)
+- AC9-AC12 (Layer 3 install + tests + pre-commit chain)
+- AC13 (combined literal 12-test output verbatim in ship report)
 
-**FIX:** Use the existing `escAttr()` helper (already in `app.js` near top — review it for mobile.js parity; if missing in mobile.js, lift the function or use `.replace(/"/g, '&quot;')`).
+## Ship gate
 
-```javascript
-// In the link replacement callback:
-h = h.replace(/\[([^\]]+)\]\(([^)]+)\)/g, function(match, label, url) {
-    return '<a href="' + escAttr(_safeHref(url)) + '" target="_blank" rel="noopener">' + label + '</a>';
-});
-```
+- Literal output of both test harnesses (6/6 + 6/6 = 12/12 PASS) pasted in ship report
+- `jq -e .` validates all 5 picker settings files
+- `bash -n` syntax-clean on both hook scripts + both test scripts
+- Mirror diff `~/baker-vault/.githooks/brief_sop_check.sh` vs `~/bm-b3/.githooks/brief_sop_check.sh` (tail -n +3 for both, skipping the differing header comment) returns empty
+- Layer 2 manual smoke (post-install): write to /tmp/briefs/BRIEF_SMOKE.md without /write-brief invocation in a fresh shell → blocks
+- Layer 3 manual smoke: stage partial brief in sandbox → blocks; add bypass trailer → passes
 
-If `escAttr` does not exist in mobile.js, define it inline (consistent with the app.js helper) or apply minimal `.replace(/"/g, '&quot;')` after `_safeHref()`.
+## Reporting (bus reply-to-sender)
 
-### HIGH 1 — `//evil.com` protocol-relative URL bypass
-
-Files: `outputs/static/app.js` + `outputs/static/mobile.js`, `_safeHref()`
-
-`trimmed.startsWith('/')` passes `//evil.com/malicious` as "relative" path. Browsers treat `//host/path` as scheme-relative (inherits https from page context) → external navigation. With `target="_blank"` → phishing / open-redirect vector.
-
-**FIX:**
-```javascript
-if (trimmed.startsWith('#') || trimmed.startsWith('?')) return trimmed;
-if (trimmed.startsWith('/') && !trimmed.startsWith('//')) return trimmed;
-// (and the `//` URL now falls through to the scheme regex, which won't match `//` so returns `'#'`)
-```
-
-### HIGH 2 — embedded `\t`/`\n`/`\r` bypass
-
-Files: `outputs/static/app.js` + `outputs/static/mobile.js`, `_safeHref()`
-
-`.trim()` strips edges only, not embedded whitespace. `java\tscript:alert(1)` → scheme regex `[a-zA-Z][a-zA-Z0-9+\-.]*` does not match `\t` so regex fails → returns verbatim. Browsers strip `\t\n\r` during href URL parsing (WHATWG URL spec §4.1) → `javascript:alert(1)` reconstituted at click.
-
-**FIX:** combined with CRITICAL 1 Option A:
-```javascript
-const trimmed = url.trim().replace(/[\t\n\r]/g, '');
-```
-
-## MEDIUM — Node test harness can't simulate browser URL-decode
-
-File: `tests/test_md_scheme_allowlist.py`
-
-`_run_node_harness()` runs `_safeHref` source in Node.js — no browser URL-decoding behavior. Tests for `javascript%3Aalert(1)` would pass in Node, fail in browser (false confidence).
-
-**FIX:**
-- Add explicit `[%3A](javascript%3Aalert(1))` to REJECT_CASES (V0.2 must REJECT after CRITICAL 1 fix).
-- Add `[tab](java\tscript:alert(1))` and `[newline](java\nscript:alert(1))` to REJECT_CASES (HIGH 2 coverage).
-- Add `[//attacker](//evil.com/malicious)` to REJECT_CASES (HIGH 1 coverage).
-- Add `[quote](https://x.com"onclick=alert(1)//)` to REJECT_CASES (CRITICAL 2 coverage — assertion: `'onclick=' not in out` AND `'"' encoded as &quot;` in href).
-- Add code comment in test file noting Node-vs-browser parity gap; ideally Playwright/headless follow-up (NOT in scope this brief).
-
-## LOW (optional, may fold for hygiene)
-
-- `test_safehref_comment_documents_esc_interaction` uses arbitrary 600-char preamble check — brittle to refactor. Tighten to scoped search.
-- `_extract_safehref_block` regex requires `\n}\n` trailing newline — fragile on file-end. Use `\n}(?:\s|$)` pattern.
-- `test_functional_empty_input` doesn't assert whitespace-only inputs (`" "`, `"   "`) return `"#"`. Add assertions.
-
-## V0.2 ship gate
-
-- ALL 4 blocking findings fixed.
-- ALL 5 new test cases added (2 CRIT + 2 HIGH + 1 sentinel-doc) — assertions must be meaningful (verify actual rejection-to-`#`, not stub `assert True`).
-- Targeted pytest still 100% pass; full suite delta vs baseline acceptable (PR description quotes literal output).
-- `_safeHref` blocks in both files remain byte-identical (re-verify `test_implementations_are_symmetric`).
-- /security-review on V0.2 — pass / NO_FINDINGS REQUIRED (b3 self-run; AH1 re-runs gate 2 independently).
-
-## Reporting
-
-On V0.2 push, bus-post `lead` per `dispatched_by`:
+Two PRs to open (one per repo). Bus-post `lead` on both PRs open:
 
 ```bash
 BAKER_ROLE=b3 ~/bm-b3/scripts/bus_post.sh lead \
-  "ship/md-scheme-allowlist-1-v02 — V0.2 pushed on b3/md-scheme-allowlist-1; all 4 blocking findings folded + 5 new test cases; targeted pytest <X/X>; full suite delta <Y>; awaiting AH1 gate chain re-run (gates 1+2+4)." \
-  ship/md-scheme-allowlist-1-v02
+  "ship/write-brief-sop-enforcer-hook-1 — baker-master PR #<N1> + baker-vault PR #<N2> open; +X LOC across N files; AC1-AC13 verified literal 12/12 PASS; awaiting AH2 gate chain (1+2+3+4) then AH1 merge." \
+  ship/write-brief-sop-enforcer-hook-1
 ```
 
-## Director ratification (carry-over)
+`lead` (AH1-T) handles gate orchestration + merge sequence (merge baker-vault first, then baker-master — Layer 3 mirror reads from vault canonical).
 
-2026-05-22 "go" on §X batch-ratification (Group B item 1) covers V0.1 dispatch + gate chain authority + V0.2 fold within same auth. No re-ratification needed for V0.2.
+## References
 
-## Heartbeat cadence
+- Brief: `briefs/BRIEF_WRITE_BRIEF_SOP_ENFORCER_HOOK_1.md`
+- Parent brief request: bus #788 (AH2)
+- Layer 3 amendment: bus #790 (AH2)
+- Existing PreToolUse precedent: `~/bm-aihead1/.claude/hooks/ui-surface-prebrief-check.sh`
+- Existing pre-commit Part 4 precedent: `~/bm-aihead1/.githooks/pre-commit`
+- jq schema verified live against current AH1-T session transcript by brief author 2026-05-23T18:00Z
 
-Minimum every 12h while actively building. ~1-1.5h scope expected to complete V0.2 in single session.
+## Heartbeat cadence (per §B-code stall chase — Director-ratified 2026-05-05)
+
+Minimum every 12h while actively building. Two consecutive 12h misses → `lead` auto-surfaces stall to Director. Given ~4.5-5.5h scope, expect 1-2 heartbeats max.
