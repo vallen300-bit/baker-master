@@ -256,11 +256,22 @@ TOOLS = [
     ),
     Tool(
         name="baker_vip_contacts",
-        description="List Baker's VIP contacts — key people tracked by the system.",
+        description=(
+            "List Baker's VIP contacts — key people tracked by the system. "
+            "Returns full provenance fields including linkedin_url + source_of_introduction "
+            "(both stored on vip_contacts table). Search matches name / role / email / "
+            "linkedin_url / source_of_introduction."
+        ),
         inputSchema={
             "type": "object",
             "properties": {
-                "search": {"type": "string", "description": "Search by name, role, or email"},
+                "search": {
+                    "type": "string",
+                    "description": (
+                        "Search by name, role, email, linkedin_url, or "
+                        "source_of_introduction (case-insensitive substring match)"
+                    ),
+                },
                 "limit": {"type": "integer", "default": 50},
             },
         },
@@ -1394,9 +1405,20 @@ def _dispatch(name: str, args: dict) -> str:
         search = args.get("search")
         limit = args.get("limit", 50)
         if search:
-            sql = "SELECT * FROM vip_contacts WHERE name ILIKE %s OR role ILIKE %s OR email ILIKE %s ORDER BY name"
+            # Match name / role / email + provenance fields (linkedin_url,
+            # source_of_introduction). Surface refinement
+            # BAKER_VIP_MCP_EXPOSE_PROVENANCE_FIELDS_1 (2026-05-23).
+            sql = (
+                "SELECT * FROM vip_contacts "
+                "WHERE name ILIKE %s "
+                "   OR role ILIKE %s "
+                "   OR email ILIKE %s "
+                "   OR linkedin_url ILIKE %s "
+                "   OR source_of_introduction ILIKE %s "
+                "ORDER BY name"
+            )
             pat = f"%{search}%"
-            rows = _query(sql, (pat, pat, pat), limit)
+            rows = _query(sql, (pat, pat, pat, pat, pat), limit)
         else:
             rows = _query("SELECT * FROM vip_contacts ORDER BY name", limit=limit)
         return _format_results(rows, "VIP Contacts")
