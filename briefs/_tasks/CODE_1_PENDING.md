@@ -1,56 +1,72 @@
 ---
 status: pending
-brief: briefs/BRIEF_BACKFILL_SCRIPT_ENV_PREFLIGHT_1.md
-brief_id: BACKFILL_SCRIPT_ENV_PREFLIGHT_1
+brief: briefs/BRIEF_SUBSTACK_NATE_INGEST_1.md
+brief_id: SUBSTACK_NATE_INGEST_1
 target_repo: baker-master
 matter_slug: baker-internal
-dispatched_at: 2026-05-23T12:55:00Z
+dispatched_at: 2026-05-23T13:20:00Z
 dispatched_by: lead
 target: b1
-working_branch: b1/backfill-script-env-preflight-1
+working_branch: b1/substack-nate-ingest-1
 reply_to: lead
-deadline: 2026-05-24T18:00:00Z
+deadline: 2026-05-25T18:00:00Z
 priority: tier-b
 ---
 
-# CODE_1_PENDING — BACKFILL_SCRIPT_ENV_PREFLIGHT_1 — 2026-05-23
+# CODE_1_PENDING — SUBSTACK_NATE_INGEST_1 — 2026-05-23
 
-**Brief:** `briefs/BRIEF_BACKFILL_SCRIPT_ENV_PREFLIGHT_1.md` (committed to baker-master `main` — PR #245 merged 2026-05-22; current HEAD `bf9e739`)
-**Working branch:** `b1/backfill-script-env-preflight-1` (cut from baker-master `main`)
-**Repo:** baker-master ONLY (`scripts/backfill_meeting_transcripts_matter_slug.py` + `scripts/backfill_matter_slug.py` + tests)
-**Pre-requisites:** none — the brief is self-contained.
+**Brief:** `briefs/BRIEF_SUBSTACK_NATE_INGEST_1.md` (committed to baker-master `main` @ `bf9e739`; pull before reading)
+**Working branch:** `b1/substack-nate-ingest-1` (cut from baker-master `main`)
+**Repo:** baker-master + `~/.claude/skills/aidennis-edge-scout/SKILL.md` (host-side skill edit, not committed)
+**Pre-requisites:** none — brief is self-contained.
 
 ## Bottom line
 
-Add `_check_required_env()` pre-flight at the top of `main()` in both backfill scripts, listing all required envs in ONE clear error before init touches anything. Director-ratified 2026-05-22 §X batch-ratification Group B item 24. ~1-2h.
+Auto-ingest Nate's Substack posts from brisengroup Gmail into AID-T library, feed into existing aidennis-edge-scout Sunday digest. Director-ratified 2026-05-23: Q1 = Nate-only first, Q2 = markdown-only v1. ~3-4h. External-surface PR (Gmail trigger touch) — gate-4 code-reviewer 2nd-pass FIRES.
 
-Slot freed after RESEARCHER_VERIFY_CITATIONS_1 V0.2 merge (baker-vault PR #107 → `09bb1de`, 2026-05-23 12:31Z).
+Previous mailbox BACKFILL_SCRIPT_ENV_PREFLIGHT_1 shipped — baker-master PR #247 squash-merged `440bac7` 2026-05-23 13:17Z.
 
-## Acceptance criteria
+## Acceptance criteria (full list — brief Quality Checkpoints 1-13)
 
-Full AC list in `briefs/BRIEF_BACKFILL_SCRIPT_ENV_PREFLIGHT_1.md` AC1-AC6. Summary:
+See `briefs/BRIEF_SUBSTACK_NATE_INGEST_1.md` Quality Checkpoints section. Summary:
 
-- **AC1** Pre-flight at `main()` entry, before any class instantiation or DB connect.
-- **AC2** Required env list: `VOYAGE_API_KEY` + (`DATABASE_URL` OR full `POSTGRES_*` split). Verify `POSTGRES_SSLMODE` requirement against current connect path before listing.
-- **AC3** Single error report listing all missing envs (not one error per env).
-- **AC4** Non-zero exit on missing envs; standard exit on env-present.
-- **AC5** Tests: env-missing case + env-present case.
-- **AC6** Same fix applied symmetrically to `scripts/backfill_matter_slug.py` (deadlines variant).
+- New file `triggers/substack_ingest.py` with `is_substack_nate`, `ingest`, helpers
+- `triggers/email_trigger.py` insert detector ABOVE existing `_should_skip_pipeline()` at line 978; add import at top
+- `requirements.txt` add `html2text>=2024.2.26`
+- New file `scripts/backfill_nate_substack.py` (30-day idempotent backfill — AH1 runs post-merge, NOT B-code)
+- New file `tests/test_substack_ingest.py` (10 pytest tests minimum)
+- Edit `~/.claude/skills/aidennis-edge-scout/SKILL.md` — 5th source row + 1 invocation-prompt sentence
+- Substack ingest failures must NOT propagate (caller continues processing other emails)
+- Idempotency: filename-derived (date + slug); re-running backfill is no-op
+- sentinel_health integration (report_success + report_failure on source="substack_ingest")
+- BAKER_VAULT_DISABLE_PUSH=false unchanged
+- store.store_email_message() still called for Substack (Postgres searchability preserved)
+- No external auto-sends; no DB migrations
 
 ## Ship gate
 
-- Literal `pytest tests/<env-preflight-test>.py -v` output in ship report. No "by inspection."
-- `python3 scripts/backfill_meeting_transcripts_matter_slug.py --help` runs without env-related crash on a freshly-deployed environment (validates fast-fail behavior).
-- Syntax check both scripts via `python3 -c "import py_compile; py_compile.compile('scripts/<name>.py', doraise=True)"`.
+- Literal `pytest tests/test_substack_ingest.py -v` output in ship report. Paste in PR description. No "by inspection."
+- Syntax check all 3 modified Python files: `python3 -c "import py_compile; py_compile.compile('triggers/substack_ingest.py', doraise=True); py_compile.compile('scripts/backfill_nate_substack.py', doraise=True); py_compile.compile('triggers/email_trigger.py', doraise=True)"`
+- `bash scripts/check_singletons.sh` clear.
 
 ## Reporting
 
-- Ship PR against baker-master `main` from branch `b1/backfill-script-env-preflight-1`.
-- **Bus-post `lead` on PR open** with topic `ship/backfill-script-env-preflight-1` (`dispatched_by: lead` ⇒ ship-report to `lead`).
+- Ship PR against baker-master `main` from branch `b1/substack-nate-ingest-1`.
+- **Bus-post `lead` on PR open** with topic `ship/substack-nate-ingest-1` (`dispatched_by: lead` ⇒ ship-report to `lead`).
+- Gate chain on PR open: AH1 static + `/security-review` (FIRES per §Security Review Protocol — touches Gmail external-surface) + feature-dev:code-reviewer 2nd-pass (FIRES per §Code-reviewer 2nd-pass Protocol trigger 4 — external-surface endpoints).
 
 ## Out of scope (Do NOT touch)
 
-- Other one-off scripts that don't touch SentinelStoreBack — generalization is future-refactor candidate, NOT this brief.
-- `outputs/dashboard.py` + other runtime-server code — different env loading path, different failure mode.
-- `kbl/db.py` / `kbl/voyage_client.py` — pre-flight reads env, doesn't modify these helpers.
-- Render env vars themselves — this brief only adds a check that runs on Render's existing env set; no env additions.
+- `_SKIP_PIPELINE_SENDERS` blocklist — additive routing only, no removal
+- `memory/store_back.py` — signature unchanged
+- Other Substacks (Faster Please, Lenny, Product Growth) — out of scope per Q1 lock
+- Qdrant / embedding pipeline — out of scope per Q2 lock
+- `tasks/lessons.md` — append-only, separate brief
+- `baker-vault/slugs.yml` — separate-repo PR only
+- `outputs/dashboard.py` — no dashboard surface for v1
+- Cortex pipeline / cortex_runner.py — Substack content not a matter, no matter_slug
+
+## Important verification points
+
+- Pre-commit grep-verify `thread` dict field names at `email_trigger.py:978` insertion site (brief Step 2 flagged: `headers` / `payload_headers` / `payload` / `message_id` / `received_date` are best-guesses).
+- Pre-commit grep-verify `_build_gmail_service` helper exists in `scripts/extract_gmail.py` (brief Step 4 flagged: may have different name; use whatever exists, do NOT invent).
