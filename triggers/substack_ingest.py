@@ -23,8 +23,10 @@ import json
 import logging
 import os
 import re
+import uuid
 from datetime import datetime, timezone
 from pathlib import Path
+from urllib.parse import urlparse
 
 from bs4 import BeautifulSoup
 import html2text
@@ -182,6 +184,111 @@ def _html_to_markdown(html: str) -> str:
     return h.handle(html).strip()
 
 
+def _publication_from_url(post_url: str | None) -> str:
+    """Extract publication subdomain from a Substack canonical URL.
+
+    `https://natesnewsletter.substack.com/p/foo` → `natesnewsletter`.
+    Falls back to `natesnewsletter` since current trigger is Nate-scoped.
+    """
+    if not post_url:
+        return "natesnewsletter"
+    host = (urlparse(post_url).hostname or "").lower()
+    if host.endswith(".substack.com"):
+        return host.split(".", 1)[0]
+    return "natesnewsletter"
+
+
+def _point_id_for_url(canonical_url: str) -> str:
+    """Deterministic UUID-string ID — must match scripts/backfill_substack_archive.py.
+
+    Backfill + forward-flow share the same Qdrant collection; identical IDs are
+    the dedupe contract between the two paths.
+    """
+    return str(uuid.uuid5(uuid.NAMESPACE_URL, canonical_url))
+
+
+def _index_to_qdrant(
+    *,
+    canonical_url: str,
+    publication: str,
+    title: str,
+    post_date: str,
+    paid_tier: bool,
+    body_text: str,
+) -> None:
+    """Non-blocking embed + Qdrant upsert. Catches all exceptions.
+
+    Markdown on disk is the ground truth; Qdrant is a derived queryable index.
+    Any Qdrant or Voyage failure here MUST NOT propagate — re-backfill via
+    `scripts/backfill_substack_archive.py` can recover gaps.
+    """
+    try:
+        if not os.environ.get("VOYAGE_API_KEY") or not os.environ.get("QDRANT_URL"):
+            logger.info(
+                "substack_ingest: Qdrant index skipped (Voyage/Qdrant env not configured)"
+            )
+            return
+        if not canonical_url:
+            logger.info("substack_ingest: Qdrant index skipped (no canonical_url)")
+            return
+        if len(body_text) < 200:
+            logger.info(
+                "substack_ingest: Qdrant index skipped — body too short (%d chars)",
+                len(body_text),
+            )
+            return
+
+        from kbl.voyage_client import embed as voyage_embed
+        from qdrant_client import QdrantClient
+        from qdrant_client.models import Distance, PointStruct, VectorParams
+
+        collection_name = f"baker-substack-{publication}"
+        qdrant = QdrantClient(
+            url=os.environ["QDRANT_URL"],
+            api_key=os.environ.get("QDRANT_API_KEY") or os.environ.get("QDRANT_KEY"),
+        )
+
+        # Idempotent collection create (cheap if exists)
+        try:
+            qdrant.get_collection(collection_name)
+        except Exception:
+            try:
+                qdrant.create_collection(
+                    collection_name=collection_name,
+                    vectors_config=VectorParams(size=1024, distance=Distance.COSINE),
+                )
+            except Exception as e:
+                # Race-condition tolerable: another caller may have created it
+                logger.info("substack_ingest: create_collection raced/failed: %s", e)
+
+        point_id = _point_id_for_url(canonical_url)
+        payload = {
+            "point_id": point_id,
+            "slug": canonical_url.rstrip("/").rsplit("/", 1)[-1] if canonical_url else "",
+            "publication": publication,
+            "title": title,
+            "post_date": post_date,
+            "canonical_url": canonical_url,
+            "audience": "only_paid" if paid_tier else "public",
+            "source": "forward_flow_gmail",
+            "body_text": body_text[:8000],
+            "char_count": len(body_text),
+        }
+
+        vector = voyage_embed(body_text)
+        qdrant.upsert(
+            collection_name=collection_name,
+            points=[PointStruct(id=point_id, vector=vector, payload=payload)],
+        )
+        _safe_report_success("substack_qdrant_index")
+        logger.info(
+            "substack_ingest: indexed %s into %s", canonical_url, collection_name
+        )
+    except Exception as e:
+        logger.warning("substack_ingest: Qdrant index failed (non-fatal): %s", e)
+        _safe_report_failure("substack_qdrant_index", f"{type(e).__name__}:{e}")
+
+
 def ingest(
     *,
     gmail_message_id: str,
@@ -235,6 +342,18 @@ def ingest(
         out_path.write_text(frontmatter + body_md, encoding="utf-8")
         _safe_report_success("substack_ingest")
         logger.info("substack_ingest: wrote %s (paid_tier=%s)", out_path.name, paid_tier)
+
+        # Non-blocking Qdrant index for agent-queryable retrieval. Any failure
+        # is logged + reported but does NOT roll back the markdown write.
+        _index_to_qdrant(
+            canonical_url=post_url or "",
+            publication=_publication_from_url(post_url),
+            title=subject,
+            post_date=date_str,
+            paid_tier=paid_tier,
+            body_text=body_md,
+        )
+
         return out_path
     except Exception as e:
         logger.exception("substack_ingest: failed for msg %s: %s", gmail_message_id, e)

@@ -717,6 +717,47 @@ TOOLS = [
         },
     ),
     Tool(
+        name="baker_substack_search",
+        description=(
+            "Semantic search across ingested Substack archives. Use when an agent "
+            "needs to query a known Substack publication's content by topic. "
+            "Returns top-k matching posts with title, URL, post date, audience tier, "
+            "and a body excerpt. Today's seeded publications: 'natesnewsletter' "
+            "(Nate Jones — Director paid sub). To add a new publication, run "
+            "scripts/backfill_substack_archive.py --publication <slug> --apply "
+            "after Director provides the session cookie via 1Password."
+        ),
+        inputSchema={
+            "type": "object",
+            "properties": {
+                "publication": {
+                    "type": "string",
+                    "description": (
+                        "Substack publication subdomain. Today supports: natesnewsletter."
+                    ),
+                    "minLength": 1,
+                    "maxLength": 100,
+                },
+                "query": {
+                    "type": "string",
+                    "description": (
+                        "Natural-language query. Embedded via Voyage; matched against post bodies."
+                    ),
+                    "minLength": 1,
+                    "maxLength": 500,
+                },
+                "limit": {
+                    "type": "integer",
+                    "description": "Max posts to return (1-20).",
+                    "default": 5,
+                    "minimum": 1,
+                    "maximum": 20,
+                },
+            },
+            "required": ["publication", "query"],
+        },
+    ),
+    Tool(
         name="baker_ingest_text",
         description=(
             "Ingest a text document into Baker's knowledge base. Use for memos, "
@@ -1065,6 +1106,89 @@ def _baker_search_via_loopback(args: dict) -> str:
         else:
             lines.append(f"  {r}")
     return "\n---\n".join(lines)
+
+
+def _baker_substack_search(args: dict) -> str:
+    """Semantic search against baker-substack-<publication> Qdrant collection.
+
+    Direct Qdrant call (no /api/* loopback) — the substack collection isn't
+    surfaced through any existing baker-master REST endpoint. Voyage embed
+    matches the indexing path in scripts/backfill_substack_archive.py +
+    triggers/substack_ingest.py._index_to_qdrant.
+    """
+    publication = (args.get("publication") or "").strip()
+    query = (args.get("query") or "").strip()
+    if not publication or not query:
+        return "Error: both 'publication' and 'query' are required"
+
+    try:
+        limit = int(args.get("limit", 5))
+    except (TypeError, ValueError):
+        limit = 5
+    limit = max(1, min(limit, 20))
+
+    qdrant_url = os.environ.get("QDRANT_URL")
+    qdrant_key = os.environ.get("QDRANT_API_KEY") or os.environ.get("QDRANT_KEY")
+    if not qdrant_url:
+        return "Error: QDRANT_URL not configured"
+    if not os.environ.get("VOYAGE_API_KEY"):
+        return "Error: VOYAGE_API_KEY not configured"
+
+    try:
+        from kbl.voyage_client import embed as voyage_embed
+        from qdrant_client import QdrantClient
+    except ImportError as e:
+        return f"Error: dependency missing ({e})"
+
+    collection_name = f"baker-substack-{publication}"
+    try:
+        qdrant = QdrantClient(url=qdrant_url, api_key=qdrant_key)
+    except Exception as e:
+        return f"Error: Qdrant client init failed: {e}"
+
+    try:
+        qdrant.get_collection(collection_name)
+    except Exception:
+        return (
+            f"Error: no Substack archive for '{publication}'. "
+            f"Run `python scripts/backfill_substack_archive.py "
+            f"--publication {publication} --apply` after Director provides "
+            f"the session cookie in 1Password."
+        )
+
+    try:
+        query_vec = voyage_embed(query)
+    except Exception as e:
+        return f"Error: Voyage embed failed: {e}"
+
+    try:
+        hits = qdrant.search(
+            collection_name=collection_name,
+            query_vector=query_vec,
+            limit=limit,
+            with_payload=True,
+        )
+    except Exception as e:
+        return f"Error: Qdrant search failed: {e}"
+
+    if not hits:
+        return f"No matches for '{query}' in {publication} archive."
+
+    lines = [f"Top {len(hits)} matches for '{query}' in {publication}:", ""]
+    for i, h in enumerate(hits, 1):
+        p = h.payload or {}
+        post_date = (p.get("post_date") or "")[:10]
+        preview = (p.get("preview") or p.get("body_text") or "")[:400]
+        lines.append(f"{i}. {p.get('title') or '(untitled)'}")
+        lines.append(f"   URL: {p.get('canonical_url', '')}")
+        lines.append(
+            f"   Date: {post_date} | Audience: {p.get('audience', '')} | "
+            f"Type: {p.get('type', '')}"
+        )
+        lines.append(f"   Match score: {h.score:.3f}")
+        lines.append(f"   Preview: {preview}")
+        lines.append("")
+    return "\n".join(lines).rstrip()
 
 
 def _baker_ingest_text_via_loopback(args: dict) -> str:
@@ -1977,6 +2101,9 @@ def _dispatch(name: str, args: dict) -> str:
 
     elif name == "baker_search":
         return _baker_search_via_loopback(args)
+
+    elif name == "baker_substack_search":
+        return _baker_substack_search(args)
 
     elif name == "baker_ingest_text":
         return _baker_ingest_text_via_loopback(args)
