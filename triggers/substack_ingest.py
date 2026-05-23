@@ -19,6 +19,7 @@ List-Id headers to every newsletter email; format stable since 2020.
 from __future__ import annotations
 
 import base64
+import json
 import logging
 import os
 import re
@@ -227,7 +228,7 @@ def ingest(
             f"ingested_at: {datetime.now(timezone.utc).isoformat()}\n"
             f"gmail_message_id: {gmail_message_id}\n"
             f"sender_email: {sender_email or ''}\n"
-            f"subject: {subject!r}\n"
+            f"subject: {json.dumps(subject)}\n"
             "---\n\n"
             f"# {subject}\n\n"
         )

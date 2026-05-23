@@ -38,6 +38,15 @@ logger = logging.getLogger("substack_backfill")
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
 
 
+def _header(headers: list[dict], name: str) -> str:
+    """Case-insensitive header lookup. Returns '' if not found."""
+    target = name.lower()
+    for h in headers:
+        if h.get("name", "").lower() == target:
+            return h.get("value", "")
+    return ""
+
+
 def run(days: int = 30, dry_run: bool = False) -> int:
     """Returns count of files written (0 if dry_run)."""
     creds = authenticate()
@@ -61,14 +70,8 @@ def run(days: int = 30, dry_run: bool = False) -> int:
             payload = full.get("payload", {}) or {}
             headers = payload.get("headers", []) or []
 
-            def _h(name: str) -> str:
-                for h in headers:
-                    if h.get("name", "").lower() == name.lower():
-                        return h.get("value", "")
-                return ""
-
-            sender = _h("From")
-            subject = _h("Subject")
+            sender = _header(headers, "From")
+            subject = _header(headers, "Subject")
             received = full.get("internalDate")
             if received:
                 received_dt = datetime.fromtimestamp(int(received) / 1000, tz=timezone.utc)

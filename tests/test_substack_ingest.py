@@ -8,6 +8,7 @@ from pathlib import Path
 from unittest.mock import MagicMock
 
 import pytest
+import yaml
 
 _REPO = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(_REPO))
@@ -160,6 +161,37 @@ def test_ingest_writes_file_and_is_idempotent(tmp_path, fake_html_payload, nate_
         nate_dir=tmp_path,
     )
     assert out2 is None
+
+
+def test_ingest_handles_mixed_quote_subject(tmp_path, fake_html_payload, nate_headers):
+    """Mixed-quote subjects must yield YAML-valid frontmatter (json.dumps escaping).
+
+    Pre-fix: `subject: {subject!r}` produced repr() output that emits single-quoted
+    strings with embedded `"` unescaped (or vice versa for double-quoted strings
+    with embedded `'`), which yaml.safe_load then rejects as invalid syntax.
+    Fix: json.dumps always emits a double-quoted string with `"` + `\\` properly
+    backslash-escaped — valid YAML by spec (YAML 1.2 §7.3.1 is a JSON superset).
+    """
+    received = datetime(2026, 5, 23, 12, 0, 0, tzinfo=timezone.utc)
+    subject = """Why "agents" can't reason about Nate's "tools" yet"""
+    out = ingest(
+        gmail_message_id="mixedq",
+        headers=nate_headers,
+        sender_email="nate@natesnewsletter.substack.com",
+        subject=subject,
+        received_date=received,
+        raw_payload=fake_html_payload,
+        nate_dir=tmp_path,
+    )
+    assert out is not None and out.exists()
+
+    text = out.read_text(encoding="utf-8")
+    fm_match = text.split("---\n", 2)
+    assert len(fm_match) >= 3, "frontmatter block missing"
+    parsed = yaml.safe_load(fm_match[1])
+    assert parsed["subject"] == subject, (
+        f"YAML round-trip failed: expected {subject!r}, got {parsed.get('subject')!r}"
+    )
 
 
 def test_ingest_handles_missing_html_part(tmp_path, nate_headers):

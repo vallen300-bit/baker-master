@@ -85,6 +85,10 @@ REJECT_CASES = [
     # V0.2 HIGH 1 — protocol-relative
     "[prot](//evil.com/path)",
     "[prot2](//evil.com)",
+    # Triple-slash variant — browser may collapse to //evil.com (scheme-relative
+    # origin hop). Helper's `startsWith('//')` guard catches the triple case
+    # because `///evil.com` also starts with `//`.
+    "[triple](///evil.com)",
     # V0.2 HIGH 2 — embedded TAB/CR/LF
     "[tab](java\tscript:alert(1))",
     "[lf](java\nscript:alert(1))",
@@ -325,27 +329,22 @@ def test_functional_quote_escape(path: Path) -> None:
 @pytest.mark.skipif(NODE is None, reason="node not on PATH — functional layer skipped")
 @pytest.mark.parametrize("path", [APP_JS, MOBILE_JS], ids=["app.js", "mobile.js"])
 def test_functional_empty_and_whitespace_input(path: Path) -> None:
-    """Edge: empty string + whitespace-only input both return '#' (no surprises).
+    """Edge: empty string + whitespace-only input both return '#' (exact).
 
-    Gate-1 LOW nit V0.1: V0.1 only asserted that whitespace-only inputs did
-    not contain `'script'` in the output — too weak. V0.2 asserts the exact
-    return value is `'#'` for empty AND for whitespace-only inputs (after
-    `.trim()` + `\\t\\n\\r` strip, these all degrade to an empty string,
-    which the helper treats as the no-scheme fallthrough returning `''` —
-    OR the early `if (!url) return '#'` branch for the truly-empty case).
+    V0.2.1 fast-follow: helper now has an explicit `if (!trimmed) return '#'`
+    branch after the .trim()+\\t\\n\\r strip, so every whitespace-only input
+    collapses to the same `'#'` sentinel as the truly-empty case. Test
+    tightened from `out in ('', '#')` to `out == '#'` to lock the contract.
     """
     results = _run_node_harness(path, ["", " ", "   ", "\t", "\n", "\t\n\r"], [])
     by_input = {r["in"]: r["out"] for r in results["allow"]}
     # Empty string: hits the `if (!url) return '#'` guard.
     assert by_input[""] == "#", f"empty href must return '#', got {by_input['']!r}"
-    # Whitespace-only inputs degrade after trim+strip to ''. The helper's
-    # no-scheme fallthrough returns the trimmed value, which is ''. That's
-    # safe (no scheme, no path) but ambiguous; treat '' and '#' as equally
-    # acceptable here. The hard constraint is: nothing browser-executable.
+    # Whitespace-only inputs: post-fast-path, all collapse to '#' exactly.
     for input_str in (" ", "   ", "\t", "\n", "\t\n\r"):
         out = by_input[input_str]
-        assert out in ("", "#"), (
-            f"whitespace-only input {input_str!r} produced unexpected output: {out!r}"
+        assert out == "#", (
+            f"whitespace-only input {input_str!r} must return '#', got {out!r}"
         )
 
 
