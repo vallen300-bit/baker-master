@@ -1,5 +1,5 @@
 ---
-status: PENDING
+status: COMPLETE
 brief: briefs/BRIEF_BAKER_SUBSTACK_SEARCH_1.md
 brief_id: BAKER_SUBSTACK_SEARCH_1
 target_repo: baker-master
@@ -8,10 +8,16 @@ working_branch: b1/baker-substack-search-1
 dispatched_by: cowork-ah1
 dispatched_at: 2026-05-23T17:00:00Z
 estimated_time: 5-6h
+actual_time: ~33min (b1 ship at 17:33Z vs dispatch 17:00Z)
 complexity: medium
 tier: B
 ratified_by: Director
 ratified_at: 2026-05-23 chat ~16:30Z (Option B over A and C)
+shipped_pr: https://github.com/vallen300-bit/baker-master/pull/251
+merged_at: 2026-05-23T17:48:29Z
+merge_commit: ff0a5899a6a58d2febb592cc2423e4b47eee9c48
+gate_chain: Gate-1 PASS (static) + Gate-2 NO_FINDINGS (/security-review) + Gate-4 PASS-WITH-NITS (code-reviewer — 2 MED + 2 LOW, all bundled into next fast-follow batch)
+render_env_wired: SUBSTACK_COOKIE_natesnewsletter via safe_env_put (60 → 61); deploy dep-d88ugk3eo5us738b4bpg picked up at 17:48Z (merge superseded with auto-deploy)
 ---
 
 # CODE_1_PENDING — BAKER_SUBSTACK_SEARCH_1 — 2026-05-23
