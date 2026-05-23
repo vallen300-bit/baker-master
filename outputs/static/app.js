@@ -578,6 +578,9 @@ function _safeHref(url) {
     // Browsers strip TAB/CR/LF inside URLs during parsing (WHATWG URL spec §4.1),
     // so `java\tscript:` would otherwise reconstitute to `javascript:` at click time.
     const trimmed = url.trim().replace(/[\t\n\r]/g, '');
+    // Empty after trim+strip → no scheme, no path. Return '#' explicitly so all
+    // whitespace-only inputs collapse to the same safe sentinel.
+    if (!trimmed) return '#';
     // Percent-decode (bounded loop). Catches single-encoded `javascript%3A` plus
     // a few multiply-encoded variants. decodeURIComponent throws on malformed
     // sequences — treat that as "no further decoding possible" and check what we have.
@@ -587,7 +590,7 @@ function _safeHref(url) {
             const next = decodeURIComponent(decoded);
             if (next === decoded) break;
             decoded = next;
-        } catch (e) { break; }
+        } catch (e) { if (!(e instanceof URIError)) throw e; break; }
     }
     // Protocol-relative `//evil.com` opens an external origin under the page's
     // scheme — must block before the single-slash relative-path allow.
