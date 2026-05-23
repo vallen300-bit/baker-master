@@ -1,0 +1,213 @@
+"""Tests for SUBSTACK_NATE_INGEST_1."""
+from __future__ import annotations
+
+import base64
+import sys
+from datetime import datetime, timezone
+from pathlib import Path
+from unittest.mock import MagicMock
+
+import pytest
+
+_REPO = Path(__file__).resolve().parent.parent
+sys.path.insert(0, str(_REPO))
+
+from triggers.substack_ingest import (  # noqa: E402
+    _detect_paid_tier,
+    _extract_html_body,
+    _extract_post_url,
+    _html_to_markdown,
+    _slugify,
+    fetch_full_message,
+    ingest,
+    is_substack_nate,
+    is_substack_nate_sender,
+)
+
+
+# --- Fixtures ---
+
+
+@pytest.fixture
+def nate_headers():
+    return [
+        {"name": "From", "value": "Nate from Nate's Newsletter <nate@natesnewsletter.substack.com>"},
+        {"name": "Subject", "value": "How to evaluate an agent — the wrong way and the right way"},
+        {"name": "List-Id", "value": "post.natesnewsletter.substack.com <a8b9c0d1.list-id.substack.com>"},
+    ]
+
+
+@pytest.fixture
+def non_nate_headers():
+    return [
+        {"name": "From", "value": "noreply@github.com"},
+        {"name": "Subject", "value": "PR #100 opened"},
+    ]
+
+
+@pytest.fixture
+def fake_html_payload():
+    html = """
+    <html><body>
+    <h1>How to evaluate an agent</h1>
+    <p>Some content here.</p>
+    <a href="https://natesnewsletter.substack.com/p/how-to-evaluate-an-agent?utm_source=email">Read in app</a>
+    </body></html>
+    """
+    b64 = base64.urlsafe_b64encode(html.encode("utf-8")).decode("ascii").rstrip("=")
+    return {
+        "mimeType": "multipart/alternative",
+        "parts": [
+            {"mimeType": "text/plain", "body": {"data": ""}},
+            {"mimeType": "text/html", "body": {"data": b64}},
+        ],
+    }
+
+
+# --- Classifier ---
+
+
+def test_is_substack_nate_matches_list_id(nate_headers):
+    assert is_substack_nate(nate_headers, "nate@natesnewsletter.substack.com") is True
+
+
+def test_is_substack_nate_falls_back_to_sender(nate_headers):
+    h = [x for x in nate_headers if x["name"] != "List-Id"]
+    assert is_substack_nate(h, "nate@natesnewsletter.substack.com") is True
+
+
+def test_is_substack_nate_rejects_non_substack(non_nate_headers):
+    assert is_substack_nate(non_nate_headers, "noreply@github.com") is False
+
+
+def test_is_substack_nate_handles_empty_inputs():
+    assert is_substack_nate([], None) is False
+    assert is_substack_nate(None, None) is False
+
+
+def test_is_substack_nate_sender_matches_substring():
+    assert is_substack_nate_sender("nate@natesnewsletter.substack.com") is True
+    assert is_substack_nate_sender("Nate <nate@NatesNewsletter.SUBSTACK.com>") is True
+
+
+def test_is_substack_nate_sender_rejects_other():
+    assert is_substack_nate_sender(None) is False
+    assert is_substack_nate_sender("") is False
+    assert is_substack_nate_sender("noreply@github.com") is False
+
+
+# --- Parser ---
+
+
+def test_extract_html_body_walks_parts(fake_html_payload):
+    html = _extract_html_body(fake_html_payload)
+    assert html and "How to evaluate an agent" in html
+
+
+def test_extract_post_url_strips_tracking(fake_html_payload):
+    html = _extract_html_body(fake_html_payload)
+    assert _extract_post_url(html) == "https://natesnewsletter.substack.com/p/how-to-evaluate-an-agent"
+
+
+def test_detect_paid_tier_marker():
+    html_paid = "<p>This post is for paying subscribers.</p>"
+    html_free = "<p>Read on.</p>"
+    assert _detect_paid_tier(html_paid) is True
+    assert _detect_paid_tier(html_free) is False
+
+
+def test_html_to_markdown_basic():
+    md = _html_to_markdown("<h1>Hi</h1><p>One <b>two</b> three.</p>")
+    assert "# Hi" in md
+    assert "**two**" in md
+
+
+def test_slugify_handles_punctuation():
+    assert _slugify("How to evaluate — the right way?") == "how-to-evaluate-the-right-way"
+    assert _slugify("") == "untitled"
+
+
+# --- Idempotency + write ---
+
+
+def test_ingest_writes_file_and_is_idempotent(tmp_path, fake_html_payload, nate_headers):
+    received = datetime(2026, 5, 23, 12, 0, 0, tzinfo=timezone.utc)
+    out1 = ingest(
+        gmail_message_id="abc123",
+        headers=nate_headers,
+        sender_email="nate@natesnewsletter.substack.com",
+        subject="How to evaluate an agent",
+        received_date=received,
+        raw_payload=fake_html_payload,
+        nate_dir=tmp_path,
+    )
+    assert out1 is not None and out1.exists()
+    assert out1.name == "2026-05-23-how-to-evaluate-an-agent.md"
+
+    content = out1.read_text(encoding="utf-8")
+    assert "source: nate_substack" in content
+    assert "paid_tier: false" in content
+    assert "url: https://natesnewsletter.substack.com/p/how-to-evaluate-an-agent" in content
+    assert "# How to evaluate an agent" in content
+
+    out2 = ingest(
+        gmail_message_id="abc123",
+        headers=nate_headers,
+        sender_email="nate@natesnewsletter.substack.com",
+        subject="How to evaluate an agent",
+        received_date=received,
+        raw_payload=fake_html_payload,
+        nate_dir=tmp_path,
+    )
+    assert out2 is None
+
+
+def test_ingest_handles_missing_html_part(tmp_path, nate_headers):
+    """No HTML part → return None, do not crash."""
+    received = datetime(2026, 5, 23, 12, 0, 0, tzinfo=timezone.utc)
+    out = ingest(
+        gmail_message_id="abc123",
+        headers=nate_headers,
+        sender_email="nate@natesnewsletter.substack.com",
+        subject="Missing HTML",
+        received_date=received,
+        raw_payload={"mimeType": "text/plain", "parts": []},
+        nate_dir=tmp_path,
+    )
+    assert out is None
+    assert list(tmp_path.iterdir()) == []
+
+
+# --- fetch_full_message (Gmail round-trip helper) ---
+
+
+def _install_stub_extract_gmail(monkeypatch, service):
+    """Inject a stub `scripts.extract_gmail` so fetch_full_message's lazy
+    import works without pulling in google.auth (which may not be installed
+    in test envs)."""
+    import types
+    stub = types.ModuleType("scripts.extract_gmail")
+    stub._gmail_service = service
+    scripts_pkg = sys.modules.get("scripts") or types.ModuleType("scripts")
+    monkeypatch.setitem(sys.modules, "scripts", scripts_pkg)
+    monkeypatch.setitem(sys.modules, "scripts.extract_gmail", stub)
+    return stub
+
+
+def test_fetch_full_message_returns_none_when_service_unset(monkeypatch):
+    """When _gmail_service module attr is None, helper returns None (does not raise)."""
+    _install_stub_extract_gmail(monkeypatch, service=None)
+    assert fetch_full_message("anything") is None
+
+
+def test_fetch_full_message_returns_payload_when_service_set(monkeypatch):
+    """When _gmail_service is set, helper calls users().messages().get(...).execute()."""
+    expected = {"id": "m1", "payload": {"headers": [{"name": "List-Id", "value": "x"}]}}
+    svc = MagicMock()
+    svc.users.return_value.messages.return_value.get.return_value.execute.return_value = expected
+    _install_stub_extract_gmail(monkeypatch, service=svc)
+
+    assert fetch_full_message("m1") == expected
+    svc.users.return_value.messages.return_value.get.assert_called_once_with(
+        userId="me", id="m1", format="full",
+    )
