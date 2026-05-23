@@ -235,18 +235,55 @@ function setSafeHTML(el, safeHtml) {
     if (el) el.innerHTML = safeHtml;
 }
 
-/** Scheme allowlist for md() link hrefs. esc() runs FIRST (entity-escape) but does NOT
- *  sanitize URL schemes — `javascript:alert(1)` survives entity-escape and executes on click.
- *  This is the second layer. Future maintainers must not remove either. */
+/** Scheme allowlist + attribute-safe encoder for md() link hrefs.
+ *  esc() runs FIRST on the markdown input (entity-escapes &, <, >) but does NOT
+ *  sanitize URL schemes and does NOT escape `"`. _safeHref is the second layer.
+ *  Closes five V0.1-review bypass classes:
+ *    - bare      javascript:alert(1)            → scheme-not-in-allowlist → '#'
+ *    - encoded   javascript%3Aalert(1)          → percent-decode-before-check → '#'
+ *    - quoted    https://x"onclick=alert(1)//   → `"` → `&quot;` at return barrier
+ *    - relative  //evil.com                     → blocked before single-slash allow
+ *    - hidden    java\tscript:alert(1)          → \t\n\r stripped pre-scheme-check
+ *  Future maintainers: keep esc() in md() AND keep all five layers here. */
 function _safeHref(url) {
     if (!url) return '#';
-    const trimmed = url.trim();
-    if (trimmed.startsWith('#') || trimmed.startsWith('/') || trimmed.startsWith('?')) return trimmed;
-    const schemeMatch = trimmed.match(/^([a-zA-Z][a-zA-Z0-9+\-.]*):/);
-    if (!schemeMatch) return trimmed;
-    const scheme = schemeMatch[1].toLowerCase();
-    if (scheme === 'https' || scheme === 'http' || scheme === 'mailto' || scheme === 'tel') return trimmed;
-    return '#';
+    // Browsers strip TAB/CR/LF inside URLs during parsing (WHATWG URL spec §4.1),
+    // so `java\tscript:` would otherwise reconstitute to `javascript:` at click time.
+    const trimmed = url.trim().replace(/[\t\n\r]/g, '');
+    // Percent-decode (bounded loop). Catches single-encoded `javascript%3A` plus
+    // a few multiply-encoded variants. decodeURIComponent throws on malformed
+    // sequences — treat that as "no further decoding possible" and check what we have.
+    let decoded = trimmed;
+    for (let i = 0; i < 4; i++) {
+        try {
+            const next = decodeURIComponent(decoded);
+            if (next === decoded) break;
+            decoded = next;
+        } catch (e) { break; }
+    }
+    // Protocol-relative `//evil.com` opens an external origin under the page's
+    // scheme — must block before the single-slash relative-path allow.
+    if (decoded.startsWith('//')) return '#';
+    let allowed = null;
+    if (decoded.startsWith('#') || decoded.startsWith('/') || decoded.startsWith('?')) {
+        allowed = trimmed;
+    } else {
+        const schemeMatch = decoded.match(/^([a-zA-Z][a-zA-Z0-9+\-.]*):/);
+        if (!schemeMatch) {
+            allowed = trimmed;
+        } else {
+            const scheme = schemeMatch[1].toLowerCase();
+            if (scheme === 'https' || scheme === 'http' || scheme === 'mailto' || scheme === 'tel') {
+                allowed = trimmed;
+            }
+        }
+    }
+    if (allowed === null) return '#';
+    // Single return barrier: escape `"` so a URL containing it can't terminate
+    // the href attribute. esc() did NOT do this (textContent→innerHTML escapes
+    // only & < > in text nodes; `"` survives). escAttr() at ~line 555 is for
+    // inline-JS attribute context (\x22 / \\') and is also wrong for href.
+    return allowed.replace(/"/g, '&quot;');
 }
 
 function md(text) {
