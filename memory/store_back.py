@@ -159,6 +159,9 @@ class SentinelStoreBack:
         # Ensure meeting_transcripts table exists (ARCH-3)
         self._ensure_meeting_transcripts_table()
 
+        # TRANSCRIPT_CURATION_PHASE_1: slice-level data layer
+        self._ensure_transcript_slices_table()
+
         # Ensure email_messages table exists (ARCH-6)
         self._ensure_email_messages_table()
 
@@ -1436,6 +1439,70 @@ class SentinelStoreBack:
         finally:
             self._put_conn(conn)
 
+    def _ensure_transcript_slices_table(self):
+        """Create transcript_slices table if it doesn't exist.
+
+        Per architecture v1 §1 + §11. Schema MUST match
+        migrations/20260524_transcript_slices.sql exactly (migration-vs-bootstrap
+        drift trap — Lesson #7).
+        """
+        conn = self._get_conn()
+        if not conn:
+            logger.warning("No DB connection — cannot ensure transcript_slices table")
+            return
+        try:
+            cur = conn.cursor()
+            cur.execute("""
+                CREATE TABLE IF NOT EXISTS transcript_slices (
+                    id TEXT PRIMARY KEY,
+                    transcript_id TEXT NOT NULL REFERENCES meeting_transcripts(id) ON DELETE CASCADE,
+                    boundary_start INT NOT NULL DEFAULT 0,
+                    boundary_end INT NOT NULL DEFAULT 0,
+                    slice_text TEXT,
+                    chunk_header TEXT,
+                    primary_desk TEXT,
+                    cross_ref_desks TEXT[] NOT NULL DEFAULT '{}',
+                    visibility TEXT NOT NULL DEFAULT 'desk-shared'
+                        CHECK (visibility IN ('desk-shared','director-personal','restricted')),
+                    confidence_boundary REAL,
+                    confidence_classifier REAL,
+                    statement_type TEXT
+                        CHECK (statement_type IS NULL OR statement_type IN ('FACT','OPINION','DECISION','ACTION')),
+                    temporal_type TEXT,
+                    valid_at TIMESTAMPTZ,
+                    invalidated_by TEXT,
+                    privilege_scope TEXT[] NOT NULL DEFAULT '{}',
+                    routing_provenance JSONB,
+                    status TEXT NOT NULL DEFAULT 'pending_classification'
+                        CHECK (status IN ('pending_classification','classified','overridden','quarantined')),
+                    target_folder TEXT
+                        CHECK (target_folder IS NULL OR target_folder IN ('03_source_summaries','01_inbox','director-personal')),
+                    cross_ref_stub_targets JSONB,
+                    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                    updated_at TIMESTAMPTZ
+                )
+            """)
+            cur.execute("""
+                CREATE INDEX IF NOT EXISTS idx_transcript_slices_status_primary_desk
+                    ON transcript_slices (status, primary_desk)
+            """)
+            cur.execute("""
+                CREATE INDEX IF NOT EXISTS idx_transcript_slices_transcript_id
+                    ON transcript_slices (transcript_id)
+            """)
+            cur.execute("""
+                CREATE INDEX IF NOT EXISTS idx_transcript_slices_visibility
+                    ON transcript_slices (visibility)
+            """)
+            conn.commit()
+            cur.close()
+            logger.info("transcript_slices table verified")
+        except Exception as e:
+            conn.rollback()
+            logger.warning(f"Could not ensure transcript_slices table: {e}")
+        finally:
+            self._put_conn(conn)
+
     def store_meeting_transcript(self, transcript_id: str, title: str,
                                   meeting_date: str = None, duration: str = None,
                                   organizer: str = None, participants: str = None,
@@ -1499,10 +1566,55 @@ class SentinelStoreBack:
             conn.commit()
             cur.close()
             logger.info(f"Stored meeting transcript: {title} ({transcript_id}) matter_slug={matter_slug}")
+            # TRANSCRIPT_CURATION_PHASE_1 — emit slice placeholder row for Phase 2 classifier queue.
+            # Non-fatal: placeholder failure does NOT roll back transcript write.
+            try:
+                self.store_transcript_slice_placeholder(
+                    transcript_id=transcript_id,
+                    full_transcript_len=len(full_transcript) if full_transcript else 0,
+                )
+            except Exception as e:
+                logger.warning(f"transcript_slices placeholder hook raised (non-fatal): {e}")
             return True
         except Exception as e:
             conn.rollback()
             logger.error(f"store_meeting_transcript failed: {e}")
+            return False
+        finally:
+            self._put_conn(conn)
+
+    def store_transcript_slice_placeholder(self, transcript_id: str, full_transcript_len: int) -> bool:
+        """Insert ONE placeholder slice row for a freshly-ingested transcript.
+
+        Phase 1 stub: boundary covers whole transcript (0 → full_transcript_len),
+        status='pending_classification', primary_desk=NULL. Phase 2 classifier
+        will either UPDATE this row with real boundaries+desk OR delete + insert
+        multiple sliced rows (TBD in Phase 2 brief).
+
+        Returns True on success, False on failure. NEVER raises — placeholder
+        insert failure must NOT roll back the parent transcript write.
+        """
+        if not transcript_id:
+            return False
+        slice_id = f"{transcript_id}:placeholder"
+        conn = self._get_conn()
+        if not conn:
+            logger.warning("No DB connection — cannot insert transcript_slices placeholder")
+            return False
+        try:
+            cur = conn.cursor()
+            cur.execute("""
+                INSERT INTO transcript_slices
+                    (id, transcript_id, boundary_start, boundary_end, status)
+                VALUES (%s, %s, 0, %s, 'pending_classification')
+                ON CONFLICT (id) DO NOTHING
+            """, (slice_id, transcript_id, max(int(full_transcript_len or 0), 0)))
+            conn.commit()
+            cur.close()
+            return True
+        except Exception as e:
+            conn.rollback()
+            logger.warning(f"transcript_slices placeholder insert failed for {transcript_id}: {e}")
             return False
         finally:
             self._put_conn(conn)
