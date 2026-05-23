@@ -480,3 +480,29 @@ Applies to: AH1 + AH2 `/security-review`, cross-lane review, picker-architect, f
 **Applies to:** WAHA, but also Slack Events API, GitHub webhooks, Render webhooks, Stripe webhooks, Linear webhooks — any push-event integration where the upstream subscription and the downstream handler-guard must agree.
 **Hot-fix:** `triggers/waha_webhook.py:830` now accepts `event_type in ("message", "message.any")` for forward + backward compat. WAHA session config flipped to `["message.any", "session.status"]` 2026-05-20.
 **Anchor:** PR #235 merged `0e08ce5` 2026-05-20; smoke failed; hot-fix commit landed same session; brief author = AH1 (own scar).
+
+### 70. 1Password "Baker API Keys" vault — item titles don't follow `<VARNAME>` convention; field names vary per item (2026-05-23)
+**Mistake:** Ran `scripts/backfill_substack_archive.py --apply` post-PR-#251-merge with the natural-feeling env-source pattern `op read 'op://Baker API Keys/<VARNAME>/credential'` — got 3 `could not get item Baker API Keys/<VARNAME>` errors back-to-back for `VOYAGE_API_KEY`, `QDRANT_URL`, `QDRANT_API_KEY`. Same wall hit earlier in the session on `RENDER_API_KEY`. Burned one foreground run + had to `op item list --vault "Baker API Keys"` to discover the actual item titles. Then ran a second time with corrected paths — script failed deep in the qdrant-client stack with `httpx.LocalProtocolError: Illegal header value` because the JWT pulled from 1P had **trailing whitespace** preserved by `op read` (qdrant_api_key had `Ek  ` with 2 trailing spaces), and `httpx` rejects header values with control/whitespace chars per RFC 9110. Third run with `tr -d '[:space:]'` strip succeeded.
+**Two findings, one lesson:**
+
+1. **1P item title convention is "API <Vendor>" not "<VARNAME>".** And the field name inside the item varies — sometimes `credential` (single secret), sometimes a custom field matching the env-var name (e.g. `API Qdrant` has BOTH `credential` AND `QDRANT_API_KEY` AND `QDRANT_URL` as separate fields). Correct paths observed this session:
+
+   | env var consumed | 1P item title | field name |
+   |---|---|---|
+   | `RENDER_API_KEY` | `API Render` | `credential` |
+   | `VOYAGE_API_KEY` | `API Voyager` | `credential` |
+   | `QDRANT_URL` | `API Qdrant` | `QDRANT_URL` |
+   | `QDRANT_API_KEY` | `API Qdrant` | `QDRANT_API_KEY` |
+   | `SUBSTACK_COOKIE_natesnewsletter` | `SUBSTACK_COOKIE_natesnewsletter` | `credential` |
+
+   The Substack item DOES follow the `<VARNAME>` title convention (because cowork-ah1 created it fresh this session per the `BRIEF_OP_TERMINAL_KEY_CREATE_SCHEMA_GUARD_1` schema we were just standardizing). The vendor API items predate that convention and have not been retitled. **There is no machine-readable manifest in the vault that maps env-var → 1P-item — `Baker — Render env-var map (manifest)` exists as a note but isn't structured for automated `op read`.**
+
+2. **`op read` preserves trailing whitespace from 1P field values.** If anyone ever fat-fingered a key into 1P with a trailing space (or copy-paste from a wrapped UI did it for them), every consumer that uses the value as an HTTP header gets `httpx.LocalProtocolError: Illegal header value` — opaque, deep in the stack, miles from the actual cause. The qdrant-client error path doesn't say "your API key has whitespace" — it just prints the raw bytes with the trailing space at the end. Took ~30s of diff-staring to spot.
+
+**Rules:**
+- **For any new script that sources from "Baker API Keys" vault:** introspect first via `op item list --vault "Baker API Keys" --format json | jq` (or `op item get <title> --vault "Baker API Keys"` to inspect fields) — do NOT assume the item-title-equals-env-var-name pattern. The convention only holds for vault items created in 2026-05 onward (post-Director-ratification 2026-05-22 of the `BRIEF_OP_TERMINAL_KEY_CREATE_SCHEMA_GUARD_1` pattern); pre-existing vendor API items use `API <Vendor>` titles.
+- **Always whitespace-strip `op read` values used as HTTP headers or URL components.** Standard pattern: `VAR="$(op read 'op://...' | tr -d '[:space:]')"`. Apply uniformly even when the secret "looks clean" — a 1P field UI that wraps long values can introduce trailing newlines/spaces on save without visual signal.
+- **Future hygiene candidate:** a `Baker — Render env-var map (manifest)` 1P item already exists as a note. If we extend that to structured (title + 1P-item + field-name + strip-needed bool) per env var, an `~/.local/bin/baker-env-source <varname>` wrapper could replace ad-hoc `op read` everywhere — turns this lesson into infra. Queue as `BRIEF_OP_ENV_SOURCE_WRAPPER_1` if the same scar happens a third time.
+
+**Applies to:** every operator-run script or B-code that sources secrets from the "Baker API Keys" vault. Most acute for scripts that consume API keys as HTTP headers (the failure mode is dropped deep in the client library; surface symptom is unrelated to the actual cause).
+**Anchor:** 2026-05-23 PM2 post-PR-#251-merge backfill — wasted ~2 foreground runs (one on item-title mismatch + one on whitespace-in-JWT) before clean run completed at 20:08:18Z with 558/569 indexed, second idempotent retry catching 10 transient Voyage timeouts → 568/569 final coverage.
