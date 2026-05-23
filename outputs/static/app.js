@@ -563,6 +563,20 @@ function escAttr(str) {
         .replace(/\u00AB/g, '\\x22').replace(/\u00BB/g, '\\x22');   // « »
 }
 
+/** Scheme allowlist for md() link hrefs. esc() runs FIRST (entity-escape) but does NOT
+ *  sanitize URL schemes — `javascript:alert(1)` survives entity-escape and executes on click.
+ *  This is the second layer. Future maintainers must not remove either. */
+function _safeHref(url) {
+    if (!url) return '#';
+    const trimmed = url.trim();
+    if (trimmed.startsWith('#') || trimmed.startsWith('/') || trimmed.startsWith('?')) return trimmed;
+    const schemeMatch = trimmed.match(/^([a-zA-Z][a-zA-Z0-9+\-.]*):/);
+    if (!schemeMatch) return trimmed;
+    const scheme = schemeMatch[1].toLowerCase();
+    if (scheme === 'https' || scheme === 'http' || scheme === 'mailto' || scheme === 'tel') return trimmed;
+    return '#';
+}
+
 /** Markdown-to-HTML converter. ALWAYS calls esc() first, then applies formatting. Safe for innerHTML. */
 function md(text) {
     if (!text) return '';
@@ -596,7 +610,9 @@ function md(text) {
     h = h.replace(/^# (.+)$/gm, '<h1>$1</h1>');
     h = h.replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>');
     h = h.replace(/\*(.+?)\*/g, '<em>$1</em>');
-    h = h.replace(/\[([^\]]+)\]\(([^)]+)\)/g, '<a href="$2" target="_blank" rel="noopener">$1</a>');
+    h = h.replace(/\[([^\]]+)\]\(([^)]+)\)/g, function(match, label, url) {
+        return '<a href="' + _safeHref(url) + '" target="_blank" rel="noopener">' + label + '</a>';
+    });
     // SPECIALIST-THINKING-1: Render citation badges [Source: label]
     h = h.replace(/\[Source: ([^\]]+)\]/g, '<span class="citation" title="$1">$1</span>');
     h = h.replace(/^- (.+)$/gm, '<li>$1</li>');
