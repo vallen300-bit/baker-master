@@ -61,6 +61,38 @@ APPLY_STALENESS_SEC = 24 * 3600
 DESC_TRUNCATE = 80
 
 
+def _check_required_env() -> None:
+    """Fail fast if required envs are missing. Lists all missing in one error.
+
+    Uniform fail-fast: runs on every invocation (dry-run + --apply) — heavy
+    init below (SentinelStoreBack → voyage client + pg pool) raises cryptic
+    errors when envs are absent. AC4(b): same behavior every path.
+    """
+    required: list[str] = []
+    # Voyage client (used in SentinelStoreBack init)
+    if not os.environ.get("VOYAGE_API_KEY"):
+        required.append("VOYAGE_API_KEY")
+    # Postgres: DATABASE_URL takes precedence; otherwise split vars required
+    # (mirrors kbl/db.py _build_dsn() precedence; POSTGRES_PORT optional;
+    # POSTGRES_SSLMODE not consulted by the connect path, so not listed).
+    if not os.environ.get("DATABASE_URL"):
+        for var in ("POSTGRES_HOST", "POSTGRES_DB", "POSTGRES_USER", "POSTGRES_PASSWORD"):
+            if not os.environ.get(var):
+                required.append(var)
+    if required:
+        msg = (
+            "ERROR: missing required environment variables:\n"
+            + "\n".join(f"  - {v}" for v in required)
+            + "\nSet these in your shell or source from 1Password.\n"
+            + "Examples:\n"
+            + "  export VOYAGE_API_KEY=\"$(op read 'op://Baker API Keys/VOYAGE_API_KEY/credential')\"\n"
+            + "  # ... etc\n"
+            + "Exiting (no init was performed)."
+        )
+        print(msg, file=sys.stderr)
+        sys.exit(2)
+
+
 def _query_null_matter_slug() -> list[tuple]:
     """SELECT active/pending_confirm deadlines with NULL matter_slug.
 
@@ -532,6 +564,7 @@ def _build_arg_parser() -> argparse.ArgumentParser:
 
 
 def main(argv: Optional[list[str]] = None) -> int:
+    _check_required_env()  # FAIL FAST before any heavy init
     args = _build_arg_parser().parse_args(argv)
 
     # DEADLINE_SIGNAL_HYGIENE_1 Scope C path — separate from main backfill.
