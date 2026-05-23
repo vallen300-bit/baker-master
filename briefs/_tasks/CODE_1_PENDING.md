@@ -1,84 +1,78 @@
 ---
 status: pending
-brief: briefs/BRIEF_BAKER_VIP_MCP_EXPOSE_PROVENANCE_FIELDS_1.md
-brief_id: BAKER_VIP_MCP_EXPOSE_PROVENANCE_FIELDS_1
+brief: briefs/BRIEF_FAST_FOLLOW_NITS_BATCH_1.md
+brief_id: FAST_FOLLOW_NITS_BATCH_1
 target_repo: baker-master
 working_dir: /Users/dimitry/bm-b1
-working_branch: b1/baker-vip-mcp-expose-provenance-fields-1
+working_branch: b1/fast-follow-nits-batch-1
 dispatched_by: lead
-dispatched_at: 2026-05-23T13:55:00Z
-estimated_time: 1-2h
+dispatched_at: 2026-05-23T14:35:00Z
+estimated_time: 30-45min
 complexity: low
 tier: B
 ratified_by: Director
-ratified_at: 2026-05-23 chat (§X-26)
+ratified_at: 2026-05-23 chat ("Bundle five small lingering needs")
 ---
 
-# CODE_1_PENDING — BAKER_VIP_MCP_EXPOSE_PROVENANCE_FIELDS_1 — 2026-05-23
+# CODE_1_PENDING — FAST_FOLLOW_NITS_BATCH_1 — 2026-05-23
 
-**Brief:** `briefs/BRIEF_BAKER_VIP_MCP_EXPOSE_PROVENANCE_FIELDS_1.md`
-**Working branch:** `b1/baker-vip-mcp-expose-provenance-fields-1`
+**Brief:** `briefs/BRIEF_FAST_FOLLOW_NITS_BATCH_1.md` (commit `f9091cd`)
+**Working branch:** `b1/fast-follow-nits-batch-1`
 **Working dir:** `~/bm-b1`
 **Dispatched by:** `lead` (AH1-Terminal)
-**Dispatched at:** 2026-05-23T13:55Z
-**Estimated time:** ~1-2h
+**Dispatched at:** 2026-05-23T14:35Z
+**Estimated time:** ~30-45 min
 **Complexity:** Low
-**Tier:** B (Director-ratified §X-26 2026-05-23 chat)
+**Tier:** B (Director-ratified 2026-05-23 chat)
 
-Previous SUBSTACK_NATE_INGEST_1 dispatch → PR #248 merged eeca2e0 at 2026-05-23T13:53:27Z. Gate chain cleared, 3 nits captured to §X fast-follow (NOT this brief).
+Previous BAKER_VIP_MCP_EXPOSE_PROVENANCE_FIELDS_1 dispatch → PR #249 merged 00458e1 at 14:27:56Z. Gate chain cleared, no fast-follows from that one. Now bundle 6 outstanding nits from PR #248 + PR #246.
 
 ## Pre-requisites
 
-- `git pull --rebase origin main` already done on `~/bm-b1` (you're at eeca2e0 — SUBSTACK merged + this brief committed at ee9c5e7).
+- `git pull --rebase origin main` on `~/bm-b1` (you're at f9091cd — PR #249 merged + this brief committed).
 - No env vars beyond what your current bm-b1 picker already has.
-- `vip_contacts` table has `linkedin_url` (TEXT) + `source_of_introduction` (TEXT) columns (verified at `memory/store_back.py:2376/2383`).
+- `node --check` for JS syntax check optional (manual visual scan acceptable if node not available).
 
-## Acceptance criteria (testable)
+## Summary of 6 fixes (read brief for full detail)
 
-Per the brief's full §AC list — read the full brief, not just this mailbox. Highlights:
+1. **Fix 1 MEDIUM:** `triggers/substack_ingest.py:228` — `subject!r` → `json.dumps(subject)`. Mixed-quote subjects produce YAML-invalid frontmatter. Add `import json`.
+2. **Fix 2 LOW:** `tests/test_substack_ingest.py` — add `test_ingest_handles_mixed_quote_subject` with `yaml.safe_load` round-trip assertion.
+3. **Fix 3 LOW:** `scripts/backfill_nate_substack.py:73-77` — lift `_h()` helper out of loop to module scope.
+4. **Fix 4 LOW:** `outputs/static/app.js:590` + `outputs/static/mobile.js:262` — narrow `catch (e) { break; }` to `catch (e) { if (!(e instanceof URIError)) throw e; break; }`.
+5. **Fix 5 LOW:** `tests/test_md_scheme_allowlist.py` — add `[triple](///evil.com)` to `REJECT_CASES`.
+6. **Fix 6 LOW:** `outputs/static/{app.js,mobile.js}` add `if (!trimmed) return '#';` fast-path; tighten `test_functional_empty_and_whitespace_input` to assert `out === '#'` for whitespace variants.
 
-1. `baker_mcp/baker_mcp_server.py:259` tool description rewritten to enumerate the returned provenance fields (`linkedin_url`, `source_of_introduction`).
-2. `baker_mcp/baker_mcp_server.py:263` input schema `search` param description rewritten to list the additional searchable fields.
-3. `baker_mcp/baker_mcp_server.py:1397` SQL WHERE clause extended: `OR linkedin_url ILIKE %s OR source_of_introduction ILIKE %s` (plus the matching param tuple).
-4. 4 static-source tests in `tests/test_baker_mcp_vip_search.py`:
-   - description text contains "linkedin_url" + "source_of_introduction"
-   - input schema search-param description names the additional fields
-   - SQL WHERE clause string contains the two new ILIKE clauses
-   - param-tuple length matches the WHERE-clause `%s` count
-5. `bash scripts/check_singletons.sh` clean.
-6. Syntax check: `python3 -c "import py_compile; py_compile.compile('baker_mcp/baker_mcp_server.py', doraise=True); print('OK')"`.
+## Pre-verify (grep before edit — surface in ship report if any fails)
 
-## Pre-verify (grep-verify before commit)
-
-Per the brief — verify before editing:
-
-1. `grep -n "name=\"baker_vip_contacts\"" baker_mcp/baker_mcp_server.py` — confirm line ~258 hasn't shifted.
-2. `grep -n "WHERE name ILIKE" baker_mcp/baker_mcp_server.py` — confirm line ~1397 hasn't shifted.
-3. `grep -n "ADD COLUMN IF NOT EXISTS linkedin_url\|ADD COLUMN IF NOT EXISTS source_of_introduction" memory/store_back.py` — confirm columns exist.
+1. `grep -n "subject!r" triggers/substack_ingest.py`
+2. `grep -n "def _h(name" scripts/backfill_nate_substack.py`
+3. `grep -n "catch (e) { break; }" outputs/static/app.js outputs/static/mobile.js`
+4. `grep -n "REJECT_CASES" tests/test_md_scheme_allowlist.py`
+5. `grep -n "test_functional_empty_and_whitespace_input" tests/test_md_scheme_allowlist.py`
 
 ## Ship gate
 
-- Literal `pytest tests/test_baker_mcp_vip_search.py -v` output in ship report. Paste in PR description. No "by inspection."
-- Syntax check both modified files.
-- `bash scripts/check_singletons.sh` clean.
+- Literal `pytest tests/test_substack_ingest.py tests/test_md_scheme_allowlist.py -v` output in ship report.
+- Syntax check Python files + `bash scripts/check_singletons.sh` clean.
+- JS files: `node --check` or visual scan of edit context.
 
 ## Reporting
 
-- Ship PR against baker-master `main` from branch `b1/baker-vip-mcp-expose-provenance-fields-1`.
-- **Bus-post `lead` on PR open** with topic `ship/baker-vip-mcp-expose-provenance-fields-1` (`dispatched_by: lead` ⇒ ship-report to `lead`).
-- Gate chain on PR open per brief: Gate-1 (AH1 static) + Gate-2 (`/security-review` — SQL change touches DB read; safe but skill fires).
-  - Gate-3 (picker-architect) skipped — no UI surface.
-  - Gate-4 (code-reviewer 2nd-pass) skipped — internal MCP tool surface, no Director-facing endpoint, no external auth surface, no DB schema migration. If you disagree, surface in ship report.
+- Ship PR against baker-master `main` from branch `b1/fast-follow-nits-batch-1`.
+- **Bus-post `lead` on PR open** with topic `ship/fast-follow-nits-batch-1` (`dispatched_by: lead` ⇒ ship-report to `lead`).
+- Gate chain on PR open: Gate-1 (AH1 static) + Gate-2 (`/security-review` — touches `_safeHref` XSS-defense code) + Gate-4 (`feature-dev:code-reviewer` 2nd-pass — fires per Protocol trigger 1, `_safeHref` is the URL-scheme allowlist).
+- Gate-3 (picker-architect) SKIPPED — no new UI / panel / modal; pure hardening on existing code.
 
 ## Out of scope (Do NOT touch)
 
-- `vip_contacts` schema (columns already exist — no ALTER TABLE)
-- `baker_upsert_vip` tool (separate symmetry brief if needed; not this one)
-- Other MCP tool surfaces (deadlines / matters / scan / etc.)
-- Dashboard surfaces (no UI for v1)
-- Migration files (no DB change)
-- `outputs/dashboard.py`
+- `_format_results` formatter (unchanged)
+- `_should_skip_pipeline` (unchanged)
+- New tests beyond the 4 specified additions
+- Migration files
+- Other Substack senders / other markdown contexts
+- `outputs/dashboard.py` route handlers
+- `baker_mcp_server.py`
 
 ## Anchor
 
-§X-26 — Director-ratified 2026-05-23 chat. Surfaced by cowork-ah1 on bus #732 (Phase 3 researcher live-test finding). Brief authored 2026-05-23 by `lead` (ee9c5e7).
+Director-ratified 2026-05-23 chat ("Bundle five small lingering needs"; bundle expanded to 6 for accuracy — 3 from PR #248 + 3 from PR #246). Brief authored 2026-05-23 ~14:35Z by `lead` (f9091cd baker-master).
