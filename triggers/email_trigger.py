@@ -973,8 +973,50 @@ def _process_email_threads(new_threads: list):
         except Exception as _e:
             logger.warning(f"MEETINGS-DETECT-2: email meeting detection failed (non-fatal): {_e}")
 
-        # COST-OPT-WAVE2: Skip pipeline for automated/newsletter senders
+        # SUBSTACK_NATE_INGEST_1: detect Nate Substack posts, ingest to AID-T
+        # vault BEFORE skip-pipeline routing. format_thread() strips raw
+        # payload/headers, so use sender substring as cheap pre-filter then
+        # round-trip to Gmail for headers + HTML body. Failures are swallowed
+        # — must NOT block other emails. Storage + skip-pipeline still happen
+        # via the existing _should_skip_pipeline path below.
         _sender_email = metadata.get("primary_sender_email", "")
+        try:
+            from triggers.substack_ingest import (
+                is_substack_nate,
+                is_substack_nate_sender,
+                fetch_full_message,
+                ingest as substack_ingest_run,
+            )
+            if is_substack_nate_sender(_sender_email):
+                _sub_msg_id = metadata.get("message_id") or thread_id
+                _sub_full = fetch_full_message(_sub_msg_id)
+                if _sub_full:
+                    _sub_payload = _sub_full.get("payload", {}) or {}
+                    _sub_headers = _sub_payload.get("headers", []) or []
+                    if is_substack_nate(_sub_headers, _sender_email):
+                        _sub_rdate_raw = metadata.get("received_date") or ""
+                        try:
+                            _sub_rdate = (
+                                datetime.fromisoformat(_sub_rdate_raw)
+                                if _sub_rdate_raw and _sub_rdate_raw != "unknown"
+                                else datetime.now(timezone.utc)
+                            )
+                        except (ValueError, TypeError):
+                            _sub_rdate = datetime.now(timezone.utc)
+                        if _sub_rdate.tzinfo is None:
+                            _sub_rdate = _sub_rdate.replace(tzinfo=timezone.utc)
+                        substack_ingest_run(
+                            gmail_message_id=_sub_msg_id,
+                            headers=_sub_headers,
+                            sender_email=_sender_email,
+                            subject=metadata.get("subject", ""),
+                            received_date=_sub_rdate,
+                            raw_payload=_sub_payload,
+                        )
+        except Exception:
+            logger.exception("substack_ingest unexpected error; continuing")
+
+        # COST-OPT-WAVE2: Skip pipeline for automated/newsletter senders
         if _should_skip_pipeline(_sender_email, thread.get("text", "")):
             logger.info(f"Email trigger: skipping pipeline for automated sender {_sender_email} (thread {thread_id})")
             skipped += 1
