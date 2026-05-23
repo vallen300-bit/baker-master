@@ -1,72 +1,75 @@
 ---
-status: complete
-brief: briefs/BRIEF_BRISEN_LAB_DESK_CARD_VISUAL_DIFFERENTIATION_1.md
-brief_id: BRISEN_LAB_DESK_CARD_VISUAL_DIFFERENTIATION_1
-target_repo: brisen-lab
+status: PENDING
+brief: briefs/BRIEF_TRANSCRIPT_CURATION_PHASE_1.md
+brief_id: TRANSCRIPT_CURATION_PHASE_1
+target_repo: baker-master
 matter_slug: baker-internal
-dispatched_at: 2026-05-22T17:05:00Z
+dispatched_at: 2026-05-23T17:35:00Z
 dispatched_by: lead
 target: b2
-working_branch: b2/brisen-lab-desk-card-visual-1
-working_dir: ~/bm-b2-brisen-lab
+working_branch: b2/transcript-curation-phase-1
+working_dir: ~/bm-b2
 reply_to: lead
-deadline: 2026-05-23T17:00:00Z
 priority: tier-b
-shipped_at: 2026-05-22T17:00:13Z
-pr: https://github.com/vallen300-bit/brisen-lab/pull/31
-completion_report: briefs/_reports/B2_brisen_lab_desk_card_visual_20260522.md
-director_auth: 2026-05-22 chat — "go" on §X batch-ratification (Group A item 22)
-prior_mailbox_state: superseded — previous CODE_2_PENDING.md was WAHA_OUTBOUND_CAPTURE_1 COMPLETE (PR #235 shipped 2026-05-21T07:30:00Z). b2 idle since.
+estimated_time: 4-5h
+trigger_class: MEDIUM
 gate_chain:
-  gate_1_static: REQUIRED (AH1 fires feature-dev:code-reviewer)
-  gate_2_security_review: SKIPPABLE — pure CSS in brisen-lab; AH1 judgment
-  gate_3_cross_lane_architecture: REQUIRED (picker-architect — UI visual change on Director-facing surface)
-  gate_4_2nd_pass_code_reviewer: SKIPPABLE — does not trigger criteria 1-7 (CSS-only, no auth / no DB / no concurrency / no external surface / not >2-week brief / not multi-repo). AH1 may fire anyway if visual judgment requires second eye.
-estimated_effort: 30-45 min (read brief + CSS + screenshot)
-ui_surface_prebrief: completed at brief authoring time (brief §Surface contract block satisfies)
+  gate_1_architecture_review: REQUIRED (AH2 runs architecture-review)
+  gate_2_code_reviewer: REQUIRED (AH2 runs feature-dev:code-reviewer)
+  gate_3_security_review: REQUIRED (additive Postgres schema; NO_FINDINGS expected)
+  gate_4_ah1_final: REQUIRED (AH1 final merge)
+prior_mailbox_state: superseded — previous CODE_2_PENDING.md was BRISEN_LAB_DESK_CARD_VISUAL_DIFFERENTIATION_1 COMPLETE (PR #31 brisen-lab, shipped 2026-05-22T17:00:13Z). b2 idle since.
+ui_surface_prebrief: brief §Surface contract = N/A (pure backend) — gate satisfied
 ---
 
-# CODE_2_PENDING — BRISEN_LAB_DESK_CARD_VISUAL_DIFFERENTIATION_1 — 2026-05-22
+# CODE_2_PENDING — TRANSCRIPT_CURATION_PHASE_1 — 2026-05-23
 
-**Brief:** `briefs/BRIEF_BRISEN_LAB_DESK_CARD_VISUAL_DIFFERENTIATION_1.md` (commit `d1412bb` on main, PR #243 merged)
-**Working branch:** `b2/brisen-lab-desk-card-visual-1` (off origin/main in brisen-lab repo)
-**Target repo:** `brisen-lab` (NOT baker-master). Clone at `~/bm-b2-brisen-lab/`.
-**Pre-requisites:** none.
+**Brief:** `briefs/BRIEF_TRANSCRIPT_CURATION_PHASE_1.md`
+**Working branch:** `b2/transcript-curation-phase-1` (off origin/main in baker-master)
+**Target repo:** `baker-master` (clone at `~/bm-b2`)
+**Pre-requisites:** none
 
 ## Bottom line
 
-CSS-only ~15 LOC change in `brisen-lab/static/styles.css`. Add `.card-desk` rules so desk cards (hag-desk, researcher) visibly differ from worker cards (b1-b4) while preserving the left-edge status indicator. Director ratified Option A-revised 2026-05-22 afternoon.
+Phase 1 of 4-phase TRANSCRIPT_CURATION sequence (Director-ratified split 2026-05-23 evening). Slice-level data layer in Postgres only — no slicing, no LLM, no vault writes. Stand up `transcript_slices` table with E1 extended schema + non-fatal placeholder write hook at end of `store_meeting_transcript()`. Trigger files untouched.
 
 ## Pre-flight (mandatory before edit)
 
-1. `cd ~/bm-b2-brisen-lab && git fetch origin main` — sync.
-2. Check current local state: `git status -sb`. If on a stale branch (e.g. `b2/brisen-lab-sse-daemon-last-seen-fix-1`), `git checkout main && git pull --ff-only origin main`. Discard or stash any uncommitted file local changes before checkout.
-3. `git checkout -b b2/brisen-lab-desk-card-visual-1`
+1. `cd ~/bm-b2 && git fetch origin main` — sync.
+2. `git status -sb`. If dirty, stash + recovery-branch. If on stale branch, `git checkout main && git pull --ff-only origin main`.
+3. `git checkout -b b2/transcript-curation-phase-1`
 
-## Implementation
+## Scope (3 features per brief)
 
-Read the full brief at `~/bm-b2/briefs/BRIEF_BRISEN_LAB_DESK_CARD_VISUAL_DIFFERENTIATION_1.md` for full spec.
+1. **NEW** `migrations/20260524_transcript_slices.sql` — table + 3 indexes
+2. **NEW** `_ensure_transcript_slices_table()` + `store_transcript_slice_placeholder()` in `memory/store_back.py` (place after existing `_ensure_meeting_transcripts_table` and `store_meeting_transcript`); 5-line non-fatal hook at end of `store_meeting_transcript()` success path
+3. **NEW** `tests/test_transcript_slices_placeholder.py` (4 tests)
 
-Patch summary: add new `.card-desk` block immediately after the `data-card-state` rules in `brisen-lab/static/styles.css` (currently lines 233-254). Recommended block:
+## Hard constraints
 
-```css
-/* Desk cards (hag-desk, researcher, future AO/MOVIE/BB) — visual differentiation */
-.card-desk {
-  border-top: 4px solid var(--desk-accent, #5a7a5a);
-  background: color-mix(in srgb, var(--panel) 95%, var(--desk-accent, #5a7a5a) 5%);
-}
-```
+- **No "by inspection"** — every AC needs literal pytest output pasted verbatim
+- **Migration-vs-bootstrap drift (Lesson #7):** bootstrap CREATE TABLE byte-equivalent to migration; verify with `diff` command in brief §"Key Constraints" Feature 1
+- **Trigger files (`fireflies_trigger.py`, `plaud_trigger.py`, `youtube_ingest.py`) MUST stay untouched** — single-source-of-truth hook in `store_meeting_transcript`
+- **Placeholder write failure must be non-fatal** — parent transcript write commits regardless (tested explicitly in test #4)
+- **`conn.rollback()` in every except block** (Lesson: PostgreSQL pool poisoning)
+- **Use `SentinelStoreBack._get_global_instance()` (classmethod) — NOT module-level import** — `_get_global_instance` is a classmethod at `memory/store_back.py:114`
+- **Every SQL query has a LIMIT** (Lesson: unbounded queries)
 
-You may pick a different muted-sage / warm-beige accent if WCAG AA contrast on `var(--text)` is tighter with another value. Document the choice in the PR description.
+## Acceptance criteria (AC1-AC6 per brief)
 
-## Acceptance criteria
-
-Per brief §Acceptance criteria — AC1 (top-edge accent) + AC2 (soft tint) + AC3 (left edge preserved) + AC4 (hover preserved) + AC5 (visual smoke screenshot) + AC6 (no JS / no HTML / no Python diff).
+- **AC1** — migration file with exact SQL; runs clean on fresh DB
+- **AC2** — production verification SQL: `transcript_slices` has 22 columns + 3 named indexes + PK
+- **AC3** — `pytest tests/test_transcript_slices_placeholder.py -v` produces literal pass output (4 passed or 4 skipped); paste output verbatim in ship report
+- **AC4** — `pytest` full suite passes; paste tail of output in ship report
+- **AC5** — `bash scripts/check_singletons.sh` exits 0
+- **AC6** — post-deploy 24h placeholder/transcript count 1:1 — AH1 Tier-B smoke (out-of-scope for ship report; ship on AC1-AC5)
 
 ## Ship gate
 
-- Literal `pytest` green in brisen-lab repo (verify no test regression — CSS-only diff should not affect any test).
-- Screenshot in PR description showing hag-desk card + researcher card vs b1-b4 cards side-by-side on the live or local-preview brisen-lab UI.
+- Literal `pytest` green in baker-master (full suite + new tests)
+- `bash scripts/check_singletons.sh` exit 0
+- `python3 -c "import py_compile; py_compile.compile('memory/store_back.py', doraise=True)"` clean
+- Migration diff vs bootstrap function: byte-equivalent (run diff command in brief)
 
 ## Reporting (bus reply-to-sender)
 
@@ -74,12 +77,19 @@ On PR open, bus-post `lead` per `dispatched_by`:
 
 ```bash
 BAKER_ROLE=b2 ~/bm-b2/scripts/bus_post.sh lead \
-  "ship/brisen-lab-desk-card-visual-1 — PR #<N> open in brisen-lab; CSS-only +<X> LOC; screenshot in PR; awaiting AH1+architect gate chain (gates 1+3 required; 2+4 skippable per mailbox)." \
-  ship/brisen-lab-desk-card-visual-1
+  "ship/transcript-curation-phase-1 — PR #<N> open in baker-master; +X LOC backend; AC1-AC5 verified literal pytest; awaiting AH2 gate chain (gates 1+2+3) then AH1 merge." \
+  ship/transcript-curation-phase-1
 ```
 
-`lead` (AH1-Terminal) handles gate orchestration + merge sequence.
+`lead` (AH1-T) handles gate orchestration + merge sequence (AH2 runs gates 1+2+3, AH1 merges on AH2 PASS).
+
+## References
+
+- Brief: `briefs/BRIEF_TRANSCRIPT_CURATION_PHASE_1.md`
+- Canonical pattern: `~/baker-vault/_ops/processes/transcript-curation-architecture-v1.md` §1 + §11
+- AH2 inheritance dispatch: bus #771
+- Phase split anchor: Director ratification 2026-05-23 evening (Phase 1 only tonight)
 
 ## Heartbeat cadence (per §B-code stall chase — Director-ratified 2026-05-05)
 
-Minimum every 12h while actively building. Two consecutive 12h misses → `lead` auto-surfaces stall to Director. Given the ~30-45 min scope here, expect single completion event, not multiple heartbeats.
+Minimum every 12h while actively building. Two consecutive 12h misses → `lead` auto-surfaces stall to Director. Given ~4-5h scope, expect 1-2 heartbeats max.
