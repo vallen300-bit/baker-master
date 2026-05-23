@@ -1,5 +1,11 @@
 ---
-status: PENDING
+status: COMPLETE
+pr: 252
+pr_url: https://github.com/vallen300-bit/baker-master/pull/252
+shipped_at: 2026-05-23T18:00:02Z
+report: briefs/_reports/B2_TRANSCRIPT_CURATION_PHASE_1_20260523.md
+bus_ship_id: 785
+bus_dispatch_acked: 782
 brief: briefs/BRIEF_TRANSCRIPT_CURATION_PHASE_1.md
 brief_id: TRANSCRIPT_CURATION_PHASE_1
 target_repo: baker-master
