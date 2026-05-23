@@ -1,5 +1,5 @@
 ---
-status: pending
+status: COMPLETE
 brief: briefs/BRIEF_FAST_FOLLOW_NITS_BATCH_1.md
 brief_id: FAST_FOLLOW_NITS_BATCH_1
 target_repo: baker-master
@@ -12,6 +12,10 @@ complexity: low
 tier: B
 ratified_by: Director
 ratified_at: 2026-05-23 chat ("Bundle five small lingering needs")
+shipped_pr: https://github.com/vallen300-bit/baker-master/pull/250
+merged_at: 2026-05-23T15:40:22Z
+merge_commit: b1421d829b46e436b216aa739203f8519eb8f57d
+report: briefs/_reports/B1_fast_follow_nits_batch_1_20260523.md
 ---
 
 # CODE_1_PENDING — FAST_FOLLOW_NITS_BATCH_1 — 2026-05-23
