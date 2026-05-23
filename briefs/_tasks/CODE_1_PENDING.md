@@ -1,72 +1,84 @@
 ---
 status: pending
-brief: briefs/BRIEF_SUBSTACK_NATE_INGEST_1.md
-brief_id: SUBSTACK_NATE_INGEST_1
+brief: briefs/BRIEF_BAKER_VIP_MCP_EXPOSE_PROVENANCE_FIELDS_1.md
+brief_id: BAKER_VIP_MCP_EXPOSE_PROVENANCE_FIELDS_1
 target_repo: baker-master
-matter_slug: baker-internal
-dispatched_at: 2026-05-23T13:20:00Z
+working_dir: /Users/dimitry/bm-b1
+working_branch: b1/baker-vip-mcp-expose-provenance-fields-1
 dispatched_by: lead
-target: b1
-working_branch: b1/substack-nate-ingest-1
-reply_to: lead
-deadline: 2026-05-25T18:00:00Z
-priority: tier-b
+dispatched_at: 2026-05-23T13:55:00Z
+estimated_time: 1-2h
+complexity: low
+tier: B
+ratified_by: Director
+ratified_at: 2026-05-23 chat (§X-26)
 ---
 
-# CODE_1_PENDING — SUBSTACK_NATE_INGEST_1 — 2026-05-23
+# CODE_1_PENDING — BAKER_VIP_MCP_EXPOSE_PROVENANCE_FIELDS_1 — 2026-05-23
 
-**Brief:** `briefs/BRIEF_SUBSTACK_NATE_INGEST_1.md` (committed to baker-master `main` @ `bf9e739`; pull before reading)
-**Working branch:** `b1/substack-nate-ingest-1` (cut from baker-master `main`)
-**Repo:** baker-master + `~/.claude/skills/aidennis-edge-scout/SKILL.md` (host-side skill edit, not committed)
-**Pre-requisites:** none — brief is self-contained.
+**Brief:** `briefs/BRIEF_BAKER_VIP_MCP_EXPOSE_PROVENANCE_FIELDS_1.md`
+**Working branch:** `b1/baker-vip-mcp-expose-provenance-fields-1`
+**Working dir:** `~/bm-b1`
+**Dispatched by:** `lead` (AH1-Terminal)
+**Dispatched at:** 2026-05-23T13:55Z
+**Estimated time:** ~1-2h
+**Complexity:** Low
+**Tier:** B (Director-ratified §X-26 2026-05-23 chat)
 
-## Bottom line
+Previous SUBSTACK_NATE_INGEST_1 dispatch → PR #248 merged eeca2e0 at 2026-05-23T13:53:27Z. Gate chain cleared, 3 nits captured to §X fast-follow (NOT this brief).
 
-Auto-ingest Nate's Substack posts from brisengroup Gmail into AID-T library, feed into existing aidennis-edge-scout Sunday digest. Director-ratified 2026-05-23: Q1 = Nate-only first, Q2 = markdown-only v1. ~3-4h. External-surface PR (Gmail trigger touch) — gate-4 code-reviewer 2nd-pass FIRES.
+## Pre-requisites
 
-Previous mailbox BACKFILL_SCRIPT_ENV_PREFLIGHT_1 shipped — baker-master PR #247 squash-merged `440bac7` 2026-05-23 13:17Z.
+- `git pull --rebase origin main` already done on `~/bm-b1` (you're at eeca2e0 — SUBSTACK merged + this brief committed at ee9c5e7).
+- No env vars beyond what your current bm-b1 picker already has.
+- `vip_contacts` table has `linkedin_url` (TEXT) + `source_of_introduction` (TEXT) columns (verified at `memory/store_back.py:2376/2383`).
 
-## Acceptance criteria (full list — brief Quality Checkpoints 1-13)
+## Acceptance criteria (testable)
 
-See `briefs/BRIEF_SUBSTACK_NATE_INGEST_1.md` Quality Checkpoints section. Summary:
+Per the brief's full §AC list — read the full brief, not just this mailbox. Highlights:
 
-- New file `triggers/substack_ingest.py` with `is_substack_nate`, `ingest`, helpers
-- `triggers/email_trigger.py` insert detector ABOVE existing `_should_skip_pipeline()` at line 978; add import at top
-- `requirements.txt` add `html2text>=2024.2.26`
-- New file `scripts/backfill_nate_substack.py` (30-day idempotent backfill — AH1 runs post-merge, NOT B-code)
-- New file `tests/test_substack_ingest.py` (10 pytest tests minimum)
-- Edit `~/.claude/skills/aidennis-edge-scout/SKILL.md` — 5th source row + 1 invocation-prompt sentence
-- Substack ingest failures must NOT propagate (caller continues processing other emails)
-- Idempotency: filename-derived (date + slug); re-running backfill is no-op
-- sentinel_health integration (report_success + report_failure on source="substack_ingest")
-- BAKER_VAULT_DISABLE_PUSH=false unchanged
-- store.store_email_message() still called for Substack (Postgres searchability preserved)
-- No external auto-sends; no DB migrations
+1. `baker_mcp/baker_mcp_server.py:259` tool description rewritten to enumerate the returned provenance fields (`linkedin_url`, `source_of_introduction`).
+2. `baker_mcp/baker_mcp_server.py:263` input schema `search` param description rewritten to list the additional searchable fields.
+3. `baker_mcp/baker_mcp_server.py:1397` SQL WHERE clause extended: `OR linkedin_url ILIKE %s OR source_of_introduction ILIKE %s` (plus the matching param tuple).
+4. 4 static-source tests in `tests/test_baker_mcp_vip_search.py`:
+   - description text contains "linkedin_url" + "source_of_introduction"
+   - input schema search-param description names the additional fields
+   - SQL WHERE clause string contains the two new ILIKE clauses
+   - param-tuple length matches the WHERE-clause `%s` count
+5. `bash scripts/check_singletons.sh` clean.
+6. Syntax check: `python3 -c "import py_compile; py_compile.compile('baker_mcp/baker_mcp_server.py', doraise=True); print('OK')"`.
+
+## Pre-verify (grep-verify before commit)
+
+Per the brief — verify before editing:
+
+1. `grep -n "name=\"baker_vip_contacts\"" baker_mcp/baker_mcp_server.py` — confirm line ~258 hasn't shifted.
+2. `grep -n "WHERE name ILIKE" baker_mcp/baker_mcp_server.py` — confirm line ~1397 hasn't shifted.
+3. `grep -n "ADD COLUMN IF NOT EXISTS linkedin_url\|ADD COLUMN IF NOT EXISTS source_of_introduction" memory/store_back.py` — confirm columns exist.
 
 ## Ship gate
 
-- Literal `pytest tests/test_substack_ingest.py -v` output in ship report. Paste in PR description. No "by inspection."
-- Syntax check all 3 modified Python files: `python3 -c "import py_compile; py_compile.compile('triggers/substack_ingest.py', doraise=True); py_compile.compile('scripts/backfill_nate_substack.py', doraise=True); py_compile.compile('triggers/email_trigger.py', doraise=True)"`
-- `bash scripts/check_singletons.sh` clear.
+- Literal `pytest tests/test_baker_mcp_vip_search.py -v` output in ship report. Paste in PR description. No "by inspection."
+- Syntax check both modified files.
+- `bash scripts/check_singletons.sh` clean.
 
 ## Reporting
 
-- Ship PR against baker-master `main` from branch `b1/substack-nate-ingest-1`.
-- **Bus-post `lead` on PR open** with topic `ship/substack-nate-ingest-1` (`dispatched_by: lead` ⇒ ship-report to `lead`).
-- Gate chain on PR open: AH1 static + `/security-review` (FIRES per §Security Review Protocol — touches Gmail external-surface) + feature-dev:code-reviewer 2nd-pass (FIRES per §Code-reviewer 2nd-pass Protocol trigger 4 — external-surface endpoints).
+- Ship PR against baker-master `main` from branch `b1/baker-vip-mcp-expose-provenance-fields-1`.
+- **Bus-post `lead` on PR open** with topic `ship/baker-vip-mcp-expose-provenance-fields-1` (`dispatched_by: lead` ⇒ ship-report to `lead`).
+- Gate chain on PR open per brief: Gate-1 (AH1 static) + Gate-2 (`/security-review` — SQL change touches DB read; safe but skill fires).
+  - Gate-3 (picker-architect) skipped — no UI surface.
+  - Gate-4 (code-reviewer 2nd-pass) skipped — internal MCP tool surface, no Director-facing endpoint, no external auth surface, no DB schema migration. If you disagree, surface in ship report.
 
 ## Out of scope (Do NOT touch)
 
-- `_SKIP_PIPELINE_SENDERS` blocklist — additive routing only, no removal
-- `memory/store_back.py` — signature unchanged
-- Other Substacks (Faster Please, Lenny, Product Growth) — out of scope per Q1 lock
-- Qdrant / embedding pipeline — out of scope per Q2 lock
-- `tasks/lessons.md` — append-only, separate brief
-- `baker-vault/slugs.yml` — separate-repo PR only
-- `outputs/dashboard.py` — no dashboard surface for v1
-- Cortex pipeline / cortex_runner.py — Substack content not a matter, no matter_slug
+- `vip_contacts` schema (columns already exist — no ALTER TABLE)
+- `baker_upsert_vip` tool (separate symmetry brief if needed; not this one)
+- Other MCP tool surfaces (deadlines / matters / scan / etc.)
+- Dashboard surfaces (no UI for v1)
+- Migration files (no DB change)
+- `outputs/dashboard.py`
 
-## Important verification points
+## Anchor
 
-- Pre-commit grep-verify `thread` dict field names at `email_trigger.py:978` insertion site (brief Step 2 flagged: `headers` / `payload_headers` / `payload` / `message_id` / `received_date` are best-guesses).
-- Pre-commit grep-verify `_build_gmail_service` helper exists in `scripts/extract_gmail.py` (brief Step 4 flagged: may have different name; use whatever exists, do NOT invent).
+§X-26 — Director-ratified 2026-05-23 chat. Surfaced by cowork-ah1 on bus #732 (Phase 3 researcher live-test finding). Brief authored 2026-05-23 by `lead` (ee9c5e7).
