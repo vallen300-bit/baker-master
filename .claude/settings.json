@@ -17,6 +17,11 @@
         "hooks": [
           {
             "type": "command",
+            "command": ".claude/hooks/ui-surface-prebrief-check.sh",
+            "timeout": 10
+          },
+          {
+            "type": "command",
             "command": ".claude/hooks/write_brief_sop_enforcer.sh",
             "timeout": 10
           }
