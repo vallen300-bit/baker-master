@@ -506,3 +506,47 @@ Applies to: AH1 + AH2 `/security-review`, cross-lane review, picker-architect, f
 
 **Applies to:** every operator-run script or B-code that sources secrets from the "Baker API Keys" vault. Most acute for scripts that consume API keys as HTTP headers (the failure mode is dropped deep in the client library; surface symptom is unrelated to the actual cause).
 **Anchor:** 2026-05-23 PM2 post-PR-#251-merge backfill — wasted ~2 foreground runs (one on item-title mismatch + one on whitespace-in-JWT) before clean run completed at 20:08:18Z with 558/569 indexed, second idempotent retry catching 10 transient Voyage timeouts → 568/569 final coverage.
+
+### Two-layer harness enforcement for mandatory SOPs (WRITE_BRIEF_SOP_ENFORCER_HOOK_1, 2026-05-24)
+
+When a memory/skill mandate keeps getting forgotten, single-point enforcement
+isn't enough. Pattern parallels render_env_guard.py (Layer 2 wrapper) +
+.githooks/pre-commit Part 4 (Layer 3 audit):
+
+- **Layer 2 (in-session):** PreToolUse hook blocks at the tool-call boundary.
+  Bypass via env var (friction-free, stderr-logged for audit).
+- **Layer 3 (git-time):** pre-commit hook scans staged content. Bypass via
+  commit-msg trailer (audit-permanent in git log) OR env var for `-m`/`-F`.
+
+Belt-and-braces. Layer 2 catches the Claude-Code path; Layer 3 catches `vim`,
+`scp`, manual edits, bypass-env-set edits, edits from non-AH pickers.
+
+**Implementation gotcha (caught at first test-run, not by inspection):** under
+`set -u` + `trap ... ERR` (the same defensive posture used in
+`ui-surface-prebrief-check.sh`), a `jq -e` returning non-zero inside `$(...)`
+trips the ERR trap and the hook silently fails open. That defeats the gate
+without warning. Fix: drop `-e` from the jq call and use plain stdout
+("true"/"false") + a `|| echo "false"` fallback to make the assignment never
+fail. Always test the **block** path explicitly; do not assume the **pass**
+path covers it.
+
+**Layer 3 trailer-bypass design gap (open for AH2 gate review):** the trailer
+mechanism (`Brief-SOP-bypass: <reason>` in commit message) cannot fire reliably
+from a pre-commit hook because git writes `.git/COMMIT_EDITMSG` at the
+commit-msg stage (step 6 of git's commit sequence), AFTER pre-commit (step 2).
+First-commit-of-fresh-repo + every `-m`/`-F` invocation: hook sees no
+COMMIT_EDITMSG. Subsequent editor-flow commits: hook reads the PREVIOUS
+commit's message (semantically wrong). The env-var bypass is the only path
+that fires correctly across `-m`/`-F`/editor flows. Trailer code is kept in
+the hook for future migration to a commit-msg-stage companion or for the
+rare editor-flow archival commit; surfaced in WRITE_BRIEF_SOP_ENFORCER_HOOK_1
+ship report for gate-1 architecture-review verdict.
+
+Apply this two-layer pattern when:
+- Director repeatedly reminds about a process rule
+- Single mandate location (memory/skill/docs) is observably not enforcing
+- Scar incident exists (render_env_guard: 2026-05-17 wipe; brief-SOP: weekly
+  Director reminder cycle)
+
+Anchor: Director chat 2026-05-23 evening; AH2 bus #788 (Layer 2) + bus #790
+(Layer 3 amendment); B3 ship 2026-05-24.
