@@ -5,9 +5,10 @@ Reuses _get_gmail_service from triggers.email_trigger (no new credential
 surface). Uses _extract_text_from_bytes from scripts.extract_gmail for
 extraction parity with poll-time path.
 
-Anchor: BRIEF_GMAIL_ATTACHMENT_READ_1 — Director-ratified 2026-05-24
-"start building now, live during sessions." Phase (a) of the (a)-then-(b)
-plan (b = label-triggered auto-ingest, separate brief).
+Anchor: BRIEF_GMAIL_ATTACHMENT_READ_2 — Director-ratified 2026-05-24.
+Amends READ_1 (PR #256). Gmail attachment IDs are OAuth-session-scoped, so
+cross-session callers cannot supply them. The tool now matches by filename
+and resolves the session-valid attachmentId internally in baker's session.
 """
 from __future__ import annotations
 
@@ -26,10 +27,10 @@ GMAIL_TOOLS: list[Tool] = [
     Tool(
         name="baker_gmail_attachment_read",
         description=(
-            "Read a single Gmail attachment on-demand. Returns extracted text "
-            "(for PDF/DOCX/XLSX/CSV/TXT/MD/JSON) plus optional base64-encoded "
-            "raw bytes. Reuses the existing poll-time extraction pipeline + "
-            "Gmail service singleton (no new credential surface). "
+            "Read a single Gmail attachment on-demand by filename. Returns "
+            "extracted text (for PDF/DOCX/XLSX/CSV/TXT/MD/JSON) plus optional "
+            "base64-encoded raw bytes. Reuses the existing poll-time extraction "
+            "pipeline + Gmail service singleton (no new credential surface). "
             "Use when an agent needs to pull a specific named attachment "
             "mid-session without waiting for the poll cycle to index it."
         ),
@@ -43,12 +44,25 @@ GMAIL_TOOLS: list[Tool] = [
                         "response). NOT the thread_id."
                     ),
                 },
-                "attachment_id": {
+                "filename": {
                     "type": "string",
                     "description": (
-                        "Gmail attachment ID for the specific attachment. "
-                        "Required when message has multiple attachments."
+                        "Attachment filename as it appears in the message "
+                        "(case-sensitive, exact match). Gmail preserves the "
+                        "original filename."
                     ),
+                },
+                "attachment_index": {
+                    "type": "integer",
+                    "description": (
+                        "1-based index used as a tiebreaker when multiple "
+                        "attachments share the same filename. Default 1 "
+                        "(first match). If filename matches >1 attachment "
+                        "and index is out of range, returns an error listing "
+                        "all matches with their indexes."
+                    ),
+                    "default": 1,
+                    "minimum": 1,
                 },
                 "include_bytes": {
                     "type": "boolean",
@@ -59,7 +73,7 @@ GMAIL_TOOLS: list[Tool] = [
                     "default": False,
                 },
             },
-            "required": ["message_id", "attachment_id"],
+            "required": ["message_id", "filename"],
         },
     ),
 ]
@@ -76,12 +90,18 @@ def dispatch_gmail(name: str, args: dict) -> str:
 
 def _attachment_read(args: dict) -> str:
     message_id = args.get("message_id", "").strip()
-    attachment_id = args.get("attachment_id", "").strip()
+    filename = args.get("filename", "").strip()
+    attachment_index = args.get("attachment_index", 1)
     include_bytes = bool(args.get("include_bytes", False))
 
-    if not message_id or not attachment_id:
+    if not message_id or not filename:
         return json.dumps({
-            "error": "message_id and attachment_id are both required",
+            "error": "message_id and filename are both required",
+        })
+
+    if not isinstance(attachment_index, int) or isinstance(attachment_index, bool) or attachment_index < 1:
+        return json.dumps({
+            "error": f"attachment_index must be a positive integer (got {attachment_index!r})",
         })
 
     # Reuse poll-time Gmail service singleton — no new credential surface.
@@ -92,7 +112,8 @@ def _attachment_read(args: dict) -> str:
         logger.error(f"Gmail service init failed: {e}")
         return json.dumps({"error": f"gmail service init failed: {e}"})
 
-    # Fetch the message to get attachment metadata (filename + size).
+    # Fetch the message in baker's own OAuth session so the attachmentId
+    # we read from body.attachmentId is valid for the attachments.get() call.
     try:
         message = service.users().messages().get(
             userId="me", id=message_id, format="full",
@@ -101,8 +122,6 @@ def _attachment_read(args: dict) -> str:
         logger.warning(f"gmail message fetch failed (message_id={message_id}): {e}")
         return json.dumps({"error": f"message fetch failed: {e}"})
 
-    # Locate the attachment part by attachment_id (recursive — handles
-    # forwarded emails with nested attachments per EMAIL-ATTACH-FIX-1).
     from scripts.extract_gmail import (
         _collect_attachment_parts,
         _extract_text_from_bytes,
@@ -111,21 +130,40 @@ def _attachment_read(args: dict) -> str:
     )
     payload = message.get("payload", {})
     parts = _collect_attachment_parts(payload)
-    target_part = None
-    for part in parts:
-        body = part.get("body", {})
-        if body.get("attachmentId") == attachment_id:
-            target_part = part
-            break
-    if target_part is None:
-        return json.dumps({"error": f"attachment_id not found in message: {attachment_id}"})
 
-    filename = target_part.get("filename", "")
+    # Match by filename (case-sensitive exact). Walk order = depth-first via
+    # _collect_attachment_parts so attachment_index is deterministic.
+    matches = [p for p in parts if p.get("filename", "") == filename]
+
+    if not matches:
+        available = sorted({p.get("filename", "") for p in parts if p.get("filename")})
+        return json.dumps({
+            "error": f"filename not found in message: {filename}",
+            "available_filenames": available,
+        })
+
+    if attachment_index > len(matches):
+        return json.dumps({
+            "error": (
+                f"attachment_index {attachment_index} out of range "
+                f"({len(matches)} attachment(s) named {filename!r})"
+            ),
+            "filename": filename,
+            "match_count": len(matches),
+        })
+
+    target_part = matches[attachment_index - 1]
     body = target_part.get("body", {})
     size = body.get("size", 0)
+    session_attachment_id = body.get("attachmentId", "")
 
-    # Size guard — mirror poll-time cap. Foot-gun: caller could request a
-    # multi-hundred-MB attachment and OOM the worker.
+    if not session_attachment_id:
+        return json.dumps({
+            "error": "matched attachment has no attachmentId (inline-data only path not supported)",
+            "filename": filename,
+        })
+
+    # Size guard — mirror poll-time cap.
     if size > _MAX_ATTACHMENT_SIZE:
         return json.dumps({
             "error": f"attachment too large: {size} bytes (cap {_MAX_ATTACHMENT_SIZE})",
@@ -133,10 +171,10 @@ def _attachment_read(args: dict) -> str:
             "size": size,
         })
 
-    # Download attachment bytes.
+    # Download attachment bytes using the session-valid attachmentId.
     try:
         att = service.users().messages().attachments().get(
-            userId="me", messageId=message_id, id=attachment_id,
+            userId="me", messageId=message_id, id=session_attachment_id,
         ).execute()
         data = att.get("data", "")
         if not data:
@@ -152,8 +190,7 @@ def _attachment_read(args: dict) -> str:
             "filename": filename,
         })
 
-    # Extract text via existing pipeline. Empty text is non-fatal — may be
-    # an image attachment (out of v1 scope) or extractor returned empty.
+    # Extract text via existing pipeline.
     from pathlib import Path
     ext = Path(filename).suffix.lower()
     text = ""
@@ -173,6 +210,8 @@ def _attachment_read(args: dict) -> str:
         "size": size,
         "text": text,
         "text_extracted": bool(text),
+        "match_count": len(matches),
+        "attachment_index": attachment_index,
     }
     if include_bytes:
         result["bytes_base64"] = base64.standard_b64encode(file_bytes).decode("ascii")
