@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Baker pre-commit — four independent checks.
+# Baker pre-commit — five independent checks.
 #
 # Part 1: migration immutability         (HAS BYPASS — see below)
 # Part 2: subagent location enforcement  (NO BYPASS — add to ~/.claude/agents/, not picker)
@@ -7,6 +7,8 @@
 #                                        (NO BYPASS — use claude-opus-4-6/4-7 or claude-sonnet-4-5/4-6)
 # Part 4: render env-var wipe-pattern detection
 #                                        (bypass via --no-verify only — 2026-05-17 wipe anchor)
+# Part 5: /write-brief SOP enforcement on staged briefs
+#                                        (bypass: Brief-SOP-bypass: <reason> trailer OR BAKER_BRIEF_SOP_BYPASS=1)
 #
 # Activation (one-time per clone):
 #   git config core.hooksPath .githooks
@@ -96,6 +98,16 @@ if [ -n "$STAGED_NON_ALLOWLISTED" ]; then
     echo "[pre-commit] If you genuinely need the array form (you don't), bypass with: git commit --no-verify" >&2
     exit 1
   fi
+fi
+
+# ---------------------------------------------------------------------------
+# Part 5: /write-brief SOP enforcement on staged brief files (bypass via
+# commit-msg trailer `Brief-SOP-bypass: <reason>` or env BAKER_BRIEF_SOP_BYPASS=1)
+# Director-ratified 2026-05-23 evening (AH2 bus #790).
+# MIRROR canonical at baker-vault/.githooks/brief_sop_check.sh.
+# ---------------------------------------------------------------------------
+if [ -x "$REPO_ROOT/.githooks/brief_sop_check.sh" ]; then
+    "$REPO_ROOT/.githooks/brief_sop_check.sh" || exit $?
 fi
 
 # ---------------------------------------------------------------------------
