@@ -17,7 +17,8 @@
         "hooks": [
           {
             "type": "command",
-            "command": ".claude/hooks/write_brief_sop_enforcer.sh"
+            "command": ".claude/hooks/write_brief_sop_enforcer.sh",
+            "timeout": 10
           }
         ]
       }

@@ -550,3 +550,25 @@ Apply this two-layer pattern when:
 
 Anchor: Director chat 2026-05-23 evening; AH2 bus #788 (Layer 2) + bus #790
 (Layer 3 amendment); B3 ship 2026-05-24.
+
+**Fix-pass v2 amendments (bus #799 — lead REQUEST_CHANGES 2026-05-24):**
+- **PreToolUse hook entries need explicit `timeout: 10`** — same convention as
+  SessionStart hooks. Without it a hung hook blocks Claude Code indefinitely.
+  Apply to every new PreToolUse hook entry going forward.
+- **Hook install pattern = canonical + untracked symlinks**, not picker-side
+  file copies. Source-of-truth lives at `~/baker-vault/_ops/hooks/<name>.sh`
+  (committed); each picker installs via untracked symlink at
+  `<picker>/.claude/hooks/<name>.sh -> ~/baker-vault/_ops/hooks/<name>.sh`.
+  File copies drift on first patch; symlinks don't. Mirrors
+  `ui-surface-prebrief-check.sh` precedent (2026-05-19). DO NOT commit hook
+  scripts to baker-master `.claude/hooks/` — only the vault canonical is
+  tracked.
+- **Pre-commit section regex must be literal `^## `, not `^##?`.** The
+  optional `?` quantifier accepts H1 (`# `), which violates the spec that
+  requires H2. Caught by AH2 gate-4 with HIGH confidence on
+  WRITE_BRIEF_SOP_ENFORCER_HOOK_1 v0.1. Add an H1-only regression test
+  case whenever shipping a `^##` content-shape gate.
+- **`settings.local.json` is gitignored local-override — do NOT install
+  enforcement hooks there.** Use `settings.json` (or `.claude/settings.json`
+  per picker). Enforcer wired in settings.local.json will not survive
+  re-provisioning + may be hidden from collaborators.

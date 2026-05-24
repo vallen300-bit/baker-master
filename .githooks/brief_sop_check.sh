@@ -76,8 +76,12 @@ while IFS= read -r brief_path; do
     # Get staged content (not on-disk — `git show :path` reads staged blob)
     STAGED_CONTENT="$(git show ":$brief_path" 2>/dev/null)" || continue
 
+    # Section regexes are anchored at the start of a line + literal "## " or
+    # "### " — never just "# " (H1 doesn't satisfy spec). AH2 gate-4 fold:
+    # the previous `^##?` allowed the `#` count to be 1 or 2; that lets H1-only
+    # briefs slip through.
     MISSING=()
-    grep -qE '^##? Context' <<< "$STAGED_CONTENT" || MISSING+=("Context")
+    grep -qE '^## Context' <<< "$STAGED_CONTENT" || MISSING+=("Context")
     grep -qE '^(##|###) Problem' <<< "$STAGED_CONTENT" || MISSING+=("Problem")
     grep -qE '^## Files (Modified|to touch)' <<< "$STAGED_CONTENT" || MISSING+=("Files Modified")
     grep -qE '^## Verification( SQL)?' <<< "$STAGED_CONTENT" || MISSING+=("Verification")
