@@ -1,5 +1,8 @@
 ---
-status: PENDING
+status: COMPLETE
+completed_at: 2026-05-24T21:10:07Z
+pr_url: https://github.com/vallen300-bit/baker-master/pull/256
+completion_report: briefs/_reports/B3_GMAIL_ATTACHMENT_READ_1_20260524.md
 brief: briefs/BRIEF_GMAIL_ATTACHMENT_READ_1.md
 brief_id: GMAIL_ATTACHMENT_READ_1
 target_repo: baker-master (single repo)
