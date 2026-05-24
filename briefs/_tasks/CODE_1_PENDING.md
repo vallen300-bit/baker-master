@@ -1,92 +1,103 @@
 ---
-status: COMPLETE
-brief: briefs/BRIEF_BAKER_SUBSTACK_SEARCH_1.md
-brief_id: BAKER_SUBSTACK_SEARCH_1
-target_repo: baker-master
-working_dir: /Users/dimitry/bm-b1
-working_branch: b1/baker-substack-search-1
-dispatched_by: cowork-ah1
-dispatched_at: 2026-05-23T17:00:00Z
-estimated_time: 5-6h
-actual_time: ~33min (b1 ship at 17:33Z vs dispatch 17:00Z)
-complexity: medium
-tier: B
-ratified_by: Director
-ratified_at: 2026-05-23 chat ~16:30Z (Option B over A and C)
-shipped_pr: https://github.com/vallen300-bit/baker-master/pull/251
-merged_at: 2026-05-23T17:48:29Z
-merge_commit: ff0a5899a6a58d2febb592cc2423e4b47eee9c48
-gate_chain: Gate-1 PASS (static) + Gate-2 NO_FINDINGS (/security-review) + Gate-4 PASS-WITH-NITS (code-reviewer — 2 MED + 2 LOW, all bundled into next fast-follow batch)
-render_env_wired: SUBSTACK_COOKIE_natesnewsletter via safe_env_put (60 → 61); deploy dep-d88ugk3eo5us738b4bpg picked up at 17:48Z (merge superseded with auto-deploy)
+brief: HAG_WORKERS_PHASE_1
+dispatched_by: lead (AH1)
+dispatched_on: 2026-05-24
+target: b1
+canonical_brief: ~/baker-vault/_ops/briefs/BRIEF_HAG_WORKERS_PHASE_1.md
+install_sop: ~/baker-vault/_ops/processes/install-agent-to-brisen-lab-sop.md
+design_specs:
+  - ~/baker-vault/_ops/agents/_universal/cm/cm-1-design.md (canonical)
+  - ~/baker-vault/_ops/agents/_universal/cm/cm-2-design.md
+  - ~/baker-vault/_ops/agents/_universal/cm/cm-3-design.md
+  - ~/baker-vault/_ops/agents/_universal/cm/cm-4-design.md
+  - ~/baker-vault/_ops/agents/hagenauer-desk/workers/filer/hag-filer-design.md
+ratification_anchor: baker-vault 763e8fc (5-design batch ratified 2026-05-24)
+sop_compliance: 5-SOP bundle b5924b7 + 7315874 cascade (create-new-agent-sop-base/fleet/matter-desk + worker-execution-of-matter-filing-sop + important-document-sop)
+priority: HIGH (Hag-desk overloaded; filing crunch 2026-05-26/27)
+estimated_complexity: Medium (~12-16h Phase 1 MVP, cross-repo)
+supersedes: BAKER_SUBSTACK_SEARCH_1 (status COMPLETE, prior dispatch from 2026-05-23, closed via PR #251 merged ff0a589)
 ---
 
-# CODE_1_PENDING — BAKER_SUBSTACK_SEARCH_1 — 2026-05-23
+# CODE_1_PENDING — HAG_WORKERS_PHASE_1 Layer 2 install dispatch
 
-**Brief:** `briefs/BRIEF_BAKER_SUBSTACK_SEARCH_1.md` (commit `c1fdcc1`)
-**Working branch:** `b1/baker-substack-search-1`
-**Working dir:** `~/bm-b1`
-**Dispatched by:** `cowork-ah1` (AH1-Cowork) — **report back to `cowork-ah1` on PR open**
-**Dispatched at:** 2026-05-23T17:00Z
-**Estimated time:** ~5-6h
-**Complexity:** Medium
-**Tier:** B (Director-ratified 2026-05-23 chat ~16:30Z — Option B over A and C)
+## Mandate
 
-## Goal in one sentence
+Execute Fix/Features 1-6 from `~/baker-vault/_ops/briefs/BRIEF_HAG_WORKERS_PHASE_1.md` to install 5 new agents (CM-1..4 + hag-filer) onto Brisen Lab per the install-SOP.
 
-Build a Perplexity-style queryable MCP tool so every Brisen agent can call `baker_substack_search(publication, query, limit)` and get top-k matching posts with excerpts + URLs from any subscribed Substack archive (Nate Jones seeded today; future Substack subs zero-code-change).
+## Read first (in order)
 
-## Pre-requisites
+1. `~/baker-vault/_ops/briefs/BRIEF_HAG_WORKERS_PHASE_1.md` — full brief (6 Fix/Features, all step-by-step, Files Modified + Do NOT Touch).
+2. `~/baker-vault/_ops/processes/install-agent-to-brisen-lab-sop.md` — canonical install-SOP. **Cross-check brief against 12-row wiring map; flag any row not covered.**
+3. The 5 design specs (frontmatter list above). Each spec resolves [FILL] from brief content; use as ground truth for slug names, paths, 1P key paths, sender slugs, runtime locations.
+4. `~/baker-vault/_ops/processes/create-new-agent-sop-base.md` (+ fleet + matter-desk extensions). For context only — design phase already complete.
 
-- `git pull --rebase origin main` on `~/bm-b1` (you're behind by 2: PR #247 BACKFILL_PREFLIGHT + this brief commit `c1fdcc1`).
-- Standard bm-b1 env (VOYAGE_API_KEY, QDRANT_URL, QDRANT_API_KEY all sourced from 1Password via your existing flow).
+## Repos touched (sequential PR order per install-SOP §"Three-repo PR sequencing")
 
-## IMPORTANT — SKIP brief Step 1 (auth probe)
+1. **baker-vault PR FIRST** — if any `_ops/agents/_universal/cm/*` or `hagenauer-desk/workers/filer/*` files need creation beyond designs already on main. (Most likely NONE since designs landed 2026-05-24; verify before opening PR.)
+2. **baker-master PR SECOND** — Fix/Features 2 (bus_post.sh whitelist) + 3 (5 worktree clones) + 4 (role-context files) + 5 (SessionStart hook cwd cases) + 6 (memory scaffolds touched on baker-vault, but committed via baker-master if any baker-master-side files involved).
+3. **brisen-lab PR THIRD** — Fix/Feature 1 (5 slug registration: app.py:40 + bus.py:896 + bus.py:1005 + db.py:226 + lifecycle.py:493 + Render env + 1P items).
 
-The auth probe described in brief §"Step 1 — Auth probe" has been run cowork-side this session (2026-05-23 ~16:55Z) and PASSED:
+## Brief coverage vs install-SOP 12-row map (lead pre-flight gap-scan)
 
-- Cookie extracted from Director's logged-in Chrome via Chrome MCP, stored at `op://Baker API Keys/SUBSTACK_COOKIE_natesnewsletter/credential` (apicredential schema, `credential` field, 83 chars, expires 2026-08-21).
-- `curl -H "Cookie: substack.sid=<val>" https://natesnewsletter.substack.com/api/v1/posts/rag-agents-knowledge-layer-architecture` returned HTTP 200, 52KB JSON, `body_html` present (36,377 chars) on a paid-only post.
+Brief covers SOP rows 1, 4, 5, 6, 7, 8, 9, 11. Two gaps require supplementary ACs:
 
-**Proceed directly to brief Step 2 (backfill script).**
+### Gap A — Row 12: Snapshot pusher (LOAD-BEARING — RESEARCHER scar 2026-05-22)
 
-## Render env requirement (cookie injection — bm-b1 cannot do this directly)
+**Supplementary AC A1.** Edit `~/baker-vault/_ops/scripts/forge_snapshot_push.sh` (or wherever canonical lives per AH1 repo — likely `~/bm-aihead1/scripts/`) TERMINALS array at line ~61. Add 5 entries:
 
-The brief's Step 2 requires `SUBSTACK_COOKIE_natesnewsletter` on Render env (production worker reads it for forward-flow ingest in Fix/Feature 2). bm-b1 cannot push Render env directly. Two paths:
+```
+CM-1:$HOME/bm-CM-1
+CM-2:$HOME/bm-CM-2
+CM-3:$HOME/bm-CM-3
+CM-4:$HOME/bm-CM-4
+hag-filer:$HOME/bm-hag-filer
+```
 
-- **Path A (preferred):** bm-b1 finishes brief, ships PR, bus-posts cowork-ah1 on PR open. cowork-ah1 (or lead) injects the Render env via 1P → Render API in same turn as gate-chain firing, BEFORE merge so deployed worker has the cookie.
-- **Path B:** bm-b1 only writes the script + tests, omits forward-flow Qdrant embed live wiring. PR merges. AH1 wires Render env + AH1 manually triggers backfill via Render shell as separate one-shot.
+**Important per install-SOP §"Second-pass lived foot-gun" foot-note (researcher scar):** for any of the 5 pickers without their own `.git` clone, use `$HOME/baker-vault` as the repo-path fallback. Pusher errors with "repo missing" if path has no .git. CMs/hag-filer DO clone baker-master per brief Step 3.1, so they have .git — but verify.
 
-**Recommendation: Path A** — keeps the brief atomic + cleaner audit trail.
+**Supplementary AC A2.** Add regression test cases in `tests/test_forge_snapshot_push.sh` mirroring Case L (PR #238 pattern) — one case per new slug.
 
-## Pre-verify (grep before edit — surface in ship report)
+**Supplementary AC A3.** Post-merge AH1 Tier-B execution: redeploy snapshot pusher on EACH host (MacBook + Mac Mini) via:
+```
+FORGE_KEY=$(plutil -extract EnvironmentVariables.FORGE_KEY raw ~/Library/LaunchAgents/com.baker.forge-snapshot-push.plist) bash scripts/install_forge_push.sh
+```
 
-1. `grep -n "TOOLS = " baker_mcp/baker_mcp_server.py` — confirm catalog line.
-2. `grep -n "_should_skip_pipeline\|_format_results" triggers/substack_ingest.py` — confirm PR #248 structure unchanged.
-3. `grep -rn "voyage-3\|voyage_client" kbl/` — confirm embed pattern reuse path.
-4. `grep -rn "QdrantClient\|qdrant_client" .` | head -10 — confirm import pattern.
-5. `ls scripts/backfill_meeting_transcripts_matter_slug.py scripts/backfill_nate_substack.py` — confirm sibling-script patterns to mirror (env pre-flight + --dry-run/--apply pair).
+### Gap B — Row 2: Shell aliases (LOW priority)
+
+**Supplementary AC B1.** Add 5 shell functions to `~/.zshrc` (CM-1, CM-2, CM-3, CM-4, hag-filer) following the existing `aodesk` / `moviedesk` / `hagenauerdesk` pattern. Functions cd to `~/bm-<slug>`, set `BAKER_ROLE=<slug>` + `FORGE_TERMINAL=<slug>`, launch claude.
+
+(LOW priority because workers run in Cowork App, not Terminal.app. Skip if time-pressured; defer to fast-follow.)
+
+## Critical constraints (per brief + designs + install-SOP)
+
+1. **Slug case-sensitivity:** `CM-1` uppercase everywhere EXCEPT role-context filename (lowercase `cm-1.md` per SessionStart hook lowercasing logic at line 55). hag-filer always lowercase.
+2. **Do NOT touch existing slug entries** (lead, cowork-ah1, deputy, b1-b4, hag-desk, researcher, architect, aid, cortex, daemon). Extend lists only.
+3. **Existing slug conflict:** `hag-desk` already in bus_post.sh whitelist (line 46 per brief). Brief Step 2.1 example shows `hag-desk` twice — remove the duplicate when editing.
+4. **Render env race:** pause active dispatches during `BRISEN_LAB_TERMINAL_KEYS` env update; redeploy AFTER env fully written.
+5. **Disk space:** 5 clones × ~500MB = ~2.5GB. Verify `df -h ~` before Step 3.1.
+6. **hag-filer cross-blocker CLOSED** — filing-protocol.md v2 ratified D-014 (2026-05-24, commit 9902430). hag-filer can ship immediately.
+
+## Gate chain on PR open
+
+MEDIUM trigger class (cross-repo + new public surface + auth changes via new bus keys). Expected gate chain per AH2 deputy lane:
+- Gate-1 architecture-review
+- Gate-2 `/security-review`
+- Gate-3 picker-architect (multi-picker install — 5 new pickers)
+- Gate-4 code-reviewer 2nd-pass
+- Gate-5 AH1 merge
 
 ## Ship gate
 
-- Literal pytest output for new tests in ship report.
-- Syntax check Python files + `bash scripts/check_singletons.sh` clean.
-- For the MCP tool: confirm it appears in `TOOLS` catalog + dispatch branch handles it + new test in `tests/test_baker_mcp_server.py` covers happy-path + missing-publication.
-- Backfill script `--dry-run` against Nate's archive in ship report (post count + total est. embed cost surfaced).
+Literal pytest output for:
+- `pytest tests/test_a3_a8_a9_bus.py -v` (brisen-lab)
+- `bash tests/test_forge_snapshot_push.sh` (baker-master)
 
-## Reporting
+in PR description. NO "pass by inspection" — REQUEST_CHANGES on inspection-only claims.
 
-- Ship PR against baker-master `main` from branch `b1/baker-substack-search-1`.
-- **Bus-post `cowork-ah1` on PR open** with topic `ship/baker-substack-search-1` (`dispatched_by: cowork-ah1` ⇒ ship-report routes to `cowork-ah1`).
-- Gate chain on PR open: Gate-1 (AH1 static) + Gate-2 (`/security-review` — touches cookie handling + new MCP tool + Qdrant write) + Gate-3 (`feature-dev:picker-architect` SKIPPED unless brief uncovers dashboard route addition) + Gate-4 (`feature-dev:code-reviewer` 2nd-pass — fires per Protocol trigger 1: new external auth surface).
+## Ship report routes to
 
-## Out of scope (Do NOT touch)
+`lead` via bus (topic: `ship/hag-workers-phase-1`). Include both PR numbers + verification command outputs.
 
-- `outputs/dashboard.py` route handlers (MCP tool surface is enough for Director-side; dashboard surface separate brief later).
-- Other matters/desks/sentinels.
-- Forward-flow Gmail trigger code (only the Qdrant-embed extension per brief Fix/Feature 2).
-- Migration files unless brief spec requires a new table (it doesn't — Qdrant only).
-- `baker-vault/slugs.yml` (separate repo).
+## Reply expected
 
-## Anchor
-
-Director ratified 2026-05-23 ~16:30Z chat — *"How to make it possible that you or AH2 or any other agents can reach Nat Jones's Substack full data in a similar way to how we reach Perplexity, NotebookLM, etc.?"* — Option B selected over A (Nate-only) and C (lazy on-demand). Pre-engineering (cookie + auth probe) closed cowork-side this session.
+`"B1 oriented. Read: CODE_1_PENDING.md, MEMORY.md."` on session start.
