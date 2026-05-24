@@ -1,4 +1,12 @@
 ---
+status: COMPLETE
+completed_on: 2026-05-24
+merge_anchors:
+  - baker-vault PR #110 → 9c12ec3
+  - baker-master PR #254 → 53aa5f7
+  - brisen-lab PR #32 → 0db99b6
+request_changes_resolved: bus #867 (F1 + F2 applied via commit 1dd2a25; F3 ratified vault-fallback no-change)
+merge_complete_msg: bus #880
 brief: HAG_WORKERS_PHASE_1
 dispatched_by: lead (AH1)
 dispatched_on: 2026-05-24
