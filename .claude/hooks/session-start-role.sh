@@ -29,6 +29,11 @@ if [ -z "$ROLE" ]; then
     */bm-b3|*/bm-b3/.claude/worktrees/*) ROLE="b3" ;;
     */bm-b4|*/bm-b4/.claude/worktrees/*) ROLE="b4" ;;
     */bm-b5|*/bm-b5/.claude/worktrees/*) ROLE="b5" ;;
+    */bm-CM-1|*/bm-CM-1/.claude/worktrees/*) ROLE="CM-1" ;;
+    */bm-CM-2|*/bm-CM-2/.claude/worktrees/*) ROLE="CM-2" ;;
+    */bm-CM-3|*/bm-CM-3/.claude/worktrees/*) ROLE="CM-3" ;;
+    */bm-CM-4|*/bm-CM-4/.claude/worktrees/*) ROLE="CM-4" ;;
+    */bm-hag-filer|*/bm-hag-filer/.claude/worktrees/*) ROLE="hag-filer" ;;
     *)      ROLE="" ;;
   esac
 fi

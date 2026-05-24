@@ -733,5 +733,41 @@ CASE_M_MBRIEF="$(extract_payload_field "$CASE_M_OUT" "researcher" "mailbox_brief
 [[ -z "$CASE_M_MBRIEF" ]]              || { echo "FAIL Case M: mailbox_brief_name='$CASE_M_MBRIEF' (expected empty)" >&2; exit 1; }
 echo "PASS: Case M — non-b-code single-clone slug (Cowork-App-only) — mailbox stays n/a."
 
+# ─────────────────────────────────────────────────────────────────────────────
+# Cases N-R — HAG_WORKERS_PHASE_1: 5 new non-b-code single-clone slugs (CM-1
+# through CM-4 fleet ClaimsMax workers + hag-filer Hagenauer-matter filer).
+# Same contract as Case L (mailbox stays n/a, brief stays empty). Each gets
+# its own tempdir to keep isolation tight. Locks in the worker-pool slug
+# pattern alongside hag-desk + researcher.
+# ─────────────────────────────────────────────────────────────────────────────
+for spec in "n:CM-1" "o:CM-2" "p:CM-3" "q:CM-4" "r:hag-filer"; do
+  CASE_LABEL="${spec%%:*}"
+  CASE_SLUG="${spec##*:}"
+  CASE_REPO="$TMP/case-${CASE_LABEL}-${CASE_SLUG}"
+  mkdir -p "$CASE_REPO"
+  (
+    cd "$CASE_REPO"
+    git init -q
+    git config user.email "test@test"
+    git config user.name "test"
+    echo "${CASE_SLUG}-worker-content" > README.md
+    git add README.md
+    git commit -qm "case-${CASE_LABEL}: ${CASE_SLUG} worker init"
+  )
+
+  CASE_OUT="$TMP/case-${CASE_LABEL}.out"
+  run_daemon "case-${CASE_LABEL}" "${CASE_SLUG}:$CASE_REPO" > "$CASE_OUT"
+  assert_no_prod_aliases "$CASE_OUT"
+
+  CASE_ALIAS="$(extract_payload_field "$CASE_OUT" "${CASE_SLUG}" "terminal_alias")"
+  CASE_MSTATUS="$(extract_payload_field "$CASE_OUT" "${CASE_SLUG}" "mailbox_status")"
+  CASE_MBRIEF="$(extract_payload_field "$CASE_OUT" "${CASE_SLUG}" "mailbox_brief_name")"
+
+  [[ "$CASE_ALIAS" == "${CASE_SLUG}" ]]  || { echo "FAIL Case $(echo "$CASE_LABEL" | tr '[:lower:]' '[:upper:]') (${CASE_SLUG}): terminal_alias='$CASE_ALIAS'" >&2; exit 1; }
+  [[ "$CASE_MSTATUS" == "n/a" ]]         || { echo "FAIL Case $(echo "$CASE_LABEL" | tr '[:lower:]' '[:upper:]') (${CASE_SLUG}): mailbox_status='$CASE_MSTATUS'" >&2; exit 1; }
+  [[ -z "$CASE_MBRIEF" ]]                || { echo "FAIL Case $(echo "$CASE_LABEL" | tr '[:lower:]' '[:upper:]') (${CASE_SLUG}): mailbox_brief_name='$CASE_MBRIEF' (expected empty)" >&2; exit 1; }
+  echo "PASS: Case $(echo "$CASE_LABEL" | tr '[:lower:]' '[:upper:]') — non-b-code single-clone slug (${CASE_SLUG}) — mailbox stays n/a."
+done
+
 echo ""
-echo "All 14 cases PASS."
+echo "All 19 cases PASS."
