@@ -971,6 +971,18 @@ except Exception as _grok_import_err:  # pragma: no cover — defensive import
         return f"Error: Grok tools failed to load: {_grok_import_err}"
 
 
+# Gmail on-demand attachment read — defensive import mirroring ClaimsMax + Grok.
+try:
+    from tools.gmail import GMAIL_TOOLS, GMAIL_TOOL_NAMES, dispatch_gmail
+    TOOLS.extend(GMAIL_TOOLS)
+except Exception as _gmail_import_err:  # pragma: no cover — defensive import
+    logger.warning("Gmail tools unavailable: %s", _gmail_import_err)
+    GMAIL_TOOL_NAMES = frozenset()
+
+    def dispatch_gmail(name: str, args: dict) -> str:  # type: ignore[no-redef]
+        return f"Error: Gmail tools failed to load: {_gmail_import_err}"
+
+
 @app.list_tools()
 async def list_tools() -> list[Tool]:
     return TOOLS
@@ -2125,6 +2137,9 @@ def _dispatch(name: str, args: dict) -> str:
 
     elif name in GROK_TOOL_NAMES:
         return dispatch_grok(name, args)
+
+    elif name in GMAIL_TOOL_NAMES:
+        return dispatch_gmail(name, args)
 
     else:
         return f"Unknown tool: {name}"
