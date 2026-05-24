@@ -5,12 +5,15 @@ Implements the 5-step flow from the Sentinel architecture:
 """
 import json
 import logging
+import os
 import re
+from pathlib import Path
 from typing import Optional
 from datetime import datetime, timezone
 from dataclasses import dataclass, asdict, field
 
 import anthropic
+import yaml
 
 from config.settings import config
 from memory.retriever import SentinelRetriever
@@ -24,12 +27,102 @@ logger = logging.getLogger("sentinel.pipeline")
 # Helpers
 # ============================================================
 
+_CLASSIFIER_RULES_CACHE: dict = {}
+# Cache key: matter_slug. Value: (mtime_seen, parsed_dict_or_None).
+# None value = file does not exist (cached so we don't stat-thrash).
+
+_VAULT_PATH = Path(os.environ.get("BAKER_VAULT_PATH", "/opt/render/project/src/baker-vault"))
+
+
+def _load_classifier_rules(matter_slug: str) -> Optional[dict]:
+    """Load per-matter classifier rule YAML if present, else None.
+
+    Path: ``{BAKER_VAULT_PATH}/wiki/matters/<slug>/classifier-keywords.yml``.
+    Caches parsed dict in-process; invalidates via mtime stat on each call.
+    File-missing case is also cached (None) to skip stat-thrash on busy paths.
+    """
+    yml_path = _VAULT_PATH / "wiki" / "matters" / matter_slug / "classifier-keywords.yml"
+    try:
+        current_mtime = yml_path.stat().st_mtime
+    except FileNotFoundError:
+        if matter_slug not in _CLASSIFIER_RULES_CACHE:
+            _CLASSIFIER_RULES_CACHE[matter_slug] = (0.0, None)
+        return None
+    except OSError as e:
+        logger.debug(f"classifier-rules stat failed for {matter_slug} (non-fatal): {e}")
+        return None
+
+    cached = _CLASSIFIER_RULES_CACHE.get(matter_slug)
+    if cached and cached[0] == current_mtime:
+        return cached[1]
+
+    try:
+        with yml_path.open("r", encoding="utf-8") as fh:
+            parsed = yaml.safe_load(fh)
+        if not isinstance(parsed, dict):
+            logger.warning(f"classifier-rules YAML for {matter_slug} not a dict — ignoring")
+            _CLASSIFIER_RULES_CACHE[matter_slug] = (current_mtime, None)
+            return None
+        _CLASSIFIER_RULES_CACHE[matter_slug] = (current_mtime, parsed)
+        return parsed
+    except (yaml.YAMLError, OSError) as e:
+        logger.warning(f"classifier-rules YAML parse failed for {matter_slug}: {e}")
+        _CLASSIFIER_RULES_CACHE[matter_slug] = (current_mtime, None)
+        return None
+
+
+def _and_gate_passes(rules: dict, search_text: str) -> bool:
+    """Check require_all_groups AND-gate against search_text.
+
+    Returns True if every group has >=1 keyword present in search_text (case-
+    insensitive substring for keywords >3 chars, word-boundary for <=3 chars —
+    matches existing _match_matter_slug semantics).
+
+    Fail-open: if rules has no ``rule: require_all_groups`` OR no ``groups:``
+    dict, returns True (default scoring handles the matter).
+    """
+    import re as _re
+    if rules.get("rule") != "require_all_groups":
+        return True
+    groups = rules.get("groups") or {}
+    if not isinstance(groups, dict) or not groups:
+        logger.debug("AND-gate rules present but groups dict empty — fail-open")
+        return True
+
+    for group_name, kw_list in groups.items():
+        if not isinstance(kw_list, list) or not kw_list:
+            logger.debug(f"AND-gate group '{group_name}' empty — fail-open for that group")
+            continue
+        hit = False
+        for kw in kw_list:
+            if not kw:
+                continue
+            kw_lower = str(kw).lower()
+            if len(kw_lower) <= 3:
+                if _re.search(r'\b' + _re.escape(kw_lower) + r'\b', search_text):
+                    hit = True
+                    break
+            else:
+                if kw_lower in search_text:
+                    hit = True
+                    break
+        if not hit:
+            return False
+    return True
+
+
 def _match_matter_slug(title: str, body: str, store: SentinelStoreBack) -> Optional[str]:
     """
     Match alert title+body against matter_registry keywords to auto-assign matter_slug.
     Returns matter_name (used as slug) if a match is found, None otherwise.
     Uses case-insensitive matching: keywords as substrings, short keywords (<=3 chars)
     as word-boundary matches, people as partial name matches (last name sufficient).
+
+    Per-matter AND-gate overlay (HAG_TRANSCRIPT_CLASSIFIER_TIGHTEN_1, 2026-05-24):
+    if ``wiki/matters/<slug>/classifier-keywords.yml`` exists and declares
+    ``rule: require_all_groups``, the matter is excluded from scoring unless
+    every declared group has >=1 keyword hit in search_text. Default scoring
+    unchanged for matters without YAML overlay.
     """
     import re as _re
     try:
@@ -43,8 +136,12 @@ def _match_matter_slug(title: str, body: str, store: SentinelStoreBack) -> Optio
         best_score = 0
 
         for matter in matters:
-            score = 0
             name = (matter.get("matter_name") or "").lower()
+            rules = _load_classifier_rules(name) if name else None
+            if rules is not None and not _and_gate_passes(rules, search_text):
+                continue  # AND-gate excluded this matter
+
+            score = 0
             keywords = matter.get("keywords") or []
             people = matter.get("people") or []
 
