@@ -1,62 +1,35 @@
 ---
+status: COMPLETE
+pr_master: 255
+pr_master_url: https://github.com/vallen300-bit/baker-master/pull/255
+pr_vault: 111
+pr_vault_url: https://github.com/vallen300-bit/baker-vault/pull/111
+shipped_at: 2026-05-24T12:55:00Z
+report: briefs/_reports/B2_HAG_TRANSCRIPT_CLASSIFIER_TIGHTEN_1_20260524.md
+bus_dispatch_acked: 858
+bus_ack_received: 861
+bus_blockers_raised: [860, 864]
+brief: ~/baker-vault/_ops/briefs/BRIEF_HAG_TRANSCRIPT_CLASSIFIER_TIGHTEN_1.md
 brief_id: HAG_TRANSCRIPT_CLASSIFIER_TIGHTEN_1
-title: AND-gate overlay for matter classifier — tighten hagenauer-rg7 transcript tagging
-status: PENDING
-authored_by: AH1
-dispatched_by: lead
-dispatched_at: 2026-05-24T12:30:00Z
-ratified_by: Director (chat 2026-05-24)
-target: b2
-target_repo: baker-master (+ baker-vault for overlay YAML)
+target_repo: baker-master + baker-vault
 matter_slug: hagenauer-rg7
-brief_path: ~/baker-vault/_ops/briefs/BRIEF_HAG_TRANSCRIPT_CLASSIFIER_TIGHTEN_1.md
-brief_anchor: baker-vault 26c7439
-estimated_time: ~1h
-complexity: Low
+dispatched_at: 2026-05-24T12:30:00Z
+dispatched_by: lead
+target: b2
+working_branch_master: b2/hag-transcript-classifier-tighten-1
+working_branch_vault: b2/hag-transcript-classifier-tighten-1-overlay
+reply_to: lead
+priority: tier-b
+estimated_time: 1h
 gate_class: SMALL
-prerequisites: none (HAG_WORKERS_PHASE_1 is unrelated codebase, no blocker)
-ratification_anchor:
-  - bus #831 (hag-desk → deputy, 6/33 mistags surfaced)
-  - bus #839 (deputy → lead, brief-request)
-  - Director chat 2026-05-24: Option (a) ratified
+prior_mailbox_state: superseded — TRANSCRIPT_CURATION_PHASE_1 COMPLETE (PR #252)
 ---
 
-# CODE_2_PENDING — HAG_TRANSCRIPT_CLASSIFIER_TIGHTEN_1
+# CODE_2_PENDING — HAG_TRANSCRIPT_CLASSIFIER_TIGHTEN_1 — COMPLETE 2026-05-24
 
-**Read the full brief first:** `~/baker-vault/_ops/briefs/BRIEF_HAG_TRANSCRIPT_CLASSIFIER_TIGHTEN_1.md` (anchor `baker-vault 26c7439`).
+Shipped. Awaiting AH2 gate chain (1+2+3) then AH1 merge.
 
-## TL;DR
-Add per-matter YAML overlay (`baker-vault/wiki/matters/<slug>/classifier-keywords.yml`) that activates AND-gate semantics in `orchestrator/pipeline._match_matter_slug`. Ship 1 YAML + 1 migration (6 idempotent UPDATEs) + 1 test file (7 cases) + 1 code edit (~80 LOC).
+- Vault PR #111 merges first (overlay YAML)
+- Baker-master PR #255 merges second (code + migration + tests + lesson)
 
-## Repos touched (2)
-1. **baker-master** — `orchestrator/pipeline.py` (edit) + `migrations/20260524_hagenauer_rg7_reclassify.sql` (new) + `tests/test_match_matter_slug_and_gate.py` (new) + `tasks/lessons.md` (append #71)
-2. **baker-vault** — `wiki/matters/hagenauer-rg7/classifier-keywords.yml` (new)
-
-## PR sequence
-- baker-vault PR (YAML overlay) — merges first so production has the file before code change goes live
-- baker-master PR (code + migration + test) — merges second
-
-## Critical pre-flight checks (per brief Quality Checkpoints)
-1. Confirm `BAKER_VAULT_PATH` env var is set on Render production. If absent, verify `/opt/render/project/src/baker-vault` default path exists in build config.
-2. Confirm 4 target slugs (`ao-holding`, `brisen`, `mrci`, `lilienmatt`) are canonical + active in `baker-vault/slugs.yml`. Line-grep before applying migration. If any wrong, STOP + bus AH1.
-3. Run pre-flight SELECT (in migration comment) to verify each WHERE-clause matches exactly one row. If any matches 0 or >1, STOP + bus AH1.
-4. PyYAML must be in `requirements.txt`. Grep first; add only if missing.
-
-## Ship gate
-- Literal `pytest tests/test_match_matter_slug_and_gate.py -v` output in ship report (no "pass by inspection" — Lesson #8).
-- Expect: 7 passed (5 AC cases + 2 regression).
-- Singletons check: `bash scripts/check_singletons.sh` (no new instances expected).
-- Bash syntax: `python3 -c "import py_compile; py_compile.compile('orchestrator/pipeline.py', doraise=True)"`.
-
-## Bus-post on ship
-Post to lead with:
-- 2 PR numbers + URLs
-- pytest output (full)
-- pre-flight SELECT result (6 row hits, ID + date + new slug per row)
-- BAKER_VAULT_PATH confirmation
-- Quality Checkpoint 5 plan (post-merge API count smoke)
-
-## Dispatch lane choice
-b2 because b1 is mid-flight on HAG_WORKERS_PHASE_1 gate chain (3 PRs awaiting AH2). Codebases are independent so b2 has clean working tree.
-
-End mailbox.
+Pre-flight surfaced 4 brief slips; all corrected pre-commit with AH1 ratification (bus #861 + #864). Full ship report at `briefs/_reports/B2_HAG_TRANSCRIPT_CLASSIFIER_TIGHTEN_1_20260524.md`.
