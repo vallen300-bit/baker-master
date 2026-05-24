@@ -1,7 +1,12 @@
 ---
 brief_id: BRISEN_LAB_REDESIGN_PHASE_1
 title: Dashboard layout + badge + matter-zone redesign
-status: PENDING
+status: COMPLETE
+completed_at: 2026-05-24T15:37:07Z
+pr_url: https://github.com/vallen300-bit/brisen-lab/pull/33
+pr_number: 33
+ship_report: briefs/_reports/B1_BRISEN_LAB_REDESIGN_PHASE_1_20260524.md
+bus_ship_post: 903
 authored_by: cowork-ah1
 dispatched_by: lead
 dispatched_at: 2026-05-24T15:25:00Z
