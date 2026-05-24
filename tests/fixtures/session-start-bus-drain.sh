@@ -54,6 +54,11 @@ case "${BAKER_ROLE:-}" in
     aid|AID)                            SLUG=aid ;;
     hag-desk|HAG-DESK|hagenauer-desk)   SLUG=hag-desk ;;
     researcher|RESEARCHER)              SLUG=researcher ;;
+    CM-1|cm-1|CM_1)                     SLUG=CM-1 ;;
+    CM-2|cm-2|CM_2)                     SLUG=CM-2 ;;
+    CM-3|cm-3|CM_3)                     SLUG=CM-3 ;;
+    CM-4|cm-4|CM_4)                     SLUG=CM-4 ;;
+    hag-filer|HAG-FILER|hag_filer)      SLUG=hag-filer ;;
     *)
         # No BAKER_ROLE → silent no-op. Cwd-based fallback intentionally NOT
         # mirrored here to avoid auto-draining for sessions not meant to be on
