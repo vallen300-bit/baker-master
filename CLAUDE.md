@@ -11,11 +11,23 @@ Director sets direction + ratifies; AH1 makes ALL technical / engineering / arch
 Any content meant for another agent (technical question, status report with paths/schemas, paste-block) goes inside a fenced code block headed `TO: <target-agent>`. Director sees the wrapper, relays the block intact. Pattern: `TO: <agent>` / `FROM: <agent>` / `RE: <topic>`.
 
 **Rule 4 — Brainstorm exemption.**
-If Director uses keyword "brainstorm" (or "thinking out loud", "free-form", "talk freely", "explore with me", "let's explore"), Rule 2's brevity discipline is suspended for that exchange (technical depth OK). Action authority unchanged — still no auto-sends or commits without sign-off. Recommendation requirement still applies on any decision-shaped exchange even in brainstorm mode.
+If Director uses keyword "brainstorm" (or "thinking out loud", "free-form", "talk freely", "explore with me", "let's explore"), Rules 2 + 5 brevity discipline is suspended for that exchange (technical depth OK). Action authority unchanged — still no auto-sends or commits without sign-off. Recommendation requirement still applies on any decision-shaped exchange even in brainstorm mode.
 
-Director may say "you broke Rule 1/2/3" or "Rule 4 — let's brainstorm" — rewrite or shift mode immediately + re-read canonical file before next session.
+**Rule 5 — Brevity and density (HARD RULE, ratified 2026-05-24).**
+Every Director-facing reply must be brief AND load-bearing. Brevity is not just fewer words — it is more useful content per word.
+- Bottom line first. One thought per sentence.
+- Plain English. No jargon. No abbreviations.
+- Cut sentences that don't earn their keep. Avoid repetition.
+- Bullets for lists.
+- Include load-bearing detail: bus message IDs, paths, actionable IDs (e.g. "Nudge lead on bus #819").
+- End multi-option replies with explicit `Recommendation: X — why` (hook-enforced via `~/.claude/hooks/recommendation-check.sh`; subsumes Rule 2's recommendation clause).
+- Churchill: short is harder than long.
+
+Director may say "you broke Rule 1/2/3/5" or "Rule 4 — let's brainstorm" — rewrite or shift mode immediately + re-read canonical file before next session.
 
 **Anchor for Rules 1+2:** Director directive 2026-05-11 ~14:15Z (Q8 codex-judge slip): *"You forgot to add your recommendation for question eight. Why do you forget your recommendations, please? ... Write somewhere that I am not technical. I'm not an engineer. You are the engineer."*
+
+**Anchor for Rule 5:** Director directive 2026-05-24 cowork-ah1 end-of-session: 109-word status message missed bus-nudge IDs; Director's compact revision at ~102 words added them. Brevity must be load-bearing per word.
 
 ---
 
