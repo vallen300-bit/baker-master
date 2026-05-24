@@ -1,111 +1,119 @@
 ---
 status: PENDING
-brief: briefs/BRIEF_WRITE_BRIEF_SOP_ENFORCER_HOOK_1.md
-brief_id: WRITE_BRIEF_SOP_ENFORCER_HOOK_1
-target_repo: multi (baker-master + baker-vault)
+brief: briefs/BRIEF_GMAIL_ATTACHMENT_READ_1.md
+brief_id: GMAIL_ATTACHMENT_READ_1
+target_repo: baker-master (single repo)
 matter_slug: baker-internal
-dispatched_at: 2026-05-23T18:30:00Z
-dispatched_by: lead
+dispatched_at: 2026-05-24T15:50:00Z
+dispatched_by: deputy (Director-ratified b3/b4 deputy lane 2026-05-24 chat)
 target: b3
-working_branch_baker_master: b3/write-brief-sop-enforcer-hook-1
-working_branch_baker_vault: b3/write-brief-sop-enforcer-hook-1
+working_branch_baker_master: b3/gmail-attachment-read-1
 working_dir_baker_master: ~/bm-b3
-working_dir_baker_vault: ~/bm-b3-baker-vault
 reply_to: lead
-priority: tier-b
-estimated_time: 4.5-5.5h
-trigger_class: MEDIUM
+also_cc: deputy
+priority: HIGH (Director-ratified "build now, live during sessions" 2026-05-24)
+estimated_time: 2-3h
+trigger_class: SMALL
 gate_chain:
-  gate_1_architecture_review: REQUIRED (AH2)
-  gate_2_security_review: REQUIRED — expected NO_FINDINGS (hooks read stdin/transcript only; no network, no auth, no secrets)
-  gate_3_picker_architect: REQUIRED — cross-picker install verification (5 picker pickers)
-  gate_4_code_reviewer_2nd_pass: REQUIRED (AH2 feature-dev:code-reviewer)
-  gate_5_ah1_final: REQUIRED
-prior_mailbox_state: superseded — MD_SCHEME_ALLOWLIST_1 V0.2 status CHANGES_REQUESTED in mailbox but ACTUAL state on main is MERGED via PR #246 (commit 7298a3d). b3 idle since.
-ui_surface_prebrief: brief §Surface contract = N/A (pure harness/hook infra) — gate satisfied
+  gate_1_architecture_review: REQUIRED (deputy, light — pattern parity with ClaimsMax + Grok defensive-import block)
+  gate_2_security_review: REQUIRED — expected NO_FINDINGS (no new auth/credential surface; reuses existing Gmail OAuth)
+  gate_3_picker_architect: SKIP (no agent-install pattern)
+  gate_4_code_reviewer_2nd_pass: REQUIRED (deputy feature-dev:code-reviewer, light — verify 10 test cases assert what their names claim)
+  gate_5_lead_merge: REQUIRED
+prior_mailbox_state: superseded — WRITE_BRIEF_SOP_ENFORCER_HOOK_1 shipped 2026-05-24 mid-morning via PR #253 (commit 915c075); b3 idle since
+ui_surface_prebrief: brief §Surface contract = N/A (pure backend MCP tool — no UI surface) — gate satisfied
+director_q_locks:
+  - q1_include_bytes_default: false (text-only default; opt-in for bytes via include_bytes=true). Deputy recommendation — locked.
+  - q2_image_scope_v1: text-extractable types only (pdf/docx/xlsx/csv/txt/md/json). Image support deferred to follow-up brief GMAIL_ATTACHMENT_READ_IMAGES_2. Deputy recommendation — locked.
 ---
 
-# CODE_3_PENDING — WRITE_BRIEF_SOP_ENFORCER_HOOK_1 — 2026-05-23
+# CODE_3_PENDING — GMAIL_ATTACHMENT_READ_1 — 2026-05-24
 
-**Brief:** `briefs/BRIEF_WRITE_BRIEF_SOP_ENFORCER_HOOK_1.md`
-**Target repos:** baker-master + baker-vault (multi-repo brief)
-**Working dirs:** `~/bm-b3` (baker-master) + `~/bm-b3-baker-vault` (baker-vault — clone if missing via `git clone https://github.com/vallen300-bit/baker-vault.git ~/bm-b3-baker-vault`)
-**Pre-requisites:** none
+**Brief:** `briefs/BRIEF_GMAIL_ATTACHMENT_READ_1.md`
+**Target repo:** baker-master (single repo)
+**Working dir:** `~/bm-b3` (baker-master)
+**Pre-requisites:** Gmail OAuth credentials already provisioned (Render Secret File `/etc/secrets/gmail_credentials.json` + `gmail_token.json`); existing polling pipeline operational. No new secrets, no new env vars.
 
 ## Bottom line
 
-Director ratified harness enforcement of /write-brief SOP after weekly reminder cycle. Two-layer enforcement parallel to render_env_guard + pre-commit Part 4 belt-and-braces:
+Director ratified 2026-05-24 "start building the capability to read attachments of emails now, live during sessions." Lead delegated authoring to deputy (bus #907). Director then ratified b3/b4 as deputy lane (chat "use b3 and b4, I will reserve b1 and b2 for lead").
 
-- **Layer 2 (in-session):** PreToolUse hook blocks Write/Edit on brief paths unless /write-brief skill was invoked in the session. Bypass: env `BAKER_BRIEF_SOP_BYPASS=1`.
-- **Layer 3 (git-time):** pre-commit hook scans staged brief diffs for 3+ of 5 canonical SOP section headers. Bypass: commit-msg trailer `Brief-SOP-bypass: <reason>`.
-
-Combined single brief — not split. 12 test cases total. Eat-own-dog-food: this brief itself was authored via /write-brief (AC8).
+Single-repo, ~80 LOC new + ~120 LOC tests, low complexity. Wraps existing poll-time attachment extractor (`scripts/extract_gmail.py:618 extract_attachments_text`) as a new on-demand MCP tool `baker_gmail_attachment_read`. Reuses Gmail OAuth singleton — no new credential surface. Pattern parity with ClaimsMax + Grok defensive-import blocks in `baker_mcp/baker_mcp_server.py:949-971`.
 
 ## Pre-flight (mandatory before edit)
 
 1. `cd ~/bm-b3 && git fetch origin main && git checkout main && git pull --ff-only` — sync baker-master.
-2. `[ -d ~/bm-b3-baker-vault ] || git clone https://github.com/vallen300-bit/baker-vault.git ~/bm-b3-baker-vault` — ensure baker-vault checkout.
-3. `cd ~/bm-b3-baker-vault && git fetch origin main && git checkout main && git pull --ff-only` — sync baker-vault.
-4. `cd ~/bm-b3 && git checkout -b b3/write-brief-sop-enforcer-hook-1`
-5. `cd ~/bm-b3-baker-vault && git checkout -b b3/write-brief-sop-enforcer-hook-1`
-6. `git config core.hooksPath .githooks` (already configured per CLAUDE.md but verify in both repos).
+2. `cd ~/bm-b3 && git checkout -b b3/gmail-attachment-read-1`
+3. `git config core.hooksPath .githooks` (verify configured).
+4. Confirm canonical brief is on main: `git show main:briefs/BRIEF_GMAIL_ATTACHMENT_READ_1.md | head -10` should return frontmatter.
 
-## Scope (4 features per brief)
+## Scope (2 features per brief)
 
-1. **Layer 2 hook + 5 picker installs** — canonical at `~/baker-vault/_ops/hooks/write_brief_sop_enforcer.sh` + 5 copies at AH1-T / AH1-cowork / AH2 / Researcher / legacy-AH1-T pickers + 5 `.claude/settings.json` (or `settings.local.json` for researcher) edits
-2. **Layer 3 hook + 2 pre-commit chain edits** — canonical at `~/baker-vault/.githooks/brief_sop_check.sh` + mirror at `~/bm-b3/.githooks/brief_sop_check.sh` + chain into both pre-commit hooks
-3. **Tests** — 12 cases total: Layer 2 (6) at `~/baker-vault/_ops/hooks/tests/test_write_brief_sop_enforcer.sh` + Layer 3 (6) at `~/baker-vault/.githooks/tests/test_brief_sop_check.sh`
-4. **lessons.md append** — Layer 2 vs Layer 3 pattern (in-session harness + git-time audit; render_env_guard parallel)
+1. **Fix/Feature 1 — `tools/gmail.py` (NEW) + 2 edits to `baker_mcp/baker_mcp_server.py`**
+   - `tools/gmail.py`: GMAIL_TOOLS + GMAIL_TOOL_NAMES + dispatch_gmail + _attachment_read (full Python in brief §Implementation Step 1.1, copy-pasteable).
+   - `baker_mcp/baker_mcp_server.py`: defensive-import block after Grok block (around line 971); dispatch route in `_dispatch()` after Grok elif (around line 2127). Both snippets copy-pasteable in brief §Implementation Step 1.2.
+2. **Fix/Feature 2 — `tests/test_gmail_attachment_read.py` (NEW)**
+   - 10 cases covering: happy path text-only, happy path include_bytes, missing message_id, missing attachment_id, attachment_id not found, oversize (>10MB), unsupported extension (e.g. `.png` in v1), empty Gmail data response, Gmail API exception on message.get(), Gmail API exception on attachments.get().
+   - Mirror mock-pattern from `tests/test_grok_client.py:450+`.
+   - Cover EMAIL-ATTACH-FIX-1 path (nested multipart, forwarded email scenario) in at least 1 test.
 
 ## Hard constraints
 
-- **No "by inspection"** — every AC needs literal bash test output pasted verbatim in ship report (Lesson #8)
-- **Fail-open posture** on hook errors — gate-logic bugs must NEVER block legitimate work (mirror `ui-surface-prebrief-check.sh` ERR trap)
-- **Anchored regex `\.md$`** — don't catch `.md.bak` etc.
-- **Excluded paths from BOTH layers:** `briefs/_reports/*` + `briefs/_tasks/CODE_*_<state>.md`
-- **Mirror drift mitigation:** `~/bm-b3/.githooks/brief_sop_check.sh` header MUST comment "MIRROR OF baker-vault/.githooks/brief_sop_check.sh — keep in sync"
-- **Hook completion <1s** for common case — no LLM, no network, regex only
-- **`git show :<path>`** to read staged blob — NOT on-disk file (pre-commit fires before commit)
-- **JSON validity** — every settings.json edit MUST be `jq -e .` valid; if PreToolUse block exists, APPEND to its `hooks` array (don't replace `ui-surface-prebrief-check.sh`)
-- **Researcher picker uses `settings.local.json`** — NOT `settings.json`. Verified at brief authoring time via `find`.
+- **Do NOT modify** `scripts/extract_gmail.py`, `triggers/email_trigger.py`, `tools/ingest/extractors.py`, `outputs/dashboard.py`. Reuse via import only.
+- **No new 1Password items, no new Render env vars.** Per Lesson #70.
+- **Sync tool, no internal asyncio** — matches ClaimsMax + Grok pattern.
+- **Build per Director-Q locks** in frontmatter (Q1=text-only default, Q2=text-extractable types only). Do NOT relitigate; lead bus-pings you only if Director redirects in the 15-min window after dispatch.
+- **No "by inspection"** — literal pytest output required in PR description.
 
-## Acceptance criteria (AC1-AC13 per brief)
+## Acceptance criteria
 
-See brief §Acceptance criteria. Highlights:
-- AC1-AC8 (Layer 2 install + tests + dog-food)
-- AC9-AC12 (Layer 3 install + tests + pre-commit chain)
-- AC13 (combined literal 12-test output verbatim in ship report)
+Per brief §Quality Checkpoints (numbered 1-7). Highlights:
+- AC1: `pytest tests/test_gmail_attachment_read.py -v` → 10/10 PASS, literal output in PR body.
+- AC2: `from baker_mcp.baker_mcp_server import TOOLS; len(TOOLS)` incremented by 1 vs main.
+- AC3: `bash scripts/check_singletons.sh` clean.
+- AC4: py_compile clean on `tools/gmail.py` + `baker_mcp/baker_mcp_server.py`.
+- AC5: Post-deploy live smoke (deputy will supply real message_id + attachment_id pair after deploy).
+- AC6: Render `/health` returns 200 post-deploy.
+- AC7: Tool listed in `tools/list` MCP response (curl in brief).
 
 ## Ship gate
 
-- Literal output of both test harnesses (6/6 + 6/6 = 12/12 PASS) pasted in ship report
-- `jq -e .` validates all 5 picker settings files
-- `bash -n` syntax-clean on both hook scripts + both test scripts
-- Mirror diff `~/baker-vault/.githooks/brief_sop_check.sh` vs `~/bm-b3/.githooks/brief_sop_check.sh` (tail -n +3 for both, skipping the differing header comment) returns empty
-- Layer 2 manual smoke (post-install): write to /tmp/briefs/BRIEF_SMOKE.md without /write-brief invocation in a fresh shell → blocks
-- Layer 3 manual smoke: stage partial brief in sandbox → blocks; add bypass trailer → passes
+- Literal `pytest tests/test_gmail_attachment_read.py -v` output (10/10 PASS) in PR body
+- Literal `bash scripts/check_singletons.sh` output in PR body
+- Literal tool-registration smoke output in PR body
+- `bash -n` syntax clean on `tools/gmail.py`
+- `py_compile` clean on `tools/gmail.py` + `baker_mcp/baker_mcp_server.py`
 
 ## Reporting (bus reply-to-sender)
 
-Two PRs to open (one per repo). Bus-post `lead` on both PRs open:
+One PR to open. Bus-post `lead` (with `deputy` CC) on PR open:
 
 ```bash
 BAKER_ROLE=b3 ~/bm-b3/scripts/bus_post.sh lead \
-  "ship/write-brief-sop-enforcer-hook-1 — baker-master PR #<N1> + baker-vault PR #<N2> open; +X LOC across N files; AC1-AC13 verified literal 12/12 PASS; awaiting AH2 gate chain (1+2+3+4) then AH1 merge." \
-  ship/write-brief-sop-enforcer-hook-1
+  "ship/gmail-attachment-read-1 — baker-master PR #<N> open; tools/gmail.py +X LOC + baker_mcp_server.py +Y LOC + tests/test_gmail_attachment_read.py +Z LOC; AC1-AC4+AC7 verified literal 10/10 PASS; awaiting deputy gate chain (1+2+4) then lead merge." \
+  ship/gmail-attachment-read-1
 ```
 
-`lead` (AH1-T) handles gate orchestration + merge sequence (merge baker-vault first, then baker-master — Layer 3 mirror reads from vault canonical).
+```bash
+BAKER_ROLE=b3 ~/bm-b3/scripts/bus_post.sh deputy \
+  "ship/gmail-attachment-read-1 — same as #N to lead; gate-chain pickup ready" \
+  ship-cc/gmail-attachment-read-1
+```
+
+`lead` runs Gate-5 merge after deputy PASS verdict. Post-merge: Render auto-deploys; deputy runs AC5 live smoke + AC7 tool-list curl.
 
 ## References
 
-- Brief: `briefs/BRIEF_WRITE_BRIEF_SOP_ENFORCER_HOOK_1.md`
-- Parent brief request: bus #788 (AH2)
-- Layer 3 amendment: bus #790 (AH2)
-- Existing PreToolUse precedent: `~/bm-aihead1/.claude/hooks/ui-surface-prebrief-check.sh`
-- Existing pre-commit Part 4 precedent: `~/bm-aihead1/.githooks/pre-commit`
-- jq schema verified live against current AH1-T session transcript by brief author 2026-05-23T18:00Z
+- Brief: `briefs/BRIEF_GMAIL_ATTACHMENT_READ_1.md` (full implementation steps + 10 test cases)
+- Director ratification: chat 2026-05-24 "build now, live during sessions" + "use b3 and b4"
+- Lead delegation: bus #907
+- Hag-desk capability gap: bus #882
+- Deputy → lead priority bump: bus #902
+- Director (a)-then-(b) authorization: bus #888 (via hag-desk relay)
+- ClaimsMax pattern reference: `baker_mcp/baker_mcp_server.py:949-960`
+- Grok pattern reference: `baker_mcp/baker_mcp_server.py:962-971`
+- Test mock-pattern reference: `tests/test_grok_client.py:450+`
 
 ## Heartbeat cadence (per §B-code stall chase — Director-ratified 2026-05-05)
 
-Minimum every 12h while actively building. Two consecutive 12h misses → `lead` auto-surfaces stall to Director. Given ~4.5-5.5h scope, expect 1-2 heartbeats max.
+Minimum every 12h while actively building. Given ~2-3h scope, expect 0-1 heartbeats.
