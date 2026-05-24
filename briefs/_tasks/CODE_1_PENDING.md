@@ -1,63 +1,63 @@
 ---
-brief_id: BRISEN_LAB_REDESIGN_PHASE_1
-title: Dashboard layout + badge + matter-zone redesign
-status: COMPLETE
-completed_at: 2026-05-24T15:37:07Z
-pr_url: https://github.com/vallen300-bit/brisen-lab/pull/33
-pr_number: 33
-ship_report: briefs/_reports/B1_BRISEN_LAB_REDESIGN_PHASE_1_20260524.md
-bus_ship_post: 903
-authored_by: cowork-ah1
-dispatched_by: lead
-dispatched_at: 2026-05-24T15:25:00Z
-ratified_by: Director (chat 2026-05-24 Steps 1-5)
+brief_id: BRISEN_LAB_CLICK_TO_WAKE_1
+title: Click on badged Brisen Lab card opens picker in Terminal
+status: PENDING
+dispatched_at: 2026-05-24T21:18:00Z
+dispatched_by: lead (AH1-Terminal)
+brief_path: briefs/BRIEF_BRISEN_LAB_CLICK_TO_WAKE_1.md
+target_repos:
+  - brisen-lab (Components 1+2 — single PR)
+  - baker-vault (Component 3 — separate PR for SOP Row 13)
+expected_time: 3-4h
+complexity: medium
+director_ratified: 2026-05-24 (Path 1, cowork-ah1 bus #916)
+authored_by: lead (AH1-Terminal)
+reply_target: lead
 target: b1
-target_repo: brisen-lab
-brief_path: ~/baker-vault/_ops/briefs/BRIEF_BRISEN_LAB_REDESIGN_PHASE_1.md
-estimated_time: ~10-14h
-complexity: Medium
-priority: HIGH
-prerequisites: HAG_WORKERS_PHASE_1 (merged; CM-1..4 + hag-filer slugs now registered)
-reply_to: lead
-prior_mailbox_state: superseded — HAG_WORKERS_PHASE_1 COMPLETE (merged 13:50-13:51Z)
+prior_mailbox_state: superseded — BRISEN_LAB_REDESIGN_PHASE_1 COMPLETE (merged PR #33 @ 19:30Z; deploy verified)
 ---
 
-# CODE_1_PENDING — BRISEN_LAB_REDESIGN_PHASE_1
+# CODE_1_PENDING — BRISEN_LAB_CLICK_TO_WAKE_1
 
-**Read the full brief first:** `~/baker-vault/_ops/briefs/BRIEF_BRISEN_LAB_REDESIGN_PHASE_1.md` (authored by cowork-ah1, Director-ratified 2026-05-24 chat Steps 1-5).
+## Read first
 
-## TL;DR
-Redesign brisen-lab dashboard. 5 features in scope:
-1. Two-zone layout (Fleet vs Matter Desks) with zone headers
-2. Five card types with sizing system (replace current 4-class flat)
-3. Unread badge redesign — circle + age-based colors + count + tooltip (replaces "small blue letters")
-4. Browser tab title + favicon dot for unread totals
-5. Matter panel structure — Hagenauer first as anchor; other matters (MOVIE/AO/Baden-Baden/Brisen/Origination) as faded placeholders
+1. The brief: `briefs/BRIEF_BRISEN_LAB_CLICK_TO_WAKE_1.md` (canonical spec — read end-to-end).
+2. The Surface Contract block at top of the brief — explains the 6-check verification done at brief-authoring time so you don't have to re-do it.
+3. The Gate-1+2 reviewer instructions block at the bottom — those four invariants are what your ship report MUST demonstrate.
 
-## Critical — reconcile with my hot-fix landed just before this dispatch
-I landed 2 hot-fix commits to brisen-lab today AFTER HAG_WORKERS merged but BEFORE this redesign dispatch:
-- `c733b0b` — static/app.js TERMINALS array + LABELS dict added CM-1..4 + hag-filer
-- `486b2dd` — static/index.html added `row-fleet` div with 5 `<article>` scaffolds
+## Working directories
 
-Both hot-fixes are the minimum to make cards render at all. The redesign **supersedes** the `row-fleet` row structure entirely — replace with the proper `row-cm-pool` inside `zone-fleet` per brief Step 1.1. The TERMINALS array + LABELS dict additions stay (still needed for renderCard()).
+- **Components 1+2 (brisen-lab repo):** work in `~/bm-b1-brisen-lab/` (your existing brisen-lab clone). Create branch `b1/brisen-lab-click-to-wake-1`. Single PR against `vallen300-bit/brisen-lab` main.
+- **Component 3 (baker-vault):** create `/tmp/baker-vault-c2w` fresh clone (avoid shared-FS race with the lead's working copy of baker-vault). Branch `b1/click-to-wake-sop-row-13`. Separate PR against `vallen300-bit/baker-vault` main.
 
-## Repos touched (1)
-brisen-lab only (no baker-master, no baker-vault).
+## Sequence
 
-## Ship gate
-- Literal HTML grep + visual smoke (new AC12 amendment): `curl https://brisen-lab.onrender.com/ | grep -E "zone-fleet|zone-matter|row-cm-pool|matter-panel|matter-hagenauer"` returns the expected DOM markers
-- Existing playwright/visual tests if present
-- Cache-bust `?v=N` on every static asset reference in index.html (brief Step 1.2 specifies v8→v9)
-- Singletons + syntax checks per repo defaults
+1. Component 1: AppleScript + build.sh + README. Verify locally — run `bash tools/wake-handler/build.sh`, then `open 'brisen-lab://wake/b1'` and confirm a Terminal window opens running `b1` shell function.
+2. Component 2: app.js click handler + cache-bust bumps in index.html (both app.js?v= AND styles.css?v=).
+3. Open brisen-lab PR for 1+2 together. Ship report under `briefs/_reports/B1_BRISEN_LAB_CLICK_TO_WAKE_1_<YYYYMMDD>.md` with literal output for all 5 ship-gate items in the brief.
+4. After brisen-lab PR merges + deploy verified + live `curl` confirms new `WAKEABLE_ALIASES` line is served: do Component 3 (baker-vault SOP PR).
+5. Bus-post lead on ship (per agent-bus-posting-contract — bus on every state change).
 
-## Bus-post on ship
-Post to lead with:
-- 1 PR number + URL
-- HTML grep output (zone + row + matter-panel selectors present)
-- Cache-bust confirmation (v=N bumped on all static refs)
-- Director-visible smoke note: "ready for Director hard-refresh"
+## Gate chain (your trigger after ship)
 
-## Dispatch lane choice
-b1 — free post HAG_WORKERS merge. brisen-lab repo work, no overlap with b2 (b2 just shipped classifier-tighten in baker-master).
+- Gate-1 architecture: deputy (AH2)
+- Gate-2 /security-review: deputy (AH2)
+- Gate-3 picker-architect: SKIP (no install, no picker symlink change)
+- Gate-4 code-reviewer 2nd-pass: deputy (AH2)
+- Gate-5 merge: lead (AH1)
 
-End mailbox.
+## Reply target
+
+Post your ship report bus message to `lead` (NOT deputy). Lead orchestrates the gate chain — will dispatch deputy for gates after your ship lands.
+
+## Director context
+
+Director just spent ~45 minutes today personally installing the 14 Terminal.app profiles + 5 new shell functions. This brief eliminates the manual step entirely going forward: badge appears → click card → picker opens. Director-ratified Path 1 (cowork-ah1 bus #916) explicitly.
+
+## What NOT to do
+
+- Do NOT add a new HTTP route on baker-master or brisen-lab. This is a client-side + macOS-local feature.
+- Do NOT touch `~/.zshrc` or `~/Library/Preferences/com.apple.Terminal.plist`. Shell functions + Terminal profiles already exist.
+- Do NOT widen `WAKEABLE_ALIASES` beyond TERMINALS. Cortex card + matter placeholders MUST fall through to existing detail-modal behavior.
+- Do NOT remove the existing detail-modal click handler. Badge-gating preserves it; shift+click escape hatch preserves it for badged cards too.
+- Do NOT ship without verifying that `open 'brisen-lab://wake/b1'` produces a real Terminal window in your environment. AppleScript-looks-right is not a ship gate.
