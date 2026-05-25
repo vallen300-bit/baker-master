@@ -55,7 +55,9 @@ _NATE_DIR = _DEFAULT_VAULT / "wiki" / "_ai-it" / "aid-t" / "external-substack" /
 
 NATE_SENDER_SUBSTRING = "natesnewsletter.substack.com"
 
-_LIST_ID_RE = re.compile(r"natesnewsletter\.substack\.com", re.IGNORECASE)
+# Canonical Nate List-Id format: "post.natesnewsletter.substack.com <id.list-id.substack.com>"
+# Word boundaries prevent substring spoofing from third-party Substack publishers.
+_LIST_ID_RE = re.compile(r"\bpost\.natesnewsletter\.substack\.com\b", re.IGNORECASE)
 _SENDER_FALLBACK_RE = re.compile(r"@.*natesnewsletter\.substack\.com", re.IGNORECASE)
 
 _PAID_TIER_MARKERS = (
@@ -112,9 +114,22 @@ def fetch_full_message(gmail_message_id: str) -> dict | None:
                 "cannot fetch msg %s", gmail_message_id,
             )
             return None
-        return svc.users().messages().get(
+        request = svc.users().messages().get(
             userId="me", id=gmail_message_id, format="full",
-        ).execute()
+        )
+        import concurrent.futures
+        with concurrent.futures.ThreadPoolExecutor(max_workers=1) as ex:
+            future = ex.submit(request.execute)
+            try:
+                return future.result(timeout=10)
+            except concurrent.futures.TimeoutError:
+                logger.warning(
+                    "substack_ingest.fetch_full_message: 10s timeout for msg %s "
+                    "(Gmail API hung); abandoning ingest for this message",
+                    gmail_message_id,
+                )
+                _safe_report_failure("substack_ingest", "fetch_full_message timeout 10s")
+                return None
     except Exception as e:
         logger.warning(
             "substack_ingest.fetch_full_message failed for %s: %s",

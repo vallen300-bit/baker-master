@@ -55,10 +55,20 @@ def run(days: int = 30, dry_run: bool = False) -> int:
     query = f"list:natesnewsletter.substack.com after:{cutoff.strftime('%Y/%m/%d')}"
     logger.info("backfill query: %s", query)
 
+    MAX_PAGES = 200  # Safety cap: ~20k messages at 100/page; guards against runaway pagination
     page_token = None
     written = 0
     seen = 0
+    pages = 0
     while True:
+        pages += 1
+        if pages > MAX_PAGES:
+            logger.warning(
+                "backfill_nate_substack: hit MAX_PAGES=%d guard; stopping early "
+                "(seen=%d written=%d). If this is expected, raise MAX_PAGES.",
+                MAX_PAGES, seen, written,
+            )
+            break
         resp = svc.users().messages().list(
             userId="me", q=query, maxResults=100, pageToken=page_token,
         ).execute()
