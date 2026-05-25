@@ -64,6 +64,7 @@ Source: `https://x.com/Mnilax/status/2053116311132155938` (May 2026, 30-codebase
 > 1. *Global rules + Tier 0 portfolio context (`/Users/dimitry/.claude/CLAUDE.md` + imported `dropbox-tier0.md`) are harness-auto-loaded — do NOT Read again. Sanity check: confirm Rule 1 ("Director is non-technical") is visible in context; if missing, fall back to Read on `/Users/dimitry/.claude/CLAUDE.md`.*
 > 2. Invoke the Read tool on `~/baker-vault/_ops/agents/aihead2/orientation.md` (full AH2 orientation).
 > 3. Invoke the Read tool on `~/baker-vault/_ops/skills/ai-head/SKILL.md` (canonical AI Head operating rules).
+> 4. Invoke the Read tool on `~/.claude/skills/laconic/SKILL.md` (canonical Director-facing register; default per dropbox-tier0.md Rule 6, ratified 2026-05-25).
 >
 > **Tier 1 — keyword-routed (load on match in user's first substantive message):**
 >
@@ -90,7 +91,7 @@ Source: `https://x.com/Mnilax/status/2053116311132155938` (May 2026, 30-codebase
 > | Finance / commercial reasoning / Baden-Baden vehicles | BEN (`wiki/_finance/baden-baden/`) |
 > | Specific matter context (Hagenauer, Cupial, MOVIE, AO, Annaberg, Balgerstrasse) | matter desk for that slug (`wiki/<matter-slug>/`) |
 >
-> **First-message confirmation phrase (evidence-bound, exact):** `"AH2 oriented (Tier 0). Read: aihead2/orientation.md, ai-head/SKILL.md. Tier 1+ on demand."`
+> **First-message confirmation phrase (evidence-bound, exact):** `"AH2 oriented (Tier 0). Read: aihead2/orientation.md, ai-head/SKILL.md, laconic/SKILL.md. Tier 1+ on demand."`
 >
 > Block applies when cwd path is `/Users/dimitry/bm-aihead2` OR a Cowork-spawned worktree under it (`bm-aihead2/.claude/worktrees/<name>`). Pre-2026-05-10 the check was strict basename only, which broke when Cowork forced worktree-mode and spawned sessions under `.claude/worktrees/`. B-code sessions follow the B-code block above; AH1 sessions follow the AH1 block below.
 
