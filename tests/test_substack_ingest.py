@@ -213,31 +213,20 @@ def test_ingest_handles_missing_html_part(tmp_path, nate_headers):
 # --- fetch_full_message (Gmail round-trip helper) ---
 
 
-def _install_stub_extract_gmail(monkeypatch, service):
-    """Inject a stub `scripts.extract_gmail` so fetch_full_message's lazy
-    import works without pulling in google.auth (which may not be installed
-    in test envs)."""
-    import types
-    stub = types.ModuleType("scripts.extract_gmail")
-    stub._gmail_service = service
-    scripts_pkg = sys.modules.get("scripts") or types.ModuleType("scripts")
-    monkeypatch.setitem(sys.modules, "scripts", scripts_pkg)
-    monkeypatch.setitem(sys.modules, "scripts.extract_gmail", stub)
-    return stub
-
-
 def test_fetch_full_message_returns_none_when_service_unset(monkeypatch):
-    """When _gmail_service module attr is None, helper returns None (does not raise)."""
-    _install_stub_extract_gmail(monkeypatch, service=None)
+    """When _get_substack_service() returns None, helper returns None (does not raise)."""
+    import triggers.substack_ingest as si
+    monkeypatch.setattr(si, "_get_substack_service", lambda: None)
     assert fetch_full_message("anything") is None
 
 
 def test_fetch_full_message_returns_payload_when_service_set(monkeypatch):
-    """When _gmail_service is set, helper calls users().messages().get(...).execute()."""
+    """When substack svc is available, helper calls users().messages().get(...).execute()."""
+    import triggers.substack_ingest as si
     expected = {"id": "m1", "payload": {"headers": [{"name": "List-Id", "value": "x"}]}}
     svc = MagicMock()
     svc.users.return_value.messages.return_value.get.return_value.execute.return_value = expected
-    _install_stub_extract_gmail(monkeypatch, service=svc)
+    monkeypatch.setattr(si, "_get_substack_service", lambda: svc)
 
     assert fetch_full_message("m1") == expected
     svc.users.return_value.messages.return_value.get.assert_called_once_with(
@@ -249,49 +238,49 @@ def test_fetch_full_message_returns_payload_when_service_set(monkeypatch):
 
 
 def test_fetch_full_message_returns_none_on_timeout(monkeypatch):
-    """Fix 1: when Gmail .execute() hangs past 10s, fetch_full_message returns None.
+    """Fix 1: socket.timeout from httplib2-wrapped execute() → fetch_full_message returns None.
 
-    Use sleep(11) — timeout fires at 10s and returns None; ThreadPoolExecutor's
-    `with`-block __exit__ then waits up to ~1s for the worker thread to finish
-    (Python 3.12 default shutdown(wait=True) semantics). Total expected ~11s.
-    Assertion margin set to 13s to absorb CI jitter without going past 15s
-    (the budget at which a real Gmail OS-TCP-timeout would have been fine
-    too — the contract is "well under minutes", not strictly 10s).
+    Architecture-honest: under the new pattern, `_get_substack_service()` builds
+    a Gmail service wrapped in `httplib2.Http(timeout=10)`. When the underlying
+    socket exceeds the timeout, httplib2 raises `socket.timeout` from execute().
+    No thread, no ThreadPoolExecutor shutdown wait — the exception unwinds the
+    stack directly. Test stubs the failure path explicitly + asserts the
+    `_safe_report_failure` audit fires.
     """
-    import time
-
-    def slow_execute():
-        time.sleep(11)
-        return {"should": "never_return"}
+    import socket
+    import triggers.substack_ingest as si
 
     svc = MagicMock()
-    svc.users.return_value.messages.return_value.get.return_value.execute = slow_execute
-    _install_stub_extract_gmail(monkeypatch, service=svc)
+    svc.users.return_value.messages.return_value.get.return_value.execute.side_effect = (
+        socket.timeout("simulated httplib2 timeout")
+    )
+    monkeypatch.setattr(si, "_get_substack_service", lambda: svc)
+    reported = []
+    monkeypatch.setattr(
+        si, "_safe_report_failure",
+        lambda source, error: reported.append((source, error)),
+    )
 
-    start = time.monotonic()
     result = fetch_full_message("hung_msg")
-    elapsed = time.monotonic() - start
-
     assert result is None
-    assert elapsed < 13.0, f"timeout did not fire near ~10s; took {elapsed:.1f}s"
+    assert reported == [("substack_ingest", "fetch_full_message socket.timeout")], (
+        f"expected exactly one socket.timeout audit row; got {reported}"
+    )
 
 
 def test_backfill_max_pages_guards_runaway_pagination(monkeypatch, caplog):
     """Fix 2: when Gmail returns infinite nextPageToken loop, MAX_PAGES breaks early.
 
-    Stub Gmail svc to ALWAYS return {"nextPageToken": "x", "messages": []}.
-    Assert run() returns 0 (no infinite loop) within ~1s and logs MAX_PAGES warning.
+    With MAX_PAGES now at module scope, monkeypatch it down to 3 for a fast
+    deterministic test — no 200-iteration synthetic loop needed.
     """
     import logging as _logging
     import sys as _sys
-    import time as _time
     import types as _types
 
     # Stub googleapiclient.discovery + scripts.extract_gmail so the backfill
     # module can be imported in test envs where neither dep is installed
-    # (prod ships with both). Without these stubs, `from scripts.extract_gmail
-    # import authenticate` chains into `google.auth.transport.requests` which
-    # is not in this test env. Import the real `scripts` package first to
+    # (prod ships with both). Import the real `scripts` package first to
     # avoid shadowing it with an empty stub.
     import scripts as _scripts_pkg  # noqa: F401 — ensures real package in sys.modules
 
@@ -316,14 +305,14 @@ def test_backfill_max_pages_guards_runaway_pagination(monkeypatch, caplog):
     }
     monkeypatch.setattr(backfill, "authenticate", lambda: None)
     monkeypatch.setattr(backfill, "build", lambda *a, **kw: svc)
+    monkeypatch.setattr(backfill, "MAX_PAGES", 3)
 
     with caplog.at_level(_logging.WARNING, logger="substack_backfill"):
-        start = _time.monotonic()
         written = backfill.run(days=30, dry_run=True)
-        elapsed = _time.monotonic() - start
 
     assert written == 0
-    assert elapsed < 5.0, f"loop did not break in ~1s; took {elapsed:.1f}s"
+    list_calls = svc.users.return_value.messages.return_value.list.call_count
+    assert list_calls == 3, f"expected exactly MAX_PAGES=3 list() calls; got {list_calls}"
     assert any("MAX_PAGES" in rec.message for rec in caplog.records), (
         "expected MAX_PAGES warning in caplog"
     )
@@ -341,3 +330,16 @@ def test_is_substack_nate_rejects_substring_spoofing():
         {"name": "List-Id", "value": "foo.substack.com <id> (re: natesnewsletter.substack.com)"},
     ]
     assert is_substack_nate(spoof_headers, "attacker@foo.substack.com") is False
+
+
+def test_is_substack_nate_accepts_canonical_list_id():
+    """Positive coverage: canonical Nate List-Id still matches under tightened regex.
+
+    Belt-and-braces — if a future regex tighten silently breaks the happy path,
+    this test fails loud instead of letting Nate Substack ingest go quiet.
+    """
+    canonical_headers = [
+        {"name": "From", "value": "nate@natesnewsletter.substack.com"},
+        {"name": "List-Id", "value": "post.natesnewsletter.substack.com <a8b9c0d1.list-id.substack.com>"},
+    ]
+    assert is_substack_nate(canonical_headers, "nate@natesnewsletter.substack.com") is True

@@ -23,6 +23,7 @@ import json
 import logging
 import os
 import re
+import threading
 import uuid
 from datetime import datetime, timezone
 from pathlib import Path
@@ -94,42 +95,76 @@ def is_substack_nate(headers: list[dict] | None, sender_email: str | None) -> bo
     return False
 
 
+# Lazy-init substack-only Gmail service with socket-level timeout via httplib2.
+# Independent of the shared `scripts.extract_gmail._gmail_service` handle so the
+# 10s timeout doesn't bleed into other Gmail callers (out-of-scope per brief).
+# socket.timeout from execute() raises directly, no thread to leak.
+_substack_svc = None
+_substack_svc_lock = threading.Lock()
+
+
+def _get_substack_service():
+    """Return a Gmail service wrapped in httplib2.Http(timeout=10), or None.
+
+    Lazy-init under a lock so concurrent first-callers don't race. Cached on
+    success; on build failure returns None and a fresh attempt fires next call.
+    """
+    global _substack_svc
+    if _substack_svc is not None:
+        return _substack_svc
+    with _substack_svc_lock:
+        if _substack_svc is None:
+            try:
+                import httplib2
+                from googleapiclient.discovery import build
+                from scripts.extract_gmail import authenticate
+                creds = authenticate()
+                http = httplib2.Http(timeout=10)
+                _substack_svc = build("gmail", "v1", credentials=creds, http=http)
+            except Exception as e:
+                logger.warning(
+                    "substack_ingest: failed to build timeout-bound svc: %s", e,
+                )
+                return None
+    return _substack_svc
+
+
 def fetch_full_message(gmail_message_id: str) -> dict | None:
     """Re-fetch raw Gmail message in 'full' format to get headers + HTML body.
 
     format_thread() in scripts/extract_gmail.py strips the raw payload before
     exposing the thread to email_trigger.py, so the caller must round-trip
-    back to Gmail when it needs headers or the HTML body. Uses the existing
-    module-level `_gmail_service` handle set by email_trigger.py at startup
-    (extract_gmail.py:441 ARCH-6).
+    back to Gmail when it needs headers or the HTML body.
+
+    Uses a substack-local Gmail service wrapped in httplib2.Http(timeout=10)
+    so a hung Gmail TCP socket raises socket.timeout directly inside execute()
+    instead of stalling the upstream email-polling loop. Independent of the
+    shared `scripts.extract_gmail._gmail_service` handle (out-of-scope here).
 
     Returns the raw API dict or None on failure (logged, never raised).
     """
+    import socket
+
     try:
-        from scripts import extract_gmail
-        svc = getattr(extract_gmail, "_gmail_service", None)
+        svc = _get_substack_service()
         if svc is None:
             logger.warning(
-                "substack_ingest.fetch_full_message: _gmail_service not set; "
+                "substack_ingest.fetch_full_message: substack svc unavailable; "
                 "cannot fetch msg %s", gmail_message_id,
             )
             return None
-        request = svc.users().messages().get(
-            userId="me", id=gmail_message_id, format="full",
-        )
-        import concurrent.futures
-        with concurrent.futures.ThreadPoolExecutor(max_workers=1) as ex:
-            future = ex.submit(request.execute)
-            try:
-                return future.result(timeout=10)
-            except concurrent.futures.TimeoutError:
-                logger.warning(
-                    "substack_ingest.fetch_full_message: 10s timeout for msg %s "
-                    "(Gmail API hung); abandoning ingest for this message",
-                    gmail_message_id,
-                )
-                _safe_report_failure("substack_ingest", "fetch_full_message timeout 10s")
-                return None
+        try:
+            return svc.users().messages().get(
+                userId="me", id=gmail_message_id, format="full",
+            ).execute()
+        except socket.timeout as e:
+            logger.warning(
+                "substack_ingest.fetch_full_message: socket timeout for msg %s "
+                "(%s); abandoning ingest for this message",
+                gmail_message_id, e,
+            )
+            _safe_report_failure("substack_ingest", "fetch_full_message socket.timeout")
+            return None
     except Exception as e:
         logger.warning(
             "substack_ingest.fetch_full_message failed for %s: %s",

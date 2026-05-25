@@ -37,6 +37,11 @@ from triggers.substack_ingest import (  # noqa: E402
 logger = logging.getLogger("substack_backfill")
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
 
+# Safety cap: ~20k messages at 100/page; guards against runaway pagination
+# (e.g. Gmail returning duplicate nextPageToken or broad List-Id matches on a
+# --days 3650 invocation). Override path: edit this constant — no CLI flag.
+MAX_PAGES = 200
+
 
 def _header(headers: list[dict], name: str) -> str:
     """Case-insensitive header lookup. Returns '' if not found."""
@@ -55,7 +60,6 @@ def run(days: int = 30, dry_run: bool = False) -> int:
     query = f"list:natesnewsletter.substack.com after:{cutoff.strftime('%Y/%m/%d')}"
     logger.info("backfill query: %s", query)
 
-    MAX_PAGES = 200  # Safety cap: ~20k messages at 100/page; guards against runaway pagination
     page_token = None
     written = 0
     seen = 0
