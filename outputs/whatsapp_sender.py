@@ -15,6 +15,16 @@ logger = logging.getLogger("baker.output.whatsapp")
 WAHA_BASE_URL = os.getenv("WAHA_BASE_URL", "https://baker-waha.onrender.com")
 WAHA_SESSION = os.getenv("WAHA_SESSION", "default")
 WAHA_API_KEY = os.getenv("WAHA_API_KEY_SEND", "") or os.getenv("WHATSAPP_API_KEY", "")
+
+# BAKER_BLOCK_WA_TO_DIRECTOR — env-flagged HARD block on Director-bound WA outbound.
+# Independent of (and stronger than) the BAKER_WA_DIRECTOR_FILTER_1 kind-allowlist:
+# when this flag is ON, NO Baker → Director WA send goes through, regardless of kind.
+# Default ON. Anchor: Director directive 2026-05-25 post WhatsApp self-chat cost-runaway
+# loop (~€92/day burn between 2026-05-21 and 2026-05-25 closed via PR #263).
+# To re-enable Baker → Director WA (e.g. for Director-Q replies), set this env var to
+# "false" via Render and redeploy.
+_BLOCK_WA_TO_DIRECTOR = os.getenv("BAKER_BLOCK_WA_TO_DIRECTOR", "true").lower() in ("true", "1", "yes")
+
 DIRECTOR_WHATSAPP = "41799605092@c.us"  # Director's number, no + prefix
 
 
@@ -326,6 +336,53 @@ def _log_director_blocked(text: str, kind: Optional[str]) -> None:
         logger.warning(f"whatsapp_blocked audit unavailable: {e}")
 
 
+def _log_director_hard_blocked(text: str, kind: Optional[str]) -> None:
+    """Audit a Director-bound WA send blocked by the BAKER_BLOCK_WA_TO_DIRECTOR
+    hard switch (distinct from the kind-allowlist block). Fails silently.
+    """
+    try:
+        from memory.store_back import SentinelStoreBack
+        store = SentinelStoreBack._get_global_instance()
+        conn = store._get_conn()
+        if not conn:
+            return
+        try:
+            payload = {
+                "reason": "director_hard_block_env_flag",
+                "env_flag": "BAKER_BLOCK_WA_TO_DIRECTOR",
+                "kind": kind,
+                "text_preview": text[:200],
+            }
+            cur = conn.cursor()
+            cur.execute(
+                """
+                INSERT INTO baker_actions
+                    (action_type, target_task_id, target_space_id, payload,
+                     trigger_source, success, error_message)
+                VALUES (%s, NULL, NULL, %s::jsonb, %s, %s, %s)
+                """,
+                (
+                    "whatsapp_hard_blocked",
+                    json.dumps(payload),
+                    "whatsapp_sender",
+                    False,
+                    None,
+                ),
+            )
+            conn.commit()
+            cur.close()
+        except Exception as e:
+            logger.warning(f"whatsapp_hard_blocked audit insert failed: {e}")
+            try:
+                conn.rollback()
+            except Exception:
+                pass
+        finally:
+            store._put_conn(conn)
+    except Exception as e:
+        logger.warning(f"whatsapp_hard_blocked audit unavailable: {e}")
+
+
 def send_whatsapp(
     text: str,
     chat_id: str = DIRECTOR_WHATSAPP,
@@ -348,6 +405,19 @@ def send_whatsapp(
     adding a new Director-controlled number is a one-line change there.
     """
     requested_chat_id = chat_id
+
+    # BAKER_BLOCK_WA_TO_DIRECTOR hard switch — overrides kind-allowlist entirely.
+    # Hits BEFORE the kind-check so even allowlisted kinds (incl. director_inbound)
+    # are dropped when this is ON. Independent failsafe against any cost-runaway
+    # loop class that touches Director-bound outbound.
+    if _BLOCK_WA_TO_DIRECTOR and _phone_root(chat_id) in DIRECTOR_PHONE_ROOTS:
+        logger.warning(
+            "WA_DIRECTOR_HARD_BLOCK: dropped Director-bound send (env-flagged). "
+            "chat_id=%r kind=%r text_preview=%r",
+            chat_id, kind, text[:120],
+        )
+        _log_director_hard_blocked(text, kind)
+        return False
 
     # BAKER_WA_DIRECTOR_FILTER_1 chokepoint — Director-bound must have allowlisted kind.
     # Filter on phone-root set (not literal DIRECTOR_WHATSAPP) so the UK

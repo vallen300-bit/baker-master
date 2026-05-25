@@ -31,6 +31,19 @@ logger = logging.getLogger("baker.email_alerts")
 
 DIRECTOR_EMAIL = "dvallen@brisengroup.com"
 DASHBOARD_URL = "baker-master.onrender.com"
+
+# Director's personal Gmail (occasional fallback). Covered by hard block alongside primary.
+DIRECTOR_PERSONAL_EMAIL = "vallen300@gmail.com"
+DIRECTOR_EMAILS = frozenset({DIRECTOR_EMAIL.lower(), DIRECTOR_PERSONAL_EMAIL.lower()})
+
+# BAKER_BLOCK_EMAIL_TO_DIRECTOR — env-flagged HARD block on Director-bound email
+# outbound. Independent of (and stronger than) BAKER_EMAIL_ALERTS_DISABLED which
+# only short-circuits proactive alert wrappers. This guard hits at the lowest
+# send primitive, catching Type 4 manual summary, Type 5 composed email, and any
+# future caller. Default ON. Anchor: Director directive 2026-05-25.
+# To re-enable Baker → Director email, set this env var to "false" via Render and redeploy.
+_BLOCK_EMAIL_TO_DIRECTOR = os.getenv("BAKER_BLOCK_EMAIL_TO_DIRECTOR", "true").lower() in ("true", "1", "yes")
+
 _BAKER_EMAIL = os.getenv("BAKER_EMAIL_ADDRESS", "bakerai200@gmail.com")
 
 # Director preference: disable all proactive Baker emails (alerts, digests, daily briefing).
@@ -64,11 +77,69 @@ def _get_gmail_service():
     return build("gmail", "v1", credentials=creds)
 
 
+def _log_email_director_hard_blocked(to: str, subject: str, body: str) -> None:
+    """Audit a Director-bound email send blocked by the BAKER_BLOCK_EMAIL_TO_DIRECTOR
+    hard switch. Mirrors WA-side audit pattern. Fails silently.
+    """
+    try:
+        from memory.store_back import SentinelStoreBack
+        import json as _json
+        store = SentinelStoreBack._get_global_instance()
+        conn = store._get_conn()
+        if not conn:
+            return
+        try:
+            payload = {
+                "reason": "director_hard_block_env_flag",
+                "env_flag": "BAKER_BLOCK_EMAIL_TO_DIRECTOR",
+                "to": to,
+                "subject_preview": (subject or "")[:200],
+                "body_preview": (body or "")[:200],
+            }
+            cur = conn.cursor()
+            cur.execute(
+                """
+                INSERT INTO baker_actions
+                    (action_type, target_task_id, target_space_id, payload,
+                     trigger_source, success, error_message)
+                VALUES (%s, NULL, NULL, %s::jsonb, %s, %s, %s)
+                """,
+                (
+                    "email_hard_blocked",
+                    _json.dumps(payload),
+                    "email_alerts",
+                    False,
+                    None,
+                ),
+            )
+            conn.commit()
+            cur.close()
+        except Exception as e:
+            logger.warning(f"email_hard_blocked audit insert failed: {e}")
+            try:
+                conn.rollback()
+            except Exception:
+                pass
+        finally:
+            store._put_conn(conn)
+    except Exception as e:
+        logger.warning(f"email_hard_blocked audit unavailable: {e}")
+
+
 def _send_raw_full(to: str, subject: str, body: str) -> Optional[dict]:
     """
     Low-level Gmail send. Returns dict with message_id and thread_id.
     Caller is responsible for all error handling.
     """
+    # BAKER_BLOCK_EMAIL_TO_DIRECTOR hard switch — recipient-based block at the
+    # lowest send primitive. Covers Type 4 / Type 5 / any future caller.
+    if _BLOCK_EMAIL_TO_DIRECTOR and to and to.strip().lower() in DIRECTOR_EMAILS:
+        logger.warning(
+            "EMAIL_DIRECTOR_HARD_BLOCK: dropped Director-bound send (env-flagged). "
+            "to=%r subject=%r", to, (subject or "")[:80]
+        )
+        _log_email_director_hard_blocked(to, subject, body)
+        return None
     service = _get_gmail_service()
     msg = MIMEText(body, "plain", "utf-8")
     msg["To"] = to
