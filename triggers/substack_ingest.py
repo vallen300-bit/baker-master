@@ -68,10 +68,14 @@ NATE_SENDER_SUBSTRING = NATE_SENDER_SUBSTRINGS[0]  # back-compat alias
 
 # Match the domain as the whole List-Id value (real form: `<natesnewsletter.substack.com>`)
 # OR as a leading bare token followed by a separate `<id.list-id.substack.com>` chunk
-# (older format, kept for forward-compat). Position guard prevents the
-# `foo.substack.com <id> (re: natesnewsletter.substack.com)` spoof.
+# (older format, kept for forward-compat). Start-anchored to reject domain
+# appearances elsewhere in the value: deputy retro-gate 2026-05-25 surfaced 4
+# bypass variants of an earlier `(?:^|[\s<])` guard (trailing-space `(re: ...)`,
+# double angle-bracket, newline-prefixed bare token, bare-token-in-prose). The
+# `^` anchor + optional leading `<` rejects all four — the domain MUST appear
+# at value-start.
 _LIST_ID_RE = re.compile(
-    r"(?:^|[\s<])(?:post\.)?natesnewsletter\.substack\.com(?=[\s>]|$)",
+    r"^<?(?:post\.)?natesnewsletter\.substack\.com(?=[\s>]|$)",
     re.IGNORECASE,
 )
 # Real sender: `natesnewsletter@substack.com`. Older expected: `*@natesnewsletter.substack.com`.

@@ -351,18 +351,42 @@ def test_backfill_max_pages_guards_runaway_pagination(monkeypatch, caplog):
 
 
 def test_is_substack_nate_rejects_substring_spoofing():
-    """Position-anchored _LIST_ID_RE rejects substring-match from third-party Substack.
+    """Start-anchored _LIST_ID_RE rejects substring-match from third-party Substack.
 
     Adversary List-Id `foo.substack.com <id> (re: natesnewsletter.substack.com)`
-    must NOT pass — the domain must appear as the value itself (preceded by
-    start/whitespace/`<`, followed by whitespace/`>`/end), not buried inside a
-    `(re: ...)` comment block where the trailing `)` fails the lookahead.
+    must NOT pass — the domain must appear at value-start (optionally wrapped in
+    `<`), not anywhere later in the value.
     """
     spoof_headers = [
         {"name": "From", "value": "attacker@foo.substack.com"},
         {"name": "List-Id", "value": "foo.substack.com <id> (re: natesnewsletter.substack.com)"},
     ]
     assert is_substack_nate(spoof_headers, "attacker@foo.substack.com") is False
+
+
+def test_is_substack_nate_rejects_bypass_variants():
+    """Deputy retro-gate 2026-05-25 surfaced 4 bypass variants of the earlier
+    `(?:^|[\\s<])` position guard. Start-anchor closes all four. Sender for each
+    variant is non-Nate so the sender-fallback can't carry the match.
+    """
+    variants = [
+        # 1. trailing space before ')' — earlier (?=[\s>]) lookahead matched space
+        "foo.substack.com <id> (re: natesnewsletter.substack.com )",
+        # 2. double angle-bracket — 2nd token preceded by '<', followed by '>'
+        "<spoof.com> <natesnewsletter.substack.com>",
+        # 3. newline-prefixed bare token — \n matches \s in the earlier guard
+        "text\nnatesnewsletter.substack.com>",
+        # 4. bare token in arbitrary prose — surrounded by whitespace
+        "notes natesnewsletter.substack.com end",
+    ]
+    for val in variants:
+        spoof = [
+            {"name": "From", "value": "attacker@foo.example.com"},
+            {"name": "List-Id", "value": val},
+        ]
+        assert is_substack_nate(spoof, "attacker@foo.example.com") is False, (
+            f"bypass variant accepted: {val!r}"
+        )
 
 
 def test_is_substack_nate_accepts_canonical_list_id():
