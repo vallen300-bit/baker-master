@@ -1,5 +1,13 @@
 ---
-status: PENDING
+status: COMPLETE
+completed_at: 2026-05-25T12:30:00Z
+pr_baker_vault: 113
+merge_squash: 7a6e2ee
+post_merge_commit: 2740f6a
+scripts_run_baseline: created=13 skipped=0 + moved=7 skipped=0
+ship_bus: deputy #1051 + lead #1052 (CC)
+gate5_bus: lead #1058 (merge done) + lead #1060 (scripts done)
+companion_brief_queued: SKILLS_EVAL_HARNESS_1 (deputy to dispatch next)
 dispatched_at: 2026-05-25T11:10:00Z
 dispatched_by: deputy
 target: b3
