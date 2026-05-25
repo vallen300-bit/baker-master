@@ -1115,6 +1115,26 @@ async def waha_webhook(
     # Both share PM-signal-outbound; only Baker self-chat fires RAG / YouTube /
     # deadlines / obligations / question handler.
     _baker_self = is_baker_self_chat(chat_id)
+
+    # COST_RUNAWAY_FIX_1: Drop fromMe=true on Baker self-chat before any
+    # question-handler / RAG / deadline / obligations path fires. Baker's
+    # own outbound replies to Director's self-chat arrive as fromMe=true
+    # webhook events, get re-attributed to Director by attribute_sender
+    # (triggers/waha_message_utils.py:42-43), and would otherwise infinite-
+    # loop through _handle_director_question — burning ~€100/day on
+    # capability_runner Opus calls (zero matter_slug, zero cache hits).
+    # Audit trail INSERT to whatsapp_messages already happened upstream
+    # at line ~983, so we preserve that even though we drop the processing.
+    # Trade-off: Director's own phone-typed self-chat messages are also
+    # dropped — that interface stops working. Lead-gated at Gate-5.
+    # Anchor: briefs/_reports/B4_capability_runner_cost_runaway_diagnostic_1_20260525.md
+    if from_me and _baker_self:
+        logger.info(
+            f"COST_RUNAWAY_FIX_1: self-chat loop guard dropping fromMe=true "
+            f"msg_id={msg_id} (audit-trail INSERT preserved upstream)"
+        )
+        return {"status": "self_chat_loop_guard_drop", "msg_id": msg_id}
+
     director_to_baker = (sender == DIRECTOR_WHATSAPP and _baker_self and bool(combined_body))
     director_to_counterparty = (sender == DIRECTOR_WHATSAPP and not _baker_self and bool(combined_body))
 

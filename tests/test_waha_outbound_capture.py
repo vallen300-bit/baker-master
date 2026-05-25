@@ -226,18 +226,133 @@ class TestWebhookDirectorRouting:
         assert not director_q.called, "Director question handler should NOT fire for Director->counterparty"
         assert not director_m.called, "Director message handler should NOT fire for Director->counterparty"
 
-    def test_director_to_baker_fires_pm_signal_and_rag(self, monkeypatch):
-        pm_flag, director_q, director_m = self._wire_mocks(monkeypatch)
+    # NOTE: prior test `test_director_to_baker_fires_pm_signal_and_rag` was
+    # removed by COST_RUNAWAY_FIX_1. It asserted that fromMe=True on Baker's
+    # self-chat fires the PM-signal + question-handler path — which was the
+    # vector for the WhatsApp self-chat feedback loop burning ~€100/day
+    # (Baker's own outbound to its self-chat arrives as fromMe=true, gets
+    # re-attributed to Director, and re-enters the question handler ad
+    # infinitum). The Option A fix drops all fromMe=true events on the
+    # self-chat, including Director's own phone-typed self-chat messages
+    # (trade-off ratified at Gate-5). The new expected behaviour is
+    # asserted by TestSelfChatLoopGuard below.
 
-        # Director → self-chat (Baker)
-        payload = _build_payload(from_me=True, to_chat=BAKER_SELF_CHAT_CUS, body="what's on for today?")
-        _run_webhook(payload)
 
-        # PM-signal-outbound fires for BOTH paths.
-        assert pm_flag.called, "flag_pm_signal should fire for Director->Baker"
-        # RAG / action path fires only on Director->Baker.
-        assert director_m.called, "Director message handler should fire for Director->Baker"
-        assert director_q.called, "Director question handler should fire for Director->Baker"
+class TestSelfChatLoopGuard:
+    """COST_RUNAWAY_FIX_1: fromMe=True on Baker self-chat must short-circuit
+    before any RAG / question / deadline / obligations handler fires. Loop
+    guard prevents the WhatsApp self-chat feedback loop that was burning
+    ~€100/day in capability_runner Opus calls pre-fix.
+
+    Note: this test guards the regression introduced by the cost-runaway
+    fix. The prior `test_director_to_baker_fires_pm_signal_and_rag` test
+    asserted the OPPOSITE behaviour — that fromMe=True self-chat fires
+    the question handler — but that was the bug. Director's
+    self-chat-typed-questions interface is intentionally dropped per the
+    Gate-5 trade-off documented in BRIEF_CAPABILITY_RUNNER_COST_FIX_1.
+    """
+
+    def test_fromme_self_chat_short_circuits(self, monkeypatch):
+        # Storage stub — INSERT happens upstream of the guard so it must
+        # still be reachable; we just don't assert on it here.
+        fake_store = MagicMock()
+        fake_store.store_whatsapp_message = MagicMock(return_value=True)
+        fake_store.match_contact_by_name.return_value = None
+        fake_store.link_to_trip_context = MagicMock()
+        fake_store._get_conn.return_value = None
+        from memory import store_back as sb_mod
+        monkeypatch.setattr(sb_mod.SentinelStoreBack, "_instance", fake_store)
+        monkeypatch.setattr(
+            sb_mod.SentinelStoreBack,
+            "_get_global_instance",
+            classmethod(lambda cls: fake_store),
+        )
+
+        # Spies on the downstream handlers — none should fire on self-chat fromMe.
+        pm_flag = MagicMock()
+        from orchestrator import pm_signal_detector as _pmd
+        monkeypatch.setattr(_pmd, "detect_relevant_pms_outbound", lambda *a, **kw: ["ao"])
+        monkeypatch.setattr(_pmd, "flag_pm_signal", pm_flag)
+        monkeypatch.setattr(_pmd, "detect_relevant_pms_whatsapp", lambda *a, **kw: [])
+
+        director_q = MagicMock()
+        director_m = MagicMock(return_value=False)
+        from triggers import waha_webhook as ww
+        monkeypatch.setattr(ww, "_handle_director_message", director_m)
+        monkeypatch.setattr(ww, "_handle_director_question", director_q)
+
+        deadline_spy = MagicMock()
+        from orchestrator import deadline_manager as _dm
+        monkeypatch.setattr(_dm, "extract_deadlines", deadline_spy)
+
+        # fromMe=True on Baker's own self-chat (the loop scenario).
+        payload = _build_payload(
+            from_me=True,
+            to_chat=BAKER_SELF_CHAT_CUS,
+            body="This is Baker's own outbound reply text.",
+        )
+        result = _run_webhook(payload)
+
+        assert result.get("status") == "self_chat_loop_guard_drop", (
+            f"Guard must short-circuit. Got: {result}"
+        )
+        assert result.get("msg_id") == payload["payload"]["id"], (
+            "Guard must echo msg_id for forensics."
+        )
+        assert not director_q.called, (
+            "_handle_director_question MUST NOT fire on fromMe=true self-chat"
+        )
+        assert not director_m.called, (
+            "_handle_director_message MUST NOT fire on fromMe=true self-chat"
+        )
+        assert not deadline_spy.called, (
+            "extract_deadlines MUST NOT fire on fromMe=true self-chat"
+        )
+        assert not pm_flag.called, (
+            "flag_pm_signal MUST NOT fire on fromMe=true self-chat (guard "
+            "returns before the PM-signal block at line ~1125)"
+        )
+
+    def test_fromme_counterparty_still_routes(self, monkeypatch):
+        """Regression guard: fromMe=true to a NON-self-chat counterparty
+        must NOT be dropped — that path (director_to_counterparty) is
+        BRIEF_WAHA_OUTBOUND_CAPTURE_1 functionality the fix preserves.
+        """
+        fake_store = MagicMock()
+        fake_store.store_whatsapp_message = MagicMock(return_value=True)
+        fake_store.match_contact_by_name.return_value = None
+        fake_store.link_to_trip_context = MagicMock()
+        fake_store._get_conn.return_value = None
+        from memory import store_back as sb_mod
+        monkeypatch.setattr(sb_mod.SentinelStoreBack, "_instance", fake_store)
+        monkeypatch.setattr(
+            sb_mod.SentinelStoreBack,
+            "_get_global_instance",
+            classmethod(lambda cls: fake_store),
+        )
+
+        pm_flag = MagicMock()
+        from orchestrator import pm_signal_detector as _pmd
+        monkeypatch.setattr(_pmd, "detect_relevant_pms_outbound", lambda *a, **kw: ["ao"])
+        monkeypatch.setattr(_pmd, "flag_pm_signal", pm_flag)
+        monkeypatch.setattr(_pmd, "detect_relevant_pms_whatsapp", lambda *a, **kw: [])
+
+        from triggers import waha_webhook as ww
+        monkeypatch.setattr(ww, "_handle_director_message", MagicMock(return_value=False))
+        monkeypatch.setattr(ww, "_handle_director_question", MagicMock())
+
+        # Director → counterparty (Julia), fromMe=True
+        payload = _build_payload(from_me=True, to_chat="41796720083@c.us", body="see you Friday")
+        result = _run_webhook(payload)
+
+        assert result.get("status") != "self_chat_loop_guard_drop", (
+            "Guard must NOT fire on non-self-chat fromMe=true events"
+        )
+        # PM-signal must still fire — that's the BRIEF_WAHA_OUTBOUND_CAPTURE_1
+        # functionality the guard preserves.
+        assert pm_flag.called, (
+            "flag_pm_signal must still fire for Director->counterparty"
+        )
 
 
 # ----------------------------------------------------------------------------
