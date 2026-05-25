@@ -1,5 +1,12 @@
 ---
-status: PENDING
+status: COMPLETE
+completed_at: 2026-05-25T15:15:00Z
+pr_baker_vault: 114
+merge_squash: pending-fill-by-lead
+gate5_authority: lead bus #1089 (gate-5 merge done) + #1091 (Director baseline rerun clean — 15/15 PASS exit 0)
+ship_bus: deputy #1083 (ship) + lead #1084 (CC) + deputy #1086 (fix-ship after gate-4 request_changes #1085)
+baseline_result: 15/15 PASS on starter corpus (5 hot skills × 3 cases); 60 catalog skills uncovered → v2 backlog
+hot_fix_landed: dcfecc8 — missing-slug false-OK scorecard bug + 3 README fast-follows
 dispatched_at: 2026-05-25T13:10:00Z
 dispatched_by: deputy
 target: b3
