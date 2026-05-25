@@ -90,3 +90,38 @@ def test_format_thread_swallow_emits_warning_with_err_type(caplog, _fake_gmail_p
         f"Expected exactly 1 WARNING with err_type=RuntimeError for format_thread swallow, got {len(matching)}. "
         f"All sentinel.gmail records: {[(r.levelname, r.message) for r in caplog.records if r.name == 'sentinel.gmail']}"
     )
+
+
+def test_extract_attachments_text_unsupported_ext_emits_info_skip(caplog):
+    """When attachment has unsupported extension, INFO log must fire with reason=unsupported_ext."""
+    from scripts import extract_gmail
+
+    # Build a message payload with one .xyz attachment (unsupported)
+    message = {
+        "id": "mid_unsupp",
+        "payload": {
+            "parts": [
+                {
+                    "filename": "presentation.xyz",
+                    "mimeType": "application/octet-stream",
+                    "body": {"size": 1000, "attachmentId": "ATT_X"},
+                },
+            ],
+        },
+    }
+    service = MagicMock()
+
+    with caplog.at_level(logging.INFO, logger="sentinel.gmail"):
+        result = extract_gmail.extract_attachments_text(service, message)
+
+    assert result == []
+    matching = [
+        r for r in caplog.records
+        if r.name == "sentinel.gmail" and r.levelno == logging.INFO
+        and "SKIP" in r.message and "reason=unsupported_ext" in r.message
+        and "mid=mid_unsupp" in r.message and "presentation.xyz" in r.message
+    ]
+    assert len(matching) == 1, (
+        f"Expected exactly 1 INFO SKIP with reason=unsupported_ext, got {len(matching)}. "
+        f"All sentinel.gmail records: {[(r.levelname, r.message) for r in caplog.records if r.name == 'sentinel.gmail']}"
+    )

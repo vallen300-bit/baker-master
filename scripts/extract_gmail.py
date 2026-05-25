@@ -632,6 +632,9 @@ def extract_attachments_text(service, message: Dict) -> List[Dict]:
     # (handles forwarded emails with nested attachments)
     attachment_parts = _collect_attachment_parts(payload)
     if not attachment_parts:
+        logging.getLogger("sentinel.gmail").info(
+            f"extract_attachments_text SKIP mid={message_id} reason=no_attachment_parts payload_keys={list(payload.keys())[:5]}"
+        )
         return results
 
     for part in attachment_parts:
@@ -642,28 +645,42 @@ def extract_attachments_text(service, message: Dict) -> List[Dict]:
         # Check file extension
         ext = Path(filename).suffix.lower()
         if ext not in _ATTACHMENT_EXTENSIONS:
+            logging.getLogger("sentinel.gmail").info(
+                f"extract_attachments_text SKIP mid={message_id} file={filename} reason=unsupported_ext ext={ext!r}"
+            )
             continue
 
         # Check size
         body = part.get("body", {})
         size = body.get("size", 0)
         if size > _MAX_ATTACHMENT_SIZE:
+            logging.getLogger("sentinel.gmail").info(
+                f"extract_attachments_text SKIP mid={message_id} file={filename} reason=oversize size={size} cap={_MAX_ATTACHMENT_SIZE}"
+            )
             continue
 
         attachment_id = body.get("attachmentId")
         if not attachment_id:
             # Inline small attachment — data might be in body directly
             data = body.get("data")
-            if data:
-                try:
-                    file_bytes = base64.urlsafe_b64decode(data)
-                    text = _extract_text_from_bytes(file_bytes, filename, ext)
-                    if text:
-                        results.append({"filename": filename, "text": text})
-                except Exception as e:
-                    logging.getLogger("sentinel.gmail").warning(
-                        f"inline-attachment extract FAILED mid={message_id} file={filename} ext={ext} err_type={type(e).__name__} err={e}"
+            if not data:
+                logging.getLogger("sentinel.gmail").info(
+                    f"extract_attachments_text SKIP mid={message_id} file={filename} reason=inline_no_data"
+                )
+                continue
+            try:
+                file_bytes = base64.urlsafe_b64decode(data)
+                text = _extract_text_from_bytes(file_bytes, filename, ext)
+                if text:
+                    results.append({"filename": filename, "text": text})
+                else:
+                    logging.getLogger("sentinel.gmail").info(
+                        f"extract_attachments_text SKIP mid={message_id} file={filename} reason=inline_extractor_returned_none ext={ext}"
                     )
+            except Exception as e:
+                logging.getLogger("sentinel.gmail").warning(
+                    f"inline-attachment extract FAILED mid={message_id} file={filename} ext={ext} err_type={type(e).__name__} err={e}"
+                )
             continue
 
         # Download attachment via Gmail API
@@ -672,11 +689,19 @@ def extract_attachments_text(service, message: Dict) -> List[Dict]:
                 userId="me", messageId=message_id, id=attachment_id
             ).execute()
             data = att.get("data", "")
-            if data:
-                file_bytes = base64.urlsafe_b64decode(data)
-                text = _extract_text_from_bytes(file_bytes, filename, ext)
-                if text:
-                    results.append({"filename": filename, "text": text})
+            if not data:
+                logging.getLogger("sentinel.gmail").info(
+                    f"extract_attachments_text SKIP mid={message_id} file={filename} reason=gmail_returned_empty_data ext={ext}"
+                )
+                continue
+            file_bytes = base64.urlsafe_b64decode(data)
+            text = _extract_text_from_bytes(file_bytes, filename, ext)
+            if text:
+                results.append({"filename": filename, "text": text})
+            else:
+                logging.getLogger("sentinel.gmail").info(
+                    f"extract_attachments_text SKIP mid={message_id} file={filename} reason=api_extractor_returned_none ext={ext}"
+                )
         except Exception as e:
             logging.getLogger("sentinel.gmail").warning(
                 f"gmail-attachment-download FAILED mid={message_id} file={filename} ext={ext} err_type={type(e).__name__} err={e}"

@@ -85,7 +85,7 @@ def run(days: int = 30, dry_run: bool = False):
                     break  # Already processed all attachments for this message
 
         except Exception as e:
-            logger.debug(f"Failed to check {mid}: {e}")
+            logger.warning(f"backfill check FAILED mid={mid} err_type={type(e).__name__} err={e}")
 
         if (i + 1) % 50 == 0:
             print(f"  Progress: {i+1}/{len(emails)} checked, {found} missing found, {stored} stored")
