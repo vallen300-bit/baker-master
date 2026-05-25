@@ -1,51 +1,43 @@
 ---
-status: COMPLETE
-completed_at: 2026-05-25T12:30:00Z
-pr_baker_vault: 113
-merge_squash: 7a6e2ee
-post_merge_commit: 2740f6a
-scripts_run_baseline: created=13 skipped=0 + moved=7 skipped=0
-ship_bus: deputy #1051 + lead #1052 (CC)
-gate5_bus: lead #1058 (merge done) + lead #1060 (scripts done)
-companion_brief_queued: SKILLS_EVAL_HARNESS_1 (deputy to dispatch next)
-dispatched_at: 2026-05-25T11:10:00Z
+status: PENDING
+dispatched_at: 2026-05-25T13:10:00Z
 dispatched_by: deputy
 target: b3
-brief: briefs/BRIEF_SOPS_TO_SKILLS_MIGRATION_1.md
-brief_id: SOPS_TO_SKILLS_MIGRATION_1
+brief: briefs/BRIEF_SKILLS_EVAL_HARNESS_1.md
+brief_id: SKILLS_EVAL_HARNESS_1
 reply_target: deputy (AH2) — cc lead
-expected_time: ~2-3h
-complexity: Low
-companion_brief: BRIEF_SKILLS_EVAL_HARNESS_1 (separate dispatch after this ship; brief already authored + committed to baker-vault @ ae2e8ca)
-director_ratified: 2026-05-25 (chat — Q1=A inline/pointer split at 200 LOC, Q2=B sop|contract|runbook|coordination|template scope, Q3=A static trigger-keyword eval v1)
+expected_time: ~4-6h
+complexity: Medium
+director_ratified: 2026-05-25 (chat — Q3=A static trigger-keyword eval v1 only; full LLM behavioral eval deferred to v2)
+depends_on: SOPS_TO_SKILLS_MIGRATION_1 (now COMPLETE end-to-end; skill corpus this harness measures is live)
+companion_to: SOPS_TO_SKILLS_MIGRATION_1
 pre_dispatch_gates:
-  architect: feature-dev:code-architect — 4 issues found + addressed in-file (glob loop replaces $(ls | grep); readlink-validate existing symlinks; mv+ln rollback trap on uplift; awk frontmatter-strip on diff verification)
-  code_reviewer: feature-dev:code-reviewer — same set, all addressed
+  architect: feature-dev:code-architect (prior session) — issues addressed in-file before authoring
+  code_reviewer: feature-dev:code-reviewer (prior session) — issues addressed in-file before authoring
   lead_second_pair: AH1 bus #1029 — APPROVE both briefs with 3 polish items (all incorporated in baker-vault commit ae2e8ca BEFORE this dispatch)
-target_repos: baker-vault (markdown only) + ~/.claude/skills/ (symlinks)
-no_baker_master_changes: this brief does NOT modify baker-master code; b3 commits to baker-vault for the SKILL.md files + scripts, and to ~/.claude/skills/ for the symlinks (symlink wiring is filesystem-only, not git-tracked)
+target_repo: baker-vault (Python + YAML + markdown only — stdlib Python; no baker-master changes)
 gate_chain_expected:
-  gate_1_architecture: deputy — verify the 13 + 7 slug list matches the audit
-  gate_2_security: deputy — light pass (markdown + symlinks; scripts must not run as root, must not touch outside the two named directories)
-  gate_3_picker_architect: SKIP per brief (no install/picker/harness CHANGE)
-  gate_4_code_reviewer: deputy — verify INLINE byte-faithfulness + POINTER no-duplication + symlink targets absolute
-  gate_5_merge: lead — merges baker-vault commit + runs the 2 one-shot scripts once each, observes `created=N skipped=M` audit line
+  gate_1_architecture: deputy — verify harness reads SKILL.md frontmatter correctly + corpus YAML/JSON format is sane
+  gate_2_security: deputy — light pass (read-only static analysis; no shell-out, no network, no LLM call)
+  gate_3_picker_architect: SKIP per brief (no install/picker change)
+  gate_4_code_reviewer: deputy — verify per-skill PASS/FAIL match logic + report format clear + corpus coverage
+  gate_5_merge: lead — merges baker-vault commit + runs first baseline report, observes pass/fail rates across the 5 hot skills × 2-3 cases starter corpus
 notes_to_b3:
-  - This brief touches baker-vault + ~/.claude/skills/ ONLY. No baker-master code changes; the b3 PR opens against baker-vault, NOT baker-master.
-  - All 6 architect/reviewer findings + 3 lead-flagged polish items already addressed in-file. Brief content is dispatch-ready as-is.
-  - Lead's polish recap (still useful for b3 awareness during implementation, not respin):
-      (a) Brief Fix 5 INDEX.md update — auto-detects bullet vs table vs categorized; fail loud if structure is ambiguous (do not guess).
-      (b) Brief Fix 2 trigger regex strip chars include `*"` — handles `**MANDATORY TRIGGERS:**` bold markdown + `"quoted phrase"` keywords cleanly. Spot-check AC6 explicitly covers plain + bold + quoted patterns.
-  - Re-run the Fix 1 audit at brief start — entries may have shifted between brief authoring (2026-05-25 ~10:30Z) and your dispatch pickup. Expected baseline: 13 MISSING + 1 EXISTS. Surface to deputy if delta > ±2.
-  - For the 7-slug uplift in Fix 4: re-run the `comm -13` audit at start. If list differs by more than ±2, surface to deputy before proceeding.
+  - Companion to the migration brief just completed. Skill corpus to test against is now live (20 new entries + ~35 pre-existing in `~/baker-vault/_ops/skills/`).
+  - Scope: STATIC trigger-keyword match only for v1. No LLM call, no token cost, runs in seconds. Director-ratified Q3=A in chat 2026-05-25.
+  - Starter corpus: 5 hot skills × 2-3 cases each. Hot-skill selection lives in the brief — read the brief before authoring corpus.
+  - Stdlib Python only — no dependencies. Reads SKILL.md MANDATORY TRIGGERS keywords + matches against YAML/JSON test corpus + reports per-skill PASS/FAIL.
+  - Anchor philosophy: thevccorner.com Substack "Prompts Are Dead. Skills Are the New Moat" (Dec 2025): "Evals are the new gross margin." v1 cheapest-possible.
 ---
 
-# Dispatch: SOPS_TO_SKILLS_MIGRATION_1 → b3
+# Dispatch: SKILLS_EVAL_HARNESS_1 → b3
 
-B3 — pick up `briefs/BRIEF_SOPS_TO_SKILLS_MIGRATION_1.md` (canonical mirror at `~/baker-vault/_ops/briefs/BRIEF_SOPS_TO_SKILLS_MIGRATION_1.md`, committed @ ae2e8ca).
+B3 — pick up briefs/BRIEF_SKILLS_EVAL_HARNESS_1.md (canonical mirror at ~/baker-vault/_ops/briefs/BRIEF_SKILLS_EVAL_HARNESS_1.md, committed earlier today).
 
-Mirror 13 `_ops/processes/*-{sop,contract,runbook,coordination,template}.md` docs into `_ops/skills/<slug>/SKILL.md` (8 INLINE inline-body + 5 POINTER body) + uplift 7 home-only skills (`~/.claude/skills/<slug>/`) into vault canonical + symlink home back to vault.
+Build the v1 static trigger-keyword eval harness for the Baker skill catalog. Stdlib Python only. Reads each _ops/skills/<slug>/SKILL.md frontmatter MANDATORY TRIGGERS keywords + matches against YAML/JSON corpus of test prompts + emits per-skill PASS/FAIL report. Starter corpus: 5 hot skills × 2-3 cases.
 
-After ship, bus-post `ship/sops-to-skills-migration-1` to **deputy (AH2)** with PR # + audit-script output + 3 spot-check trigger fires + before/after counts. Deputy runs gates 1+2+4 then hands to lead for Gate-5 merge + script execution. CC lead on the ship report.
+Companion to the migration brief that completed end-to-end this session — the 55+ skill corpus this harness measures is now live across the picker.
 
-Anchor: lead bus #1040 GO signal post-PR-#258-merge; deputy bus follow next.
+After ship, bus-post ship/skills-eval-harness-1 to deputy (AH2) with PR # + sample baseline-report output + per-skill PASS/FAIL counts on the starter corpus. Deputy runs gates 1+2+4 then hands to lead for Gate-5 merge + first baseline-report run. CC lead on the ship report.
+
+Anchor: deputy bus #1063 (b3 close-out of companion brief, mailbox cleared, standing by for this dispatch).
