@@ -39,6 +39,22 @@ def nate_headers():
 
 
 @pytest.fixture
+def nate_headers_live():
+    """Real Nate header form observed in production Gmail 2026-05-25.
+
+    Captured from Gmail msg ids 19e5fb0a59885740 / 19e5abb948b2a471 /
+    19e54a2703ea54f0 / 19e54a259e1cb901 / 19e54a258dd35ab2. Differs from the
+    synthesized `nate_headers` fixture: List-Id has NO `post.` prefix; sender
+    has `natesnewsletter` as local part not subdomain.
+    """
+    return [
+        {"name": "From", "value": "Nate from Nate's Substack <natesnewsletter@substack.com>"},
+        {"name": "Subject", "value": "AI made your app teams 10x faster. Nobody gave you the playbook."},
+        {"name": "List-Id", "value": "<natesnewsletter.substack.com>"},
+    ]
+
+
+@pytest.fixture
 def non_nate_headers():
     return [
         {"name": "From", "value": "noreply@github.com"},
@@ -89,6 +105,22 @@ def test_is_substack_nate_handles_empty_inputs():
 def test_is_substack_nate_sender_matches_substring():
     assert is_substack_nate_sender("nate@natesnewsletter.substack.com") is True
     assert is_substack_nate_sender("Nate <nate@NatesNewsletter.SUBSTACK.com>") is True
+
+
+def test_is_substack_nate_matches_live_list_id(nate_headers_live):
+    """Real Nate format: List-Id `<natesnewsletter.substack.com>` (no `post.` prefix)."""
+    assert is_substack_nate(nate_headers_live, "natesnewsletter@substack.com") is True
+
+
+def test_is_substack_nate_live_falls_back_to_sender(nate_headers_live):
+    """Real Nate sender: `natesnewsletter@substack.com` (local part = newsletter name)."""
+    h = [x for x in nate_headers_live if x["name"] != "List-Id"]
+    assert is_substack_nate(h, "natesnewsletter@substack.com") is True
+
+
+def test_is_substack_nate_sender_matches_live_format():
+    assert is_substack_nate_sender("natesnewsletter@substack.com") is True
+    assert is_substack_nate_sender("Nate from Nate's Substack <natesnewsletter@substack.com>") is True
 
 
 def test_is_substack_nate_sender_rejects_other():
@@ -319,11 +351,12 @@ def test_backfill_max_pages_guards_runaway_pagination(monkeypatch, caplog):
 
 
 def test_is_substack_nate_rejects_substring_spoofing():
-    """Fix 3: tightened _LIST_ID_RE rejects substring-match from third-party Substack.
+    """Position-anchored _LIST_ID_RE rejects substring-match from third-party Substack.
 
     Adversary List-Id `foo.substack.com <id> (re: natesnewsletter.substack.com)`
-    must NOT pass — the canonical `post.natesnewsletter.substack.com` prefix is
-    required.
+    must NOT pass — the domain must appear as the value itself (preceded by
+    start/whitespace/`<`, followed by whitespace/`>`/end), not buried inside a
+    `(re: ...)` comment block where the trailing `)` fails the lookahead.
     """
     spoof_headers = [
         {"name": "From", "value": "attacker@foo.substack.com"},

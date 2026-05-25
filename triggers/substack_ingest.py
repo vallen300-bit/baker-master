@@ -54,12 +54,31 @@ def _safe_report_failure(source: str, error: str) -> None:
 _DEFAULT_VAULT = Path(os.environ.get("BAKER_VAULT_PATH", str(Path.home() / "baker-vault")))
 _NATE_DIR = _DEFAULT_VAULT / "wiki" / "_ai-it" / "aid-t" / "external-substack" / "nate"
 
-NATE_SENDER_SUBSTRING = "natesnewsletter.substack.com"
+# Real Nate sender form observed in production Gmail 2026-05-25:
+#   From:    "Nate from Nate's Substack" <natesnewsletter@substack.com>
+#   List-Id: <natesnewsletter.substack.com>
+# The original SUBSTACK_NATE_INGEST_1 brief specified the older
+# `post.natesnewsletter.substack.com` List-Id and an `@*natesnewsletter.substack.com`
+# sender domain — both wrong against live data; original test fixtures were
+# synthesized, not pulled from Gmail (lesson #8 anchor — "compile-clean ≠ done").
+# Patch widens both filters to accept the real form while keeping anti-spoof
+# (List-Id must appear as the value itself, not buried in a `(re: ...)` comment).
+NATE_SENDER_SUBSTRINGS = ("natesnewsletter@substack.com", "natesnewsletter.substack.com")
+NATE_SENDER_SUBSTRING = NATE_SENDER_SUBSTRINGS[0]  # back-compat alias
 
-# Canonical Nate List-Id format: "post.natesnewsletter.substack.com <id.list-id.substack.com>"
-# Word boundaries prevent substring spoofing from third-party Substack publishers.
-_LIST_ID_RE = re.compile(r"\bpost\.natesnewsletter\.substack\.com\b", re.IGNORECASE)
-_SENDER_FALLBACK_RE = re.compile(r"@.*natesnewsletter\.substack\.com", re.IGNORECASE)
+# Match the domain as the whole List-Id value (real form: `<natesnewsletter.substack.com>`)
+# OR as a leading bare token followed by a separate `<id.list-id.substack.com>` chunk
+# (older format, kept for forward-compat). Position guard prevents the
+# `foo.substack.com <id> (re: natesnewsletter.substack.com)` spoof.
+_LIST_ID_RE = re.compile(
+    r"(?:^|[\s<])(?:post\.)?natesnewsletter\.substack\.com(?=[\s>]|$)",
+    re.IGNORECASE,
+)
+# Real sender: `natesnewsletter@substack.com`. Older expected: `*@natesnewsletter.substack.com`.
+_SENDER_FALLBACK_RE = re.compile(
+    r"(?:natesnewsletter@substack\.com|@[^\s>]*natesnewsletter\.substack\.com)",
+    re.IGNORECASE,
+)
 
 _PAID_TIER_MARKERS = (
     "this post is for paying subscribers",
@@ -77,7 +96,8 @@ def is_substack_nate_sender(sender_email: str | None) -> bool:
     """
     if not sender_email:
         return False
-    return NATE_SENDER_SUBSTRING in sender_email.lower()
+    s = sender_email.lower()
+    return any(sub in s for sub in NATE_SENDER_SUBSTRINGS)
 
 
 def is_substack_nate(headers: list[dict] | None, sender_email: str | None) -> bool:
