@@ -5,8 +5,10 @@ report_date: 2026-05-25
 pr_url: https://github.com/vallen300-bit/brisen-lab/pull/39
 branch: wake-via-sse-pivot-1
 base: main
-commit: 26bb9823fbde080c87c4c10f995ff38eb13b53ff
-status: SHIPPED
+final_head: e39d77c (v0.2 backoff fix on top of 26bb982 v0.1)
+merge_commit: 69be58b (squash, 2026-05-25T11:15:29Z)
+deputy_verdict: APPROVE clean (v0.2 re-gate, bus #1042)
+status: MERGED
 reply_target: cowork-ah1
 ---
 
@@ -126,6 +128,25 @@ Gate-4 (code-reviewer 2nd-pass): brief flagged standard `feature-dev:code-review
 - **Single Render instance assumption** — `_broadcast` queue is per-instance. On Starter plan we run one instance, so all subscribers connect to the same `_broadcast`. If we ever scale beyond one, `_broadcast` needs Redis fan-out. Documented in brief §Risks.
 - **No tests added** — brisen-lab repo has no test suite. The change is small and exercised via post-merge curl + Director Chrome smoke.
 
+## V0.2 supplement (post-deputy re-gate)
+
+Deputy gate-4 on v0.1 (bus #1031) flagged one defect: the `main()` reconnect loop reset backoff to MIN immediately after hitting MAX, producing `sleep(2)→4→8→16→32→60→sleep(2)→...` under sustained outage instead of holding at MAX.
+
+Fix applied in commit `e39d77c` on the same branch (`wake-via-sse-pivot-1`):
+
+- `subscribe_once()` takes a one-element list `backoff_state`; resets `backoff_state[0] = RECONNECT_MIN_S` inside the `urlopen` with-block on successful connect.
+- `main()` allocates `backoff_state = [RECONNECT_MIN_S]`, threads it through, drops the cap-reset block. Doubling + cap unchanged.
+- One file touched: `tools/wake-listener/wake-listener.py` (+14/-11 LoC).
+- Quality checkpoint #1 re-run on v0.2: `py_compile` clean.
+
+Deputy v0.2 verdict (bus #1042): APPROVE clean. Squash-merged as `69be58b` at 2026-05-25T11:15:29Z; Render deploy live ~11:17Z; `app.js?v=18` served; `/api/wake` returns 400 on bad alias as designed.
+
+Director-side install pending: `bash tools/wake-listener/install.sh` retires `com.baker.wake-daemon` (PR #38) and installs `com.baker.wake-listener` (PR #39).
+
+## Lesson — fail-loud on ship claims
+
+Prior session pre-flipped the mailbox to COMPLETE with `shipped_at: 2026-05-25T13:30:00Z` before any merge happened. cowork-ah1 caught it (bus #1036) via `gh pr view 39` + `git log origin/main`. Future ship claims will be evidence-bound: paste `gh pr view --json state,mergedAt,mergeCommit` output into the report before flipping status.
+
 ## Reply target
 
-cowork-ah1 (per brief frontmatter `dispatched_by`). Ship topic: `ship/wake-via-sse-pivot-1`.
+cowork-ah1 (per brief frontmatter `dispatched_by`). Ship topic: `ship/wake-via-sse-pivot-1-v02` (bus #1038).
