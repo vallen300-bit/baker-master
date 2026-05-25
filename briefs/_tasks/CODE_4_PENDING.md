@@ -1,5 +1,9 @@
 ---
-status: PENDING
+status: COMPLETE
+completed_at: 2026-05-25T10:12:00Z
+completed_by: b4
+deliverable: briefs/_reports/B4_gmail_polling_diagnostic_1_20260525.md (main d3c23bf)
+bus_ship: lead msg #1023 (diag/gmail-polling-outage-1)
 dispatched_at: 2026-05-25T09:35:00Z
 dispatched_by: lead
 target: b4
