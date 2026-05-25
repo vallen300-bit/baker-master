@@ -26,6 +26,7 @@ Output:
 import argparse
 import base64
 import json
+import logging
 import os
 import re
 import sys
@@ -446,8 +447,10 @@ def format_thread(thread_data: Dict, messages: List[Dict]) -> Optional[Dict]:
                     attachment_blocks.append(
                         f"--- Attachment: {att['filename']} ---\n{att['text']}"
                     )
-            except Exception:
-                pass
+            except Exception as _ae:
+                logging.getLogger("sentinel.gmail").warning(
+                    f"format_thread: extract_attachments_text raised mid={msg.get('id','?')} err_type={type(_ae).__name__} err={_ae}"
+                )
 
     # Skip threads with no content
     if not msg_blocks and not attachment_blocks:
@@ -658,8 +661,8 @@ def extract_attachments_text(service, message: Dict) -> List[Dict]:
                     if text:
                         results.append({"filename": filename, "text": text})
                 except Exception as e:
-                    logging.getLogger("sentinel.gmail").debug(
-                        f"Failed to extract inline attachment {filename}: {e}"
+                    logging.getLogger("sentinel.gmail").warning(
+                        f"inline-attachment extract FAILED mid={message_id} file={filename} ext={ext} err_type={type(e).__name__} err={e}"
                     )
             continue
 
@@ -675,8 +678,8 @@ def extract_attachments_text(service, message: Dict) -> List[Dict]:
                 if text:
                     results.append({"filename": filename, "text": text})
         except Exception as e:
-            logging.getLogger("sentinel.gmail").debug(
-                f"Failed to download attachment {filename}: {e}"
+            logging.getLogger("sentinel.gmail").warning(
+                f"gmail-attachment-download FAILED mid={message_id} file={filename} ext={ext} err_type={type(e).__name__} err={e}"
             )
 
     # SPECIALIST-UPGRADE-1B: Store each attachment as a standalone document
@@ -702,7 +705,7 @@ def extract_attachments_text(service, message: Dict) -> List[Dict]:
                     )
         except Exception as e:
             logging.getLogger("sentinel.gmail").warning(
-                f"Email attachment document storage failed (non-fatal): {e}"
+                f"email-attachment-storage FAILED mid={message_id} err_type={type(e).__name__} err={e}"
             )
 
     return results
@@ -721,7 +724,9 @@ def _extract_text_from_bytes(file_bytes: bytes, filename: str, ext: str) -> Opti
         text = extract(tmp_path)
         return text.strip() if text else None
     except Exception as e:
-        logging.getLogger("sentinel.gmail").debug(f"Text extraction failed for {filename}: {e}")
+        logging.getLogger("sentinel.gmail").warning(
+            f"_extract_text_from_bytes FAILED file={filename} ext={ext} err_type={type(e).__name__} err={e}"
+        )
         return None
     finally:
         if tmp_path and tmp_path.exists():
