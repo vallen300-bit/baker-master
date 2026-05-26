@@ -106,8 +106,35 @@ Smoke runner is `/tmp/recharge_smoke.py` (not committed — operating tool only)
 4. Validator is BLOCKING — never warns. `RechargeReportValidationError` is the single boundary; `RechargeReportGenerationError` surfaces after the second failure.
 5. Tests assume Python 3.12. Local repo `python3` defaulted to 3.9 (PEP-604 union syntax in `memory/store_back.py` blocks conftest); use `/opt/homebrew/bin/python3.12 -m pytest`.
 
+## V0.2 fold addendum (bus #1189 Gate-1 fail → fix)
+
+Gate-1 returned FAIL on PR #267 V0.1 (2 CRITICAL + 2 HIGH + 2 MED). Mock-based tests masked live-API surface issues. All 6 findings folded on same branch (commit `af59cd02`); 12th test added.
+
+| # | Severity | Fix | File |
+|---|----------|-----|------|
+| C1 | CRITICAL | `tool_choice` → `{'type': 'auto'}` (forced choice + extended thinking = API 400) | `generator.py` |
+| C2 | CRITICAL | Drop `anthropic-beta: tools-strict-2025-01` (flag does not exist); add `'strict': True` on tool def | `generator.py` |
+| H1 | HIGH | Patch `additionalProperties: False` into `input_schema` (defensive lock) | `generator.py` |
+| H2 | HIGH | Validator tracks `in_fence` toggle; `## X` inside ``` ``` never splits sections | `validator.py` |
+| M1 | MED | `CANONICAL_TEMPLATE_PATH` reads `BAKER_VAULT_PATH` env with `~/baker-vault` fallback | `renderer.py` |
+| M2 | MED | Guard `section_order_or_set` with `len(sections)==11` (no double-finding on count mismatch) | `validator.py` |
+
+**New test:** `test_validator_ignores_h2_in_fenced_code_block` — fenced `## Imposter` line must not split section count.
+
+**Re-verification after fold:**
+- AC1 `pytest tests/test_recharge_report.py -v` → **12/12 PASS** (0.27s)
+- AC2/AC7 py_compile clean on all 5 NEW files
+- AC4 CLI smoke (mocked) → exit 0, validator re-read PASS
+- AC5 CLI persistent-fail → exit 3, no file written
+- AC6 full `pytest -q` → 2306 passed (+12 vs baseline 2294); 117 failed + 40 errors all pre-existing (zero new regressions)
+
+**New HEAD:** `af59cd021647641d1203f6bbc9d711a56440d5ed`. Same branch; not force-pushed (additive commit).
+
+---
+
 ## Anchors
 - Dispatch bus #1186 (lead → b2, 2026-05-26T17:34Z)
+- Gate-1 fail bus #1189 (lead → b2, 2026-05-26T17:57Z)
 - Brief: `briefs/BRIEF_RECHARGE_REPORT_SCAFFOLD_SCHEMA_VALIDATOR_1.md`
 - Diagnosis bus #1178 (hag-desk → lead)
 - Research bus #1180 (round-1) + #1185 (round-2) → `wiki/research/2026-05-26-template-drift-prior-art.md`
