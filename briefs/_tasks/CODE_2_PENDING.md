@@ -3,7 +3,7 @@ dispatch: RECHARGE_REPORT_SCAFFOLD_SCHEMA_VALIDATOR_1
 to: b2
 from: lead
 dispatched_by: lead
-status: PENDING
+status: IN_PROGRESS
 dispatched_at: 2026-05-26T17:30:00Z
 authored: 2026-05-26
 target_repo: baker-master
