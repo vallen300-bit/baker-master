@@ -1,11 +1,13 @@
 """Render RechargeReport into the canonical Pichler/HEAD-4 markdown scaffold."""
+import os
 from pathlib import Path
 
 from .schema import RechargeReport, SECTION_ORDER
 
 
-CANONICAL_TEMPLATE_PATH = Path(
-    "/Users/dimitry/baker-vault/wiki/_templates/pichler-head4-template.md"
+CANONICAL_TEMPLATE_PATH = (
+    Path(os.environ.get("BAKER_VAULT_PATH", str(Path.home() / "baker-vault")))
+    / "wiki/_templates/pichler-head4-template.md"
 )
 
 

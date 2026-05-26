@@ -157,6 +157,31 @@ def test_validator_blocks_oversize_section(tmp_path):
     assert "word_count:executive_summary" in str(excinfo.value)
 
 
+def test_validator_ignores_h2_in_fenced_code_block(tmp_path):
+    """LLM output containing '## X' inside a fenced code block must NOT be parsed
+    as an extra H2. Section count stays 11; canonical validation passes.
+    """
+    # Inject a fenced code block into one section's body containing a fake '## H2 line'.
+    markdown = _canonical_markdown(
+        tmp_path,
+        overrides={"cost_reconstruction": 200},
+    )
+    fenced_noise = (
+        "\n```python\n"
+        "# example code referencing a markdown heading\n"
+        "## Imposter heading inside code fence\n"
+        "value = 1\n"
+        "```\n"
+    )
+    # Splice the fence into the cost_reconstruction section body, after the slot text.
+    marker = "## Cost reconstruction — what was paid, by whom"
+    idx = markdown.index(marker)
+    end_of_marker_line = markdown.index("\n", idx) + 1
+    markdown = markdown[:end_of_marker_line] + fenced_noise + markdown[end_of_marker_line:]
+    # Validator must NOT raise — fenced '##' line is invisible to H2 parser.
+    validate_recharge_report(markdown)
+
+
 def test_validator_blocks_undersize_total(tmp_path):
     # Per-section minimums sum to ~966 words, below TOTAL_WORD_RANGE lower bound (1400).
     minimums = {

@@ -24,7 +24,6 @@ log = logging.getLogger(__name__)
 MODEL_HIGH = "claude-opus-4-7"
 MODEL_ROUTINE = "claude-sonnet-4-6"
 EXTENDED_THINKING_BUDGET = 8_000
-STRICT_TOOLS_BETA = "tools-strict-2025-01"
 
 
 class RechargeReportGenerationError(Exception):
@@ -62,7 +61,11 @@ def generate_recharge_report(
     tool = {
         "name": "emit_recharge_report",
         "description": "Emit the 11-section Pichler/HEAD-4 recharge-failure report.",
-        "input_schema": RechargeReport.model_json_schema(),
+        "strict": True,
+        "input_schema": {
+            **RechargeReport.model_json_schema(),
+            "additionalProperties": False,
+        },
         "cache_control": {"type": "ephemeral"},
     }
 
@@ -82,10 +85,9 @@ def generate_recharge_report(
             max_tokens=8_192,
             system=_system_prompt(scaffold_text),
             tools=[tool],
-            tool_choice={"type": "tool", "name": "emit_recharge_report"},
+            tool_choice={"type": "auto"},
             thinking={"type": "enabled", "budget_tokens": EXTENDED_THINKING_BUDGET},
             messages=[{"role": "user", "content": user_content}],
-            extra_headers={"anthropic-beta": STRICT_TOOLS_BETA},
         )
         tool_use_block = next(
             (b for b in resp.content if getattr(b, "type", "") == "tool_use"),

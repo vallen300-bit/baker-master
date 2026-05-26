@@ -37,13 +37,27 @@ class ValidationFinding:
 
 
 def _parse_h2_sections(markdown: str) -> list[tuple[str, str]]:
-    """Return [(heading_text, body_text), ...] in document order. H2 = lines beginning '## '."""
+    """Return [(heading_text, body_text), ...] in document order. H2 = lines beginning '## '.
+
+    Lines inside a fenced code block (delimited by ``` at the start of a line)
+    are NEVER interpreted as H2, so an LLM-emitted code sample containing a
+    '## X' line cannot fool the parser into seeing a new section.
+    """
     lines = markdown.splitlines()
     sections: list[tuple[str, list[str]]] = []
     current_heading: str | None = None
     current_body: list[str] = []
+    in_fence = False
     for line in lines:
-        m = re.match(r"^##\s+(.+?)\s*$", line)
+        if re.match(r"^```", line):
+            in_fence = not in_fence
+            if current_heading is not None:
+                current_body.append(line)
+            continue
+        if not in_fence:
+            m = re.match(r"^##\s+(.+?)\s*$", line)
+        else:
+            m = None
         if m:
             if current_heading is not None:
                 sections.append((current_heading, current_body))
@@ -79,8 +93,7 @@ def validate_recharge_report(markdown: str) -> None:
                 f"Actual: {actual_headings}",
             )
         )
-
-    if actual_headings != canonical_headings:
+    elif actual_headings != canonical_headings:
         findings.append(
             ValidationFinding(
                 "section_order_or_set",
