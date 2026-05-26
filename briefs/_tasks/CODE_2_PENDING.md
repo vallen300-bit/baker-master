@@ -3,10 +3,16 @@ dispatch: AID_WAKE_BACKFILL_1
 to: b2
 from: lead
 dispatched_by: lead
-status: PENDING
+status: SHIPPED
 dispatched_at: 2026-05-26T09:15:00Z
+shipped_at: 2026-05-26T14:19Z
 authored: 2026-05-26
 target_repo: brisen-lab
+pr: https://github.com/vallen300-bit/brisen-lab/pull/44
+branch: b2/aid-wake-backfill-1
+commit: a718dcae560853c4b65da9c60635b9d3f2b3be9f
+ship_bus_msg: 1172
+ship_report: briefs/_reports/B2_AID_WAKE_BACKFILL_1_SHIP_20260526.md
 estimated_time: 20 min
 complexity: trivial
 reply_to: lead
