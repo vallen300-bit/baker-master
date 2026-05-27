@@ -1,7 +1,20 @@
 {
   "version": 1,
-  "updated_at": "2026-05-14",
+  "updated_at": "2026-05-27",
   "folders": [
+    {
+      "name": "TEMPLATES",
+      "slug": "templates",
+      "presentations": [
+        {
+          "title": "\u2605 Templates Gallery \u2014 pick by sight",
+          "file": "templates/index.html",
+          "created": "2026-05-27",
+          "matter": "baker",
+          "live": true
+        }
+      ]
+    },
     {
       "name": "ORIGINATION",
       "slug": "aiola",
