@@ -1415,13 +1415,14 @@ body {
 }
 
 .ao-dash-grid {
-  display: grid; grid-template-columns: 1fr 1fr; gap: 16px;
+  display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 16px;
 }
 .ao-dash-grid .grid-cell {
   background: var(--card); border: 1px solid var(--border);
   border-radius: var(--radius); display: flex; flex-direction: column;
-  max-height: 380px;
+  max-height: 380px; min-width: 0;
 }
+.ao-dash-grid .grid-cell-body { min-width: 0; overflow-x: auto; }
 .grid-header-ao-status { background: rgba(91,154,111,0.08); }
 .grid-header-ao-convos { background: rgba(201,169,110,0.08); }
 .grid-header-ao-finance { background: rgba(100,149,237,0.08); }
