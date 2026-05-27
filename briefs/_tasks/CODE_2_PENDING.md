@@ -3,7 +3,7 @@ dispatch: TEMPLATES_GALLERY_BAKER_INSTALL_1
 to: b2
 from: lead
 dispatched_by: lead
-status: PENDING
+status: IN_PROGRESS
 dispatched_at: 2026-05-27T14:45:00Z
 authored: 2026-05-27
 target_repo: baker-master

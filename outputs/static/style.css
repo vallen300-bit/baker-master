@@ -92,6 +92,8 @@ body {
   color: var(--text3); overflow: hidden; flex-wrap: nowrap;
 }
 .nav-item:hover { background: rgba(201,169,110,0.06); color: var(--text2); }
+.nav-item-external { text-decoration: none; color: var(--text3); }
+.nav-item-external:hover { color: var(--text2); }
 .nav-item.active {
   background: var(--blue-bg); color: var(--blue); font-weight: 500;
   border-left: 3px solid var(--blue); padding-left: 9px;

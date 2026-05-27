@@ -1,0 +1,218 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Templates Gallery — Brisen</title>
+<style>
+  :root {
+    --bg: #fafaf7;
+    --ink: #1a1a1a;
+    --accent: #1a3a52;
+    --muted: #6a6a6a;
+    --card: #ffffff;
+    --border: #e4e2db;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    font-family: Helvetica, Arial, sans-serif;
+    background: var(--bg);
+    color: var(--ink);
+    -webkit-font-smoothing: antialiased;
+  }
+  header {
+    padding: 40px 48px 24px;
+    border-bottom: 1px solid var(--border);
+  }
+  h1 {
+    margin: 0 0 6px;
+    font-size: 28px;
+    letter-spacing: 0.5px;
+  }
+  .tagline {
+    margin: 0;
+    color: var(--muted);
+    font-size: 14px;
+  }
+  main {
+    padding: 32px 48px 64px;
+    max-width: 1280px;
+  }
+  .grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+    gap: 24px;
+  }
+  .card {
+    background: var(--card);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    overflow: hidden;
+    display: flex;
+    flex-direction: column;
+    transition: box-shadow 0.15s ease, transform 0.15s ease;
+  }
+  .card:hover {
+    box-shadow: 0 8px 24px rgba(0,0,0,0.08);
+    transform: translateY(-2px);
+  }
+  .thumb {
+    height: 180px;
+    background: linear-gradient(135deg, #f3f1ea 0%, #e8e6df 100%);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: var(--accent);
+    font-size: 13px;
+    font-weight: 600;
+    letter-spacing: 1.5px;
+    text-transform: uppercase;
+    border-bottom: 1px solid var(--border);
+  }
+  .thumb.dark {
+    background: #0a0a0a;
+    color: #76B900;
+  }
+  .body {
+    padding: 18px 20px 20px;
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+  }
+  .tnum {
+    color: var(--muted);
+    font-size: 11px;
+    letter-spacing: 1.5px;
+    text-transform: uppercase;
+    margin: 0 0 4px;
+  }
+  .name {
+    margin: 0 0 8px;
+    font-size: 17px;
+    font-weight: 600;
+    color: var(--accent);
+  }
+  .purpose {
+    margin: 0 0 16px;
+    font-size: 13px;
+    line-height: 1.5;
+    color: var(--ink);
+  }
+  .links {
+    margin-top: auto;
+    display: flex;
+    gap: 12px;
+    font-size: 12px;
+  }
+  .links a {
+    color: var(--accent);
+    text-decoration: none;
+    font-weight: 600;
+    border-bottom: 1px solid transparent;
+  }
+  .links a:hover { border-bottom-color: var(--accent); }
+  .group-header {
+    margin: 32px 0 16px;
+    font-size: 11px;
+    letter-spacing: 2px;
+    text-transform: uppercase;
+    color: var(--muted);
+    font-weight: 600;
+  }
+  .group-header:first-child { margin-top: 0; }
+  footer {
+    padding: 24px 48px;
+    border-top: 1px solid var(--border);
+    font-size: 12px;
+    color: var(--muted);
+  }
+</style>
+</head>
+<body>
+<header>
+  <h1>Templates Gallery</h1>
+  <p class="tagline">Click any thumbnail to open a live sample. Pick by sight, not by number.</p>
+</header>
+<main>
+
+  <div class="group-header">Director-facing — internal reports</div>
+  <div class="grid">
+
+    <div class="card">
+      <div class="thumb">PER-LINE CLAIM REPORT</div>
+      <div class="body">
+        <p class="tnum">T1 · pichler-report</p>
+        <h2 class="name">Per-trade claim report</h2>
+        <p class="purpose">Bilingual EN+DE per-line recharge-failure report. Used for every trade in the Hagenauer filing chain. Example: Pichler/RHTB V3.</p>
+        <div class="links">
+          <a href="/templates/samples/t1-per-line-claim-report.html" target="_blank">Sample</a>
+          <a href="/templates/samples/t1-blank-template.html" target="_blank">Blank</a>
+        </div>
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="thumb">CROSS-CASE AUDIT</div>
+      <div class="body">
+        <p class="tnum">T2 · executive-audit-html</p>
+        <h2 class="name">Cross-case audit</h2>
+        <p class="purpose">Multi-case Director scan. 3-stat dashboard up top, case rows with status pills, glossary at the bottom. Example: HAG pre-insolvency payment pattern.</p>
+        <div class="links">
+          <a href="/templates/samples/t2-cross-case-audit.html" target="_blank">Sample</a>
+          <a href="/templates/samples/t2-blank-template.html" target="_blank">Blank</a>
+        </div>
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="thumb">MATTER EVIDENCE</div>
+      <div class="body">
+        <p class="tnum">T4 · mckinsey-report-html</p>
+        <h2 class="name">Matter evidence report</h2>
+        <p class="purpose">Cream paper, deep navy accents, fixed-width 3-column evidence tables, accept-blocks for "why this holds" reasoning. Multi-page exhibits with full evidence chains.</p>
+        <div class="links">
+          <a href="/templates/samples/t4-matter-evidence.html" target="_blank">Sample</a>
+          <a href="/templates/samples/t4-blank-template.html" target="_blank">Blank</a>
+        </div>
+      </div>
+    </div>
+
+  </div>
+
+  <div class="group-header">Decision-shaped — memos and proposals</div>
+  <div class="grid">
+
+    <div class="card">
+      <div class="thumb">STRATEGIC MEMO</div>
+      <div class="body">
+        <p class="tnum">T3 · executive-memo-ellie-style</p>
+        <h2 class="name">Strategic memo</h2>
+        <p class="purpose">8-section spine for acquisition memos, investment briefs, board one-pagers, findings memos. Director-ratified Ellie style.</p>
+        <div class="links">
+          <a href="/templates/samples/t3-strategic-memo.html" target="_blank">Sample</a>
+          <a href="/templates/samples/t3-blank-template.html" target="_blank">Blank</a>
+        </div>
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="thumb">COUNTERPARTY PROPOSAL</div>
+      <div class="body">
+        <p class="tnum">T5 · brisen-balazs-word-style</p>
+        <h2 class="name">Counterparty proposal</h2>
+        <p class="purpose">Owner-operator voice, ALL-CAPS section dividers, em-dash bullets. Word-format for hotel-sector partnership and acquisition proposals.</p>
+        <div class="links">
+          <a href="/templates/samples/t5-counterparty-proposal.docx">Sample</a>
+          <a href="/templates/samples/t5-blank-template.docx">Blank</a>
+        </div>
+      </div>
+    </div>
+
+  </div>
+
+</main>
+<footer>
+  Source-of-truth: <code>baker-vault/wiki/_templates/</code> + <code>baker-vault/wiki/matters/_templates/</code>. Authored by Hag Desk; installed by lead. Director-ratified 2026-05-27.
+</footer>
+</body>
+</html>
