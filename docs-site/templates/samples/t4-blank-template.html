@@ -1,5 +1,338 @@
-<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8"><title>Sample placeholder</title></head>
-<body style="font-family:Helvetica,Arial,sans-serif;padding:48px;color:#1a1a1a;background:#fafaf7;">
-<h1 style="color:#1a3a52;margin:0 0 8px;">Sample placeholder</h1>
-<p style="color:#6a6a6a;font-size:14px;">Canonical sample lands in next brief. <a href="/templates/" style="color:#1a3a52;">Back to Templates Gallery</a>.</p>
-</body></html>
+<!DOCTYPE html>
+<!--
+Brisen McKinsey-style Director report — HTML template
+Director-ratified register: 2026-05-25 (source: Pichler/RHTB Recharge-Failure Claim — Director Report, hand-rolled by Origination Desk same day).
+Canonical skill (binds + triggers): ~/baker-vault/_ops/skills/mckinsey-report-html/SKILL.md
+
+PURPOSE
+- Matter-specific Director-facing reports (creditor claims, exhibit summaries, deal analyses, investor memos).
+- Cream paper + deep-navy accent + sans-serif body + uppercase-tracked H2s + bottom-line callout + 3-column evidence tables + split-table for claim breakdowns + A4 print.
+- English-only (translate German/French source quotes inline). Independent legal/expert citations in italic-gray below the relevant section.
+
+USAGE
+1. Copy this file into the target matter folder as a starting point.
+2. Replace {{PLACEHOLDERS}} with content. Section ORDER + section COUNT can vary — the visual register depends on the CSS classes (.callout, .evidence-table, .split-table, .accept-block) being used consistently, NOT on a fixed section list.
+3. PDF render: Chrome headless --print-to-pdf=output.pdf input.html. Page styling already wired (A4, 18mm margins, page-break-before utility, print background-white override).
+4. File alongside .md source in `wiki/matters/<slug>/curated/<YYYY-MM-DD>-<topic>-report.{md,html,pdf}`.
+-->
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>{{TITLE}}</title>
+<style>
+  @page { size: A4; margin: 18mm; }
+  html, body {
+    background: #fafaf7;
+    color: #1f2933;
+    font-family: "Helvetica Neue", "Arial", "Segoe UI", sans-serif;
+    font-size: 10pt;
+    line-height: 1.45;
+    margin: 0;
+    padding: 0;
+    -webkit-font-smoothing: antialiased;
+  }
+  .page {
+    max-width: 174mm;
+    margin: 0 auto;
+    padding: 4mm 0 0 0;
+  }
+  h1 {
+    font-size: 18pt;
+    color: #1a3a52;
+    margin: 0 0 1.5mm 0;
+    letter-spacing: -0.2pt;
+    font-weight: 500;
+    line-height: 1.2;
+  }
+  .subhead {
+    font-size: 9.5pt;
+    color: #6a7280;
+    margin: 0 0 6mm 0;
+    border-bottom: 0.4pt solid #1a3a52;
+    padding-bottom: 3mm;
+    letter-spacing: 0.1pt;
+  }
+  h2 {
+    font-size: 8.5pt;
+    color: #1a3a52;
+    margin: 6mm 0 2mm 0;
+    font-weight: 700;
+    letter-spacing: 1.2pt;
+    text-transform: uppercase;
+  }
+  p { margin: 0 0 2.5mm 0; }
+  ul { margin: 0 0 3mm 4.5mm; padding: 0; }
+  li { margin-bottom: 1mm; }
+
+  /* Bottom-line callout — the first thing the reader sees after the header.
+     .bigfig = the headline number / verdict. .theory = the one-line why. */
+  .callout {
+    background: #ffffff;
+    border-left: 2.5pt solid #1a3a52;
+    padding: 3.5mm 5mm;
+    margin: 0 0 5mm 0;
+    font-size: 10.5pt;
+  }
+  .callout .bigfig {
+    font-size: 16pt;
+    color: #1a3a52;
+    font-weight: 600;
+    display: block;
+    margin-bottom: 1.2mm;
+    letter-spacing: -0.3pt;
+  }
+  .callout .theory {
+    color: #2d3748;
+    font-size: 10pt;
+    line-height: 1.4;
+  }
+
+  /* Tables — fixed-layout, navy rules, tight padding */
+  table {
+    width: 100%;
+    border-collapse: collapse;
+    margin: 2mm 0 4mm 0;
+    font-size: 9.5pt;
+    table-layout: fixed;
+  }
+  th {
+    text-align: left;
+    background: transparent;
+    color: #1a3a52;
+    border-top: 0.6pt solid #1a3a52;
+    border-bottom: 0.4pt solid #1a3a52;
+    padding: 1.4mm 2mm 1.4mm 0;
+    font-weight: 600;
+    font-size: 8.5pt;
+    text-transform: uppercase;
+    letter-spacing: 0.6pt;
+    font-family: "Helvetica Neue", "Arial", sans-serif;
+  }
+  td {
+    border-bottom: 0.25pt solid #cfcfc4;
+    padding: 1.7mm 2mm 1.7mm 0;
+    vertical-align: top;
+  }
+  td.num { text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
+
+  /* Evidence table — date narrow, document medium, "what it proves" wide. 13/27/60 split. */
+  .evidence-table { table-layout: fixed; }
+  .evidence-table col.c-date { width: 13%; }
+  .evidence-table col.c-doc  { width: 27%; }
+  .evidence-table col.c-pr   { width: 60%; }
+  .evidence-table td:nth-child(1) { color: #4a5568; font-size: 9pt; white-space: nowrap; padding-right: 3mm; }
+  .evidence-table td:nth-child(2) { color: #1a3a52; font-weight: 600; padding-right: 3mm; }
+  .evidence-table td:nth-child(3) { color: #1f2933; }
+
+  /* Split table — label left, number right. Total row gets navy top + bottom rules. Sub rows muted. */
+  .split-table { table-layout: fixed; }
+  .split-table col.c-label { width: 70%; }
+  .split-table col.c-num   { width: 30%; }
+  .split-table td:first-child { padding-right: 4mm; }
+  .split-table td.num { padding-left: 4mm; padding-right: 0; }
+  .split-table tr.total td { border-top: 0.4pt solid #1a3a52; border-bottom: 0.6pt solid #1a3a52; padding-top: 1.8mm; padding-bottom: 1.8mm; }
+  .split-table tr.sub td { color: #4a5568; font-size: 9.2pt; }
+
+  /* Accept-block — used for "why this should be accepted" or "likely defense and why it does not hold" — bold-led paragraphs in a contained block. */
+  .accept-block p { margin-bottom: 2mm; }
+  .accept-block strong { color: #1a3a52; }
+
+  /* Footer — citation line, source attribution, date */
+  .footer {
+    margin-top: 6mm;
+    padding-top: 2.5mm;
+    border-top: 0.4pt solid #1a3a52;
+    font-size: 7.8pt;
+    color: #6a7280;
+    letter-spacing: 0.2pt;
+  }
+
+  /* Page-break utility — apply before any section that should start on a fresh page */
+  .pagebreak { page-break-before: always; }
+  @media print {
+    body { background: #ffffff; }
+  }
+</style>
+</head>
+<body>
+<div class="page">
+
+<!-- ====================================================================
+     HEADER — title + subhead with version annotation
+==================================================================== -->
+<h1>{{TITLE — e.g. "Pichler / RHTB Recharge-Failure Claim — Director Report"}}</h1>
+<div class="subhead">{{Subhead — matter context + filing context + language note. End optionally with version annotation in italic gray.}} <em style="color:#6a7280; font-size:8.5pt; font-style:italic;">&middot; {{VERSION_TAG — e.g. "v2 — termination-defense added DD Mon YYYY"}}</em></div>
+
+<!-- ====================================================================
+     BOTTOM-LINE CALLOUT — the first thing the reader sees after the header
+     .bigfig = headline number or verdict. .theory = one-line why.
+==================================================================== -->
+<div class="callout">
+  <span class="bigfig">{{BIGFIG — e.g. "Bottom line — €342,580" or "Verdict — accept the claim"}}</span>
+  <span class="theory">{{THEORY — single sentence explaining WHY the bigfig is what it is. Reader gets the whole report from these two lines.}}</span>
+</div>
+
+<!-- ====================================================================
+     OPENING SECTION — "Headline" or domain-equivalent
+     One paragraph stating the claim / finding / proposal in plain English.
+==================================================================== -->
+<h2>Headline</h2>
+<p>{{Opening paragraph — restate the claim / finding / decision in 2-3 sentences. Plain English. Don't repeat the callout verbatim; expand it.}}</p>
+
+<!-- ====================================================================
+     CONTEXT SECTION — the underlying structure / contract / facts
+     Title varies by report type. Examples: "The contract architecture", "The deal structure", "How we got here", "The current position".
+==================================================================== -->
+<h2>{{CONTEXT_SECTION_TITLE}}</h2>
+<p>{{Single paragraph or short prose — the structural facts the reader needs before the rest makes sense. Don't make this an essay; one paragraph max.}}</p>
+
+<!-- ====================================================================
+     EVENT SECTION — what happened
+     Title varies. Examples: "What happened with the drywall work", "What changed in the market", "How the dispute arose".
+==================================================================== -->
+<h2>{{EVENT_SECTION_TITLE — e.g. "What happened with the X work" / "How the dispute arose"}}</h2>
+<p>{{Narrative paragraph — chronological. Names, dates, amounts. Sentence-level density. No bullets here — bullets come in the "supposed to / actually did" pair below.}}</p>
+
+<!-- ====================================================================
+     DUTY / EXPECTATION SECTION — what should have happened
+==================================================================== -->
+<h2>{{DUTY_SECTION_TITLE — e.g. "What X was supposed to do" / "What the contract required"}}</h2>
+<ul>
+  <li>{{Duty 1 — single short sentence.}}</li>
+  <li>{{Duty 2.}}</li>
+  <li>{{Duty 3.}}</li>
+  <li>{{Duty 4.}}</li>
+</ul>
+
+<!-- ====================================================================
+     ACTUAL-EVENT SECTION — what actually happened (the failure)
+==================================================================== -->
+<h2>{{ACTUAL_SECTION_TITLE — e.g. "What X actually did" / "What changed in practice"}}</h2>
+<ul>
+  <li>{{Actual 1 — paired against Duty 1 above.}}</li>
+  <li>{{Actual 2.}}</li>
+  <li>{{Actual 3.}}</li>
+  <li>{{Actual 4.}}</li>
+  <li>{{Actual 5 — often "no recovery action / no follow-up" — the absence-as-evidence point.}}</li>
+</ul>
+
+<!-- ====================================================================
+     EVIDENCE CHAIN — 3-column dated documentary trail
+     Column proportions FIXED at 13% / 27% / 60% via .evidence-table.
+==================================================================== -->
+<h2>The evidence chain</h2>
+<table class="evidence-table">
+  <colgroup><col class="c-date"><col class="c-doc"><col class="c-pr"></colgroup>
+  <thead>
+    <tr><th>Date</th><th>Document</th><th>What it proves</th></tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td>{{DATE_1 — e.g. "7 July 2025" or "Master contract"}}</td>
+      <td>{{DOCUMENT_1 — name of the document}}</td>
+      <td>{{WHAT_IT_PROVES_1 — single sentence of legal/commercial significance}}</td>
+    </tr>
+    <tr>
+      <td>{{DATE_2}}</td>
+      <td>{{DOCUMENT_2}}</td>
+      <td>{{WHAT_IT_PROVES_2}}</td>
+    </tr>
+    <tr>
+      <td>{{DATE_3}}</td>
+      <td>{{DOCUMENT_3}}</td>
+      <td>{{WHAT_IT_PROVES_3}}</td>
+    </tr>
+    <tr>
+      <td>{{DATE_4}}</td>
+      <td>{{DOCUMENT_4}}</td>
+      <td>{{WHAT_IT_PROVES_4}}</td>
+    </tr>
+    <tr>
+      <td>{{DATE_5 — e.g. "Through 2025"}}</td>
+      <td>{{DOCUMENT_5 — often "Absence of X" — the negative-evidence row}}</td>
+      <td>{{WHAT_IT_PROVES_5 — what the absence proves}}</td>
+    </tr>
+  </tbody>
+</table>
+
+<!-- Optional page break before the financial section -->
+<div class="pagebreak"></div>
+
+<!-- ====================================================================
+     CLAIM/NUMBERS SECTION — split table with total + sub rows
+     Use .split-table with label/num column proportions 70/30.
+     tr.total = the bottom line (navy rules above + below).
+     tr.sub = sub-rows under the total (muted, italic-color).
+==================================================================== -->
+<h2>{{CLAIM_SECTION_TITLE — e.g. "The amount Brisen claims" / "The deal economics"}}</h2>
+<table class="split-table">
+  <colgroup><col class="c-label"><col class="c-num"></colgroup>
+  <tbody>
+    <tr><td>{{LINE_LABEL_1 — e.g. "Total Pichler net invoiced and reimbursed"}}</td><td class="num">{{NUM_1}}</td></tr>
+    <tr><td>{{LINE_LABEL_2 — e.g. "Less: small slice arguably needed in any case (5%)"}}</td><td class="num">{{NUM_2}}</td></tr>
+    <tr class="total"><td><strong>{{TOTAL_LABEL — e.g. "Net recoverable position"}}</strong></td><td class="num"><strong>{{TOTAL_NUM}}</strong></td></tr>
+    <tr class="sub"><td>&nbsp;&nbsp;{{SUB_1 — e.g. "of which firmly attributable to X"}}</td><td class="num">{{SUB_NUM_1}}</td></tr>
+    <tr class="sub"><td>&nbsp;&nbsp;{{SUB_2 — e.g. "of which reserved for ambiguous zone"}}</td><td class="num">{{SUB_NUM_2}}</td></tr>
+  </tbody>
+</table>
+<p>{{Reservations paragraph — Brisen reserves the right to X / Brisen refuses any deduction for Y. Set boundaries explicitly so the counterparty cannot read silence as concession.}}</p>
+
+<!-- ====================================================================
+     SURVIVES-OBJECTION SECTION — bold-led paragraphs
+     For claims: "Why this claim survives termination / objection / counter-defense".
+     For deals: "Why this deal works despite [risk]".
+     Format: 3 paragraphs each led by a bold thesis sentence.
+==================================================================== -->
+<h2>{{SURVIVES_SECTION_TITLE — e.g. "Why this claim survives Hagenauer's termination of the contract"}}</h2>
+
+<p><strong>{{THESIS_1 — bold one-sentence argument.}}</strong> {{Body — 3-4 sentences supporting the thesis. Cite specific facts already established above.}}</p>
+
+<p><strong>{{THESIS_2.}}</strong> {{Body.}}</p>
+
+<p><strong>{{THESIS_3.}}</strong> {{Body.}}</p>
+
+<!-- ====================================================================
+     COUNTER-DEFENSE BLOCK — anticipate + defuse the counterparty's likely defense
+     Wrapped in .accept-block. Bold-led paragraph(s).
+==================================================================== -->
+<div class="accept-block">
+<p><strong>{{COUNTERPARTY}}'s likely defense, and why it does not hold.</strong> {{Paragraph — name the strongest defense the counterparty will raise; show why it fails on the timeline / facts / law.}}</p>
+</div>
+
+<!-- ====================================================================
+     INDEPENDENT-OPINION CITATION — italic gray, below the section it supports
+     Format: counsel firm name + date + what they confirmed + reconfirm-before-external-use marker if applicable.
+==================================================================== -->
+<p style="font-size:8.5pt; font-style:italic; color:#6a7280; margin-top:3mm;">{{Independent opinion citation — Firm Name's opinion of DD Month YYYY confirms X. {{Optional: Date and firm to be reconfirmed by counsel before external use.}}}}</p>
+
+<!-- ====================================================================
+     ACCEPTANCE SECTION — why the deciding party should accept
+     For claims: "Why the insolvency administrator should accept this"
+     For investor memos: "Why this is the right investment"
+     For deal memos: "Why this should proceed"
+     Wrapped in .accept-block. 3-4 bold-led paragraphs.
+==================================================================== -->
+<h2>{{ACCEPTANCE_SECTION_TITLE — e.g. "Why the insolvency administrator should accept this" / "Why this should proceed"}}</h2>
+
+<div class="accept-block">
+
+<p><strong>{{ACCEPT_THESIS_1 — e.g. "The duty is contractual, not invented."}}</strong> {{Body.}}</p>
+
+<p><strong>{{ACCEPT_THESIS_2 — e.g. "Independent legal opinion confirms."}}</strong> {{Body.}}</p>
+
+<p><strong>{{ACCEPT_THESIS_3 — e.g. "The amount is conservative."}}</strong> {{Body.}}</p>
+
+<p><strong>{{ACCEPT_THESIS_4 — e.g. "The evidence chain is documentary and dated."}}</strong> {{Body.}}</p>
+
+</div>
+
+<!-- ====================================================================
+     FOOTER — date, source, anchor
+==================================================================== -->
+<div class="footer">
+Report date: {{REPORT_DATE — DD Month YYYY}}. Source: {{SOURCE — e.g. "ClaimsMax independent investigation, DD Month YYYY — N tool calls, N documents reviewed."}}
+</div>
+
+</div>
+</body>
+</html>

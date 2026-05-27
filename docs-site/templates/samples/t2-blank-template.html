@@ -1,5 +1,173 @@
-<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8"><title>Sample placeholder</title></head>
-<body style="font-family:Helvetica,Arial,sans-serif;padding:48px;color:#1a1a1a;background:#fafaf7;">
-<h1 style="color:#1a3a52;margin:0 0 8px;">Sample placeholder</h1>
-<p style="color:#6a6a6a;font-size:14px;">Canonical sample lands in next brief. <a href="/templates/" style="color:#1a3a52;">Back to Templates Gallery</a>.</p>
-</body></html>
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>{{TITLE_SHORT}}</title>
+<style>
+  @page { size: A4; margin: 18mm; }
+  html, body {
+    background: #fafaf7;
+    color: #1f2933;
+    font-family: "Helvetica Neue", "Arial", "Segoe UI", sans-serif;
+    font-size: 10.5pt;
+    line-height: 1.5;
+    margin: 0;
+    padding: 0;
+    -webkit-font-smoothing: antialiased;
+  }
+  .page { max-width: 174mm; margin: 0 auto; padding: 4mm 0 0 0; }
+  h1 { font-size: 24pt; color: #1a3a52; margin: 0 0 1mm 0; letter-spacing: -0.3pt; font-weight: 600; line-height: 1.15; }
+  .subtitle { font-size: 13pt; color: #1a3a52; font-weight: 400; margin: 0 0 1mm 0; }
+  .report-label { font-size: 8.5pt; color: #6a7280; text-transform: uppercase; letter-spacing: 1.4pt; margin: 1mm 0 1.5mm 0; }
+  .report-meta { font-size: 9.5pt; color: #4a5568; margin: 0 0 3mm 0; }
+  .tagline { font-size: 11pt; color: #1f2933; font-style: italic; margin: 0 0 6mm 0; border-bottom: 0.4pt solid #1a3a52; padding-bottom: 4mm; line-height: 1.45; }
+  h2 { font-size: 9pt; color: #1a3a52; margin: 8mm 0 2.5mm 0; font-weight: 700; letter-spacing: 1.2pt; text-transform: uppercase; }
+  h3 { font-size: 11.5pt; color: #1a3a52; margin: 3mm 0 1mm 0; font-weight: 600; line-height: 1.25; }
+  p { margin: 0 0 2.5mm 0; }
+  .lede p { font-size: 10.5pt; }
+  .numbers { display: flex; gap: 4mm; margin: 0 0 7mm 0; }
+  .numbers .stat { flex: 1; background: #ffffff; border-left: 2.5pt solid #1a3a52; padding: 3mm 5mm 3mm 5mm; }
+  .numbers .stat .v { font-size: 22pt; color: #1a3a52; font-weight: 700; line-height: 1; font-variant-numeric: tabular-nums; }
+  .numbers .stat .l { font-size: 8.5pt; color: #4a5568; text-transform: uppercase; letter-spacing: 0.8pt; margin-top: 1.5mm; }
+  .case-row {
+    display: flex;
+    gap: 0;
+    margin: 0 0 4mm 0;
+    background: #ffffff;
+    border-left: 2.5pt solid #1a3a52;
+    padding: 0;
+  }
+  .case-row.solvent { border-left-color: #b8b8a8; }
+  .case-row.review { border-left-color: #b88a2c; }
+  .case-row.confirmed { border-left-color: #1a3a52; }
+  .case-row .left { flex: 0 0 38mm; padding: 3mm 4mm 3mm 5mm; border-right: 0.4pt solid #e8e8dc; }
+  .case-row .right { flex: 1; padding: 3mm 5mm 3mm 4mm; }
+  .case-row .case-num { font-size: 8.5pt; color: #6a7280; letter-spacing: 1.2pt; text-transform: uppercase; }
+  .case-row .case-name { font-size: 11pt; color: #1a3a52; font-weight: 600; line-height: 1.2; margin: 0.5mm 0 1mm 0; }
+  .case-row .trade { font-size: 9pt; color: #4a5568; font-style: italic; }
+  .case-row .badge {
+    display: inline-block;
+    font-size: 7pt;
+    padding: 0.5mm 2mm;
+    letter-spacing: 0.6pt;
+    text-transform: uppercase;
+    font-weight: 700;
+    margin-top: 2mm;
+  }
+  .badge-confirmed { background: #1a3a52; color: #ffffff; }
+  .badge-review { background: #b88a2c; color: #ffffff; }
+  .badge-solvent { background: #e8e8dc; color: #4a5568; }
+  .case-row .right p { margin: 0 0 1.5mm 0; font-size: 9.5pt; }
+  .case-row .right p:last-child { margin-bottom: 0; }
+  .case-row .right p strong { color: #1a3a52; }
+  .case-row .meta { font-size: 8.5pt; color: #6a7280; margin-top: 1.5mm; }
+  table { width: 100%; border-collapse: collapse; margin: 2mm 0 4mm 0; font-size: 9pt; table-layout: fixed; }
+  th { text-align: left; color: #1a3a52; border-top: 0.6pt solid #1a3a52; border-bottom: 0.4pt solid #1a3a52; padding: 1.4mm 2mm 1.4mm 0; font-weight: 600; font-size: 8pt; text-transform: uppercase; letter-spacing: 0.6pt; }
+  td { border-bottom: 0.25pt solid #cfcfc4; padding: 1.6mm 2mm 1.6mm 0; vertical-align: top; }
+  .verdict-table col.c-case { width: 18%; }
+  .verdict-table col.c-status { width: 18%; }
+  .verdict-table col.c-pattern { width: 64%; }
+  .verdict-table td .status-pill { display: inline-block; font-size: 8pt; font-weight: 700; padding: 0.4mm 2mm; letter-spacing: 0.4pt; text-transform: uppercase; }
+  .pill-file { background: #1a3a52; color: #ffffff; }
+  .pill-confirm { background: #b88a2c; color: #ffffff; }
+  .pill-check { background: #e8e8dc; color: #4a5568; }
+  .pill-drop { background: #f0f0e8; color: #8a8a7a; font-style: italic; }
+  .glossary { background: #f4f5ee; border-left: 2.5pt solid #1a3a52; padding: 3mm 5mm; margin: 5mm 0 4mm 0; font-size: 9pt; }
+  .glossary dl { margin: 0; column-count: 2; column-gap: 8mm; }
+  .glossary dt { font-weight: 600; color: #1a3a52; font-size: 8.5pt; }
+  .glossary dd { margin: 0 0 1.5mm 0; color: #2d3748; font-size: 8.5pt; }
+  .footer-note { margin-top: 8mm; padding-top: 3mm; border-top: 0.4pt solid #1a3a52; font-size: 9pt; color: #4a5568; }
+  @media print { body { background: #ffffff; } .case-row { break-inside: avoid; } }
+</style>
+</head>
+<body>
+<div class="page">
+
+<!-- TOKEN 1 — Title block -->
+<h1>{{TITLE_SHORT}}</h1>
+<div class="subtitle">{{SUBTITLE_ONE_LINE_SCOPE}}</div>
+<div class="report-label">Director Report &middot; {{TREND_OR_AUDIT_OR_SUMMARY}}</div>
+<div class="report-meta">{{DATE}} &middot; V{{N}} &middot; All findings to be verified by counsel before external use</div>
+
+<div class="tagline">{{ONE_SENTENCE_THESIS}}</div>
+
+<!-- TOKEN 2 — Three-stat dashboard -->
+<div class="numbers">
+  <div class="stat"><div class="v">{{STAT_1_VALUE}}</div><div class="l">{{STAT_1_LABEL}}</div></div>
+  <div class="stat"><div class="v">{{STAT_2_VALUE}}</div><div class="l">{{STAT_2_LABEL}}</div></div>
+  <div class="stat"><div class="v">{{STAT_3_VALUE}}</div><div class="l">{{STAT_3_LABEL}}</div></div>
+</div>
+
+<!-- TOKEN 3 — Trend in three sentences -->
+<h2>{{TREND_HEADING}}</h2>
+<div class="lede">
+<p>{{PARA_1_CONTEXT_OR_ROOT_CAUSE}}</p>
+<p>{{PARA_2_PATTERN_EXPRESSIONS_ENUMERATED}}</p>
+<p>{{PARA_3_UNIFYING_MECHANISM}}</p>
+</div>
+
+<!-- TOKEN 4 — Case rows (repeat per case; vary border-left class: confirmed | review | solvent) -->
+<h2>{{CASES_HEADING}}</h2>
+
+<div class="case-row confirmed">
+  <div class="left">
+    <div class="case-num">Case 1</div>
+    <div class="case-name">{{ENTITY_NAME}}</div>
+    <div class="trade">{{ROLE_OR_TRADE}}</div>
+    <div class="badge badge-confirmed">{{STATUS_BADGE_TEXT}}</div>
+  </div>
+  <div class="right">
+    <p><strong>{{LOAD_BEARING_FACT}}</strong></p>
+    <p>{{SECONDARY_EVIDENCE}}</p>
+    <p>{{LEGAL_OR_FACTUAL_CONSEQUENCE}}</p>
+    <div class="meta">Source: {{CITATION_OR_BUS_REF}}.</div>
+  </div>
+</div>
+
+<!-- repeat .case-row blocks; change classes:
+       .case-row.confirmed + .badge-confirmed for navy / load-bearing
+       .case-row.review    + .badge-review    for amber / needs verification
+       .case-row.solvent   + .badge-solvent   for grey / clean or peripheral
+-->
+
+<!-- TOKEN 5 — Status summary table -->
+<h2>{{STATUS_SUMMARY_HEADING}}</h2>
+
+<table class="verdict-table">
+  <colgroup><col class="c-case"><col class="c-status"><col class="c-pattern"></colgroup>
+  <thead>
+    <tr><th>Case</th><th>Status</th><th>Pattern fit</th></tr>
+  </thead>
+  <tbody>
+    <tr><td>{{CASE_NAME}}</td><td><span class="status-pill pill-file">File now</span></td><td>{{PATTERN_FIT_TWO_LINES}}</td></tr>
+    <tr><td>{{CASE_NAME}}</td><td><span class="status-pill pill-confirm">Confirm &amp; file</span></td><td>{{PATTERN_FIT_TWO_LINES}}</td></tr>
+    <tr><td>{{CASE_NAME}}</td><td><span class="status-pill pill-check">To be checked</span></td><td>{{PATTERN_FIT_TWO_LINES}}</td></tr>
+    <tr><td>{{CASE_NAME}}</td><td><span class="status-pill pill-drop">Likely drop</span></td><td>{{PATTERN_FIT_TWO_LINES}}</td></tr>
+  </tbody>
+</table>
+
+<!-- TOKEN 6 — What still needs verification -->
+<h2>What still needs verification</h2>
+<ol>
+  <li>{{VERIFICATION_ACTION_1_WITH_OWNER}}.</li>
+  <li>{{VERIFICATION_ACTION_2_WITH_OWNER}}.</li>
+  <li>{{VERIFICATION_ACTION_3_WITH_OWNER}}.</li>
+</ol>
+
+<!-- TOKEN 7 (optional) — Translated-terms glossary; MANDATORY if foreign terms used inline -->
+<div class="glossary">
+  <h2 style="margin-top:0">{{FOREIGN_LANG}} terms used (translated)</h2>
+  <dl>
+    <dt>{{TERM}}</dt><dd>{{PLAIN_ENGLISH_GLOSS}}</dd>
+    <dt>{{TERM}}</dt><dd>{{PLAIN_ENGLISH_GLOSS}}</dd>
+  </dl>
+</div>
+
+<!-- TOKEN 8 (optional) — Footer note: sources + verification statement -->
+<div class="footer-note">
+  <strong>All cases / findings above are to be verified by counsel before any external use.</strong> Underlying facts are sourced from {{SOURCES_LIST}}. Confidence is {{HIGH/MED/LOW}} on the facts cited; legal characterization depends on counsel validation.
+</div>
+
+</div>
+</body>
+</html>

@@ -1,5 +1,272 @@
-<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8"><title>Sample placeholder</title></head>
-<body style="font-family:Helvetica,Arial,sans-serif;padding:48px;color:#1a1a1a;background:#fafaf7;">
-<h1 style="color:#1a3a52;margin:0 0 8px;">Sample placeholder</h1>
-<p style="color:#6a6a6a;font-size:14px;">Canonical sample lands in next brief. <a href="/templates/" style="color:#1a3a52;">Back to Templates Gallery</a>.</p>
-</body></html>
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Pichler / RHTB Recharge-Failure Claim — Director Report</title>
+<style>
+  @page { size: A4; margin: 18mm; }
+  html, body {
+    background: #fafaf7;
+    color: #1f2933;
+    font-family: "Helvetica Neue", "Arial", "Segoe UI", sans-serif;
+    font-size: 10pt;
+    line-height: 1.45;
+    margin: 0;
+    padding: 0;
+    -webkit-font-smoothing: antialiased;
+  }
+  .page {
+    max-width: 174mm;
+    margin: 0 auto;
+    padding: 4mm 0 0 0;
+  }
+  h1 {
+    font-size: 22pt;
+    color: #1a3a52;
+    margin: 0 0 1mm 0;
+    letter-spacing: -0.3pt;
+    font-weight: 600;
+    line-height: 1.15;
+  }
+  .claim-type {
+    font-size: 14pt;
+    color: #1a3a52;
+    font-weight: 400;
+    margin: 0 0 0.5mm 0;
+    letter-spacing: -0.1pt;
+  }
+  .report-label {
+    font-size: 9pt;
+    color: #6a7280;
+    text-transform: uppercase;
+    letter-spacing: 1.4pt;
+    margin: 1mm 0 1.5mm 0;
+  }
+  .report-meta {
+    font-size: 9.5pt;
+    color: #4a5568;
+    margin: 0 0 3mm 0;
+  }
+  .tagline {
+    font-size: 10.5pt;
+    color: #1f2933;
+    font-style: italic;
+    margin: 0 0 5mm 0;
+    border-bottom: 0.4pt solid #1a3a52;
+    padding-bottom: 4mm;
+    line-height: 1.4;
+  }
+  .version-marker { font-size: 9.5pt; color: #1a3a52; font-weight: 700; display: block; margin-top: 2.5mm; letter-spacing: 0.2pt; }
+  h2 {
+    font-size: 8.5pt;
+    color: #1a3a52;
+    margin: 6mm 0 2mm 0;
+    font-weight: 700;
+    letter-spacing: 1.2pt;
+    text-transform: uppercase;
+  }
+  p { margin: 0 0 2.5mm 0; }
+  ul, ol { margin: 0 0 3mm 4.5mm; padding: 0; }
+  li { margin-bottom: 1.5mm; }
+  .claim-figures {
+    background: #ffffff;
+    border-left: 2.5pt solid #1a3a52;
+    padding: 3.5mm 5mm 2mm 5mm;
+    margin: 0 0 5mm 0;
+    font-size: 10.5pt;
+  }
+  .claim-figures .figure-row {
+    display: flex;
+    justify-content: space-between;
+    padding: 1.6mm 0;
+    border-bottom: 0.25pt solid #e8e8dc;
+  }
+  .claim-figures .figure-row:last-child { border-bottom: none; }
+  .claim-figures .label { color: #2d3748; }
+  .claim-figures .value {
+    color: #1a3a52;
+    font-weight: 600;
+    font-variant-numeric: tabular-nums;
+    white-space: nowrap;
+    padding-left: 6mm;
+  }
+  .claim-figures .headline .value {
+    font-size: 16pt;
+    font-weight: 700;
+    letter-spacing: -0.3pt;
+  }
+  .claim-figures .headline { padding: 2.4mm 0; }
+  .claim-figures .ceiling .value { color: #6a7280; font-weight: 500; font-style: italic; }
+  table {
+    width: 100%;
+    border-collapse: collapse;
+    margin: 2mm 0 4mm 0;
+    font-size: 9.5pt;
+    table-layout: fixed;
+  }
+  th {
+    text-align: left;
+    background: transparent;
+    color: #1a3a52;
+    border-top: 0.6pt solid #1a3a52;
+    border-bottom: 0.4pt solid #1a3a52;
+    padding: 1.4mm 2mm 1.4mm 0;
+    font-weight: 600;
+    font-size: 8.5pt;
+    text-transform: uppercase;
+    letter-spacing: 0.6pt;
+    font-family: "Helvetica Neue", "Arial", sans-serif;
+  }
+  td {
+    border-bottom: 0.25pt solid #cfcfc4;
+    padding: 1.7mm 2mm 1.7mm 0;
+    vertical-align: top;
+  }
+  td.num { text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
+  .evidence-table { table-layout: fixed; }
+  .evidence-table col.c-date { width: 13%; }
+  .evidence-table col.c-doc  { width: 27%; }
+  .evidence-table col.c-pr   { width: 60%; }
+  .evidence-table td:nth-child(1) { color: #4a5568; font-size: 9pt; white-space: nowrap; padding-right: 3mm; }
+  .evidence-table td:nth-child(2) { color: #1a3a52; font-weight: 600; padding-right: 3mm; }
+  .evidence-table td:nth-child(3) { color: #1f2933; }
+  .split-table { table-layout: fixed; }
+  .split-table col.c-label { width: 70%; }
+  .split-table col.c-num   { width: 30%; }
+  .split-table td:first-child { padding-right: 4mm; }
+  .split-table td.num { padding-left: 4mm; padding-right: 0; }
+  .split-table tr.total td { border-top: 0.4pt solid #1a3a52; border-bottom: 0.6pt solid #1a3a52; padding-top: 1.8mm; padding-bottom: 1.8mm; }
+  .split-table tr.sub td { color: #4a5568; font-size: 9.2pt; }
+  .footer {
+    margin-top: 6mm;
+    padding-top: 2.5mm;
+    border-top: 0.4pt solid #1a3a52;
+    font-size: 7.8pt;
+    color: #6a7280;
+    letter-spacing: 0.2pt;
+  }
+  .cite { font-size: 8.5pt; font-style: italic; color: #6a7280; margin-top: 3mm; }
+  .pagebreak { page-break-before: always; }
+  @media print { body { background: #ffffff; } }
+</style>
+</head>
+<body>
+<div class="page">
+
+<h1>Pichler / RHTB</h1>
+<div class="claim-type">Recharge-Failure Claim</div>
+<div class="report-label">Director Report</div>
+<div class="report-meta">Date: 26 May 2026 &middot; Time: 18:30</div>
+<div class="tagline">Brisen claims from Hagenauer the amount Hagenauer failed to charge a defaulting subcontractor.<span class="version-marker">1,071 documents reviewed</span></div>
+
+<div class="claim-figures">
+  <div class="figure-row"><span class="label">Before ClaimsMax investigation</span><span class="value">TBA</span></div>
+  <div class="figure-row headline"><span class="label">ClaimsMax investigation (Conservative)</span><span class="value">&euro;342,580</span></div>
+  <div class="figure-row ceiling"><span class="label">ClaimsMax investigation (Max Ceiling)</span><span class="value">&euro;424,252</span></div>
+</div>
+
+<h2>The parties</h2>
+<ol>
+  <li><strong>Original drywall subcontractor:</strong> RHTB: bau Service GmbH (FN 373154 g, Handelsgericht Wien; registered office Volkragasse 2, 1220 Wien; represented by DI Michael Haiden).</li>
+  <li><strong>Substitute drywall subcontractor:</strong> Pichler GmbH (FN 66459 i, Landes- als Handelsgericht Graz; registered office Weizer Stra&szlig;e 13, 8162 Passail; Vienna branch Slamastra&szlig;e 44, 1230 Wien; represented on the Werkvertrag by Hr. Malik and Fr. Kolb).</li>
+</ol>
+
+<h2>Background</h2>
+<ol>
+  <li>Brisen and Hagenauer signed an open-book, cost-plus contract.</li>
+  <li>Brisen reimbursed Hagenauer monthly for the actual cost of all work performed, including amounts Hagenauer paid to its subcontractors.</li>
+  <li>Hagenauer was trusted to manage those subcontractors and recover from any that failed.</li>
+  <li>On subcontractor failure, Hagenauer had two duties: charge back to that subcontractor and credit Brisen, or absorb the cost itself if the failure was its own.</li>
+  <li>Either way, Brisen was never supposed to carry the cost of a subcontractor's failure.</li>
+</ol>
+
+<h2>What happened with the drywall work</h2>
+<p>Hagenauer engaged RHTB as the drywall subcontractor. RHTB defaulted.</p>
+<p>Hagenauer issued two formal cure notices &mdash; 7 July 2025 and 10 August 2025.</p>
+<p>The second notice declared partial termination of RHTB's contract and announced that a substitute contractor would finish RHTB's scope at RHTB's cost.</p>
+<p>Hagenauer brought in Pichler as that substitute, on a pure hourly basis (&euro;68.80 per hour plus materials at supplier cost + 12%) &mdash; no fixed price, no original scope of work.</p>
+<p>Pichler worked at the site from 16 July to 29 November 2025 and issued 19 partial invoices totalling &euro;360,610 net.</p>
+<p>On 26 August 2025 Hagenauer filed RHTB's defective acceptance protocol &mdash; which itself listed major drywall defects in 72 hotel rooms (all 36 first-floor rooms, all 36 third-floor rooms), wrong ventilation cut-outs in four lift lobbies, and missing inspection openings.</p>
+<p>Despite this, Hagenauer paid each Pichler invoice in full and billed the cost through to Brisen in the monthly open-book account. Brisen reimbursed Hagenauer.</p>
+
+<h2>What Hagenauer failed to do</h2>
+<ul>
+  <li>Did not issue a charge-back to RHTB for the substitute-contractor cost.</li>
+  <li>Did not credit Brisen the recovered amount in the open-book reconciliation.</li>
+  <li>Did not pursue RHTB for the shortfall or book it as a receivable.</li>
+</ul>
+
+<h2>The evidence chain</h2>
+<table class="evidence-table">
+  <colgroup><col class="c-date"><col class="c-doc"><col class="c-pr"></colgroup>
+  <thead>
+    <tr><th>Date</th><th>Document</th><th>What it proves</th></tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td>baseline</td>
+      <td>Brisen &harr; Hagenauer open-book contract</td>
+      <td>Brisen reimburses actual incurred cost; Hagenauer manages subcontractors and must recover from defaulters.</td>
+    </tr>
+    <tr>
+      <td>1 Jul 2025</td>
+      <td>Pichler hourly contract signed</td>
+      <td>Pure hourly billing, no fixed price, no scope of work &mdash; by design, a substitute-contractor retainer.</td>
+    </tr>
+    <tr>
+      <td>7 Jul 2025</td>
+      <td>First cure notice to RHTB</td>
+      <td>RHTB formally on notice of default. Threat of substitute performance at RHTB's cost.</td>
+    </tr>
+    <tr>
+      <td>10 Aug 2025</td>
+      <td>Second cure notice &mdash; final ultimatum to RHTB</td>
+      <td>Partial termination declared. Substitute contractor to complete RHTB's scope at RHTB's cost. Cure deadline 16 August.</td>
+    </tr>
+    <tr>
+      <td>26 Aug 2025</td>
+      <td>RHTB defective acceptance protocol</td>
+      <td>Major drywall defects in 72 hotel rooms and four lift lobbies. Confirms RHTB scope failure. Filed without follow-up.</td>
+    </tr>
+    <tr>
+      <td>Jul&ndash;Nov 2025</td>
+      <td>19 Pichler partial invoices to Hagenauer</td>
+      <td>Total &euro;360,610 net. All paid by Hagenauer, all passed through to Brisen in the open-book account.</td>
+    </tr>
+    <tr>
+      <td>full year 2025</td>
+      <td>Absence of any charge-back to RHTB</td>
+      <td>No record exists. Hagenauer never invoiced RHTB for the substitute-contractor cost. Brisen carried it all.</td>
+    </tr>
+  </tbody>
+</table>
+
+<div class="pagebreak"></div>
+
+<h2>The amount Brisen claims</h2>
+<table class="split-table">
+  <colgroup><col class="c-label"><col class="c-num"></colgroup>
+  <tbody>
+    <tr><td>Total Pichler net invoiced and reimbursed by Brisen through Hagenauer</td><td class="num">&euro;360,610</td></tr>
+    <tr><td>Less: small slice of early-period generic work arguably needed in any case (5%)</td><td class="num">&minus;&euro;18,030</td></tr>
+    <tr class="total"><td><strong>Amount Brisen is claiming from Hagenauer</strong></td><td class="num"><strong>&euro;342,580</strong></td></tr>
+    <tr class="sub"><td>&nbsp;&nbsp;of which firmly attributable to RHTB's default</td><td class="num">&euro;325,451</td></tr>
+    <tr class="sub"><td>&nbsp;&nbsp;of which reserved for ambiguous zone (late-stage mould remediation)</td><td class="num">&euro;17,129</td></tr>
+  </tbody>
+</table>
+<p>Brisen reserves the right to grow the claim toward the ceiling figure of &euro;424,252 if expert evidence in the proceeding supports recovering the contractor levy and performance retention currently excluded.</p>
+<p>Brisen also reserves the right to refuse any deduction for "would-have-been-Brisen-cost-anyway" &mdash; the Pichler contract had no original scope; the entire engagement existed only because RHTB failed.</p>
+
+<h2>Brisen's Arguments (to be validated)</h2>
+<ol>
+  <li><strong>Duties crystallised payment-by-payment, before any termination.</strong><br>Each of the 19 Pichler invoices Hagenauer paid through the open-book account between 16 July and 29 November 2025 created a contemporaneous duty on Hagenauer either to charge that cost back to RHTB or to credit Brisen.<br>Brisen was paying its bills on time throughout &mdash; no Brisen breach to suspend the duty.</li>
+  <li><strong>Termination releases future performance, not past duties.</strong><br>Hagenauer can argue forward-looking relief from any post-termination obligation.<br>It cannot argue that its silent failure to charge RHTB through the second half of 2025 is excused because, months later, the contract ended.</li>
+  <li><strong>The claim is restitutionary, not performance-based.</strong><br>Brisen asks for return of money paid into the open-book account that should have been credited back.<br>Recovery of overpayments survives termination of the underlying contract; both ordinary contract law and unjust enrichment support it.</li>
+  <li><strong>Hagenauer's likely defence fails on causation.</strong><br>Counsel may argue Brisen's later breach extinguished the credit duty.<br>That defence requires a Brisen breach occurring before the recharge duty crystallised plus a causal link.<br>Hagenauer never charged RHTB even in the months Brisen was paying on time &mdash; duty breached on the merits, not suspended.</li>
+  <li><strong>Independent legal opinion confirms recourse.</strong><br>Pochmarski Kober opinion of 4 December 2025 confirms Brisen's right of recourse against Hagenauer for failure to enforce subcontractor warranty.<br>Date and firm to be reconfirmed by counsel before external use.</li>
+  <li><strong>Amount and evidence are anchored above.</strong><br>Every euro is tied to a paid Pichler invoice.<br>Every step &mdash; open-book contract, cure notices, partial-termination declaration, RHTB acceptance protocol, 19 paid invoices, absence of any RHTB charge-back &mdash; is cross-checkable against Hagenauer's own records.</li>
+</ol>
+
+</div>
+</body>
+</html>

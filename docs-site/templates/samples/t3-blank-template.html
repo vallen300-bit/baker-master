@@ -1,5 +1,300 @@
-<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8"><title>Sample placeholder</title></head>
-<body style="font-family:Helvetica,Arial,sans-serif;padding:48px;color:#1a1a1a;background:#fafaf7;">
-<h1 style="color:#1a3a52;margin:0 0 8px;">Sample placeholder</h1>
-<p style="color:#6a6a6a;font-size:14px;">Canonical sample lands in next brief. <a href="/templates/" style="color:#1a3a52;">Back to Templates Gallery</a>.</p>
-</body></html>
+<!DOCTYPE html>
+<!--
+Brisen Executive Memo — Ellie style HTML template
+Director-ratified register: 2026-05-13 (source: Ellie Technologies Ltd "Acquisition Memo Luxury Hospitality AI", 13 May 2026).
+Canonical Markdown spine: ../executive-memo-template.md (same folder).
+Canonical PDF visual reference: ../executive-memo-template.pdf (same folder).
+Canonical skill (binds + triggers): ~/baker-vault/_ops/skills/executive-memo-ellie-style/SKILL.md
+
+USAGE
+1. Copy this file into the target matter folder as a starting point.
+2. Replace {{PLACEHOLDERS}} with content. Keep section ORDER + COUNT; vary section CONTENT.
+3. Section labels can change (e.g. "Three Constraints" instead of "Tier 1 Targets") — the visual register depends on the 8-block rhythm, not the literal labels.
+4. PDF render: Chrome headless --print-to-pdf=output.pdf input.html — page styling already wired (@page A4, footer counter, no break inside callouts).
+5. File alongside .md source in `wiki/matters/<slug>/curated/<YYYY-MM-DD>-<topic>-memo.{md,html,pdf}`.
+-->
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>{{TITLE}}</title>
+<style>
+  @page {
+    size: A4;
+    margin: 18mm 18mm 22mm 18mm;
+    @bottom-left { content: "{{FOOTER_LEFT}}"; font-size: 8pt; color: #888; font-style: italic; }
+    @bottom-right { content: counter(page) " / " counter(pages); font-size: 8pt; color: #888; }
+  }
+  :root {
+    --ink: #1a1a1a;
+    --sub: #555;
+    --mute: #888;
+    --rule: #d8d8d8;
+    --accent: #a02020;
+    --box-bg: #fafafa;
+    --box-border: #dddddd;
+    --dark: #1a1a1a;
+    --yellow-bg: #fef9e7;
+    --yellow-border: #e6c869;
+    --example-bg: #f5f1ec;
+    --example-border: #d4c8b8;
+  }
+  * { box-sizing: border-box; }
+  html, body {
+    margin: 0; padding: 0;
+    color: var(--ink);
+    font-family: "PT Serif", Georgia, "Liberation Serif", serif;
+    line-height: 1.55;
+    font-size: 10.5pt;
+  }
+  .wrap { max-width: 175mm; margin: 0 auto; }
+  h1 {
+    font-family: system-ui, -apple-system, "Segoe UI", Helvetica, Arial, sans-serif;
+    font-size: 22pt; font-weight: 700; letter-spacing: -0.01em;
+    margin: 0 0 0.4rem; line-height: 1.15; color: var(--ink);
+  }
+  .subtitle {
+    font-style: italic; color: var(--sub); font-size: 11pt;
+    margin: 0 0 0.4rem; line-height: 1.4;
+  }
+  .meta {
+    font-size: 9.5pt; color: var(--sub);
+    padding-bottom: 0.7rem; border-bottom: 1px solid var(--rule);
+    margin-bottom: 1.8rem;
+  }
+  h2 {
+    font-family: system-ui, -apple-system, "Segoe UI", Helvetica, Arial, sans-serif;
+    font-size: 13pt; font-weight: 700; color: var(--ink);
+    margin: 1.6rem 0 0.6rem; padding-bottom: 0.35rem;
+    border-bottom: 1px solid var(--rule);
+  }
+  h3 {
+    font-family: system-ui, -apple-system, "Segoe UI", Helvetica, Arial, sans-serif;
+    font-size: 11pt; font-weight: 700; color: var(--ink);
+    margin: 1rem 0 0.4rem;
+  }
+  p { margin: 0.4rem 0 0.8rem; }
+  ul { margin: 0.4rem 0 0.9rem; padding-left: 1.1rem; }
+  ul li { margin-bottom: 0.3rem; }
+  strong { color: var(--ink); font-weight: 700; }
+  em { color: var(--ink); }
+
+  /* Bold-led numbered bullets — Section 2 pattern */
+  .lede {
+    border-left: 3px solid var(--accent);
+    padding: 0.15rem 0 0.15rem 0.9rem;
+    margin: 0.5rem 0 0.7rem;
+  }
+  .lede .num {
+    color: var(--accent); font-weight: 700;
+    font-family: system-ui, -apple-system, sans-serif;
+    margin-right: 0.3rem;
+  }
+
+  /* Detail boxes — Section 4 / 5 pattern (constraints, targets, items) */
+  .constraint-box {
+    background: var(--box-bg);
+    border: 1px solid var(--box-border);
+    border-left: 3px solid var(--accent);
+    border-radius: 4px;
+    padding: 0.9rem 1.1rem;
+    margin: 0.7rem 0;
+  }
+  .constraint-box h3 { margin-top: 0; }
+  .constraint-box .field { margin: 0.25rem 0; font-size: 10pt; }
+  .constraint-box .field-label {
+    font-family: system-ui, -apple-system, sans-serif;
+    font-size: 8.5pt; font-weight: 700; letter-spacing: 0.05em;
+    text-transform: uppercase; color: var(--sub);
+    margin-right: 0.4rem;
+  }
+
+  /* Pull-quote — for source citations inside detail boxes */
+  .quote {
+    font-style: italic; color: var(--sub);
+    border-left: 2px solid var(--accent);
+    padding-left: 0.7rem; margin: 0.4rem 0 0.6rem;
+    font-size: 9.8pt;
+  }
+
+  /* Section 6 — Recommended Play, the dark callout */
+  .recommend-box {
+    background: var(--dark); color: #fff;
+    padding: 1.1rem 1.3rem; margin: 1rem 0;
+    border-radius: 4px;
+  }
+  .recommend-box p { margin: 0.35rem 0; }
+  .recommend-box strong { color: #fff; }
+  .recommend-headline {
+    font-family: system-ui, -apple-system, sans-serif;
+    font-size: 12.5pt; font-weight: 700; line-height: 1.35;
+    margin: 0 0 0.7rem;
+  }
+
+  /* Section 7 — Open Questions, the yellow callout */
+  .open-q-box {
+    background: var(--yellow-bg);
+    border: 1px solid var(--yellow-border);
+    border-radius: 4px;
+    padding: 0.9rem 1.1rem 0.9rem 1.4rem;
+    margin: 0.8rem 0;
+  }
+  .open-q-box ol { margin: 0; padding-left: 1.3rem; }
+  .open-q-box ol li { margin-bottom: 0.5rem; }
+
+  /* Optional table (Section 5 alternative — staging / timeline / register) */
+  .stage-table {
+    width: 100%; border-collapse: collapse; margin: 0.7rem 0;
+    font-size: 9.7pt;
+  }
+  .stage-table th, .stage-table td {
+    border-bottom: 1px solid var(--rule);
+    padding: 0.45rem 0.5rem;
+    text-align: left; vertical-align: top;
+  }
+  .stage-table th {
+    font-family: system-ui, -apple-system, sans-serif;
+    font-size: 8.5pt; font-weight: 700; letter-spacing: 0.04em;
+    text-transform: uppercase; color: var(--sub);
+    border-bottom: 1.5px solid var(--ink);
+  }
+
+  /* Footer disclaimer */
+  .disclaimer {
+    margin-top: 1.8rem; padding-top: 0.7rem;
+    border-top: 1px solid var(--rule);
+    font-style: italic; color: var(--mute); font-size: 9pt;
+  }
+
+  /* Print hygiene */
+  .constraint-box, .recommend-box, .open-q-box { page-break-inside: avoid; }
+  h2, h3 { page-break-after: avoid; }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+<h1>{{TITLE}}</h1>
+<div class="subtitle">{{SUBTITLE — italic, one-line context}}</div>
+<div class="meta">Prepared for: {{AUDIENCE}} &nbsp;|&nbsp; Date: {{DATE — DD MMM YYYY}} &nbsp;|&nbsp; Status: {{STATUS — Confidential — Internal / Counterparty Draft}}</div>
+
+<!-- ====================================================================
+     SECTION 1 — EXECUTIVE SUMMARY
+     One or two paragraphs. Bottom line first; sharpest non-obvious insight second.
+==================================================================== -->
+<h2>1. Executive Summary</h2>
+<p>{{Paragraph 1 — bottom line. State the opportunity / decision / recommendation in the first sentence. Every reader gets it even if they stop here.}}</p>
+<p>{{Paragraph 2 — the sharpest insight that justifies the memo's existence. What is true that was not obvious before this work?}}</p>
+
+<!-- ====================================================================
+     SECTION 2 — KEY FRAME / WHAT WE AGREED / ADVANTAGES
+     Bold-led numbered bullets. 5 items. Each item: fact + consequence.
+==================================================================== -->
+<h2>2. {{KEY_FRAME_OR_ADVANTAGES — e.g. "What We Agreed" / "Five Advantages" / "Key Findings"}}</h2>
+<div class="lede"><span class="num">01.</span> <strong>{{ITEM_LABEL}}.</strong> {{Body — one or two sentences. State the fact, then the consequence.}}</div>
+<div class="lede"><span class="num">02.</span> <strong>{{ITEM_LABEL}}.</strong> {{Body.}}</div>
+<div class="lede"><span class="num">03.</span> <strong>{{ITEM_LABEL}}.</strong> {{Body.}}</div>
+<div class="lede"><span class="num">04.</span> <strong>{{ITEM_LABEL}}.</strong> {{Body.}}</div>
+<div class="lede"><span class="num">05.</span> <strong>{{ITEM_LABEL}}.</strong> {{Body.}}</div>
+
+<!-- ====================================================================
+     SECTION 3 — THESIS / OPPORTUNITY
+     Plain prose, 2-3 paragraphs. Make the argument. Crowded vs uncrowded play optional.
+==================================================================== -->
+<h2>3. {{THESIS_OR_OPPORTUNITY — e.g. "The Three Constraints That Shape V1" / "Why This Now"}}</h2>
+<p>{{Paragraph 1 — argument body.}}</p>
+<p>The crowded play is {{X}}. {{Paragraph 2 — why X is wrong.}}</p>
+<p>The uncrowded play is <strong>{{Y}}</strong>. Here:</p>
+<ul>
+  <li>{{Reason 1 — single sentence, the moat.}}</li>
+  <li>{{Reason 2 — single sentence, the buyer.}}</li>
+  <li>{{Reason 3 — single sentence, the timing or pricing.}}</li>
+  <li>{{Reason 4 — single sentence, the IP overlap.}}</li>
+</ul>
+
+<!-- ====================================================================
+     SECTION 4 — TIER 1 / DETAIL BLOCK A
+     For acquisition memos: 3 named targets (STAGE / WHAT THEY DO / WHY IT FITS / RISK).
+     For other memo types: 3 constraint-boxes / decision-boxes / risk-boxes.
+==================================================================== -->
+<h2>4. {{TIER_1_OR_DETAIL_A — e.g. "Tier 1 — Strongest Fit" / "Three Constraints That Shape V1"}}</h2>
+<p><em>{{Italic one-line framing — what action this section implies.}}</em></p>
+
+<div class="constraint-box">
+  <h3>{{TARGET_OR_ITEM_NAME_1}}</h3>
+  <p class="quote">{{Optional pull-quote — source statement justifying this item.}}</p>
+  <p><strong>{{LABEL — e.g. "Stage" / "Implication" / "What they do" / "Risk"}}:</strong> {{Body.}}</p>
+  <p><strong>{{LABEL}}:</strong> {{Body.}}</p>
+</div>
+
+<div class="constraint-box">
+  <h3>{{TARGET_OR_ITEM_NAME_2}}</h3>
+  <p class="quote">{{Optional pull-quote.}}</p>
+  <p><strong>{{LABEL}}:</strong> {{Body.}}</p>
+  <p><strong>{{LABEL}}:</strong> {{Body.}}</p>
+</div>
+
+<div class="constraint-box">
+  <h3>{{TARGET_OR_ITEM_NAME_3}}</h3>
+  <p class="quote">{{Optional pull-quote.}}</p>
+  <p><strong>{{LABEL}}:</strong> {{Body.}}</p>
+  <p><strong>{{LABEL}}:</strong> {{Body.}}</p>
+</div>
+
+<!-- ====================================================================
+     SECTION 5 — TIER 2 / DETAIL BLOCK B / SCOPE
+     For acquisition memos: 2 broader-fit targets (WHAT THEY DO / WHY IT FITS).
+     For scoping memos: staging table or sub-headed paths.
+==================================================================== -->
+<h2>5. {{TIER_2_OR_DETAIL_B — e.g. "Tier 2 — Strong Fit Broader" / "Scope: Staging" / "The Path to V1"}}</h2>
+
+<table class="stage-table">
+  <thead>
+    <tr><th>{{COL_1}}</th><th>{{COL_2}}</th><th>{{COL_3}}</th></tr>
+  </thead>
+  <tbody>
+    <tr><td><strong>{{ROW_LABEL_1}}</strong></td><td>{{Cell.}}</td><td>{{Cell.}}</td></tr>
+    <tr><td><strong>{{ROW_LABEL_2}}</strong></td><td>{{Cell.}}</td><td>{{Cell.}}</td></tr>
+    <tr><td><strong>{{ROW_LABEL_3}}</strong></td><td>{{Cell.}}</td><td>{{Cell.}}</td></tr>
+  </tbody>
+</table>
+
+<p>{{Optional supporting paragraph.}}</p>
+
+<!-- ====================================================================
+     SECTION 6 — RECOMMENDED PLAY
+     Dark callout. ONE bold sentence (load-bearing), then supporting paragraph.
+==================================================================== -->
+<h2>6. Recommended Play</h2>
+<div class="recommend-box">
+  <p class="recommend-headline">{{One-sentence recommendation — the load-bearing line of the memo. Bold. The reader's takeaway.}}</p>
+  <p>{{Supporting paragraph — assets, channels, partners, timing, the why-this-works.}}</p>
+  <p>{{Optional second paragraph naming the trade-off if more than one path is viable.}}</p>
+</div>
+
+<!-- ====================================================================
+     SECTION 7 — OPEN QUESTIONS BEFORE ACTING
+     Yellow callout. 5 numbered DECISION-needed items (NOT research-needed).
+==================================================================== -->
+<h2>7. Open Questions Before Acting</h2>
+<div class="open-q-box">
+  <ol>
+    <li><strong>{{Question label.}}</strong> {{Body — what the decision changes, optionality cost of getting it wrong.}}</li>
+    <li><strong>{{Question label.}}</strong> {{Body.}}</li>
+    <li><strong>{{Question label.}}</strong> {{Body.}}</li>
+    <li><strong>{{Question label.}}</strong> {{Body.}}</li>
+    <li><strong>{{Question label.}}</strong> {{Body.}}</li>
+  </ol>
+</div>
+
+<!-- ====================================================================
+     SECTION 8 — DISCLAIMER + FOOTER
+==================================================================== -->
+<div class="disclaimer">
+{{Disclaimer — what this memo is based on, what should be verified before acting. Single paragraph.}}
+</div>
+
+<p style="text-align: center; color: var(--mute); font-size: 9pt; margin-top: 1.2rem;">Confidential — {{ENTITY}}</p>
+
+</div>
+</body>
+</html>
