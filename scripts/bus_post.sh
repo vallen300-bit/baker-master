@@ -13,6 +13,7 @@
 #                             architect → architect
 #                             cortex → cortex
 #                             aid/AID → aid
+#                             codex/CODEX → codex
 #   BRISEN_LAB_DAEMON_URL   — optional. Default: https://brisen-lab.onrender.com
 #
 # Exits non-zero on any failure with descriptive stderr.
@@ -42,12 +43,13 @@ TOPIC="${3:-}"
 # Validate against canonical slug registry (Director ratified aid 2026-05-10;
 # hag-desk added 2026-05-21 per HAGENAUER_DESK_ON_BUS_1 single-desk pilot;
 # researcher added 2026-05-22 per RESEARCHER_ON_BUS_1 Cowork-App-only install;
-# CM-1..4 + hag-filer added 2026-05-24 per HAG_WORKERS_PHASE_1 worker pool build).
+# CM-1..4 + hag-filer added 2026-05-24 per HAG_WORKERS_PHASE_1 worker pool build;
+# codex added 2026-05-29 per CODEX_ON_BUS_1 slim install — CLI-based, no dashboard card / SessionStart hook).
 case "$RECIPIENT" in
-    director|cowork-ah1|lead|deputy|architect|b1|b2|b3|b4|b5|cortex|daemon|aid|hag-desk|researcher|CM-1|CM-2|CM-3|CM-4|hag-filer) ;;
+    director|cowork-ah1|lead|deputy|architect|b1|b2|b3|b4|b5|cortex|daemon|aid|codex|hag-desk|researcher|CM-1|CM-2|CM-3|CM-4|hag-filer) ;;
     *)
         echo "ERROR: unknown slug: $RECIPIENT" >&2
-        echo "  Valid: director cowork-ah1 lead deputy architect b1 b2 b3 b4 b5 cortex daemon aid hag-desk researcher CM-1 CM-2 CM-3 CM-4 hag-filer" >&2
+        echo "  Valid: director cowork-ah1 lead deputy architect b1 b2 b3 b4 b5 cortex daemon aid codex hag-desk researcher CM-1 CM-2 CM-3 CM-4 hag-filer" >&2
         exit 1
         ;;
 esac
@@ -66,6 +68,7 @@ case "${BAKER_ROLE:-}" in
     architect|ARCHITECT)                SENDER=architect ;;
     cortex|CORTEX)                      SENDER=cortex ;;
     aid|AID)                            SENDER=aid ;;
+    codex|CODEX)                        SENDER=codex ;;
     hag-desk|HAG-DESK|hagenauer-desk)   SENDER=hag-desk ;;
     researcher|RESEARCHER)              SENDER=researcher ;;
     CM-1|cm-1|CM_1)                     SENDER=CM-1 ;;
@@ -75,7 +78,7 @@ case "${BAKER_ROLE:-}" in
     hag-filer|HAG-FILER|hag_filer)      SENDER=hag-filer ;;
     *)
         echo "ERROR: BAKER_ROLE not set or unrecognized: '${BAKER_ROLE:-}'" >&2
-        echo "  Valid: AH1 (terminal=lead), AH1-APP (Cowork=cowork-ah1), AH2, B1-B5, architect, cortex, aid, hag-desk, researcher, CM-1, CM-2, CM-3, CM-4, hag-filer" >&2
+        echo "  Valid: AH1 (terminal=lead), AH1-APP (Cowork=cowork-ah1), AH2, B1-B5, architect, cortex, aid, codex, hag-desk, researcher, CM-1, CM-2, CM-3, CM-4, hag-filer" >&2
         exit 1
         ;;
 esac
