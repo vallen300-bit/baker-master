@@ -20,8 +20,14 @@ if [[ -z "$KEY" ]]; then
 fi
 
 if [[ -z "$KEY" ]]; then
+  # Emit on stdout AND stderr — codex's bash-tool UI sometimes hides stderr,
+  # causing the symptom "exited 1, no output". stdout guarantees the diagnostic
+  # surfaces in codex's transcript regardless of stderr handling.
+  echo "ERROR: BRISEN_LAB_TERMINAL_KEY_codex not in env and 1P unreachable."
+  echo "  Diagnostic: BRISEN_LAB_TERMINAL_KEY env var is empty, and 'op read' returned nothing."
+  echo "  Fix: relaunch codex via the cdx() shell function (Shell -> New Window -> codex), which pre-fetches"
+  echo "       the credential from 1Password in AH1's authenticated shell and exports it to codex's env."
   echo "ERROR: BRISEN_LAB_TERMINAL_KEY_codex not in env and 1P unreachable." >&2
-  echo "       Relaunch via 'cdx' (it pre-fetches) or run 'op signin'." >&2
   exit 2
 fi
 
