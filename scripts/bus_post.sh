@@ -88,12 +88,8 @@ esac
 # requiring 1P access inside sandboxed sub-agent shells); fall back to 1P.
 
 KEY="${BRISEN_LAB_TERMINAL_KEY:-}"
-if [ -z "$KEY" ]; then
-    KEY="$(op read "op://Baker API Keys/BRISEN_LAB_TERMINAL_KEY_${SENDER}/credential" 2>/dev/null)" || {
-        echo "ERROR: 1Password CLI fetch failed for sender=${SENDER}" >&2
-        echo "  Check: op CLI authenticated (op whoami) OR pre-set BRISEN_LAB_TERMINAL_KEY env" >&2
-        exit 1
-    }
+if [ -z "$KEY" ] && command -v op >/dev/null 2>&1; then
+    KEY="$(op read "op://Baker API Keys/BRISEN_LAB_TERMINAL_KEY_${SENDER}/credential" 2>/dev/null || true)"
 fi
 
 if [ -z "$KEY" ]; then

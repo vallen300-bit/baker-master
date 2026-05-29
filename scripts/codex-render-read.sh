@@ -70,8 +70,8 @@ fi
 # (Script never specifies a method; we just leave HTTP verb as default GET.)
 
 KEY="${CODEX_RENDER_API_KEY:-}"
-if [[ -z "$KEY" ]]; then
-  KEY="$(op read 'op://Baker API Keys/API Render/credential' 2>/dev/null)"
+if [[ -z "$KEY" ]] && command -v op >/dev/null 2>&1; then
+  KEY="$(op read 'op://Baker API Keys/API Render/credential' 2>/dev/null || true)"
 fi
 if [[ -z "$KEY" ]]; then
   echo "ERROR: CODEX_RENDER_API_KEY not in env and 1P unreachable." >&2

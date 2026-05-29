@@ -21,8 +21,8 @@ if ! [[ "$MSG_ID" =~ ^[0-9]+$ ]]; then
 fi
 
 KEY="${BRISEN_LAB_TERMINAL_KEY:-}"
-if [[ -z "$KEY" ]]; then
-  KEY="$(op read 'op://Baker API Keys/BRISEN_LAB_TERMINAL_KEY_codex/credential' 2>/dev/null)"
+if [[ -z "$KEY" ]] && command -v op >/dev/null 2>&1; then
+  KEY="$(op read 'op://Baker API Keys/BRISEN_LAB_TERMINAL_KEY_codex/credential' 2>/dev/null || true)"
 fi
 
 if [[ -z "$KEY" ]]; then
