@@ -69,6 +69,7 @@ declare -a TERMINALS=(
   "hag-desk:/Users/dimitry/baker-vault"
   "researcher:/Users/dimitry/baker-vault"
   "aid:/Users/dimitry/baker-vault"
+  "codex:/Users/dimitry/baker-vault"
   "CM-1:/Users/dimitry/baker-vault"
   "CM-2:/Users/dimitry/baker-vault"
   "CM-3:/Users/dimitry/baker-vault"
