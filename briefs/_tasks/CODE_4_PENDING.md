@@ -13,7 +13,8 @@ complexity: Low (markdown-only)
 reply_to: deputy
 priority: tier-a
 anchor: AH2 self-check commit 53ab51d; researcher bus #1283; Director-ratified Q1=b4 Q2=optional-post-merge 2026-05-29
-brief_canonical: ~/baker-vault/_ops/briefs/BRIEF_HARNESS_SETUP_SKILL_1.md (commit 91a3840)
+brief_canonical: ~/baker-vault/_ops/briefs/BRIEF_HARNESS_SETUP_SKILL_1.md (commit ca855a3 — v2 with codex-verifier amends)
+codex_verifier_verdict: PASS-WITH-NOTES; 8 amends folded into v2 canonical (gpt-5.5 model swap surfaced)
 ---
 
 # B4 dispatch — BRIEF_HARNESS_SETUP_SKILL_1
@@ -22,7 +23,14 @@ brief_canonical: ~/baker-vault/_ops/briefs/BRIEF_HARNESS_SETUP_SKILL_1.md (commi
 
 Build the `harness-setup` skill at `~/baker-vault/_ops/skills/harness-setup/SKILL.md` + companion `checklist.md` + user-global symlink + INDEX update. Markdown-only — no code, no DB, no API. ~30-60 min build.
 
-Canonical brief body lives at `~/baker-vault/_ops/briefs/BRIEF_HARNESS_SETUP_SKILL_1.md` (commit 91a3840). Read that file first — it has the full Context / Problem / Files Modified / Verification / Acceptance criteria.
+Canonical brief body lives at `~/baker-vault/_ops/briefs/BRIEF_HARNESS_SETUP_SKILL_1.md` — **READ V2 AT COMMIT ca855a3** (codex-verifier folded 8 amends same turn as initial dispatch; v1 at 91a3840 is superseded). Canonical has the full Context / Problem / Files Modified / Verification / Acceptance criteria including embedded video summary.
+
+### CRITICAL DELTA FROM v1 → v2 (read before starting)
+
+1. **Do NOT hand-create the symlink.** Run `bash ~/baker-vault/_install/sync_skills.sh --dry-run`, review, then `bash ~/baker-vault/_install/sync_skills.sh`. Canonical install workflow — has data-loss safety the manual `ln -s` does not.
+2. AC1 / AC3 / AC4 / AC5 / AC6 are all tightened in v2. Run the v2 verification block (in canonical), not the v1 block.
+3. `operating.md` append is AH2's post-ship task — NOT yours.
+4. Researcher bus #1283 video summary is embedded in canonical Problem section — you don't need to chase the source.
 
 ## Context (short version)
 
@@ -71,52 +79,26 @@ You voted N on the binding-constraint probe earlier today (#1291) — closest fr
 - Do NOT touch `outputs/dashboard.py`, `orchestrator/`, or `kbl/`.
 - Do NOT alter existing skills.
 
-## Verification — exact commands to run before reporting ship
+## Verification — RUN THE v2 BLOCK IN CANONICAL BRIEF (ca855a3)
 
-```bash
-# AC1: SKILL.md exists with valid frontmatter
-test -f ~/baker-vault/_ops/skills/harness-setup/SKILL.md
-head -10 ~/baker-vault/_ops/skills/harness-setup/SKILL.md | grep -q "^name: harness-setup"
-head -10 ~/baker-vault/_ops/skills/harness-setup/SKILL.md | grep -q "MANDATORY TRIGGERS"
+The v2 verification block in `~/baker-vault/_ops/briefs/BRIEF_HARNESS_SETUP_SKILL_1.md` is canonical — tighter than what was here in v1 of the dispatch. Run that block literally. Paste full output in ship report.
 
-# AC2: checklist.md exists
-test -f ~/baker-vault/_ops/skills/harness-setup/checklist.md
+Summary (v2 deltas):
+- AC1 verifies `name:` + `description:` + `type: skill` + MANDATORY TRIGGERS.
+- AC3 verifies Layer headings AND embeds a python sub-script that fails if any layer is missing `(a)` / `(b)` / `(c)` sub-bullets.
+- AC4 uses `realpath` equality, not `readlink | grep` — must run AFTER `sync_skills.sh`.
+- AC5 schema-matches the INDEX row, not substring.
+- AC6 requires named "Anchors" + "Co-authors" sections + 90-day owner.
 
-# AC3: All 7 layer sections present
-for L in "Layer 1" "Layer 2" "Layer 3" "Layer 4" "Layer 5" "Layer 6" "Layer 7"; do
-  grep -q "$L" ~/baker-vault/_ops/skills/harness-setup/SKILL.md || { echo "MISSING: $L"; exit 1; }
-done
+No "pass by inspection". Paste literal stdout/stderr from the canonical v2 bash block.
 
-# AC4: Symlink resolves
-test -L ~/.claude/skills/harness-setup
-readlink ~/.claude/skills/harness-setup | grep -q "baker-vault/_ops/skills/harness-setup"
-test -f ~/.claude/skills/harness-setup/SKILL.md
+## Quality Checkpoints / Acceptance criteria — v2 (codex-verifier folded)
 
-# AC5: Index registered
-grep -q "harness-setup" ~/baker-vault/_ops/skills/INDEX.md
+Canonical AC list lives in `~/baker-vault/_ops/briefs/BRIEF_HARNESS_SETUP_SKILL_1.md` v2 (commit ca855a3) — read that file's "Quality Checkpoints / Acceptance criteria" section.
 
-# AC6: Anchors cited
-grep -q "53ab51d" ~/baker-vault/_ops/skills/harness-setup/SKILL.md
-grep -q "#1283" ~/baker-vault/_ops/skills/harness-setup/SKILL.md
-grep -q "ulNsa0sD8N0" ~/baker-vault/_ops/skills/harness-setup/SKILL.md
+Headline deltas vs v1: AC1 expanded (description + type:skill). AC3 tightened ((a)/(b)/(c) sub-structure). AC4 realpath equality. AC5 schema-match. AC6 named Anchors + Co-authors + 90-day owner.
 
-# AC7: Length envelopes
-[ "$(wc -l < ~/baker-vault/_ops/skills/harness-setup/SKILL.md)" -le 300 ]
-[ "$(wc -l < ~/baker-vault/_ops/skills/harness-setup/checklist.md)" -le 80 ]
-```
-
-All 7 ACs must pass literally (paste output in ship report). No "pass by inspection".
-
-## Quality Checkpoints / Acceptance criteria
-
-- **AC1** SKILL.md exists with frontmatter (name, description, MANDATORY TRIGGERS).
-- **AC2** checklist.md exists, ≤80 lines.
-- **AC3** All 7 layer sections present (Layers 1-6 from video + Layer 7 bus substrate).
-- **AC4** User-global symlink resolves to canonical.
-- **AC5** INDEX.md has new row for `harness-setup`.
-- **AC6** Anchors block cites commit 53ab51d + bus #1283 + video URL.
-- **AC7** SKILL.md ≤300 lines, checklist.md ≤80 lines.
-- **AC8 (post-merge, non-blocking, Director-ratified OPTIONAL):** after merge, bus researcher with skill commit hash + ack request. Researcher's rubric-integrity comments land via follow-up commit, NOT re-merge gate.
+AC8 unchanged: post-merge, non-blocking, Director-ratified OPTIONAL. Bus researcher with commit hash + ack request after merge; their rubric-integrity comments land via follow-up commit, not re-merge gate.
 
 ## Ship report
 
