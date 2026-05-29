@@ -40,6 +40,11 @@ if [[ -z "$PSQL" ]]; then
 fi
 
 DBURL="${CODEX_NEON_READONLY_URL:-}"
+if [[ -z "$DBURL" ]] && [[ -r "$HOME/.codex/runtime-env" ]]; then
+  # shellcheck disable=SC1091
+  source "$HOME/.codex/runtime-env"
+  DBURL="${CODEX_NEON_READONLY_URL:-}"
+fi
 if [[ -z "$DBURL" ]] && command -v op >/dev/null 2>&1; then
   DBURL="$(op read 'op://Baker API Keys/CODEX_NEON_READONLY/credential' 2>/dev/null || true)"
 fi

@@ -12,9 +12,15 @@ set -euo pipefail
 
 LIMIT="${1:-10}"
 
-# Prefer pre-fetched env var (cdx() picker captures the key at spawn);
-# fall back to live 1P read (works in AH1's interactive shell).
+# Tier 1: env var (set by cdx() picker; works in AH1's shell). Codex bash sandbox
+# strips parent env in some configurations, so Tier 2: disk file at ~/.codex/
+# runtime-env (also written by cdx()). Tier 3: live op read (AH1 interactive only).
 KEY="${BRISEN_LAB_TERMINAL_KEY:-}"
+if [[ -z "$KEY" ]] && [[ -r "$HOME/.codex/runtime-env" ]]; then
+  # shellcheck disable=SC1091
+  source "$HOME/.codex/runtime-env"
+  KEY="${BRISEN_LAB_TERMINAL_KEY:-}"
+fi
 if [[ -z "$KEY" ]] && command -v op >/dev/null 2>&1; then
   KEY="$(op read 'op://Baker API Keys/BRISEN_LAB_TERMINAL_KEY_codex/credential' 2>/dev/null || true)"
 fi

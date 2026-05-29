@@ -70,6 +70,11 @@ fi
 # (Script never specifies a method; we just leave HTTP verb as default GET.)
 
 KEY="${CODEX_RENDER_API_KEY:-}"
+if [[ -z "$KEY" ]] && [[ -r "$HOME/.codex/runtime-env" ]]; then
+  # shellcheck disable=SC1091
+  source "$HOME/.codex/runtime-env"
+  KEY="${CODEX_RENDER_API_KEY:-}"
+fi
 if [[ -z "$KEY" ]] && command -v op >/dev/null 2>&1; then
   KEY="$(op read 'op://Baker API Keys/API Render/credential' 2>/dev/null || true)"
 fi
