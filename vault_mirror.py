@@ -199,9 +199,11 @@ def ensure_mirror() -> None:
             _record_pull()
             logger.info("vault_mirror: cloned to %s", path)
         except subprocess.CalledProcessError as e:
-            raise RuntimeError(
-                f"vault_mirror: initial clone failed: {_redact(e.stderr or e)}"
-            ) from e
+            logger.error(
+                "vault_mirror: initial clone failed (non-fatal — degraded mode, "
+                "sync_tick will retry once auth restored): %s",
+                _redact(e.stderr or e),
+            )
 
 
 def sync_tick() -> None:
