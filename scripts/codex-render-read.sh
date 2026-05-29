@@ -69,9 +69,13 @@ fi
 # Refuse non-GET — codex must not POST / PUT / PATCH / DELETE to Render.
 # (Script never specifies a method; we just leave HTTP verb as default GET.)
 
-KEY="$(op read 'op://Baker API Keys/API Render/credential' 2>/dev/null)"
+KEY="${CODEX_RENDER_API_KEY:-}"
 if [[ -z "$KEY" ]]; then
-  echo "ERROR: Render API key not retrievable from 1Password." >&2
+  KEY="$(op read 'op://Baker API Keys/API Render/credential' 2>/dev/null)"
+fi
+if [[ -z "$KEY" ]]; then
+  echo "ERROR: CODEX_RENDER_API_KEY not in env and 1P unreachable." >&2
+  echo "       Relaunch via 'cdx' (it pre-fetches) or run 'op signin'." >&2
   exit 4
 fi
 

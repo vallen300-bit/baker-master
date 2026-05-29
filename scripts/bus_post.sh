@@ -83,16 +83,21 @@ case "${BAKER_ROLE:-}" in
         ;;
 esac
 
-# --- 1Password fetch (policy ii) ---
+# --- credential fetch ---
+# Prefer pre-fetched env var (set by picker functions like cdx() to avoid
+# requiring 1P access inside sandboxed sub-agent shells); fall back to 1P.
 
-KEY="$(op read "op://Baker API Keys/BRISEN_LAB_TERMINAL_KEY_${SENDER}/credential" 2>/dev/null)" || {
-    echo "ERROR: 1Password CLI fetch failed for sender=${SENDER}" >&2
-    echo "  Check: op CLI authenticated (op whoami) + key exists at op://Baker API Keys/BRISEN_LAB_TERMINAL_KEY_${SENDER}/credential" >&2
-    exit 1
-}
+KEY="${BRISEN_LAB_TERMINAL_KEY:-}"
+if [ -z "$KEY" ]; then
+    KEY="$(op read "op://Baker API Keys/BRISEN_LAB_TERMINAL_KEY_${SENDER}/credential" 2>/dev/null)" || {
+        echo "ERROR: 1Password CLI fetch failed for sender=${SENDER}" >&2
+        echo "  Check: op CLI authenticated (op whoami) OR pre-set BRISEN_LAB_TERMINAL_KEY env" >&2
+        exit 1
+    }
+fi
 
 if [ -z "$KEY" ]; then
-    echo "ERROR: 1Password returned empty key for sender=${SENDER}" >&2
+    echo "ERROR: terminal key empty for sender=${SENDER} (no env, no 1P)" >&2
     exit 1
 fi
 

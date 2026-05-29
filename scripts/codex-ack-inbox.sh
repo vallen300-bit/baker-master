@@ -20,10 +20,14 @@ if ! [[ "$MSG_ID" =~ ^[0-9]+$ ]]; then
   exit 1
 fi
 
-KEY="$(op read 'op://Baker API Keys/BRISEN_LAB_TERMINAL_KEY_codex/credential' 2>/dev/null)"
+KEY="${BRISEN_LAB_TERMINAL_KEY:-}"
+if [[ -z "$KEY" ]]; then
+  KEY="$(op read 'op://Baker API Keys/BRISEN_LAB_TERMINAL_KEY_codex/credential' 2>/dev/null)"
+fi
 
 if [[ -z "$KEY" ]]; then
-  echo "ERROR: BRISEN_LAB_TERMINAL_KEY_codex not retrievable from 1Password." >&2
+  echo "ERROR: BRISEN_LAB_TERMINAL_KEY_codex not in env and 1P unreachable." >&2
+  echo "       Relaunch via 'cdx' (it pre-fetches) or run 'op signin'." >&2
   exit 2
 fi
 

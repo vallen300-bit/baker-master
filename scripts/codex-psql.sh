@@ -39,10 +39,14 @@ if [[ -z "$PSQL" ]]; then
   exit 2
 fi
 
-DBURL="$(op read 'op://Baker API Keys/CODEX_NEON_READONLY/credential' 2>/dev/null)"
+DBURL="${CODEX_NEON_READONLY_URL:-}"
+if [[ -z "$DBURL" ]]; then
+  DBURL="$(op read 'op://Baker API Keys/CODEX_NEON_READONLY/credential' 2>/dev/null)"
+fi
 
 if [[ -z "$DBURL" ]]; then
-  echo "ERROR: CODEX_NEON_READONLY URL not retrievable from 1Password." >&2
+  echo "ERROR: CODEX_NEON_READONLY_URL not in env and 1P unreachable." >&2
+  echo "       Relaunch via 'cdx' (it pre-fetches) or run 'op signin'." >&2
   exit 3
 fi
 
