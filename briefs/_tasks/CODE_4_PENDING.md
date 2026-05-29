@@ -3,8 +3,9 @@ dispatch: TEMPLATES_GALLERY_LAB_INSTALL_1
 to: b4
 from: lead
 dispatched_by: lead
-status: PENDING
+status: COMPLETE
 dispatched_at: 2026-05-27T14:45:00Z
+completed_at: 2026-05-27T14:58:40Z
 authored: 2026-05-27
 target_repo: brisen-lab
 workdir: ~/bm-b4-brisen-lab
@@ -16,6 +17,7 @@ anchor: bus #1253 (hag-desk dispatch, Director-ratified 2026-05-27)
 brief_path: briefs/BRIEF_TEMPLATES_GALLERY_LAB_INSTALL_1.md
 parallel_brief: TEMPLATES_GALLERY_BAKER_INSTALL_1 (b2, baker-master — runs in parallel; no file overlap)
 prerequisite_note: Link target `https://brisen-docs.onrender.com/templates/` returns 404 until parallel brief ships. Ship in parallel; target page lands when companion deploys.
+ship_pr: brisen-lab#48 (merged 2026-05-27T14:58:40Z, commit 2a0aa56)
 ---
 
 # B4 dispatch — TEMPLATES_GALLERY_LAB_INSTALL_1
