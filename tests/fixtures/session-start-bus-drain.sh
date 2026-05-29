@@ -53,6 +53,7 @@ case "${BAKER_ROLE:-}" in
     cortex|CORTEX)                      SLUG=cortex ;;
     aid|AID)                            SLUG=aid ;;
     hag-desk|HAG-DESK|hagenauer-desk)   SLUG=hag-desk ;;
+    origination-desk|ORIGINATION-DESK|ORIGINATION_DESK|origination_desk) SLUG=origination-desk ;;
     researcher|RESEARCHER)              SLUG=researcher ;;
     CM-1|cm-1|CM_1)                     SLUG=CM-1 ;;
     CM-2|cm-2|CM_2)                     SLUG=CM-2 ;;

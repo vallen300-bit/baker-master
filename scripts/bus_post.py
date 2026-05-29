@@ -28,6 +28,8 @@ VALID_SLUGS = {
     "director", "cowork-ah1", "lead", "deputy", "architect",
     "b1", "b2", "b3", "b4", "b5",
     "cortex", "daemon", "aid", "codex",
+    "hag-desk", "origination-desk", "researcher",
+    "CM-1", "CM-2", "CM-3", "CM-4", "hag-filer",
 }
 
 ROLE_TO_SLUG = {
@@ -42,6 +44,15 @@ ROLE_TO_SLUG = {
     "cortex": "cortex", "CORTEX": "cortex",
     "aid": "aid", "AID": "aid",
     "codex": "codex", "CODEX": "codex",
+    "hag-desk": "hag-desk", "HAG-DESK": "hag-desk", "hagenauer-desk": "hag-desk",
+    "origination-desk": "origination-desk", "ORIGINATION-DESK": "origination-desk",
+    "ORIGINATION_DESK": "origination-desk", "origination_desk": "origination-desk",
+    "researcher": "researcher", "RESEARCHER": "researcher",
+    "CM-1": "CM-1", "cm-1": "CM-1", "CM_1": "CM-1",
+    "CM-2": "CM-2", "cm-2": "CM-2", "CM_2": "CM-2",
+    "CM-3": "CM-3", "cm-3": "CM-3", "CM_3": "CM-3",
+    "CM-4": "CM-4", "cm-4": "CM-4", "CM_4": "CM-4",
+    "hag-filer": "hag-filer", "HAG-FILER": "hag-filer", "hag_filer": "hag-filer",
 }
 
 
