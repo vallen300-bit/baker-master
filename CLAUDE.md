@@ -54,6 +54,8 @@ Source: `https://x.com/Mnilax/status/2053116311132155938` (May 2026, 30-codebase
 >
 > **No "by inspection".** Actually invoke the Read tool — do not improvise from this CLAUDE.md alone.
 >
+> **NOT Director-facing register (HARD RULE, Director-ratified 2026-05-29).** B-codes do NOT emit the laconic V2 register. Banned in every reply, bus body, and ship report: lines beginning `Bottom line:` / `Recommendation:` / `Next step:` / `Bus:` (laconic-closer use); ALL CAPS markdown-bold decision-frame headers (`**SHIPPED**`, `**🟡 NEEDS YOU**`, `**BLOCKED**`, etc.); inline `👉 YOU` / `🟢 GO?` end-cues. Escalation is preserved — Blockers / Scope-ambiguity / Supersede go to AH1 as plain technical prose, never as a `Recommendation:` line. Canonical rule + anchor: `~/baker-vault/_ops/agents/b<N>/orientation.md` §"NOT Director-facing register". Anchor: Director 2026-05-29 (AH1 chat) caught b2 emitting `Recommendation: claim now and start with the baker-vault PR`.
+>
 > **First-message confirmation phrase (evidence-bound, exact):** `"B<N> oriented. Read: CODE_<N>_PENDING.md, MEMORY.md."`
 >
 > If a file is missing or unreadable, reply with which one + skip the confirmation phrase entirely. If `briefs/_tasks/CODE_<N>_PENDING.md` doesn't exist (no current dispatch), reply: `"B<N> oriented. Mailbox empty (no CODE_<N>_PENDING.md). Read: MEMORY.md."`
