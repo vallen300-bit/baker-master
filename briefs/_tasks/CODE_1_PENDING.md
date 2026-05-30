@@ -3,8 +3,10 @@ dispatch: WAHA_SESSION_POLL_HARDEN_1
 to: b1
 from: lead
 dispatched_by: lead
-status: PENDING
+status: CLAIMED
 dispatched_at: 2026-05-30T09:45:00Z
+claimed_at: 2026-05-30T10:20:00Z
+claimed_by: b1
 brief_version: v1 (codex PASS-WITH-NITS bus #1364, all 3 nits folded)
 codex_pre_review: PASS-WITH-NITS bus #1364
 prior_design_iterations:
