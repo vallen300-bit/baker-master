@@ -10,15 +10,38 @@ When Director approves a research proposal, this engine:
 
 Cost: ~EUR 2-4 per dossier (3-4 specialist Opus calls).
 Time: ~60-120 seconds (parallel execution).
+
+BRIEF_DOSSIER_ROOM_READ_1 (2026-05-30): before specialists run, resolve the
+subject to ONE matter slug and prepend that room's curated digest to the
+specialist prompt as ground truth. Resolution is strict-precedence (explicit
+matter_slug column → exact canonical / composite alias → metadata-only weak
+candidate → fail closed). Generic single-token aliases are REJECTED for
+authoritative resolution.
 """
 import json
 import logging
+import os
+import re
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime, timezone
+from pathlib import Path
+from typing import Optional
 
 from config.settings import config
 
 logger = logging.getLogger("baker.research_executor")
+
+# Kill-flag preference key (runtime-checked at the call-site; NOT a module-level
+# env var, so a bad injection can be disabled via DB write without redeploy).
+_KILL_FLAG_CATEGORY = "feature_flags"
+_KILL_FLAG_KEY = "dossier_room_read_enabled"
+
+# Frontmatter cap when scanning candidate matter cortex-config.md files in the
+# metadata-only fallback (step 3 of resolver). Frontmatter is the first YAML
+# block; 4KB is more than enough for the largest cortex-config frontmatter
+# observed, and caps the worst-case body-read damage on a malformed file.
+_FRONTMATTER_SCAN_CAP = 4000
+_PEOPLE_SCAN_CAP = 8000
 
 # Dropbox destination folder (Dropbox API path, not local filesystem)
 DROPBOX_DOSSIER_FOLDER = "/Baker-Feed/research-dossiers"
@@ -47,9 +70,13 @@ def _get_proposal(proposal_id: int) -> dict:
             return None
         try:
             cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+            # matter_slug must be in the SELECT for the dossier-room resolver to
+            # honour the explicit-column path (BRIEF_DOSSIER_ROOM_READ_1, Codex C1).
+            # Prod schema already carries the column; bootstrap CREATE TABLE in
+            # research_trigger.py is drift (FAST-FOLLOW item).
             cur.execute("""
                 SELECT id, subject_name, subject_type, context, specialists,
-                       trigger_source, trigger_ref
+                       trigger_source, trigger_ref, matter_slug
                 FROM research_proposals WHERE id = %s
             """, (proposal_id,))
             row = cur.fetchone()
@@ -145,6 +172,321 @@ def _get_source_text(trigger_ref: str) -> str:
             store._put_conn(conn)
     except Exception:
         return ""
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Curated-room resolver (BRIEF_DOSSIER_ROOM_READ_1)
+# ─────────────────────────────────────────────────────────────────────────────
+
+
+def _room_read_enabled() -> bool:
+    """Runtime kill-flag check (DB-backed, not env-var — disable without redeploy).
+
+    Default: ENABLED. Returns False ONLY when an explicit `false`-shaped
+    preference exists. Any failure path keeps the feature on (fail-open on
+    flag check), which matches the brief's "any error → log → proceed" frame.
+    """
+    try:
+        from memory.store_back import SentinelStoreBack
+        store = SentinelStoreBack._get_global_instance()
+        prefs = store.get_preferences(category=_KILL_FLAG_CATEGORY)
+        for p in prefs:
+            if p.get("pref_key") == _KILL_FLAG_KEY:
+                val = str(p.get("pref_value", "")).strip().lower()
+                if val in {"false", "0", "off", "disabled", "no"}:
+                    return False
+                break
+        return True
+    except Exception as e:
+        logger.debug(f"_room_read_enabled flag check non-fatal: {e}")
+        return True
+
+
+def _alias_is_composite(alias_key: str) -> bool:
+    """A safe-to-resolve-authoritatively alias contains a hyphen (matter-specific).
+
+    Single-token aliases (`mohg`, `mandarin`) and bare multi-word aliases
+    (`mandarin oriental`) are REJECTED for authoritative resolution because
+    they collide across matters (e.g. `mohg` maps to `mo-vie-am` in slugs.yml
+    even though a Bick/MOHG dossier needs `nvidia-mohg`).
+    """
+    return "-" in alias_key
+
+
+_TOKEN_BOUNDARY = re.compile(r"[^a-z0-9-]+")
+
+
+def _authoritative_match(subject_name: str, context: str) -> Optional[str]:
+    """Step 2 of resolver: exact canonical slug or matter-specific composite alias.
+
+    Scans `subject_name + context` (lowercased, hyphen-preserving boundary) for
+    occurrences of (a) any canonical slug, or (b) any composite (hyphenated)
+    alias. Single-token aliases are REJECTED — they collide across matters and
+    must never resolve authoritatively (Codex C2 regression).
+
+    Returns:
+        - The single canonical slug if exactly one matches.
+        - None if zero matches OR 2+ distinct canonical slugs match (ambiguous).
+    """
+    try:
+        from kbl import slug_registry
+    except ImportError:
+        return None
+
+    haystack_raw = " ".join(s for s in (subject_name, context) if s).lower()
+    if not haystack_raw.strip():
+        return None
+    # Normalise non-slug separators (spaces, punctuation) to a single space so
+    # hyphenated composites stay intact for word-boundary matching.
+    haystack = _TOKEN_BOUNDARY.sub(" ", haystack_raw)
+    tokens = set(haystack.split())
+    if not tokens:
+        return None
+
+    hits: set[str] = set()
+    for slug in slug_registry.canonical_slugs():
+        if slug in tokens:
+            hits.add(slug)
+            continue
+        try:
+            aliases = slug_registry.aliases_for(slug)
+        except KeyError:
+            aliases = []
+        for alias in aliases:
+            if not _alias_is_composite(alias):
+                continue
+            # Composite alias may itself contain hyphens; match as a whole token
+            if alias in tokens:
+                hits.add(slug)
+                break
+
+    if len(hits) == 1:
+        return next(iter(hits))
+    return None
+
+
+_FRONTMATTER_BLOCK_RE = re.compile(r"\A---\s*\n(.*?\n)---\s*\n", re.DOTALL)
+
+
+def _extract_frontmatter_text(body: str) -> str:
+    """Return raw frontmatter block (between leading ---/---) or "" if absent.
+
+    Body-cap: never scan more than _FRONTMATTER_SCAN_CAP chars. Defense against
+    a malformed file with no closing `---`.
+    """
+    if not body or not body.startswith("---"):
+        return ""
+    head = body[:_FRONTMATTER_SCAN_CAP]
+    m = _FRONTMATTER_BLOCK_RE.match(head)
+    return m.group(1) if m else ""
+
+
+def _metadata_lookup(subject_name: str, context: str) -> Optional[str]:
+    """Step 3 of resolver: ONE pass over wiki/matters/*/ — frontmatter + _people.md only.
+
+    NEVER reads room bodies (00_originals/, curated/, 03_source_summaries/).
+    Returns a single candidate canonical slug iff exactly one matter scores >0
+    AND no other matter ties. 0 or tie → None.
+
+    The result, if any, is NON-authoritative — the caller must use the WEAK
+    header on injection (D2 fail-closed: never label a metadata guess as
+    ground truth).
+    """
+    try:
+        from kbl import slug_registry
+    except ImportError:
+        return None
+
+    vault = os.environ.get("BAKER_VAULT_PATH")
+    if not vault:
+        return None
+    try:
+        matters_root = (Path(vault).expanduser() / "wiki" / "matters").resolve()
+    except OSError:
+        return None
+    if not matters_root.is_dir():
+        return None
+
+    haystack = " ".join(s for s in (subject_name, context) if s).lower()
+    if not haystack.strip():
+        return None
+    subject_lc = subject_name.lower().strip() if subject_name else ""
+
+    scores: dict[str, int] = {}
+
+    try:
+        entries = sorted(matters_root.iterdir())
+    except OSError:
+        return None
+
+    for slug_dir in entries:
+        try:
+            if not slug_dir.is_dir():
+                continue
+        except OSError:
+            continue
+        slug = slug_dir.name
+        # Containment + slug-registry gate: ignore stray dirs, alias dirs map to canonical.
+        try:
+            resolved = slug_dir.resolve()
+        except OSError:
+            continue
+        if not str(resolved).startswith(str(matters_root) + os.sep):
+            continue
+        canonical = slug_registry.normalize(slug)
+        if canonical is None:
+            continue
+
+        score = 0
+
+        # cortex-config.md frontmatter — read ONLY the frontmatter block.
+        cfg = slug_dir / "cortex-config.md"
+        try:
+            cfg_resolved = cfg.resolve()
+        except OSError:
+            cfg_resolved = None
+        if cfg_resolved and str(cfg_resolved).startswith(str(matters_root) + os.sep) and cfg_resolved.is_file():
+            try:
+                body = cfg_resolved.read_text(encoding="utf-8")[:_FRONTMATTER_SCAN_CAP]
+            except OSError:
+                body = ""
+            fm = _extract_frontmatter_text(body)
+            if fm:
+                fm_lc = fm.lower()
+                # Subject-name token match against frontmatter (entities + trigger_patterns).
+                if subject_lc and len(subject_lc) >= 4 and subject_lc in fm_lc:
+                    score += 1
+                # Entity slugs (e.g. `mohg-raphael-bick`) presence in haystack.
+                # Pull anything that looks like a slug from entities/adjacent lists.
+                for raw_slug in re.findall(r"[a-z][a-z0-9-]{3,}", fm_lc):
+                    if raw_slug in haystack and "-" in raw_slug:
+                        score += 1
+                        break  # one entity hit is enough per matter
+
+        # _people.md (table content) — substring match on subject_name.
+        ppl = slug_dir / "_people.md"
+        try:
+            ppl_resolved = ppl.resolve()
+        except OSError:
+            ppl_resolved = None
+        if ppl_resolved and str(ppl_resolved).startswith(str(matters_root) + os.sep) and ppl_resolved.is_file():
+            try:
+                ppl_body = ppl_resolved.read_text(encoding="utf-8")[:_PEOPLE_SCAN_CAP].lower()
+            except OSError:
+                ppl_body = ""
+            if subject_lc and len(subject_lc) >= 4 and subject_lc in ppl_body:
+                score += 1
+
+        if score > 0:
+            scores[canonical] = scores.get(canonical, 0) + score
+
+    if not scores:
+        return None
+    if len(scores) == 1:
+        return next(iter(scores))
+    max_score = max(scores.values())
+    top = [s for s, v in scores.items() if v == max_score]
+    if len(top) == 1:
+        return top[0]
+    return None  # tie → fail closed
+
+
+def _resolve_matter_slug(
+    proposal_matter_slug: Optional[str],
+    subject_name: str,
+    context: str,
+) -> tuple[Optional[str], str]:
+    """Strict-precedence resolver. Returns (canonical_slug, path).
+
+    path ∈ {'explicit', 'alias', 'grep', 'none'}.
+      - 'explicit' : proposal.matter_slug, normalised to canonical (steps 1 — authoritative).
+      - 'alias'    : exact canonical or composite-alias hit in subject+context (step 2 — authoritative).
+      - 'grep'     : metadata-only fallback (step 3 — WEAK / non-authoritative).
+      - 'none'     : unresolved (steps fail closed — no room injection).
+    """
+    try:
+        from kbl import slug_registry
+    except ImportError:
+        return None, "none"
+
+    # Step 1 — explicit column (authoritative). Brief: "Explicit DOMINATES — if
+    # present and canonical, stop here; never override with a context guess."
+    if proposal_matter_slug:
+        normed = slug_registry.normalize(proposal_matter_slug)
+        if normed and slug_registry.is_canonical(normed):
+            return normed, "explicit"
+
+    # Step 2 — exact canonical OR composite alias (authoritative).
+    auth = _authoritative_match(subject_name, context)
+    if auth:
+        return auth, "alias"
+
+    # Step 3 — metadata-only (non-authoritative).
+    meta = _metadata_lookup(subject_name, context)
+    if meta:
+        return meta, "grep"
+
+    return None, "none"
+
+
+def _read_curated_room_block(slug: str, authoritative: bool) -> str:
+    """Wrapper around kbl.curated_wiki_reader.read_room. Fault-tolerant."""
+    try:
+        from kbl.curated_wiki_reader import read_room
+    except ImportError as e:
+        logger.warning(f"read_room import failed: {e}")
+        return ""
+    try:
+        return read_room(slug, authoritative=authoritative)
+    except Exception as e:
+        logger.warning(f"read_room({slug!r}) failed: {e}")
+        return ""
+
+
+def _resolve_and_prepend_room(
+    proposal_matter_slug: Optional[str],
+    subject_name: str,
+    context: str,
+) -> str:
+    """Single call-site seam: resolve slug + read room + prepend to context.
+
+    Returns the (possibly empty) string to prepend. Honours runtime kill-flag.
+    All paths emit a structured log line (D3: observability) so a silent miss
+    is detectable post-hoc.
+    """
+    if not _room_read_enabled():
+        logger.info(
+            "dossier_room_read: kill-flag DISABLED path=killflag room_found=false "
+            "slug=- files=0 digest_chars=0"
+        )
+        return ""
+
+    slug, path = _resolve_matter_slug(proposal_matter_slug, subject_name, context)
+    if slug is None:
+        logger.info(
+            "dossier_room_read: unresolved path=%s room_found=false slug=- "
+            "files=0 digest_chars=0", path
+        )
+        return ""
+
+    authoritative = path in ("explicit", "alias")
+    block = _read_curated_room_block(slug, authoritative=authoritative)
+    if not block:
+        logger.info(
+            "dossier_room_read: empty room path=%s room_found=false slug=%s "
+            "files=0 digest_chars=0", path, slug
+        )
+        return ""
+
+    # D4: cost metering. ~4 chars/token estimate aligns with the digest cap.
+    digest_chars = len(block)
+    est_tokens = digest_chars // 4
+    logger.info(
+        "dossier_room_read: injected path=%s room_found=true slug=%s "
+        "authoritative=%s digest_chars=%d est_tokens=%d",
+        path, slug, authoritative, digest_chars, est_tokens
+    )
+    return block
 
 
 def _run_specialists(subject_name: str, subject_type: str, context: str,
@@ -363,6 +705,7 @@ def execute_research_dossier(proposal_id: int):
     context = proposal.get("context", "")
     specialists = proposal.get("specialists", ["research"])
     trigger_ref = proposal.get("trigger_ref", "")
+    proposal_matter_slug = proposal.get("matter_slug")
 
     # 2. Mark as running
     _update_proposal_status(proposal_id, "running")
@@ -370,6 +713,17 @@ def execute_research_dossier(proposal_id: int):
     try:
         # 3. Get source text
         source_text = _get_source_text(trigger_ref)
+
+        # 3a. BRIEF_DOSSIER_ROOM_READ_1: resolve matter slug → read curated room →
+        # prepend as ground truth so specialists do NOT re-derive filed facts.
+        # Single call-site seam (D1/D2): all resolution + caps + observability
+        # live in _resolve_and_prepend_room. Fail-closed on unresolved; weak
+        # header on metadata-only matches; runtime kill-flag honoured.
+        room_block = _resolve_and_prepend_room(
+            proposal_matter_slug, subject_name, context
+        )
+        if room_block:
+            context = room_block + "\n\n" + (context or "")
 
         # 4. Run specialists in parallel
         logger.info(f"Dispatching {len(specialists)} specialists for '{subject_name}'")

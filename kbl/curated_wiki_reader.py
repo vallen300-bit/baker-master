@@ -16,7 +16,10 @@ This module is read-only and stateless. Slug input is sanitized against:
      `<BAKER_VAULT_PATH>/wiki/matters/` (string-prefix on resolved paths;
      defends against symlink escape).
 
-Brief: BRIEF_AO_PM_READ_CURATED_WIKI_1 (2026-05-16, AH2).
+Briefs:
+  - BRIEF_AO_PM_READ_CURATED_WIKI_1 (2026-05-16, AH2) — `read_curated`.
+  - BRIEF_DOSSIER_ROOM_READ_1 (2026-05-30, cowork-ah1) — `read_room`: the
+    dossier-engine pre-read. Reuses containment + char-cap helpers.
 """
 from __future__ import annotations
 
@@ -39,7 +42,34 @@ DEFAULT_CHAR_CAP = 8000
 #   - 02_money.md (drawdown status / dated receipts)
 DEFAULT_FILES = ("00_overview.md", "02_money.md")
 
+# read_room caps. The total cap is the load-bearing budget — `context` is not
+# truncated downstream, so the dossier prompt swells with the digest * N
+# specialists. ROOM_TOTAL_CHAR_CAP keeps digest≤~8K tokens at 4 chars/token.
+ROOM_MAX_FILES = 8
+ROOM_TOTAL_CHAR_CAP = 32000  # ~8K tokens
+ROOM_PER_FILE_CAP = 8000
+
+# Resolution-path headers. Authoritative header is reserved for steps 1-2 of
+# the dossier-engine resolver (explicit matter_slug or exact/specific-composite
+# slug match). Step 3 (metadata-only lookup) uses the weak header. The dossier
+# resolver chooses which one to use; `read_room` honours that choice.
+ROOM_HEADER_AUTHORITATIVE = (
+    "=== CURATED PROJECT ROOM (authoritative — desk-maintained; "
+    "surface conflicts, do not average; do NOT report a listed document as missing) ==="
+)
+ROOM_HEADER_WEAK = "=== POSSIBLY-RELATED ROOM (unconfirmed — verify) ==="
+ROOM_INSTRUCTION = (
+    "The block below is desk-curated ground truth for the matter named in the "
+    "header. Treat as primary source: if a fact in this block contradicts your "
+    "memory or a web result, surface the conflict — do not average. If a "
+    "document is listed below, do NOT report it as missing."
+)
+
 _SLUG_PATTERN = re.compile(r"^[a-z0-9-]+$")
+_TOUCHES_SIBLINGS_RE = re.compile(
+    r"^\s*touches_siblings\s*:\s*\[?\s*([^\]\n]+?)\s*\]?\s*$",
+    re.MULTILINE,
+)
 
 
 class CuratedWikiError(ValueError):
@@ -106,6 +136,40 @@ def _parse_last_curated_at(body: str) -> Optional[str]:
             if key.strip() == "last_curated_at":
                 return value.strip().strip('"').strip("'") or None
     return None
+
+
+def _read_capped_text(
+    fpath: Path,
+    matters_root_resolved: Path,
+    char_cap: int,
+) -> Optional[tuple[str, bool]]:
+    """Resolve, containment-check, read, char-cap a single file under matters_root.
+
+    Returns `(body, truncated)` on success or None when the file does not exist,
+    escapes containment, or is unreadable. Defense-in-depth: matter_dir's
+    containment is enforced separately by the caller; this helper re-checks at
+    file level because is_file()/read_text() follow symlinks.
+    """
+    try:
+        resolved = fpath.resolve()
+    except OSError as e:
+        logger.warning("curated_wiki: resolve failed %s: %s", fpath, e)
+        return None
+    if not str(resolved).startswith(str(matters_root_resolved) + os.sep):
+        logger.warning("curated_wiki: file %s escapes vault, skipping", resolved)
+        return None
+    if not resolved.is_file():
+        return None
+    try:
+        body = resolved.read_text(encoding="utf-8")
+    except OSError as e:
+        logger.warning("curated_wiki: read failed %s: %s", resolved, e)
+        return None
+    truncated = False
+    if char_cap and len(body) > char_cap:
+        body = body[:char_cap] + "\n\n[...truncated; full file in vault...]"
+        truncated = True
+    return body, truncated
 
 
 def read_curated(
@@ -219,3 +283,271 @@ def format_for_prompt(
         header += "]"
         parts.append(f"{header}\n{f.body}")
     return "\n\n---\n\n".join(parts)
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# read_room — dossier-engine pre-read
+# ─────────────────────────────────────────────────────────────────────────────
+
+
+def _parse_touches_siblings(body: str) -> list[str]:
+    """Lift `touches_siblings: [a, b, c]` (inline list) from frontmatter or body.
+
+    Tolerates both the YAML frontmatter form and a bare line elsewhere in the
+    document. Returns a possibly-empty list of stripped slug strings.
+    """
+    if not body:
+        return []
+    m = _TOUCHES_SIBLINGS_RE.search(body)
+    if not m:
+        return []
+    raw = m.group(1)
+    parts = [p.strip().strip("'\"") for p in raw.split(",")]
+    return [p for p in parts if p and _SLUG_PATTERN.match(p)]
+
+
+def _family_root(slug: str) -> str:
+    """Family boundary = first hyphen-separated segment.
+
+    Examples: 'nvidia-mohg' -> 'nvidia', 'mo-vie-am' -> 'mo', 'hagenauer-rg7'
+    -> 'hagenauer'. Used to gate sibling reads so resolution + sibling-read
+    cannot cross matters (`nvidia-*` siblings stay inside the nvidia family).
+    """
+    return slug.split("-", 1)[0]
+
+
+def _in_family(primary: str, candidate: str) -> bool:
+    """True iff `candidate` belongs to the same slug family as `primary`."""
+    if not primary or not candidate:
+        return False
+    root = _family_root(primary)
+    # candidate must equal root or start with `root-`. Equal-root case covers
+    # parent slug (e.g. 'nvidia') when primary is 'nvidia-mohg'.
+    return candidate == root or candidate.startswith(root + "-")
+
+
+def read_room(
+    slug: str,
+    authoritative: bool = True,
+    file_cap: int = ROOM_MAX_FILES,
+    total_char_cap: int = ROOM_TOTAL_CHAR_CAP,
+    per_file_cap: int = ROOM_PER_FILE_CAP,
+) -> str:
+    """Return a formatted curated-room digest for `slug`, headered for ground-truth use.
+
+    Build order:
+      1. `02_inventory/*room-structure-overview.md` if present (preferred — desk-authored).
+      2. Else: `00_originals/` filenames listing + `03_source_summaries/*.md` bodies + `curated/*.md`.
+      3. Expand `touches_siblings:` frontmatter on read files → include those siblings'
+         `curated/*.md` + `03_source_summaries/*.md`, slug-family-gated.
+
+    Reuses containment + char-cap helpers (`_read_capped_text`, `_validate_slug`,
+    `read_curated`). No new vault-layout knowledge in callers.
+
+    Args:
+        slug: matter slug (must pass `_validate_slug`).
+        authoritative: True → prepend AUTHORITATIVE header (resolver steps 1-2).
+                       False → prepend WEAK header (resolver step 3 metadata-only).
+        file_cap: max files in digest (default 8).
+        total_char_cap: max raw chars across all files (default 32K ≈ 8K tokens).
+        per_file_cap: per-file char cap before the file body is truncated.
+
+    Returns:
+        Formatted string ready to prepend to the specialist prompt. Empty string
+        if nothing readable, slug invalid, or vault env unset (graceful no-op —
+        callers can `if block: context = block + context`).
+    """
+    try:
+        _validate_slug(slug)
+    except CuratedWikiError as e:
+        logger.warning("read_room: skip slug=%s reason=%s", slug, e)
+        return ""
+
+    try:
+        vault_root = _resolve_vault_root()
+    except CuratedWikiError as e:
+        logger.warning("read_room: vault unresolvable: %s", e)
+        return ""
+
+    matters_root = vault_root / "wiki" / "matters"
+    matters_root_resolved = matters_root.resolve()
+    if not matters_root_resolved.is_dir():
+        logger.info("read_room: matters root missing %s", matters_root_resolved)
+        return ""
+
+    # Slug-family gate up front: resolution chose `slug`; siblings allowed only
+    # within slug-family.
+    primary_dir = (matters_root / slug).resolve()
+    if not str(primary_dir).startswith(str(matters_root_resolved) + os.sep):
+        logger.warning("read_room: primary dir %s escapes vault", primary_dir)
+        return ""
+
+    digest: list[tuple[str, str]] = []  # (rel_path, body)
+    truncated_files = 0
+    total_chars = 0
+
+    def _add(rel: str, body: str) -> bool:
+        """Append (rel, body), respecting file_cap + total_char_cap. Returns True if added."""
+        nonlocal total_chars, truncated_files
+        if len(digest) >= file_cap:
+            truncated_files += 1
+            return False
+        # Per-room budget — trim individual body to remaining headroom rather than
+        # rejecting outright, so a single oversized file doesn't starve later ones
+        # AND cannot blow the total cap.
+        room_left = total_char_cap - total_chars
+        if room_left <= 0:
+            truncated_files += 1
+            return False
+        if len(body) > room_left:
+            body = body[:room_left] + "\n\n[...truncated; total-room cap hit...]"
+        digest.append((rel, body))
+        total_chars += len(body)
+        return True
+
+    # ── Primary room: prefer overview ──
+    overview_dir = primary_dir / "02_inventory"
+    overview_used = False
+    if overview_dir.is_dir():
+        try:
+            overview_candidates = sorted(
+                f for f in overview_dir.iterdir()
+                if f.is_file() and f.name.endswith("room-structure-overview.md")
+            )
+        except OSError:
+            overview_candidates = []
+        for f in overview_candidates:
+            res = _read_capped_text(f, matters_root_resolved, per_file_cap)
+            if res is None:
+                continue
+            body, was_trunc = res
+            rel = f"wiki/matters/{slug}/02_inventory/{f.name}"
+            if _add(rel, body):
+                overview_used = True
+                if was_trunc:
+                    truncated_files += 0  # body-internal truncation, not file-skip
+            break  # only first overview file
+
+    if not overview_used:
+        # Filename listing of 00_originals/ (names only — never bodies)
+        originals_dir = primary_dir / "00_originals"
+        if originals_dir.is_dir():
+            try:
+                originals_resolved = originals_dir.resolve()
+                if str(originals_resolved).startswith(str(matters_root_resolved) + os.sep):
+                    names = sorted(
+                        p.name for p in originals_dir.iterdir() if p.is_file()
+                    )
+                    if names:
+                        listing = "Filenames in 00_originals/ (names only — bodies live in vault):\n" + \
+                                  "\n".join(f"- {n}" for n in names)
+                        _add(f"wiki/matters/{slug}/00_originals/ (listing)", listing)
+            except OSError as e:
+                logger.warning("read_room: originals listing failed %s: %s", originals_dir, e)
+
+        # 03_source_summaries bodies
+        ss_dir = primary_dir / "03_source_summaries"
+        if ss_dir.is_dir():
+            try:
+                ss_files = sorted(
+                    f for f in ss_dir.iterdir() if f.is_file() and f.name.endswith(".md")
+                )
+            except OSError:
+                ss_files = []
+            for f in ss_files:
+                res = _read_capped_text(f, matters_root_resolved, per_file_cap)
+                if res is None:
+                    continue
+                body, _ = res
+                # _add bumps truncated_files when caps reject the add — do NOT
+                # short-circuit the loop here, or the truncation count is
+                # silently lost.
+                _add(f"wiki/matters/{slug}/03_source_summaries/{f.name}", body)
+
+        # curated/ via read_curated (full directory listing, not DEFAULT_FILES)
+        curated_dir = primary_dir / "curated"
+        if curated_dir.is_dir() and len(digest) < file_cap and total_chars < total_char_cap:
+            try:
+                curated_files = tuple(
+                    sorted(p.name for p in curated_dir.iterdir()
+                           if p.is_file() and p.name.endswith(".md"))
+                )
+            except OSError:
+                curated_files = ()
+            if curated_files:
+                try:
+                    files_data = read_curated(slug, files=curated_files, char_cap=per_file_cap)
+                except CuratedWikiError as e:
+                    logger.warning("read_room: read_curated failed slug=%s: %s", slug, e)
+                    files_data = []
+                for cf in files_data:
+                    _add(cf.path, cf.body)
+
+    # ── touches_siblings expansion (slug-family-gated) ──
+    sibling_slugs: set[str] = set()
+    for _path, body in list(digest):
+        for sib in _parse_touches_siblings(body):
+            if sib == slug:
+                continue
+            if not _in_family(slug, sib):
+                continue
+            try:
+                from kbl import slug_registry
+            except ImportError:
+                continue
+            if not slug_registry.is_canonical(sib):
+                continue
+            sibling_slugs.add(sib)
+
+    for sib in sorted(sibling_slugs):
+        sib_dir = (matters_root / sib).resolve()
+        if not str(sib_dir).startswith(str(matters_root_resolved) + os.sep):
+            continue
+        if not sib_dir.is_dir():
+            continue
+
+        # Sibling curated/
+        sib_curated = sib_dir / "curated"
+        if sib_curated.is_dir():
+            try:
+                sib_curated_files = tuple(
+                    sorted(p.name for p in sib_curated.iterdir()
+                           if p.is_file() and p.name.endswith(".md"))
+                )
+            except OSError:
+                sib_curated_files = ()
+            if sib_curated_files:
+                try:
+                    sib_files_data = read_curated(sib, files=sib_curated_files,
+                                                  char_cap=per_file_cap)
+                except CuratedWikiError:
+                    sib_files_data = []
+                for cf in sib_files_data:
+                    _add(cf.path, cf.body)
+
+        # Sibling 03_source_summaries
+        sib_ss = sib_dir / "03_source_summaries"
+        if sib_ss.is_dir():
+            try:
+                ss_files = sorted(
+                    f for f in sib_ss.iterdir() if f.is_file() and f.name.endswith(".md")
+                )
+            except OSError:
+                ss_files = []
+            for f in ss_files:
+                res = _read_capped_text(f, matters_root_resolved, per_file_cap)
+                if res is None:
+                    continue
+                body, _ = res
+                _add(f"wiki/matters/{sib}/03_source_summaries/{f.name}", body)
+
+    if not digest:
+        return ""
+
+    header = ROOM_HEADER_AUTHORITATIVE if authoritative else ROOM_HEADER_WEAK
+    parts = [f"{header}\nResolved slug: {slug}\n{ROOM_INSTRUCTION}"]
+    for rel, body in digest:
+        parts.append(f"[{rel}]\n{body}")
+    if truncated_files > 0:
+        parts.append(f"[room digest truncated: {truncated_files} files omitted]")
+    return "\n\n".join(parts)
