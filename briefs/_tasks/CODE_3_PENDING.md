@@ -3,7 +3,12 @@ dispatch: BRIEF_RESEARCHER_FANOUT_SKILL_1
 to: b3
 from: deputy
 dispatched_by: deputy
-status: PENDING
+status: COMPLETE
+completed_at: 2026-05-30T15:10:00Z
+ship_commit: 7efcded
+ship_branch: main
+claimed_at: 2026-05-30T14:55:00Z
+claimed_by: b3
 dispatched_at: 2026-05-30T12:15:00Z
 authored: 2026-05-30
 target_repo: baker-vault (markdown + skill spec, no DB, no migrations, no API)
