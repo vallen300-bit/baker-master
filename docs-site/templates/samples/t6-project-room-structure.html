@@ -1,0 +1,633 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>NVIDIA — Project Room Structure (2026-05-30)</title>
+<style>
+  :root {
+    --bg: #0a0a0a;
+    --panel: #141414;
+    --panel-2: #1c1c1c;
+    --border: #2a2a2a;
+    --text: #e8e8e8;
+    --text-dim: #8a8a8a;
+    --text-muted: #5a5a5a;
+    --accent: #c9a96e;        /* muted gold */
+    --accent-dim: #8a7449;
+    --teal: #4a8a8a;          /* muted teal */
+    --rust: #a55a4a;          /* muted rust — empty / blocked */
+    --green: #6a8a5a;         /* muted green — populated / load-bearing */
+    --line: #333;
+  }
+  * { box-sizing: border-box; }
+  html, body {
+    margin: 0; padding: 0;
+    background: var(--bg);
+    color: var(--text);
+    font-family: 'Helvetica Neue', Arial, sans-serif;
+    font-weight: 300;
+    line-height: 1.45;
+    -webkit-font-smoothing: antialiased;
+  }
+  .page {
+    max-width: 1280px;
+    margin: 0 auto;
+    padding: 56px 56px 80px;
+  }
+  .eyebrow {
+    font-size: 11px;
+    letter-spacing: 0.18em;
+    text-transform: uppercase;
+    color: var(--accent);
+    margin-bottom: 14px;
+  }
+  h1 {
+    font-size: 32px;
+    font-weight: 300;
+    letter-spacing: -0.01em;
+    margin: 0 0 8px;
+    color: var(--text);
+  }
+  .subtitle {
+    font-size: 14px;
+    color: var(--text-dim);
+    margin-bottom: 8px;
+  }
+  .meta-bar {
+    display: flex;
+    gap: 32px;
+    font-size: 12px;
+    color: var(--text-muted);
+    padding: 14px 0;
+    border-top: 1px solid var(--border);
+    border-bottom: 1px solid var(--border);
+    margin-bottom: 36px;
+  }
+  .meta-bar strong { color: var(--text-dim); font-weight: 400; }
+  .meta-bar .countdown { color: var(--accent); font-weight: 400; }
+
+  .bottom-line {
+    background: var(--panel);
+    border-left: 2px solid var(--accent);
+    padding: 18px 22px;
+    margin-bottom: 40px;
+    font-size: 14px;
+    color: var(--text);
+  }
+  .bottom-line .label {
+    font-size: 10px;
+    letter-spacing: 0.2em;
+    text-transform: uppercase;
+    color: var(--accent);
+    margin-bottom: 8px;
+  }
+
+  /* Parent room wide lane */
+  .parent-lane {
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-left: 2px solid var(--accent);
+    padding: 24px;
+    margin-bottom: 24px;
+  }
+  .parent-lane .lane-head {
+    font-size: 11px;
+    letter-spacing: 0.18em;
+    text-transform: uppercase;
+    color: var(--accent);
+    margin-bottom: 4px;
+  }
+  .parent-lane .lane-title {
+    font-size: 20px;
+    font-weight: 400;
+    color: var(--text);
+    margin-bottom: 4px;
+  }
+  .parent-lane .lane-sub {
+    font-size: 12px;
+    color: var(--text-muted);
+    margin-bottom: 22px;
+    padding-bottom: 14px;
+    border-bottom: 1px solid var(--border);
+  }
+  .parent-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 32px;
+  }
+
+  /* Three-column sibling lane layout */
+  .lanes {
+    display: grid;
+    grid-template-columns: 1fr 1fr 1fr;
+    gap: 24px;
+    margin-bottom: 48px;
+  }
+  .lane {
+    background: var(--panel);
+    border: 1px solid var(--border);
+    padding: 24px;
+  }
+  .lane-head {
+    font-size: 11px;
+    letter-spacing: 0.18em;
+    text-transform: uppercase;
+    color: var(--accent);
+    margin-bottom: 4px;
+  }
+  .lane-title {
+    font-size: 18px;
+    font-weight: 400;
+    color: var(--text);
+    margin-bottom: 4px;
+  }
+  .lane-sub {
+    font-size: 12px;
+    color: var(--text-muted);
+    margin-bottom: 22px;
+    padding-bottom: 14px;
+    border-bottom: 1px solid var(--border);
+  }
+
+  .tree {
+    font-family: 'SF Mono', 'Menlo', monospace;
+    font-size: 12px;
+    line-height: 1.7;
+    color: var(--text-dim);
+  }
+  .tree .root {
+    color: var(--text);
+    font-weight: 400;
+    margin-bottom: 6px;
+  }
+  .tree .branch { color: var(--text-muted); }
+  .tree .folder { color: var(--text-dim); }
+  .tree .file { color: var(--text-muted); }
+  .tree .external { color: var(--accent); }
+  .tree .live { color: var(--green); }
+  .tree .empty { color: var(--rust); }
+  .tree .note {
+    color: var(--text-muted);
+    font-style: italic;
+    font-size: 11px;
+  }
+
+  /* Output-type matrix */
+  h2 {
+    font-size: 18px;
+    font-weight: 400;
+    color: var(--text);
+    margin: 0 0 4px;
+    letter-spacing: -0.005em;
+  }
+  .h2-sub {
+    font-size: 12px;
+    color: var(--text-muted);
+    margin-bottom: 20px;
+  }
+  table.matrix {
+    width: 100%;
+    border-collapse: collapse;
+    background: var(--panel);
+    border: 1px solid var(--border);
+    font-size: 12px;
+    margin-bottom: 48px;
+  }
+  table.matrix th, table.matrix td {
+    padding: 12px 16px;
+    text-align: left;
+    border-bottom: 1px solid var(--border);
+    vertical-align: top;
+  }
+  table.matrix th {
+    background: var(--panel-2);
+    font-weight: 400;
+    font-size: 10px;
+    letter-spacing: 0.15em;
+    text-transform: uppercase;
+    color: var(--accent);
+  }
+  table.matrix td.row-label {
+    color: var(--text);
+    font-weight: 400;
+    width: 22%;
+  }
+  table.matrix td.row-label small {
+    display: block;
+    color: var(--text-muted);
+    font-weight: 300;
+    margin-top: 2px;
+    font-size: 11px;
+  }
+  table.matrix td.stage {
+    width: 14%;
+    color: var(--text-dim);
+  }
+  table.matrix td.audience {
+    color: var(--text-muted);
+    width: 14%;
+    font-size: 11px;
+    text-transform: uppercase;
+    letter-spacing: 0.1em;
+  }
+  .pill {
+    display: inline-block;
+    padding: 2px 8px;
+    border-radius: 2px;
+    font-size: 10px;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    font-weight: 400;
+  }
+  .pill.live { background: rgba(106, 138, 90, 0.15); color: var(--green); border: 1px solid var(--green); }
+  .pill.empty { background: rgba(165, 90, 74, 0.10); color: var(--rust); border: 1px solid var(--rust); }
+  .pill.ext { background: rgba(201, 169, 110, 0.10); color: var(--accent); border: 1px solid var(--accent-dim); }
+  .pill.int { background: transparent; color: var(--text-muted); border: 1px solid var(--border); }
+  .stage-count {
+    display: inline-block;
+    color: var(--text-muted);
+    font-size: 11px;
+    margin-left: 6px;
+  }
+
+  /* Gate flow */
+  .gate-flow {
+    background: var(--panel);
+    border: 1px solid var(--border);
+    padding: 28px;
+    margin-bottom: 48px;
+  }
+  .gate-steps {
+    display: grid;
+    grid-template-columns: repeat(5, 1fr);
+    gap: 0;
+    margin-top: 18px;
+  }
+  .gate-step {
+    background: var(--panel-2);
+    border: 1px solid var(--border);
+    padding: 14px 16px;
+    position: relative;
+  }
+  .gate-step + .gate-step { border-left: none; }
+  .gate-step .stage-num {
+    font-size: 10px;
+    letter-spacing: 0.18em;
+    color: var(--accent);
+    margin-bottom: 6px;
+  }
+  .gate-step .stage-name {
+    font-size: 13px;
+    color: var(--text);
+    margin-bottom: 6px;
+    font-weight: 400;
+  }
+  .gate-step .stage-gate {
+    font-size: 11px;
+    color: var(--text-muted);
+    line-height: 1.4;
+  }
+  .gate-step.blocked {
+    background: rgba(165, 90, 74, 0.06);
+    border-color: var(--rust);
+  }
+  .gate-step.blocked .stage-num { color: var(--rust); }
+
+  /* Notes */
+  .notes {
+    background: var(--panel);
+    border-left: 2px solid var(--teal);
+    padding: 18px 22px;
+    font-size: 13px;
+    color: var(--text-dim);
+  }
+  .notes .label {
+    font-size: 10px;
+    letter-spacing: 0.2em;
+    text-transform: uppercase;
+    color: var(--teal);
+    margin-bottom: 10px;
+  }
+  .notes ul { margin: 0; padding-left: 18px; }
+  .notes li { margin-bottom: 6px; }
+
+  .footer {
+    margin-top: 56px;
+    padding-top: 20px;
+    border-top: 1px solid var(--border);
+    font-size: 11px;
+    color: var(--text-muted);
+    display: flex;
+    justify-content: space-between;
+  }
+</style>
+</head>
+<body>
+<div class="page">
+
+  <div class="eyebrow">NVIDIA Partnership · Origination Desk · Snapshot</div>
+  <h1>Project Room Structure — NVIDIA Family</h1>
+  <div class="subtitle">Parent room + 3 siblings inside <span style="color: var(--text-dim);">~/baker-vault/wiki/matters/</span></div>
+
+  <div class="meta-bar">
+    <div><strong>As of:</strong> 2026-05-30 (post Codex audit)</div>
+    <div><strong>Sessions:</strong> 4 closed</div>
+    <div><strong>HITEC San Antonio:</strong> <span class="countdown">15–17 June 2026 · T-16</span></div>
+    <div><strong>Pattern:</strong> Parent-with-siblings (Director-ratified 2026-05-29)</div>
+  </div>
+
+  <div class="bottom-line">
+    <div class="label">Bottom line</div>
+    Four rooms inside the NVIDIA matter family. <strong>nvidia (parent)</strong> holds shared partnership thesis, NVIDIA-channel comms, Inception intel — the cross-sibling layer. <strong>nvidia-corinthia</strong>, <strong>nvidia-mohg</strong>, <strong>nvidia-ai-hotel</strong> hold deal-specific context per counterparty. New <strong>communications/</strong> folder at parent (ratified by lead bus #1339, 2026-05-29) is the canonical home for any email/WhatsApp/meeting that touches more than one sibling. Storer Partnership Brief v2 drafted; awaiting Director review before Mail.app press-send.
+  </div>
+
+  <!-- Parent room - wide -->
+  <div class="parent-lane">
+    <div class="lane-head">Parent · Cross-sibling layer</div>
+    <div class="lane-title">nvidia/</div>
+    <div class="lane-sub">37 files · 9 folders · Shared partnership thesis · Storer-channel communications · Jensen/Colette/Inception intel</div>
+    <div class="parent-grid">
+      <div class="tree">
+        <div class="root">nvidia/</div>
+        <div><span class="branch">├─</span> <span class="folder">00_originals/</span> <span class="live">8</span> <span class="note">pitch decks, plans, concepts</span></div>
+        <div><span class="branch">├─</span> <span class="folder">01_inbox/</span> <span class="empty">empty</span></div>
+        <div><span class="branch">├─</span> <span class="folder">02_inventory/</span> <span class="live">2</span></div>
+        <div><span class="branch">│&nbsp;&nbsp;</span> <span class="branch">├─</span> source_inventory.md</div>
+        <div><span class="branch">│&nbsp;&nbsp;</span> <span class="branch">└─</span> 2026-05-30-nvidia-room-structure-overview.html <span class="live">this file</span></div>
+        <div><span class="branch">├─</span> <span class="folder">03_source_summaries/</span> <span class="live">8</span></div>
+        <div><span class="branch">├─</span> <span class="folder">04_working_brief/</span> <span class="live">1</span></div>
+        <div><span class="branch">├─</span> <span class="folder">05_outputs/</span> <span class="empty">empty</span></div>
+        <div><span class="branch">├─</span> <span class="folder">99_review/</span> <span class="live">4</span></div>
+        <div><span class="branch">├─</span> <span class="folder">_unsorted/</span> <span class="note">14-day residence rule</span></div>
+      </div>
+      <div class="tree">
+        <div><span class="branch">├─</span> <span class="folder">communications/</span> <span class="live">7</span> <span class="external">NEW · canonical</span></div>
+        <div><span class="branch">│&nbsp;&nbsp;</span> <span class="branch">├─</span> README.md <span class="note">register</span></div>
+        <div><span class="branch">│&nbsp;&nbsp;</span> <span class="branch">├─</span> 2026-03-14 Hefftz Bellboy intro</div>
+        <div><span class="branch">│&nbsp;&nbsp;</span> <span class="branch">├─</span> 2026-03-17 Hefftz GTC scheduling</div>
+        <div><span class="branch">│&nbsp;&nbsp;</span> <span class="branch">├─</span> 2026-03-23 Jarnigan thank-you</div>
+        <div><span class="branch">│&nbsp;&nbsp;</span> <span class="branch">├─</span> 2026-05-13 Storer WA <span class="note">inbound</span></div>
+        <div><span class="branch">│&nbsp;&nbsp;</span> <span class="branch">├─</span> 2026-05-13 Vallen fwd-Storer HITEC <span class="live">load-bearing</span></div>
+        <div><span class="branch">│&nbsp;&nbsp;</span> <span class="branch">└─</span> 2026-05-12→22 Bick WA thread <span class="live">load-bearing</span></div>
+        <div>&nbsp;</div>
+        <div><span class="branch">├─</span> <span class="folder">curated/</span> <span class="live">2</span></div>
+        <div><span class="branch">│&nbsp;&nbsp;</span> <span class="branch">├─</span> 2026-05-29 Storer Partnership Brief .md <span class="external">v2 draft</span></div>
+        <div><span class="branch">│&nbsp;&nbsp;</span> <span class="branch">└─</span> 2026-05-29 Storer Partnership Brief .html <span class="external">v2 draft</span></div>
+        <div>&nbsp;</div>
+        <div><span class="branch">├─</span> <span class="folder">research/</span> <span class="live">6</span> <span class="external">+2 dossiers · Director 2026-05-30</span></div>
+        <div><span class="branch">│&nbsp;&nbsp;</span> <span class="branch">├─</span> README.md <span class="note">register · research memos + dossiers + comparables + intel briefs</span></div>
+        <div><span class="branch">│&nbsp;&nbsp;</span> <span class="branch">├─</span> 2026-05-14 Bucket 1 findings .html <span class="live">moved from corinthia/curated/</span></div>
+        <div><span class="branch">│&nbsp;&nbsp;</span> <span class="branch">├─</span> 2026-05-14 Bucket 1 findings .pdf <span class="live">moved from corinthia/curated/</span></div>
+        <div><span class="branch">│&nbsp;&nbsp;</span> <span class="branch">├─</span> 2026-03-17 Storer Baker dossier .md <span class="external">NEW · imported from cowork_5628d2e2a125</span></div>
+        <div><span class="branch">│&nbsp;&nbsp;</span> <span class="branch">├─</span> 2026-05-30 Bick Baker dossier .md <span class="external">NEW · MOHG CIO profile</span></div>
+        <div><span class="branch">│&nbsp;&nbsp;</span> <span class="branch">└─</span> 2026-05-30 Bick Baker dossier .docx <span class="note">source binary</span></div>
+        <div>&nbsp;</div>
+        <div><span class="branch">└─</span> <span class="folder">[ room root ]</span></div>
+        <div>&nbsp;&nbsp;&nbsp;&nbsp; <span class="branch">├─</span> cortex-config.md</div>
+        <div>&nbsp;&nbsp;&nbsp;&nbsp; <span class="branch">├─</span> gold.md <span class="note">Tier C</span></div>
+        <div>&nbsp;&nbsp;&nbsp;&nbsp; <span class="branch">├─</span> proposed-gold.md</div>
+        <div>&nbsp;&nbsp;&nbsp;&nbsp; <span class="branch">├─</span> state.md</div>
+        <div>&nbsp;&nbsp;&nbsp;&nbsp; <span class="branch">└─</span> _people.md <span class="external">NEW · Codex fix</span></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Three sibling lanes -->
+  <div class="lanes">
+
+    <!-- Sibling 1: corinthia -->
+    <div class="lane">
+      <div class="lane-head">Sibling 1 · Pitch in flight</div>
+      <div class="lane-title">nvidia-corinthia/</div>
+      <div class="lane-sub">25 files · Pitch v2 to Marcus Pisani in AH1 review · D-001..D-008 ratifications</div>
+      <div class="tree">
+        <div class="root">nvidia-corinthia/</div>
+        <div><span class="branch">├─</span> <span class="folder">00_originals/</span> <span class="live">7</span></div>
+        <div><span class="branch">│&nbsp;&nbsp;</span> <span class="branch">├─</span> 7 Apr partnership strategy .html/.pdf</div>
+        <div><span class="branch">│&nbsp;&nbsp;</span> <span class="branch">├─</span> 8 Apr full presentation .html</div>
+        <div><span class="branch">│&nbsp;&nbsp;</span> <span class="branch">└─</span> 8 Apr two-pager .html/.pdf</div>
+        <div>&nbsp;</div>
+        <div><span class="branch">├─</span> <span class="folder">01_inbox/</span> <span class="empty">empty</span></div>
+        <div><span class="branch">├─</span> <span class="folder">02_inventory/</span> <span class="live">2</span></div>
+        <div><span class="branch">├─</span> <span class="folder">03_source_summaries/</span> <span class="live">8</span></div>
+        <div><span class="branch">│&nbsp;&nbsp;</span> <span class="branch">├─</span> bucket1-findings-memo.md</div>
+        <div><span class="branch">│&nbsp;&nbsp;</span> <span class="branch">├─</span> ellie-memo-vs-deck-twopager.md</div>
+        <div><span class="branch">│&nbsp;&nbsp;</span> <span class="branch">└─</span> pitch-v2-draft.md</div>
+        <div><span class="branch">├─</span> <span class="folder">04_working_brief/</span> <span class="live">1</span></div>
+        <div><span class="branch">├─</span> <span class="folder">05_outputs/</span> <span class="empty">empty</span></div>
+        <div><span class="branch">├─</span> <span class="folder">99_review/</span> <span class="live">4</span></div>
+        <div>&nbsp;</div>
+        <div><span class="branch">└─</span> <span class="folder">curated/</span> <span class="live">4</span> <span class="note">Bucket1 .html/.pdf moved out 2026-05-30</span></div>
+        <div>&nbsp;&nbsp;&nbsp;&nbsp; <span class="branch">├─</span> 00_overview.md</div>
+        <div>&nbsp;&nbsp;&nbsp;&nbsp; <span class="branch">├─</span> 06_decisions_log.md <span class="live">D-001..D-008</span></div>
+        <div>&nbsp;&nbsp;&nbsp;&nbsp; <span class="branch">├─</span> 13 May Ellie memo vs deck</div>
+        <div>&nbsp;&nbsp;&nbsp;&nbsp; <span class="branch">└─</span> 14 May pitch v2 draft <span class="external">AH1 review</span></div>
+        <div>&nbsp;</div>
+        <div class="note">root: _overview.md · cortex-config.md · proposed-gold.md · _people.md <span class="external">NEW · Codex fix</span></div>
+      </div>
+    </div>
+
+    <!-- Sibling 2: mohg -->
+    <div class="lane">
+      <div class="lane-head">Sibling 2 · MOHG engaged</div>
+      <div class="lane-title">nvidia-mohg/</div>
+      <div class="lane-sub">15 files · Bick 22-May concept paper proposes HITEC three-way · HITEC go/no-go in T-16</div>
+      <div class="tree">
+        <div class="root">nvidia-mohg/</div>
+        <div><span class="branch">├─</span> <span class="folder">00_originals/</span> <span class="live">5</span></div>
+        <div><span class="branch">│&nbsp;&nbsp;</span> <span class="branch">├─</span> 14 May AI Hotel Step Plan</div>
+        <div><span class="branch">│&nbsp;&nbsp;</span> <span class="branch">├─</span> 14 May AI Hotel Triaga v2</div>
+        <div><span class="branch">│&nbsp;&nbsp;</span> <span class="branch">├─</span> 14 May Storer 30min request</div>
+        <div><span class="branch">│&nbsp;&nbsp;</span> <span class="branch">├─</span> 14 May Bucket1 findings memo</div>
+        <div><span class="branch">│&nbsp;&nbsp;</span> <span class="branch">└─</span> 22 May Bick concept .pdf <span class="live">load-bearing</span></div>
+        <div>&nbsp;</div>
+        <div><span class="branch">├─</span> <span class="folder">01_inbox/</span> <span class="empty">empty</span></div>
+        <div><span class="branch">├─</span> <span class="folder">02_inventory/</span> <span class="live">2</span></div>
+        <div><span class="branch">├─</span> <span class="folder">03_source_summaries/</span> <span class="live">6</span></div>
+        <div><span class="branch">├─</span> <span class="folder">04_working_brief/</span> <span class="empty">empty</span></div>
+        <div><span class="branch">├─</span> <span class="folder">05_outputs/</span> <span class="empty">empty</span></div>
+        <div><span class="branch">├─</span> <span class="folder">99_review/</span> <span class="live">2</span></div>
+        <div>&nbsp;</div>
+        <div><span class="branch">└─</span> <span class="folder">curated/</span> <span class="live">1</span></div>
+        <div>&nbsp;&nbsp;&nbsp;&nbsp; <span class="branch">└─</span> 06_decisions_log.md <span class="live">D-001+002 Bick</span></div>
+        <div>&nbsp;</div>
+        <div class="note">root: _communications.md · _people.md · cortex-config.md · gold.md · proposed-gold.md · state.md</div>
+      </div>
+    </div>
+
+    <!-- Sibling 3: ai-hotel -->
+    <div class="lane">
+      <div class="lane-head">Sibling 3 · Vision artefacts</div>
+      <div class="lane-title">nvidia-ai-hotel/</div>
+      <div class="lane-sub">13 files · JCB mood board + Vertex deck · Singapore-vs-Vienna site attribution open</div>
+      <div class="tree">
+        <div class="root">nvidia-ai-hotel/</div>
+        <div><span class="branch">├─</span> <span class="folder">00_originals/</span> <span class="live">6</span></div>
+        <div><span class="branch">│&nbsp;&nbsp;</span> <span class="branch">├─</span> 28 Mar JCB MA Hotel concept .pdf</div>
+        <div><span class="branch">│&nbsp;&nbsp;</span> <span class="branch">├─</span> 28 Mar JCB mood board .pdf</div>
+        <div><span class="branch">│&nbsp;&nbsp;</span> <span class="branch">├─</span> 7 Apr AI Hotel Vision journey</div>
+        <div><span class="branch">│&nbsp;&nbsp;</span> <span class="branch">└─</span> 7 Apr Vertex × Corinthia deck</div>
+        <div>&nbsp;</div>
+        <div><span class="branch">├─</span> <span class="folder">01_inbox/</span> <span class="empty">empty</span></div>
+        <div><span class="branch">├─</span> <span class="folder">02_inventory/</span> <span class="live">2</span></div>
+        <div><span class="branch">├─</span> <span class="folder">03_source_summaries/</span> <span class="live">7</span></div>
+        <div><span class="branch">├─</span> <span class="folder">04_working_brief/</span> <span class="live">1</span></div>
+        <div><span class="branch">├─</span> <span class="folder">05_outputs/</span> <span class="empty">empty</span></div>
+        <div><span class="branch">├─</span> <span class="folder">99_review/</span> <span class="live">4</span></div>
+        <div><span class="branch">└─</span> <span class="folder">curated/</span> <span class="empty">empty</span></div>
+        <div>&nbsp;</div>
+        <div class="note">root: cortex-config.md · gold.md · proposed-gold.md · state.md · _people.md <span class="external">NEW · Codex fix</span></div>
+      </div>
+    </div>
+
+  </div>
+
+  <!-- File-distribution matrix -->
+  <h2>File-distribution matrix — Where things live</h2>
+  <div class="h2-sub">Per-folder file counts across parent + 3 siblings. Empty cells indicate the folder exists but holds no files yet.</div>
+
+  <table class="matrix">
+    <thead>
+      <tr>
+        <th>Folder</th>
+        <th>nvidia (parent)</th>
+        <th>nvidia-corinthia</th>
+        <th>nvidia-mohg</th>
+        <th>nvidia-ai-hotel</th>
+        <th>Audience</th>
+      </tr>
+    </thead>
+    <tbody>
+      <tr>
+        <td class="row-label">00_originals/ <small>verbatim source artefacts</small></td>
+        <td class="stage"><span class="pill live">live</span><span class="stage-count">8</span></td>
+        <td class="stage"><span class="pill live">live</span><span class="stage-count">7</span></td>
+        <td class="stage"><span class="pill live">live</span><span class="stage-count">5</span></td>
+        <td class="stage"><span class="pill live">live</span><span class="stage-count">6</span></td>
+        <td class="audience"><span class="pill int">internal</span></td>
+      </tr>
+      <tr>
+        <td class="row-label">03_source_summaries/ <small>distilled markdown cards</small></td>
+        <td class="stage"><span class="pill live">live</span><span class="stage-count">8</span></td>
+        <td class="stage"><span class="pill live">live</span><span class="stage-count">8</span></td>
+        <td class="stage"><span class="pill live">live</span><span class="stage-count">6</span></td>
+        <td class="stage"><span class="pill live">live</span><span class="stage-count">7</span></td>
+        <td class="audience"><span class="pill int">internal</span></td>
+      </tr>
+      <tr>
+        <td class="row-label">communications/ <small>cross-sibling email + WA</small></td>
+        <td class="stage"><span class="pill live">live</span><span class="stage-count">7</span></td>
+        <td class="stage"><span class="pill empty">empty</span></td>
+        <td class="stage"><span class="pill empty">empty</span></td>
+        <td class="stage"><span class="pill empty">empty</span></td>
+        <td class="audience"><span class="pill int">internal</span></td>
+      </tr>
+      <tr>
+        <td class="row-label">curated/ <small>Director-facing outputs · sendability is PER FILE not folder</small></td>
+        <td class="stage"><span class="pill live">live</span><span class="stage-count">2</span></td>
+        <td class="stage"><span class="pill live">live</span><span class="stage-count">4</span></td>
+        <td class="stage"><span class="pill live">live</span><span class="stage-count">1</span></td>
+        <td class="stage"><span class="pill empty">empty</span></td>
+        <td class="audience"><span class="pill int">Director-facing</span></td>
+      </tr>
+      <tr>
+        <td class="row-label">_people.md <small>people roster per SOP §7.5</small></td>
+        <td class="stage"><span class="pill live">live</span><span class="stage-count">NEW</span></td>
+        <td class="stage"><span class="pill live">live</span><span class="stage-count">NEW</span></td>
+        <td class="stage"><span class="pill live">live</span><span class="stage-count">existing</span></td>
+        <td class="stage"><span class="pill live">live</span><span class="stage-count">NEW</span></td>
+        <td class="audience"><span class="pill int">internal</span></td>
+      </tr>
+      <tr>
+        <td class="row-label">research/ <small>matter-anchored research memos + non-people dossiers</small></td>
+        <td class="stage"><span class="pill live">live</span><span class="stage-count">6 · README + Bucket1 + Storer .md + Bick .md/.docx</span></td>
+        <td class="stage"><span class="pill empty">empty</span></td>
+        <td class="stage"><span class="pill empty">empty</span></td>
+        <td class="stage"><span class="pill empty">empty</span></td>
+        <td class="audience"><span class="pill int">internal</span></td>
+      </tr>
+      <tr>
+        <td class="row-label">04_working_brief/ <small>live synthesis</small></td>
+        <td class="stage"><span class="pill live">live</span><span class="stage-count">1</span></td>
+        <td class="stage"><span class="pill live">live</span><span class="stage-count">1</span></td>
+        <td class="stage"><span class="pill empty">empty</span></td>
+        <td class="stage"><span class="pill live">live</span><span class="stage-count">1</span></td>
+        <td class="audience"><span class="pill int">internal</span></td>
+      </tr>
+      <tr>
+        <td class="row-label">99_review/ <small>quality gates</small></td>
+        <td class="stage"><span class="pill live">live</span><span class="stage-count">4</span></td>
+        <td class="stage"><span class="pill live">live</span><span class="stage-count">4</span></td>
+        <td class="stage"><span class="pill live">live</span><span class="stage-count">2</span></td>
+        <td class="stage"><span class="pill live">live</span><span class="stage-count">4</span></td>
+        <td class="audience"><span class="pill int">internal</span></td>
+      </tr>
+      <tr>
+        <td class="row-label">01_inbox/ · 05_outputs/ <small>flow points</small></td>
+        <td class="stage"><span class="pill empty">empty</span></td>
+        <td class="stage"><span class="pill empty">empty</span></td>
+        <td class="stage"><span class="pill empty">empty</span></td>
+        <td class="stage"><span class="pill empty">empty</span></td>
+        <td class="audience"><span class="pill int">internal</span></td>
+      </tr>
+    </tbody>
+  </table>
+
+  <!-- Gate flow -->
+  <div class="gate-flow">
+    <h2>Storer outbound gate flow</h2>
+    <div class="h2-sub">Sequencing Brisen proposes in the Storer email v2 + Partnership Brief v2 (both pending Director review).</div>
+    <div class="gate-steps">
+      <div class="gate-step">
+        <div class="stage-num">Stage 1</div>
+        <div class="stage-name">30-min call</div>
+        <div class="stage-gate">This week — propose 3 slots in cover note</div>
+      </div>
+      <div class="gate-step blocked">
+        <div class="stage-num">Stage 2</div>
+        <div class="stage-name">HITEC SA</div>
+        <div class="stage-gate">15–17 June — Director carries Storer-aligned framing; NVIDIA delegate optional (Jacob Hobson?)</div>
+      </div>
+      <div class="gate-step blocked">
+        <div class="stage-num">Stage 3</div>
+        <div class="stage-name">19 June in-person</div>
+        <div class="stage-gate">Storer post-move — formal three-way moment in San Antonio</div>
+      </div>
+      <div class="gate-step blocked">
+        <div class="stage-num">Stage 4</div>
+        <div class="stage-name">Pilot scope drafted</div>
+        <div class="stage-gate">Late June → mid-July — venue + scope locked</div>
+      </div>
+      <div class="gate-step">
+        <div class="stage-num">Anchor</div>
+        <div class="stage-name" style="color: var(--accent);">HITEC SA T-16</div>
+        <div class="stage-gate">Decision window 15–17 June 2026 · 16 calendar days</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Notes -->
+  <div class="notes">
+    <div class="label">Notes on the parent-with-siblings architecture</div>
+    <ul>
+      <li><strong>Parent (nvidia)</strong> is the cross-sibling layer — anything that touches MORE than one of {corinthia, mohg, ai-hotel} lives here. Storer-channel comms file at parent because Storer's threads touch all three siblings.</li>
+      <li><strong>Communications folder</strong> at parent is the new canonical pattern (lead bus #1339 GREEN-LIGHT, 2026-05-29). Single flat folder, one file per counterparty message, frontmatter <code>touches_siblings: []</code> drives cross-sibling lookup via grep. To be codified into project-room-build SOP §Communications folder pattern.</li>
+      <li><strong>Load-bearing artefacts</strong> are pinned with the green pill: 2026-05-13 Vallen→Edita fwd of Storer's HITEC decline (NVIDIA channel state), 2026-05-12→22 Bick WA thread (MOHG-side intent), 2026-05-22 Bick concept paper PDF (the three-way trigger), 2026-05-14 pitch v2 draft (AH1 in review).</li>
+      <li><strong>WhatsApp Director-outbound gap</strong> surfaced in this work: 18 of 29 May days blacked out for Director-outbound capture (inbound captured fine). Currently in 8-day blackout. Lead-owned remediation via 2 b-code briefs today (WA harden + M365 Graph integration); NO Origination Desk action required.</li>
+      <li><strong>Empty 01_inbox/ + 05_outputs/</strong> across all four rooms is correct — these are flow points (triage / final-ship), not storage layers.</li>
+      <li><strong>Codex room-structure audit 2026-05-30 — fixes landed in this revision:</strong> (1) parent <code>working_brief.md</code> F-1 refreshed from "Total active source files: 2" to current 8+8+7+2+1 = 26 active artefacts; (2) <code>nvidia-mohg/99_review/sop-execution-status.md</code> marked SUPERSEDED — sibling no longer in zero-source state after 22 May Bick concept arrival; (3) <code>nvidia-mohg/cortex-config.md</code> DOCUMENT HIERARCHY block refreshed; (4) <code>_people.md</code> added to parent + corinthia + ai-hotel (only nvidia-mohg had one before); (5) curated/ audience label changed from "EXT-ready" (folder-level) to "Director-facing" (per-file sendability is honest gate, not folder-level).</li>
+      <li><strong>Template promotion 2026-05-30 (Director directive):</strong> this overview HTML is now the canonical Project Room Structure template for all desks (AO, MOVIE, Hagenauer, Baden-Baden, Brisen, etc.). Saved at <code>_ops/processes/project-room-overview-template.html</code>. Other desks copy + adapt. SOP codification (<code>_ops/processes/project-room-build-sop.md</code>) is AH1-owned follow-on.</li>
+      <li><strong>New folder <code>research/</code> at parent (Director directive 2026-05-30):</strong> single flat folder for matter-anchored research memos + non-people dossiers + comparable benchmarks + intel briefs. Lookup via grep on frontmatter <code>touches_siblings</code>/<code>kind</code>. People dossiers stay at global <code>wiki/people/</code>.</li>
+      <li><strong>Bucket 1 findings memo MOVED 2026-05-30:</strong> <code>2026-05-14-research-bucket1-findings-memo.html/.pdf</code> moved (git mv, history preserved) from <code>nvidia-corinthia/curated/</code> to <code>nvidia/research/</code>. Reason: cross-sibling research belongs at parent. Source summary at <code>nvidia-corinthia/03_source_summaries/bucket1-findings-memo.md</code> updated to point to new location. Corinthia <code>curated/</code> count 5 → 4; parent <code>research/</code> count 1 → 3.</li>
+      <li><strong>Baker-dashboard dossiers extracted to research/ 2026-05-30 (Director directive):</strong> Two Baker research dossiers now sit in <code>nvidia/research/</code> as searchable markdown: (a) Peter Storer (<code>2026-03-17-dossier-peter-storer-nvidia.md</code>) — verbatim Baker dossier <code>cowork_5628d2e2a125</code>, parallel filing to the canonical people dossier <code>wiki/people/nvidia-peter-storer.md</code> already enriched with this content (commit <code>99e8a18</code>); (b) Raphael Bick MOHG CIO (<code>2026-05-30-dossier-raphael-bick-mohg.md</code> + source <code>.docx</code>) — extracted via python-docx; headline biographicals (CIO since Aug 2025, ex-McKinsey Partner, INSEAD, HK-based, Executive Committee, reports to CEO Kleitman) treated as load-bearing pending Director sign-off before LONGTERM promotion. Parent <code>research/</code> count 3 → 6.</li>
+    </ul>
+  </div>
+
+  <div class="footer">
+    <div>~/baker-vault/wiki/matters/nvidia*/ · snapshot 2026-05-30</div>
+    <div>Origination Desk · session 4 close state · 98 files / 4 rooms (post Codex audit + research/ folder + Storer + Bick dossiers extracted)</div>
+  </div>
+
+</div>
+</body>
+</html>
