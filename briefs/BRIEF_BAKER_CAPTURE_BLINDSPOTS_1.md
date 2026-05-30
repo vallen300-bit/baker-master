@@ -1,6 +1,8 @@
 # BRIEF: BAKER_CAPTURE_BLINDSPOTS_1 — close Director outbound capture gaps on email + WhatsApp
 
-> **REV 3 (2026-05-30):** Watermark semantics in `poll_exchange_sent()` corrected — codex bus #1344 caught that v2's `metadata["uid"]` + `str(latest_uid)` would KeyError or persist wrong type (real `TriggerState.set_watermark()` takes datetime; real metadata uses `received_date`, not `uid`). Step 1.2 skeleton now mirrors `poll_exchange()` lines 98-194 byte-for-byte except folder name + watermark key. Anchor patch commit: TBD; predecessor commits `a77ea78` (v1) + `ac3e5fd` (v2).
+> **REV 4 (2026-05-30):** Codex bus #1346 PASS-WITH-NOTE on v3. Non-blocking annotation: scheduler call site is `triggers/email_trigger.py:634-640`, not `scheduler.py` / `embedded_scheduler.py` (codex verified the import + processing block in that file). Step 1.4 + Files Modified updated to point at the exact line range. No code logic change — wiring-target clarification only. Anchor patch commit: TBD; predecessor commits `a77ea78` (v1) + `ac3e5fd` (v2) + `493d682` (v3). **PASS — ready for b1.**
+>
+> **REV 3 (2026-05-30):** Watermark semantics in `poll_exchange_sent()` corrected — codex bus #1344 caught that v2's `metadata["uid"]` + `str(latest_uid)` would KeyError or persist wrong type (real `TriggerState.set_watermark()` takes datetime; real metadata uses `received_date`, not `uid`). Step 1.2 skeleton now mirrors `poll_exchange()` lines 98-194 byte-for-byte except folder name + watermark key.
 >
 > **REV 2 (2026-05-30):** Patched after codex review bus #1342 (FAIL-LIGHT, 4 findings). Phase 1 + Phase 2 storage paths rewritten against ACTUAL schemas (`email_messages` + `whatsapp_messages` per `memory/store_back.py:1665-1706`). Direction tagging via existing fields, not new columns. No migrations required. Helper calls go through `_get_store()` → `SentinelStoreBack` methods.
 
@@ -187,7 +189,7 @@ def poll_exchange_sent() -> list:
 
 **Step 1.3 — Dedup is automatic.** `SentinelStoreBack.store_email_message()` at `memory/store_back.py:1665-1678` has `ON CONFLICT (message_id) DO UPDATE`. If a Sent-folder Message-ID already exists in `email_messages` (rare — only on self-CC or reply-quoting-original-id), the upsert is a no-op-equivalent. **Remove the brief v1 `_msgid_already_stored()` helper entirely.** No `emails` table exists; the brief v1 dedup helper queried a non-existent table.
 
-**Step 1.4 — Wire into scheduler.** Find where `poll_exchange()` is called from (likely `triggers/scheduler.py` or `triggers/embedded_scheduler.py` — verify with grep before editing). Add `poll_exchange_sent()` call IMMEDIATELY AFTER the existing `poll_exchange()` call, inside its OWN try/except (lesson #45 — sequential pollers must be independent).
+**Step 1.4 — Wire into scheduler.** Call site is `triggers/email_trigger.py:634-640` (codex bus #1346 verified — that file imports `poll_exchange` and processes results in this range). Add `poll_exchange_sent()` call IMMEDIATELY AFTER the existing `poll_exchange()` call, inside its OWN try/except (lesson #45 — sequential pollers must be independent).
 
 ```python
 try:
@@ -451,7 +453,7 @@ WHERE id LIKE 'iphone:%'
 ## Files Modified
 
 - `triggers/exchange_poller.py` — add `_detect_sent_folder()`, `poll_exchange_sent()`, related constants.
-- `triggers/scheduler.py` (or `embedded_scheduler.py` — verify which calls `poll_exchange()`) — add sibling call to `poll_exchange_sent()` in its own try/except.
+- `triggers/email_trigger.py` lines 634-640 — actual call site of `poll_exchange()` (codex bus #1346 verified anchor; the file imports `poll_exchange` and processes its results here). Add sibling call to `poll_exchange_sent()` immediately after, in its OWN try/except per lesson #45.
 - `outputs/dashboard.py` — add `/api/whatsapp/import_iphone_export` endpoint + `parse_iphone_export()` + `_iphone_export_id()` + `_ingest_iphone_messages()` helpers.
 - `tests/test_exchange_sent_poller.py` — new.
 - `tests/test_iphone_export_parser.py` — new.
