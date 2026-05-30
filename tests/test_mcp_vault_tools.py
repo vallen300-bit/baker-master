@@ -44,6 +44,9 @@ AO_CORTEX_CONFIG_FIXTURE = (
 )
 AO_GOLD_FIXTURE = "# AO — gold\n\nDirector-curated knowledge.\n"
 WIKI_PRIORITIES_FIXTURE = "priorities:\n  - tier_1\n  - tier_2\n"
+# Room-overview .html companion — read as text/source, never rendered
+# (CODEX_HTML_VAULT_READ_1, Director-ratified 2026-05-30).
+HTML_FIXTURE = "<!doctype html><html><body><h1>Room overview</h1></body></html>\n"
 
 
 @pytest.fixture
@@ -89,6 +92,8 @@ def vault_mirror_repo(tmp_path, monkeypatch):
         AO_CORTEX_CONFIG_FIXTURE
     )
     (work / "wiki" / "matters" / "oskolkov" / "gold.md").write_text(AO_GOLD_FIXTURE)
+    # An .html room-overview companion — allowlisted, read as text/source.
+    (work / "wiki" / "matters" / "oskolkov" / "overview.html").write_text(HTML_FIXTURE)
     # A binary inside wiki/ to prove the extension allowlist still applies.
     (work / "wiki" / "matters" / "oskolkov" / "image.png").write_bytes(BINARY_FIXTURE)
 
@@ -221,6 +226,16 @@ def test_read_registry_yml_is_allowed(vault_mirror_repo):
     assert result["truncated"] is False
 
 
+def test_read_html_extension_is_allowed(vault_mirror_repo):
+    """.html room-overview companion is allowlisted and returned as text/source
+    (CODEX_HTML_VAULT_READ_1). Traversal + size cap unchanged."""
+    vm = vault_mirror_repo["module"]
+    result = vm.read_ops_file("wiki/matters/oskolkov/overview.html")
+    assert result["content_utf8"] == HTML_FIXTURE
+    assert result["truncated"] is False
+    assert ".html" in vm.ALLOWED_EXTENSIONS and ".htm" in vm.ALLOWED_EXTENSIONS
+
+
 # --------------------------------------------------------------------------
 # list_ops_files
 # --------------------------------------------------------------------------
@@ -329,6 +344,8 @@ def test_list_wiki_root_returns_allowed_files(vault_mirror_repo):
     assert "wiki/_priorities.yml" in paths
     assert "wiki/matters/oskolkov/cortex-config.md" in paths
     assert "wiki/matters/oskolkov/gold.md" in paths
+    # .html room-overview companion IS listed (CODEX_HTML_VAULT_READ_1).
+    assert "wiki/matters/oskolkov/overview.html" in paths
     # Extension allowlist still in force — png excluded.
     assert "wiki/matters/oskolkov/image.png" not in paths
     # _ops/ files must NOT leak into a wiki/ listing.

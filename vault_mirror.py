@@ -43,7 +43,7 @@ SYNC_INTERVAL_FLOOR_SECONDS = 60
 
 # MCP-tool limits. Treat as contract — the tests pin them.
 MAX_FILE_BYTES = 128 * 1024
-ALLOWED_EXTENSIONS = frozenset([".md", ".yml", ".yaml", ".txt"])
+ALLOWED_EXTENSIONS = frozenset([".md", ".yml", ".yaml", ".txt", ".html", ".htm"])
 
 # Allowed read-scope prefixes. Originally ``_ops/`` only
 # (SOT_OBSIDIAN_1_PHASE_D); extended 2026-04-30 with ``wiki/`` for

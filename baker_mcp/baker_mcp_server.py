@@ -574,7 +574,7 @@ TOOLS = [
     # ------------------------------------------------------------------
     Tool(
         name="baker_vault_list",
-        description="List files in the baker-vault mirror under a given prefix. Allowed prefixes: `_ops/` (skills, agents, processes, briefs, registries) and `wiki/` (matter dossiers, curated knowledge, ratified priorities). Use this to discover what canonical files are available. Returns sorted relative paths for `.md`, `.yml`, `.yaml`, `.txt` files only.",
+        description="List files in the baker-vault mirror under a given prefix. Allowed prefixes: `_ops/` (skills, agents, processes, briefs, registries) and `wiki/` (matter dossiers, curated knowledge, ratified priorities). Use this to discover what canonical files are available. Returns sorted relative paths for `.md`, `.yml`, `.yaml`, `.txt`, `.html`, `.htm` files only.",
         inputSchema={
             "type": "object",
             "properties": {
@@ -594,7 +594,7 @@ TOOLS = [
             "properties": {
                 "path": {
                     "type": "string",
-                    "description": "Relative path, e.g. `_ops/skills/it-manager/SKILL.md` or `wiki/matters/oskolkov/cortex-config.md`. Must start with `_ops/` or `wiki/`. Only .md / .yml / .yaml / .txt allowed.",
+                    "description": "Relative path, e.g. `_ops/skills/it-manager/SKILL.md` or `wiki/matters/oskolkov/cortex-config.md`. Must start with `_ops/` or `wiki/`. Only .md / .yml / .yaml / .txt / .html / .htm allowed. HTML is returned as text/source, not rendered.",
                 },
             },
             "required": ["path"],
