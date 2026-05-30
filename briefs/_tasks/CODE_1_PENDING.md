@@ -1,45 +1,32 @@
 ---
-dispatch: BAKER_CAPTURE_BLINDSPOTS_1
+dispatch: WAHA_SESSION_POLL_HARDEN_1
 to: b1
 from: lead
 dispatched_by: lead
 status: PENDING
-dispatched_at: 2026-05-29T21:45:00Z
-brief_version: v4 (codex PASS bus #1346)
-brief_anchor_commit: 49e2050
-authored: 2026-05-29
-brief_path: /Users/dimitry/bm-aihead1/briefs/BRIEF_BAKER_CAPTURE_BLINDSPOTS_1.md
+dispatched_at: 2026-05-30T09:45:00Z
+brief_version: v1 (codex PASS-WITH-NITS bus #1364, all 3 nits folded)
+codex_pre_review: PASS-WITH-NITS bus #1364
+prior_design_iterations:
+  - v1 bus #1360 → codex FAIL-LIGHT #1362 (6 findings, all folded into v2)
+  - v2 bus #1363 → codex PASS-WITH-NITS #1364 (3 nits, all folded into this brief)
+authored: 2026-05-30
+brief_path: /Users/dimitry/bm-aihead1/briefs/BRIEF_WAHA_SESSION_POLL_HARDEN_1.md
 target_repo: baker-master
-estimated_time: ~5h
+estimated_time: ~3h
 complexity: Medium
 reply_to: lead
-ship_topic: ship/baker-capture-blindspots-1
-anchor_chat: Director 2026-05-29 — "If we have a gap in what I send to other people by WhatsApp or email, there is a problem. Baker is blind."
-supersedes: AID_ON_BUS_1 (shipped 2026-05-25, ship report B1_AID_ON_BUS_1_20260525.md)
+ship_topic: ship/waha-session-poll-harden-1
+anchor_chat: Director 2026-05-30 — Bick iPhone export caught 4× 2026-05-29 WAHA-missed messages; existing poll did not fire after 2026-05-29 19:19Z per codex prod-DB probe.
+supersedes: BAKER_CAPTURE_BLINDSPOTS_1 (PR #270 shipped 7a4799c)
 ---
 
-# CODE_1_PENDING — BAKER_CAPTURE_BLINDSPOTS_1
+# b1 dispatch — WAHA_SESSION_POLL_HARDEN_1
 
-Close two Director outbound capture blind spots:
+Read `briefs/BRIEF_WAHA_SESSION_POLL_HARDEN_1.md` end-to-end before any code.
 
-1. **Email (Exchange Sent-Items polling)** — `triggers/exchange_poller.py` polls only INBOX (`EXCHANGE_FOLDER = "INBOX"` line 23). All Outlook outbound from dvallen@brisengroup.com is invisible. Add sibling `poll_exchange_sent()` with separate watermark + `source=exchange_sent` + `direction=outbound` tag. Independent try/except in scheduler.
+Brief landed after **two codex review iterations**. v1 → FAIL-LIGHT 6 findings → v2 → PASS-WITH-NITS 3 nits → final brief folds all 9. No further pre-write review; ship to AH1 + deputy gate chain as usual.
 
-2. **WhatsApp (iPhone export ingest)** — outbound capture shipped 2026-05-20 (PR #235); pre-2026-05-20 outbound (Storer + Bick threads) only survives on Director's iPhone. New endpoint `POST /api/whatsapp/import_iphone_export` accepts iPhone "Export Chat" .txt + ingests into existing `whatsapp_messages` table with `source=iphone_export`. Idempotent.
+**Scope:** patch `triggers/sentinel_health.py:poll_waha_session()` + tighten `triggers/embedded_scheduler.py:501-509` cadence 30 min → 5 min + 12 pytest cases.
 
-**Full spec:** `briefs/BRIEF_BAKER_CAPTURE_BLINDSPOTS_1.md` — read in full before starting.
-
-**Anchors:**
-- `triggers/exchange_poller.py:23` (smoking gun, INBOX-only)
-- `triggers/waha_webhook.py:830-877` (verified going-forward fromMe capture)
-- PR #235 / commit `0e08ce5` + hot-fix `5af2971` (outbound capture ship 2026-05-20)
-- origination-desk bus #1338 (NVIDIA project room — Storer + Bick gap inventory)
-- Lesson #45 (sequential pollers must be independent — apply)
-
-**Ship-gate discipline:**
-- Pytest literal output (no "pass by inspection")
-- Verify column names against actual schema BEFORE INSERT
-- Verify scheduler caller of `poll_exchange()` before wiring sibling
-- Surface contract: N/A (pure backend) — already documented in brief
-
-**Ship report:** `briefs/_reports/B1_BAKER_CAPTURE_BLINDSPOTS_1_<YYYYMMDD>.md`
-**Bus-post topic on ship:** `ship/baker-capture-blindspots-1` from `b1` to `lead`.
+**Reply target:** lead (not deputy). Ship report to `briefs/_reports/B1_WAHA_SESSION_POLL_HARDEN_1_<YYYYMMDD>.md` + bus-post to `lead` with topic `ship/waha-session-poll-harden-1`.
