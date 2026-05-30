@@ -371,6 +371,12 @@ _WATERMARK_MAX_AGE = {
 # ClickUp workspaces — all should advance within 2 hours
 _CLICKUP_WORKSPACE_IDS = ["2652545", "24368967", "24382372", "24382764", "24385290", "9004065517"]
 
+# WAHA_SESSION_POLL_HARDEN_1: consecutive-non-healthy tick counter for grace policy.
+# In-process dict. Lost on Render restart → first 2 ticks post-restart re-grace.
+# Acceptable because scheduler is singleton-gated (advisory lock); only one
+# process is polling at any time.
+_WAHA_POLL_STATE: dict[str, int] = {"non_healthy_streak": 0, "starting_streak": 0}
+
 
 def check_stale_watermarks():
     """SENTINEL-SAFETY-1: Check trigger_watermarks for sources that haven't
@@ -683,8 +689,12 @@ def check_waha_silence():
 
 
 def poll_waha_session():
-    """WAHA-SILENT-GUARD-1: Actively poll WAHA session status every 30 min.
-    Catches session death even when no messages are flowing.
+    """WAHA-SILENT-GUARD-1 / WAHA_SESSION_POLL_HARDEN_1: poll WAHA session every 5 min.
+
+    Grace policy: STARTING tolerated for 3 ticks (~15 min), UNKNOWN/missing
+    statuses tolerated for 2 ticks (~10 min). DEAD statuses alert immediately.
+    Webhook-drift check: union of subscribed events across all webhooks MUST
+    include 'session.status' + 'message.any' (Lesson #69 invariant).
     """
     try:
         from triggers.waha_client import get_session_status, monitor_headers
@@ -719,17 +729,55 @@ def poll_waha_session():
 
     _HEALTHY = {"WORKING"}
     _DEAD = {"SCAN_QR_CODE", "STOPPED", "FAILED"}
+    _STARTING = {"STARTING"}
 
+    # ---- Webhook-drift check (Lesson #69 invariant) -------------------
+    # Baker's subscription union across all webhooks MUST include both
+    # 'session.status' and 'message.any'. If the union is missing either,
+    # we are silently dropping events that the handler is ready to process.
+    try:
+        webhooks = (result.get("config", {}) or {}).get("webhooks", []) or []
+        subscribed_events = set()
+        for wh in webhooks:
+            for ev in (wh.get("events") or []):
+                subscribed_events.add(ev)
+        required = {"session.status", "message.any"}
+        missing = required - subscribed_events
+        if missing:
+            from memory.store_back import SentinelStoreBack
+            st = SentinelStoreBack._get_global_instance()
+            st.create_alert(
+                tier=1,
+                title="WAHA WEBHOOK CONFIG DRIFT",
+                body=(
+                    f"Baker's WAHA webhook subscription union is missing: "
+                    f"{sorted(missing)}. Handler at triggers/waha_webhook.py "
+                    f"expects 'message.any' (inbound + fromMe) and 'session.status' "
+                    f"(infra). Missing events are silently dropped. "
+                    f"Currently subscribed (union): {sorted(subscribed_events)}. "
+                    f"Anchor: tasks/lessons.md #69."
+                ),
+                source="waha_session_poll",
+                source_id=f"webhook-drift-{datetime.now(timezone.utc).strftime('%Y%m%d-%H')}",
+            )
+    except Exception as e:
+        logger.warning(f"WAHA webhook-drift check skipped: {e}")
+
+    # ---- Status branches with grace policy ----------------------------
     if status in _HEALTHY:
+        _WAHA_POLL_STATE["non_healthy_streak"] = 0
+        _WAHA_POLL_STATE["starting_streak"] = 0
         report_success("waha_session_poll")
-    elif status in _DEAD:
-        report_failure("waha_session_poll", f"Session status: {status}")
+        return
 
+    if status in _DEAD:
+        _WAHA_POLL_STATE["non_healthy_streak"] = 0  # DEAD has its own immediate alert path
+        _WAHA_POLL_STATE["starting_streak"] = 0
+        report_failure("waha_session_poll", f"Session status: {status}")
         alert_msg = (
             f"WAHA session is {status}. Inbound WhatsApp messages are NOT being received.\n"
             f"Re-scan QR: https://baker-waha.onrender.com/#/sessions/default"
         )
-
         # T1 alert
         try:
             from memory.store_back import SentinelStoreBack
@@ -743,14 +791,63 @@ def poll_waha_session():
             )
         except Exception:
             pass
-
         # BAKER_WA_DIRECTOR_FILTER_1: infra_only — WAHA session state is Baker
         # internal infra; dashboard T1 alert above is canonical.
         logger.warning(
             "WAHA SESSION DOWN (WA-suppressed, infra_only): status=%s — %s",
-            status,
-            alert_msg,
+            status, alert_msg,
         )
-    else:
-        # Unknown status — log but don't alert
-        logger.warning(f"WAHA session poll: unexpected status '{status}'")
+        return
+
+    if status in _STARTING:
+        _WAHA_POLL_STATE["non_healthy_streak"] = 0  # different counter
+        _WAHA_POLL_STATE["starting_streak"] += 1
+        streak = _WAHA_POLL_STATE["starting_streak"]
+        # 3 consecutive ticks × 5 min cadence = ~15 min grace; matches archived
+        # BRIEF_WAHA_SILENT_GUARD_1.md:379 ("STARTING is NOT treated as dead").
+        if streak >= 3:
+            report_failure("waha_session_poll", f"STARTING stuck for {streak} ticks")
+            try:
+                from memory.store_back import SentinelStoreBack
+                st = SentinelStoreBack._get_global_instance()
+                st.create_alert(
+                    tier=1,
+                    title="WAHA SESSION STUCK STARTING",
+                    body=(
+                        f"WAHA session has been STARTING for {streak} consecutive ticks "
+                        f"(~{streak * 5} min). Likely mid-restart that did not recover. "
+                        f"Re-scan QR: https://baker-waha.onrender.com/#/sessions/default"
+                    ),
+                    source="waha_session_poll",
+                    source_id=f"starting-stuck-{datetime.now(timezone.utc).strftime('%Y%m%d-%H')}",
+                )
+            except Exception:
+                pass
+        else:
+            logger.info(f"WAHA session poll: STARTING (tick {streak}/3 grace) — no alert yet")
+        return
+
+    # Unknown / missing status (UNKNOWN, or any future WAHA enum value)
+    _WAHA_POLL_STATE["starting_streak"] = 0
+    _WAHA_POLL_STATE["non_healthy_streak"] += 1
+    streak = _WAHA_POLL_STATE["non_healthy_streak"]
+    logger.warning(f"WAHA session poll: unexpected status '{status}' (tick {streak}/2 grace)")
+    # 2 consecutive ticks × 5 min = ~10 min grace before alerting
+    if streak >= 2:
+        report_failure("waha_session_poll", f"Unknown status '{status}' for {streak} ticks")
+        try:
+            from memory.store_back import SentinelStoreBack
+            st = SentinelStoreBack._get_global_instance()
+            st.create_alert(
+                tier=1,
+                title="WAHA SESSION UNKNOWN STATUS",
+                body=(
+                    f"WAHA session reports unexpected status '{status}' for "
+                    f"{streak} consecutive ticks (~{streak * 5} min). "
+                    f"Investigate: https://baker-waha.onrender.com/#/sessions/default"
+                ),
+                source="waha_session_poll",
+                source_id=f"unknown-{status}-{datetime.now(timezone.utc).strftime('%Y%m%d-%H')}",
+            )
+        except Exception:
+            pass
