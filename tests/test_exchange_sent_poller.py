@@ -49,6 +49,35 @@ def test_detect_sent_folder_swallows_list_failure():
     assert exchange_poller._detect_sent_folder(conn) is None
 
 
+def test_detect_sent_folder_handles_unquoted_names():
+    """AH2 review bus #1350 MEDIUM: some Exchange configs return bare folder
+    names without quotes (RFC-3501 atom form). Without the unquoted fallback
+    the Sent poll silently disables on those servers."""
+    conn = mock.Mock()
+    conn.list.return_value = (
+        "OK",
+        [
+            b"(\\HasNoChildren) / INBOX",
+            b"(\\HasNoChildren) / Drafts",
+            b"(\\HasNoChildren) / Sent",
+            b"(\\HasNoChildren) / Trash",
+        ],
+    )
+    assert exchange_poller._detect_sent_folder(conn) == "Sent"
+
+
+def test_detect_sent_folder_mixed_quoted_and_unquoted():
+    conn = mock.Mock()
+    conn.list.return_value = (
+        "OK",
+        [
+            b'(\\HasNoChildren) "/" "INBOX"',
+            b"(\\HasNoChildren) / Sent",
+        ],
+    )
+    assert exchange_poller._detect_sent_folder(conn) == "Sent"
+
+
 # ---- poll_exchange_sent ------------------------------------------------------
 
 

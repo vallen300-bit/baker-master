@@ -246,7 +246,16 @@ def _detect_sent_folder(conn) -> str | None:
             try:
                 decoded = raw.decode("utf-8", errors="replace")
                 if '"' in decoded:
+                    # Quoted-name form: (\HasNoChildren) "/" "Sent Items"
                     folder_names.append(decoded.rsplit('"', 2)[-2])
+                else:
+                    # Unquoted-name form (RFC-3501 allows bare atoms for
+                    # whitespace-free names): (\HasNoChildren) / Sent
+                    # AH2 review bus #1350 MEDIUM — without this fallback
+                    # some Exchange configs silently disable the Sent poll.
+                    parts = decoded.rsplit(None, 1)
+                    if len(parts) == 2 and parts[1].strip():
+                        folder_names.append(parts[1].strip())
             except Exception:
                 continue
         for candidate in SENT_FOLDER_CANDIDATES:
