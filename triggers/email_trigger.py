@@ -641,6 +641,17 @@ def check_new_emails():
     except Exception as e:
         logger.warning(f"Exchange poll failed (non-fatal): {e}")
 
+    # ── BAKER_CAPTURE_BLINDSPOTS_1: Sent-folder sibling — independent try/except
+    # so an INBOX failure does not kill Sent and vice-versa (lesson #45).
+    try:
+        from triggers.exchange_poller import poll_exchange_sent
+        exchange_sent_threads = poll_exchange_sent()
+        if exchange_sent_threads:
+            logger.info(f"Exchange Sent: {len(exchange_sent_threads)} new emails to process")
+            _process_email_threads(exchange_sent_threads)
+    except Exception as e:
+        logger.warning(f"Exchange Sent poll failed (non-fatal): {e}")
+
     import time as _time
     global _gmail_retry_after, _gmail_backoff_seconds
 

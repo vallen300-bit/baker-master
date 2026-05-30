@@ -7,9 +7,11 @@ Includes /api/scan SSE endpoint for interactive Baker chat.
 """
 import asyncio
 import decimal as _decimal
+import hashlib
 import json
 import logging
 import os
+import re
 import tempfile
 import threading
 import time
@@ -1214,6 +1216,197 @@ async def whatsapp_messages_endpoint(
         "to": to_date.isoformat(),
         "count": len(messages),
         "messages": messages,
+    }
+
+
+# ============================================================
+# BAKER_CAPTURE_BLINDSPOTS_1: iPhone WhatsApp export ingest
+# ============================================================
+# Pre-2026-05-20 Director outbound on WhatsApp was never captured (WAHA
+# `fromMe=true` subscription shipped that day). The only historical source
+# is the iPhone "Export Chat" .txt. This endpoint ingests one such file at
+# a time and upserts into the existing whatsapp_messages table, keyed by a
+# deterministic `iphone:<chat>:<ts>:<bit>:<md5>` id so re-uploads are no-ops.
+
+_IPHONE_WA_LINE = re.compile(
+    r'^\[(\d{4}-\d{2}-\d{2}|\d{2}/\d{2}/\d{4}), (\d{1,2}:\d{2}:\d{2})\] (.+?): (.*)$'
+)
+
+
+def parse_iphone_export(text: str, director_name: str = "Dimitry Vallen") -> list[dict]:
+    """Parse iPhone WhatsApp 'Export Chat' .txt into per-message dicts.
+
+    Format: `[YYYY-MM-DD, HH:MM:SS] <Sender>: <body>` with body continuations
+    on unprefixed lines. Auto-detects between ISO and DD/MM/YYYY / MM/DD/YYYY
+    locales. Drops empty bodies and WhatsApp system placeholders.
+
+    Returns list of {timestamp, sender, body, is_director}.
+    """
+    messages: list[dict] = []
+    current: dict | None = None
+    for raw in text.splitlines():
+        m = _IPHONE_WA_LINE.match(raw)
+        if m:
+            if current is not None:
+                messages.append(current)
+            date_str, time_str, sender, body = m.groups()
+            ts = None
+            for fmt in ("%Y-%m-%d %H:%M:%S", "%d/%m/%Y %H:%M:%S", "%m/%d/%Y %H:%M:%S"):
+                try:
+                    ts = datetime.strptime(f"{date_str} {time_str}", fmt)
+                    break
+                except ValueError:
+                    continue
+            if ts is None:
+                current = None
+                continue
+            current = {
+                "timestamp": ts,
+                "sender": sender.strip(),
+                "body": body,
+                "is_director": director_name.lower() in sender.lower(),
+            }
+        elif current is not None:
+            current["body"] = current["body"] + "\n" + raw
+    if current is not None:
+        messages.append(current)
+
+    return [
+        m for m in messages
+        if m["body"].strip()
+        and not m["body"].lstrip().startswith("\u200e")
+        and "<This message was deleted>" not in m["body"]
+        and "<This message was edited>" not in m["body"]
+    ]
+
+
+def _iphone_export_id(chat_id: str, timestamp: datetime, is_director: bool, body: str) -> str:
+    """Deterministic PK for iPhone-export rows. Prefix `iphone:` makes them
+    queryable via `WHERE id LIKE 'iphone:%'`. Same key on re-upload → ON CONFLICT
+    upsert (no duplicate row)."""
+    body_md5 = hashlib.md5(body.encode("utf-8")).hexdigest()[:12]
+    ts_iso = timestamp.strftime("%Y%m%dT%H%M%S")
+    bit = "1" if is_director else "0"
+    return f"iphone:{chat_id}:{ts_iso}:{bit}:{body_md5}"
+
+
+def _ingest_iphone_messages(
+    store,
+    messages: list[dict],
+    counterparty_phone: str,
+    counterparty_name: str,
+    director_name: str = "Dimitry Vallen",
+) -> tuple[int, int]:
+    """Upsert parsed messages via SentinelStoreBack.store_whatsapp_message().
+
+    Pre-queries for existing ids to distinguish new inserts from upserts so
+    the endpoint can return an accurate `ingested` vs `skipped_duplicates`
+    split. Returns (ingested, skipped_duplicates).
+    """
+    DIRECTOR_PHONE = "41799605092@c.us"
+    chat_id = f"{counterparty_phone.lstrip('+')}@c.us"
+
+    conn = store._get_conn()
+    existing_ids: set[str] = set()
+    target_ids: list[str] = []
+    if conn is not None:
+        try:
+            cur = conn.cursor()
+            target_ids = [
+                _iphone_export_id(chat_id, m["timestamp"], m["is_director"], m["body"])
+                for m in messages
+            ]
+            if target_ids:
+                cur.execute(
+                    "SELECT id FROM whatsapp_messages WHERE id = ANY(%s)",
+                    (target_ids,),
+                )
+                existing_ids = {row[0] for row in cur.fetchall()}
+            cur.close()
+        except Exception as e:
+            try:
+                conn.rollback()
+            except Exception:
+                pass
+            logger.warning(f"iphone-export pre-query failed (continuing): {e}")
+        finally:
+            store._put_conn(conn)
+    else:
+        target_ids = [
+            _iphone_export_id(chat_id, m["timestamp"], m["is_director"], m["body"])
+            for m in messages
+        ]
+
+    ingested = 0
+    skipped_duplicates = 0
+    for m, msg_id in zip(messages, target_ids):
+        sender_phone = DIRECTOR_PHONE if m["is_director"] else chat_id
+        sender_label = director_name if m["is_director"] else counterparty_name
+        was_existing = msg_id in existing_ids
+        ok = store.store_whatsapp_message(
+            msg_id=msg_id,
+            sender=sender_phone,
+            sender_name=sender_label,
+            chat_id=chat_id,
+            full_text=m["body"],
+            timestamp=m["timestamp"].isoformat(),
+            is_director=m["is_director"],
+        )
+        if not ok:
+            continue
+        if was_existing:
+            skipped_duplicates += 1
+        else:
+            ingested += 1
+    return ingested, skipped_duplicates
+
+
+@app.post(
+    "/api/whatsapp/import_iphone_export",
+    tags=["whatsapp"],
+    dependencies=[Depends(verify_api_key)],
+)
+async def whatsapp_import_iphone_export(
+    file: UploadFile = File(...),
+    counterparty_phone: str = Form(...),
+    counterparty_name: str = Form(...),
+    director_name: str = Form("Dimitry Vallen"),
+):
+    """Ingest iPhone WhatsApp 'Export Chat' .txt as historical messages.
+
+    Form fields:
+      file: .txt from iPhone "Export Chat" (without media)
+      counterparty_phone: e.g. "+393358345678" → chat_id "393358345678@c.us"
+      counterparty_name: human-readable label (e.g. "Peter Storer")
+      director_name: substring used to set is_director=True
+
+    Returns: {ingested, skipped_duplicates, first_timestamp, last_timestamp}.
+    Idempotent via deterministic `iphone:` id prefix + ON CONFLICT DO UPDATE.
+    .zip uploads (export-with-media) return 501 — out of scope for v1.
+    """
+    filename = (file.filename or "").lower()
+    if filename.endswith(".zip"):
+        raise HTTPException(
+            status_code=501,
+            detail="media import not yet supported — upload the .txt only",
+        )
+
+    content = (await file.read()).decode("utf-8", errors="replace")
+    messages = parse_iphone_export(content, director_name=director_name)
+    if not messages:
+        raise HTTPException(status_code=422, detail="No parseable messages in upload")
+
+    store = _get_store()
+    ingested, skipped_duplicates = _ingest_iphone_messages(
+        store, messages, counterparty_phone, counterparty_name, director_name=director_name
+    )
+    return {
+        "ingested": ingested,
+        "skipped_duplicates": skipped_duplicates,
+        "first_timestamp": messages[0]["timestamp"].isoformat(),
+        "last_timestamp": messages[-1]["timestamp"].isoformat(),
+        "counterparty_phone": counterparty_phone,
+        "counterparty_name": counterparty_name,
     }
 
 
