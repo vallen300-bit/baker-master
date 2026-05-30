@@ -1,6 +1,8 @@
 # BRIEF: BAKER_CAPTURE_BLINDSPOTS_1 — close Director outbound capture gaps on email + WhatsApp
 
-> **REV 2 (2026-05-30):** Patched after codex review bus #1342 (FAIL-LIGHT, 4 findings). Phase 1 + Phase 2 storage paths rewritten against ACTUAL schemas (`email_messages` + `whatsapp_messages` per `memory/store_back.py:1665-1706`). Direction tagging via existing fields, not new columns. No migrations required. Helper calls go through `_get_store()` → `SentinelStoreBack` methods. Anchor patch commit: TBD; original commit `a77ea78`.
+> **REV 3 (2026-05-30):** Watermark semantics in `poll_exchange_sent()` corrected — codex bus #1344 caught that v2's `metadata["uid"]` + `str(latest_uid)` would KeyError or persist wrong type (real `TriggerState.set_watermark()` takes datetime; real metadata uses `received_date`, not `uid`). Step 1.2 skeleton now mirrors `poll_exchange()` lines 98-194 byte-for-byte except folder name + watermark key. Anchor patch commit: TBD; predecessor commits `a77ea78` (v1) + `ac3e5fd` (v2).
+>
+> **REV 2 (2026-05-30):** Patched after codex review bus #1342 (FAIL-LIGHT, 4 findings). Phase 1 + Phase 2 storage paths rewritten against ACTUAL schemas (`email_messages` + `whatsapp_messages` per `memory/store_back.py:1665-1706`). Direction tagging via existing fields, not new columns. No migrations required. Helper calls go through `_get_store()` → `SentinelStoreBack` methods.
 
 ## Context
 
@@ -104,7 +106,13 @@ def _detect_sent_folder(conn) -> str | None:
 
 ```python
 def poll_exchange_sent() -> list:
-    """Poll EVOK Exchange Sent folder. Mirrors poll_exchange() return shape.
+    """Poll EVOK Exchange Sent folder. Mirrors poll_exchange() body byte-for-byte
+    except for folder name + watermark key.
+
+    Watermark semantics: TIMESTAMP-based (datetime), matching poll_exchange()
+    pattern at triggers/exchange_poller.py:99-104 + 191-194. NOT UID-based.
+    TriggerState.set_watermark() expects a datetime that supports .isoformat()
+    (triggers/state.py:218-241; live schema column `last_seen` is TIMESTAMPTZ).
 
     Direction is implicit: every Sent row has sender_email = EXCHANGE_USER
     (Director's address). No metadata.source / metadata.direction tagging
@@ -117,9 +125,16 @@ def poll_exchange_sent() -> list:
 
     from triggers.state import TriggerState
     state = TriggerState()
+
+    # Watermark: datetime, IMAP SINCE format (mirror poll_exchange() lines 98-104).
     wm = state.get_watermark(WATERMARK_KEY_SENT)
+    if wm:
+        since_date = wm.strftime("%d-%b-%Y")
+    else:
+        since_date = (datetime.now(timezone.utc) - timedelta(days=3)).strftime("%d-%b-%Y")
 
     results = []
+    latest_date = None
     conn = None
     try:
         conn = imaplib.IMAP4_SSL(EXCHANGE_IMAP_HOST, EXCHANGE_IMAP_PORT)
@@ -132,12 +147,26 @@ def poll_exchange_sent() -> list:
             logger.warning(f"IMAP select '{sent_folder}' failed: {status}")
             return []
 
-        # Mirror poll_exchange() UID/SEARCH/FETCH loop EXACTLY (lines ~100-160).
-        # Only differences:
-        #   - folder name (above)
-        #   - watermark key (WATERMARK_KEY_SENT)
-        #   - tag the dict's metadata.source = SOURCE_TYPE_SENT for logs only
-        # No dedup logic — downstream store_email_message() ON CONFLICT handles it.
+        status, msg_ids = conn.search(None, f'(SINCE {since_date})')
+        if status != "OK" or not msg_ids[0]:
+            return []
+        id_list = msg_ids[0].split()
+        if len(id_list) > MAX_FETCH:
+            id_list = id_list[-MAX_FETCH:]
+
+        for msg_id in id_list:
+            # Mirror poll_exchange() lines 128-189 EXACTLY:
+            #   - FETCH RFC822 → email.message_from_bytes
+            #   - extract message_id, subject, sender_name, sender_email, to, body
+            #   - parse Date → received_dt (with timezone fallback)
+            #   - dedup_key = message_id.strip("<>")
+            #   - state.is_processed(SOURCE_TYPE_SENT, dedup_key) → skip
+            #   - track latest_date
+            #   - append dict with metadata.source = SOURCE_TYPE_SENT,
+            #     metadata.received_date = received_dt.isoformat(),
+            #     standard text_block format.
+            # Only difference vs INBOX path: SOURCE_TYPE_SENT instead of SOURCE_TYPE.
+            pass  # b1 fills with mirror logic per above
     except Exception as e:
         logger.error(f"poll_exchange_sent failed: {e}")
         return []
@@ -148,9 +177,10 @@ def poll_exchange_sent() -> list:
             except Exception:
                 pass
 
-    if results:
-        latest_uid = max(r["metadata"]["uid"] for r in results)
-        state.set_watermark(WATERMARK_KEY_SENT, str(latest_uid))
+    # Watermark advance — datetime, not UID (codex bus #1344 anchor).
+    if latest_date:
+        state.set_watermark(WATERMARK_KEY_SENT, latest_date)
+        logger.info(f"Exchange Sent poll: {len(results)} new emails, watermark -> {latest_date.isoformat()}")
 
     return results
 ```
