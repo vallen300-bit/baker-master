@@ -5,6 +5,8 @@ from: lead
 dispatched_by: lead
 status: PENDING
 dispatched_at: 2026-05-29T21:45:00Z
+brief_version: v4 (codex PASS bus #1346)
+brief_anchor_commit: 49e2050
 authored: 2026-05-29
 brief_path: /Users/dimitry/bm-aihead1/briefs/BRIEF_BAKER_CAPTURE_BLINDSPOTS_1.md
 target_repo: baker-master
