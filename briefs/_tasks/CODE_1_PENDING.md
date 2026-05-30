@@ -3,8 +3,14 @@ dispatch: SCHEDULER_JOB_LIVENESS_1
 to: b1
 from: lead
 dispatched_by: lead
-status: PENDING
+status: COMPLETE
 dispatched_at: 2026-05-30T14:50:00Z
+claimed_at: 2026-05-30T15:01:00Z
+claimed_by: b1
+completed_at: 2026-05-30T15:15:00Z
+pr: 273
+pr_url: https://github.com/vallen300-bit/baker-master/pull/273
+ship_report: briefs/_reports/B1_SCHEDULER_JOB_LIVENESS_1_20260530.md
 brief_version: v2 (codex PASS-WITH-NITS bus #1401, all 3 nits folded)
 codex_pre_review: PASS-WITH-NITS bus #1401
 prior_design_iterations:

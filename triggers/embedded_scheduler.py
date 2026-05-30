@@ -84,6 +84,15 @@ def _register_jobs(scheduler: BackgroundScheduler):
     """
     from config.settings import config
 
+    # SCHEDULER_JOB_LIVENESS_1: dynamic registry built at startup. Every
+    # IntervalTrigger add_job below pairs with a register_expected_job(...)
+    # call. CronTrigger jobs MUST NOT pair (V1 = interval only). The AST
+    # pre-flight check in tests verifies this invariant before merge.
+    from triggers.scheduler_liveness_sentinel import (
+        check_scheduler_liveness,
+        register_expected_job,
+    )
+
     # Email polling — every 5 minutes
     from triggers.email_trigger import check_new_emails
     scheduler.add_job(
@@ -92,6 +101,7 @@ def _register_jobs(scheduler: BackgroundScheduler):
         id="email_poll", name="Gmail polling",
         coalesce=True, max_instances=1, replace_existing=True,
     )
+    register_expected_job("email_poll", config.triggers.email_check_interval)
     logger.info(f"Registered: email_poll (every {config.triggers.email_check_interval}s)")
 
     # WhatsApp: migrated from Wassenger polling to WAHA webhook (Session 26)
@@ -107,6 +117,7 @@ def _register_jobs(scheduler: BackgroundScheduler):
         id="fireflies_scan", name="Fireflies scanning",
         coalesce=True, max_instances=1, replace_existing=True,
     )
+    register_expected_job("fireflies_scan", config.triggers.fireflies_scan_interval)
     logger.info(f"Registered: fireflies_scan (every {config.triggers.fireflies_scan_interval}s)")
 
     # Plaud Note Pro scanning — every 15 minutes
@@ -118,6 +129,7 @@ def _register_jobs(scheduler: BackgroundScheduler):
             id="plaud_scan", name="Plaud Note Pro scanning",
             coalesce=True, max_instances=1, replace_existing=True,
         )
+        register_expected_job("plaud_scan", config.triggers.plaud_scan_interval)
         logger.info(f"Registered: plaud_scan (every {config.triggers.plaud_scan_interval}s)")
     else:
         logger.info("Plaud trigger: PLAUD_TOKEN not set — skipping registration")
@@ -170,6 +182,7 @@ def _register_jobs(scheduler: BackgroundScheduler):
         id="dropbox_poll", name="Dropbox folder polling",
         coalesce=True, max_instances=1, replace_existing=True,
     )
+    register_expected_job("dropbox_poll", config.triggers.dropbox_check_interval)
     logger.info(f"Registered: dropbox_poll (every {config.triggers.dropbox_check_interval}s)")
 
     # WEALTH-MANAGER: Edita's Dropbox feed — every 30 minutes
@@ -180,6 +193,7 @@ def _register_jobs(scheduler: BackgroundScheduler):
         id="dropbox_edita_poll", name="Edita Dropbox folder polling",
         coalesce=True, max_instances=1, replace_existing=True,
     )
+    register_expected_job("dropbox_edita_poll", config.triggers.dropbox_check_interval)
     logger.info("Registered: dropbox_edita_poll (Edita-Feed)")
 
     # Todoist polling — every 30 minutes
@@ -190,6 +204,7 @@ def _register_jobs(scheduler: BackgroundScheduler):
         id="todoist_poll", name="Todoist task polling",
         coalesce=True, max_instances=1, replace_existing=True,
     )
+    register_expected_job("todoist_poll", config.triggers.todoist_check_interval)
     logger.info(f"Registered: todoist_poll (every {config.triggers.todoist_check_interval}s)")
 
     # RSS polling — every 60 minutes (RSS-1)
@@ -200,6 +215,7 @@ def _register_jobs(scheduler: BackgroundScheduler):
         id="rss_poll", name="RSS feed polling",
         coalesce=True, max_instances=1, replace_existing=True,
     )
+    register_expected_job("rss_poll", config.triggers.rss_check_interval)
     logger.info(f"Registered: rss_poll (every {config.triggers.rss_check_interval}s)")
 
     # Slack polling — every 5 minutes (SLACK-1 S2)
@@ -210,6 +226,7 @@ def _register_jobs(scheduler: BackgroundScheduler):
         id="slack_poll", name="Slack channel polling",
         coalesce=True, max_instances=1, replace_existing=True,
     )
+    register_expected_job("slack_poll", config.triggers.slack_check_interval)
     logger.info(f"Registered: slack_poll (every {config.triggers.slack_check_interval}s)")
 
     # Browser task polling — every 30 minutes (BROWSER-1)
@@ -220,6 +237,7 @@ def _register_jobs(scheduler: BackgroundScheduler):
         id="browser_poll", name="Browser task polling",
         coalesce=True, max_instances=1, replace_existing=True,
     )
+    register_expected_job("browser_poll", config.triggers.browser_check_interval)
     logger.info(f"Registered: browser_poll (every {config.triggers.browser_check_interval}s)")
 
     # WhatsApp re-sync — every 6 hours (catch missed webhook messages)
@@ -230,6 +248,7 @@ def _register_jobs(scheduler: BackgroundScheduler):
         id="whatsapp_resync", name="WhatsApp periodic re-sync",
         coalesce=True, max_instances=1, replace_existing=True,
     )
+    register_expected_job("whatsapp_resync", 21600)
     logger.info("Registered: whatsapp_resync (every 6 hours)")
 
     # WAHA-HEALTH-FIXES-1: Weekly WAHA restart — prevents memory accumulation
@@ -382,6 +401,7 @@ def _register_jobs(scheduler: BackgroundScheduler):
         id="deadline_cadence", name="Deadline escalation cadence",
         coalesce=True, max_instances=1, replace_existing=True,
     )
+    register_expected_job("deadline_cadence", 3600)
     logger.info("Registered: deadline_cadence (every 60 minutes)")
 
     # VIP SLA monitoring — KILLED (Director decision, Session 21).
@@ -402,6 +422,7 @@ def _register_jobs(scheduler: BackgroundScheduler):
         id="calendar_prep", name="Calendar meeting prep",
         coalesce=True, max_instances=1, replace_existing=True,
     )
+    register_expected_job("calendar_prep", 15 * 60)
     logger.info("Registered: calendar_prep (every 15 minutes)")
 
     # Alert auto-expiry — every 6 hours (COCKPIT-V3 Phase C)
@@ -412,6 +433,7 @@ def _register_jobs(scheduler: BackgroundScheduler):
         id="alert_expiry", name="Alert expiry + snooze reactivation (hourly)",
         coalesce=True, max_instances=1, replace_existing=True,
     )
+    register_expected_job("alert_expiry", 60 * 60)
     logger.info("Registered: alert_expiry (every 1 hour — includes snooze reactivation)")
 
     # TRAVEL-HYGIENE-1: Auto-dismiss travel alerts after midnight CET on departure day
@@ -421,6 +443,7 @@ def _register_jobs(scheduler: BackgroundScheduler):
         id="dismiss_past_travel", name="Dismiss past travel alerts (hourly, midnight CET)",
         coalesce=True, max_instances=1, replace_existing=True,
     )
+    register_expected_job("dismiss_past_travel", 60 * 60)
     logger.info("Registered: dismiss_past_travel (every 1 hour — midnight CET expiry)")
 
     # Proactive signal scanner — every 30 minutes (PROACTIVE-FLAG-AO)
@@ -431,6 +454,7 @@ def _register_jobs(scheduler: BackgroundScheduler):
         id="proactive_scan", name="Proactive signal scanner",
         coalesce=True, max_instances=1, replace_existing=True,
     )
+    register_expected_job("proactive_scan", 30 * 60)
     logger.info("Registered: proactive_scan (every 30 minutes)")
 
     # Communication gap tracker — DISABLED (Session 26, Director decision)
@@ -446,6 +470,7 @@ def _register_jobs(scheduler: BackgroundScheduler):
         id="stale_watermark_check", name="Stale watermark detector",
         coalesce=True, max_instances=1, replace_existing=True,
     )
+    register_expected_job("stale_watermark_check", 6 * 60 * 60)
     logger.info("Registered: stale_watermark_check (every 6 hours)")
 
     # F1: Compounding risk detector — every 2 hours (Session 26)
@@ -456,6 +481,7 @@ def _register_jobs(scheduler: BackgroundScheduler):
         id="risk_detection", name="Compounding risk detector",
         coalesce=True, max_instances=1, replace_existing=True,
     )
+    register_expected_job("risk_detection", 2 * 60 * 60)
     logger.info("Registered: risk_detection (every 2 hours)")
 
     # F5: Weekly intelligence digest — Sundays 18:00 UTC (Session 26)
@@ -476,6 +502,7 @@ def _register_jobs(scheduler: BackgroundScheduler):
         id="cadence_tracker", name="Communication cadence tracker",
         coalesce=True, max_instances=1, replace_existing=True,
     )
+    register_expected_job("cadence_tracker", 6 * 60 * 60)
     logger.info("Registered: cadence_tracker (every 6 hours)")
 
     # G5: Health watchdog — every 2 hours (Session 27)
@@ -486,6 +513,7 @@ def _register_jobs(scheduler: BackgroundScheduler):
         id="health_watchdog", name="Health watchdog (WA alert if stuck)",
         coalesce=True, max_instances=1, replace_existing=True,
     )
+    register_expected_job("health_watchdog", 2 * 60 * 60)
     logger.info("Registered: health_watchdog (every 2 hours)")
 
     # WAHA-SILENT-GUARD-1: Detect WhatsApp inbound silence
@@ -496,6 +524,7 @@ def _register_jobs(scheduler: BackgroundScheduler):
         id="waha_silence_check", name="WAHA inbound silence detector",
         coalesce=True, max_instances=1, replace_existing=True,
     )
+    register_expected_job("waha_silence_check", 2 * 60 * 60)
     logger.info("Registered: waha_silence_check (every 2 hours)")
 
     # WAHA-SILENT-GUARD-1 / WAHA_SESSION_POLL_HARDEN_1: Active WAHA session health poll
@@ -506,7 +535,21 @@ def _register_jobs(scheduler: BackgroundScheduler):
         id="waha_session_poll", name="WAHA session health poll",
         coalesce=True, max_instances=1, replace_existing=True,
     )
+    register_expected_job("waha_session_poll", 5 * 60)
     logger.info("Registered: waha_session_poll (every 5 minutes)")
+
+    # SCHEDULER_JOB_LIVENESS_1: Generic per-job liveness check.
+    # Reads scheduler_executions and alerts on any EXPECTED_JOBS entry whose
+    # last fire is older than interval x tolerance. Self-registers as a T1
+    # job so a missing scheduler_job_liveness row is itself surfaced.
+    scheduler.add_job(
+        check_scheduler_liveness,
+        IntervalTrigger(minutes=10),
+        id="scheduler_job_liveness", name="Per-job scheduler liveness check",
+        coalesce=True, max_instances=1, replace_existing=True,
+    )
+    register_expected_job("scheduler_job_liveness", 10 * 60)
+    logger.info("Registered: scheduler_job_liveness (every 10 minutes)")
 
     # F4: Financial signal detector — every 6 hours (Session 27)
     from orchestrator.financial_detector import run_financial_detection
@@ -516,6 +559,7 @@ def _register_jobs(scheduler: BackgroundScheduler):
         id="financial_detector", name="Financial signal detector",
         coalesce=True, max_instances=1, replace_existing=True,
     )
+    register_expected_job("financial_detector", 6 * 60 * 60)
     logger.info("Registered: financial_detector (every 6 hours)")
 
     # Document pipeline job queue drain — every 2 minutes (PIPELINE-JOBQUEUE-1)
@@ -526,6 +570,7 @@ def _register_jobs(scheduler: BackgroundScheduler):
         id="doc_pipeline_drain", name="Document pipeline job queue",
         coalesce=True, max_instances=1, replace_existing=True,
     )
+    register_expected_job("doc_pipeline_drain", 2 * 60)
     logger.info("Registered: doc_pipeline_drain (every 2 minutes)")
 
     # INTERACTION-PIPELINE-1: Daily last_contact_date sync from contact_interactions
@@ -582,6 +627,7 @@ def _register_jobs(scheduler: BackgroundScheduler):
         id="action_completion_detector", name="Action completion detector",
         coalesce=True, max_instances=1, replace_existing=True,
     )
+    register_expected_job("action_completion_detector", 6 * 60 * 60)
     logger.info("Registered: action_completion_detector (every 6 hours)")
 
     # OBLIGATION-GENERATOR: Morning triage actions — 06:50 UTC (08:50 CET)
@@ -612,6 +658,7 @@ def _register_jobs(scheduler: BackgroundScheduler):
         id="sentiment_backfill", name="Sentiment scoring backfill",
         coalesce=True, max_instances=1, replace_existing=True,
     )
+    register_expected_job("sentiment_backfill", 6 * 60 * 60)
     logger.info("Registered: sentiment_backfill (every 6 hours)")
 
     # CROSS-MATTER-CONVERGENCE-1: Weekly convergence detection — Wednesdays 06:00 UTC
@@ -653,6 +700,7 @@ def _register_jobs(scheduler: BackgroundScheduler):
         id="expire_browser_actions", name="Expire browser actions",
         coalesce=True, max_instances=1, replace_existing=True,
     )
+    register_expected_job("expire_browser_actions", 5 * 60)
     logger.info("Registered: expire_browser_actions (every 5 min)")
 
     # SCHEDULER-WATCHDOG-1: Heartbeat — proof of life every 5 min
@@ -663,6 +711,7 @@ def _register_jobs(scheduler: BackgroundScheduler):
         coalesce=True, max_instances=1, replace_existing=True,
         next_run_time=datetime.now(timezone.utc),  # Run immediately on startup
     )
+    register_expected_job("scheduler_heartbeat", 5 * 60)
     logger.info("Registered: scheduler_heartbeat (every 5 min)")
 
     # OOM-PHASE3: Memory watchdog — log RSS every 5 min, alert on thresholds
@@ -672,6 +721,7 @@ def _register_jobs(scheduler: BackgroundScheduler):
         id="memory_watchdog", name="Memory watchdog",
         coalesce=True, max_instances=1, replace_existing=True,
     )
+    register_expected_job("memory_watchdog", 5 * 60)
     logger.info("Registered: memory_watchdog (every 5 min)")
 
     # KBL_PIPELINE_SCHEDULER_WIRING: KBL-B Steps 1-6 orchestrator.
@@ -697,6 +747,7 @@ def _register_jobs(scheduler: BackgroundScheduler):
         coalesce=True, max_instances=1, replace_existing=True,
         misfire_grace_time=60,
     )
+    register_expected_job("kbl_pipeline_tick", _kbl_tick_seconds)
     logger.info(f"Registered: kbl_pipeline_tick (every {_kbl_tick_seconds}s — env-gated)")
 
     # ALERTS_TO_SIGNAL_QUEUE_BRIDGE_1: Producer for signal_queue.
@@ -722,6 +773,7 @@ def _register_jobs(scheduler: BackgroundScheduler):
         coalesce=True, max_instances=1, replace_existing=True,
         misfire_grace_time=30,
     )
+    register_expected_job("kbl_bridge_tick", _bridge_tick_seconds)
     logger.info(f"Registered: kbl_bridge_tick (every {_bridge_tick_seconds}s)")
 
     # BRIDGE_HOT_MD_AND_TUNING_1: Saturday morning hot.md nudge.
@@ -846,6 +898,7 @@ def _register_jobs(scheduler: BackgroundScheduler):
             coalesce=True, max_instances=1, replace_existing=True,
             misfire_grace_time=300,
         )
+        register_expected_job("cortex_stuck_cycle_sentinel", 5 * 60)
         logger.info("Registered: cortex_stuck_cycle_sentinel (every 5 min)")
     else:
         logger.info("Skipped: cortex_stuck_cycle_sentinel (CORTEX_STUCK_CYCLE_SENTINEL_ENABLED=false)")
@@ -885,6 +938,7 @@ def _register_jobs(scheduler: BackgroundScheduler):
             coalesce=True, max_instances=1, replace_existing=True,
             misfire_grace_time=3600,
         )
+        register_expected_job("phase6_reflector_sweep", _reflector_minutes * 60)
         logger.info(
             f"Registered: phase6_reflector_sweep (every {_reflector_minutes} min)"
         )
@@ -927,6 +981,7 @@ def _register_jobs(scheduler: BackgroundScheduler):
             coalesce=True, max_instances=1, replace_existing=True,
             misfire_grace_time=3600,
         )
+        register_expected_job("phase6_reconciler", _reconciler_minutes * 60)
         logger.info(
             f"Registered: phase6_reconciler (every {_reconciler_minutes} min)"
         )
@@ -1040,6 +1095,7 @@ def _register_jobs(scheduler: BackgroundScheduler):
             name="Proactive sentinel — quiet-thread detection",
             coalesce=True, max_instances=1, replace_existing=True,
         )
+        register_expected_job("sentinel_quiet_thread", 30 * 60)
         logger.info("Registered: sentinel_quiet_thread (every 30 minutes)")
 
         # Upgrade 2: dismiss-pattern surface (14-day rolling aggregation)
@@ -1051,6 +1107,7 @@ def _register_jobs(scheduler: BackgroundScheduler):
             name="Proactive sentinel — dismiss pattern surface",
             coalesce=True, max_instances=1, replace_existing=True,
         )
+        register_expected_job("sentinel_dismiss_patterns", 6 * 60 * 60)
         logger.info("Registered: sentinel_dismiss_patterns (every 6 hours)")
     else:
         logger.info("Proactive sentinels DISABLED (PROACTIVE_SENTINEL_ENABLED=false)")
@@ -1079,6 +1136,7 @@ def _register_jobs(scheduler: BackgroundScheduler):
         name="Tier B reservation sweep (orphan reaper)",
         coalesce=True, max_instances=1, replace_existing=True,
     )
+    register_expected_job("tier_b_reservation_sweep", 5 * 60)
     logger.info("Registered: tier_b_reservation_sweep (every 5 min)")
 
     # BRIEF_APSCHEDULER_VAULT_SCANNER_V1: daily 06:00 UTC vault soft-task +
@@ -1550,6 +1608,15 @@ def start_scheduler():
     In-process idempotent — safe to call twice.
     """
     global _scheduler
+
+    # SCHEDULER_JOB_LIVENESS_1 NIT #3: re-stamp the sentinel's cold-start anchor
+    # so an in-process restart_scheduler() re-applies the 15-min grace window
+    # (mirrors fresh Render restart semantics).
+    try:
+        from triggers.scheduler_liveness_sentinel import reset_cold_start_anchor
+        reset_cold_start_anchor()
+    except Exception:
+        pass
 
     if _scheduler is not None and _scheduler.running:
         logger.warning("Scheduler already running — skipping start")
