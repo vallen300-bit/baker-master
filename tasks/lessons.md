@@ -629,3 +629,17 @@ Anchor: Director chat 2026-05-23 evening; AH2 bus #788 (Layer 2) + bus #790
 **Rule:** every BRISEN_LAB_TERMINAL_KEY_<slug> 1P item MUST be created with `--category="API Credential"` (exact title-case label) + `credential="$KEY"` field name. Add pre-flight check before claiming Row 8 done: `op item get "BRISEN_LAB_TERMINAL_KEY_<slug>" --format json | grep '"category": "API_CREDENTIAL"'`. Verify access path resolves: `op read "op://Baker API Keys/BRISEN_LAB_TERMINAL_KEY_<slug>/credential"` should return the key, not empty. Same pattern applies to any future 1P credential the bus / forge / wake pipeline reads via `op://.../credential` path.
 **Applies to:** every future agent install onto the bus (matter desks, workers, CLI agents). Also applies retroactively to any existing terminal key that was created PASSWORD-category — surface via `op item list --vault "Baker API Keys" --format json | jq '.[] | select(.title|startswith("BRISEN_LAB_TERMINAL_KEY_")) | {title, category}'` audit and fix any PASSWORD entries to API_CREDENTIAL.
 **Anchor:** baker-vault install-agent-to-brisen-lab-sop.md §Cycle time benchmark + this entry; baker-master commit `<this commit>`.
+
+### 82. brisen-lab `/event/{id}` (without `/full`) is NOT a route — pattern bug masquerades as endpoint bug
+
+**Mistake:** AH1 lead session 2026-05-30 ran ID-walk bus drains via `curl /event/$id` to poll for new traffic. The endpoint returned `{"detail":"Not Found"}` universally, including for events known to exist (codex's #1342 + #1344). Director caught the lapse after 3 drops in one chat: AH1 declared "no new bus" while codex's reviews were sitting unread on bus. Investigation found that brisen-lab `bus.py:546` registers ONLY `GET /event/{msg_id}/full`. There is NO `GET /event/{msg_id}` without `/full` — the trailing path component is part of the route. FastAPI returned 404 because the route literally doesn't exist.
+
+**Why it happened:** AH1 invented the endpoint shape from "common REST convention" rather than reading the actual API spec. Compounded by an earlier session where the same broken pattern silently worked-by-luck (events not in the desired range happened to be missing from the result, masking the bug). The canonical bus API surface per `bus.py:8` header comment is: `POST /msg/{terminal}`, `GET /msg/{terminal}`, `GET /event/{msg_id}/full`, `POST /msg/{msg_id}/ack`, `DELETE /msg/{msg_id}`. No `/event/{id}` shorthand.
+
+**Rule (drain pattern):** for "what's new in my inbox", use `GET /msg/{terminal}?since=<timestamp>&limit=N` — the canonical inbox-poll endpoint. ASC-ordered, supports `since`/`kind`/`topic`/`exclude_self` filters. Track last-seen `created_at` in a state file (`~/.brisen-lab/<terminal>_last_seen`) so subsequent calls only surface genuinely-new traffic. DO NOT ID-walk via `/event/$id` — that route does not exist.
+
+**Rule (single-event fetch):** for "fetch the body of a known message id", use `GET /event/{msg_id}/full` — the trailing `/full` is mandatory. Verified at `bus.py:546`.
+
+**Anchor tooling:** `~/Desktop/baker-code/scripts/check-lead-inbox.sh` (built 2026-05-30 same chat) mirrors `check-codex-inbox.sh` pattern with `since`-filter state persistence. Other terminals (deputy / aid / desks) should adopt the same pattern — one canonical script per terminal slug.
+
+**Anchor chat:** Director directive 2026-05-30 ~07:30 CEST — *"It's not about how to poll. I think we have a little problem. What time is now?"* + *"We need to fix this."* AH1 had been blaming polling-cadence for what was actually a wrong-endpoint pattern.
