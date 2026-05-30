@@ -27,6 +27,12 @@ SOURCE_TYPE = "exchange"
 # Max emails per poll cycle (safety)
 MAX_FETCH = 50
 
+# BAKER_CAPTURE_BLINDSPOTS_1: Sent-folder sibling poller config.
+# Director outbound from Outlook is invisible until polled here.
+SENT_FOLDER_CANDIDATES = ["Sent Items", "Sent", "INBOX.Sent"]
+WATERMARK_KEY_SENT = "exchange_poll_sent"
+SOURCE_TYPE_SENT = "exchange_sent"
+
 
 def _decode_header_value(raw: str) -> str:
     """Decode RFC 2047 encoded header values."""
@@ -212,6 +218,191 @@ def poll_exchange() -> list:
         try:
             from triggers.sentinel_health import report_failure
             report_failure("exchange", str(e))
+        except Exception:
+            pass
+    finally:
+        if conn:
+            try:
+                conn.logout()
+            except Exception:
+                pass
+
+    return results
+
+
+def _detect_sent_folder(conn) -> str | None:
+    """Probe IMAP LIST for the Sent folder.
+
+    EVOK Exchange may expose Sent under any of SENT_FOLDER_CANDIDATES.
+    Returns the first matching folder name, or None if no candidate matches.
+    """
+    try:
+        status, folders = conn.list()
+        if status != "OK":
+            logger.warning(f"IMAP LIST failed: {status}")
+            return None
+        folder_names = []
+        for raw in folders:
+            try:
+                decoded = raw.decode("utf-8", errors="replace")
+                if '"' in decoded:
+                    # Quoted-name form: (\HasNoChildren) "/" "Sent Items"
+                    folder_names.append(decoded.rsplit('"', 2)[-2])
+                else:
+                    # Unquoted-name form (RFC-3501 allows bare atoms for
+                    # whitespace-free names): (\HasNoChildren) / Sent
+                    # AH2 review bus #1350 MEDIUM — without this fallback
+                    # some Exchange configs silently disable the Sent poll.
+                    parts = decoded.rsplit(None, 1)
+                    if len(parts) == 2 and parts[1].strip():
+                        folder_names.append(parts[1].strip())
+            except Exception:
+                continue
+        for candidate in SENT_FOLDER_CANDIDATES:
+            if candidate in folder_names:
+                return candidate
+        logger.warning(f"No Sent folder found in: {folder_names[:20]}")
+        return None
+    except Exception as e:
+        logger.error(f"_detect_sent_folder error: {e}")
+        return None
+
+
+def poll_exchange_sent() -> list:
+    """
+    BAKER_CAPTURE_BLINDSPOTS_1: Poll EVOK Exchange Sent folder.
+
+    Mirrors poll_exchange() body except: (a) folder name detected at runtime
+    via _detect_sent_folder(), (b) separate watermark key.
+
+    Direction is implicit — every row has sender_email = EXCHANGE_USER (the
+    Director's address). Downstream retrievers distinguish outbound by sender
+    filter; no metadata.direction column exists on email_messages.
+    """
+    if not EXCHANGE_PASS:
+        logger.warning("EXCHANGE_PASS not set — skipping Exchange Sent poll")
+        return []
+
+    from triggers.state import TriggerState
+    state = TriggerState()
+
+    wm = state.get_watermark(WATERMARK_KEY_SENT)
+    if wm:
+        since_date = wm.strftime("%d-%b-%Y")
+    else:
+        since_date = (datetime.now(timezone.utc) - timedelta(days=3)).strftime("%d-%b-%Y")
+
+    results = []
+    conn = None
+    try:
+        conn = imaplib.IMAP4_SSL(EXCHANGE_IMAP_HOST, EXCHANGE_IMAP_PORT)
+        conn.login(EXCHANGE_USER, EXCHANGE_PASS)
+
+        sent_folder = _detect_sent_folder(conn)
+        if not sent_folder:
+            logger.warning("Exchange Sent poll: no Sent folder detected — skipping")
+            return []
+        status, _ = conn.select(f'"{sent_folder}"', readonly=True)
+        if status != "OK":
+            logger.warning(f"IMAP select '{sent_folder}' failed: {status}")
+            return []
+
+        status, msg_ids = conn.search(None, f'(SINCE {since_date})')
+        if status != "OK" or not msg_ids[0]:
+            logger.info(f"Exchange Sent poll: no new emails since {since_date}")
+            return []
+
+        id_list = msg_ids[0].split()
+        if len(id_list) > MAX_FETCH:
+            id_list = id_list[-MAX_FETCH:]
+
+        logger.info(f"Exchange Sent poll: {len(id_list)} emails since {since_date}")
+
+        latest_date = None
+
+        for msg_id in id_list:
+            try:
+                status, data = conn.fetch(msg_id, "(RFC822)")
+                if status != "OK" or not data[0]:
+                    continue
+
+                raw_email = data[0][1]
+                msg = email.message_from_bytes(raw_email)
+
+                message_id = msg.get("Message-ID", f"exchange-sent-{msg_id.decode()}")
+                subject = _decode_header_value(msg.get("Subject", "(no subject)"))
+                sender_name, sender_email = _extract_sender(msg)
+                to_header = _decode_header_value(msg.get("To", ""))
+                body = _extract_body(msg)
+
+                date_str = msg.get("Date", "")
+                try:
+                    received_dt = parsedate_to_datetime(date_str)
+                    if received_dt.tzinfo is None:
+                        received_dt = received_dt.replace(tzinfo=timezone.utc)
+                except Exception:
+                    received_dt = datetime.now(timezone.utc)
+
+                dedup_key = message_id.strip("<>")
+                if state.is_processed(SOURCE_TYPE_SENT, dedup_key):
+                    continue
+
+                if latest_date is None or received_dt > latest_date:
+                    latest_date = received_dt
+
+                participants = f"{sender_email}, {to_header}"
+                text_block = (
+                    f"Email Thread: {subject}\n"
+                    f"Date: {received_dt.strftime('%Y-%m-%d')}\n"
+                    f"Participants: {participants}\n"
+                    f"Messages: 1\n\n"
+                    f"--- {sender_name or sender_email} ({received_dt.strftime('%Y-%m-%d %H:%M')}) ---\n"
+                    f"{subject}\n\n"
+                    f"{body}"
+                )
+
+                results.append({
+                    "text": text_block,
+                    "metadata": {
+                        "source": SOURCE_TYPE_SENT,
+                        "thread_id": dedup_key,
+                        "subject": subject,
+                        "primary_sender": sender_name or sender_email,
+                        "primary_sender_email": sender_email,
+                        "received_date": received_dt.isoformat(),
+                        "participants": participants,
+                    }
+                })
+
+            except Exception as e:
+                logger.warning(f"Exchange Sent: failed to parse msg {msg_id}: {e}")
+                continue
+
+        if latest_date:
+            state.set_watermark(WATERMARK_KEY_SENT, latest_date)
+            logger.info(
+                f"Exchange Sent poll: {len(results)} new emails, "
+                f"watermark -> {latest_date.isoformat()}"
+            )
+
+        try:
+            from triggers.sentinel_health import report_success
+            report_success("exchange_sent")
+        except Exception:
+            pass
+
+    except imaplib.IMAP4.error as e:
+        logger.error(f"Exchange Sent IMAP auth/connection error: {e}")
+        try:
+            from triggers.sentinel_health import report_failure
+            report_failure("exchange_sent", str(e))
+        except Exception:
+            pass
+    except Exception as e:
+        logger.error(f"Exchange Sent poll failed: {e}")
+        try:
+            from triggers.sentinel_health import report_failure
+            report_failure("exchange_sent", str(e))
         except Exception:
             pass
     finally:
