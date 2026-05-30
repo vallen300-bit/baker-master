@@ -1,5 +1,6 @@
 ---
 dispatch: CODE_4
+status: COMPLETE
 brief: briefs/BRIEF_DOSSIER_ROOM_READ_1.md
 rev: 3
 from: cowork-ah1
@@ -10,6 +11,12 @@ brief_commit: 9127e81
 complexity: Medium
 est: ~2-3h
 reply_to: cowork-ah1
+ship_pr: 272
+ship_commit: b86cd7b
+ship_branch: b4/dossier-room-read (deleted post-merge)
+merged_at: 2026-05-30T14:32:00Z
+security_review: CLEAN (0 findings) — cowork-ah1 bus #1396
+ac8_researcher_post: bus #1397 2026-05-30T14:35:54Z
 ---
 
 # CODE_4 DISPATCH — BRIEF_DOSSIER_ROOM_READ_1 (Rev 3)
