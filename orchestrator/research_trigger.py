@@ -52,6 +52,7 @@ def _ensure_research_proposals_table():
                     deliverable_summary TEXT,
                     error_message TEXT,
                     send_to JSONB,
+                    matter_slug TEXT,
                     created_at TIMESTAMPTZ DEFAULT NOW(),
                     approved_at TIMESTAMPTZ,
                     completed_at TIMESTAMPTZ
@@ -64,6 +65,18 @@ def _ensure_research_proposals_table():
             # Migration: add error_message column if table already exists without it
             cur.execute("""
                 ALTER TABLE research_proposals ADD COLUMN IF NOT EXISTS error_message TEXT
+            """)
+            # BRIEF_DOSSIER_ROOM_READ_1 — matter_slug for the dossier-engine
+            # explicit-slug resolver path. Idempotent: prod already has the
+            # column per Codex C1 verification; this closes the bootstrap drift
+            # so fresh dev / test / ephemeral-Neon DBs match prod.
+            cur.execute("""
+                ALTER TABLE research_proposals ADD COLUMN IF NOT EXISTS matter_slug TEXT
+            """)
+            cur.execute("""
+                CREATE INDEX IF NOT EXISTS idx_rp_matter_slug
+                ON research_proposals(matter_slug)
+                WHERE matter_slug IS NOT NULL
             """)
             conn.commit()
             cur.close()
