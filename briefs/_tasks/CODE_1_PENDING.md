@@ -6,6 +6,11 @@ dispatched_by: lead
 status: COMPLETE
 merged_anchor: PR #278 squash 7ce936f (G1+G2+G3 all PASS); deputy G3 #1469
 dispatched_at: 2026-05-31T12:12:00Z
+completed_at: 2026-05-31T12:32:00Z
+pr: 278
+ship_commit: 37b43ce
+ship_bus: 1467
+ship_report: briefs/_reports/B1_SCHEDULER_LIVENESS_REVIVE_1_20260531.md
 authored: 2026-05-31
 brief_path: /Users/dimitry/bm-aihead1/briefs/BRIEF_SCHEDULER_LIVENESS_REVIVE_1.md
 target_repo: baker-master
