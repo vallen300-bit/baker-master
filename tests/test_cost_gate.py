@@ -77,9 +77,10 @@ def test_estimate_zero_for_empty_signal() -> None:
     """Still non-negative even when signal_text is empty — the fixed
     output-token allowance dominates."""
     est = _estimate_step5_cost({"signal_text": "", "prompt_overhead_chars": 0})
-    # 4096 * 75 / 1M = ~0.31 USD
-    assert est > Decimal("0.30")
-    assert est < Decimal("0.35")
+    # Opus 4.7/4.8: 4096 * 25 / 1M = ~0.10 USD (was ~0.31 at legacy $75/M output;
+    # OPUS_4_8_UPGRADE_1 amendment bus #1429).
+    assert est > Decimal("0.09")
+    assert est < Decimal("0.12")
 
 
 def test_estimate_grows_with_signal_size() -> None:
