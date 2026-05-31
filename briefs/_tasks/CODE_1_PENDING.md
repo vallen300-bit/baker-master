@@ -3,7 +3,8 @@ dispatch: SCHEDULER_LIVENESS_REVIVE_1
 to: b1
 from: lead
 dispatched_by: lead
-status: PENDING
+status: COMPLETE
+merged_anchor: PR #278 squash 7ce936f (G1+G2+G3 all PASS); deputy G3 #1469
 dispatched_at: 2026-05-31T12:12:00Z
 authored: 2026-05-31
 brief_path: /Users/dimitry/bm-aihead1/briefs/BRIEF_SCHEDULER_LIVENESS_REVIVE_1.md
