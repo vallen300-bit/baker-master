@@ -1,40 +1,35 @@
 ---
-dispatch: SCHEDULER_JOB_LIVENESS_1
+dispatch: JOB_LISTENER_HARDEN_1
 to: b1
 from: lead
 dispatched_by: lead
-status: COMPLETE
-dispatched_at: 2026-05-30T14:50:00Z
-claimed_at: 2026-05-30T15:01:00Z
-claimed_by: b1
-completed_at: 2026-05-30T15:15:00Z
-pr: 273
-pr_url: https://github.com/vallen300-bit/baker-master/pull/273
-ship_report: briefs/_reports/B1_SCHEDULER_JOB_LIVENESS_1_20260530.md
-brief_version: v2 (codex PASS-WITH-NITS bus #1401, all 3 nits folded)
-codex_pre_review: PASS-WITH-NITS bus #1401
-prior_design_iterations:
-  - v1 bus #1392 → codex FAIL-LIGHT #1395 (4 findings: registry literals + cold-start global MIN + missing jobs + dynamic intervals)
-  - v2 bus #1399 → codex PASS-WITH-NITS #1401 (3 nits: import + side-effect-safe pre-flight + in-process restart caveat)
-authored: 2026-05-30
-brief_path: /Users/dimitry/bm-aihead1/briefs/BRIEF_SCHEDULER_JOB_LIVENESS_1.md
+status: PENDING
+dispatched_at: 2026-05-31T06:35:00Z
+authored: 2026-05-31
+brief_path: /Users/dimitry/bm-aihead1/briefs/BRIEF_JOB_LISTENER_HARDEN_1.md
 target_repo: baker-master
-estimated_time: ~4h
-complexity: Medium
+estimated_time: ~2h
+complexity: Low-Medium
+brief_version: v1 (codex PASS-WITH-NITS bus #1421, factual NIT + dispatch hint folded into brief)
+codex_pre_review: PASS-WITH-NITS bus #1421
 reply_to: lead
-ship_topic: ship/scheduler-job-liveness-1
-anchor_chat: Director 2026-05-30 — "author brief for scheduler" after PR #271 (WAHA_SESSION_POLL_HARDEN_1) shipped. Codex pre-review chain caught wrong literals + cold-start bug; final design uses dynamic registry built by embedded_scheduler.py + process-local _MODULE_LOAD_TIME with explicit reset hook.
-supersedes: WAHA_SESSION_POLL_HARDEN_1 (PR #271 shipped 2f2a1a9)
+ship_topic: ship/job-listener-harden-1
+anchor_chat: Director 2026-05-31 — "go" after PINNED top-pick recommendation. Resume after PR #273 (SCHEDULER_JOB_LIVENESS_1) merged 522775f; deputy bus #1418 found scheduler_job_liveness + slack_poll fired but zero rows in scheduler_executions. Root cause: triggers/embedded_scheduler.py::_job_listener:47-50 silently returns on store._get_conn() == None.
+supersedes: SCHEDULER_JOB_LIVENESS_1 (PR #273 shipped 522775f)
 ---
 
-# b1 dispatch — SCHEDULER_JOB_LIVENESS_1
+# b1 dispatch — JOB_LISTENER_HARDEN_1
 
-Read `briefs/BRIEF_SCHEDULER_JOB_LIVENESS_1.md` end-to-end before any code.
+Read `briefs/BRIEF_JOB_LISTENER_HARDEN_1.md` end-to-end before any code.
 
-Brief landed after **two codex review iterations**. v1 → FAIL-LIGHT 4 findings → v2 → PASS-WITH-NITS 3 nits → final brief folds all 7. No further pre-write review.
+Brief cleared codex pre-review #1421 on v1 (PASS-WITH-NITS, no blockers). One factual NIT (line 59 wording about audit_sentinel writing dedupe-anchor rows) + one dispatch hint (patch `triggers.embedded_scheduler.get_listener_drop_counts` not a non-existent sentinel attr) — both folded into the brief commit `<see next push>`. No further pre-write review required.
 
-**Scope:** new `triggers/scheduler_liveness_sentinel.py` (dynamic registry built at startup via `register_expected_job()` + `_MODULE_LOAD_TIME` cold-start anchor + `reset_cold_start_anchor()` for in-process restart) + patch `triggers/embedded_scheduler.py` to call `register_expected_job` after every IntervalTrigger add_job + 14 pytest cases.
+**Scope:** patch `triggers/embedded_scheduler.py` (add `_listener_drop_count` dict + lock + `get_listener_drop_counts()` + `_record_listener_drop()` helpers; modify `_job_listener` lines 47-50 with 100ms sleep + one retry then drop-record) + patch `triggers/scheduler_liveness_sentinel.py` (local-import + append drop-hint line to alert body for both branches) + NEW `tests/test_job_listener_harden.py` (4 tests). No DB migration. No schema change.
 
-**Critical pre-flight (MANDATORY before opening PR):** run the AST pairing check in Verification section. Script must print `OK: N interval jobs paired, M cron jobs cleanly skipped`. Do NOT boot `_register_jobs()` — that has side effects (vault_scanner Slack DM + mirror writes).
+**Test patch-target hint (per codex #1421):** for Test 3.1 / 3.2, patch `triggers.embedded_scheduler.get_listener_drop_counts` — sentinel calls it via local `from triggers.embedded_scheduler import get_listener_drop_counts` inside its alert-emit `try` block, so the sentinel module never holds a reference to monkey-patch.
 
-**Reply target:** lead. Ship report to `briefs/_reports/B1_SCHEDULER_JOB_LIVENESS_1_<YYYYMMDD>.md` + bus-post to `lead` with topic `ship/scheduler-job-liveness-1`.
+**Test isolation:** clear `triggers.embedded_scheduler._listener_drop_count` in pytest fixture per test (process-local dict; otherwise leaks between cases).
+
+**ACs:** AC1 (Render log or scheduler_executions row within 30min of deploy), AC2 (PR #273 AC1 query re-runnable), AC3 (4 PASSED literal pytest tail). NO pass-by-inspection.
+
+**Reply target:** lead. Ship report to `briefs/_reports/B1_JOB_LISTENER_HARDEN_1_<YYYYMMDD>.md` + bus-post to `lead` with topic `ship/job-listener-harden-1`.

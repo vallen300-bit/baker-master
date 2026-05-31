@@ -56,7 +56,7 @@ When `_job_listener` hits the silent-skip, the row is permanently lost — APSch
 Line 49-50 silently returns on `conn is None`. Operator has zero signal this is happening; the only evidence today is downstream alerts from `scheduler_liveness_sentinel`.
 
 ### Current state
-`triggers/embedded_scheduler.py:24-76` — `_job_listener` is the only consumer of `_get_conn()` in this file. `scheduler_executions` rows are written exclusively from here. `_listener_drop_count` / `get_listener_drop_counts` do not exist yet (`grep -n "_listener_drop_count" triggers/ memory/` returns nothing).
+`triggers/embedded_scheduler.py:24-76` — `_job_listener` is the only consumer of `_get_conn()` in this file. `scheduler_executions` rows are written primarily from `_job_listener`; `triggers/audit_sentinel.py:103-112` also writes a dedupe-anchor row (orthogonal — filtered by job_id, out of scope for this brief). `_listener_drop_count` / `get_listener_drop_counts` do not exist yet (`grep -n "_listener_drop_count" triggers/ memory/` returns nothing).
 
 ### Implementation
 
@@ -225,6 +225,8 @@ Standard pytest. Mock `SentinelStoreBack._get_global_instance()` and a synthetic
 **Test runner:** `pytest tests/test_job_listener_harden.py -v` — literal output mandatory in ship report. NO "by inspection."
 
 **Test reset hook:** each test must clear `_listener_drop_count` at setup (use `pytest` fixture: `triggers.embedded_scheduler._listener_drop_count.clear()`). Process-local counter would otherwise leak between tests.
+
+**Patch-target hint (per codex pre-review #1421):** for Test 3.1 / 3.2, patch `triggers.embedded_scheduler.get_listener_drop_counts` — the local-import source — NOT a `scheduler_liveness_sentinel.get_listener_drop_counts` attribute (none exists there; sentinel does `from triggers.embedded_scheduler import get_listener_drop_counts` at call-time inside the `try` block per Fix 3 Step 3.1).
 
 ---
 
