@@ -1,11 +1,12 @@
 #!/usr/bin/env python3
 """Recharge-report CLI. Reads facts from stdin (or --facts-file), writes
-rendered markdown to stdout (or --output). Validates before writing.
+rendered HTML (canonical Pichler V3 register) to stdout (or --output).
+Validates the rendered HTML before writing.
 
 Usage:
-  python scripts/recharge_report_cli.py --tier high --output report.md < facts.txt
+  python scripts/recharge_report_cli.py --tier high --output report.html < facts.txt
   python scripts/recharge_report_cli.py --tier routine --facts-file facts.txt \\
-      --output report.md
+      --output report.html
 """
 import argparse
 import sys
@@ -19,7 +20,7 @@ from claimsmax.recharge_report.generator import (
 
 def main(argv: list[str] | None = None) -> int:
     p = argparse.ArgumentParser(
-        description="Generate canonical Pichler/HEAD-4 recharge report."
+        description="Generate canonical Pichler V3 EN recharge-failure HTML report."
     )
     p.add_argument("--tier", choices=["high", "routine"], default="high")
     p.add_argument(
@@ -30,12 +31,12 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument(
         "--output",
         type=Path,
-        help="Output markdown path (default: stdout)",
+        help="Output HTML path (default: stdout)",
     )
     p.add_argument(
         "--template",
         type=Path,
-        help="Override canonical template path",
+        help="Override canonical V3 HTML template path",
     )
     args = p.parse_args(argv)
 
@@ -48,7 +49,7 @@ def main(argv: list[str] | None = None) -> int:
 
     template_kwargs = {"template_path": args.template} if args.template else {}
     try:
-        markdown = generate_recharge_report(
+        rendered_html = generate_recharge_report(
             facts, model_tier=args.tier, **template_kwargs
         )
     except RechargeReportGenerationError as e:
@@ -56,10 +57,10 @@ def main(argv: list[str] | None = None) -> int:
         return 3
 
     if args.output:
-        args.output.write_text(markdown, encoding="utf-8")
+        args.output.write_text(rendered_html, encoding="utf-8")
         print(f"OK: wrote {args.output}", file=sys.stderr)
     else:
-        sys.stdout.write(markdown)
+        sys.stdout.write(rendered_html)
     return 0
 
 
