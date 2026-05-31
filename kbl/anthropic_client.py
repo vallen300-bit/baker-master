@@ -22,10 +22,16 @@ Error surface:
       (retry would not help — caller bypasses the ladder)
 
 Model:
-    Default ``claude-opus-4-7`` (1M-context). Env override:
-    ``KBL_STEP5_MODEL`` — allows burn-in on Sonnet 4.6 without a code
-    change if needed. ``ANTHROPIC_API_KEY`` is required; missing →
-    RuntimeError at module import (fail-fast; Render catches it at boot).
+    Default ``claude-opus-4-8`` (1M-context, $5/$25 per MTok). Env overrides
+    (most-specific wins):
+        ``KBL_STEP5_MODEL``    — Step-5-only override (e.g. burn-in on
+                                  Sonnet 4.6 without a code change).
+        ``KBL_ANTHROPIC_MODEL`` — global Opus default across Baker; lets
+                                  the whole Opus surface revert to
+                                  ``claude-opus-4-7`` with no redeploy
+                                  (OPUS_4_8_UPGRADE_1, 2026-05-31).
+    ``ANTHROPIC_API_KEY`` is required; missing → RuntimeError at module
+    import (fail-fast; Render catches it at boot).
 """
 from __future__ import annotations
 
@@ -48,7 +54,7 @@ from kbl.exceptions import AnthropicUnavailableError, OpusRequestError
 
 # ---------------------------- constants ----------------------------
 
-_DEFAULT_MODEL = "claude-opus-4-7"
+_DEFAULT_MODEL = os.environ.get("KBL_ANTHROPIC_MODEL", "claude-opus-4-8")
 _MODEL_ENV = "KBL_STEP5_MODEL"
 
 _API_KEY_ENV = "ANTHROPIC_API_KEY"

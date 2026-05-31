@@ -44,7 +44,8 @@ class VoyageConfig:
 @dataclass
 class ClaudeConfig:
     api_key: str = os.getenv("ANTHROPIC_API_KEY", "")
-    model: str = "claude-opus-4-6"
+    # OPUS_4_8_UPGRADE_1 (2026-05-31): env-overridable via KBL_ANTHROPIC_MODEL.
+    model: str = os.getenv("KBL_ANTHROPIC_MODEL", "claude-opus-4-8")
     beta_header: str = "context-1m-2025-08-07"
     max_context_tokens: int = 1_000_000
     max_output_tokens: int = 128_000
@@ -337,7 +338,8 @@ class ComplexityConfig:
     """COMPLEXITY-ROUTER-1: Fast/deep routing configuration."""
     shadow_mode: bool = os.getenv("COMPLEXITY_SHADOW_MODE", "false").lower() == "true"
     fast_model: str = "gemini-2.5-flash"
-    deep_model: str = "claude-opus-4-6"
+    # OPUS_4_8_UPGRADE_1 (2026-05-31): env-overridable via KBL_ANTHROPIC_MODEL.
+    deep_model: str = os.getenv("KBL_ANTHROPIC_MODEL", "claude-opus-4-8")
     fast_max_tokens: int = 1024
     deep_max_tokens: int = 4096
     fast_tool_limit: int = 3

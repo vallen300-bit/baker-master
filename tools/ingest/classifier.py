@@ -89,7 +89,7 @@ def _classify_with_llm(filename: str, text_preview: str) -> Optional[str]:
     try:
         client = anthropic.Anthropic(api_key=api_key)
         resp = client.messages.create(
-            model="claude-opus-4-6",
+            model=os.environ.get("KBL_ANTHROPIC_MODEL", "claude-opus-4-8"),
             max_tokens=50,
             messages=[{"role": "user", "content": prompt}],
         )

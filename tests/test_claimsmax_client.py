@@ -236,7 +236,7 @@ def test_http_error_raises_transport_error() -> None:
 _ASK_RESPONSE_FIXTURE: dict[str, Any] = {
     "question": "What is the Pagitsch defect count?",
     "language": "en",
-    "model": "claude-opus-4-7",
+    "model": "claude-opus-4-8",
     "answer": "Per the audit, 14 defects remain open [D1].",
     "citations": [
         {

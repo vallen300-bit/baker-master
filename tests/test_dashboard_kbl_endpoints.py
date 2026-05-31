@@ -160,7 +160,7 @@ def test_kbl_signals_empty_state(client):
 def test_kbl_cost_rollup_happy_path(client):
     rollup_cols = ["step", "model", "calls", "total_eur", "in_tok", "out_tok"]
     rollup_rows = [
-        ("step5_opus", "claude-opus-4-6", 3, 1.25, 12000, 2400),
+        ("step5_opus", "claude-opus-4-8", 3, 1.25, 12000, 2400),
         ("step1_triage", "gemma-3-4b", 12, 0.0, 48000, 6400),
     ]
     total_cols = ["day_total"]

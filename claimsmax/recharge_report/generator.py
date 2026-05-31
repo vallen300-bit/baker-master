@@ -2,7 +2,8 @@
 
 Single entry point: generate_recharge_report(facts_for_trade, model_tier="high").
 - Loads canonical scaffold template (read-only).
-- Calls claude-opus-4-7 (high) or claude-sonnet-4-6 (routine) via tool-use,
+- Calls claude-opus-4-8 (high; env-overridable via KBL_ANTHROPIC_MODEL) or
+  claude-sonnet-4-6 (routine) via tool-use,
   strict=True, prompt-caching on tool def + scaffold.
 - Extended thinking enabled (8000-token budget) for Mehrkosten reasoning.
 - Validates rendered markdown; one repair retry on ValidationError;
@@ -21,7 +22,8 @@ from .validator import RechargeReportValidationError, validate_recharge_report
 
 log = logging.getLogger(__name__)
 
-MODEL_HIGH = "claude-opus-4-7"
+# OPUS_4_8_UPGRADE_1 (2026-05-31): env-overridable via KBL_ANTHROPIC_MODEL.
+MODEL_HIGH = os.environ.get("KBL_ANTHROPIC_MODEL", "claude-opus-4-8")
 MODEL_ROUTINE = "claude-sonnet-4-6"
 EXTENDED_THINKING_BUDGET = 8_000
 

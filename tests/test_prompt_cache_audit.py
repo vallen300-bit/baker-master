@@ -88,7 +88,7 @@ def test_log_cache_usage_fires_baker_action(monkeypatch):
         cache_read_input_tokens=3000,
         cache_creation_input_tokens=100,
     )
-    log_cache_usage(usage, call_site="test.site", model="claude-opus-4-7")
+    log_cache_usage(usage, call_site="test.site", model="claude-opus-4-8")
     assert captured["action_type"] == "claude:cache_usage"
     payload = captured["payload"]
     assert payload["call_site"] == "test.site"

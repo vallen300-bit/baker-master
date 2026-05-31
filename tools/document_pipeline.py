@@ -19,6 +19,7 @@ All Claude calls go through Phase 4A cost tracking + circuit breaker.
 import hashlib
 import json
 import logging
+import os
 import time
 from typing import Optional
 
@@ -29,7 +30,8 @@ from config.settings import config
 logger = logging.getLogger("baker.document_pipeline")
 
 _HAIKU_MODEL = "gemini-2.5-flash"
-_OPUS_MODEL = "claude-opus-4-6"
+# OPUS_4_8_UPGRADE_1 (2026-05-31): env-overridable via KBL_ANTHROPIC_MODEL.
+_OPUS_MODEL = os.environ.get("KBL_ANTHROPIC_MODEL", "claude-opus-4-8")
 
 # High-value types that use Opus for extraction (better accuracy on legal/financial)
 _OPUS_EXTRACTION_TYPES = frozenset({

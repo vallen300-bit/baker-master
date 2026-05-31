@@ -150,7 +150,7 @@ def _mock_ok_response() -> SimpleNamespace:
             cache_creation_input_tokens=1000,
         ),
         stop_reason="end_turn",
-        model="claude-opus-4-7",
+        model="claude-opus-4-8",
     )
 
 
@@ -171,7 +171,7 @@ def test_call_opus_happy_path_returns_response_with_cost() -> None:
     assert resp.cache_write_tokens == 1000
     assert resp.cost_usd > 0
     assert resp.stop_reason == "end_turn"
-    assert resp.model_id == "claude-opus-4-7"
+    assert resp.model_id == "claude-opus-4-8"
 
 
 def test_call_opus_system_block_has_cache_control() -> None:
@@ -187,6 +187,15 @@ def test_call_opus_system_block_has_cache_control() -> None:
     assert system_blocks[0]["cache_control"] == {"type": "ephemeral", "ttl": "1h"}
     assert system_blocks[0]["text"] == "stable sys"
     assert system_blocks[0]["type"] == "text"
+
+
+def test_default_model_is_opus_4_8_when_env_unset() -> None:
+    """OPUS_4_8_UPGRADE_1 (2026-05-31): module-level _DEFAULT_MODEL is read
+    from ``KBL_ANTHROPIC_MODEL`` at import. With no env override, the default
+    is ``claude-opus-4-8``. With the rollback override set, it tracks that.
+    """
+    expected = os.environ.get("KBL_ANTHROPIC_MODEL", "claude-opus-4-8")
+    assert anthropic_client._DEFAULT_MODEL == expected
 
 
 def test_call_opus_model_env_override(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -226,7 +235,7 @@ def test_call_opus_prompt_cache_hit_second_call(monkeypatch: pytest.MonkeyPatch)
             cache_creation_input_tokens=0,
         ),
         stop_reason="end_turn",
-        model="claude-opus-4-7",
+        model="claude-opus-4-8",
     )
 
     resp = call_opus(system="s", user="u", client=mock_client)

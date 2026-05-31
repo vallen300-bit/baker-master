@@ -2,7 +2,7 @@
 
 Pricing keys are FAMILY-level aliases (claude-opus-4, claude-sonnet-4,
 claude-haiku-4). Real Anthropic model IDs are versioned
-(claude-opus-4-6, claude-haiku-4-5-20251001) — `_model_key()` normalizes
+(claude-opus-4-8, claude-haiku-4-5-20251001) — `_model_key()` normalizes
 before looking up PRICING, and raises ValueError on unknown models
 (R1.B6: stricter than silent $0, which would break cap enforcement).
 
@@ -33,8 +33,9 @@ _local = _stdlib_logging.getLogger("kbl")
 # without a code deploy. Local models are free.
 PRICING: dict[str, dict[str, float]] = {
     "claude-opus-4": {
-        "input": float(os.getenv("PRICE_OPUS4_IN", "15.00")),
-        "output": float(os.getenv("PRICE_OPUS4_OUT", "75.00")),
+        # Opus 4.7/4.8 pricing, 2026-05-28 (was $15/$75 for legacy Opus 4.x).
+        "input": float(os.getenv("PRICE_OPUS4_IN", "5.00")),
+        "output": float(os.getenv("PRICE_OPUS4_OUT", "25.00")),
     },
     "claude-sonnet-4": {
         "input": float(os.getenv("PRICE_SONNET4_IN", "3.00")),

@@ -151,7 +151,7 @@ def _make_opus_response(
         cost_usd=cost,
         latency_ms=1000,
         stop_reason="end_turn",
-        model_id="claude-opus-4-7",
+        model_id="claude-opus-4-8",
     )
 
 
