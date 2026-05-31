@@ -98,12 +98,12 @@
     <li><b>Claim</b> — B-code orients (brief + memory), confirms on bus.</li>
     <li><b>Implementation</b> — surgical, tests-first, fault-tolerant.</li>
     <li><b>Ship report</b> — literal pytest output; no "by inspection".</li>
-    <li><span class="gate">Review gates</span> — G0 Codex pre-review (cross-vendor) → G1 AH1 fold / gate-1 static review → G2 <code>/security-review</code> / gate-2 where required → G3 AH2 deputy plus deeper gate-3 / gate-4 reviews where applicable.</li>
+    <li><span class="gate">Review gates</span> — G0 Codex pre-review (cross-vendor) → G1 AH1 fold + AH2 static review / gate-1 → G2 <code>/security-review</code> / gate-2 where required → G3 deep gates (gate-3 picker-architect, gate-4 code-reviewer) where applicable. AH2's static pass is G1; G3 is the deep-gate band, not deputy review alone.</li>
     <li><b>Merge</b> — AH1 squash-merge on green gates.</li>
     <li><b>Deploy</b> — Render auto-deploys from <code>main</code>.</li>
     <li><b>Post-deploy AC + writeback</b> — verify ACs live → PINNED update, activity log, cascade-back-prop, lessons.</li>
   </ol>
-  <p class="dim"><b>Gate naming:</b> v6 uses G0-G3 for the lifecycle. Existing ops skills still use gate-1 through gate-4. Map G1 to gate-1 static review, G2 to gate-2 <code>/security-review</code>, and G3 to deputy / architecture / code-reviewer deeper gates where applicable.</p>
+  <p class="dim"><b>Gate naming:</b> v6 uses G0-G3 for the lifecycle. Existing ops skills still use gate-1 through gate-4. <b>G0</b> = Codex cross-vendor pre-review (no gate-N equivalent — it predates the gate ladder). <b>G1</b> = gate-1 static review (AH1 fold + AH2 static read). <b>G2</b> = gate-2 <code>/security-review</code>. <b>G3</b> = the deep gates — gate-3 (picker-architect) + gate-4 (code-reviewer) — applied where architecture or shared-contract risk exists, not satisfied by AH2 deputy review alone. Canonical detail: the <code>done-rubrics-stop-gate</code> skill.</p>
   <p class="dim"><b>Security-review precision:</b> <code>/security-review</code> is mandatory for Tier-B PRs and executable, DB, security, auth, API, webhook, external-surface, email, WhatsApp, or Render-touching changes. Docs-only / architecture-only work may skip it when the diff is prose or static HTML only and the skip reason is recorded.</p>
 
   <h2><span class="n">5</span>Harness V2 implications</h2>
