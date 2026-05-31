@@ -69,7 +69,13 @@
           "matter": "baker"
         },
         {
-          "title": "Baker System Architecture v6 \u2014 31 May 2026 (current)",
+          "title": "Baker System Architecture v6 \u2014 Non-Agent Presentation (31 May 2026)",
+          "file": "baker-v6-presentation.html",
+          "created": "2026-05-31",
+          "matter": "baker"
+        },
+        {
+          "title": "Baker System Architecture v6 \u2014 Agent Reference (31 May 2026)",
           "file": "baker-v6.html",
           "created": "2026-05-31",
           "matter": "baker"

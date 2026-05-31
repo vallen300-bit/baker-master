@@ -1,0 +1,276 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Baker v6 — Non-Agent Presentation</title>
+<style>
+  :root{
+    --bg:#08090d; --bg2:#0f1117; --panel:#14171f; --panel2:#1a1d27;
+    --line:#262a38; --fg:#e7e9f0; --dim:#9398ab; --bright:#ffffff;
+    --blue:#4f8cff; --violet:#a78bfa; --green:#34d399; --pink:#f472b6;
+    --amber:#fbbf24; --cyan:#38bdf8; --orange:#f59e42;
+  }
+  *{margin:0;padding:0;box-sizing:border-box;}
+  html{scroll-behavior:smooth;}
+  body{font-family:'Inter',-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;background:var(--bg);color:var(--fg);line-height:1.6;-webkit-font-smoothing:antialiased;}
+  .wrap{max-width:1080px;margin:0 auto;padding:2rem 1.5rem 4rem;}
+  .section{margin:4.5rem 0;}
+  .eyebrow{font-size:0.72rem;text-transform:uppercase;letter-spacing:0.18em;color:var(--dim);margin-bottom:0.75rem;}
+  h2{font-size:1.5rem;font-weight:700;color:var(--bright);letter-spacing:-0.02em;margin-bottom:0.4rem;}
+  .sub{color:var(--dim);font-size:0.95rem;max-width:640px;margin-bottom:1.75rem;}
+
+  /* HERO */
+  .hero{position:relative;text-align:center;padding:5rem 1rem 3.5rem;border-bottom:1px solid var(--line);overflow:hidden;}
+  .hero::before{content:'';position:absolute;inset:-40% 0 auto 0;height:480px;background:radial-gradient(60% 60% at 50% 0%,rgba(79,140,255,0.18),rgba(167,139,250,0.10) 40%,transparent 70%);pointer-events:none;}
+  .hero h1{position:relative;font-size:4rem;font-weight:800;letter-spacing:-0.04em;background:linear-gradient(120deg,#fff 20%,var(--blue) 55%,var(--violet) 90%);-webkit-background-clip:text;background-clip:text;-webkit-text-fill-color:transparent;}
+  .hero .tagline{position:relative;color:var(--fg);font-size:1.15rem;margin-top:0.5rem;font-weight:500;}
+  .hero .desc{position:relative;color:var(--dim);font-size:0.95rem;margin-top:0.75rem;}
+  .chip{position:relative;display:inline-block;margin-top:1.5rem;padding:0.35rem 0.9rem;border:1px solid var(--line);border-radius:999px;font-size:0.78rem;color:var(--dim);background:rgba(255,255,255,0.02);}
+  .chip b{color:var(--green);}
+
+  /* SHIFT before/after */
+  .shift{display:grid;grid-template-columns:1fr auto 1fr;gap:1.5rem;align-items:center;}
+  .shift-card{background:var(--panel);border:1px solid var(--line);border-radius:16px;padding:1.5rem;text-align:center;}
+  .shift-card .lbl{font-size:0.72rem;text-transform:uppercase;letter-spacing:0.1em;color:var(--dim);margin-bottom:0.9rem;}
+  .dots{display:flex;flex-wrap:wrap;gap:0.45rem;justify-content:center;margin-bottom:0.9rem;}
+  .dot{width:14px;height:14px;border-radius:50%;background:var(--line);}
+  .dot.on{background:var(--blue);box-shadow:0 0 10px rgba(79,140,255,0.6);}
+  .dot.v{background:var(--violet);box-shadow:0 0 10px rgba(167,139,250,0.6);}
+  .dot.g{background:var(--green);box-shadow:0 0 10px rgba(52,211,153,0.5);}
+  .dot.p{background:var(--pink);box-shadow:0 0 10px rgba(244,114,182,0.5);}
+  .shift-card .cap{font-size:0.85rem;color:var(--fg);font-weight:600;}
+  .shift-card .yr{font-size:0.75rem;color:var(--dim);}
+  .arrow-mid{font-size:1.6rem;color:var(--violet);}
+
+  /* LAYERS */
+  .layers{display:flex;flex-direction:column;gap:0.6rem;}
+  .layer{position:relative;border-radius:16px;padding:1.4rem 1.6rem;border:1px solid var(--line);}
+  .layer.authority{background:linear-gradient(135deg,rgba(245,158,66,0.12),rgba(245,158,66,0.03));border-color:rgba(245,158,66,0.3);}
+  .layer.reason{background:linear-gradient(135deg,rgba(167,139,250,0.12),rgba(79,140,255,0.04));border-color:rgba(167,139,250,0.3);}
+  .layer.sentinel{background:linear-gradient(135deg,rgba(79,140,255,0.12),rgba(56,189,248,0.04));border-color:rgba(79,140,255,0.3);}
+  .layer .lname{font-size:0.95rem;font-weight:700;color:var(--bright);}
+  .layer .ldesc{font-size:0.85rem;color:var(--dim);margin-top:0.2rem;}
+  .layer .members{margin-top:0.7rem;display:flex;flex-wrap:wrap;gap:0.4rem;}
+  .pill{font-size:0.76rem;padding:0.25rem 0.65rem;border-radius:999px;background:rgba(255,255,255,0.05);border:1px solid var(--line);color:var(--fg);}
+  .layer-arrow{text-align:center;color:var(--dim);font-size:1.1rem;line-height:0.6;}
+
+  /* BUS hub-and-spoke */
+  .busbox{background:var(--panel);border:1px solid var(--line);border-radius:18px;padding:2rem 1.5rem;}
+  .node-row{display:flex;justify-content:center;flex-wrap:wrap;gap:0.7rem;}
+  .node{font-size:0.78rem;padding:0.5rem 0.85rem;border-radius:10px;background:var(--panel2);border:1px solid var(--line);color:var(--fg);text-align:center;min-width:92px;}
+  .node small{display:block;color:var(--dim);font-size:0.66rem;margin-top:0.1rem;}
+  .node.orch{border-color:rgba(167,139,250,0.5);} .node.orch small{color:var(--violet);}
+  .node.auth{border-color:rgba(245,158,66,0.5);} .node.auth small{color:var(--orange);}
+  .node.build{border-color:rgba(52,211,153,0.5);} .node.build small{color:var(--green);}
+  .node.review{border-color:rgba(244,114,182,0.5);} .node.review small{color:var(--pink);}
+  .node.spec{border-color:rgba(56,189,248,0.5);} .node.spec small{color:var(--cyan);}
+  .connectors{height:26px;display:flex;justify-content:center;}
+  .connectors::before{content:'';width:2px;height:100%;background:linear-gradient(var(--violet),transparent);opacity:0.5;}
+  .bus-bar{margin:0.4rem 0;height:46px;border-radius:12px;background:linear-gradient(90deg,var(--blue),var(--violet),var(--pink));display:flex;align-items:center;justify-content:center;color:#0b0b12;font-weight:800;font-size:0.92rem;letter-spacing:0.04em;box-shadow:0 0 30px rgba(167,139,250,0.35);position:relative;overflow:hidden;}
+  .bus-bar::after{content:'';position:absolute;inset:0;background:linear-gradient(90deg,transparent,rgba(255,255,255,0.35),transparent);transform:translateX(-100%);animation:sweep 3.5s infinite;}
+  @keyframes sweep{0%{transform:translateX(-100%);}60%,100%{transform:translateX(100%);}}
+  .bus-cap{text-align:center;color:var(--dim);font-size:0.8rem;margin-top:0.9rem;}
+
+  /* CAST */
+  .cast{display:grid;grid-template-columns:repeat(auto-fill,minmax(210px,1fr));gap:0.9rem;}
+  .actor{background:var(--panel);border:1px solid var(--line);border-radius:14px;padding:1.1rem 1.2rem;transition:transform 0.15s,border-color 0.2s;}
+  .actor:hover{transform:translateY(-3px);border-color:var(--violet);}
+  .actor .ic{font-size:1.5rem;}
+  .actor h4{font-size:0.95rem;color:var(--bright);margin-top:0.4rem;}
+  .actor .r{font-size:0.8rem;color:var(--dim);margin-top:0.15rem;}
+  .actor .badge{display:inline-block;margin-top:0.6rem;font-size:0.68rem;padding:0.15rem 0.5rem;border-radius:999px;letter-spacing:0.03em;}
+  .b-decide{background:rgba(245,158,66,0.15);color:var(--orange);}
+  .b-orch{background:rgba(167,139,250,0.15);color:var(--violet);}
+  .b-build{background:rgba(52,211,153,0.15);color:var(--green);}
+  .b-check{background:rgba(244,114,182,0.15);color:var(--pink);}
+  .b-spec{background:rgba(56,189,248,0.15);color:var(--cyan);}
+
+  /* AUTHORITY pyramid */
+  .pyramid{display:flex;flex-direction:column;align-items:center;gap:0.5rem;}
+  .prow{border-radius:12px;padding:1rem 1.5rem;text-align:center;border:1px solid var(--line);}
+  .prow .who{font-weight:700;color:var(--bright);font-size:0.95rem;}
+  .prow .what{font-size:0.8rem;color:var(--dim);margin-top:0.15rem;}
+  .p1{width:46%;background:linear-gradient(135deg,rgba(245,158,66,0.18),rgba(245,158,66,0.05));border-color:rgba(245,158,66,0.4);}
+  .p2{width:68%;background:linear-gradient(135deg,rgba(167,139,250,0.16),rgba(167,139,250,0.04));border-color:rgba(167,139,250,0.4);}
+  .p3{width:90%;background:linear-gradient(135deg,rgba(52,211,153,0.14),rgba(244,114,182,0.06));border-color:var(--line);}
+  .tiers{display:grid;grid-template-columns:repeat(3,1fr);gap:0.8rem;margin-top:1.5rem;}
+  .tcard{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:1rem 1.1rem;}
+  .tcard .t{font-weight:700;font-size:0.85rem;}
+  .tcard.a .t{color:var(--green);} .tcard.b .t{color:var(--amber);} .tcard.c .t{color:var(--orange);}
+  .tcard p{font-size:0.78rem;color:var(--dim);margin-top:0.3rem;}
+
+  /* PIPELINE */
+  .pipe{display:flex;flex-wrap:wrap;gap:0.5rem;align-items:stretch;}
+  .stage{flex:1;min-width:96px;background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:0.8rem 0.7rem;text-align:center;position:relative;}
+  .stage .num{font-size:0.7rem;color:var(--violet);font-weight:700;}
+  .stage .nm{font-size:0.8rem;color:var(--fg);font-weight:600;margin-top:0.2rem;}
+  .stage.gate{border-color:var(--pink);background:linear-gradient(135deg,rgba(244,114,182,0.12),rgba(244,114,182,0.03));}
+  .stage.gate .num{color:var(--pink);}
+  .gates-detail{margin-top:0.9rem;display:flex;flex-wrap:wrap;gap:0.4rem;justify-content:center;}
+  .gpill{font-size:0.72rem;padding:0.25rem 0.6rem;border-radius:999px;background:rgba(244,114,182,0.12);border:1px solid rgba(244,114,182,0.3);color:var(--pink);}
+
+  .foot{margin-top:4rem;padding-top:1.5rem;border-top:1px solid var(--line);text-align:center;color:var(--dim);font-size:0.78rem;}
+  .foot a{color:var(--blue);text-decoration:none;}
+
+  @media(max-width:720px){
+    .hero h1{font-size:2.6rem;} .shift{grid-template-columns:1fr;} .arrow-mid{transform:rotate(90deg);}
+    .tiers{grid-template-columns:1fr;} .p1,.p2,.p3{width:100%;}
+  }
+</style>
+</head>
+<body>
+
+  <div class="hero">
+    <h1>Baker</h1>
+    <div class="tagline">How the institution senses, thinks, builds, and decides</div>
+    <div class="desc">System architecture — v6</div>
+    <div class="chip"><b>v6</b> · 31 May 2026 · the picture in five diagrams</div>
+  </div>
+
+  <div class="wrap">
+
+    <!-- THE SHIFT -->
+    <div class="section">
+      <div class="eyebrow">The shift</div>
+      <h2>From a desk to an institution</h2>
+      <p class="sub">Baker used to be three things: an always-on assistant, one thinking session, and you. It is now an organisation of specialised agents that coordinate on a shared message bus.</p>
+      <div class="shift">
+        <div class="shift-card">
+          <div class="lbl">Before</div>
+          <div class="dots"><span class="dot on"></span><span class="dot v"></span><span class="dot" style="background:var(--orange);box-shadow:0 0 10px rgba(245,158,66,.6)"></span></div>
+          <div class="cap">3 actors</div>
+          <div class="yr">Baker · Cowork · Director</div>
+        </div>
+        <div class="arrow-mid">→</div>
+        <div class="shift-card">
+          <div class="lbl">Now</div>
+          <div class="dots"><span class="dot on"></span><span class="dot v"></span><span class="dot g"></span><span class="dot p"></span><span class="dot on"></span><span class="dot v"></span><span class="dot g"></span><span class="dot" style="background:var(--cyan);box-shadow:0 0 10px rgba(56,189,248,.6)"></span><span class="dot p"></span><span class="dot" style="background:var(--orange);box-shadow:0 0 10px rgba(245,158,66,.6)"></span><span class="dot on"></span></div>
+          <div class="cap">An institution</div>
+          <div class="yr">10+ agents on one bus</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- THREE LAYERS -->
+    <div class="section">
+      <div class="eyebrow">The structure</div>
+      <h2>Three layers</h2>
+      <p class="sub">Everything Baker does sits in one of three layers. The top decides, the middle thinks and builds, the bottom never sleeps.</p>
+      <div class="layers">
+        <div class="layer authority">
+          <div class="lname">⬢ Authority — who decides</div>
+          <div class="ldesc">Sets direction and ratifies. Talks to one agent: AH1.</div>
+          <div class="members"><span class="pill">Director (Dimitry)</span></div>
+        </div>
+        <div class="layer-arrow">▼</div>
+        <div class="layer reason">
+          <div class="lname">◆ Reasoning &amp; Orchestration — who thinks &amp; builds</div>
+          <div class="ldesc">The fleet. Plans, writes, reviews, verifies — coordinating on the bus.</div>
+          <div class="members"><span class="pill">AH1 lead</span><span class="pill">AH1 cowork</span><span class="pill">AH2 deputy</span><span class="pill">B-codes b1–b4</span><span class="pill">Codex</span><span class="pill">Architect</span><span class="pill">AID</span><span class="pill">Researcher</span><span class="pill">Matter desks</span></div>
+        </div>
+        <div class="layer-arrow">▼</div>
+        <div class="layer sentinel">
+          <div class="lname">● Sentinel — who never sleeps</div>
+          <div class="ldesc">Baker the service. Watches every channel, remembers everything, serves it back.</div>
+          <div class="members"><span class="pill">Baker</span><span class="pill">Email · WhatsApp · Meetings</span><span class="pill">ClickUp · RSS · Memory</span></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- THE BUS -->
+    <div class="section">
+      <div class="eyebrow">The spine</div>
+      <h2>One bus connects everyone</h2>
+      <p class="sub">The single most important change since the old model: every agent talks to every other agent over the Brisen Lab bus — dispatches, ship reports, blockers, gate verdicts, acknowledgements.</p>
+      <div class="busbox">
+        <div class="node-row">
+          <div class="node auth">Director<small>decides</small></div>
+          <div class="node orch">AH1 lead<small>orchestrates</small></div>
+          <div class="node orch">AH1 cowork<small>orchestrates</small></div>
+          <div class="node orch">AH2 deputy<small>reviews</small></div>
+        </div>
+        <div class="connectors"></div>
+        <div class="bus-bar">BRISEN LAB BUS</div>
+        <div class="connectors"></div>
+        <div class="node-row">
+          <div class="node build">B-codes<small>build</small></div>
+          <div class="node review">Codex<small>verifies</small></div>
+          <div class="node review">Architect<small>designs</small></div>
+          <div class="node spec">AID<small>IT / SRE</small></div>
+          <div class="node spec">Researcher<small>research</small></div>
+          <div class="node spec">Matter desks<small>per-matter</small></div>
+        </div>
+        <div class="bus-cap">Plus the Baker MCP (~47 memory tools) and the vault as shared truth.</div>
+      </div>
+    </div>
+
+    <!-- THE CAST -->
+    <div class="section">
+      <div class="eyebrow">The cast</div>
+      <h2>Who does what</h2>
+      <p class="sub">Eleven roles, four jobs: decide, orchestrate, build, check. Colour tells you which.</p>
+      <div class="cast">
+        <div class="actor"><div class="ic">⬢</div><h4>Director</h4><div class="r">Final authority. Sets direction, ratifies. Non-technical.</div><span class="badge b-decide">decides</span></div>
+        <div class="actor"><div class="ic">●</div><h4>Baker (Sentinel)</h4><div class="r">Always-on service. Watches channels, holds the memory.</div><span class="badge b-spec">remembers</span></div>
+        <div class="actor"><div class="ic">◆</div><h4>AH1 — lead</h4><div class="r">Sole orchestrator. Briefs, dispatches, reviews, merges, deploys.</div><span class="badge b-orch">orchestrates</span></div>
+        <div class="actor"><div class="ic">◆</div><h4>AH1 — cowork</h4><div class="r">Same authority, on the Cowork desktop session. (This one.)</div><span class="badge b-orch">orchestrates</span></div>
+        <div class="actor"><div class="ic">⬙</div><h4>AH2 — deputy</h4><div class="r">Cross-checks the lead's work; final ship gate.</div><span class="badge b-check">reviews</span></div>
+        <div class="actor"><div class="ic">⚙</div><h4>B-codes (b1–b4)</h4><div class="r">The build pool. Turn briefs into tested, shipped code.</div><span class="badge b-build">builds</span></div>
+        <div class="actor"><div class="ic">🔎</div><h4>Codex</h4><div class="r">Independent verifier from a different AI vendor. A second pair of eyes.</div><span class="badge b-check">verifies</span></div>
+        <div class="actor"><div class="ic">📐</div><h4>Architect</h4><div class="r">Reviews the design before anyone builds it.</div><span class="badge b-check">designs</span></div>
+        <div class="actor"><div class="ic">🛠</div><h4>AID — AI Dennis</h4><div class="r">IT, infrastructure, and AI strategy. Design-time only.</div><span class="badge b-spec">IT / SRE</span></div>
+        <div class="actor"><div class="ic">🧭</div><h4>Researcher</h4><div class="r">Gathers and synthesises across many sources.</div><span class="badge b-spec">researches</span></div>
+        <div class="actor"><div class="ic">🗂</div><h4>Matter desks</h4><div class="r">One brain per matter — Hagenauer, MOVIE, AO, Baden-Baden, more.</div><span class="badge b-spec">per-matter</span></div>
+      </div>
+    </div>
+
+    <!-- AUTHORITY -->
+    <div class="section">
+      <div class="eyebrow">Who decides what</div>
+      <h2>The bank model</h2>
+      <p class="sub">You authorise; the fleet executes. Decisions fall into three tiers — only one of them ever reaches your desk.</p>
+      <div class="pyramid">
+        <div class="prow p1"><div class="who">⬢ Director</div><div class="what">Final say — capital, counterparties, anything externally-facing</div></div>
+        <div class="prow p2"><div class="who">◆ AH1</div><div class="what">Orchestrates the fleet; runs everything inside the green lane</div></div>
+        <div class="prow p3"><div class="who">⚙ 🔎 📐 🛠 Build &amp; review fleet</div><div class="what">Feed AH1 — they never reach the Director directly</div></div>
+      </div>
+      <div class="tiers">
+        <div class="tcard a"><div class="t">Tier A — automatic</div><p>AH1 just does it: dispatch, merge on green review, routine commits. You hear about it after.</p></div>
+        <div class="tcard b"><div class="t">Tier B — ask first</div><p>AH1 prepares the exact action and asks "Shall I?" — env changes, external posts, secrets.</p></div>
+        <div class="tcard c"><div class="t">Tier C — you only</div><p>Money, counterparty drafts, speaking as the Chairman. The fleet surfaces; never acts.</p></div>
+      </div>
+    </div>
+
+    <!-- PIPELINE -->
+    <div class="section">
+      <div class="eyebrow">How work gets done</div>
+      <h2>From idea to live in nine steps</h2>
+      <p class="sub">Every change runs the same track. The pink step is the quality gate — three independent checks before anything merges.</p>
+      <div class="pipe">
+        <div class="stage"><div class="num">1</div><div class="nm">Brief</div></div>
+        <div class="stage"><div class="num">2</div><div class="nm">Dispatch</div></div>
+        <div class="stage"><div class="num">3</div><div class="nm">Claim</div></div>
+        <div class="stage"><div class="num">4</div><div class="nm">Build</div></div>
+        <div class="stage"><div class="num">5</div><div class="nm">Ship report</div></div>
+        <div class="stage gate"><div class="num">6</div><div class="nm">Review gates</div></div>
+        <div class="stage"><div class="num">7</div><div class="nm">Merge</div></div>
+        <div class="stage"><div class="num">8</div><div class="nm">Deploy</div></div>
+        <div class="stage"><div class="num">9</div><div class="nm">Verify &amp; remember</div></div>
+      </div>
+      <div class="gates-detail">
+        <span class="gpill">G0 · Codex (cross-vendor)</span>
+        <span class="gpill">G1 · AH1 fold</span>
+        <span class="gpill">G2 · security review</span>
+        <span class="gpill">G3 · AH2 deputy</span>
+      </div>
+    </div>
+
+    <div class="foot">
+      Baker System Architecture — v6 · Non-Agent Presentation · 31 May 2026<br>
+      Technical reference for agents: <a href="baker-v6.html">baker-v6.html</a>
+    </div>
+
+  </div>
+</body>
+</html>
