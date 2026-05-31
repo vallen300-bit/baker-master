@@ -4,7 +4,7 @@ Single entry point: generate_recharge_report(facts_for_trade, model_tier="high")
 - Loads canonical scaffold template (read-only).
 - Calls claude-opus-4-7 (high) or claude-sonnet-4-6 (routine) via tool-use,
   strict=True, prompt-caching on tool def + scaffold.
-- Extended thinking enabled (8000-token budget) for Mehrkosten reasoning.
+- Adaptive extended thinking (effort="high") for Mehrkosten reasoning.
 - Validates rendered markdown; one repair retry on ValidationError;
   surfaces to human on second failure.
 """
@@ -23,7 +23,12 @@ log = logging.getLogger(__name__)
 
 MODEL_HIGH = "claude-opus-4-7"
 MODEL_ROUTINE = "claude-sonnet-4-6"
-EXTENDED_THINKING_BUDGET = 8_000
+# SPECIALIST-THINKING-2: Opus 4.7/4.8 reject manual {"type":"enabled",
+# "budget_tokens":N} with HTTP 400; adaptive thinking is the only accepted mode
+# and thinking depth is controlled by output_config.effort, not a token budget.
+# "high" (the API default) keeps full reasoning depth for this low-volume,
+# quality-critical Director-facing report. Live-verified 2026-05-31.
+EXTENDED_THINKING_EFFORT = "high"
 
 
 class RechargeReportGenerationError(Exception):
@@ -86,7 +91,8 @@ def generate_recharge_report(
             system=_system_prompt(scaffold_text),
             tools=[tool],
             tool_choice={"type": "auto"},
-            thinking={"type": "enabled", "budget_tokens": EXTENDED_THINKING_BUDGET},
+            thinking={"type": "adaptive"},
+            output_config={"effort": EXTENDED_THINKING_EFFORT},
             messages=[{"role": "user", "content": user_content}],
         )
         tool_use_block = next(

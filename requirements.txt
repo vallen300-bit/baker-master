@@ -2,7 +2,7 @@
 # Install: pip install -r requirements.txt
 
 # Core
-anthropic>=0.40.0          # Claude API client
+anthropic>=0.82.0          # Claude API client (>=0.82 needed for adaptive thinking + output_config.effort on Opus 4.7/4.8)
 google-genai>=1.0.0        # Gemini API client (GEMINI-MIGRATION-1)
 voyageai>=0.3.0            # Voyage AI embeddings
 qdrant-client>=1.12.0      # Qdrant vector DB

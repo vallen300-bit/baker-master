@@ -40,6 +40,31 @@ def _cache_wrap(system_str: str) -> list:
     return [{"type": "text", "text": system_str,
              "cache_control": {"type": "ephemeral", "ttl": "1h"}}]
 
+
+# SPECIALIST-THINKING-2: extended-thinking request shape for Opus 4.7/4.8.
+# Manual thinking ({"type": "enabled", "budget_tokens": N}) is rejected with
+# HTTP 400 on Opus 4.7 and 4.8 ("thinking.type.enabled is not supported for
+# this model"); adaptive thinking is the only accepted mode. Thinking depth is
+# now controlled by `output_config.effort` (which replaced budget_tokens), not a
+# manual token budget. Live-verified 2026-05-31 against claude-opus-4-7/4-8.
+# Effort is a single tunable knob: "medium" keeps the high-volume specialist
+# path cost-aware while still letting adaptive think on genuinely hard turns.
+_THINKING_EFFORT = "medium"
+
+
+def _adaptive_thinking_params(effort: str = _THINKING_EFFORT) -> dict:
+    """API params that enable adaptive extended thinking on Opus 4.7+.
+
+    Returns the kwargs to merge into a messages.create() call:
+      thinking={"type": "adaptive"}   — only mode accepted on 4.7/4.8
+      output_config={"effort": ...}   — depth control (replaces budget_tokens)
+    """
+    return {
+        "thinking": {"type": "adaptive"},
+        "output_config": {"effort": effort},
+    }
+
+
 # Max sub-tasks in delegate path (safety bound)
 MAX_SUB_TASKS = 4
 
@@ -693,7 +718,9 @@ class CapabilityRunner:
                 "tools": tools,
             }
             if capability.use_thinking and complexity != "fast":
-                api_params["thinking"] = {"type": "enabled", "budget_tokens": 10000}
+                # SPECIALIST-THINKING-2: adaptive thinking (Opus 4.7/4.8 reject
+                # manual budget_tokens with HTTP 400). Depth via output_config.effort.
+                api_params.update(_adaptive_thinking_params())
                 api_params["max_tokens"] = max(api_params["max_tokens"], 16000)
 
             response = self.claude.messages.create(**api_params)
@@ -740,7 +767,21 @@ class CapabilityRunner:
                 tool_uses = []
                 for block in response.content:
                     if block.type == "thinking":
-                        continue  # SPECIALIST-THINKING-1: skip thinking blocks
+                        # SPECIALIST-THINKING-2: preserve thinking blocks in the
+                        # assistant round-trip. Adaptive thinking + tool use
+                        # expects the unmodified block (incl. signature) passed
+                        # back — keeps reasoning continuity across tool turns and
+                        # future-proofs against stricter enforcement.
+                        assistant_content.append({
+                            "type": "thinking", "thinking": block.thinking,
+                            "signature": block.signature,
+                        })
+                        continue
+                    if block.type == "redacted_thinking":
+                        assistant_content.append({
+                            "type": "redacted_thinking", "data": block.data,
+                        })
+                        continue
                     if block.type == "text":
                         assistant_content.append({"type": "text", "text": block.text})
                     elif block.type == "tool_use":
@@ -911,7 +952,9 @@ class CapabilityRunner:
                 "tools": tools,
             }
             if capability.use_thinking and complexity != "fast":
-                api_params["thinking"] = {"type": "enabled", "budget_tokens": 10000}
+                # SPECIALIST-THINKING-2: adaptive thinking (Opus 4.7/4.8 reject
+                # manual budget_tokens with HTTP 400). Depth via output_config.effort.
+                api_params.update(_adaptive_thinking_params())
                 api_params["max_tokens"] = max(api_params["max_tokens"], 16000)
 
             response = self.claude.messages.create(**api_params)
@@ -960,7 +1003,21 @@ class CapabilityRunner:
                 tool_uses = []
                 for block in response.content:
                     if block.type == "thinking":
-                        continue  # SPECIALIST-THINKING-1: skip thinking blocks
+                        # SPECIALIST-THINKING-2: preserve thinking blocks in the
+                        # assistant round-trip. Adaptive thinking + tool use
+                        # expects the unmodified block (incl. signature) passed
+                        # back — keeps reasoning continuity across tool turns and
+                        # future-proofs against stricter enforcement.
+                        assistant_content.append({
+                            "type": "thinking", "thinking": block.thinking,
+                            "signature": block.signature,
+                        })
+                        continue
+                    if block.type == "redacted_thinking":
+                        assistant_content.append({
+                            "type": "redacted_thinking", "data": block.data,
+                        })
+                        continue
                     if block.type == "text":
                         assistant_content.append({"type": "text", "text": block.text})
                         if block.text:

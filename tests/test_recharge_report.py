@@ -227,6 +227,26 @@ def test_generator_retries_once_on_validation_fail(mock_client_cls, tmp_path):
 
 
 @patch("claimsmax.recharge_report.generator.anthropic.Anthropic")
+def test_generator_uses_adaptive_thinking_not_manual_budget(mock_client_cls, tmp_path):
+    """SPECIALIST-THINKING-2: must send adaptive thinking, never manual
+    {"type":"enabled","budget_tokens":N} — the latter returns HTTP 400 on
+    Opus 4.7/4.8 (live-verified 2026-05-31)."""
+    template_path = _write_canonical_template(tmp_path)
+    good_data = _valid_report_dict()
+    mock_client = mock_client_cls.return_value
+    mock_client.messages.create.side_effect = [_make_anthropic_response(good_data)]
+    generate_recharge_report(
+        "facts about the painter trade", model_tier="routine", template_path=template_path
+    )
+    kwargs = mock_client.messages.create.call_args.kwargs
+    assert kwargs["thinking"] == {"type": "adaptive"}
+    assert "budget_tokens" not in kwargs["thinking"]
+    assert kwargs["thinking"].get("type") != "enabled"
+    # Depth via output_config.effort (replaces budget_tokens).
+    assert kwargs["output_config"] == {"effort": "high"}
+
+
+@patch("claimsmax.recharge_report.generator.anthropic.Anthropic")
 def test_generator_surfaces_after_two_failures(mock_client_cls, tmp_path):
     template_path = _write_canonical_template(tmp_path)
     bad_data = _valid_report_dict({"executive_summary": 10})
