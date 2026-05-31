@@ -129,6 +129,15 @@ def check_scheduler_liveness() -> dict:
             cur.close()
             return summary
 
+        # SCHEDULER_LIVENESS_REVIVE_1 Fix 2: bound the watchdog's own SELECTs so a
+        # slow server-side query cannot hold a pooled connection open and worsen
+        # the very pool exhaustion this sentinel exists to detect. Placed after
+        # the cold-start guard (which issues no SQL) so it scopes the actual
+        # SELECT loop and we never touch the DB on a cold-start skip. SET LOCAL is
+        # scoped to this transaction; the except-block conn.rollback() below
+        # already handles a server-side QueryCanceled cleanly.
+        cur.execute("SET LOCAL statement_timeout = '20s'")
+
         # ---- Per-job staleness ------------------------------------------
         for job_id, (interval, tier) in EXPECTED_JOBS.items():
             staleness_window = max(interval * TOLERANCE_FACTOR, MIN_STALENESS_SECONDS)

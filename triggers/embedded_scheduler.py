@@ -73,40 +73,77 @@ def _job_listener(event):
     try:
         from memory.store_back import SentinelStoreBack
         store = SentinelStoreBack._get_global_instance()
+
+        status = "error" if event.exception else "executed"
+        error_msg = str(event.exception)[:1000] if event.exception else None
+        _row = (event.job_id, event.scheduled_run_time, status, error_msg)
+        _insert_sql = """
+            INSERT INTO scheduler_executions
+                (job_id, fired_at, completed_at, status, error_msg)
+            VALUES (%s, %s, NOW(), %s, %s)
+        """
+
+        # SCHEDULER_LIVENESS_REVIVE_1 Fix 1: bounded pooled backoff. Replaces the
+        # single 100ms retry (JOB_LISTENER_HARDEN_1) with one immediate attempt +
+        # up to 3 retries at 100/200/400ms. Total worst-case 700ms is far below
+        # APScheduler misfire_grace_time (300s), so the listener never
+        # back-pressures the scheduler. Transient exhaustion of the shared
+        # maxconn=5 pool (FastAPI + ~40 jobs + Cortex) usually clears in that window.
+        import time
         conn = store._get_conn()
-        if not conn:
-            # JOB_LISTENER_HARDEN_1: brief sleep + one retry — transient pool
-            # exhaustion is common under spike (40+ jobs + FastAPI + Cortex share
-            # maxconn=5 pool). 100ms is well below APScheduler misfire_grace_time
-            # (300s) so listener cannot back-pressure the scheduler.
-            import time
-            time.sleep(0.1)
+        for _backoff in (0.1, 0.2, 0.4):
+            if conn:
+                break
+            time.sleep(_backoff)
             conn = store._get_conn()
-            if not conn:
-                _record_listener_drop(event.job_id)
-                return
-        try:
-            cur = conn.cursor()
-            status = "error" if event.exception else "executed"
-            error_msg = str(event.exception)[:1000] if event.exception else None
-            cur.execute(
-                """
-                INSERT INTO scheduler_executions
-                    (job_id, fired_at, completed_at, status, error_msg)
-                VALUES (%s, %s, NOW(), %s, %s)
-                """,
-                (event.job_id, event.scheduled_run_time, status, error_msg),
-            )
-            conn.commit()
-            cur.close()
-        except Exception as e:
+
+        if conn:
+            # Pooled path — return the connection to the shared pool when done.
             try:
-                conn.rollback()
-            except Exception:
-                pass
-            logger.warning(f"scheduler_executions write failed for {event.job_id}: {e}")
-        finally:
-            store._put_conn(conn)
+                cur = conn.cursor()
+                cur.execute(_insert_sql, _row)
+                conn.commit()
+                cur.close()
+            except Exception as e:
+                try:
+                    conn.rollback()
+                except Exception:
+                    pass
+                logger.warning(f"scheduler_executions write failed for {event.job_id}: {e}")
+            finally:
+                store._put_conn(conn)
+        else:
+            # SCHEDULER_LIVENESS_REVIVE_1 Fix 1: pooled path exhausted. Open a
+            # dedicated short-lived connection on the NON-POOLED Neon endpoint so
+            # this tiny observability INSERT does not depend on the shared
+            # maxconn=5 pool having a free slot. Per-event + short-lived; opened →
+            # INSERT → commit → closed in finally, never reused, never returned to
+            # the pool. Counts against Neon's raw connection ceiling (not the
+            # pooler) — acceptable for a single small INSERT under pool pressure.
+            import psycopg2
+            from config.settings import config
+            direct = None
+            try:
+                direct = psycopg2.connect(
+                    connect_timeout=5, **config.postgres.direct_dsn_params
+                )
+                cur = direct.cursor()
+                cur.execute(_insert_sql, _row)
+                direct.commit()
+                cur.close()
+            except Exception as e:
+                # Pooled retries AND the direct fallback both failed — only NOW
+                # is it a true, now-rare drop of the execution row.
+                _record_listener_drop(event.job_id)
+                logger.warning(
+                    f"JOB_LISTENER direct-conn fallback failed job_id={event.job_id}: {e}"
+                )
+            finally:
+                if direct is not None:
+                    try:
+                        direct.close()
+                    except Exception:
+                        pass
     except Exception as e:
         # Catastrophic failure (import, singleton, etc.) — log and continue.
         # Scheduler must not crash because of observability.
@@ -1678,6 +1715,15 @@ def start_scheduler():
     )
     _scheduler.add_listener(_job_listener, EVENT_JOB_EXECUTED | EVENT_JOB_ERROR)
     _register_jobs(_scheduler)
+    # SCHEDULER_LIVENESS_REVIVE_1 (optional, defense-in-depth): non-fatal
+    # self-presence check. get_jobs() is valid pre-start. Log-not-raise: the
+    # _start_scheduler() wrapper (outputs/dashboard.py) only logs on failure and
+    # continues boot, so a raise here would NOT abort — it would silently boot
+    # scheduler-less. So we surface absence loudly in logs without aborting.
+    if "scheduler_job_liveness" in {j.id for j in _scheduler.get_jobs()}:
+        logger.info("Self-bootstrap OK: scheduler_job_liveness present")
+    else:
+        logger.error("Self-bootstrap WARNING: scheduler_job_liveness NOT registered")
     _scheduler.start()
     logger.info(f"BackgroundScheduler started with {len(_scheduler.get_jobs())} jobs")
 

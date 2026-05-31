@@ -49,7 +49,9 @@ def _store_with_rows(rows_per_job: dict):
     cur = MagicMock()
     queries = []
 
-    def _execute(sql, params):
+    def _execute(sql, params=None):
+        # REVIVE_1 Fix 2: the watchdog now issues a param-less
+        # `SET LOCAL statement_timeout` before the per-job SELECTs.
         queries.append((sql, params))
         cur._next_jid = params[0] if params else None
 
