@@ -3,22 +3,22 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Baker v6 — Non-Agent Presentation</title>
+<title>Baker v6 — The Fleet, in Detail</title>
 <style>
   :root{
     --bg:#08090d; --bg2:#0f1117; --panel:#14171f; --panel2:#1a1d27;
     --line:#262a38; --fg:#e7e9f0; --dim:#9398ab; --bright:#ffffff;
     --blue:#4f8cff; --violet:#a78bfa; --green:#34d399; --pink:#f472b6;
-    --amber:#fbbf24; --cyan:#38bdf8; --orange:#f59e42;
+    --amber:#fbbf24; --cyan:#38bdf8; --orange:#f59e42; --red:#f87171;
   }
   *{margin:0;padding:0;box-sizing:border-box;}
   html{scroll-behavior:smooth;}
   body{font-family:'Inter',-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;background:var(--bg);color:var(--fg);line-height:1.6;-webkit-font-smoothing:antialiased;}
-  .wrap{max-width:1080px;margin:0 auto;padding:2rem 1.5rem 4rem;}
+  .wrap{max-width:1140px;margin:0 auto;padding:2rem 1.5rem 4rem;}
   .section{margin:4.5rem 0;}
   .eyebrow{font-size:0.72rem;text-transform:uppercase;letter-spacing:0.18em;color:var(--dim);margin-bottom:0.75rem;}
-  h2{font-size:1.5rem;font-weight:700;color:var(--bright);letter-spacing:-0.02em;margin-bottom:0.4rem;}
-  .sub{color:var(--dim);font-size:0.95rem;max-width:640px;margin-bottom:1.75rem;}
+  h2{font-size:1.55rem;font-weight:700;color:var(--bright);letter-spacing:-0.02em;margin-bottom:0.4rem;}
+  .sub{color:var(--dim);font-size:0.95rem;max-width:680px;margin-bottom:1.75rem;}
 
   /* HERO */
   .hero{position:relative;text-align:center;padding:5rem 1rem 3.5rem;border-bottom:1px solid var(--line);overflow:hidden;}
@@ -29,19 +29,12 @@
   .chip{position:relative;display:inline-block;margin-top:1.5rem;padding:0.35rem 0.9rem;border:1px solid var(--line);border-radius:999px;font-size:0.78rem;color:var(--dim);background:rgba(255,255,255,0.02);}
   .chip b{color:var(--green);}
 
-  /* SHIFT before/after */
-  .shift{display:grid;grid-template-columns:1fr auto 1fr;gap:1.5rem;align-items:center;}
-  .shift-card{background:var(--panel);border:1px solid var(--line);border-radius:16px;padding:1.5rem;text-align:center;}
-  .shift-card .lbl{font-size:0.72rem;text-transform:uppercase;letter-spacing:0.1em;color:var(--dim);margin-bottom:0.9rem;}
-  .dots{display:flex;flex-wrap:wrap;gap:0.45rem;justify-content:center;margin-bottom:0.9rem;}
-  .dot{width:14px;height:14px;border-radius:50%;background:var(--line);}
-  .dot.on{background:var(--blue);box-shadow:0 0 10px rgba(79,140,255,0.6);}
-  .dot.v{background:var(--violet);box-shadow:0 0 10px rgba(167,139,250,0.6);}
-  .dot.g{background:var(--green);box-shadow:0 0 10px rgba(52,211,153,0.5);}
-  .dot.p{background:var(--pink);box-shadow:0 0 10px rgba(244,114,182,0.5);}
-  .shift-card .cap{font-size:0.85rem;color:var(--fg);font-weight:600;}
-  .shift-card .yr{font-size:0.75rem;color:var(--dim);}
-  .arrow-mid{font-size:1.6rem;color:var(--violet);}
+  /* LEGEND */
+  .legend{display:flex;flex-wrap:wrap;gap:0.5rem;justify-content:center;margin-top:1.6rem;}
+  .lg{display:inline-flex;align-items:center;gap:0.4rem;font-size:0.74rem;color:var(--dim);border:1px solid var(--line);border-radius:999px;padding:0.25rem 0.7rem;background:rgba(255,255,255,0.02);}
+  .sw{width:9px;height:9px;border-radius:50%;}
+  .sw.decide{background:var(--orange);} .sw.orch{background:var(--violet);} .sw.build{background:var(--green);}
+  .sw.check{background:var(--pink);} .sw.desk{background:var(--cyan);} .sw.univ{background:var(--blue);}
 
   /* LAYERS */
   .layers{display:flex;flex-direction:column;gap:0.6rem;}
@@ -55,6 +48,26 @@
   .pill{font-size:0.76rem;padding:0.25rem 0.65rem;border-radius:999px;background:rgba(255,255,255,0.05);border:1px solid var(--line);color:var(--fg);}
   .layer-arrow{text-align:center;color:var(--dim);font-size:1.1rem;line-height:0.6;}
 
+  /* FLEET MAP (org chart) */
+  .orgwrap{background:var(--panel);border:1px solid var(--line);border-radius:18px;padding:2rem 1.4rem;}
+  .org-top{display:flex;justify-content:center;}
+  .org-node{border-radius:12px;padding:0.7rem 1.1rem;text-align:center;border:1px solid var(--line);background:var(--panel2);min-width:120px;}
+  .org-node .t{font-weight:700;color:var(--bright);font-size:0.9rem;}
+  .org-node .s{font-size:0.68rem;color:var(--dim);margin-top:0.1rem;}
+  .org-node.decide{border-color:rgba(245,158,66,0.5);background:linear-gradient(135deg,rgba(245,158,66,0.14),transparent);}
+  .org-node.orch{border-color:rgba(167,139,250,0.55);background:linear-gradient(135deg,rgba(167,139,250,0.14),transparent);}
+  .org-stem{height:24px;display:flex;justify-content:center;}
+  .org-stem::before{content:'';width:2px;height:100%;background:linear-gradient(var(--violet),rgba(167,139,250,0.15));}
+  .org-cols{display:grid;grid-template-columns:repeat(3,1fr);gap:0.9rem;}
+  .org-col{border:1px solid var(--line);border-radius:14px;padding:0.9rem 0.85rem;background:var(--bg2);}
+  .org-col .ch{font-size:0.7rem;text-transform:uppercase;letter-spacing:0.08em;font-weight:700;margin-bottom:0.6rem;display:flex;align-items:center;gap:0.4rem;}
+  .org-col.build .ch{color:var(--green);} .org-col.desk .ch{color:var(--cyan);} .org-col.univ .ch{color:var(--blue);}
+  .mini{display:flex;flex-wrap:wrap;gap:0.35rem;}
+  .mini span{font-size:0.72rem;padding:0.2rem 0.5rem;border-radius:7px;background:var(--panel2);border:1px solid var(--line);color:var(--fg);}
+  .org-col.build .mini span{border-color:rgba(52,211,153,0.3);}
+  .org-col.desk .mini span{border-color:rgba(56,189,248,0.3);}
+  .org-col.univ .mini span{border-color:rgba(79,140,255,0.3);}
+
   /* BUS hub-and-spoke */
   .busbox{background:var(--panel);border:1px solid var(--line);border-radius:18px;padding:2rem 1.5rem;}
   .node-row{display:flex;justify-content:center;flex-wrap:wrap;gap:0.7rem;}
@@ -64,7 +77,8 @@
   .node.auth{border-color:rgba(245,158,66,0.5);} .node.auth small{color:var(--orange);}
   .node.build{border-color:rgba(52,211,153,0.5);} .node.build small{color:var(--green);}
   .node.review{border-color:rgba(244,114,182,0.5);} .node.review small{color:var(--pink);}
-  .node.spec{border-color:rgba(56,189,248,0.5);} .node.spec small{color:var(--cyan);}
+  .node.desk{border-color:rgba(56,189,248,0.5);} .node.desk small{color:var(--cyan);}
+  .node.spec{border-color:rgba(79,140,255,0.5);} .node.spec small{color:var(--blue);}
   .connectors{height:26px;display:flex;justify-content:center;}
   .connectors::before{content:'';width:2px;height:100%;background:linear-gradient(var(--violet),transparent);opacity:0.5;}
   .bus-bar{margin:0.4rem 0;height:46px;border-radius:12px;background:linear-gradient(90deg,var(--blue),var(--violet),var(--pink));display:flex;align-items:center;justify-content:center;color:#0b0b12;font-weight:800;font-size:0.92rem;letter-spacing:0.04em;box-shadow:0 0 30px rgba(167,139,250,0.35);position:relative;overflow:hidden;}
@@ -72,19 +86,40 @@
   @keyframes sweep{0%{transform:translateX(-100%);}60%,100%{transform:translateX(100%);}}
   .bus-cap{text-align:center;color:var(--dim);font-size:0.8rem;margin-top:0.9rem;}
 
-  /* CAST */
-  .cast{display:grid;grid-template-columns:repeat(auto-fill,minmax(210px,1fr));gap:0.9rem;}
-  .actor{background:var(--panel);border:1px solid var(--line);border-radius:14px;padding:1.1rem 1.2rem;transition:transform 0.15s,border-color 0.2s;}
-  .actor:hover{transform:translateY(-3px);border-color:var(--violet);}
-  .actor .ic{font-size:1.5rem;}
-  .actor h4{font-size:0.95rem;color:var(--bright);margin-top:0.4rem;}
-  .actor .r{font-size:0.8rem;color:var(--dim);margin-top:0.15rem;}
-  .actor .badge{display:inline-block;margin-top:0.6rem;font-size:0.68rem;padding:0.15rem 0.5rem;border-radius:999px;letter-spacing:0.03em;}
-  .b-decide{background:rgba(245,158,66,0.15);color:var(--orange);}
-  .b-orch{background:rgba(167,139,250,0.15);color:var(--violet);}
-  .b-build{background:rgba(52,211,153,0.15);color:var(--green);}
-  .b-check{background:rgba(244,114,182,0.15);color:var(--pink);}
-  .b-spec{background:rgba(56,189,248,0.15);color:var(--cyan);}
+  /* ROSTER */
+  .group{margin-bottom:2.2rem;}
+  .group-head{display:flex;align-items:center;gap:0.6rem;margin-bottom:0.3rem;}
+  .group-head .gi{width:30px;height:30px;border-radius:8px;display:flex;align-items:center;justify-content:center;font-size:1rem;}
+  .group-head h3{font-size:1.08rem;color:var(--bright);font-weight:700;}
+  .group-head .cnt{font-size:0.72rem;color:var(--dim);border:1px solid var(--line);border-radius:999px;padding:0.1rem 0.55rem;}
+  .group-sub{font-size:0.85rem;color:var(--dim);margin:0 0 1rem 2.4rem;}
+  .gi.build{background:rgba(52,211,153,0.15);} .gi.desk{background:rgba(56,189,248,0.15);}
+  .gi.univ{background:rgba(79,140,255,0.15);} .gi.orch{background:rgba(167,139,250,0.15);} .gi.spec{background:rgba(248,113,113,0.12);}
+
+  .roster{display:grid;grid-template-columns:repeat(auto-fill,minmax(248px,1fr));gap:0.9rem;}
+  .rcard{background:var(--panel);border:1px solid var(--line);border-radius:14px;padding:1.05rem 1.15rem;border-left-width:3px;transition:transform 0.15s,border-color 0.2s;}
+  .rcard:hover{transform:translateY(-3px);}
+  .rcard.cl-build{border-left-color:var(--green);} .rcard.cl-desk{border-left-color:var(--cyan);}
+  .rcard.cl-univ{border-left-color:var(--blue);} .rcard.cl-orch{border-left-color:var(--violet);}
+  .rcard.cl-check{border-left-color:var(--pink);} .rcard.cl-decide{border-left-color:var(--orange);}
+  .rcard .rh{display:flex;align-items:baseline;justify-content:space-between;gap:0.5rem;}
+  .rcard h4{font-size:0.96rem;color:var(--bright);font-weight:700;}
+  .rcard .code{font-size:0.68rem;color:var(--dim);font-family:ui-monospace,Menlo,monospace;}
+  .rcard .fn{font-size:0.82rem;color:var(--fg);margin-top:0.45rem;}
+  .rcard .meta{font-size:0.72rem;color:var(--dim);margin-top:0.55rem;line-height:1.5;}
+  .rcard .tags{margin-top:0.6rem;display:flex;flex-wrap:wrap;gap:0.3rem;}
+  .rcard .tg{font-size:0.66rem;padding:0.12rem 0.5rem;border-radius:999px;background:rgba(255,255,255,0.05);border:1px solid var(--line);color:var(--dim);}
+  .rcard .tg.df{color:var(--green);border-color:rgba(52,211,153,0.3);}
+  .rcard .tg.nf{color:var(--red);border-color:rgba(248,113,113,0.3);}
+  .rcard .tg.dorm{color:var(--amber);border-color:rgba(251,191,36,0.3);}
+
+  /* MATTER TABLE */
+  .mtable{width:100%;border-collapse:collapse;font-size:0.84rem;background:var(--panel);border:1px solid var(--line);border-radius:14px;overflow:hidden;}
+  .mtable th{text-align:left;color:var(--dim);font-weight:600;text-transform:uppercase;font-size:0.66rem;letter-spacing:0.05em;padding:0.7rem 0.9rem;border-bottom:1px solid var(--line);background:var(--bg2);}
+  .mtable td{padding:0.7rem 0.9rem;border-bottom:1px solid var(--line);vertical-align:top;}
+  .mtable tr:last-child td{border-bottom:none;}
+  .mtable td.dk{color:var(--cyan);font-weight:700;white-space:nowrap;}
+  .mtable .slug{font-family:ui-monospace,Menlo,monospace;font-size:0.74rem;color:var(--dim);}
 
   /* AUTHORITY pyramid */
   .pyramid{display:flex;flex-direction:column;align-items:center;gap:0.5rem;}
@@ -113,9 +148,9 @@
   .foot{margin-top:4rem;padding-top:1.5rem;border-top:1px solid var(--line);text-align:center;color:var(--dim);font-size:0.78rem;}
   .foot a{color:var(--blue);text-decoration:none;}
 
-  @media(max-width:720px){
-    .hero h1{font-size:2.6rem;} .shift{grid-template-columns:1fr;} .arrow-mid{transform:rotate(90deg);}
-    .tiers{grid-template-columns:1fr;} .p1,.p2,.p3{width:100%;}
+  @media(max-width:760px){
+    .hero h1{font-size:2.6rem;}
+    .org-cols{grid-template-columns:1fr;} .tiers{grid-template-columns:1fr;} .p1,.p2,.p3{width:100%;}
   }
 </style>
 </head>
@@ -123,9 +158,17 @@
 
   <div class="hero">
     <h1>Baker</h1>
-    <div class="tagline">How the institution senses, thinks, builds, and decides</div>
-    <div class="desc">System architecture — v6</div>
-    <div class="chip"><b>v6</b> · 31 May 2026 · the picture in five diagrams</div>
+    <div class="tagline">The full fleet — who builds, who owns each matter, who serves everyone</div>
+    <div class="desc">System architecture — v6 · detailed fleet edition</div>
+    <div class="chip"><b>23 standing agents</b> · 31 May 2026 · grouped by what they do</div>
+    <div class="legend">
+      <span class="lg"><span class="sw decide"></span>Decide</span>
+      <span class="lg"><span class="sw orch"></span>Orchestrate</span>
+      <span class="lg"><span class="sw build"></span>Build &amp; code</span>
+      <span class="lg"><span class="sw check"></span>Review</span>
+      <span class="lg"><span class="sw desk"></span>Matter desk</span>
+      <span class="lg"><span class="sw univ"></span>Universal</span>
+    </div>
   </div>
 
   <div class="wrap">
@@ -144,14 +187,45 @@
         <div class="layer-arrow">▼</div>
         <div class="layer reason">
           <div class="lname">◆ Reasoning &amp; Orchestration — who thinks &amp; builds</div>
-          <div class="ldesc">The fleet. Plans, writes, reviews, verifies — coordinating on the bus.</div>
-          <div class="members"><span class="pill">AH1 lead</span><span class="pill">AH1 cowork</span><span class="pill">AH2 deputy</span><span class="pill">B-codes b1–b4</span><span class="pill">Codex</span><span class="pill">Architect</span><span class="pill">AID</span><span class="pill">Researcher</span><span class="pill">Matter desks</span></div>
+          <div class="ldesc">The fleet: 23 standing agents. Plans, writes, reviews, verifies, files — coordinating on the bus.</div>
+          <div class="members"><span class="pill">AH1 lead + cowork</span><span class="pill">AH2 deputy</span><span class="pill">B-codes b1–b4</span><span class="pill">Architect</span><span class="pill">Codex</span><span class="pill">7 matter desks</span><span class="pill">Researcher</span><span class="pill">AI Dennis</span><span class="pill">CM-1–4</span><span class="pill">Hag-filer</span></div>
         </div>
         <div class="layer-arrow">▼</div>
         <div class="layer sentinel">
           <div class="lname">● Sentinel — who never sleeps</div>
           <div class="ldesc">Baker the service. Watches every channel, remembers everything, serves it back.</div>
-          <div class="members"><span class="pill">Baker</span><span class="pill">Email · WhatsApp · Meetings</span><span class="pill">ClickUp · RSS · Memory</span></div>
+          <div class="members"><span class="pill">Baker</span><span class="pill">Email · WhatsApp · Meetings</span><span class="pill">ClickUp · RSS · Memory (~47 MCP tools)</span></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- FLEET MAP -->
+    <div class="section">
+      <div class="eyebrow">The whole fleet at a glance</div>
+      <h2>Fleet map</h2>
+      <p class="sub">One Director, two-and-a-half orchestrators, and three working columns underneath: the build line, the matter desks, and the universal support pool.</p>
+      <div class="orgwrap">
+        <div class="org-top"><div class="org-node decide"><div class="t">⬢ Director</div><div class="s">final authority</div></div></div>
+        <div class="org-stem"></div>
+        <div class="org-top" style="gap:0.7rem;flex-wrap:wrap;">
+          <div class="org-node orch"><div class="t">◆ AH1 lead</div><div class="s">sole orchestrator</div></div>
+          <div class="org-node orch"><div class="t">◆ AH1 cowork</div><div class="s">parallel instance</div></div>
+          <div class="org-node orch"><div class="t">⬙ AH2 deputy</div><div class="s">review · ship gate</div></div>
+        </div>
+        <div class="org-stem"></div>
+        <div class="org-cols">
+          <div class="org-col build">
+            <div class="ch">⚙ Build &amp; coding</div>
+            <div class="mini"><span>b1</span><span>b2</span><span>b3</span><span>b4</span><span>Architect</span><span>Codex</span></div>
+          </div>
+          <div class="org-col desk">
+            <div class="ch">🗂 Matter desks</div>
+            <div class="mini"><span>Hagenauer</span><span>MOVIE</span><span>AO</span><span>Baden-Baden</span><span>Origination</span><span>Brisen</span><span>BB-Finance</span></div>
+          </div>
+          <div class="org-col univ">
+            <div class="ch">🧭 Universal</div>
+            <div class="mini"><span>Researcher</span><span>AI Dennis</span><span>CM-1–4</span><span>Hag-filer</span></div>
+          </div>
         </div>
       </div>
     </div>
@@ -160,7 +234,7 @@
     <div class="section">
       <div class="eyebrow">The spine</div>
       <h2>One bus connects everyone</h2>
-      <p class="sub">The single most important change since the old model: every agent talks to every other agent over the Brisen Lab bus — dispatches, ship reports, blockers, gate verdicts, acknowledgements.</p>
+      <p class="sub">The single most important change since the old model: every agent talks to every other agent over the Brisen Lab bus — dispatches, ship reports, blockers, gate verdicts, acknowledgements, heartbeats.</p>
       <div class="busbox">
         <div class="node-row">
           <div class="node auth">Director<small>decides</small></div>
@@ -172,35 +246,94 @@
         <div class="bus-bar">BRISEN LAB BUS</div>
         <div class="connectors"></div>
         <div class="node-row">
-          <div class="node build">B-codes<small>build</small></div>
-          <div class="node review">Codex<small>verifies</small></div>
+          <div class="node build">B-codes b1–b4<small>build</small></div>
+          <div class="node review">Codex<small>verifies + acts</small></div>
           <div class="node review">Architect<small>designs</small></div>
-          <div class="node spec">AID<small>IT / SRE</small></div>
+          <div class="node desk">7 matter desks<small>per-matter</small></div>
           <div class="node spec">Researcher<small>research</small></div>
-          <div class="node spec">Matter desks<small>per-matter</small></div>
+          <div class="node spec">AI Dennis<small>IT / SRE</small></div>
+          <div class="node spec">CM-1–4<small>claims</small></div>
+          <div class="node spec">Hag-filer<small>filing</small></div>
         </div>
         <div class="bus-cap">Plus the Baker MCP (~47 memory tools) and the vault as shared truth.</div>
       </div>
     </div>
 
-    <!-- THE CAST -->
+    <!-- ROSTER: BUILD & CODING -->
     <div class="section">
-      <div class="eyebrow">The cast</div>
-      <h2>Who does what</h2>
-      <p class="sub">Eleven roles, four jobs: decide, orchestrate, build, check. Colour tells you which.</p>
-      <div class="cast">
-        <div class="actor"><div class="ic">⬢</div><h4>Director</h4><div class="r">Final authority. Sets direction, ratifies. Non-technical.</div><span class="badge b-decide">decides</span></div>
-        <div class="actor"><div class="ic">●</div><h4>Baker (Sentinel)</h4><div class="r">Always-on service. Watches channels, holds the memory.</div><span class="badge b-spec">remembers</span></div>
-        <div class="actor"><div class="ic">◆</div><h4>AH1 — lead</h4><div class="r">Sole orchestrator. Briefs, dispatches, reviews, merges, deploys.</div><span class="badge b-orch">orchestrates</span></div>
-        <div class="actor"><div class="ic">◆</div><h4>AH1 — cowork</h4><div class="r">Same authority, on the Cowork desktop session. (This one.)</div><span class="badge b-orch">orchestrates</span></div>
-        <div class="actor"><div class="ic">⬙</div><h4>AH2 — deputy</h4><div class="r">Cross-checks the lead's work; final ship gate.</div><span class="badge b-check">reviews</span></div>
-        <div class="actor"><div class="ic">⚙</div><h4>B-codes (b1–b4)</h4><div class="r">The build pool. Turn briefs into tested, shipped code.</div><span class="badge b-build">builds</span></div>
-        <div class="actor"><div class="ic">🔎</div><h4>Codex</h4><div class="r">Independent verifier from a different AI vendor. A second pair of eyes.</div><span class="badge b-check">verifies</span></div>
-        <div class="actor"><div class="ic">📐</div><h4>Architect</h4><div class="r">Reviews the design before anyone builds it.</div><span class="badge b-check">designs</span></div>
-        <div class="actor"><div class="ic">🛠</div><h4>AID — AI Dennis</h4><div class="r">IT, infrastructure, and AI strategy. Design-time only.</div><span class="badge b-spec">IT / SRE</span></div>
-        <div class="actor"><div class="ic">🧭</div><h4>Researcher</h4><div class="r">Gathers and synthesises across many sources.</div><span class="badge b-spec">researches</span></div>
-        <div class="actor"><div class="ic">🗂</div><h4>Matter desks</h4><div class="r">One brain per matter — Hagenauer, MOVIE, AO, Baden-Baden, more.</div><span class="badge b-spec">per-matter</span></div>
+      <div class="eyebrow">The roster, in detail</div>
+      <h2>Who's in the fleet today</h2>
+      <p class="sub">Every standing agent, grouped by job. "Director-facing" means it can talk to you directly; build-pool agents structurally cannot — they feed AH1.</p>
+
+      <div class="group">
+        <div class="group-head"><div class="gi build">⚙</div><h3>Build &amp; coding</h3><span class="cnt">6 agents</span></div>
+        <div class="group-sub">Turn briefs into shipped, tested code — and check it before it merges. Not Director-facing (except via AH1).</div>
+        <div class="roster">
+          <div class="rcard cl-build"><div class="rh"><h4>b1</h4><span class="code">~/bm-b1</span></div><div class="fn">Code Brisen build worker. Implements a dispatched brief in its own repo clone, ships with literal pytest output.</div><div class="meta">Owns one mailbox: <code>CODE_1_PENDING.md</code>. Surgical edits, tests-first, fault-tolerant.</div><div class="tags"><span class="tg nf">not Director-facing</span><span class="tg df">builds</span></div></div>
+          <div class="rcard cl-build"><div class="rh"><h4>b2</h4><span class="code">~/bm-b2</span></div><div class="fn">Code Brisen build worker. Same contract as b1 — second parallel build lane.</div><div class="meta">Mailbox <code>CODE_2_PENDING.md</code>. Claims, builds, ships, reports on the bus.</div><div class="tags"><span class="tg nf">not Director-facing</span><span class="tg df">builds</span></div></div>
+          <div class="rcard cl-build"><div class="rh"><h4>b3</h4><span class="code">~/bm-b3</span></div><div class="fn">Code Brisen build worker. Third build lane for parallel dispatch.</div><div class="meta">Mailbox <code>CODE_3_PENDING.md</code>.</div><div class="tags"><span class="tg nf">not Director-facing</span><span class="tg df">builds</span></div></div>
+          <div class="rcard cl-build"><div class="rh"><h4>b4</h4><span class="code">~/bm-b4</span></div><div class="fn">Code Brisen build worker. Fourth build lane. <span style="color:var(--amber)">b5 exists but is dormant.</span></div><div class="meta">Mailbox <code>CODE_4_PENDING.md</code>.</div><div class="tags"><span class="tg nf">not Director-facing</span><span class="tg dorm">b5 dormant</span></div></div>
+          <div class="rcard cl-check"><div class="rh"><h4>Architect</h4><span class="code">architect</span></div><div class="fn">Design-time architecture review. Surfaces coupling, scaling failure modes, reversibility — before anyone builds.</div><div class="meta">Talks only to agents, never the Director. Verdict + concerns, not "looks good".</div><div class="tags"><span class="tg nf">not Director-facing</span><span class="tg">designs</span></div></div>
+          <div class="rcard cl-check"><div class="rh"><h4>Codex</h4><span class="code">OpenAI gpt-5.5</span></div><div class="fn">Cross-vendor second opinion — a non-Claude reviewer that catches what one vendor misses (gate G0). <b>Now full-access:</b> can read, write, edit and run on your authorization.</div><div class="meta">AH1 still orchestrates. Updated 31 May 2026 from read-only to full access.</div><div class="tags"><span class="tg">verifies</span><span class="tg df">full access</span></div></div>
+        </div>
       </div>
+
+      <!-- ROSTER: MATTER DESKS -->
+      <div class="group">
+        <div class="group-head"><div class="gi desk">🗂</div><h3>Matter desks</h3><span class="cnt">7 desks</span></div>
+        <div class="group-sub">One brain per matter. Each owns its wiki slug, holds the chronology, drafts the moves. Director-facing.</div>
+        <div class="roster">
+          <div class="rcard cl-desk"><div class="rh"><h4>Hagenauer Desk</h4><span class="code">hagenauer-desk</span></div><div class="fn">The RG7 construction-defect dispute in Baden bei Wien. Runs ClaimsMax recharge investigations against the contractor's lists.</div><div class="meta">Matters: <span class="slug">hagenauer-rg7</span>, <span class="slug">cupial</span>.</div><div class="tags"><span class="tg df">Director-facing</span></div></div>
+          <div class="rcard cl-desk"><div class="rh"><h4>MOVIE Desk</h4><span class="code">movie-desk</span></div><div class="fn">Mandarin Oriental Vienna — the hotel you own. Asset-management performance and the eventual exit.</div><div class="meta">Matters: <span class="slug">mo-vie-am</span>, <span class="slug">mo-vie-exit</span>.</div><div class="tags"><span class="tg df">Director-facing</span></div></div>
+          <div class="rcard cl-desk"><div class="rh"><h4>AO Desk</h4><span class="code">ao-desk</span></div><div class="fn">The Alexander Oskolkov relationship and portfolio — co-investor context, positions, history.</div><div class="meta">Matter: <span class="slug">oskolkov</span>.</div><div class="tags"><span class="tg df">Director-facing</span></div></div>
+          <div class="rcard cl-desk"><div class="rh"><h4>Baden-Baden Desk</h4><span class="code">baden-baden-desk</span></div><div class="fn">The German real-estate vehicles: MRCI (Balgerstrasse) and Lilienmatt (Annaberg). Asset side of both.</div><div class="meta">Matters: <span class="slug">mrci</span>, <span class="slug">balgerstrasse</span>, <span class="slug">lilienmatt</span>, <span class="slug">annaberg</span>, <span class="slug">aukera</span>.</div><div class="tags"><span class="tg df">Director-facing</span></div></div>
+          <div class="rcard cl-desk"><div class="rh"><h4>Origination Desk</h4><span class="code">origination-desk</span></div><div class="fn">The deal pipeline — everything pre-matter. Screens, tracks and pressure-tests new opportunities until they graduate to a matter.</div><div class="meta">16 pipeline slugs: NVIDIA-Corinthia, Kitz-Kempinski, Six Senses, Cap-Ferrat, Bora-Bora, Minor Hotels, MO-Prague, CITIC…</div><div class="tags"><span class="tg df">Director-facing</span></div></div>
+          <div class="rcard cl-desk"><div class="rh"><h4>Brisen Desk</h4><span class="code">brisen-desk</span></div><div class="fn">Cross-portfolio synthesizer. The meta-desk that reasons across every matter at once — funding, PR, group-level posture.</div><div class="meta">Matters: <span class="slug">brisen</span>, <span class="slug">brisen-funding</span>, <span class="slug">brisen-pr</span>.</div><div class="tags"><span class="tg df">Director-facing</span></div></div>
+          <div class="rcard cl-desk"><div class="rh"><h4>BB-Finance (BEN)</h4><span class="code">bb-finance</span></div><div class="fn">The finance lens on Baden-Baden — commercial reasoning, vehicle economics, IRR / NOI, lender posture. Pairs with the asset desk.</div><div class="meta">Shadows the same Baden-Baden matters from the numbers side.</div><div class="tags"><span class="tg df">Director-facing</span></div></div>
+        </div>
+      </div>
+
+      <!-- ROSTER: UNIVERSAL -->
+      <div class="group">
+        <div class="group-head"><div class="gi univ">🧭</div><h3>Universal / cross-matter</h3><span class="cnt">4 roles · 7 agents</span></div>
+        <div class="group-sub">Not tied to one matter — they serve the whole fleet on demand.</div>
+        <div class="roster">
+          <div class="rcard cl-univ"><div class="rh"><h4>Researcher</h4><span class="code">researcher</span></div><div class="fn">Multi-source research and synthesis. Fans out across web, X, Perplexity and local channels in parallel, then verifies every citation before delivery.</div><div class="meta">Writes ideas to <code>_ops/ideas/</code>. Director-facing when presenting.</div><div class="tags"><span class="tg df">Director-facing</span><span class="tg">researches</span></div></div>
+          <div class="rcard cl-univ"><div class="rh"><h4>AI Dennis</h4><span class="code">ai-dennis / aid</span></div><div class="fn">IT, infrastructure and SRE. Owns the M365 migration, systems health, agent-architecture and security library. Design-time advisor.</div><div class="meta">Director-facing directly. Shadows Dennis Egorenkov (IT Admin).</div><div class="tags"><span class="tg df">Director-facing</span><span class="tg">IT / SRE</span></div></div>
+          <div class="rcard cl-univ"><div class="rh"><h4>CM-1 … CM-4</h4><span class="code">_universal/cm</span></div><div class="fn">ClaimsMax investigation pool — four parallel workers that run single-shot trade recharge investigations to help the Hagenauer matter (Edita's lists).</div><div class="meta">Dispatched by the Hagenauer Desk; batch their output for review.</div><div class="tags"><span class="tg nf">not Director-facing</span><span class="tg">claims</span></div></div>
+          <div class="rcard cl-univ"><div class="rh"><h4>Hag-filer</h4><span class="code">hag-filer</span></div><div class="fn">Hagenauer filing worker. Atomic, multi-path vault filing so investigation outputs land consistently across the three canonical locations.</div><div class="meta">Support worker behind the Hagenauer Desk.</div><div class="tags"><span class="tg nf">not Director-facing</span><span class="tg">filing</span></div></div>
+        </div>
+      </div>
+
+      <!-- ROSTER: ON-DEMAND SPECIALISTS -->
+      <div class="group">
+        <div class="group-head"><div class="gi spec">✦</div><h3>On-demand specialists</h3><span class="cnt">invokable</span></div>
+        <div class="group-sub">Not standing bus seats — these are specialist sub-agents any desk or head can spin up inside a session when a domain question needs them.</div>
+        <div class="roster">
+          <div class="rcard cl-univ" style="border-left-color:var(--red)"><div class="rh"><h4>Russo tax desks</h4><span class="code">russo-*</span></div><div class="fn">Multi-jurisdiction tax: an orchestrator (russo-ai) plus per-country desks — Austria, Switzerland, Cyprus, Germany, France, Luxembourg. Restructure, succession, exposure.</div><div class="tags"><span class="tg">tax</span><span class="tg">7 jurisdictions</span></div></div>
+          <div class="rcard cl-univ" style="border-left-color:var(--red)"><div class="rh"><h4>Baker domain helpers</h4><span class="code">baker-*</span></div><div class="fn">Focused analysts: deal-analyst, asset-mgmt, legal, sales, marketing, PR-branding, people-intel, communications, PM, IT, research.</div><div class="tags"><span class="tg">~12 lenses</span></div></div>
+          <div class="rcard cl-univ" style="border-left-color:var(--red)"><div class="rh"><h4>Claims-analysis</h4><span class="code">claims-analysis</span></div><div class="fn">Deep RG7 / Cupial claim-spreadsheet and defect analysis — the specialist that reviews ClaimsMax output for the Hagenauer matter.</div><div class="tags"><span class="tg">RG7 claims</span></div></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- MATTER DESK FUNCTIONS TABLE -->
+    <div class="section">
+      <div class="eyebrow">Desks &amp; what they own</div>
+      <h2>Each desk, its matters, its function</h2>
+      <p class="sub">A desk is the single source of truth for its matters — it holds the file, drafts the moves, and is the one you ask.</p>
+      <table class="mtable">
+        <thead><tr><th>Desk</th><th>Function</th><th>Owns (matter slugs)</th></tr></thead>
+        <tbody>
+          <tr><td class="dk">Hagenauer</td><td>RG7 construction-defect dispute, Baden bei Wien; ClaimsMax recharge work</td><td class="slug">hagenauer-rg7 · cupial</td></tr>
+          <tr><td class="dk">MOVIE</td><td>Mandarin Oriental Vienna — asset management &amp; exit</td><td class="slug">mo-vie-am · mo-vie-exit</td></tr>
+          <tr><td class="dk">AO</td><td>Alexander Oskolkov relationship &amp; portfolio</td><td class="slug">oskolkov</td></tr>
+          <tr><td class="dk">Baden-Baden</td><td>German RE vehicles — MRCI (Balgerstrasse) &amp; Lilienmatt (Annaberg), asset side</td><td class="slug">mrci · balgerstrasse · lilienmatt · annaberg · aukera</td></tr>
+          <tr><td class="dk">Origination</td><td>Pre-matter deal pipeline — screen, track, pressure-test</td><td class="slug">16 slugs (NVIDIA-Corinthia, Kitz-Kempinski, Six Senses…)</td></tr>
+          <tr><td class="dk">Brisen</td><td>Cross-portfolio synthesizer — funding, PR, group posture</td><td class="slug">brisen · brisen-funding · brisen-pr</td></tr>
+          <tr><td class="dk">BB-Finance</td><td>Finance lens on Baden-Baden — economics, IRR/NOI, lenders</td><td class="slug">(shadows Baden-Baden matters)</td></tr>
+        </tbody>
+      </table>
     </div>
 
     <!-- AUTHORITY -->
@@ -211,7 +344,7 @@
       <div class="pyramid">
         <div class="prow p1"><div class="who">⬢ Director</div><div class="what">Final say — capital, counterparties, anything externally-facing</div></div>
         <div class="prow p2"><div class="who">◆ AH1</div><div class="what">Orchestrates the fleet; runs everything inside the green lane</div></div>
-        <div class="prow p3"><div class="who">⚙ 🔎 📐 🛠 Build &amp; review fleet</div><div class="what">Feed AH1 — they never reach the Director directly</div></div>
+        <div class="prow p3"><div class="who">⚙ 🗂 🧭 Build · desks · universal</div><div class="what">Feed AH1 — build-pool agents never reach the Director directly</div></div>
       </div>
       <div class="tiers">
         <div class="tcard a"><div class="t">Tier A — automatic</div><p>AH1 just does it: dispatch, merge on green review, routine commits. You hear about it after.</p></div>
@@ -224,7 +357,7 @@
     <div class="section">
       <div class="eyebrow">How work gets done</div>
       <h2>From idea to live in nine steps</h2>
-      <p class="sub">Every change runs the same track. The pink step is the quality gate — three independent checks before anything merges.</p>
+      <p class="sub">Every change runs the same track. The pink step is the quality gate — independent checks, including a cross-vendor one, before anything merges.</p>
       <div class="pipe">
         <div class="stage"><div class="num">1</div><div class="nm">Brief</div></div>
         <div class="stage"><div class="num">2</div><div class="nm">Dispatch</div></div>
@@ -245,7 +378,7 @@
     </div>
 
     <div class="foot">
-      Baker System Architecture — v6 · Non-Agent Presentation · 31 May 2026<br>
+      Baker System Architecture — v6 · detailed fleet edition · 31 May 2026<br>
       Technical reference for agents: <a href="baker-v6.html">baker-v6.html</a>
     </div>
 

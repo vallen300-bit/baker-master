@@ -58,7 +58,7 @@
       <tr><td class="k">AH1 — cowork</td><td>Same authority, Cowork App surface. Parallel AH1 instance.</td><td><b>yes</b></td><td>collide with lead's lane</td></tr>
       <tr><td class="k">AH2 — deputy</td><td>Cross-lane review, AUTOPOLL, gold-audit, G3 ship gate.</td><td>yes</td><td>orchestrate (AH1's job)</td></tr>
       <tr><td class="k">B-codes b1–b4</td><td>Build pool. Implement briefs, ship with literal pytest.</td><td><span class="no">NO</span></td><td>address Director / design / recommend</td></tr>
-      <tr><td class="k">Codex</td><td>Read-only verifier (OpenAI vendor). Cross-vendor second opinion.</td><td><span class="no">NO</span></td><td>execute / write / merge</td></tr>
+      <tr><td class="k">Codex</td><td>Cross-vendor reviewer (OpenAI gpt-5.5) + full-access agent on Director authorization (since 31 May 2026). G0 gate.</td><td><span class="no">NO</span></td><td>address Director / merge without AH1</td></tr>
       <tr><td class="k">Architect</td><td>Design-time architecture review.</td><td><span class="no">NO</span></td><td>implement / merge</td></tr>
       <tr><td class="k">AID (AI Dennis)</td><td>IT / SRE / CAIO. Design-time only. Owns IT library.</td><td>yes (direct)</td><td>engineer / implement</td></tr>
       <tr><td class="k">Researcher</td><td>Brainstorm + multi-source synthesis. Writes <code>_ops/ideas/</code>.</td><td>when facing</td><td>implement / overrule ratified specs</td></tr>
@@ -71,7 +71,7 @@
     <thead><tr><th>Rail</th><th>Carries</th><th>Endpoint / location</th></tr></thead>
     <tbody>
       <tr><td class="k">Baker MCP</td><td>Memory R/W (~47 tools): deadlines, VIPs, emails, actions, ClickUp/Todoist, RSS, transcripts, raw query</td><td><code>baker-master.onrender.com/mcp</code></td></tr>
-      <tr><td class="k spine">Brisen Lab bus</td><td><span class="spine">Agent-to-agent spine:</span> dispatch, ship, blocker, gate verdict, heartbeat, ack</td><td><code>brisen-lab.onrender.com</code> · <code>bus_post.sh</code></td></tr>
+      <tr><td class="k spine">Brisen Lab bus</td><td><span class="spine">Agent-to-agent spine:</span> dispatch, ship, blocker, gate verdict, heartbeat, ack. Dispatches carry <code>dispatched_by</code>; replies route to the sender.</td><td><code>brisen-lab.onrender.com</code> · <code>bus_post.sh</code></td></tr>
       <tr><td class="k">B-code mailbox</td><td>Self-contained briefs (paired with same-turn bus-post)</td><td><code>briefs/_tasks/CODE_&lt;N&gt;_PENDING.md</code></td></tr>
       <tr><td class="k">Vault</td><td>Shared truth: <code>_ops/</code>, <code>wiki/matters/</code>, curated knowledge, agent state</td><td><code>baker-vault</code> git (shared physical dir)</td></tr>
       <tr><td class="k">Dashboard</td><td>Director-facing briefings, Scan, ratify panels</td><td><code>baker-master.onrender.com</code></td></tr>
@@ -98,11 +98,13 @@
     <li><b>Claim</b> — B-code orients (brief + memory), confirms on bus.</li>
     <li><b>Implementation</b> — surgical, tests-first, fault-tolerant.</li>
     <li><b>Ship report</b> — literal pytest output; no "by inspection".</li>
-    <li><span class="gate">Review gates</span> — G0 Codex pre-review (cross-vendor) → G1 AH1 fold → G2 <code>/security-review</code> → G3 AH2 deputy.</li>
+    <li><span class="gate">Review gates</span> — G0 Codex pre-review (cross-vendor) → G1 AH1 fold / gate-1 static review → G2 <code>/security-review</code> / gate-2 where required → G3 AH2 deputy plus deeper gate-3 / gate-4 reviews where applicable.</li>
     <li><b>Merge</b> — AH1 squash-merge on green gates.</li>
     <li><b>Deploy</b> — Render auto-deploys from <code>main</code>.</li>
     <li><b>Post-deploy AC + writeback</b> — verify ACs live → PINNED update, activity log, cascade-back-prop, lessons.</li>
   </ol>
+  <p class="dim"><b>Gate naming:</b> v6 uses G0-G3 for the lifecycle. Existing ops skills still use gate-1 through gate-4. Map G1 to gate-1 static review, G2 to gate-2 <code>/security-review</code>, and G3 to deputy / architecture / code-reviewer deeper gates where applicable.</p>
+  <p class="dim"><b>Security-review precision:</b> <code>/security-review</code> is mandatory for Tier-B PRs and executable, DB, security, auth, API, webhook, external-surface, email, WhatsApp, or Render-touching changes. Docs-only / architecture-only work may skip it when the diff is prose or static HTML only and the skip reason is recorded.</p>
 
   <h2><span class="n">5</span>Harness V2 implications</h2>
   <ol>
@@ -115,7 +117,7 @@
   </ol>
 
   <h2><span class="n">6</span>Hard invariants (agents respect these)</h2>
-  <div class="inv"><b>Bus-post on every state change</b> — ship, dispatch, blocker, heartbeat, gate verdict, merge, Tier-B ask/done.</div>
+  <div class="inv"><b>Bus-post on every state change</b> — ship, dispatch, blocker, heartbeat, gate verdict, merge, Tier-B ask/done. Use <code>dispatched_by</code>/<code>reply_to</code>; do not route every reply blindly to <code>lead</code>.</div>
   <div class="inv"><b>No "by inspection"</b> — ship on literal green test run only.</div>
   <div class="inv"><b>Tier boundaries are hard</b> — never exceed your tier even if confident; B-codes never Director-facing.</div>
   <div class="inv"><b>Fault-tolerant or it doesn't ship</b> — all DB/API calls wrapped; fail loud, never skip silently.</div>
