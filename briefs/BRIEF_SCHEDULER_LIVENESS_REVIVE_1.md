@@ -96,7 +96,10 @@ maxconn=5 is tight for FastAPI + ~40 jobs + Cortex. Even with Fix 1, easing pool
 ---
 
 ## Optional (defense-in-depth, low priority): startup self-presence log
-Codex confirmed the watchdog IS registered, so the v1 hard-`raise` assertion is unnecessary. Keep only a non-fatal startup log after the register loop: `logger.info("Self-bootstrap OK: scheduler_job_liveness present")` if `"scheduler_job_liveness" in {j.id for j in scheduler.get_jobs()}` else `logger.error(...)`. No `raise` (avoid making a future unrelated registration issue crash boot). Skip entirely if it complicates the diff.
+Codex confirmed the watchdog IS registered, so the v1 hard-`raise` assertion is unnecessary. Keep only a **non-fatal** startup log: `logger.info("Self-bootstrap OK: scheduler_job_liveness present")` if `"scheduler_job_liveness" in {j.id for j in scheduler.get_jobs()}` else `logger.error(...)`. No `raise`.
+- **Placement (codex #1447):** put it immediately after `_register_jobs(_scheduler)` (`triggers/embedded_scheduler.py:1680`), before `_scheduler.start()` — `scheduler.get_jobs()` is valid pre-start.
+- **Why log-not-raise (codex #1447 Finding 3):** `_start_scheduler()` is wrapped in a `try/except` at `outputs/dashboard.py:537-541` that only logs "Scheduler failed to start" and continues boot at `:595-599`. A `raise` inside `start_scheduler()` would therefore NOT abort boot — it would silently boot scheduler-less. So fail-loud-abort is out of scope unless that wrapper is changed to re-raise; non-fatal log is the correct scope here.
+- Skip entirely if it complicates the diff.
 
 ## Files Modified
 - `triggers/embedded_scheduler.py` — `_job_listener`: bounded pooled backoff + direct-connection fallback for the execution-row INSERT (Fix 1); optional startup self-presence log.
