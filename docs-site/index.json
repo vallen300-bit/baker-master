@@ -69,15 +69,9 @@
           "matter": "baker"
         },
         {
-          "title": "Baker System Architecture v6 \u2014 Harness V2 Baseline (current)",
+          "title": "Baker System Architecture v6 \u2014 31 May 2026 (current)",
           "file": "baker-v6.html",
           "created": "2026-05-31",
-          "matter": "baker"
-        },
-        {
-          "title": "Baker System Architecture v5 \u2014 Legacy (superseded by v6)",
-          "file": "baker-v5.html",
-          "created": "2026-04-20",
           "matter": "baker"
         }
       ]
