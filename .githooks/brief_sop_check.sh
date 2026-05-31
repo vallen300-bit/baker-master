@@ -90,13 +90,34 @@ while IFS= read -r brief_path; do
     if [ ${#MISSING[@]} -ge 3 ]; then
         VIOLATIONS+=$'\n  - '"$brief_path"' — missing: '"${MISSING[*]}"
     fi
+
+    # --- Harness V2 adoption lock (Director-ratified 2026-05-31) ---
+    # Production implementation briefs must carry the Harness V2 essentials:
+    # Context Contract, task class, done rubric / done-state class, gate plan.
+    # Safe escape: a brief that declares `Harness-V2: N/A — <reason>` (docs-only,
+    # small non-production, or research brief) skips this check. Classification is
+    # author-declared via that line, NOT guessed from content — non-brittle by
+    # design. Phrase-presence (case-insensitive) keeps false-blocks low; 2+ of 4
+    # missing = block.
+    if ! grep -qiE '^Harness-V2:[[:space:]]*N/?A' <<< "$STAGED_CONTENT"; then
+        HV2_MISSING=()
+        grep -qiE 'context contract' <<< "$STAGED_CONTENT" || HV2_MISSING+=("Context Contract")
+        grep -qiE 'task[ _-]?class' <<< "$STAGED_CONTENT" || HV2_MISSING+=("task class")
+        grep -qiE 'done[ -]?state|done rubric|required final state' <<< "$STAGED_CONTENT" || HV2_MISSING+=("done rubric/done-state class")
+        grep -qiE 'gate plan' <<< "$STAGED_CONTENT" || HV2_MISSING+=("gate plan")
+        if [ ${#HV2_MISSING[@]} -ge 2 ]; then
+            VIOLATIONS+=$'\n  - '"$brief_path"' — Harness V2 blocks missing: '"${HV2_MISSING[*]}"' (add them, or declare `Harness-V2: N/A — <reason>`)'
+        fi
+    fi
 done <<< "$STAGED_BRIEFS"
 
 if [ -n "$VIOLATIONS" ]; then
     cat >&2 <<MSG
-[pre-commit] BLOCKED (brief-sop-check): staged brief(s) lack 3+ of 5 canonical /write-brief section headers:$VIOLATIONS
+[pre-commit] BLOCKED (brief-sop-check): staged brief(s) fail the /write-brief structure check (3+ of 5 headers) and/or the Harness V2 adoption lock:$VIOLATIONS
 
-Required (accepts variants): Context, Problem, Files Modified (or "Files to touch"), Verification (or "Verification SQL"), Quality Checkpoints (or "Acceptance criteria").
+Required SOP headers (accepts variants): Context, Problem, Files Modified (or "Files to touch"), Verification (or "Verification SQL"), Quality Checkpoints (or "Acceptance criteria").
+
+Harness V2 essentials for production implementation briefs (Director-ratified 2026-05-31): Context Contract, task class, done rubric / done-state class, gate plan. See _ops/build/INDEX.md. Docs-only / small non-production briefs: declare \`Harness-V2: N/A — <reason>\` to skip.
 
 Run \`/write-brief\` to regenerate, or add the missing sections.
 
