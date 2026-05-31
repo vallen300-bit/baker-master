@@ -85,9 +85,36 @@ A single hung DB call must never be able to permanently silence the watchdog.
 
 ---
 
+## Fix 3: Startup self-bootstrap assertion (fail loud on silent unregister) — per deputy #1441
+
+### Problem
+If mechanism (a) is the cause — the watchdog silently absent from the jobstore on a boot — nothing surfaces it today. A self-monitor that itself fails to register is the worst failure mode (it cannot report its own absence).
+
+### Implementation
+After the full register loop in `start_scheduler()` (i.e. after all `add_job(...)` calls), assert the watchdog is actually present in the live jobstore and fail loud at startup if not:
+```python
+if "scheduler_job_liveness" not in {j.id for j in scheduler.get_jobs()}:
+    raise RuntimeError(
+        "scheduler_job_liveness failed to register — liveness watchdog absent; "
+        "refusing to start blind"
+    )
+logger.info("Self-bootstrap OK: scheduler_job_liveness present in jobstore")
+```
+Place AFTER `scheduler.start()` (jobs are only enumerable once the scheduler is started, depending on jobstore) — verify by reading the actual `start_scheduler()` ordering before placing; if `get_jobs()` is valid pre-start in this APScheduler version, place after the register loop instead. Do NOT guess the ordering — read it.
+
+### Key Constraints
+- Assert ONLY `scheduler_job_liveness` presence (this is the self-monitor); do not gate startup on every job.
+- The raise must be reachable on boot, not swallowed by a broad `try/except` around scheduler init — confirm the surrounding handler does not catch-and-continue.
+
+### Verification
+- Local: temporarily comment out the watchdog `add_job` → assert `start_scheduler()` raises `RuntimeError`. Restore.
+- Boot log shows `Self-bootstrap OK: scheduler_job_liveness present in jobstore`.
+
+---
+
 ## Files Modified
 - `triggers/scheduler_liveness_sentinel.py` — statement_timeout + bounded acquire in `check_scheduler_liveness`.
-- `triggers/embedded_scheduler.py` — `scheduler_job_liveness` add_job: `max_instances=2`, `misfire_grace_time=300` (this job only).
+- `triggers/embedded_scheduler.py` — `scheduler_job_liveness` add_job: `max_instances=2`, `misfire_grace_time=300` (this job only); startup self-bootstrap assertion after the register loop (Fix 3).
 
 ## Do NOT Touch
 - Any other `add_job(...)` block — no other job's instances/interval/trigger changes.
