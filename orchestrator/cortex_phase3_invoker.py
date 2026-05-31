@@ -33,7 +33,7 @@ logger = logging.getLogger(__name__)
 
 SPECIALIST_TIMEOUT_S = int(os.getenv("CORTEX_SPECIALIST_TIMEOUT_S", "180"))  # RA-23 Q5; env-tunable post-2026-04-29
 SPECIALIST_MAX_RETRIES = 2         # RA-23 Q5 (so 3 total attempts)
-PHASE3B_MODEL_FOR_COST = "claude-opus-4-6"  # cycle-row cost calc only
+PHASE3B_MODEL_FOR_COST = os.environ.get("KBL_ANTHROPIC_MODEL", "claude-opus-4-8")  # cycle-row cost calc only; OPUS_4_8_UPGRADE_1
 STAGING_ROOT = Path("outputs/cortex_proposed_curated")
 
 

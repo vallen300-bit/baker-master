@@ -8,9 +8,8 @@ cycle row's running cost.
 Brief: ``briefs/BRIEF_CORTEX_3T_FORMALIZE_1B.md``.
 
 EXPLORE deviations from the brief snippet (Lesson #44):
-  - Brief used "claude-opus-4-7"; production model 2026-04-28 is
-    ``claude-opus-4-6`` (verified at ``capability_runner.py:317``).
-    "Out of scope" of 1A/1B/1C says no model bump.
+  - Production model is ``claude-opus-4-8`` (OPUS_4_8_UPGRADE_1, 2026-05-31);
+    env-overridable via ``KBL_ANTHROPIC_MODEL`` for no-redeploy rollback to 4-7.
   - ``log_api_cost`` returns EUR (not USD) — column name is ``cost_dollars``
     per 1A migration; we keep the column name but record EUR values.
   - Module-level ``_get_store`` / ``_load_active_domain_capabilities`` /
@@ -22,6 +21,7 @@ from __future__ import annotations
 
 import json
 import logging
+import os
 import re
 from dataclasses import dataclass, field
 from typing import Any
@@ -30,7 +30,7 @@ logger = logging.getLogger(__name__)
 
 CAP5_LIMIT = 5  # RA-23 Q4 hard cap — never exceed even via LLM rank
 PHASE3A_MAX_TOKENS = 2048
-PHASE3A_MODEL = "claude-opus-4-6"
+PHASE3A_MODEL = os.environ.get("KBL_ANTHROPIC_MODEL", "claude-opus-4-8")
 
 # Generic always-on patterns gating the games_relevant cortex-config opt-in.
 # Without a negotiation-class signal, game_theory is not auto-added.

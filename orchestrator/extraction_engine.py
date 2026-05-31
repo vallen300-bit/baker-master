@@ -11,6 +11,7 @@ read from signal_extractions instead of re-scanning raw text.
 """
 import json
 import logging
+import os
 import threading
 import time
 from datetime import datetime, timezone
@@ -313,7 +314,7 @@ def _extract_agentic(content, source_channel, source_id):
         # Agent loop: max 3 iterations (focused, not open-ended)
         for iteration in range(4):
             response = client.messages.create(
-                model="claude-opus-4-6",
+                model=os.environ.get("KBL_ANTHROPIC_MODEL", "claude-opus-4-8"),
                 max_tokens=4000,
                 tools=extraction_tools,
                 messages=messages,

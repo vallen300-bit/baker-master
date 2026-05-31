@@ -22,10 +22,16 @@ Error surface:
       (retry would not help — caller bypasses the ladder)
 
 Model:
-    Default ``claude-opus-4-7`` (1M-context). Env override:
-    ``KBL_STEP5_MODEL`` — allows burn-in on Sonnet 4.6 without a code
-    change if needed. ``ANTHROPIC_API_KEY`` is required; missing →
-    RuntimeError at module import (fail-fast; Render catches it at boot).
+    Default ``claude-opus-4-8`` (1M-context, $5/$25 per MTok). Env overrides
+    (most-specific wins):
+        ``KBL_STEP5_MODEL``    — Step-5-only override (e.g. burn-in on
+                                  Sonnet 4.6 without a code change).
+        ``KBL_ANTHROPIC_MODEL`` — global Opus default across Baker; lets
+                                  the whole Opus surface revert to
+                                  ``claude-opus-4-7`` with no redeploy
+                                  (OPUS_4_8_UPGRADE_1, 2026-05-31).
+    ``ANTHROPIC_API_KEY`` is required; missing → RuntimeError at module
+    import (fail-fast; Render catches it at boot).
 """
 from __future__ import annotations
 
@@ -48,7 +54,7 @@ from kbl.exceptions import AnthropicUnavailableError, OpusRequestError
 
 # ---------------------------- constants ----------------------------
 
-_DEFAULT_MODEL = "claude-opus-4-7"
+_DEFAULT_MODEL = os.environ.get("KBL_ANTHROPIC_MODEL", "claude-opus-4-8")
 _MODEL_ENV = "KBL_STEP5_MODEL"
 
 _API_KEY_ENV = "ANTHROPIC_API_KEY"
@@ -57,8 +63,10 @@ _API_KEY_ENV = "ANTHROPIC_API_KEY"
 # operators can still tune rates via the same env-var family). These are
 # EUR-treated-as-USD per §9.2 reconciliation — single-currency accounting
 # for Phase 1. Phase 2 introduces proper multi-ccy handling.
-_PRICE_OPUS_INPUT_PER_M = float(os.getenv("PRICE_OPUS4_IN", "15.00"))
-_PRICE_OPUS_OUTPUT_PER_M = float(os.getenv("PRICE_OPUS4_OUT", "75.00"))
+# Opus 4.7/4.8 pricing, 2026-05-28 (was $15/$75 for legacy Opus 4.x);
+# OPUS_4_8_UPGRADE_1 amendment (bus #1429).
+_PRICE_OPUS_INPUT_PER_M = float(os.getenv("PRICE_OPUS4_IN", "5.00"))
+_PRICE_OPUS_OUTPUT_PER_M = float(os.getenv("PRICE_OPUS4_OUT", "25.00"))
 # Prompt-caching multipliers (Anthropic public pricing).
 # Cache writes: 1.25x base input for 5-min TTL, 2.00x base input for 1-hour TTL.
 # Baker uses 1-hour TTL on all hot sites (PR #176, 2026-05-08), so the write

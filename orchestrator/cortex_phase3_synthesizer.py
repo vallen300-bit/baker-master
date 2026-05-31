@@ -13,8 +13,8 @@ status to ``proposed`` (1C's Phase 4 picks up from there).
 Brief: ``briefs/BRIEF_CORTEX_3T_FORMALIZE_1B.md``.
 
 EXPLORE deltas vs the brief snippet:
-  - Uses ``claude-opus-4-6`` (production model 2026-04-28; brief said
-    4.7, but model bumps are out of scope per brief).
+  - Uses ``claude-opus-4-8`` (OPUS_4_8_UPGRADE_1, 2026-05-31; env-overridable
+    via ``KBL_ANTHROPIC_MODEL`` for no-redeploy rollback to 4-7).
   - LLM call goes through the same ``_call_opus`` shape as Phase 3a
     so cost monitor wiring is consistent.
 """
@@ -22,13 +22,14 @@ from __future__ import annotations
 
 import json
 import logging
+import os
 import re
 from dataclasses import dataclass, field
 from typing import Any
 
 logger = logging.getLogger(__name__)
 
-PHASE3C_MODEL = "claude-opus-4-6"
+PHASE3C_MODEL = os.environ.get("KBL_ANTHROPIC_MODEL", "claude-opus-4-8")
 PHASE3C_MAX_TOKENS = 4000
 
 

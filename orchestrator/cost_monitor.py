@@ -23,8 +23,11 @@ logger = logging.getLogger("baker.cost_monitor")
 
 # Model costs (USD per million tokens) — GEMINI-MIGRATION-1
 MODEL_COSTS = {
-    # Anthropic
-    "claude-opus-4-6": {"input": 15.00, "output": 75.00},
+    # Anthropic — Opus 4.7/4.8 priced at $5/$25 per Anthropic docs 2026-05-28
+    # (OPUS_4_8_UPGRADE_1). Opus 4.6 kept at legacy $15/$75 for historical rows.
+    "claude-opus-4-8": {"input": 5.00, "output": 25.00},
+    "claude-opus-4-7": {"input": 5.00, "output": 25.00},
+    "claude-opus-4-6": {"input": 15.00, "output": 75.00},  # legacy generation
     "claude-sonnet-4-6": {"input": 3.00, "output": 15.00},
     "claude-haiku-4-5-20251001": {"input": 0.80, "output": 4.00},
     # Gemini

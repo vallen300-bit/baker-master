@@ -12,6 +12,7 @@ Two modes:
 """
 import json
 import logging
+import os
 import time
 from typing import Generator, Optional
 
@@ -325,7 +326,7 @@ def extract_and_update_pm_state(
 
         claude = anthropic.Anthropic(api_key=config.claude.api_key)
         resp = claude.messages.create(
-            model="claude-opus-4-6",
+            model=os.environ.get("KBL_ANTHROPIC_MODEL", "claude-opus-4-8"),
             max_tokens=3000,
             system=extraction_system,
             messages=[{"role": "user", "content": (

@@ -57,8 +57,11 @@ _CIRCUIT_KEY = "opus_step5"
 # Pre-call estimate — token counts derived heuristically from prompt
 # length. Conservative (overestimate) to avoid a last-€ call that
 # actually exceeds the cap at settle time.
-_PRICE_OPUS_INPUT_PER_M = Decimal(os.getenv("PRICE_OPUS4_IN", "15.00"))
-_PRICE_OPUS_OUTPUT_PER_M = Decimal(os.getenv("PRICE_OPUS4_OUT", "75.00"))
+# Opus 4.7/4.8 pricing, 2026-05-28 (was $15/$75 for legacy Opus 4.x).
+# OPUS_4_8_UPGRADE_1 amendment (bus #1429): cap gate priced 3x high until env
+# override set; folded into in-code default to fail-safe to current rate.
+_PRICE_OPUS_INPUT_PER_M = Decimal(os.getenv("PRICE_OPUS4_IN", "5.00"))
+_PRICE_OPUS_OUTPUT_PER_M = Decimal(os.getenv("PRICE_OPUS4_OUT", "25.00"))
 _ESTIMATE_CHARS_PER_TOKEN = Decimal("4")
 _ESTIMATE_MAX_OUTPUT_TOKENS = Decimal("4096")
 

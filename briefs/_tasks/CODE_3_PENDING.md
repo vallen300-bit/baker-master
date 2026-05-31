@@ -3,7 +3,11 @@ dispatch: OPUS_4_8_UPGRADE_1
 to: b3
 from: cowork-ah1
 dispatched_by: cowork-ah1
-status: PENDING
+status: SHIPPED
+ship_pr: 276
+ship_commit: bb57eba
+ship_report: briefs/_reports/B3_OPUS_4_8_UPGRADE_1_20260531.md
+ship_bus: 1427
 dispatched_at: 2026-05-31T09:25:00Z
 authored: 2026-05-31
 brief_path: briefs/BRIEF_OPUS_4_8_UPGRADE_1.md

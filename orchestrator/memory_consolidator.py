@@ -23,6 +23,7 @@ Table: memory_summaries (Tier 2), memory_institutional (Tier 3).
 """
 import json
 import logging
+import os
 import time
 from datetime import datetime, timezone, timedelta
 from typing import Optional
@@ -45,8 +46,9 @@ TIER2_TO_TIER3_AGE_DAYS = 365
 MAX_INTERACTIONS_PER_SUMMARY = 100
 # Minimum interactions to bother summarizing
 MIN_INTERACTIONS_FOR_SUMMARY = 3
-# Model for Tier 2 compression (Opus — lossless critical details)
-TIER2_MODEL = "claude-opus-4-6"
+# Model for Tier 2 compression (Opus — lossless critical details).
+# OPUS_4_8_UPGRADE_1 (2026-05-31): env-overridable via KBL_ANTHROPIC_MODEL.
+TIER2_MODEL = os.environ.get("KBL_ANTHROPIC_MODEL", "claude-opus-4-8")
 # Model for Tier 3 compression (Gemini Pro — strategic synthesis)
 TIER3_MODEL = "gemini-2.5-pro"
 

@@ -24,7 +24,7 @@ import pytest
 
 def test_calculate_cost_eur_zero_cache_matches_legacy_formula():
     from orchestrator.cost_monitor import calculate_cost_eur, MODEL_COSTS, USD_TO_EUR
-    model = "claude-opus-4-6"
+    model = "claude-opus-4-8"
     in_tok = 1000
     out_tok = 500
     expected_usd = (
@@ -35,9 +35,18 @@ def test_calculate_cost_eur_zero_cache_matches_legacy_formula():
     assert calculate_cost_eur(model, in_tok, out_tok) == expected
 
 
+def test_opus_4_8_priced_at_5_25():
+    """OPUS_4_8_UPGRADE_1 (2026-05-31): Opus 4.7/4.8 priced at $5/$25 per MTok.
+    The 4-6 entry stays at legacy $15/$75 for historical cost rows."""
+    from orchestrator.cost_monitor import MODEL_COSTS
+    assert MODEL_COSTS["claude-opus-4-8"] == {"input": 5.00, "output": 25.00}
+    assert MODEL_COSTS["claude-opus-4-7"] == {"input": 5.00, "output": 25.00}
+    assert MODEL_COSTS["claude-opus-4-6"] == {"input": 15.00, "output": 75.00}
+
+
 def test_calculate_cost_eur_cache_read_billed_at_10_percent():
     from orchestrator.cost_monitor import calculate_cost_eur, MODEL_COSTS, USD_TO_EUR
-    model = "claude-opus-4-6"
+    model = "claude-opus-4-8"
     rate_in = MODEL_COSTS[model]["input"]
     base = calculate_cost_eur(model, 0, 0, cache_read_input_tokens=1_000_000)
     expected = round(rate_in * 0.10 * USD_TO_EUR, 6)
@@ -47,7 +56,7 @@ def test_calculate_cost_eur_cache_read_billed_at_10_percent():
 def test_calculate_cost_eur_cache_creation_billed_at_200_percent():
     """Cache writes cost 2.00x base input rate at 1-hour TTL (PR #176 2026-05-08)."""
     from orchestrator.cost_monitor import calculate_cost_eur, MODEL_COSTS, USD_TO_EUR
-    model = "claude-opus-4-6"
+    model = "claude-opus-4-8"
     rate_in = MODEL_COSTS[model]["input"]
     base = calculate_cost_eur(model, 0, 0, cache_creation_input_tokens=1_000_000)
     expected = round(rate_in * 2.00 * USD_TO_EUR, 6)
@@ -78,7 +87,7 @@ def test_build_caches_system_and_marks_last_tool(monkeypatch):
     agent_mod = _reload_agent_module(monkeypatch, enabled=True, gemini=False)
     tools = [{"name": "t1"}, {"name": "t2"}, {"name": "t3"}]
     sys_v, tools_v = agent_mod._build_cached_system_and_tools(
-        "STATIC PROMPT", tools, "claude-opus-4-6")
+        "STATIC PROMPT", tools, "claude-opus-4-8")
 
     # System: list with one ephemeral block.
     assert isinstance(sys_v, list) and len(sys_v) == 1
@@ -101,7 +110,7 @@ def test_build_kill_switch_returns_passthrough(monkeypatch):
     agent_mod = _reload_agent_module(monkeypatch, enabled=False, gemini=False)
     tools = [{"name": "t1"}, {"name": "t2"}]
     sys_v, tools_v = agent_mod._build_cached_system_and_tools(
-        "STATIC", tools, "claude-opus-4-6")
+        "STATIC", tools, "claude-opus-4-8")
     assert sys_v == "STATIC"
     assert tools_v is tools  # exact passthrough, no copy
 
@@ -118,7 +127,7 @@ def test_build_gemini_guard_returns_passthrough(monkeypatch):
 def test_build_handles_empty_tools(monkeypatch):
     agent_mod = _reload_agent_module(monkeypatch, enabled=True, gemini=False)
     sys_v, tools_v = agent_mod._build_cached_system_and_tools(
-        "STATIC", None, "claude-opus-4-6")
+        "STATIC", None, "claude-opus-4-8")
     assert isinstance(sys_v, list) and sys_v[0]["cache_control"] == {"type": "ephemeral", "ttl": "1h"}
     assert tools_v is None
 
@@ -140,7 +149,7 @@ def test_log_api_cost_accepts_legacy_signature(monkeypatch):
     fake_store_mod.SentinelStoreBack._get_global_instance.return_value = None
     monkeypatch.setitem(__import__("sys").modules, "memory.store_back", fake_store_mod)
 
-    out = cost_monitor.log_api_cost("claude-opus-4-6", 100, 50, source="agent_loop")
+    out = cost_monitor.log_api_cost("claude-opus-4-8", 100, 50, source="agent_loop")
     assert out == 0.42
 
 
@@ -161,7 +170,7 @@ def test_log_api_cost_passes_cache_kwargs_to_calc(monkeypatch):
     monkeypatch.setitem(__import__("sys").modules, "memory.store_back", fake_store_mod)
 
     cost_monitor.log_api_cost(
-        "claude-opus-4-6", 100, 50, source="agent_loop",
+        "claude-opus-4-8", 100, 50, source="agent_loop",
         cache_creation_input_tokens=42, cache_read_input_tokens=999,
     )
     assert captured == {"create": 42, "read": 999}
@@ -186,7 +195,7 @@ def test_h1_run_agent_loop_uses_effective_model_for_cache_helper(monkeypatch):
     import orchestrator.agent as agent_mod
     importlib.reload(agent_mod)
 
-    STUB_MODEL = "claude-opus-4-6"
+    STUB_MODEL = "claude-opus-4-8"
 
     captured_helper_models = []
     captured_create_models = []
@@ -269,7 +278,7 @@ def test_m1_helper_does_not_mutate_module_level_agent_tools(monkeypatch):
     original_t2_props = dict(tools[-1]["input_schema"]["properties"])
 
     _, tools_v = agent_mod._build_cached_system_and_tools(
-        "STATIC", tools, "claude-opus-4-6")
+        "STATIC", tools, "claude-opus-4-8")
 
     # Mutate the nested input_schema on the helper output.
     tools_v[-1]["input_schema"]["properties"]["INJECTED"] = {"type": "boolean"}
@@ -326,7 +335,7 @@ def test_m2_force_synthesis_logs_api_cost_with_synthesis_source(monkeypatch):
 
     out_text, in_t, out_t = agent_mod._force_synthesis(
         _FakeClient(),
-        model="claude-opus-4-6",
+        model="claude-opus-4-8",
         system_prompt="STATIC",
         messages=[{"role": "user", "content": "ctx"}],
         max_tokens=1024,
@@ -336,7 +345,7 @@ def test_m2_force_synthesis_logs_api_cost_with_synthesis_source(monkeypatch):
     assert out_text == "synthesized"
     assert in_t == 12 and out_t == 7
     assert captured["source"] == "agent_loop_synthesis"
-    assert captured["model"] == "claude-opus-4-6"
+    assert captured["model"] == "claude-opus-4-8"
     assert captured["in"] == 12 and captured["out"] == 7
     assert captured["cache_creation"] == 100
     assert captured["cache_read"] == 500

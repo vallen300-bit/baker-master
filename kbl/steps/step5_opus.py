@@ -873,7 +873,7 @@ def _fire_opus_with_r3(
             _write_cost_ledger(
                 conn,
                 signal_id=inputs.signal_id,
-                model_id=os.environ.get("KBL_STEP5_MODEL", "claude-opus-4-7"),
+                model_id=os.environ.get("KBL_STEP5_MODEL", os.environ.get("KBL_ANTHROPIC_MODEL", "claude-opus-4-8")),
                 input_tokens=0,
                 output_tokens=0,
                 latency_ms=0,
@@ -896,7 +896,7 @@ def _fire_opus_with_r3(
             _write_cost_ledger(
                 conn,
                 signal_id=inputs.signal_id,
-                model_id=os.environ.get("KBL_STEP5_MODEL", "claude-opus-4-7"),
+                model_id=os.environ.get("KBL_STEP5_MODEL", os.environ.get("KBL_ANTHROPIC_MODEL", "claude-opus-4-8")),
                 input_tokens=0,
                 output_tokens=0,
                 latency_ms=0,

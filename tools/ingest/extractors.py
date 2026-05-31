@@ -306,7 +306,7 @@ def _call_claude_vision(img_bytes: bytes, mime: str, prompt: str, max_tokens: in
     b64 = base64.standard_b64encode(img_bytes).decode("utf-8")
 
     response = client.messages.create(
-        model="claude-opus-4-6",
+        model=os.environ.get("KBL_ANTHROPIC_MODEL", "claude-opus-4-8"),
         max_tokens=max_tokens,
         messages=[
             {

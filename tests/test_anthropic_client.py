@@ -53,8 +53,8 @@ def test_compute_cost_with_cache_read_discount() -> None:
         cache_read_tokens=1000,
         cache_write_tokens=0,
     )
-    # 1000 * 15/1M + 1000 * 15 * 0.1 / 1M = 0.015 + 0.0015 = 0.0165 USD
-    assert cost == Decimal("0.0165")
+    # Opus 4.7/4.8 pricing: 1000 * 5/1M + 1000 * 5 * 0.1 / 1M = 0.005 + 0.0005 = 0.0055 USD
+    assert cost == Decimal("0.0055")
 
 
 def test_compute_cost_with_cache_write_markup() -> None:
@@ -65,8 +65,8 @@ def test_compute_cost_with_cache_write_markup() -> None:
         cache_read_tokens=0,
         cache_write_tokens=1000,
     )
-    # 1000 * 15 * 2.00 / 1M = 0.030 USD
-    assert cost == Decimal("0.030")
+    # Opus 4.7/4.8: 1000 * 5 * 2.00 / 1M = 0.010 USD
+    assert cost == Decimal("0.010")
 
 
 def test_compute_cost_zero_tokens_is_zero() -> None:
@@ -77,10 +77,18 @@ def test_compute_cost_output_dominates_opus_pricing() -> None:
     """Output is 5x input rate — verify."""
     input_cost = _compute_cost_usd(1000, 0, 0, 0)
     output_cost = _compute_cost_usd(0, 1000, 0, 0)
-    # 15/M * 1000 vs 75/M * 1000
-    assert input_cost == Decimal("0.015")
-    assert output_cost == Decimal("0.075")
+    # Opus 4.7/4.8: 5/M * 1000 vs 25/M * 1000
+    assert input_cost == Decimal("0.005")
+    assert output_cost == Decimal("0.025")
     assert output_cost == input_cost * 5
+
+
+def test_compute_cost_uses_5_25_pricing_when_env_unset() -> None:
+    """OPUS_4_8_UPGRADE_1 amendment (bus #1429): in-code defaults are $5/$25.
+    Probe per dispatch: _compute_cost_usd(25, 4, 0, 0) == Decimal('0.000225').
+    Old $15/$75 path would return 0.000675 — the amendment prevents that.
+    """
+    assert _compute_cost_usd(25, 4, 0, 0) == Decimal("0.000225")
 
 
 # --------------------------- _extract_usage ---------------------------
@@ -150,7 +158,7 @@ def _mock_ok_response() -> SimpleNamespace:
             cache_creation_input_tokens=1000,
         ),
         stop_reason="end_turn",
-        model="claude-opus-4-7",
+        model="claude-opus-4-8",
     )
 
 
@@ -171,7 +179,7 @@ def test_call_opus_happy_path_returns_response_with_cost() -> None:
     assert resp.cache_write_tokens == 1000
     assert resp.cost_usd > 0
     assert resp.stop_reason == "end_turn"
-    assert resp.model_id == "claude-opus-4-7"
+    assert resp.model_id == "claude-opus-4-8"
 
 
 def test_call_opus_system_block_has_cache_control() -> None:
@@ -187,6 +195,15 @@ def test_call_opus_system_block_has_cache_control() -> None:
     assert system_blocks[0]["cache_control"] == {"type": "ephemeral", "ttl": "1h"}
     assert system_blocks[0]["text"] == "stable sys"
     assert system_blocks[0]["type"] == "text"
+
+
+def test_default_model_is_opus_4_8_when_env_unset() -> None:
+    """OPUS_4_8_UPGRADE_1 (2026-05-31): module-level _DEFAULT_MODEL is read
+    from ``KBL_ANTHROPIC_MODEL`` at import. With no env override, the default
+    is ``claude-opus-4-8``. With the rollback override set, it tracks that.
+    """
+    expected = os.environ.get("KBL_ANTHROPIC_MODEL", "claude-opus-4-8")
+    assert anthropic_client._DEFAULT_MODEL == expected
 
 
 def test_call_opus_model_env_override(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -226,7 +243,7 @@ def test_call_opus_prompt_cache_hit_second_call(monkeypatch: pytest.MonkeyPatch)
             cache_creation_input_tokens=0,
         ),
         stop_reason="end_turn",
-        model="claude-opus-4-7",
+        model="claude-opus-4-8",
     )
 
     resp = call_opus(system="s", user="u", client=mock_client)
