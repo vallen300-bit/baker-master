@@ -38,10 +38,13 @@ if not conn:
    ```python
    # after pooled attempts fail:
    import psycopg2
-   from config import config  # verify the actual import path used elsewhere in this file first
+   from config.settings import config   # NIT 1 (codex #1452): canonical import path
    direct = None
    try:
-       direct = psycopg2.connect(connect_timeout=5, **config.postgres.dsn_params)
+       # NIT 2 (codex #1452): use the NON-POOLED Neon endpoint so the fallback
+       # bypasses BOTH the in-process maxconn=5 pool AND the Neon pooler/PgBouncer
+       # — the whole point of the fallback is pool-pressure independence.
+       direct = psycopg2.connect(connect_timeout=5, **config.direct_dsn_params)
        cur = direct.cursor()
        cur.execute(
            """INSERT INTO scheduler_executions (job_id, fired_at, completed_at, status, error_msg)
@@ -57,7 +60,7 @@ if not conn:
            try: direct.close()
            except Exception: pass
    ```
-   - Verify `config.postgres.dsn_params` is the exact attribute used by `_init_pool` (`memory/store_back.py:307-310`) — reuse the same params; do NOT hand-build a DSN.
+   - Use `config.direct_dsn_params` — the NON-POOLED Neon endpoint (`config/settings.py:173-181`, as used by `triggers/scheduler_lease.py:64` for dedicated sessions). Verify the exact attribute path before coding; do NOT hand-build a DSN. **Connection-budget tradeoff:** direct connects count against Neon's raw connection ceiling (not the pooler) — acceptable because the fallback is per-event + short-lived, but note peak connection count in the ship evidence.
    - `connect_timeout=5` so the fallback itself cannot hang.
 2. Strengthen the pooled attempt before falling back: replace the single 100ms retry with a short bounded backoff (e.g. 3 attempts at 100/200/400ms). Keep total well under `misfire_grace_time` (300s) so the listener never back-pressures the scheduler.
 3. Keep `_record_listener_drop` ONLY for the case where BOTH pooled retries AND the direct fallback fail — a true, now-rare drop.
@@ -69,7 +72,8 @@ if not conn:
 - Touch ONLY `_job_listener`'s persistence block. Do NOT change the watchdog's logic, intervals, or any `add_job(...)`.
 
 ### Verification
-- Local: monkeypatch `store._get_conn` to always return None; assert the row still lands via the direct path (against a test DB or a mocked `psycopg2.connect`).
+- Local: monkeypatch `store._get_conn` to always return None; assert the row still lands via the direct path (mock `psycopg2.connect`).
+- **NIT 3 (codex #1452): assert `_record_listener_drop` is NOT called when pooled attempts fail but the direct fallback SUCCEEDS** — extend the existing suite at `tests/test_job_listener_harden.py:67-121` (which covers pooled retry/drop) with two new named cases: (a) direct-success → row inserted, drop-count unchanged; (b) direct-fail → `_record_listener_drop` increments, no raise.
 - Local: monkeypatch both pooled and direct to fail; assert `_record_listener_drop` increments and the scheduler thread does not raise.
 - `python3 -c "import py_compile; py_compile.compile('triggers/embedded_scheduler.py', doraise=True)"`.
 - `pytest` — the #274 listener tests + #273 liveness suite (42) must pass on a literal run.
