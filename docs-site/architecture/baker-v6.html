@@ -1,0 +1,312 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Baker System Architecture v6 — Harness V2 Baseline</title>
+<style>
+  :root {
+    --bg: #0f1117;
+    --card: #1a1d27;
+    --card-hover: #222633;
+    --border: #2a2e3d;
+    --accent-director: #f59e42;
+    --accent-baker: #4f8cff;
+    --accent-orch: #a78bfa;
+    --accent-build: #34d399;
+    --accent-review: #f472b6;
+    --accent-spec: #fbbf24;
+    --accent-desk: #38bdf8;
+    --accent-world: #34d399;
+    --danger: #ef4444;
+    --text: #e2e4ea;
+    --text-dim: #8b8fa3;
+    --text-bright: #ffffff;
+  }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+    background: var(--bg);
+    color: var(--text);
+    line-height: 1.6;
+    padding: 2rem;
+    min-height: 100vh;
+  }
+  .container { max-width: 1200px; margin: 0 auto; }
+
+  /* Header */
+  .header { text-align: center; margin-bottom: 2rem; padding-bottom: 2rem; border-bottom: 1px solid var(--border); }
+  .header h1 { font-size: 2rem; font-weight: 700; color: var(--text-bright); letter-spacing: -0.02em; }
+  .header .sub { color: var(--text-dim); font-size: 0.95rem; margin-top: 0.5rem; }
+  .header .version { display: inline-block; background: var(--card); border: 1px solid var(--border); border-radius: 6px; padding: 0.2rem 0.7rem; font-size: 0.75rem; color: var(--text-dim); margin-top: 0.75rem; }
+
+  /* Callout */
+  .callout { background: linear-gradient(135deg, rgba(245,158,66,0.08), rgba(167,139,250,0.08)); border: 1px solid rgba(245,158,66,0.25); border-radius: 12px; padding: 1.25rem 1.75rem; margin-bottom: 2.5rem; font-size: 0.9rem; }
+  .callout strong { color: var(--accent-director); }
+  .callout a { color: var(--accent-baker); text-decoration: none; }
+  .callout a:hover { text-decoration: underline; }
+
+  /* Section headers */
+  .section-title { font-size: 1.1rem; font-weight: 600; color: var(--text-bright); margin-bottom: 1.25rem; display: flex; align-items: center; gap: 0.5rem; }
+  .section-title::after { content: ''; flex: 1; height: 1px; background: var(--border); }
+  .section { margin-bottom: 3rem; }
+  .lead { color: var(--text-dim); font-size: 0.88rem; margin-bottom: 1.25rem; max-width: 820px; }
+
+  /* Actor cards */
+  .group-label { font-size: 0.72rem; text-transform: uppercase; letter-spacing: 0.1em; color: var(--text-dim); margin: 1.5rem 0 0.75rem; }
+  .actors { display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 1rem; }
+  .actor-card { background: var(--card); border: 1px solid var(--border); border-radius: 12px; padding: 1.25rem 1.4rem; transition: border-color 0.2s, transform 0.15s, background 0.15s; position: relative; overflow: hidden; }
+  .actor-card:hover { transform: translateY(-2px); background: var(--card-hover); }
+  .actor-card::before { content: ''; position: absolute; top: 0; left: 0; right: 0; height: 3px; }
+  .c-director::before { background: var(--accent-director); }
+  .c-baker::before { background: var(--accent-baker); }
+  .c-orch::before { background: var(--accent-orch); }
+  .c-build::before { background: var(--accent-build); }
+  .c-review::before { background: var(--accent-review); }
+  .c-spec::before { background: var(--accent-spec); }
+  .c-desk::before { background: var(--accent-desk); }
+  .actor-card h3 { font-size: 1rem; font-weight: 600; color: var(--text-bright); margin-bottom: 0.1rem; }
+  .actor-card .role { font-size: 0.72rem; text-transform: uppercase; letter-spacing: 0.06em; color: var(--text-dim); margin-bottom: 0.6rem; }
+  .actor-card p { font-size: 0.83rem; color: var(--text); }
+  .actor-card .not { font-size: 0.78rem; color: var(--text-dim); margin-top: 0.5rem; }
+  .actor-card .not b { color: var(--danger); font-weight: 600; }
+
+  /* Tables */
+  .ftable { width: 100%; border-collapse: separate; border-spacing: 0; font-size: 0.84rem; }
+  .ftable th { background: var(--card); color: var(--text-dim); font-weight: 600; font-size: 0.7rem; text-transform: uppercase; letter-spacing: 0.08em; padding: 0.75rem 1rem; text-align: left; border-bottom: 1px solid var(--border); }
+  .ftable th:first-child { border-radius: 8px 0 0 0; }
+  .ftable th:last-child { border-radius: 0 8px 0 0; }
+  .ftable td { padding: 0.8rem 1rem; border-bottom: 1px solid var(--border); vertical-align: top; }
+  .ftable tbody tr { background: var(--card); transition: background 0.15s; }
+  .ftable tbody tr:hover { background: var(--card-hover); }
+  .ftable tr:last-child td { border-bottom: none; }
+  .ftable code { font-family: 'SF Mono', 'Fira Code', monospace; font-size: 0.74rem; color: var(--accent-baker); }
+  .spine { color: var(--accent-orch); font-weight: 600; }
+  .v-obsolete { color: var(--danger); font-weight: 600; }
+  .v-stale { color: var(--accent-spec); font-weight: 600; }
+
+  /* Authority tiers */
+  .tiers { display: grid; grid-template-columns: repeat(3, 1fr); gap: 1rem; }
+  .tier { background: var(--card); border: 1px solid var(--border); border-radius: 12px; padding: 1.4rem; }
+  .tier h3 { font-size: 0.95rem; color: var(--text-bright); margin-bottom: 0.3rem; }
+  .tier .who { font-size: 0.72rem; text-transform: uppercase; letter-spacing: 0.06em; margin-bottom: 0.75rem; }
+  .tier.a .who { color: var(--accent-build); }
+  .tier.b .who { color: var(--accent-spec); }
+  .tier.c .who { color: var(--accent-director); }
+  .tier p { font-size: 0.82rem; color: var(--text); }
+  .tier ul { margin: 0.5rem 0 0 1rem; font-size: 0.8rem; color: var(--text-dim); }
+
+  /* Lifecycle */
+  .cycle { background: var(--card); border: 1px solid var(--border); border-radius: 12px; padding: 2rem; }
+  .cstep { display: flex; align-items: flex-start; gap: 1rem; margin-bottom: 1.1rem; position: relative; }
+  .cstep:last-child { margin-bottom: 0; }
+  .cnum { width: 30px; height: 30px; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-size: 0.78rem; font-weight: 700; flex-shrink: 0; background: rgba(167,139,250,0.18); color: var(--accent-orch); }
+  .cstep.gate .cnum { background: rgba(244,114,182,0.18); color: var(--accent-review); }
+  .clabel { font-weight: 600; font-size: 0.9rem; color: var(--text-bright); }
+  .cdesc { font-size: 0.82rem; color: var(--text-dim); margin-top: 0.1rem; }
+
+  /* Implications */
+  .impl { display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; }
+  .impl-card { background: var(--card); border: 1px solid var(--border); border-left: 3px solid var(--accent-orch); border-radius: 8px; padding: 1.1rem 1.3rem; }
+  .impl-card h4 { font-size: 0.9rem; color: var(--text-bright); margin-bottom: 0.3rem; }
+  .impl-card p { font-size: 0.82rem; color: var(--text-dim); }
+
+  /* Stack */
+  .stack-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 0.75rem; }
+  .stack-item { background: var(--card); border: 1px solid var(--border); border-radius: 8px; padding: 0.85rem 1rem; }
+  .stack-label { font-size: 0.8rem; font-weight: 600; color: var(--text-bright); }
+  .stack-detail { font-size: 0.72rem; color: var(--text-dim); }
+
+  /* Recommendation box */
+  .rec { background: linear-gradient(135deg, rgba(79,140,255,0.08), rgba(52,211,153,0.08)); border: 1px solid rgba(52,211,153,0.25); border-radius: 12px; padding: 1.5rem 1.9rem; }
+  .rec h3 { color: var(--text-bright); font-size: 1rem; margin-bottom: 0.5rem; }
+  .rec p { font-size: 0.86rem; color: var(--text); margin-bottom: 0.6rem; }
+  .rec .cc { font-size: 0.82rem; color: var(--text-dim); }
+  .rec .cc b { color: var(--accent-spec); }
+
+  .footer { text-align: center; padding-top: 2rem; border-top: 1px solid var(--border); color: var(--text-dim); font-size: 0.75rem; }
+
+  @media (max-width: 900px) { .tiers, .impl { grid-template-columns: 1fr; } body { padding: 1rem; } }
+</style>
+</head>
+<body>
+<div class="container">
+
+  <div class="header">
+    <h1>Baker System Architecture — v6</h1>
+    <div class="sub">From a 3-actor desk to a multi-agent institution on the Brisen Lab bus</div>
+    <div class="version">v6 · current as of 2026-05-31 · Harness V2 baseline · subject to revision</div>
+  </div>
+
+  <div class="callout">
+    <strong>Supersedes v5.1 (2 March 2026).</strong> The earlier
+    <a href="baker-v5.html">baker-v5 page</a> describes three actors, 18 MCP tools, and no
+    agent-to-agent rail — roughly a third of today's system, and actively misleading on the
+    rest. This page replaces it as canonical. v5.1 is retained for version history.
+  </div>
+
+  <!-- 1. CURRENT ARCHITECTURE SUMMARY -->
+  <div class="section">
+    <div class="section-title">Current architecture summary</div>
+    <p class="lead">Baker is no longer "a Sentinel + a thinking session + the Director." It is a
+    multi-agent institution in three layers. The <span class="spine">Sentinel layer</span> (Baker
+    the always-on service) survives from v5.1 and remains the memory bridge. A new
+    <span class="spine">reasoning + orchestration layer</span> — a fleet of Claude Code agents plus
+    a cross-vendor verifier — coordinates over the Brisen Lab bus. The <span class="spine">authority
+    layer</span> is unchanged at the top: the Director is final authority, but now talks to AH1,
+    who orchestrates the rest under a strict tiered bank model. Target reasoning model is Cortex 3T
+    (per-matter 6-phase cycles), migration in flight.</p>
+    <p class="lead"><b>Stack deltas vs v5.1:</b> LLM is now Claude Opus 4.8 (<code>claude-opus-4-8</code>),
+    not 4.6. Baker MCP exposes ~47 tools, not 18. FastAPI 8080, Neon Postgres, Qdrant/Voyage 1024d,
+    and Render auto-deploy all hold.</p>
+  </div>
+
+  <!-- 3. UPDATED ACTOR MAP -->
+  <div class="section">
+    <div class="section-title">Updated actor map</div>
+
+    <div class="group-label">Authority &amp; Sentinel</div>
+    <div class="actors">
+      <div class="actor-card c-director"><h3>Director (Dimitry)</h3><div class="role">Final authority</div><p>Sets direction, ratifies, runs the business. Non-technical.</p><div class="not"><b>Not:</b> engineer, tooling, code.</div></div>
+      <div class="actor-card c-baker"><h3>Baker (Sentinel)</h3><div class="role">Always-on service</div><p>Ingest → embed → store → serve via MCP. The memory bridge.</p><div class="not"><b>Not:</b> deep reasoning, deciding, unattended strategy.</div></div>
+    </div>
+
+    <div class="group-label">Orchestration</div>
+    <div class="actors">
+      <div class="actor-card c-orch"><h3>AH1 — lead</h3><div class="role">Sole orchestrator</div><p>Briefs, dispatch, review, merge, deploy, recovery. Tier-B autonomy.</p><div class="not"><b>Not:</b> writes prod code, sets strategy.</div></div>
+      <div class="actor-card c-orch"><h3>AH1 — cowork</h3><div class="role">Cowork App surface</div><p>Same authority as lead, parallel instance on the Cowork App.</p><div class="not"><b>Not:</b> conflict with lead's lane (coordinates).</div></div>
+      <div class="actor-card c-orch"><h3>AH2 — deputy</h3><div class="role">Cross-lane review</div><p>AUTOPOLL, gold-audit watch, and the G3 ship gate.</p><div class="not"><b>Not:</b> orchestrate (that's AH1).</div></div>
+    </div>
+
+    <div class="group-label">Build &amp; Review</div>
+    <div class="actors">
+      <div class="actor-card c-build"><h3>B-codes (b1–b4)</h3><div class="role">Build pool</div><p>Implement briefs, ship with literal pytest output.</p><div class="not"><b>Not Director-facing.</b> No design, no recommend.</div></div>
+      <div class="actor-card c-review"><h3>Codex</h3><div class="role">Read-only verifier</div><p>Independent OpenAI-vendor cross-check — a second opinion across vendors.</p><div class="not"><b>Not:</b> execute, write, or merge — verify only.</div></div>
+      <div class="actor-card c-review"><h3>Architect</h3><div class="role">Design-time review</div><p>Reviews proposed architecture before build.</p><div class="not"><b>Not:</b> implement or merge.</div></div>
+    </div>
+
+    <div class="group-label">Specialists &amp; Desks</div>
+    <div class="actors">
+      <div class="actor-card c-spec"><h3>AID (AI Dennis)</h3><div class="role">IT / SRE / CAIO</div><p>Design-time only. Owns the IT library. Escalates to Director directly.</p><div class="not"><b>Not:</b> engineer or implement.</div></div>
+      <div class="actor-card c-spec"><h3>Researcher</h3><div class="role">Brainstorm + synthesis</div><p>Multi-source research; writes <code>_ops/ideas/</code>.</p><div class="not"><b>Not:</b> implement, overrule ratified specs.</div></div>
+      <div class="actor-card c-desk"><h3>Matter desks</h3><div class="role">Per-matter reasoning</div><p>Hagenauer, MOVIE, AO, Baden-Baden, Origination, Brisen. Each owns its wiki slug.</p><div class="not"><b>Not:</b> cross into another desk's matter.</div></div>
+    </div>
+  </div>
+
+  <!-- 2 (rails) -->
+  <div class="section">
+    <div class="section-title">Updated rails map</div>
+    <table class="ftable">
+      <thead><tr><th>Rail</th><th>Carries</th><th>Between</th><th>Note</th></tr></thead>
+      <tbody>
+        <tr><td><b>Baker MCP</b> (~47 tools)</td><td>Memory: deadlines, VIPs, emails, actions, ClickUp/Todoist, RSS, transcripts, raw query + write-back</td><td>Every agent ↔ Baker</td><td>v5.1's "MCP bridge", grown 18→47</td></tr>
+        <tr><td class="spine">Brisen Lab bus</td><td>Agent-to-agent: dispatch, ship, blocker, gate verdict, heartbeat, ack</td><td>All fleet agents</td><td><span class="spine">The new spine.</span> Absent in v5.1</td></tr>
+        <tr><td><b>B-code mailboxes</b></td><td>Self-contained briefs <code>CODE_&lt;N&gt;_PENDING.md</code></td><td>AH1 → b1–b4</td><td>Paired with same-turn bus-post</td></tr>
+        <tr><td><b>Vault</b> (<code>baker-vault</code> git)</td><td>Shared truth: <code>_ops/</code>, <code>wiki/matters/</code>, curated knowledge, agent state</td><td>All agents (R/W per ownership)</td><td>Physical shared dir</td></tr>
+        <tr><td><b>Dashboard / CEO Cockpit</b></td><td>Director-facing briefings, Scan, ratify panels</td><td>Baker → Director</td><td><code>baker-master.onrender.com</code></td></tr>
+        <tr><td><b>Render / Baker service</b></td><td>Running FastAPI app + auto-deploy from <code>main</code></td><td>CI → prod</td><td>Single deploy path</td></tr>
+        <tr><td><b>Email / WhatsApp / Mail.app</b></td><td>Outbound counterparty + Director comms</td><td>Agents → world (gated)</td><td>External sends always draft-first</td></tr>
+      </tbody>
+    </table>
+    <p class="lead" style="margin-top:1rem"><b>Inbound triggers (Sentinel, unchanged):</b> Gmail (5 min),
+    WhatsApp (push), ClickUp (5 min), Fireflies, Todoist, RSS, Whoop, Dropbox watch.</p>
+  </div>
+
+  <!-- Authority split -->
+  <div class="section">
+    <div class="section-title">Authority split — the bank model</div>
+    <div class="tiers">
+      <div class="tier a"><h3>Tier A</h3><div class="who">AH1 standing authorization</div><p>Acts on gate conditions; logs and reports after.</p><ul><li>PR merges on green CI + review</li><li>Mailbox dispatch to B-codes</li><li>Brief drafting, memory R/W</li><li>Small infra / docs commits</li></ul></div>
+      <div class="tier b"><h3>Tier B</h3><div class="who">Per-action authorization</div><p>Prepare exact action, ask "Shall I X?", wait, execute, log the quote.</p><ul><li>Render env-var flips</li><li>External posts (Slack / Gmail)</li><li>launchd / secret-file PUTs</li><li>Decisions-log entries</li></ul></div>
+      <div class="tier c"><h3>Tier C</h3><div class="who">Director only</div><p>AH1 surfaces the option; never executes.</p><ul><li>Capital, counterparty drafts</li><li>Externally-facing speech</li><li>Third-party logins</li><li>Acts under Director's name</li></ul></div>
+    </div>
+    <p class="lead" style="margin-top:1rem">B-codes, Codex, Architect, and AID carry <b>no</b> Director-facing
+    authority — they feed AH1, who carries the decision to the Director.</p>
+  </div>
+
+  <!-- 5. DONE-STATE LIFECYCLE -->
+  <div class="section">
+    <div class="section-title">Updated done-state lifecycle</div>
+    <p class="lead">v5.1's 6-step memory cycle is replaced by a 9-stage gated delivery pipeline. The
+    old "store decision → act → world" loop now lives inside stages 1 and 9.</p>
+    <div class="cycle">
+      <div class="cstep"><div class="cnum">1</div><div><div class="clabel">Brief</div><div class="cdesc">AH1 authors via the write-brief skill — problem → constraints → acceptance criteria.</div></div></div>
+      <div class="cstep"><div class="cnum">2</div><div><div class="clabel">Dispatch</div><div class="cdesc">Mailbox <code>CODE_&lt;N&gt;_PENDING.md</code> + same-turn bus-post.</div></div></div>
+      <div class="cstep"><div class="cnum">3</div><div><div class="clabel">Claim</div><div class="cdesc">B-code orients, reads brief + memory, confirms pickup on the bus.</div></div></div>
+      <div class="cstep"><div class="cnum">4</div><div><div class="clabel">Implementation</div><div class="cdesc">Surgical edits, tests-first, fault-tolerant.</div></div></div>
+      <div class="cstep"><div class="cnum">5</div><div><div class="clabel">Ship report</div><div class="cdesc">Literal pytest output — no "pass by inspection".</div></div></div>
+      <div class="cstep gate"><div class="cnum">6</div><div><div class="clabel">Review gates</div><div class="cdesc">G0 Codex pre-review (cross-vendor) → G1 AH1 fold → G2 /security-review → G3 AH2 deputy.</div></div></div>
+      <div class="cstep"><div class="cnum">7</div><div><div class="clabel">Merge</div><div class="cdesc">AH1 squash-merges on green gates.</div></div></div>
+      <div class="cstep"><div class="cnum">8</div><div><div class="clabel">Deploy</div><div class="cdesc">Render auto-deploys from <code>main</code>.</div></div></div>
+      <div class="cstep"><div class="cnum">9</div><div><div class="clabel">Post-deploy AC + writeback</div><div class="cdesc">AH1 verifies acceptance criteria live, then PINNED update, activity log, cascade-back-prop, lessons.</div></div></div>
+    </div>
+  </div>
+
+  <!-- 2 (obsolete) -->
+  <div class="section">
+    <div class="section-title">Obsolete / superseded parts of v5.1</div>
+    <table class="ftable">
+      <thead><tr><th>v5.1 claim</th><th>Reality today</th><th>Verdict</th></tr></thead>
+      <tbody>
+        <tr><td>Three actors only (Baker / Cowork / Director)</td><td>10+ agent roles across reasoning, build, review, IT, research, desks</td><td class="v-obsolete">Obsolete</td></tr>
+        <tr><td>18 MCP tools (14 read / 4 write)</td><td>~47 Baker MCP tools live</td><td class="v-stale">Stale count</td></tr>
+        <tr><td>Cowork = the only thinking session</td><td>AH1 / AH2 / desks / Researcher all reason; Cowork is one AH1 surface</td><td class="v-obsolete">Superseded</td></tr>
+        <tr><td>No agent-to-agent rail</td><td>Brisen Lab bus is the spine of all cross-agent traffic</td><td class="v-obsolete">Missing entirely</td></tr>
+        <tr><td>No build pool</td><td>B-codes b1–b4 build from mailbox briefs</td><td class="v-obsolete">Missing</td></tr>
+        <tr><td>No review lanes</td><td>Codex pre-review + /security-review + AH2 deputy gate</td><td class="v-obsolete">Missing</td></tr>
+        <tr><td>No Codex / Architect / AID</td><td>All three are live actors</td><td class="v-obsolete">Missing</td></tr>
+        <tr><td>Opus 4.6</td><td>Opus 4.8</td><td class="v-stale">Stale</td></tr>
+        <tr><td>6-step linear memory cycle</td><td>9-stage gated delivery pipeline</td><td class="v-obsolete">Superseded</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <!-- 6. HARNESS V2 IMPLICATIONS -->
+  <div class="section">
+    <div class="section-title">Harness V2 implications</div>
+    <div class="impl">
+      <div class="impl-card"><h4>1 · The bus is the load-bearing primitive</h4><p>Not the MCP. V2 must model the Brisen Lab bus as the spine — dispatch, gates, heartbeats, acks all ride it. Any V2 that omits the bus repeats v5.1's central error.</p></div>
+      <div class="impl-card"><h4>2 · Roles are tiered, not flat</h4><p>Encode A/B/C authority and the Director-facing-or-not boundary as first-class. A B-code or Codex must be structurally unable to address the Director.</p></div>
+      <div class="impl-card"><h4>3 · Review is multi-vendor, multi-gate</h4><p>Treat G0–G3 as the default path. Codex (cross-vendor) + security-review + deputy is the institution's correctness immune system.</p></div>
+      <div class="impl-card"><h4>4 · Memory is two-layer</h4><p>Keep the split: Baker MCP (live operational) vs vault curated (per-matter, persistent). Conflating them is how state rots.</p></div>
+      <div class="impl-card"><h4>5 · Cortex 3T is the reasoning target</h4><p>V2's reasoning model should assume per-matter cycles (sense → load → reason → propose → act → archive), not one global thinking session.</p></div>
+      <div class="impl-card"><h4>6 · Cheap build layer, singular orchestration</h4><p>Let B-codes / Researcher fan out freely; keep orchestration (AH1) singular and stateful.</p></div>
+    </div>
+  </div>
+
+  <!-- Recommendation -->
+  <div class="section">
+    <div class="section-title">Recommendation — replace vs new page</div>
+    <div class="rec">
+      <h3>Replace baker-v5 with this v6 page; keep the old URL as a "superseded" banner + redirect.</h3>
+      <p>v5.1 is not merely incomplete — it is actively misleading (three actors, 18 tools, no bus).
+      A new page that leaves v5.1 live as a peer lets the wrong mental model keep circulating. Keeping
+      the old URL alive as a redirect/banner preserves links and version history. <b>Director ratified:
+      replace as v6 (2026-05-31).</b></p>
+      <p class="cc"><b>Counter-case (devil's advocate):</b> if the Harness V2 actor set may shift again
+      in weeks, freezing v6 as final risks a third rewrite. Mitigation: v6 is marked "current as of
+      2026-05-31, Harness V2 baseline — subject to revision" rather than final. A stale-but-honest page
+      costs far less than a confidently-wrong one.</p>
+    </div>
+  </div>
+
+  <!-- Stack -->
+  <div class="section">
+    <div class="section-title">Tech stack</div>
+    <div class="stack-grid">
+      <div class="stack-item"><div class="stack-label">Backend</div><div class="stack-detail">FastAPI · port 8080</div></div>
+      <div class="stack-item"><div class="stack-label">Database</div><div class="stack-detail">PostgreSQL (Neon)</div></div>
+      <div class="stack-item"><div class="stack-label">Vectors</div><div class="stack-detail">Qdrant Cloud · Voyage 1024d</div></div>
+      <div class="stack-item"><div class="stack-label">LLM</div><div class="stack-detail">Claude Opus 4.8 (claude-opus-4-8)</div></div>
+      <div class="stack-item"><div class="stack-label">Deployment</div><div class="stack-detail">Render · auto-deploy from main</div></div>
+      <div class="stack-item"><div class="stack-label">Rails</div><div class="stack-detail">Baker MCP (~47) + Brisen Lab bus</div></div>
+    </div>
+  </div>
+
+  <div class="footer">
+    Baker System v6 — Brisengroup — current as of 2026-05-31 — Harness V2 baseline — ~47 MCP tools + Brisen Lab bus
+  </div>
+
+</div>
+</body>
+</html>
