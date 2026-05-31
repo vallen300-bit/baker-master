@@ -179,6 +179,12 @@ def check_scheduler_liveness() -> dict:
 
     try:
         hour_bucket = datetime.now(timezone.utc).strftime("%Y%m%d-%H")
+        # JOB_LISTENER_HARDEN_1: surface listener-drop hint in alert body
+        try:
+            from triggers.embedded_scheduler import get_listener_drop_counts
+            drop_counts = get_listener_drop_counts()
+        except Exception:
+            drop_counts = {}
         for entry in summary["stale"]:
             job_id = entry["job_id"]
             tier = entry["tier"]
@@ -196,6 +202,13 @@ def check_scheduler_liveness() -> dict:
                     f"Scheduler job '{job_id}' last fired {age:.0f}s ago; "
                     f"staleness window is {window:.0f}s (interval x tolerance). "
                     f"Tier {tier} job — investigate."
+                )
+            drop_n = drop_counts.get(job_id, 0)
+            if drop_n > 0:
+                body += (
+                    f"\n\nNOTE: _job_listener silently dropped {drop_n} write(s) for "
+                    f"this job this process. The job may have fired; the listener could "
+                    f"not persist. Check Render logs for JOB_LISTENER_SILENT_SKIP."
                 )
             try:
                 store.create_alert(

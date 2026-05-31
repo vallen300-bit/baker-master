@@ -7,6 +7,7 @@ never ran on Render because uvicorn only starts dashboard.py.
 Called by dashboard.py on startup/shutdown events.
 """
 import logging
+import threading
 from typing import Optional
 from datetime import datetime, timezone
 
@@ -16,6 +17,33 @@ from apscheduler.triggers.cron import CronTrigger
 from apscheduler.events import EVENT_JOB_ERROR, EVENT_JOB_EXECUTED
 
 logger = logging.getLogger("sentinel.embedded_scheduler")
+
+# JOB_LISTENER_HARDEN_1: in-memory per-job-id counter of silent listener drops
+# (conn-pool exhaustion / init-failure). Read by scheduler_liveness_sentinel
+# alert body to differentiate "job didn't fire" vs "listener dropped write".
+# Process-local; replica-local; resets on Render restart. Acceptable for V1.
+_listener_drop_count: dict[str, int] = {}
+_listener_drop_lock = threading.Lock()
+
+
+def get_listener_drop_counts() -> dict[str, int]:
+    """Snapshot of per-job listener drop counts since process start.
+    Returns a shallow copy so callers cannot mutate the live dict.
+    """
+    with _listener_drop_lock:
+        return dict(_listener_drop_count)
+
+
+def _record_listener_drop(job_id: str) -> None:
+    """Thread-safe increment of drop counter + structured WARNING log."""
+    with _listener_drop_lock:
+        _listener_drop_count[job_id] = _listener_drop_count.get(job_id, 0) + 1
+        count = _listener_drop_count[job_id]
+    logger.warning(
+        f"JOB_LISTENER_SILENT_SKIP job_id={job_id} reason=conn_pool_none "
+        f"process_drop_count={count}"
+    )
+
 
 _scheduler: Optional[BackgroundScheduler] = None
 _lock_retry_thread: Optional["threading.Thread"] = None
@@ -47,7 +75,16 @@ def _job_listener(event):
         store = SentinelStoreBack._get_global_instance()
         conn = store._get_conn()
         if not conn:
-            return
+            # JOB_LISTENER_HARDEN_1: brief sleep + one retry — transient pool
+            # exhaustion is common under spike (40+ jobs + FastAPI + Cortex share
+            # maxconn=5 pool). 100ms is well below APScheduler misfire_grace_time
+            # (300s) so listener cannot back-pressure the scheduler.
+            import time
+            time.sleep(0.1)
+            conn = store._get_conn()
+            if not conn:
+                _record_listener_drop(event.job_id)
+                return
         try:
             cur = conn.cursor()
             status = "error" if event.exception else "executed"
