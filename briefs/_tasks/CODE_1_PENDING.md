@@ -4,6 +4,8 @@ to: b1
 from: lead
 dispatched_by: lead
 dispatched_at: 2026-06-01
+status: COMPLETE
+merged_anchor: baker-vault main 382ee0e (G1 PASS — evals 59/59 exit0, 8 skills resolve, single-source clean, all 8 ACs)
 repo: baker-vault (NOT baker-master) — work in ~/baker-vault, push to baker-vault main
 canonical_brief: ~/baker-vault/_ops/briefs/BRIEF_EXECUTIVE_MEMO_AUTHORING_SKILL_TREE_1.md (commit b73c384)
 codex_status: PASS-WITH-NITS (v3.1) — dispatch-ready
