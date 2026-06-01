@@ -4,7 +4,10 @@ to: b4
 from: lead
 dispatched_by: lead
 dispatched_at: 2026-06-01
-status: PENDING
+status: COMPLETE
+completed_at: 2026-06-01
+completed_commit: brisen-lab ca4795f (pushed to main)
+g1: RE-VERIFY PASS (Director, browser-frontmost, #1523/#1524) — bare-CR fix, permission-free
 repo: brisen-lab (NOT baker-master) — work in a brisen-lab clone, PR to brisen-lab main
 canonical_brief: ~/Desktop/baker-code/briefs/BRIEF_CODEX_WAKE_ENTER_SUBMIT_1.md
 complexity: Medium (~1.5h)
