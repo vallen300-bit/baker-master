@@ -643,3 +643,27 @@ Anchor: Director chat 2026-05-23 evening; AH2 bus #788 (Layer 2) + bus #790
 **Anchor tooling:** `~/Desktop/baker-code/scripts/check-lead-inbox.sh` (built 2026-05-30 same chat) mirrors `check-codex-inbox.sh` pattern with `since`-filter state persistence. Other terminals (deputy / aid / desks) should adopt the same pattern — one canonical script per terminal slug.
 
 **Anchor chat:** Director directive 2026-05-30 ~07:30 CEST — *"It's not about how to poll. I think we have a little problem. What time is now?"* + *"We need to fix this."* AH1 had been blaming polling-cadence for what was actually a wrong-endpoint pattern.
+
+### 83. macOS TCC — Accessibility ≠ Automation; prefer a permission-free `do script` CR over `key code` keystroke injection (2026-06-01)
+
+**Mistake:** CODEX_WAKE_ENTER_SUBMIT_1's first fix submitted the wake prompt to a Terminal TUI via `tell application "System Events" to key code 36` (Enter). On the codex *terminal* card it failed two ways at once: (1) a NEW Terminal window spawned instead of the existing tab being used; (2) the prompt text landed but was never submitted. Both symptoms had ONE root cause — the Wake.app lacked the **Accessibility** TCC grant (`kTCCServiceAccessibility`), which is a *separate* permission from the **Automation** grant (control-Terminal) Director had already approved. `key code` via System Events throws error 1002 ("not allowed to send keystrokes"); that error was caught by the handler's outer try/catch and **cascaded into the spawn fallback** → stray duplicate window + unsubmitted text.
+
+**Why it happened:** the two macOS TCC buckets look interchangeable but are not. Automation (`kTCCServiceAppleEvents`) lets app A send AppleEvents to app B (e.g. `do script` to Terminal). Accessibility lets an app synthesize raw input events (`key code`, `keystroke` via System Events) — a strictly higher privilege requiring its own grant. The fix assumed the Automation grant covered keystroke injection. It does not.
+
+**Rule:** to SUBMIT a line to a Terminal-hosted TUI (codex, claude picker, any REPL), do NOT inject `key code 36` / System Events keystrokes — that needs Accessibility and cascades to spawn-fallback when missing. Instead send a **second, empty `do script "" in targetTab`**: a lone carriage return delivered through the *existing Automation grant* that the TUI treats as Enter. A/B proof: `do script "<text>" in tab` leaves the text unsubmitted; a following bare `do script "" in tab` submits it. Permission-free, focus-independent (works with any app frontmost), no `activate`, no spawn cascade. When you must verify keystroke-injection code, confirm WHICH TCC bucket it needs before assuming an existing grant covers it.
+
+**Applies to:** the brisen-lab wake pipeline (`tools/wake-handler/wake-handler.applescript`) and any AppleScript that drives a Terminal TUI. Generalizes to any agent-wake / auto-submit surface added to the bus going forward.
+
+**Anchor:** CODEX_WAKE_ENTER_SUBMIT_1 — b4 bus #1522 (root-cause + corrected fix), G1 re-verify PASS bus #1523/#1524 (Director clicked codex card browser-frontmost → auto-submit, zero new windows); report `brisen-lab/briefs/_reports/B4_codex_wake_enter_submit_20260601.md` REVISION 1; install SOP §Seventh-pass lived foot-gun.
+
+### 84. Verifying an app's behavior using the SESSION's own borrowed TCC grant = FALSE PASS (2026-06-01)
+
+**Mistake:** during CODEX_WAKE_ENTER_SUBMIT_1, b4 reported the submit mechanism PASS (bus #1515) after seeing codex submit live. But the submit it observed came from b4's own `osascript` run, which borrowed the *interactive session's* Accessibility grant — NOT the Wake.app's own grant. When Director ran the real smoke through the actual app surface, both defects (spawn + no-submit) reappeared. The "pass" was an artifact of the verification harness, not the artifact under test.
+
+**Why it happened:** running a verification `osascript` from a logged-in Terminal inherits that terminal's TCC permissions, which are broader than a packaged .app's. The app being shipped has a different (often empty) grant set. Testing in the happy path (terminal frontmost, full grants) hid the failure that only appears in the real scenario (browser/Finder frontmost, app's own grants).
+
+**Rule:** when shipping code that runs inside a packaged app / launchd agent / different security context, verify in THAT context with THAT context's grants — not from an interactive shell. For TCC-gated behavior specifically: reproduce the **failing scenario** (a non-Terminal app frontmost) using the app's own invocation path (`open 'brisen-lab://wake/<slug>'`, not a hand-run `osascript`). A pass from a borrowed grant is a false pass — call it out and re-run through the real surface before claiming G1.
+
+**Applies to:** every wake / auto-submit / AppleScript ship, every launchd-agent behavior, any "it worked when I ran it" claim where the runtime grant context differs from production. Layer onto Lesson #8 (compile-clean ≠ done; exercise the real flow).
+
+**Anchor:** CODEX_WAKE_ENTER_SUBMIT_1 — b4 owned the false pass in bus #1522 ("MY EARLIER #1515 PASS WAS A FALSE PASS"); corrected via REVISION 1 + G1 re-verify through the real app surface (bus #1523).
