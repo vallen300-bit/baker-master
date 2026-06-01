@@ -1,38 +1,43 @@
 ---
-dispatch: SCHEDULER_LIVENESS_REVIVE_1
+dispatch: EXECUTIVE_MEMO_AUTHORING_SKILL_TREE_1
 to: b1
 from: lead
 dispatched_by: lead
-status: COMPLETE
-merged_anchor: PR #278 squash 7ce936f (G1+G2+G3 all PASS); deputy G3 #1469
-dispatched_at: 2026-05-31T12:12:00Z
-authored: 2026-05-31
-brief_path: /Users/dimitry/bm-aihead1/briefs/BRIEF_SCHEDULER_LIVENESS_REVIVE_1.md
-target_repo: baker-master
-estimated_time: ~2-3h
-complexity: Medium
-brief_version: v2.2 @ main 3c0e849 (recut after codex FAIL-LIGHT #1444; PASS-WITH-NITS #1452; all 3 nits folded)
-codex_pre_review: PASS-WITH-NITS bus #1452 (root cause re-scoped to listener persistence; 3 nits folded into v2.2)
-deputy_concur: bus #1450 (G3 will focus on fallback-conn lifecycle)
-reply_to: lead
-ship_topic: ship/scheduler-liveness-revive-1
-anchor_chat: Director 2026-05-31 "go" after codex PASS-WITH-NITS. Supersedes the v1 dead-watchdog premise. PR #273 AC1 re-verify FAILED (scheduler_job_liveness 0 rows since 06:31Z) because _job_listener drops scheduler_executions INSERTs under conn-pool exhaustion — NOT a #274 regression.
+dispatched_at: 2026-06-01
+repo: baker-vault (NOT baker-master) — work in ~/baker-vault, push to baker-vault main
+canonical_brief: ~/baker-vault/_ops/briefs/BRIEF_EXECUTIVE_MEMO_AUTHORING_SKILL_TREE_1.md (commit b73c384)
+codex_status: PASS-WITH-NITS (v3.1) — dispatch-ready
+gate_owner: lead (G1 = sync_skills.sh dry-run clean + trigger evals green)
+ship_target: bus topic ship/executive-memo-authoring-skill-tree-1 -> lead
 ---
 
-# b1 dispatch — SCHEDULER_LIVENESS_REVIVE_1
+# DISPATCH — build the executive-memo-authoring skill tree (b1)
 
-Read `briefs/BRIEF_SCHEDULER_LIVENESS_REVIVE_1.md` end-to-end before any code. It is the RECUT v2.2 — the H1 + RECUT NOTE explain why v1's "dead watchdog" premise was wrong (codex disproved it with Render logs; the watchdog executes fine, the listener drops its row).
+**This is a baker-VAULT build, not baker-master.** All paths are under `~/baker-vault/_ops/`.
+Do your work there; commit + push to baker-vault `main` (writer-contract allows B-codes to push `_ops/`).
 
-Brief cleared codex pre-review twice: FAIL-LIGHT #1444 (correctly disproved v1) → recut → PASS-WITH-NITS #1452 on v2.1. All 3 nits folded into v2.2 (`3c0e849`): (1) `from config.settings import config`, (2) direct fallback uses `config.direct_dsn_params` (non-pooled Neon endpoint), (3) +2 named test cases. No further pre-write review required.
+## Read first
+The full, Codex-passed brief is canonical — build exactly to it:
+`~/baker-vault/_ops/briefs/BRIEF_EXECUTIVE_MEMO_AUTHORING_SKILL_TREE_1.md` (commit `b73c384`).
 
-**Scope:**
-- **Fix 1 (root cause):** `triggers/embedded_scheduler.py` `_job_listener` — replace the single 100ms retry with bounded pooled backoff (100/200/400ms), then a DEDICATED short-lived `psycopg2.connect(connect_timeout=5, **config.direct_dsn_params)` fallback for the `scheduler_executions` INSERT (close in `finally`). `_record_listener_drop` only if pooled AND direct both fail.
-- **Fix 2 (secondary):** `memory/store_back.py` maxconn 5→8 ONLY if you confirm the Neon connection ceiling (else leave 5, note in ship report) + `SET LOCAL statement_timeout='20s'` in the watchdog cursor block (`triggers/scheduler_liveness_sentinel.py`).
-- **Optional (low priority):** non-fatal startup self-presence log after `_register_jobs(_scheduler)` (pre-`start()`), NO raise. Skip if it bloats the diff.
-- DROPPED: max_instances=2 (codex Finding 2 dup-alert race). Do NOT touch any `add_job(...)`.
+Also read its source spec + handoff (referenced in the brief frontmatter). **Do NOT re-derive the design — it is Director-ratified.** You are codifying a fixed design.
 
-**Tests:** extend `tests/test_job_listener_harden.py` with (a) pooled-fail + direct-success → row inserted, drop-count unchanged; (b) pooled-fail + direct-fail → `_record_listener_drop` increments, no raise. Existing #274 listener tests + #273 liveness suite (42) must stay green on a literal `pytest` run.
+## Scope (summary — brief is the source of truth)
+1. Build orchestrator `executive-memo-authoring` + 6 net-new step-skills (Fixes 1–2).
+2. Wire 3 template gaps (Fix 3); install the already-drafted `memo-body-loops` AS-IS (Fix 4).
+3. Promote the SOP overview from the Dropbox-inbox path (Fix 5; fallback = reconstruct from spec).
+4. Register via `_ops/skills/INDEX.md` rows + `_install/sync_skills.sh` — **NOT** manual symlinks / manifest (Fix 6).
+5. Add trigger eval cases to `_ops/evals/skills/test-cases.yml`.
 
-**ACs:** AC1 (scheduler_job_liveness row with fired_at after deploy lands within ~25min — proves fallback works under real pressure), AC2 (no NEW false STALE alerts for live jobs), AC3 (literal pytest tail, new cases PASS). NO pass-by-inspection.
+## Hard constraints
+- **Single-source rule:** reference sub-skills BY NAME; never paste a callee's body. The brief's Verification §3b asserts this — it must pass.
+- Run the brief's Verification block verbatim; it is fail-loud (`set -euo pipefail`). All checks green before ship.
+- Each new SKILL.md needs a `MANDATORY TRIGGERS:` line.
+- Do NOT touch any existing sub-skill SKILL.md, the step-1 triaga template, the `memo-body-loops` draft body, or `tasks/lessons.md`.
 
-**Reply target:** lead. Ship report to `briefs/_reports/B1_SCHEDULER_LIVENESS_REVIVE_1_<YYYYMMDD>.md` + bus-post to `lead` topic `ship/scheduler-liveness-revive-1`. Tag `/security-review` per Tier-A ship contract (DB write path). Gate chain after ship: G1 AH1 fold + G2 /security-review + G3 deputy (will focus on fallback-conn lifecycle).
+## Done = (per brief Harness V2 block)
+`Authored → Registered (INDEX.md) → Synced (sync_skills.sh clean) → Evals-green → all 8 ACs met`.
+Ship is NOT done at "files written." Run the verification block; paste its `ALL VERIFY CHECKS PASSED` line in your ship report.
+
+## Ship
+Bus-post to `lead`, topic `ship/executive-memo-authoring-skill-tree-1`, with: commit SHA, verification output, and any nit. Lead gates G1.
