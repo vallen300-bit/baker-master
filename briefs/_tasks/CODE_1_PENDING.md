@@ -1,45 +1,43 @@
----
-dispatch: EXECUTIVE_MEMO_AUTHORING_SKILL_TREE_1
-to: b1
-from: lead
+# CODE_1_PENDING — AUTOWAKE_MASTER_KILLSWITCH_1
+
+status: PENDING
 dispatched_by: lead
-dispatched_at: 2026-06-01
-status: COMPLETE
-merged_anchor: baker-vault main 382ee0e (G1 PASS — evals 59/59 exit0, 8 skills resolve, single-source clean, all 8 ACs)
-repo: baker-vault (NOT baker-master) — work in ~/baker-vault, push to baker-vault main
-canonical_brief: ~/baker-vault/_ops/briefs/BRIEF_EXECUTIVE_MEMO_AUTHORING_SKILL_TREE_1.md (commit b73c384)
-codex_status: PASS-WITH-NITS (v3.1) — dispatch-ready
-gate_owner: lead (G1 = sync_skills.sh dry-run clean + trigger evals green)
-ship_target: bus topic ship/executive-memo-authoring-skill-tree-1 -> lead
----
+ship-report recipient: lead
+repo: brisen-lab (your brisen-lab checkout, e.g. ~/bm-b1-brisen-lab)
+task class: production implementation (daemon + dashboard UI)
+gate plan: G0 codex (brief PASS, #1547) → G1 lead static → G2 security-review → G3 architect/code-reviewer
+bus topics: ship/autowake-master-killswitch-1
 
-# DISPATCH — build the executive-memo-authoring skill tree (b1)
+## Context
 
-**This is a baker-VAULT build, not baker-master.** All paths are under `~/baker-vault/_ops/`.
-Do your work there; commit + push to baker-vault `main` (writer-contract allows B-codes to push `_ops/`).
+Canonical brief (READ IN FULL FIRST): `~/baker-vault/_ops/briefs/BRIEF_AUTOWAKE_MASTER_KILLSWITCH_1.md` (committed 85af10e, codex G0 PASS #1547).
 
-## Read first
-The full, Codex-passed brief is canonical — build exactly to it:
-`~/baker-vault/_ops/briefs/BRIEF_EXECUTIVE_MEMO_AUTHORING_SKILL_TREE_1.md` (commit `b73c384`).
+Build guardrail #2 of the ratified Autonomous Delegated Loop: a one-click, runtime, persisted master kill switch for autonomous bus-arrival wakes. Four of five guardrails already live in `BUS_AUTOWAKE_CONTAINMENT_1` — do NOT rebuild them. This adds only the master kill switch.
 
-Also read its source spec + handoff (referenced in the brief frontmatter). **Do NOT re-derive the design — it is Director-ratified.** You are codifying a fixed design.
+## Problem
 
-## Scope (summary — brief is the source of truth)
-1. Build orchestrator `executive-memo-authoring` + 6 net-new step-skills (Fixes 1–2).
-2. Wire 3 template gaps (Fix 3); install the already-drafted `memo-body-loops` AS-IS (Fix 4).
-3. Promote the SOP overview from the Dropbox-inbox path (Fix 5; fallback = reconstruct from spec).
-4. Register via `_ops/skills/INDEX.md` rows + `_install/sync_skills.sh` — **NOT** manual symlinks / manifest (Fix 6).
-5. Add trigger eval cases to `_ops/evals/skills/test-cases.yml`.
+Autonomous bus-arrival wakes can only be master-disabled via env var `BRISEN_LAB_AUTOWAKE_ENABLED` + a Render redeploy (Tier-B, slow). Need a dashboard one-click master kill, persisted so a redeploy can't silently re-enable autonomy.
 
-## Hard constraints
-- **Single-source rule:** reference sub-skills BY NAME; never paste a callee's body. The brief's Verification §3b asserts this — it must pass.
-- Run the brief's Verification block verbatim; it is fail-loud (`set -euo pipefail`). All checks green before ship.
-- Each new SKILL.md needs a `MANDATORY TRIGGERS:` line.
-- Do NOT touch any existing sub-skill SKILL.md, the step-1 triaga template, the `memo-body-loops` draft body, or `tasks/lessons.md`.
+## Files Modified
 
-## Done = (per brief Harness V2 block)
-`Authored → Registered (INDEX.md) → Synced (sync_skills.sh clean) → Evals-green → all 8 ACs met`.
-Ship is NOT done at "files written." Run the verification block; paste its `ALL VERIFY CHECKS PASSED` line in your ship report.
+(per brief §Stable Paths) — `bus.py` (`_master_autowake_enabled()` + gate the auto-wake fire + audit `master_disabled`), `app.py` (`POST /api/autowake/master` origin-gated + `master_enabled` in `/api/wake_health`), `db.py` (bootstrap `brisen_lab_settings` table), `static/{index.html,app.js,styles.css}` (toggle UI + cache-bust), `tests/`.
 
-## Ship
-Bus-post to `lead`, topic `ship/executive-memo-authoring-skill-tree-1`, with: commit SHA, verification output, and any nit. Lead gates G1.
+Do NOT touch: existing containment primitives (rate cap, loop detector, env per-slug disable).
+
+## Verification
+
+Per brief §Verification + §Quality Checkpoints. Literal `pytest` output mandatory. Emit `POST_DEPLOY_AC_VERDICT v1` after the live-dashboard post-deploy check (Lesson #84 — real surface, not hand-run osascript).
+
+## Quality Checkpoints
+
+The load-bearing semantics (do NOT get these wrong — codex G0 blocker was here):
+1. **Fail-SAFE precedence at hook time:** env `!= "true"` → disabled (hard backstop, no DB read); env `== "true"` → DB flag (off → disabled; on/missing-but-read-ok → enabled; **DB read FAILS → FAIL CLOSED disabled + log loud**). Never re-enable on a DB blip.
+2. **Persisted** in `brisen_lab_settings`; in-memory cache ≤5s TTL allowed BUT **POST setter invalidates/updates cache before returning** so a kill takes effect on the very next hook call.
+3. **Master gate placed BEFORE** per-slug/rate/loop checks in the auto-wake hook.
+4. **Autonomous-only:** master-off must NOT block a manual `/api/wake` Director click.
+5. Origin-gated like `/api/wake`; G2 reviews spoof risk.
+6. Test AC (a)-(g) per brief — all literal pytest.
+
+## Constraints
+
+All DB calls in try/except with `conn.rollback()`. Fault-tolerant. No `--no-verify`. No secrets. Bootstrap table only (no migration runner). Ship report answers the done rubric (not just "tests pass") + carries the POST_DEPLOY_AC_VERDICT.
