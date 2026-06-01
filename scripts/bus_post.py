@@ -27,7 +27,7 @@ DAEMON_URL = os.environ.get("BRISEN_LAB_DAEMON_URL", "https://brisen-lab.onrende
 VALID_SLUGS = {
     "director", "cowork-ah1", "lead", "deputy", "architect",
     "b1", "b2", "b3", "b4", "b5",
-    "cortex", "daemon", "aid", "codex",
+    "cortex", "daemon", "aid", "codex", "codex-arch",
     "hag-desk", "origination-desk", "researcher",
     "CM-1", "CM-2", "CM-3", "CM-4", "hag-filer",
 }
@@ -43,7 +43,7 @@ ROLE_TO_SLUG = {
     "architect": "architect", "ARCHITECT": "architect",
     "cortex": "cortex", "CORTEX": "cortex",
     "aid": "aid", "AID": "aid",
-    "codex": "codex", "CODEX": "codex",
+    "codex": "codex", "CODEX": "codex", "codex-arch": "codex-arch", "CODEX-ARCH": "codex-arch",
     "hag-desk": "hag-desk", "HAG-DESK": "hag-desk", "hagenauer-desk": "hag-desk",
     "origination-desk": "origination-desk", "ORIGINATION-DESK": "origination-desk",
     "ORIGINATION_DESK": "origination-desk", "origination_desk": "origination-desk",
@@ -61,7 +61,7 @@ def _resolve_sender() -> str:
     if role not in ROLE_TO_SLUG:
         sys.exit(
             f"ERROR: BAKER_ROLE not set or unrecognized: {role!r}. "
-            f"Valid: AH1, AH2, B1-B5, architect, cortex, aid, codex"
+            f"Valid: AH1, AH2, B1-B5, architect, cortex, aid, codex, codex-arch"
         )
     return ROLE_TO_SLUG[role]
 
