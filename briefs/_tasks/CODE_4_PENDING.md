@@ -1,6 +1,7 @@
 # CODE_4_PENDING — DASHBOARD_CARD_SIGNAL_POLISH_1
 
-status: PENDING
+status: COMPLETE
+completed: 2026-06-02 PM3 — PR #59 merged b97eda0; G1 lead static + G2 /security-review scan-clear; b4 post-deploy AC #1649 machine-verified PASS (B1 instant-extinguish, B2 regression, endpoint auth, turn-stop-hook, frontend 6/6+8/8); Director visual AC PASS (blue NEW pulse + fast extinguish confirmed live).
 dispatched: 2026-06-02 PM3 (aihead1-lead)
 dispatched_by: lead
 brief_source: ~/baker-vault/_ops/briefs/BRIEF_DASHBOARD_CARD_SIGNAL_POLISH_1.md
