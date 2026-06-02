@@ -667,3 +667,25 @@ Anchor: Director chat 2026-05-23 evening; AH2 bus #788 (Layer 2) + bus #790
 **Applies to:** every wake / auto-submit / AppleScript ship, every launchd-agent behavior, any "it worked when I ran it" claim where the runtime grant context differs from production. Layer onto Lesson #8 (compile-clean ≠ done; exercise the real flow).
 
 **Anchor:** CODEX_WAKE_ENTER_SUBMIT_1 — b4 owned the false pass in bus #1522 ("MY EARLIER #1515 PASS WAS A FALSE PASS"); corrected via REVISION 1 + G1 re-verify through the real app surface (bus #1523).
+
+### 85. Cowork-app (Claude.app) sessions are NOT terminal-wakeable — same agent identity, different host (2026-06-02)
+
+**What happened:** Director authorized a live auto-wake loop test on `researcher`. Lead dispatched bus #1652; the bus → SSE → `wake-listener` → `open brisen-lab://wake/researcher` chain fired correctly, but researcher never acked or acted. Lead initially mis-diagnosed it as "auto-wake broken at the macOS layer." Director corrected the model: the running `researcher` is hosted in the **Cowork App (Claude.app)**, not Terminal.app. Cowork-app agents (researcher, cowork-ah1) get + send buses normally, but **only after Director manually opens the session** — the terminal URL-wake cannot reach them.
+
+**Verified:** both `researcher` claude PIDs had parent `/Applications/Claude.app/Contents/Helpers/disclaimer` → Cowork sessions, not Terminal tabs. The wake-handler AppleScript (`tools/wake-handler/wake-handler.applescript`) targets **Terminal.app tabs only**; a Claude.app session is invisible to it regardless of registration.
+
+**The identity question (Director asked):** the Cowork-app researcher and a Terminal researcher are the **same agent** — one picker folder (`~/bm-researcher`), one bus slug (`researcher`), one CLAUDE.md/orientation. Only the **host app** differs, and the host determines wakeability:
+- **Terminal.app session, running** → auto-wakeable by bus (the b1–b4 model; their sessions stay open and poll).
+- **Cowork App session** → Director must open it; then it drains the bus on its own. Bus #1652 sat unacted only because the session was never opened.
+
+**Two separate facts, don't conflate:**
+1. *Host reachability* — terminal URL-wake reaches Terminal.app only (the root cause here).
+2. *`-609` on the wake URL* — `open brisen-lab://wake/<alias>` logged `_LSOpenURLsWithCompletionHandler() failed with error -609` (Wake.app launch/registration failure). Real, but MOOT for a Cowork-hosted agent (a working handler still couldn't reach a Claude.app session). `lsregister -f` did not clear it; deeper Wake.app fix deferred.
+
+**Rule:** before claiming an agent is "autonomously wakeable," verify it is a **running Terminal.app session** — `lsof -a -d cwd -c claude | grep <picker>` then check the parent process (`ps -o ppid=` → `Claude.app` = Cowork = NOT wakeable; `Terminal` = wakeable). Never infer wakeability from "it's on the bus + in ALLOWED_ALIASES" — bus membership ≠ wake-host. A bus dispatch to a not-opened Cowork agent is delivered but inert until Director opens it.
+
+**Roadmap (parked, Director 2026-06-02, target ~next week):** full cold-spawn automation — waking an agent with NO prior opened session — is a separate build. Today's loop is autonomous only for already-running Terminal sessions.
+
+**Applies to:** every auto-wake / autonomous-loop claim; every new agent brought onto the bus; every "why didn't agent X act on my dispatch" triage. Layer onto Lesson #84 (false pass from borrowed runtime context) — same family: the mechanism "fired" but the production host context made it inert.
+
+**Anchor:** researcher loop test 2026-06-02; bus #1652 delivered-but-inert; Director: *"You cannot wake him up from the terminal … he did not act because I never wake him up … same as AH-1 co-work app."*
