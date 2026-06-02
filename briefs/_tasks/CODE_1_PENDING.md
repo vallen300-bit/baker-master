@@ -1,44 +1,43 @@
-# CODE_1_PENDING — AUTOWAKE_MASTER_KILLSWITCH_1
+# CODE_1_PENDING — BUS_AUTOWAKE_TEST_HARDEN_1
 
-status: COMPLETE
-completed: 2026-06-02 — PR #52 merged 611349d; G0 codex (#1547+#1577) + G1 lead + G2 security-review (7 dims PASS) + post-deploy AC PASS (b1 #1588: KILLED suppresses + audits master_disabled, ENABLED fires; env-armed). Loop guardrail #2 LIVE. Spec writeback done (baker-vault 52a7673).
+status: PENDING
 dispatched_by: lead
 ship-report recipient: lead
 repo: brisen-lab (your brisen-lab checkout, e.g. ~/bm-b1-brisen-lab)
-task class: production implementation (daemon + dashboard UI)
-gate plan: G0 codex (brief PASS, #1547) → G1 lead static → G2 security-review → G3 architect/code-reviewer
-bus topics: ship/autowake-master-killswitch-1
+task class: test reliability (NO production code change)
+gate plan: G0 codex (brief PASS-WITH-NIT #1609) → G1 lead static → G2 security-review N/A (test-only, codex confirmed) → merge
+bus topics: ship/bus-autowake-test-harden-1
 
 ## Context
 
-Canonical brief (READ IN FULL FIRST): `~/baker-vault/_ops/briefs/BRIEF_AUTOWAKE_MASTER_KILLSWITCH_1.md` (committed 85af10e, codex G0 PASS #1547).
+Canonical brief (READ IN FULL FIRST): `~/baker-vault/_ops/briefs/BRIEF_BUS_AUTOWAKE_TEST_HARDEN_1.md` (v2, commit on baker-vault main; codex G0 PASS-WITH-NIT #1609 — all 3 prior REVISE findings + the cache nit folded).
 
-Build guardrail #2 of the ratified Autonomous Delegated Loop: a one-click, runtime, persisted master kill switch for autonomous bus-arrival wakes. Four of five guardrails already live in `BUS_AUTOWAKE_CONTAINMENT_1` — do NOT rebuild them. This adds only the master kill switch.
+The autonomous loop is ARMED in prod. `tests/test_bus_autowake.py` (6 cases) passes 8/8 isolated but ~5 fail under full-suite load (cowork-ah1 #1597). No CI on brisen-lab, so this flakiness silently erodes trust in the suite guarding an armed prod autonomy system.
 
 ## Problem
 
-Autonomous bus-arrival wakes can only be master-disabled via env var `BRISEN_LAB_AUTOWAKE_ENABLED` + a Render redeploy (Tier-B, slow). Need a dashboard one-click master kill, persisted so a redeploy can't silently re-enable autonomy.
+Full-suite flake = LEAKED module-level wake-suppression state across test order, NOT a queue race. `tests/test_bus_autowake.py:29-33` `_reset_debounce()` clears only `bus._last_wake_emit_at`; the other five `bus.py` module dicts (`_wake_count_by_slug`, `_cap_alert_emitted_at`, `_recent_edges`, `_loop_edges_5min`, `_auto_disabled_until`) leak from earlier wake-firing tests (e.g. the containment suite) and suppress the wake a later case expects → `assert len(wakes)==1` sees 0.
 
 ## Files Modified
 
-(per brief §Stable Paths) — `bus.py` (`_master_autowake_enabled()` + gate the auto-wake fire + audit `master_disabled`), `app.py` (`POST /api/autowake/master` origin-gated + `master_enabled` in `/api/wake_health`), `db.py` (bootstrap `brisen_lab_settings` table), `static/{index.html,app.js,styles.css}` (toggle UI + cache-bust), `tests/`.
+`tests/test_bus_autowake.py` ONLY — replace `_reset_debounce()` with full `_reset_wake_state()` clearing all SIX dicts (mirror `tests/test_bus_autowake_containment.py:32-42` `_reset_containment_state`), called at top of every test. Optionally add the defensive poll helper. Absence tests keep original sender/kind.
 
-Do NOT touch: existing containment primitives (rate cap, loop detector, env per-slug disable).
+Do NOT touch: `bus.py`, `app.py` (production wake path is correct); `tests/test_bus_autowake_containment.py` (the reference pattern).
+
+## Quality Checkpoints (load-bearing — codex #1605/#1609)
+
+1. PRIMARY fix = `_reset_wake_state()` clears all six `bus.py` module dicts; called at top of every test. EXPLICIT AC.
+2. Do NOT clear `bus._CACHE` (that's the /api/v2 response cache, unrelated). Master gate uses `bus._master_flag_cache`, already reset by conftest `fresh_db` — no action needed (codex #1609).
+3. Root cause is leaked module state, NOT a queue race (broadcast is synchronous before response — bus.py:536-542 + app.py:531-538). Any poll helper is documented defensive only.
+4. Absence tests keep `kind="broadcast"`, `to=["*"]`, sender `lead` (don't narrow contract).
+5. Only `tests/test_bus_autowake.py` changes (git diff confirms).
 
 ## Verification
 
-Per brief §Verification + §Quality Checkpoints. Literal `pytest` output mandatory. Emit `POST_DEPLOY_AC_VERDICT v1` after the live-dashboard post-deploy check (Lesson #84 — real surface, not hand-run osascript).
-
-## Quality Checkpoints
-
-The load-bearing semantics (do NOT get these wrong — codex G0 blocker was here):
-1. **Fail-SAFE precedence at hook time:** env `!= "true"` → disabled (hard backstop, no DB read); env `== "true"` → DB flag (off → disabled; on/missing-but-read-ok → enabled; **DB read FAILS → FAIL CLOSED disabled + log loud**). Never re-enable on a DB blip.
-2. **Persisted** in `brisen_lab_settings`; in-memory cache ≤5s TTL allowed BUT **POST setter invalidates/updates cache before returning** so a kill takes effect on the very next hook call.
-3. **Master gate placed BEFORE** per-slug/rate/loop checks in the auto-wake hook.
-4. **Autonomous-only:** master-off must NOT block a manual `/api/wake` Director click.
-5. Origin-gated like `/api/wake`; G2 reviews spoof risk.
-6. Test AC (a)-(g) per brief — all literal pytest.
+- Isolated: `python3 -m pytest tests/test_bus_autowake.py -v` → 6/6 (literal output).
+- **Full-suite reproduce-then-confirm (the AC that matters):** run the FULL suite 5×; show 0 `test_bus_autowake` failures across all 5. The 1 unrelated pre-existing failure cowork-ah1 noted may remain — name it, out of scope. Literal output.
+- `git diff --name-only` shows only the one test file.
 
 ## Constraints
 
-All DB calls in try/except with `conn.rollback()`. Fault-tolerant. No `--no-verify`. No secrets. Bootstrap table only (no migration runner). Ship report answers the done rubric (not just "tests pass") + carries the POST_DEPLOY_AC_VERDICT.
+Test-only; no production code/config touched → no deploy, no post-deploy AC. No `--no-verify`. Ship to topic `ship/bus-autowake-test-harden-1`; do NOT merge (lead gates). Ship report answers the done rubric (terminal state = 0 wake-test failures across 5 full-suite runs).
