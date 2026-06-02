@@ -1,6 +1,7 @@
 # CODE_1_PENDING — DASHBOARD_WHOLE_CARD_WORKING_GLOW_1
 
-status: PENDING
+status: COMPLETE
+completed: 2026-06-02 — PR #58 merged abb3a9c (squash). G0 codex PASS-WITH-NOTE #1614 + G1 lead static PASS (compute glance once + classList.toggle glance-working on WORKING only; dot untouched; amber #d29922; cache-bust v20/v24) + G2 narrow /security-review PASS (no innerHTML/fetch/auth/storage/endpoint; CSS+class-toggle only). Tests: resolver 8/8 + toggle-contract 6/6. POST_DEPLOY_AC = Director visual judge (whole-card amber on live dashboard).
 dispatched_by: lead
 ship-report recipient: lead
 repo: brisen-lab (your brisen-lab checkout; base current main 2d0fc42 — includes #55 dashboard card + #57)
