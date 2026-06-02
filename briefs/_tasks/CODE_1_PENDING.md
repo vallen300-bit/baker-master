@@ -1,6 +1,7 @@
 # CODE_1_PENDING — BUS_AUTOWAKE_TEST_HARDEN_1
 
-status: PENDING
+status: COMPLETE
+completed: 2026-06-02 — PR #57 merged 2d0fc42 (squash). G0 codex PASS-WITH-NIT #1609 + G1 lead static PASS (diff = tests/test_bus_autowake.py only; full _reset_wake_state clears all 6 dicts; Fix 1b backdate-trick preserves first-fire sentinel) + G2/G3 N/A. Evidence: isolated 8/8 + targeted containment+autowake 5x = 0 autowake failures. FOLLOW-UP (separate): containment suite itself intermittently flaky under remote-Neon latency (b1 #1620) — env/test-infra, not this diff.
 dispatched_by: lead
 ship-report recipient: lead
 repo: brisen-lab (your brisen-lab checkout, e.g. ~/bm-b1-brisen-lab)
