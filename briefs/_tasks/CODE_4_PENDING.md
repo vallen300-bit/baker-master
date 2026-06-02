@@ -1,6 +1,7 @@
 # CODE_4_PENDING — FORGE_HEARTBEAT_TURN_GATED_1
 
-status: PENDING
+status: COMPLETE
+completed: 2026-06-02 — on-disk ship (forge-agent + settings.json, not git-tracked). G0 codex PASS-WITH-NOTES #1634 (printf + stale-flag caveat folded) + G1 lead static PASS (settings.json valid + additive, ticker flag-gate + own-flag-clear, hooks +x) + live AC (b4 #1637: AC1 amber mid-turn, AC2 flag-clears-on-Stop extinguish path, AC4 non-watched no-op, AC5 concurrent-safe). Director stuck-amber bug RESOLVED; amber now = actively working, extinguishes ~≤120s after task-end. Caveat: interrupted-turn stale flag (v1 acceptable, TTL=v2). Spec writeback landed.
 dispatched_by: lead
 ship-report recipient: lead
 repo: forge instrumentation on THIS Mac (~/forge-agent/ + ~/.claude/settings.json) — on-disk, NOT git-tracked. Edit in place.
