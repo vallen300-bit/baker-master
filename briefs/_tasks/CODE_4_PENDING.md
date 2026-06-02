@@ -1,33 +1,40 @@
----
-dispatch: CODEX_WAKE_ENTER_SUBMIT_1
-to: b4
-from: lead
+# CODE_4_PENDING — DASHBOARD_CARD_WORKSTATE_CLARITY_1
+
+status: PENDING
 dispatched_by: lead
-dispatched_at: 2026-06-01
-status: COMPLETE
-completed_at: 2026-06-01
-completed_commit: brisen-lab ca4795f (pushed to main)
-g1: RE-VERIFY PASS (Director, browser-frontmost, #1523/#1524) — bare-CR fix, permission-free
-repo: brisen-lab (NOT baker-master) — work in a brisen-lab clone, PR to brisen-lab main
-canonical_brief: ~/Desktop/baker-code/briefs/BRIEF_CODEX_WAKE_ENTER_SUBMIT_1.md
-complexity: Medium (~1.5h)
-ship_target: bus topic ship/codex-wake-enter-submit-1 -> lead
----
+ship-report recipient: lead
+repo: brisen-lab (your brisen-lab checkout, e.g. ~/bm-b4/brisen-lab)
+task class: production implementation (dashboard UI + small read-only backend field)
+gate plan: G0 codex (brief PASS, #1583) → G1 lead static → G2 security-review (likely N/A, confirm) → G3 architect → merge → post-deploy AC
+bus topics: ship/dashboard-card-workstate-clarity-1
 
-# DISPATCH — codex card wake must auto-run, not wait for Enter (b4)
+## Context
 
-Read the canonical brief: `~/Desktop/baker-code/briefs/BRIEF_CODEX_WAKE_ENTER_SUBMIT_1.md`.
+Canonical brief (READ IN FULL FIRST): `~/baker-vault/_ops/briefs/BRIEF_DASHBOARD_CARD_WORKSTATE_CLARITY_1.md` (committed 8b7ba20, codex G0 READY-TO-DISPATCH #1583).
 
-**One-line:** clicking the codex dashboard card injects `check bus` into codex's Terminal but the
-text sits there until Director hits Enter — only codex (it runs the OpenAI `codex` TUI, not `claude`).
+Director pain: dashboard card stays "lit" while an agent works — can't tell got-it / working / done. Today the "lit" = unacked inbox (clears only on ack); the work-state is a faint left-edge color. Build ONE legible signal.
 
-Fix `tools/wake-handler/wake-handler.applescript` (brisen-lab repo): (1) add codex to the alias
-maps, (2) detect codex by its `codex` process not `claude`+cwd, (3) send an explicit Return
-(`System Events key code 36`) so the codex TUI submits. Rebuild via `build.sh` + `lsregister -f`.
+## Problem
 
-**Acceptance is LIVE** — no "by inspection". Launch a real codex session (`cdx`), click the codex
-card, confirm the command auto-runs with no manual Enter; regression-check a Claude picker still works.
+No single glance-state on a card. Build `computeGlanceState(alias) -> NEW | WORKING | DONE_IDLE` and make the DOT the single visual via `renderStateDot(alias, glanceState)`; RETIRE the competing `data-pending` navy chrome.
 
-**Do NOT touch** `db.py` / `bus.py` (cowork-ah1 active) or the dashboard frontend.
+## Files Modified
 
-Reply to `lead` via bus topic `ship/codex-wake-enter-submit-1`; note the exact submit mechanism + any new Automation grant. Do NOT commit/push until AH1 authorizes.
+(per brief §Stable Paths) — `static/app.js` (computeGlanceState + renderStateDot refactor, retire data-pending visual), `static/styles.css` (3 distinct dot states + cache-bust), `bus.py`/`app.py` (read-only `is_working` from latest open `forge_sessions.last_seen_at` ≤120s), `tests/`.
+
+## Verification
+
+Per brief §Acceptance. Literal test output. `POST_DEPLOY_AC_VERDICT v1` after live-dashboard check (Director is the acceptance judge — the exact thing he was confused by).
+
+## Quality Checkpoints
+
+Load-bearing (codex #1573/#1578):
+1. WORKING signal = latest OPEN `forge_sessions` row with `last_seen_at` ≤120s. NOT daemon_last_seen, NOT forge_events, NOT ended_at-alone. Test AC (c): stale open row (>120s) → is_working FALSE.
+2. The DOT is the single signal — REMOVE/stop using `data-pending` card chrome as a visible signal (do not merely gate it).
+3. WORKING suppresses NEW (no force-ack).
+4. App agents (lead/cowork, no fresh heartbeat) = telemetry-UNKNOWN: keep unread glow; never false IDLE/WORKING; generic rule, no permanent slug hardcode.
+5. Existing click-to-wake + cardState green/grey-as-DONE/IDLE-input preserved.
+
+## Constraints
+
+All DB calls in try/except with `conn.rollback()`; read-only query with LIMIT. Cache-bust `?v=N` on changed static assets. No secrets. Ship report answers the done rubric + carries POST_DEPLOY_AC_VERDICT (DONE only at post-deploy AC pass on the live dashboard).
