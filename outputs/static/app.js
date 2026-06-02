@@ -34,6 +34,31 @@ async function bakerFetch(url, options = {}) {
     }
 }
 
+// Mutation wrapper: runs onOk ONLY after a confirmed-ok response; on any
+// failure (non-ok status OR network error) shows a red toast and runs onErr.
+// Returns nothing (callers pass UI updates as callbacks). Prevents the
+// fire-and-forget + false-success bugs (DASHBOARD_MUTATION_FAILSAFE_1).
+async function _mutate(url, opts, onOk, onErr) {
+    try {
+        var resp = await bakerFetch(url, opts);
+        if (!resp.ok) throw new Error('http_' + resp.status);
+        // codex-arch fold: some endpoints return HTTP 200 + {"error": "..."}
+        // for business failures (e.g. /api/critical/{id}/promote max-5,
+        // dashboard.py:7638). Treat that as failure, NOT success.
+        var data = null;
+        try { data = await resp.clone().json(); } catch (e) { data = null; }
+        if (data && data.error) {
+            _showToast(data.error, 'error');
+            if (onErr) onErr(new Error(data.error));
+            return;
+        }
+        if (onOk) onOk(resp, data);
+    } catch (e) {
+        _showToast('Action failed — not saved. Try again.', 'error');
+        if (onErr) onErr(e);
+    }
+}
+
 // ═══ STATE ═══
 let currentTab = 'morning-brief';
 var _scanHistories = {};   // keyed by context: 'global', 'matter:oskolkov-rg7', etc.
@@ -842,12 +867,10 @@ function _renderPrioritiesWidget(priorities) {
 }
 
 function _completePriority(id, itemEl) {
-    bakerFetch('/api/priorities/' + id, { method: 'DELETE' }).then(function(resp) {
-        if (resp.ok) {
-            itemEl.style.opacity = '0.4';
-            itemEl.style.textDecoration = 'line-through';
-            setTimeout(function() { itemEl.remove(); }, 600);
-        }
+    _mutate('/api/priorities/' + id, { method: 'DELETE' }, function() {
+        itemEl.style.opacity = '0.4';
+        itemEl.style.textDecoration = 'line-through';
+        setTimeout(function() { itemEl.remove(); }, 600);
     });
 }
 
@@ -2852,7 +2875,7 @@ function _triageOpenBaker(prompt) {
 }
 
 function _triageDismiss(alertId, card) {
-    bakerFetch('/api/alerts/' + alertId + '/dismiss', { method: 'POST' }).then(function() {
+    _mutate('/api/alerts/' + alertId + '/dismiss', { method: 'POST' }, function() {
         if (card) card.style.opacity = '0.3';
         setTimeout(function() { if (card) card.remove(); }, 500);
     });
@@ -2965,40 +2988,30 @@ async function _triageCreateClickUp(alertId, title, body) {
 }
 
 function _triagePromoteCritical(alertId) {
-    bakerFetch('/api/critical/' + alertId + '/promote', {
-        method: 'POST',
-    }).then(function(r) { return r.json(); }).then(function(d) {
-        if (d.error) {
-            _showToast(d.error);
-        } else {
-            _showToast('\u26A1 Marked as critical');
-            loadMorningBrief();  // refresh to show in Critical card
-        }
-    }).catch(function(e) {
-        _showToast('Critical promote error: ' + e);
+    // _mutate treats HTTP 200 + {error} (e.g. max-5) as failure \u2192 red toast (preserves
+    // the prior d.error behavior, now error-styled); onOk runs only on confirmed success.
+    _mutate('/api/critical/' + alertId + '/promote', { method: 'POST' }, function() {
+        _showToast('\u26A1 Marked as critical');
+        loadMorningBrief();  // refresh to show in Critical card
     });
 }
 
 function _triageAddToPromised(alertId) {
-    bakerFetch('/api/deadlines/from-alert', {
+    _mutate('/api/deadlines/from-alert', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ alert_id: alertId }),
-    }).then(function(r) { return r.json(); }).then(function(d) {
-        if (d.error) {
-            _showToast(d.error);
-        } else {
-            _showToast('\uD83D\uDCCB Added to Promised To Do');
-            loadMorningBrief();
-        }
-    }).catch(function(e) {
-        _showToast('Add to promised error: ' + e);
+    }, function() {
+        _showToast('\uD83D\uDCCB Added to Promised To Do');
+        loadMorningBrief();
     });
 }
 
-function _showToast(msg) {
+function _showToast(msg, type) {
     var t = document.createElement('div');
-    t.style.cssText = 'position:fixed;bottom:20px;left:50%;transform:translateX(-50%);background:#c9a96e;color:#1a1a1a;padding:8px 20px;border-radius:8px;font-size:13px;font-weight:600;z-index:9999;box-shadow:0 4px 12px rgba(0,0,0,0.3);';
+    var bg = (type === 'error') ? '#b00020' : '#c9a96e';
+    var fg = (type === 'error') ? '#fff' : '#1a1a1a';
+    t.style.cssText = 'position:fixed;bottom:20px;left:50%;transform:translateX(-50%);background:' + bg + ';color:' + fg + ';padding:8px 20px;border-radius:8px;font-size:13px;font-weight:600;z-index:9999;box-shadow:0 4px 12px rgba(0,0,0,0.3);';
     t.textContent = msg;
     document.body.appendChild(t);
     setTimeout(function() { t.remove(); }, 3000);
@@ -3088,11 +3101,12 @@ async function _travelSetStatus(btn, tripId, deadlineId, newStatus) {
     if (!tripId && deadlineId) {
         try {
             var resp = await bakerFetch('/api/travel/promote-deadline/' + deadlineId, { method: 'POST' });
+            if (!resp.ok) throw new Error('http_' + resp.status);
             var result = await resp.json();
             tripId = result.trip_id || result.id;
             if (card) card.dataset.tripId = tripId;
         } catch(e) {
-            _showToast('Failed to create trip');
+            _showToast('Failed to create trip', 'error');
             return;
         }
     }
@@ -3101,11 +3115,12 @@ async function _travelSetStatus(btn, tripId, deadlineId, newStatus) {
 
     // Update trip status
     try {
-        await bakerFetch('/api/trips/' + tripId, {
+        var presp = await bakerFetch('/api/trips/' + tripId, {
             method: 'PATCH',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ status: newStatus })
         });
+        if (!presp.ok) throw new Error('http_' + presp.status);
 
         // Live-update dot color
         var newColor = _tripStatusColors[newStatus] || 'var(--text3)';
@@ -3130,7 +3145,7 @@ async function _travelSetStatus(btn, tripId, deadlineId, newStatus) {
 
         _showToast('Status → ' + newStatus.charAt(0).toUpperCase() + newStatus.slice(1));
     } catch(e) {
-        _showToast('Failed to update status');
+        _showToast('Failed to update status', 'error');
     }
 }
 
@@ -3143,7 +3158,7 @@ function _landingDismiss(cardType, itemId, btn) {
     else if (cardType === 'meeting') endpoint = '/api/alerts/' + itemId + '/dismiss';
     else endpoint = '/api/alerts/' + itemId + '/dismiss';
     if (!endpoint) return;
-    bakerFetch(endpoint, { method: 'POST' }).then(function() {
+    _mutate(endpoint, { method: 'POST' }, function() {
         if (card) { card.style.opacity = '0.3'; setTimeout(function() { card.remove(); }, 500); }
         _showToast('Dismissed');
     });
@@ -3151,7 +3166,7 @@ function _landingDismiss(cardType, itemId, btn) {
 
 function _landingMarkNotCritical(deadlineId, btn) {
     var card = btn.closest('.card');
-    bakerFetch('/api/critical/' + deadlineId + '/done', { method: 'POST' }).then(function() {
+    _mutate('/api/critical/' + deadlineId + '/done', { method: 'POST' }, function() {
         if (card) { card.style.opacity = '0.3'; setTimeout(function() { card.remove(); }, 500); }
         _showToast('Removed from Critical');
     });
@@ -3159,7 +3174,7 @@ function _landingMarkNotCritical(deadlineId, btn) {
 
 function _landingMarkDone(deadlineId, btn) {
     var card = btn.closest('.card');
-    bakerFetch('/api/deadlines/' + deadlineId + '/complete', { method: 'POST' }).then(function() {
+    _mutate('/api/deadlines/' + deadlineId + '/complete', { method: 'POST' }, function() {
         if (card) { card.style.opacity = '0.3'; setTimeout(function() { card.remove(); }, 500); }
         _showToast('Marked as done \u2713');
     });
@@ -3244,11 +3259,11 @@ function _deadlineSubmitWrongMatter(deadlineId, btn) {
         _showToast('Pick a matter first');
         return;
     }
-    bakerFetch('/api/deadlines/' + deadlineId + '/feedback', {
+    _mutate('/api/deadlines/' + deadlineId + '/feedback', {
         method: 'POST',
         headers: {'Content-Type': 'application/json'},
         body: JSON.stringify({feedback_type: 'wrong_matter', corrected_matter_slug: correctedSlug})
-    }).then(function() {
+    }, function() {
         // Don't remove the card — wrong_matter is a label correction; the
         // deadline stays visible.
         var drop = document.getElementById('wrong-matter-drop-' + deadlineId);
@@ -3260,11 +3275,11 @@ function _deadlineSubmitWrongMatter(deadlineId, btn) {
 // DEADLINE_FEEDBACK_LOOP_1: Not a Deadline — flag extraction error + dismiss.
 function _deadlineWrongDeadline(deadlineId, btn) {
     var card = btn.closest('.card');
-    bakerFetch('/api/deadlines/' + deadlineId + '/feedback', {
+    _mutate('/api/deadlines/' + deadlineId + '/feedback', {
         method: 'POST',
         headers: {'Content-Type': 'application/json'},
         body: JSON.stringify({feedback_type: 'wrong_deadline'})
-    }).then(function() {
+    }, function() {
         if (card) { card.style.opacity = '0.3'; setTimeout(function() { card.remove(); }, 500); }
         _showToast('Flagged: not a deadline');
     });
@@ -3295,7 +3310,7 @@ function _landingCancelMeeting(meetingId, btn) {
         _showToast('Meeting dismissed');
         return;
     }
-    bakerFetch('/api/detected-meetings/' + meetingId + '/cancel', { method: 'POST' }).then(function() {
+    _mutate('/api/detected-meetings/' + meetingId + '/cancel', { method: 'POST' }, function() {
         if (card) { card.style.opacity = '0.3'; setTimeout(function() { card.remove(); }, 500); }
         _showToast('Meeting cancelled');
     });
@@ -3314,7 +3329,7 @@ function _meetingSetStatus(meetingId, status, btn) {
             return;
         }
         // Detected meetings — cancel via API
-        bakerFetch('/api/detected-meetings/' + meetingId + '/cancel', { method: 'POST' }).then(function() {
+        _mutate('/api/detected-meetings/' + meetingId + '/cancel', { method: 'POST' }, function() {
             if (card) { card.style.opacity = '0.3'; setTimeout(function() { card.remove(); }, 500); }
             _showToast('Meeting declined');
         });
@@ -3322,22 +3337,27 @@ function _meetingSetStatus(meetingId, status, btn) {
     }
 
     if (status === 'confirmed') {
-        // Update dot to green immediately (live DOM update)
-        if (dot) {
-            dot.className = 'nav-dot green';
-            dot.style.marginTop = '5px';
-        }
-        // Update status text
-        var statusSpan = card ? card.querySelector('.card-body span[style*="color:var(--"]') : null;
-        if (statusSpan) {
-            statusSpan.textContent = 'Confirmed';
-            statusSpan.style.color = 'var(--green)';
-        }
-        _showToast('Meeting confirmed');
-
-        // For detected meetings, persist to DB
+        var applyConfirmedUI = function() {
+            // Update dot to green (live DOM update)
+            if (dot) {
+                dot.className = 'nav-dot green';
+                dot.style.marginTop = '5px';
+            }
+            // Update status text
+            var statusSpan = card ? card.querySelector('.card-body span[style*="color:var(--"]') : null;
+            if (statusSpan) {
+                statusSpan.textContent = 'Confirmed';
+                statusSpan.style.color = 'var(--green)';
+            }
+            _showToast('Meeting confirmed');
+        };
+        // For detected meetings, persist to DB FIRST — apply the optimistic UI only
+        // on a confirmed-ok response so a failed save no longer false-succeeds.
         if (!isNaN(Number(meetingId)) && String(meetingId).indexOf('cal-') !== 0 && String(meetingId).indexOf('exchange-') !== 0) {
-            bakerFetch('/api/detected-meetings/' + meetingId + '/confirm', { method: 'POST' });
+            _mutate('/api/detected-meetings/' + meetingId + '/confirm', { method: 'POST' }, applyConfirmedUI);
+        } else {
+            // Calendar/exchange events — no persistence layer; apply UI directly.
+            applyConfirmedUI();
         }
         return;
     }
@@ -3403,7 +3423,7 @@ function _renderCriticalItem(ci) {
 }
 
 function _criticalDone(deadlineId, btn) {
-    bakerFetch('/api/critical/' + deadlineId + '/done', { method: 'POST' }).then(function() {
+    _mutate('/api/critical/' + deadlineId + '/done', { method: 'POST' }, function() {
         var card = btn.closest('.card');
         if (card) { card.style.opacity = '0.3'; setTimeout(function() { card.remove(); }, 500); }
         _showToast('Critical item completed \u2713');
@@ -3533,20 +3553,18 @@ function isNewAlert(createdAt) {
 
 // ═══ CARD ACTIONS ═══
 
-async function resolveAlert(alertId, btnEl) {
-    try {
-        await bakerFetch('/api/alerts/' + alertId + '/resolve', { method: 'POST' });
+function resolveAlert(alertId, btnEl) {
+    _mutate('/api/alerts/' + alertId + '/resolve', { method: 'POST' }, function() {
         var card = btnEl.closest('.card');
         if (card) { card.style.opacity = '0.3'; setTimeout(function() { card.remove(); }, 500); }
-    } catch (e) { console.error('resolveAlert failed:', e); }
+    }, function(e) { console.error('resolveAlert failed:', e); });
 }
 
-async function dismissAlert(alertId, btnEl) {
-    try {
-        await bakerFetch('/api/alerts/' + alertId + '/dismiss', { method: 'POST' });
+function dismissAlert(alertId, btnEl) {
+    _mutate('/api/alerts/' + alertId + '/dismiss', { method: 'POST' }, function() {
         var card = btnEl.closest('.card');
         if (card) { card.style.opacity = '0.3'; setTimeout(function() { card.remove(); }, 500); }
-    } catch (e) { console.error('dismissAlert failed:', e); }
+    }, function(e) { console.error('dismissAlert failed:', e); });
 }
 
 // Cooling contacts dismiss menu
@@ -3622,24 +3640,28 @@ async function confirmBrowserAction(actionId, alertId, btnEl) {
         var footer = card.querySelector('.card-footer');
         if (footer) footer.innerHTML = '<span style="color:#22c55e;font-size:12px;">Executing action...</span>';
     }
-    try {
-        await bakerFetch('/api/browser/confirm/' + actionId, { method: 'POST' });
+    _mutate('/api/browser/confirm/' + actionId, { method: 'POST' }, function() {
         if (card) { card.style.opacity = '0.3'; setTimeout(function() { card.remove(); }, 2000); }
-    } catch (e) {
+    }, function(e) {
         console.error('confirmBrowserAction failed:', e);
         if (card) {
             var footer = card.querySelector('.card-footer');
-            if (footer) footer.innerHTML = '<span style="color:#ef4444;font-size:12px;">Failed — may have expired</span>';
+            if (footer) {
+                footer.textContent = '';
+                var fs = document.createElement('span');
+                fs.style.cssText = 'color:#ef4444;font-size:12px;';
+                fs.textContent = 'Failed — may have expired';
+                footer.appendChild(fs);
+            }
         }
-    }
+    });
 }
 
-async function cancelBrowserAction(actionId, alertId, btnEl) {
-    try {
-        await bakerFetch('/api/browser/cancel/' + actionId, { method: 'POST' });
+function cancelBrowserAction(actionId, alertId, btnEl) {
+    _mutate('/api/browser/cancel/' + actionId, { method: 'POST' }, function() {
         var card = btnEl.closest('.card');
         if (card) { card.style.opacity = '0.3'; setTimeout(function() { card.remove(); }, 500); }
-    } catch (e) { console.error('cancelBrowserAction failed:', e); }
+    }, function(e) { console.error('cancelBrowserAction failed:', e); });
 }
 
 async function previewBrowserAction(actionId) {
@@ -6106,13 +6128,13 @@ async function loadDeadlinesTab() {
                 }
 
                 actionsDiv.appendChild(makeBtn('Dismiss', 'var(--text3)', function() {
-                    bakerFetch('/api/deadlines/' + item.id + '/dismiss', { method: 'POST' }).then(function() { loadDeadlinesTab(); });
+                    _mutate('/api/deadlines/' + item.id + '/dismiss', { method: 'POST' }, function() { loadDeadlinesTab(); });
                 }));
 
                 actionsDiv.appendChild(makeBtn('+1 Week', 'var(--amber)', function() {
                     var newDate = new Date(item.due_date || new Date());
                     newDate.setDate(newDate.getDate() + 7);
-                    bakerFetch('/api/deadlines/' + item.id + '/reschedule', { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify({due_date: newDate.toISOString()}) }).then(function() { loadDeadlinesTab(); });
+                    _mutate('/api/deadlines/' + item.id + '/reschedule', { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify({due_date: newDate.toISOString()}) }, function() { loadDeadlinesTab(); });
                 }));
 
                 actionsDiv.appendChild(makeBtn('Ask Baker', 'var(--blue)', function() {
@@ -9069,7 +9091,8 @@ async function _runBrowserTask(taskId, btn) {
     btn.disabled = true;
     btn.textContent = 'Running...';
     try {
-        await bakerFetch('/api/browser/tasks/' + taskId + '/run', { method: 'POST' });
+        var resp = await bakerFetch('/api/browser/tasks/' + taskId + '/run', { method: 'POST' });
+        if (!resp.ok) throw new Error('http_' + resp.status);
         btn.textContent = 'Done';
         setTimeout(function() { btn.textContent = 'Run Now'; btn.disabled = false; }, 5000);
     } catch (e) {
