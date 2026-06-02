@@ -1,44 +1,56 @@
-# CODE_1_PENDING — BUS_AUTOWAKE_TEST_HARDEN_1
+# CODE_1_PENDING — DASHBOARD_WHOLE_CARD_WORKING_GLOW_1
 
-status: COMPLETE
-completed: 2026-06-02 — PR #57 merged 2d0fc42 (squash). G0 codex PASS-WITH-NIT #1609 + G1 lead static PASS (diff = tests/test_bus_autowake.py only; full _reset_wake_state clears all 6 dicts; Fix 1b backdate-trick preserves first-fire sentinel) + G2/G3 N/A. Evidence: isolated 8/8 + targeted containment+autowake 5x = 0 autowake failures. FOLLOW-UP (separate): containment suite itself intermittently flaky under remote-Neon latency (b1 #1620) — env/test-infra, not this diff.
+status: PENDING
 dispatched_by: lead
 ship-report recipient: lead
-repo: brisen-lab (your brisen-lab checkout, e.g. ~/bm-b1-brisen-lab)
-task class: test reliability (NO production code change)
-gate plan: G0 codex (brief PASS-WITH-NIT #1609) → G1 lead static → G2 security-review N/A (test-only, codex confirmed) → merge
-bus topics: ship/bus-autowake-test-harden-1
+repo: brisen-lab (your brisen-lab checkout; base current main 2d0fc42 — includes #55 dashboard card + #57)
+task class: production implementation (dashboard UI, frontend-only)
+gate plan: G0 codex (brief PASS-WITH-NOTE #1614) → G1 lead static → G2 narrow /security-review REQUIRED → merge → post-deploy AC (Director visual judge)
+bus topics: ship/dashboard-whole-card-working-glow-1
 
 ## Context
 
-Canonical brief (READ IN FULL FIRST): `~/baker-vault/_ops/briefs/BRIEF_BUS_AUTOWAKE_TEST_HARDEN_1.md` (v2, commit on baker-vault main; codex G0 PASS-WITH-NIT #1609 — all 3 prior REVISE findings + the cache nit folded).
+Canonical brief (READ IN FULL FIRST): `~/baker-vault/_ops/briefs/BRIEF_DASHBOARD_WHOLE_CARD_WORKING_GLOW_1.md` (commit c280969; codex G0 PASS-WITH-NOTE #1614).
 
-The autonomous loop is ARMED in prod. `tests/test_bus_autowake.py` (6 cases) passes 8/8 isolated but ~5 fail under full-suite load (cowork-ah1 #1597). No CI on brisen-lab, so this flakiness silently erodes trust in the suite guarding an armed prod autonomy system.
+Director feedback 2026-06-02: the just-merged DASHBOARD_CARD_WORKSTATE_CLARITY_1 (#55) narrowed the work-state signal to a small dot near the name. Director wants the WHOLE CARD to light amber when an agent is working and go dark when done (the original plan). Restore the whole-card amber glow as the PRIMARY signal AND keep the dot (Director wants both).
 
 ## Problem
 
-Full-suite flake = LEAKED module-level wake-suppression state across test order, NOT a queue race. `tests/test_bus_autowake.py:29-33` `_reset_debounce()` clears only `bus._last_wake_emit_at`; the other five `bus.py` module dicts (`_wake_count_by_slug`, `_cap_alert_emitted_at`, `_recent_edges`, `_loop_edges_5min`, `_auto_disabled_until`) leak from earlier wake-firing tests (e.g. the containment suite) and suppress the wake a later case expects → `assert len(wakes)==1` sees 0.
+The work-state signal is now only the small dot. Restore a whole-card amber glow driven by the SAME `WORKING` glance-state; card extinguishes (no glow) when not WORKING.
 
 ## Files Modified
 
-`tests/test_bus_autowake.py` ONLY — replace `_reset_debounce()` with full `_reset_wake_state()` clearing all SIX dicts (mirror `tests/test_bus_autowake_containment.py:32-42` `_reset_containment_state`), called at top of every test. Optionally add the defensive poll helper. Absence tests keep original sender/kind.
+(per brief §Stable Paths) — `static/app.js` (`renderCard`: capture `const glance = computeGlanceState(alias)` once, pass to `renderStateDot`, AND `card.classList.toggle("glance-working", glance === "WORKING")`), `static/styles.css` (`.card.glance-working` amber `#d29922` rule + cache-bust → v20), `static/index.html` (`styles.css?v=20`, `app.js?v=24`).
 
-Do NOT touch: `bus.py`, `app.py` (production wake path is correct); `tests/test_bus_autowake_containment.py` (the reference pattern).
+Do NOT touch: `static/glance_state.js` (resolver correct + tested), `renderStateDot`/the dot (Director wants it kept), backend (`bus.py`/`app.py`/`db.py` — no data change).
 
-## Quality Checkpoints (load-bearing — codex #1605/#1609)
+## Quality Checkpoints (codex #1614 confirmed)
 
-1. PRIMARY fix = `_reset_wake_state()` clears all six `bus.py` module dicts; called at top of every test. EXPLICIT AC.
-2. Do NOT clear `bus._CACHE` (that's the /api/v2 response cache, unrelated). Master gate uses `bus._master_flag_cache`, already reset by conftest `fresh_db` — no action needed (codex #1609).
-3. Root cause is leaked module state, NOT a queue race (broadcast is synchronous before response — bus.py:536-542 + app.py:531-538). Any poll helper is documented defensive only.
-4. Absence tests keep `kind="broadcast"`, `to=["*"]`, sender `lead` (don't narrow contract).
-5. Only `tests/test_bus_autowake.py` changes (git diff confirms).
+1. WORKING → whole-card amber glow; every other state → no glow ("extinguished"). codex confirmed `classList.toggle` in `renderCard` is the minimal correct hook.
+2. Glow auto-extinguishes when WORKING ends — the existing renderCard re-eval (app.js ~1177-1179, "Re-eval card statuses every 5s") that decays the dot also removes the class. No stale-glow gap.
+3. ONLY WORKING lights the card — NEW stays dot-only (Director: working→amber, finished→extinguished).
+4. Dot unchanged; `node tests/test_glance_state_resolver.js` still 8/8 (regression).
+5. Cortex card untouched (its resolver derives only NEW/DONE/IDLE, no WORKING).
+6. Amber `#d29922` matches the dot; glow legible on dark bg, not overwhelming.
+
+## Suggested CSS (refine as needed)
+
+```css
+.card.glance-working {
+  border-color: #d29922;
+  box-shadow: 0 0 0 1px #d29922, 0 0 16px rgba(210, 153, 34, 0.38);
+  background: rgba(210, 153, 34, 0.07);
+}
+```
+
+## G2 note (REQUIRED — narrow)
+
+codex #1614: do NOT mark G2 globally N/A on a Tier-A merge. A NARROW /security-review is required confirming: no raw HTML / `innerHTML`, no new fetch/auth/storage, no endpoint/data change — CSS rule + `classList.toggle` only.
 
 ## Verification
 
-- Isolated: `python3 -m pytest tests/test_bus_autowake.py -v` → 6/6 (literal output).
-- **Full-suite reproduce-then-confirm (the AC that matters):** run the FULL suite 5×; show 0 `test_bus_autowake` failures across all 5. The 1 unrelated pre-existing failure cowork-ah1 noted may remain — name it, out of scope. Literal output.
-- `git diff --name-only` shows only the one test file.
+Per brief §Acceptance. Literal `node tests/test_glance_state_resolver.js` (resolver untouched → 8/8) + a small assertion that `renderCard` toggles `glance-working` iff glance is WORKING (if feasible in the JS harness; else document manual check). Cache-bust every changed asset. Post-deploy: live dashboard working b-code = whole-card amber, dark within ~2 min of finishing → emit `POST_DEPLOY_AC_VERDICT v1` (Director is visual judge).
 
 ## Constraints
 
-Test-only; no production code/config touched → no deploy, no post-deploy AC. No `--no-verify`. Ship to topic `ship/bus-autowake-test-harden-1`; do NOT merge (lead gates). Ship report answers the done rubric (terminal state = 0 wake-test failures across 5 full-suite runs).
+Frontend-only; no backend/DB/endpoint. Keep the dot. No secrets. No `--no-verify`. Ship to topic `ship/dashboard-whole-card-working-glow-1`; do NOT merge (lead gates). Ship report answers the done rubric + carries POST_DEPLOY_AC_VERDICT (DONE only at Director's live visual sign-off).
