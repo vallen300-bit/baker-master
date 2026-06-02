@@ -1,6 +1,7 @@
 # CODE_4_PENDING — DASHBOARD_CARD_WORKSTATE_CLARITY_1
 
-status: PENDING
+status: COMPLETE
+completed: 2026-06-02 — PR #55 merged 43dccde; G0 codex no-findings (#1591) + G1 lead + post-deploy AC PASS (b4 #1594: NEW/WORKING/DONE/IDLE on one dot live; stale-open-row gate proven). Known follow-up = WORKING-amber under-fires → FORGE_HEARTBEAT_FRESHNESS_1 (in flight).
 dispatched_by: lead
 ship-report recipient: lead
 repo: brisen-lab (your brisen-lab checkout, e.g. ~/bm-b4/brisen-lab)

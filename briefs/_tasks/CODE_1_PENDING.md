@@ -1,6 +1,7 @@
 # CODE_1_PENDING — AUTOWAKE_MASTER_KILLSWITCH_1
 
-status: PENDING
+status: COMPLETE
+completed: 2026-06-02 — PR #52 merged 611349d; G0 codex (#1547+#1577) + G1 lead + G2 security-review (7 dims PASS) + post-deploy AC PASS (b1 #1588: KILLED suppresses + audits master_disabled, ENABLED fires; env-armed). Loop guardrail #2 LIVE. Spec writeback done (baker-vault 52a7673).
 dispatched_by: lead
 ship-report recipient: lead
 repo: brisen-lab (your brisen-lab checkout, e.g. ~/bm-b1-brisen-lab)
