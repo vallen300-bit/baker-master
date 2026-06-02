@@ -1,6 +1,6 @@
 # CODE_4_PENDING — FORGE_HEARTBEAT_FRESHNESS_1
 
-status: PENDING
+status: COMPLETE
 dispatched_by: lead
 ship-report recipient: lead
 repo: brisen-lab (new /api/heartbeat) + ~/forge-agent/ (per-session ticker, NOT git-tracked — edit in place on this Mac)
