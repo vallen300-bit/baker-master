@@ -3,7 +3,7 @@ dispatch: INGEST_RETRIEVAL_GAP_DIAGNOSE_FIX_1
 to: b1
 from: lead
 dispatched_by: lead
-status: PENDING
+status: COMPLETE (merged PR #285 a7a0341; all gates PASS — G0 #1702 / G1 lead / G2 security CLEAR / G3 codex #1706 PASS-WITH-NOTES)
 dispatched_at: 2026-06-03
 authored: 2026-06-03
 target_repo: baker-master (vallen300-bit/baker-master)
