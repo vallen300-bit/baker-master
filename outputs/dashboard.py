@@ -1850,6 +1850,98 @@ async def scheduler_heartbeat_health():
 # Root — serve index.html
 # ============================================================
 
+def _documents_missing_qdrant(limit: int = 50):
+    """A3 (INGEST_SEARCH_DURABILITY_FOLLOWUPS_1): cross-store reconciliation.
+
+    Find `documents` rows (Postgres = system of record) with NO matching
+    `baker-documents` ingestion in `ingestion_log` — i.e. the Postgres half
+    landed but the Qdrant half did not (the A2-class half-index drift, plus any
+    legacy backlog that predates the Qdrant two-write). Read-only and bounded.
+
+    Returns (count, rows) where rows is capped at `limit`; count is the full
+    total. On any error returns (None, []) — callers treat None as "unknown".
+    The list is for a manual re-ingest decision; A3 does not auto-repair.
+    """
+    store = _get_store()
+    conn = store._get_conn()
+    if not conn:
+        return None, []
+    try:
+        import psycopg2.extras
+        cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+        # filename is the shared join key used by the search enrichment path.
+        not_in_qdrant = (
+            "NOT EXISTS (SELECT 1 FROM ingestion_log il "
+            "WHERE il.collection = 'baker-documents' AND il.filename = d.filename)"
+        )
+        cur.execute(f"SELECT COUNT(*) AS c FROM documents d WHERE {not_in_qdrant}")
+        count = cur.fetchone()["c"]
+        cur.execute(
+            f"SELECT d.id, d.filename, d.source_path, d.matter_slug, d.ingested_at "
+            f"FROM documents d WHERE {not_in_qdrant} "
+            f"ORDER BY d.ingested_at DESC NULLS LAST LIMIT %s",
+            (limit,),
+        )
+        rows = []
+        for r in cur.fetchall():
+            r = dict(r)
+            ing = r.get("ingested_at")
+            rows.append({
+                "id": r["id"],
+                "filename": r.get("filename"),
+                "source_path": r.get("source_path"),
+                "matter_slug": r.get("matter_slug"),
+                "ingested_at": ing.isoformat() if hasattr(ing, "isoformat") and ing else None,
+            })
+        cur.close()
+        return count, rows
+    except Exception as recon_err:
+        try:
+            conn.rollback()
+        except Exception:
+            pass
+        logger.warning(f"reconciliation _documents_missing_qdrant failed: {recon_err}")
+        return None, []
+    finally:
+        store._put_conn(conn)
+
+
+# A3: TTL-cache the drift COUNT for the /health path only. /health is Render's
+# liveness probe (hit frequently); a per-probe COUNT(*) + correlated NOT EXISTS
+# would add needless DB load. The authed reconciliation endpoint stays fresh.
+_recon_health_cache = {"ts": 0.0, "count": None}
+_RECON_HEALTH_TTL_SEC = 300
+
+
+def _documents_missing_qdrant_health_count():
+    """Cached drift count for /health (recomputed at most once per TTL)."""
+    import time
+    now = time.time()
+    if now - _recon_health_cache["ts"] < _RECON_HEALTH_TTL_SEC:
+        return _recon_health_cache["count"]
+    count, _ = _documents_missing_qdrant(limit=1)
+    _recon_health_cache["ts"] = now
+    _recon_health_cache["count"] = count
+    return count
+
+
+@app.get("/api/documents/reconciliation", tags=["documents"], dependencies=[Depends(verify_api_key)])
+async def documents_reconciliation(limit: int = Query(50, ge=1, le=500)):
+    """A3: list `documents` rows with no `baker-documents` Qdrant ingestion.
+
+    Surfaces half-indexed docs (Postgres-only) for a manual re-ingest decision.
+    Read-only, bounded. `count` is the full total; `documents` is capped at `limit`.
+    """
+    count, rows = _documents_missing_qdrant(limit=limit)
+    return {
+        "missing_qdrant_count": count,
+        "documents": rows,
+        "limit": limit,
+        "note": "documents present in Postgres but absent from baker-documents ingestion_log; "
+                "includes legacy backlog predating the Qdrant two-write. Manual re-ingest decision.",
+    }
+
+
 @app.get("/health", tags=["system"], include_in_schema=False)
 async def health_check():
     """Public health endpoint for Render + monitoring. No auth required."""
@@ -1898,6 +1990,14 @@ async def health_check():
     except Exception:
         pass
 
+    # A3: cross-store drift signal (informational — does NOT flip status, so
+    # legacy backlog can't fail Render's liveness probe / gate a deploy).
+    docs_missing_qdrant = None
+    try:
+        docs_missing_qdrant = _documents_missing_qdrant_health_count()
+    except Exception:
+        docs_missing_qdrant = None
+
     status = "healthy"
     if not db_ok or not scheduler_ok or sentinels_down > 0:
         status = "degraded"
@@ -1909,6 +2009,7 @@ async def health_check():
         "sentinels_healthy": sentinels_healthy,
         "sentinels_down": sentinels_down,
         "sentinels_down_list": sentinels_down_list,
+        "documents_missing_qdrant": docs_missing_qdrant,
         "vault_mirror_last_pull": vault_mirror_status["vault_mirror_last_pull"],
         "vault_mirror_commit_sha": vault_mirror_status["vault_mirror_commit_sha"],
         "vault_sync_thread_alive": vault_mirror_status.get(
@@ -2286,6 +2387,15 @@ async def search_documents_endpoint(
     DOCUMENTS-REDESIGN-1: Search documents with filters.
     - If q provided: Qdrant semantic search, then enrich from PostgreSQL
     - If only filters: PostgreSQL query with WHERE clauses
+
+    Response includes a `mode` field (INGEST_SEARCH_DURABILITY_FOLLOWUPS_1 A1):
+      - "semantic"       — Qdrant semantic path served the results.
+      - "ilike_fallback" — had query text but fell back to PG keyword match
+                           (Qdrant/Voyage raised → logged at ERROR; or no hit
+                           above threshold → logged at INFO).
+      - "filter_only"    — no query text; PG WHERE-clause path by design.
+    A silent regression to keyword search (the original Bug A) is now visible
+    in both the response and the logs.
     """
     try:
         store = _get_store()
@@ -2299,10 +2409,16 @@ async def search_documents_endpoint(
         results = []
         total = 0
         use_ilike = not qtext  # filter-only queries always use the PostgreSQL path
+        # A1 (INGEST_SEARCH_DURABILITY_FOLLOWUPS_1): observable retrieval mode.
+        # "semantic" = Qdrant path ran; "ilike_fallback" = had a query but fell
+        # back to keyword match (degradation OR legitimate no-match — split in logs);
+        # "filter_only" = no query text, PG WHERE-clause path by design.
+        mode = "filter_only" if not qtext else None
 
         # ── Semantic phase: Qdrant search with NO PG connection held ──
         if qtext:
             hits = None
+            qdrant_errored = False
             try:
                 from memory.retriever import SentinelRetriever
                 retriever = SentinelRetriever._get_global_instance()   # singleton — never SentinelRetriever()
@@ -2315,12 +2431,20 @@ async def search_documents_endpoint(
                     score_threshold=0.3,
                 )
             except Exception as vec_err:
-                logger.warning(f"Qdrant semantic search failed, falling back to PostgreSQL ILIKE: {vec_err}")
+                # Degradation that SHOULD alert — this is the exact shape of the
+                # original Bug A (months of silent keyword fallback). logger.error.
+                qdrant_errored = True
+                logger.error(f"Qdrant/Voyage semantic search RAISED, degrading to PostgreSQL ILIKE: {vec_err}")
                 hits = None
 
             if not hits:
-                # Qdrant error, or genuinely no semantic match → ILIKE last resort
+                # Split the two fallback causes (A1): a raised error is degradation
+                # (already logged above at error); an empty result above threshold
+                # is a legitimate last-resort, not a fault → info, not warning.
+                if not qdrant_errored:
+                    logger.info(f"Semantic search returned no hits above threshold for {qtext!r}; using ILIKE last-resort")
                 use_ilike = True
+                mode = "ilike_fallback"
             else:
                 # ── Enrich from PostgreSQL by filename (conn held ONLY for this batch query) ──
                 filenames = [f for f in {(getattr(h, "metadata", {}) or {}).get("source_file") or "" for h in hits} if f]
@@ -2355,6 +2479,7 @@ async def search_documents_endpoint(
                 results, total = _resolve_semantic_doc_hits(
                     hits, pg_rows_by_filename, matter_list, type_list, source_list, offset, limit
                 )
+                mode = "semantic"
 
         # ── PostgreSQL ILIKE / filter-only path (conn held only here) ──
         if use_ilike:
@@ -2446,7 +2571,7 @@ async def search_documents_endpoint(
             finally:
                 store._put_conn(conn)
 
-        return {"results": results, "total": total, "offset": offset}
+        return {"results": results, "total": total, "offset": offset, "mode": mode}
     except HTTPException:
         raise
     except Exception as e:
