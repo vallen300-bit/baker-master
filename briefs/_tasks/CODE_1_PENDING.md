@@ -66,6 +66,11 @@ Semantic `total` reflects results within the ≤300-chunk over-fetch window, not
 
 ---
 
+### B5. Deferred from Part A review (codex #1748 + architect — fold into Part B)
+1. **Voyage cardinality guard** — `_embed_and_upsert` trusts `zip(batch, result.embeddings)` (`tools/ingest/pipeline.py:291`); if Voyage returns fewer embeddings than texts WITHOUT raising, `failed_batches` stays empty and the doc gets sealed half-indexed (the exact silent half-index A2 exists to kill, via a side door). Add `if len(result.embeddings) != len(batch):` → treat as a failed batch. + test.
+2. **Cross-caller partial-embed posture** — on partial (`result.skipped, skip_reason="partial_embed"`), `/api/ingest` writes NEITHER store (PG write gated on `not result.skipped`), but `dropbox_trigger.py` writes PG `documents` BEFORE `ingest_file` (not gated) → leaves PG-written-but-ingestion_log-empty. Different durability postures for the same failure. Pick one deliberately + make A3 reconciliation detect both. Document the choice.
+3. **`semantic + total:0` enrichment-failure sub-signal** — when Qdrant returns hits but PG enrichment fails/filters-drop-all, response is `mode=semantic, total=0` (looks like "ran, found nothing" but enrichment silently failed). Consider a distinct observable sub-signal (e.g. `enrichment_failed: true`) so this new silent surface is visible.
+
 ## Key Constraints
 - All DB calls try/except + `conn.rollback()`; bounded queries (LIMIT).
 - Singleton accessors only (`_get_global_instance()`); CI guard `scripts/check_singletons.sh`.
