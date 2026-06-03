@@ -71,6 +71,19 @@ class GeminiConfig:
 
 
 @dataclass
+class GraphConfig:
+    """M365_GRAPH_CLIENT_FOUNDATION_1: Microsoft Graph (M365) configuration.
+    Dormant until Phase 0 creds + BAKER_USE_GRAPH=true."""
+    tenant_id: str = os.getenv("M365_TENANT_ID", "")
+    client_id: str = os.getenv("M365_CLIENT_ID", "")
+    client_secret: str = os.getenv("M365_CLIENT_SECRET", "")
+    base_url: str = "https://graph.microsoft.com/v1.0"
+    authority_tmpl: str = "https://login.microsoftonline.com/{tenant}"
+    scope: List[str] = field(default_factory=lambda: ["https://graph.microsoft.com/.default"])
+    enabled: bool = os.getenv("BAKER_USE_GRAPH", "false").lower() == "true"
+
+
+@dataclass
 class GmailConfig:
     # OAuth2 credentials file (downloaded from Google Cloud Console)
     # Render Secret Files live at /etc/secrets/; fall back to config/ for local dev
