@@ -15,6 +15,8 @@ from kbl.graph_client import GraphClient
 # Recognizable sentinels — asserted to NEVER appear in logs.
 SECRET = "SUPER_SECRET_VALUE_123"
 TOKEN = "ACCESS_TOKEN_VALUE_XYZ"
+CERT_KEY = "-----BEGIN PRIVATE KEY-----\nPRIVATE_KEY_PEM_BODY_456\n-----END PRIVATE KEY-----"
+THUMBPRINT = "ABCDEF0123456789THUMBPRINT"
 
 MSAL_PATH = "kbl.graph_client.ConfidentialClientApplication"
 REQUESTS_PATH = "kbl.graph_client.requests"
@@ -26,6 +28,20 @@ def _ready_cfg(**over) -> GraphConfig:
         tenant_id="tenant-123",
         client_id="client-456",
         client_secret=SECRET,
+        enabled=True,
+    )
+    base.update(over)
+    return GraphConfig(**base)
+
+
+def _cert_cfg(**over) -> GraphConfig:
+    """A cert-authed, flag-ON config (no client_secret)."""
+    base = dict(
+        tenant_id="tenant-123",
+        client_id="client-456",
+        client_secret="",
+        cert_private_key=CERT_KEY,
+        cert_thumbprint=THUMBPRINT,
         enabled=True,
     )
     base.update(over)
@@ -262,3 +278,128 @@ def test_default_client_inert_without_env(monkeypatch):
         assert client.get("/me") is None
         assert m_msal.called is False
         assert m_requests.get.called is False
+
+
+# ---------------------------------------------------------------------------
+# 10. Certificate auth (M365_GRAPH_CERT_AUTH_1 Fix 1)
+# ---------------------------------------------------------------------------
+def test_cert_configured_without_secret():
+    # AC1/AC3: cert (inline PEM + thumbprint) is a usable credential; no secret needed.
+    assert GraphClient(_cert_cfg()).is_configured() is True
+
+
+def test_cert_path_configured_without_inline_key():
+    cfg = _cert_cfg(cert_private_key="", cert_path="/etc/secrets/graph.pem")
+    assert GraphClient(cfg).is_configured() is True
+
+
+def test_cert_missing_thumbprint_not_configured():
+    # Cert material without a thumbprint is not a usable credential.
+    cfg = _cert_cfg(cert_thumbprint="")
+    assert GraphClient(cfg).is_configured() is False
+
+
+def test_neither_secret_nor_cert_not_configured():
+    # AC3: no secret + no cert ⇒ unconfigured, dormant.
+    cfg = _ready_cfg(client_secret="")
+    assert GraphClient(cfg).is_configured() is False
+    assert GraphClient(cfg).is_ready() is False
+
+
+def test_acquire_token_builds_msal_with_cert_dict():
+    # AC1: MSAL constructed with the cert credential dict (mock MSAL, no network).
+    client = GraphClient(_cert_cfg())
+    with mock.patch(MSAL_PATH) as m_msal:
+        m_msal.return_value.acquire_token_for_client.return_value = {"access_token": TOKEN}
+        assert client._acquire_token() == TOKEN
+        _, kwargs = m_msal.call_args
+        assert kwargs["client_credential"] == {
+            "private_key": CERT_KEY,
+            "thumbprint": THUMBPRINT,
+        }
+
+
+def test_acquire_token_cert_path_read_from_file(tmp_path):
+    pem = tmp_path / "graph.pem"
+    pem.write_text(CERT_KEY)
+    client = GraphClient(_cert_cfg(cert_private_key="", cert_path=str(pem)))
+    with mock.patch(MSAL_PATH) as m_msal:
+        m_msal.return_value.acquire_token_for_client.return_value = {"access_token": TOKEN}
+        assert client._acquire_token() == TOKEN
+        _, kwargs = m_msal.call_args
+        assert kwargs["client_credential"]["private_key"] == CERT_KEY
+        assert kwargs["client_credential"]["thumbprint"] == THUMBPRINT
+
+
+def test_cert_takes_precedence_over_secret_when_both_set():
+    # Cert precedence: both present ⇒ MSAL gets the cert dict, not the secret string.
+    client = GraphClient(_cert_cfg(client_secret=SECRET))
+    with mock.patch(MSAL_PATH) as m_msal:
+        m_msal.return_value.acquire_token_for_client.return_value = {"access_token": TOKEN}
+        client._acquire_token()
+        _, kwargs = m_msal.call_args
+        assert isinstance(kwargs["client_credential"], dict)
+        assert kwargs["client_credential"]["thumbprint"] == THUMBPRINT
+
+
+def test_secret_only_still_builds_with_string_credential():
+    # AC2: back-compat — secret-only config still authenticates with the raw secret.
+    client = GraphClient(_ready_cfg())
+    with mock.patch(MSAL_PATH) as m_msal:
+        m_msal.return_value.acquire_token_for_client.return_value = {"access_token": TOKEN}
+        client._acquire_token()
+        _, kwargs = m_msal.call_args
+        assert kwargs["client_credential"] == SECRET
+
+
+def test_cert_material_never_logged(caplog):
+    # AC7: private_key + thumbprint never reach logs, success or failure path.
+    client = GraphClient(_cert_cfg())
+    with mock.patch(MSAL_PATH) as m_msal, mock.patch(REQUESTS_PATH) as m_requests:
+        m_msal.return_value.acquire_token_for_client.return_value = {"error": "invalid_client"}
+        m_requests.get.side_effect = TimeoutError("timed out")
+        with caplog.at_level(logging.DEBUG):
+            client._acquire_token()
+            client.get("/me/messages")
+    assert "PRIVATE_KEY_PEM_BODY_456" not in caplog.text
+    assert THUMBPRINT not in caplog.text
+    assert TOKEN not in caplog.text
+
+
+# ---------------------------------------------------------------------------
+# 11. Host-pin the bearer (M365_GRAPH_CERT_AUTH_1 Fix 2)
+# ---------------------------------------------------------------------------
+def test_get_url_non_https_rejected_before_token(caplog):
+    # AC4: http:// URL ⇒ None; MSAL NOT called; requests.get NOT called; URL not logged.
+    client = GraphClient(_ready_cfg())
+    bad_url = "http://graph.microsoft.com/v1.0/me/messages"
+    with mock.patch(MSAL_PATH) as m_msal, mock.patch(REQUESTS_PATH) as m_requests:
+        with caplog.at_level(logging.DEBUG):
+            assert client.get_url(bad_url) is None
+        assert m_msal.called is False
+        assert m_requests.get.called is False
+        assert bad_url not in caplog.text
+
+
+def test_get_url_non_graph_host_rejected_before_token(caplog):
+    # AC5: foreign host ⇒ None; no MSAL; no requests.get; URL not logged (no token leak).
+    client = GraphClient(_ready_cfg())
+    evil_url = "https://evil.example/v1.0/me/messages?$deltatoken=STEAL_ME"
+    with mock.patch(MSAL_PATH) as m_msal, mock.patch(REQUESTS_PATH) as m_requests:
+        with caplog.at_level(logging.DEBUG):
+            assert client.get_url(evil_url) is None
+        assert m_msal.called is False
+        assert m_requests.get.called is False
+        assert "evil.example" not in caplog.text
+        assert "STEAL_ME" not in caplog.text
+
+
+def test_get_url_valid_graph_host_passes_through():
+    # AC6: a valid graph.microsoft.com delta URL still passes the guard and is fetched.
+    client = GraphClient(_ready_cfg())
+    delta_url = "https://graph.microsoft.com/v1.0/me/messages/delta?$deltatoken=abc"
+    with mock.patch(MSAL_PATH) as m_msal, mock.patch(REQUESTS_PATH) as m_requests:
+        m_msal.return_value.acquire_token_for_client.return_value = {"access_token": TOKEN}
+        m_requests.get.return_value = _ok_response()
+        assert client.get_url(delta_url) == {"value": []}
+        assert m_requests.get.call_args[0][0] == delta_url

@@ -77,6 +77,12 @@ class GraphConfig:
     tenant_id: str = os.getenv("M365_TENANT_ID", "")
     client_id: str = os.getenv("M365_CLIENT_ID", "")
     client_secret: str = os.getenv("M365_CLIENT_SECRET", "")
+    # Certificate auth (production-preferred per program Phase 0). Cert takes
+    # precedence over client_secret when both are set. PEM private key may be
+    # supplied inline (cert_private_key) or via a PEM file path (cert_path).
+    cert_private_key: str = os.getenv("M365_CERT_PRIVATE_KEY", "")
+    cert_path: str = os.getenv("M365_CERT_PATH", "")
+    cert_thumbprint: str = os.getenv("M365_CERT_THUMBPRINT", "")
     base_url: str = "https://graph.microsoft.com/v1.0"
     authority_tmpl: str = "https://login.microsoftonline.com/{tenant}"
     scope: List[str] = field(default_factory=lambda: ["https://graph.microsoft.com/.default"])
