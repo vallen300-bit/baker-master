@@ -10498,6 +10498,53 @@ async def ingest_document(
         if result.error:
             raise HTTPException(status_code=500, detail=f"Ingestion failed: {result.error}")
 
+        # 7b. INGEST_RETRIEVAL_GAP_FIX_1 — persist to the Postgres `documents`
+        # table so the doc is retrievable via GET /api/documents/search.
+        #
+        # ROOT CAUSE: this endpoint previously wrote ONLY Qdrant chunks (via
+        # ingest_file). But /api/documents/search reads the Postgres `documents`
+        # table (its Qdrant branch has been dead since DOCUMENTS-REDESIGN-1 —
+        # `from memory.retriever import Retriever` ImportErrors → silent ILIKE
+        # fallback). So an /api/ingest "success" landed in Qdrant + ingestion_log
+        # but never in `documents` → invisible to search. We now mirror the
+        # established triggers/dropbox_trigger.py two-write pattern:
+        # store_document_full() for Postgres + ingest_file() for Qdrant.
+        #
+        # Skipped for business cards (card_data set → routed to contacts, not
+        # documents) and for skipped ingests (dedup / empty). store_document_full
+        # is idempotent (ON CONFLICT file_hash + content_hash dedup) so re-uploads
+        # collapse instead of duplicating.
+        document_id = None
+        if not result.skipped and not result.card_data and result.full_text:
+            try:
+                store = _get_store()
+                document_id = store.store_document_full(
+                    source_path=file.filename,
+                    filename=file.filename,
+                    file_hash=result.file_hash,
+                    full_text=result.full_text,
+                    token_count=result.token_count,
+                    owner="shared",
+                )
+                result.document_id = document_id
+                if document_id:
+                    # Queue classification + extraction (SPECIALIST-UPGRADE-1B),
+                    # matching the dropbox-trigger flow so facets/matter tags populate.
+                    try:
+                        from tools.document_pipeline import queue_extraction
+                        queue_extraction(document_id)
+                    except Exception as qe:
+                        logger.warning(f"/api/ingest: queue_extraction failed for doc {document_id} (non-fatal): {qe}")
+                else:
+                    # Fail loud: Qdrant write succeeded but the read-store write did not.
+                    logger.error(
+                        "/api/ingest: store_document_full returned no id for %s — "
+                        "doc is in Qdrant but NOT retrievable via /api/documents/search",
+                        file.filename,
+                    )
+            except Exception as doc_err:
+                logger.error(f"/api/ingest: documents-table write failed for {file.filename} (non-fatal): {doc_err}")
+
         response = {
             "status": "skipped" if result.skipped else "success",
             "filename": file.filename,
@@ -10507,6 +10554,10 @@ async def ingest_document(
             "skip_reason": result.skip_reason,
             "project": project,
             "role": role,
+            "document_id": document_id,
+            # stored_postgres reflects whether the doc reached the read store
+            # (the search-backing `documents` table) — not just Qdrant.
+            "stored_postgres": document_id is not None,
         }
 
         # Include card extraction data if present
