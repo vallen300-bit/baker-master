@@ -141,6 +141,7 @@ def ingest_file(
         return IngestResult(
             filename=filename, file_hash=file_hash, file_size_bytes=file_size,
             collection=target, chunk_count=len(chunks),
+            full_text=text, token_count=token_est,
         )
 
     # --- Step 5+6: Embed + Upsert ---
@@ -181,6 +182,7 @@ def ingest_file(
         filename=filename, file_hash=file_hash, file_size_bytes=file_size,
         collection=target, chunk_count=len(chunks),
         project=project, role=role, point_ids=point_ids,
+        full_text=text, token_count=token_est,
     )
 
     # Attach card extraction data for API response

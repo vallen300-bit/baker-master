@@ -19,3 +19,9 @@ class IngestResult:
     error: Optional[str] = None
     card_data: Optional[dict] = None          # Business card extracted fields
     contact_result: Optional[dict] = None     # Contact write result (action, contact_id)
+    # INGEST_RETRIEVAL_GAP_FIX_1: expose extracted text so callers can mirror the
+    # dropbox-trigger two-write pattern (Qdrant chunks here + Postgres `documents`
+    # row in the caller) without re-extracting (re-extract = double Vision cost on images).
+    full_text: Optional[str] = None           # Full extracted text (pre-chunk)
+    token_count: int = 0                      # Rough token estimate of full_text
+    document_id: Optional[int] = None         # documents.id once the caller persists the row
