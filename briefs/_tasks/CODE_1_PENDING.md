@@ -17,7 +17,7 @@ gate_plan: G0 codex (brief) → G1 lead (literal pytest) → G2 /security-review
 - **Repo:** baker-master, working dir `~/bm-b1`. Test on py3.12 (`/opt/homebrew/bin/python3.12 -m pytest`).
 - **Origin:** consolidated fast-follows from the merged document-retrieval arc — #285 (ingest→Postgres), #287 (semantic search restore), #286 (attachment two-write). All architect-flagged, non-blocking, Director-approved (2026-06-03). Read those 3 PRs' merge commits (`a7a0341`, `c969576`, `1831f8f`) + `briefs/_reports/B1_INGEST_COVERAGE_AUDIT_PHASE2_20260603.md` for grounding.
 - **Theme:** the ingest↔search two-store contract (Postgres `documents` + Qdrant `baker-documents`) now works, but has two **silent-degradation** risks of the same class as the bug we just fixed. Close them.
-- **Ship as TWO PRs** if cleaner: Part A (P1) first, Part B (P2) after. One brief, two coherent clusters.
+- **Ship as TWO PRs — MANDATORY** (codex G0 #1743): Part A (ingestion/search durability + observability) ships first as PR1; Part B (durable payload/signature/join contract) ships as PR2 only after Part A is green + smoke-verified. They are different contracts — do not bundle.
 
 ---
 
@@ -43,19 +43,23 @@ No way today to find docs where one store landed and the other didn't.
 
 ## PART B — durability hardening (P2, ship after Part A)
 
-### B1. Durable Qdrant↔Postgres join (write ids into the payload)
-Search currently joins Qdrant→Postgres on `source_path` (enrichment in `memory/retriever.py:~540-617`, falls back to `filename`). Filename/source_path are not globally unique → rare cross-matter mis-attribution (architect #287).
-- Going forward, write `document_id` + `matter_slug` into the `baker-documents` Qdrant payload (`_embed_and_upsert` metadata, `tools/ingest/pipeline.py:236`). The two-write callers (`/api/ingest`, dropbox_trigger, `promote_attachment_text_to_document_and_qdrant`) know the `documents.id` after `store_document_full` — thread it into `ingest_text`/`ingest_file` so the payload carries it.
-- When the payload has `document_id`, search resolves on it directly (no filename guesswork) and can push the `matter_slug` filter into Qdrant's `query_filter` (the retriever already supports `FieldCondition`). Keep filename/source_path enrichment as the fallback for legacy points.
-- **Note:** only NEW ingests get the id; existing points rely on the fallback until re-embedded (the reconciliation re-ingest, A3, can carry the id). State this clearly; do not attempt a full payload migration here.
+### B1. Durable Qdrant↔Postgres join (write ids into the payload) — MUST include retriever.py
+Search joins Qdrant→Postgres on `source_path`/`filename` (enrichment `memory/retriever.py:540-547`; document fetch by source_path/filename only at `:606-617`). Not globally unique → rare cross-matter mis-attribution (architect #287).
+- Write `document_id` + `matter_slug` into the `baker-documents` Qdrant payload (`_embed_and_upsert` metadata, `tools/ingest/pipeline.py:235-242` — today only `source_file`/`source_path`). Thread `document_id` through `ingest_text`/`ingest_file` from the two-write callers.
+- **Reorder note (codex):** `/api/ingest` currently calls `ingest_file` BEFORE `store_document_full` (`outputs/dashboard.py:10571-10607`), so it doesn't have `document_id` at Qdrant-write time. Reorder so `store_document_full` runs first (get the id) then the Qdrant write carries it — OR patch the payload after. Same for `promote_attachment_text_to_document_and_qdrant` + `dropbox_trigger`.
+- **MUST update `memory/retriever.py`** (codex MEDIUM #2): add `document_id` resolution to the enrichment path (`:540-617`) so search actually uses the new payload field — otherwise the durable join is dead weight. Add tests. If retriever changes are too large, explicitly DEFER B1 as a named standalone fast-follow rather than ship it half-wired.
+- Keep filename/source_path enrichment as the fallback for legacy points. Only NEW ingests get the id; existing points rely on fallback until re-embedded (A3 reconciliation re-ingest can carry it). No full payload migration here.
 
-### B2. `source_path` prefix contract
-The search source-filter keys on substrings (`email:`/`whatsapp:`/`clickup:`/`fireflies:`, else `dropbox`) — an implicit, load-bearing convention. Before M365 adds a 3rd prefix (`m365:`/`microsoft:`) and silently falls into the `dropbox` bucket:
-- Introduce a `SOURCE_PREFIXES` constant + a single `_derive_source` source of truth; document it as the contract. Add `m365` mapping now (inert until M365 lands).
+### B2. `source_path` prefix contract — THREE surfaces (codex MEDIUM #3)
+The source convention is hardcoded in THREE places that must agree, or M365 will be inconsistent across facets/filters/labels:
+- facet CASE — `outputs/dashboard.py:2183-2194`
+- SQL source filters — `outputs/dashboard.py:2385-2397`
+- Python `_derive_source` — `outputs/dashboard.py:2556-2567`
+- Introduce ONE `SOURCE_PREFIXES` constant + a single source-of-truth helper; route all three surfaces through it; document it as the contract. Add `m365` mapping now (inert until M365 lands).
 
-### B3. `safe_filename` once in `/api/ingest` (codex #1730 nit)
-`/api/ingest` strips path separators for the temp path (`Path(file.filename).name`) but still stores `documents.filename = file.filename`. A client sending `folder/Mandarin.pdf` would mismatch the join.
-- Compute `safe_filename = Path(file.filename).name` ONCE; reuse for the temp path, `store_document_full` filename/source_path, the response, and logs.
+### B3. `safe_filename` once in `/api/ingest` (codex #1730 nit + #1743 #4)
+`/api/ingest` strips path separators for the temp path but still uses `file.filename` for: ext derivation (`outputs/dashboard.py:10523`), `store_document_full` source_path/filename (`:10604-10607`), and the response (`:10633`). A client sending `folder/Mandarin.pdf` diverges across temp path / PG row / Qdrant source_file / API response.
+- Compute `safe_filename = Path(file.filename).name` ONCE; reuse for ext derivation, temp path, `store_document_full` filename/source_path, the response, and logs — every surface.
 
 ### B4. Document the pagination/total bound (`/api/documents/search`)
 Semantic `total` reflects results within the ≤300-chunk over-fetch window, not the true corpus total; deep offsets give a shifting total. Document this in the handler docstring + response (e.g. `"total_is_windowed": true` when semantic), and consider falling back to ILIKE for `offset` beyond the window.
