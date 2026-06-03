@@ -1,138 +1,84 @@
-# CODE_4_PENDING — DASHBOARD_CARD_SIGNAL_POLISH_1
-
-status: COMPLETE
-completed: 2026-06-02 PM3 — PR #59 merged b97eda0; G1 lead static + G2 /security-review scan-clear; b4 post-deploy AC #1649 machine-verified PASS (B1 instant-extinguish, B2 regression, endpoint auth, turn-stop-hook, frontend 6/6+8/8); Director visual AC PASS (blue NEW pulse + fast extinguish confirmed live).
-dispatched: 2026-06-02 PM3 (aihead1-lead)
-dispatched_by: lead
-brief_source: ~/baker-vault/_ops/briefs/BRIEF_DASHBOARD_CARD_SIGNAL_POLISH_1.md
-codex_g0: PASS-WITH-NOTES (#1645) — proceed; 5 fold-notes below
-gate_plan: G0 codex DONE → G1 lead static → G2 /security-review REQUIRED (Part B touches X-Forge-Key DB-writing endpoint) → lead merge → Part B live-verify (turn-stop-hook on-disk + watched-session restart, Director visual judge)
-
-## CODEX G0 FOLD-NOTES (#1645) — apply these
-1. Part B: use `bus.WORKING_FRESH_THRESHOLD_S + 5` in app.py (app.py:23 already imports bus — no circular import). Do NOT hardcode 125.
-2. Extend `tests/test_card_glance_working_toggle.js` to assert BOTH `glance-working` iff WORKING and `glance-new` iff NEW, incl. mutual exclusion.
-3. Update stale comments still saying the dot is the single signal (app.js:352-354, styles.css:306-308) — A+C make dot + whole-card glow the work-state signals.
-4. Part A rides Part B's narrow /security-review (G2 required: Part B touches X-Forge-Key DB-writing endpoint). Part C frontend-only, covered same PR.
-5. turn-stop POST: synchronous `curl --max-time 1 >/dev/null 2>&1 || true` acceptable; background/nohup optional. NEVER log FORGE_KEY; hook must exit 0.
-
-Evidence anchors codex verified: main=2f016fc (use ~/bm-b4-brisen-lab, ignore stale b4 feature clone); app.js:365-371 toggles glance-working; glance_state.js:15-18 WORKING>NEW; app.py:318-359 /api/heartbeat UPDATE-only; bus.py:67-71 WORKING_FRESH_THRESHOLD_S=120; bus.py:1216-1225 is_working; styles.css:290-293 left-edge + 483-486 mappings; app.js:114-123 DONE dot depends on cardState==="green"; turn-stop-hook.sh:8-13 clears active/<sid>.
-
+---
+dispatch: M365_GRAPH_CERT_AUTH_1
+target: b4
+status: PENDING
+from: cowork-ah1 (Director-directed 2026-06-03)
+gate_G0: codex PASS — bus #1742 (rev2); the two #1735 blockers are folded
 ---
 
-# BRIEF — DASHBOARD_CARD_SIGNAL_POLISH_1 — instant extinguish + whole-card "received" highlight
+# CODE_4_PENDING — M365_GRAPH_CERT_AUTH_1
 
-**Repo:** brisen-lab (frontend + `/api/heartbeat`) + `~/forge-agent/turn-stop-hook.sh` (on-disk) · **Task class:** production implementation (dashboard UI + telemetry) · **Author:** AH1 (lead) · **Date:** 2026-06-02
-**Harness-V2:** full (production-facing). Context Contract + done rubric below.
-
-### Surface contract: user-visible dashboard cards at brisen-lab.onrender.com. Director is the visual judge. Two independent, independently-revertible parts.
+**b4 — MANDATORY before any reply:** Read this file + `~/baker-vault/_ops/agents/b4/orientation.md` + `~/.claude/projects/-Users-dimitry-Vallen-Dropbox-Dimitry-vallen-Baker-Project/memory/MEMORY.md`. Confirmation phrase: `"B4 oriented. Read: CODE_4_PENDING.md, MEMORY.md."`
 
 ## Context
 
-Director live-tested the working/received signals 2026-06-02 and gave two fixes:
-- **#2 — extinguish lag:** amber takes ~2 min to clear after a b-code finishes (the 120s freshness window). "Too long… distracts me. Why can't it be the same time when he finished?" → make amber go dark the instant the task ends.
-- **#3 — "received" is invisible:** when an agent receives a task it shows a small white dot — "too small, I cannot notice it." → restore the WHOLE-CARD highlight for the received/NEW state (like the old data-pending chrome, but brighter), keeping the dot.
+### Surface contract: N/A — backend Graph certificate auth + host-pin, no UI surface.
 
-(WORKING whole-card amber already ships — `DASHBOARD_WHOLE_CARD_WORKING_GLOW_1` PR #58. This brief adds the matching NEW whole-card highlight + makes the extinguish instant.)
+Dennis (EVOK) issued a **certificate** (.pfx), not a client secret (production-preferred per program §Phase 0). Phase 1 has two gaps: (1) `GraphClient` is client-secret-only; (2) `_request` attaches the bearer to ANY URL before any host check — a latent credential-leak. This brief fixes both. codex G0 (#1742) PASSED rev2.
 
-### Context Contract
-- **Router:** b4 — owns the card frontend (`DASHBOARD_CARD_WORKSTATE_CLARITY_1` #55) + the heartbeat/`/api/heartbeat` (#56) + turn-gating. Single best owner for both parts.
-- **Problem Evidence:** Director chat 2026-06-02 (#2 + #3 above); current `renderCard` toggles only `glance-working`; `.state-dot-pending` is a small white pulsing dot; `/api/heartbeat` only refreshes `last_seen_at=NOW()`; `is_working` = `last_seen_at` ≤ `WORKING_FRESH_THRESHOLD_S` (120s) so extinguish lags the window.
-- **Current State:** `static/app.js` renderCard (post-#58): `const glance = computeGlanceState(alias); card.classList.toggle("glance-working", glance==="WORKING"); card.appendChild(renderStateDot(alias, glance))`. `static/styles.css` has `.card.glance-working` + `.state-dot-pending`. `app.py` `POST /api/heartbeat` = UPDATE-only `last_seen_at=NOW()`. `~/forge-agent/turn-stop-hook.sh` = self-gate + `rm -f active/<sid>` + exit 0.
-- **Stable Paths:** `static/app.js`, `static/styles.css`, `static/index.html` (cache-bust), `app.py` (`/api/heartbeat`), `~/forge-agent/turn-stop-hook.sh`, `tests/`.
+**Verified current state (now on main):**
+- `config/settings.py:74-83` — `class GraphConfig` (tenant_id :77, client_id :78, client_secret :79, enabled :83). **GraphConfig lives here, NOT in graph_client.py.**
+- `kbl/graph_client.py` — `is_configured()` :35; `_acquire_token()` :51 (`ConfidentialClientApplication(..., client_credential=self.cfg.client_secret)`); `_request()` :77 acquires token (:79) then `requests.get(url, headers={Authorization: Bearer})` (:83-85) with **no scheme/host check**; `get_url()` :101 passes any absolute URL to `_request` (:108).
+
+## Estimated time: ~2h · Complexity: Low-Medium · Prereqs: Phase 1 merged (done). pfx password for LIVE test only.
 
 ---
 
-## Part A (frontend) — whole-card highlight on NEW ("task received")
-
-### Implementation
-- `static/app.js` renderCard: alongside the existing working toggle, add `card.classList.toggle("glance-new", glance === "NEW")`. (Reuse the single `glance` already computed; do not recompute.)
-- `static/styles.css`: add `.card.glance-new` = a bright, **noticeable whole-card highlight** distinct from amber — bright blue, pulsing, so a glance across the room catches it:
-```css
-/* NEW — whole card pulses bright blue when a task is received but not yet
-   started. Distinct from WORKING amber. Director: "make the whole card light
-   up — I can't notice the small white dot." */
-.card.glance-new {
-  border-color: #2f81f7;
-  box-shadow: 0 0 0 1px #2f81f7, 0 0 16px rgba(47, 129, 247, 0.45);
-  background: rgba(47, 129, 247, 0.09);
-  animation: card-new-pulse 1.4s ease-in-out infinite;
-}
-@keyframes card-new-pulse {
-  0%, 100% { box-shadow: 0 0 0 1px #2f81f7, 0 0 10px rgba(47,129,247,0.30); }
-  50%      { box-shadow: 0 0 0 1px #2f81f7, 0 0 22px rgba(47,129,247,0.60); }
-}
-```
-- Keep the dot (Director wants both signals). WORKING amber unchanged. DONE/IDLE/UNKNOWN → no whole-card glow.
-- Cache-bust changed assets (`styles.css?v=N+1`, `app.js?v=N+1`).
-- Precedence note: a card is NEW only when not WORKING (resolver already returns WORKING over NEW), so `glance-new` and `glance-working` are mutually exclusive — fine to toggle both off the one `glance`.
-
-### Part A Acceptance
-- A1: a card with an unacked task (glance NEW) shows the whole-card blue pulse + the dot; WORKING shows amber (unchanged); DONE/IDLE = no glow.
-- A2: `node tests/test_glance_state_resolver.js` still 8/8 (resolver untouched); extend `test_card_glance_working_toggle.js` (or a sibling) to assert `glance-new` toggles iff glance==="NEW".
-
----
-
-## Part B (backend + hook) — instant extinguish on task-end
-
-### Implementation
-- `app.py` `POST /api/heartbeat`: accept an OPTIONAL `idle` boolean in the body. When `idle` is true, backdate instead of refresh:
-  `UPDATE forge_sessions SET last_seen_at = NOW() - make_interval(secs => %s) WHERE session_uuid = %s` with secs = `WORKING_FRESH_THRESHOLD_S + 5` (pull the threshold from the same source of truth; do not hardcode 125 — import/derive). Default (`idle` absent/false) = existing `NOW()` behavior, byte-for-byte. Keep auth/freeze/alias-validation/UPDATE-only/no-broadcast exactly as today.
-- `~/forge-agent/turn-stop-hook.sh`: after `rm -f active/<sid>`, fire-and-forget POST `/api/heartbeat` with `{"session_uuid":<sid>,"terminal_alias":$FORGE_TERMINAL,"idle":true}` (short timeout, never logs FORGE_KEY, exit 0). This stales `last_seen_at` immediately → `is_working=false` on the next dashboard poll (~seconds), not ~2 min.
-- Net behavior: turn ends → flag cleared (ticker stops) AND last_seen_at backdated → amber extinguishes within one dashboard refresh.
-
-### Part B Acceptance
-- B1: `POST /api/heartbeat {idle:true}` for a fresh session → `is_working=false` immediately on `/api/v2/terminals` (vs still-true without idle). Literal test.
-- B2: default heartbeat (no `idle`) still refreshes → `is_working=true` (regression — unchanged).
-- B3: same auth/freeze/alias/UPDATE-only/no-broadcast invariants as the existing endpoint (the #56 tests stay green).
-- B4 (live): a b-code finishing a turn (window open) greys **within one dashboard poll cycle (~seconds), not ~2 min** — Director visual judge.
-
----
-
-## Part C (frontend) — retire the legacy colored left-edge (Director "glitch": b2/b3 left edge amber)
+## Fix 1: Certificate auth
 
 ### Problem
-The card left edge is `border-left: 4px solid var(--card-edge)` colored by `data-card-state` (styles.css ~483-486): `yellow→#d29922` (= the SAME amber as WORKING), `red→#f85149`, `green→#2ea043`, `grey→#30363d`. `cardState()` returns "yellow" for an open PR or a building-on-a-feature-branch mailbox. b2/b3 show amber left edges from a **stale snapshot** — their `forge_snapshot_push` daemon has been dead ~3 days, so the edge reflects days-old PR/branch state, in the same amber as the live working signal. Director reads it as a glitch (color collision + stale data).
+The issued cert is unusable; `GraphClient` authenticates only with a client secret.
 
 ### Implementation
-- **Retire the left-edge COLOR.** Remove the `data-card-state` → `--card-edge` color mappings (styles.css ~483-486) so the left border is always the neutral `var(--border)`. The dot + whole-card glow (NEW blue / WORKING amber / DONE green) are now the only work-state colors — the legacy colored edge is redundant + collision-prone.
-- **KEEP** `cardState()` the function and the `data-card-state` attribute — the dot's DONE state depends on `isDoneGreen = cardState(snap) === "green"`, and the attribute stays as debug instrumentation. ONLY the colored border is retired.
-- Cache-bust (shared with Part A bump).
+1. **`config/settings.py` `GraphConfig`** — add (keep `client_secret`):
+   - `cert_private_key: str = os.getenv("M365_CERT_PRIVATE_KEY", "")`  (PEM string)
+   - `cert_path: str = os.getenv("M365_CERT_PATH", "")`  (PEM file path, alternative)
+   - `cert_thumbprint: str = os.getenv("M365_CERT_THUMBPRINT", "")`  (SHA-1 hex)
+2. **`graph_client.py:35 is_configured()`** — true if `tenant_id` AND `client_id` AND (`client_secret` OR ((`cert_private_key` OR `cert_path`) AND `cert_thumbprint`)).
+3. **`graph_client.py:51 _acquire_token`** — when cert present, `client_credential = {"private_key": <cert_private_key, or pathlib read of cert_path>, "thumbprint": cert_thumbprint}`; else the existing secret path. **Cert precedence** when both set. Read `cert_path` inside the existing token try block (codex note).
+4. **No new dependency** — MSAL accepts a PEM private-key string + precomputed thumbprint; `pathlib` reads the file.
 
-### Part C Acceptance
-- C1: b2/b3 (and all cards) show a neutral left edge regardless of `data-card-state`; no amber/yellow/red/green left border anywhere.
-- C2: the DONE-green dot still works (cardState function intact); resolver tests still green.
-- Note (separate follow-up, NOT in scope): the dead `forge_snapshot_push` daemon for b2/b3 (~3 days stale) is a telemetry degradation like the agent.py tailer — retiring the colored edge makes it moot for this signal; reviving the snapshot daemon is its own brief.
+### Constraints
+Dormant behind `BAKER_USE_GRAPH` (default false). Never log key / secret / thumbprint — coarse error code only.
+
+## Fix 2: Host-pin the bearer (security — closes a latent credential leak)
+
+### Problem
+`_request` acquires a token and sends `Authorization: Bearer` to ANY URL. `get_url("https://evil.example/...")` leaks the app token. codex mock-probe confirmed.
+
+### Implementation
+At the **TOP of `_request()`, BEFORE `_acquire_token()`**:
+```python
+from urllib.parse import urlparse  # module-level import
+...
+p = urlparse(url)
+if p.scheme != "https" or p.hostname != "graph.microsoft.com":
+    return None  # do NOT acquire token, do NOT requests.get, do NOT log the url
+```
+
+### Constraints
+Guard runs before token acquisition. On reject: no token acquired, no `requests.get`, no URL / delta-token logged. Protects both `get()` and `get_url()` (shared `_request`).
+
+## Acceptance criteria
+1. Cert env + `BAKER_USE_GRAPH=true` → MSAL built with the cert dict (unit, mock MSAL, no network).
+2. Secret-only → back-compat (unit).
+3. Neither → `is_configured()` false, dormant.
+4. `get_url` non-https URL → returns None; MSAL NOT called; `requests.get` NOT called; URL not logged (caplog assert).
+5. `get_url` non-graph host (`https://evil.example`) → same as #4.
+6. Valid `https://graph.microsoft.com` delta URL → passes through (existing test `tests/test_graph_client.py:160-172` stays green).
+7. caplog sentinel: `private_key`, `thumbprint`, `client_secret`, token value NEVER appear in logs.
+8. py3.12 literal-string test pass; `/security-review` CLEAR.
 
 ## Files Modified
-- `static/app.js` — `glance-new` toggle.
-- `static/styles.css` — Part C: remove `data-card-state` color mappings (neutral left edge).
-- `static/styles.css` — `.card.glance-new` + keyframe; cache-bust.
-- `static/index.html` — cache-bust bump.
-- `app.py` — `/api/heartbeat` optional `idle` backdate branch.
-- `~/forge-agent/turn-stop-hook.sh` — POST idle:true on Stop.
-- `tests/` — Part A toggle test + Part B idle-endpoint tests.
+- `config/settings.py` — `GraphConfig` cert fields.
+- `kbl/graph_client.py` — cert credential in token path + host-pin guard in `_request`.
+- `tests/test_graph_client.py` — cert/secret/neither selection; host-pin (non-https, non-graph, valid pass-through); caplog sentinels.
 
-## Do NOT Touch
-- `static/glance_state.js` resolver, `renderStateDot`/the dot, `.card.glance-working` (amber).
-- The default `/api/heartbeat` refresh path (additive `idle` branch only).
-- `WORKING_FRESH_THRESHOLD_S` value, `turn-start-hook.sh`, the ticker gate.
+## Do NOT touch
+- `BAKER_USE_GRAPH` default (false). Phase 2+ pollers (not built). Non-Graph mail paths.
 
-## Quality Checkpoints
-1. NEW = whole-card bright-blue pulse + dot; mutually exclusive with WORKING amber; DONE/IDLE dark.
-2. `idle:true` backdates last_seen_at past the threshold → instant grey; default path unchanged (#56 tests green).
-3. Threshold derived from the single source of truth, not hardcoded.
-4. turn-stop POST is fire-and-forget, never logs FORGE_KEY, exit 0.
-5. Cache-bust every changed static asset.
+## Gates
+G0 codex PASS (#1742) → **G1 lead (unit, py3.12)** → G2 `/security-review` → G3 codex → merge. Dormant → no post-deploy AC until Phase-0 creds + Phase-2 LIVE test.
 
-## Gate Plan
-- G0 codex (brief, then PR) · G1 lead static · **G2 /security-review REQUIRED** (Part B touches the X-Forge-Key DB-writing endpoint — narrow but mandatory on Tier-A; Part A frontend confirm-narrow) · G3 architect N/A. Lead merges on green; Part B needs the turn-stop-hook edit applied on-disk + a watched-session restart to live-verify.
-
-## Done rubric / done-state terminal class
-- **Task class:** production implementation (UI + telemetry).
-- **Done-state:** DONE only at live AC — A1 (whole-card NEW pulse visible) + B4 (extinguish within ~seconds of task-end), Director visual-confirmed, + cache-bust live. "Tests pass" alone ≠ done.
-
-## Notes for reviewer (codex)
-- Confirm `idle` backdate is the cleanest instant-extinguish vs a separate endpoint (reuses heartbeat auth/freeze/validation; smaller surface).
-- Confirm `glance-new` + `glance-working` mutual exclusivity holds via the resolver priority.
-- Rule whether Part A (frontend-only) needs its own narrow /security-review or rides Part B's.
-- Confirm the turn-stop POST can't block the agent's turn (fire-and-forget, short timeout).
+## Report back
+On completion write `briefs/_reports/B4_M365_GRAPH_CERT_AUTH_1_<date>.md` + bus-post the ship to cowork-ah1 (dispatcher) and lead (owns merge gate).
