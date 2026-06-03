@@ -995,6 +995,32 @@ async def waha_webhook(
     except Exception as _e:
         logger.warning(f"Failed to store WhatsApp msg {msg_id} to PostgreSQL (non-fatal): {_e}")
 
+    # ATTACHMENT_TWO_WRITE_PARITY_1: promote WA media text to BOTH stores
+    # (documents + Qdrant baker-documents) so it reaches semantic RAG. Parent
+    # inline text (combined_body) is untouched above — no regression to WA search.
+    # Durable source_path: prefer the Dropbox path; deterministic whatsapp:<id>/
+    # fallback. NEVER the local temp filepath (deleted in the finally above).
+    if media_text:
+        try:
+            import os as _os_media
+            from tools.ingest.attachments import promote_attachment_text_to_document_and_qdrant
+            if media_dropbox_path:
+                _media_src_path = media_dropbox_path
+                _media_fname = _os_media.path.basename(media_dropbox_path) or f"whatsapp_{msg_id}"
+            else:
+                _media_ext = ""
+                if media_mimetype and "/" in media_mimetype:
+                    _media_ext = "." + media_mimetype.split("/")[-1].split(";")[0].strip()
+                _media_fname = f"whatsapp_{msg_id}{_media_ext}"
+                _media_src_path = f"whatsapp:{msg_id}/{_media_fname}"
+            promote_attachment_text_to_document_and_qdrant(
+                source_path=_media_src_path,
+                filename=_media_fname,
+                full_text=media_text,
+            )
+        except Exception as _e:
+            logger.warning(f"WA media promote failed (non-fatal) msg={msg_id}: {_e}")
+
     # PM-SIGNAL: Detect PM-relevant WhatsApp signals (generic, PM_REGISTRY-driven)
     if sender != DIRECTOR_WHATSAPP:
         try:
