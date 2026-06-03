@@ -71,7 +71,8 @@ pywebpush>=2.0.0             # Web Push notifications via VAPID
 youtube-transcript-api>=1.2.0
 
 # Future: Trigger integrations
-# msgraph-sdk>=1.0.0       # Microsoft 365 / Outlook
+msal>=1.28.0               # M365_GRAPH_CLIENT_FOUNDATION_1: OAuth2 client-credentials for Microsoft Graph
+# msgraph-sdk>=1.0.0       # intentionally NOT used — raw Graph REST via requests is lighter + easier to mock
 slack-sdk>=3.0.0           # Slack
 exchangelib>=5.5.0         # EXCHANGE-CALENDAR-POLL-1: EWS calendar (temporary, until M365 migration)
 
