@@ -35,6 +35,8 @@ def ingest_file(
     image_type: Optional[str] = None,
     project: Optional[str] = None,
     role: Optional[str] = None,
+    document_id: Optional[int] = None,
+    matter_slug: Optional[str] = None,
 ) -> IngestResult:
     """Ingest a single file through the full pipeline.
 
@@ -147,7 +149,8 @@ def ingest_file(
 
     # --- Step 5+6: Embed + Upsert ---
     point_ids, failed_batches = _embed_and_upsert(chunks, target, filepath.name, str(filepath),
-                                                  verbose, project=project, role=role)
+                                                  verbose, project=project, role=role,
+                                                  document_id=document_id, matter_slug=matter_slug)
 
     # --- A2 (INGEST_SEARCH_DURABILITY_FOLLOWUPS_1): do NOT seal a partial embed ---
     # Return before contact write + log_ingestion so the doc stays retryable
@@ -218,6 +221,8 @@ def _embed_and_upsert(
     verbose: bool = False,
     project: Optional[str] = None,
     role: Optional[str] = None,
+    document_id: Optional[int] = None,
+    matter_slug: Optional[str] = None,
 ) -> tuple[list[str], list[int]]:
     """Embed chunks via Voyage AI and upsert into Qdrant.
 
@@ -258,6 +263,14 @@ def _embed_and_upsert(
         metadata["project"] = project
     if role:
         metadata["role"] = role
+    # B1 (INGEST_SEARCH_DURABILITY_FOLLOWUPS_1): durable Qdrant↔Postgres join keys.
+    # document_id is the globally-unique join (filename/source_path are not), so the
+    # chat-RAG retriever can resolve the exact PG row instead of a filename guess.
+    # Only NEW ingests carry these; legacy points fall back to filename/source_path.
+    if document_id is not None:
+        metadata["document_id"] = document_id
+    if matter_slug:
+        metadata["matter_slug"] = matter_slug
 
     for batch_num, batch in enumerate(batches, 1):
         if batch_num > 1:
@@ -288,6 +301,19 @@ def _embed_and_upsert(
             failed_batches.append(batch_num)
             continue
 
+        # B5.1 (INGEST_SEARCH_DURABILITY_FOLLOWUPS_1): Voyage cardinality guard.
+        # zip(batch, result.embeddings) silently truncates to the shorter side, so a
+        # short embeddings array (Voyage returns fewer vectors than texts WITHOUT
+        # raising) would seal a half-embedded batch — the exact silent half-index A2
+        # exists to kill, via a side door. Treat a count mismatch as a failed batch.
+        embeddings = getattr(result, "embeddings", None) or []
+        if len(embeddings) != len(batch):
+            logger.error("  FAILED batch %d — Voyage returned %d embeddings for %d texts "
+                         "(cardinality mismatch); partial embed, doc will NOT be sealed",
+                         batch_num, len(embeddings), len(batch))
+            failed_batches.append(batch_num)
+            continue
+
         for text, vector in zip(batch, result.embeddings):
             point_id = make_point_id(text)
             all_point_ids.append(point_id)
@@ -312,6 +338,34 @@ def _embed_and_upsert(
     return all_point_ids, failed_batches
 
 
+def set_document_payload(collection: str, point_ids: list[str],
+                         document_id: Optional[int] = None,
+                         matter_slug: Optional[str] = None) -> None:
+    """B1 (INGEST_SEARCH_DURABILITY_FOLLOWUPS_1): patch durable join keys onto
+    already-upserted Qdrant points.
+
+    For callers that learn `documents.id` only AFTER the Qdrant write (e.g.
+    /api/ingest embeds before it has the PG id). Callers that hold the id at embed
+    time should pass it to ingest_text/ingest_file instead — this is the after-the-fact
+    path. Best-effort; never raises (the filename/source_path join remains the fallback).
+    """
+    if not point_ids:
+        return
+    payload = {}
+    if document_id is not None:
+        payload["document_id"] = document_id
+    if matter_slug:
+        payload["matter_slug"] = matter_slug
+    if not payload:
+        return
+    try:
+        qdrant = QdrantClient(url=config.qdrant.url, api_key=config.qdrant.api_key)
+        qdrant.set_payload(collection_name=collection, payload=payload, points=list(point_ids))
+    except Exception as e:
+        logger.warning("set_document_payload failed (non-fatal) collection=%s n_points=%d err=%s",
+                       collection, len(point_ids), e)
+
+
 def ingest_text(
     full_text: str,
     filename: str,
@@ -322,6 +376,8 @@ def ingest_text(
     role: Optional[str] = None,
     skip_dedup: bool = False,
     verbose: bool = False,
+    document_id: Optional[int] = None,
+    matter_slug: Optional[str] = None,
 ) -> IngestResult:
     """Chunk + embed + upsert ALREADY-EXTRACTED text into Qdrant. No re-extraction.
 
@@ -378,7 +434,8 @@ def ingest_text(
         logger.info("  ingest_text: %s → %d chunks", filename, len(chunks))
 
     point_ids, failed_batches = _embed_and_upsert(chunks, target, filename, source_path,
-                                                  verbose, project=project, role=role)
+                                                  verbose, project=project, role=role,
+                                                  document_id=document_id, matter_slug=matter_slug)
 
     # --- A2 (INGEST_SEARCH_DURABILITY_FOLLOWUPS_1): do NOT seal a partial embed ---
     # If any batch failed, skip log_ingestion so is_duplicate stays False and a

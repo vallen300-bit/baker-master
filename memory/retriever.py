@@ -537,14 +537,17 @@ class SentinelRetriever:
                         logger.info(f"Enriched email {source_id} with full content")
                         continue
 
-                # Documents — match by source_path or filename (SPECIALIST-UPGRADE-1A)
+                # Documents — resolve by document_id when present (durable join,
+                # B1 INGEST_SEARCH_DURABILITY_FOLLOWUPS_1), else fall back to
+                # source_path / filename for legacy points (SPECIALIST-UPGRADE-1A).
                 is_document = "document" in collection
+                doc_id_meta = ctx.metadata.get("document_id")
                 source_path = ctx.metadata.get("source_path", "")
                 filename_meta = ctx.metadata.get("filename", ctx.metadata.get("label", ""))
-                if is_document and (source_path or filename_meta):
-                    doc_key = source_path or filename_meta
+                if is_document and (doc_id_meta is not None or source_path or filename_meta):
+                    doc_key = f"id:{doc_id_meta}" if doc_id_meta is not None else (source_path or filename_meta)
                     if doc_key not in enriched_ids:
-                        full = self._get_full_document_text(source_path, filename_meta)
+                        full = self._get_full_document_text(source_path, filename_meta, document_id=doc_id_meta)
                         if full:
                             contexts[i] = RetrievedContext(
                                 content=full,
@@ -597,13 +600,22 @@ class SentinelRetriever:
             return None
 
     def _get_full_document_text(self, source_path: str = None,
-                                filename: str = None) -> Optional[str]:
+                                filename: str = None,
+                                document_id: int = None) -> Optional[str]:
         """Fetch full document text from documents table (SPECIALIST-UPGRADE-1A).
-        DOC-TRIAGE-1: Excludes media_asset type — no point enriching image descriptions."""
+        DOC-TRIAGE-1: Excludes media_asset type — no point enriching image descriptions.
+        B1: document_id (when the Qdrant payload carries it) is the authoritative,
+        globally-unique join and takes priority over source_path/filename."""
         try:
             conn = self._get_pg_conn()
             cur = conn.cursor()
-            if source_path:
+            if document_id is not None:
+                cur.execute(
+                    "SELECT full_text FROM documents WHERE id = %s"
+                    " AND COALESCE(document_type, '') != 'media_asset' LIMIT 1",
+                    (document_id,),
+                )
+            elif source_path:
                 cur.execute(
                     "SELECT full_text FROM documents WHERE source_path = %s"
                     " AND COALESCE(document_type, '') != 'media_asset' LIMIT 1",

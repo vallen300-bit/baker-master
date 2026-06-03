@@ -94,6 +94,7 @@ def promote_attachment_text_to_document_and_qdrant(
             source_path=source_path,
             collection=collection,
             file_hash=file_hash,
+            document_id=result["doc_id"],  # B1: durable join key (PG row written in Half 1)
         )
         if ir is not None:
             result["chunk_count"] = ir.chunk_count or 0
