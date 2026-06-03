@@ -2043,7 +2043,10 @@ async def documents_reingest_missing(
         except Exception:
             pass
         logger.error(f"reingest-missing select failed: {sel_err}")
-        store._put_conn(conn)
+        # NOTE: do NOT _put_conn here — the finally below returns the conn exactly
+        # once. _put_conn itself rolls back before returning to the pool, so a
+        # second call here would roll back / return an already-returned conn under
+        # concurrency (codex G3 #1778/#1779 fold).
         return {"error": "select_failed", "reason": str(sel_err), "dry_run": dry_run}
     finally:
         store._put_conn(conn)

@@ -322,6 +322,46 @@ def test_ac5_empty_text_row_skipped_not_embedded(monkeypatch):
     assert 2 not in embedded_ids, "blank-text row must not be embedded"
 
 
+def test_g3_select_error_returns_conn_to_pool_exactly_once(monkeypatch):
+    """G3 #1779 regression: on a select/count error the conn is returned to the
+    pool EXACTLY ONCE (the finally), never twice. A double _put_conn would, under
+    concurrency, roll back / return an already-returned connection (_put_conn
+    itself rolls back before putconn)."""
+    from fastapi.testclient import TestClient
+    import importlib
+    monkeypatch.setenv("BAKER_API_KEY", "test-key")
+    import outputs.dashboard as dash
+    importlib.reload(dash)
+
+    class _ErrCursor:
+        def cursor(self, cursor_factory=None):
+            return self
+
+        def execute(self, sql, params=None):
+            raise RuntimeError("select boom")
+
+        def rollback(self):
+            pass
+
+    err_conn = _ErrCursor()
+    put_calls = []
+
+    class _CountingStore:
+        def _get_conn(self):
+            return err_conn
+
+        def _put_conn(self, c):
+            put_calls.append(c)
+
+    monkeypatch.setattr(dash, "_get_store", lambda: _CountingStore())
+    client = TestClient(dash.app)
+    r = client.post("/api/documents/reingest-missing?dry_run=false", headers=_HDR)
+    body = r.json()
+    assert body["error"] == "select_failed"
+    assert "select boom" in body["reason"]
+    assert put_calls == [err_conn], "conn must be returned to the pool exactly once"
+
+
 def test_fold2_loop_converges_despite_legacy_empties(monkeypatch):
     """Fold 2 regression: when only empties remain (embeddable=0), remaining_after
     is 0 so the resume loop terminates — even though total_missing > 0."""
