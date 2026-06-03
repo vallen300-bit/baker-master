@@ -1,107 +1,89 @@
 ---
-dispatch: INGEST_RETRIEVAL_GAP_DIAGNOSE_FIX_1
+status: PENDING
+brief_id: DOCUMENTS_SEARCH_SEMANTIC_RESTORE_1
+dispatch: DOCUMENTS_SEARCH_SEMANTIC_RESTORE_1
 to: b1
 from: lead
 dispatched_by: lead
-status: COMPLETE (merged PR #285 a7a0341; all gates PASS — G0 #1702 / G1 lead / G2 security CLEAR / G3 codex #1706 PASS-WITH-NOTES)
-dispatched_at: 2026-06-03
-authored: 2026-06-03
-target_repo: baker-master (vallen300-bit/baker-master)
-estimated_time: ~2-4h (diagnosis-heavy)
-complexity: Medium-High
-reply_to: lead
-ship_topic: ship/ingest-retrieval-gap-diagnose-fix-1
-anchor_chat: Director 2026-06-03 "Go dispatch B" — /api/ingest reports success but content is not retrievable; affects ALL document ingestion. Surfaced AH1 while ingesting mo-prague appendix data.
+task_class: bug-fix (high blast radius — Director-approved behavior change)
+harness_v2: applies
+gate_plan: G0 codex (brief) → G1 lead (literal pytest) → G2 /security-review → G3 codex (code)
 ---
 
-# B1 dispatch — INGEST_RETRIEVAL_GAP_DIAGNOSE_FIX_1
+# B1 dispatch — DOCUMENTS_SEARCH_SEMANTIC_RESTORE_1 (Bug A)
 
-## Context
+## Context Contract (read before building)
 
-`POST /api/ingest` returns `{"status":"success","collection":"baker-documents","chunks":4}`,
-but the ingested content is **not retrievable** afterwards. This is a green-but-broken gap
-(Lesson #8 / #86 family): the API reports success, nothing is actually queryable. It affects
-EVERY document ingested via this path, not one file — so it is a real Baker bug, priority.
+- **Repo:** baker-master, working dir `~/bm-b1`. Test on py3.12 (`/opt/homebrew/bin/python3.12 -m pytest`).
+- **Origin:** You flagged this as "Bug A" while fixing INGEST_RETRIEVAL_GAP (#285, merged `a7a0341`). **Director has approved the fix** (chat 2026-06-03 "fix what's needed"). This is a high-blast-radius, Director-ratified behavior change — semantic results will replace keyword (ILIKE) results portfolio-wide.
+- **Endpoint:** `GET /api/documents/search` — `outputs/dashboard.py:2213` (handler), Qdrant branch at `~2246-2300`, ILIKE fallback at `~2301+`.
 
-**Evidence AH1 captured live (2026-06-03), use it — do not re-derive from scratch:**
-- Ingested `~/baker-vault/wiki/matters/mo-prague/00_originals/from-dropbox-deal-folder/appendix-2-3-transcribed.md`
-  via `POST /api/ingest` (X-Baker-Key). Response: `status=success, collection=baker-documents, chunks=4, dedup=false`.
-- **Re-ingesting the SAME file again ALSO returned `dedup=false`** — dedup never fired on an identical re-upload. Suspicious (suggests the dedup check and/or the upsert is not hitting the store the retriever reads).
-- `GET /api/documents/search?q=...` (dashboard.py:2213 → `retriever.search("baker-documents", q, ...)`):
-  - `"Mandarin Oriental"` → total **639**; `"renovation"` → 226; `"deal"` → 458. **Collection is live + populated + readable.**
-  - Every phrase distinctive to the just-ingested doc → total **0**: `"CITIC renovation business case"`, `"Stage 1 Stage 2 cashflow CZK"`, `"transcribed embedded chart"`, `"appendix 2 3 IRR"`, `"82557265"`.
-- So: the retriever reads a populated `baker-documents`, but the doc `/api/ingest` claims it stored is absent from it.
+## Problem
 
-**Context Contract:**
-- **Repo / branch:** baker-master, branch off `main` (e.g. `b1/ingest-retrieval-gap-diagnose-fix-1`).
-- **Write path (ingest):** `outputs/dashboard.py:10425` `POST /api/ingest` → `ingest_file(...)` in `tools/ingest/pipeline.py` (+ `tools/ingest/extractors.py`). Reports `collection="baker-documents"`, `chunk_count`.
-- **Read path (retriever):** `outputs/dashboard.py:2213` `GET /api/documents/search` → `retriever.search("baker-documents", q, limit=...)`. Also used at `dashboard.py:8279`.
-- **A SECOND ingest path exists:** `kbl/ingest_endpoint.py:300` upserts to `collection_name="baker-wiki"` (NOT baker-documents) via `models.cortex._embed_text`. Confirm whether `/api/ingest` actually routes through the tools/ingest pipeline or kbl path, and which Qdrant client each uses.
-- **Embedding:** Voyage `voyage-3`, 1024-d (`kbl/voyage_client.py`). A dimension/model mismatch between write and read silently breaks retrieval.
-- **Singletons:** never instantiate `SentinelRetriever()` / `SentinelStoreBack()` directly — use `_get_global_instance()` (CI guard `scripts/check_singletons.sh`).
-- **Task class:** production bug-fix + investigation.
-- **Surface contract: N/A — backend ingest/retrieval pipeline, no clickable surface.**
+The Qdrant semantic branch of `/api/documents/search` has been **dead since DOCUMENTS-REDESIGN-1**. At `outputs/dashboard.py:2248`:
+```python
+from memory.retriever import Retriever   # ImportError — no such symbol
+retriever = Retriever()                  # never runs
+hits = retriever.search("baker-documents", q.strip(), limit=qdrant_limit)  # wrong method too
+```
+`memory/retriever.py` exposes `SentinelRetriever` (not `Retriever`), and its method is `search_collection(query_vector, collection, ...)` (not `search(collection, text, ...)`). The import raises, the `except` swallows it (`logger.warning("Qdrant search failed, falling back to PostgreSQL")`), and every query silently runs a Postgres `filename/full_text ILIKE` keyword match. So "document search" has been dumb substring matching, not semantic, for months.
 
-## Hypotheses (test in order, cheapest first; confirm with evidence, don't guess)
-1. **Qdrant client divergence (most likely):** the ingest upsert client and the retriever read client use a DIFFERENT Qdrant URL / API key / cluster. Memory: the `baker-memory` Qdrant cluster was upgraded free→paid recently (cluster 38c16dc6) — an old vs new URL/key could be split across the two paths. Compare the exact `QDRANT_URL` / `QDRANT_API_KEY` (and any per-module override) each path resolves at runtime.
-2. **Collection mismatch:** write goes to a different collection name (e.g. `baker-wiki` vs `baker-documents`) or a stale duplicate collection with the same name on a different cluster.
-3. **Silent upsert failure (green-but-broken):** `ingest_file` returns `chunk_count` computed BEFORE/independent of the Qdrant upsert, and the upsert raises + is swallowed → success reported, nothing stored. Trace whether `chunk_count` is post-upsert-confirmed.
-4. **Embedding dim/model mismatch:** write embeds with a different model/dim than the collection expects → upsert silently rejected.
+## Current State (verified by lead)
 
-## Deliverable
-1. **Root cause, evidenced** — which client/collection/key/dim each path uses; the exact divergence, quoted from runtime config (not assumed).
-2. **Fix** so a doc ingested via `/api/ingest` IS retrievable via `/api/documents/search`.
-3. **Round-trip self-test (load-bearing, Lesson #86):** an end-to-end test that ingests a sentinel doc carrying a unique token, then asserts the retriever returns it. Wire it so `/api/ingest` "success" can never again mean "not stored" — at minimum a test; ideally the endpoint confirms the upsert (point exists) before returning success.
-4. **Re-land the mo-prague doc:** after the fix, ensure `appendix-2-3-transcribed.md` is ingested + retrievable (and clean up the 2 duplicate ingest attempts AH1 made if they landed anywhere). Confirm `"82557265"` / `"Stage 1 Stage 2 cashflow CZK"` now return it.
+- `SentinelRetriever` — `memory/retriever.py:148`. Singleton accessor: `SentinelRetriever._get_global_instance()` (`memory/retriever.py:156`). **Use the accessor — do NOT instantiate directly** (CI guard `scripts/check_singletons.sh`).
+- `search_collection(query_vector: list[float], collection: str, limit=20, score_threshold=0.3, project=None, role=None) -> list[RetrievedContext]` — `memory/retriever.py:190`. Takes a **pre-computed embedding vector**.
+- Query embedding helper used internally: `self._embed_query(query)` (see `search_all_collections`, `memory/retriever.py:~256`). One Voyage call per query.
+- Return type is `RetrievedContext` objects (NOT dicts): attributes `.content`, `.source`, `.score`, `.metadata` (dict), `.token_estimate`. The current broken mapping uses dict access (`h.get("metadata")`, `h.get("text")`, `h.get("score")`, `h.get("id")`) — that mapping MUST change to attribute access.
 
-## Phase 2 — ingestion COVERAGE audit (Director extension; scope as a short report, do NOT build M365 poll)
-Director's ask: once ingest is trustworthy, verify OTHER material — including M365 mail + attachments — actually reaches Qdrant + Postgres.
-- Map the CURRENT attachment-ingestion path: do email/WhatsApp/transcript ATTACHMENTS (PDFs, images, docx) get extracted + embedded into Qdrant + written to Postgres today? Where, and via which trigger?
-- Document the GAP for M365: the M365 mail/attachment poll is gated on Azure creds (M365 program Phase 2+, not yet live) — so this is a coverage MAP + gap-list, NOT a build. Output: a short markdown report (what's covered, what isn't, what M365 Phase 2+ must wire to ingest attachments). File it under `briefs/_reports/` and bus it to lead.
-- Keep Phase 2 separate from the Phase-1 fix PR so the fix can merge independently.
+## Implementation
+
+1. **Fix the import + call** in the Qdrant branch (`outputs/dashboard.py:~2247-2249`):
+   ```python
+   from memory.retriever import SentinelRetriever
+   retriever = SentinelRetriever._get_global_instance()
+   qdrant_limit = min(offset + limit + 50, 200)
+   query_vector = retriever._embed_query(q.strip())
+   hits = retriever.search_collection(
+       query_vector=query_vector,
+       collection="baker-documents",
+       limit=qdrant_limit,
+       score_threshold=0.3,
+   )
+   ```
+2. **Remap results** from `RetrievedContext` attributes. The filter loop + result dict currently read `h.get("metadata")` / `h.get("text")` / `h.get("score")` / `meta.get("doc_id")` etc. Change to `h.metadata` / `h.content` / `h.score`. **VERIFY the `baker-documents` payload keys exist** before trusting them — pull one live point and confirm which of `doc_id` / `document_id` / `filename` / `matter_slug` / `document_type` / `source_path` / `ingested_at` are actually present in the payload written by `ingest_file`. Map missing keys defensively (`or ""`), and make sure the result `id` resolves to the Postgres `documents.id` (so the UI's open-document link still works) — if the Qdrant payload doesn't carry the PG id, you may need to carry it through `ingest_file`'s payload or resolve by `source_path`/`file_hash`. Flag the chosen approach in the ship report.
+3. **KEEP the ILIKE fallback** exactly as-is for: (a) Qdrant error/empty, (b) filter-only queries with no `q`. The semantic branch populates `results`; the existing `if not results ...` fallback must still fire when semantic returns nothing. Do NOT delete the Postgres path — it is the safety net (THREE-TIER pattern).
 
 ## Key Constraints
-- Read-only diagnosis FIRST; propose the fix with evidence before mutating prod config.
-- Do NOT delete/recreate Qdrant collections destructively. If a collection must be created/migrated, propose it to lead first.
-- Wrap all DB/Qdrant calls in try/except (fault-tolerant).
-- Use `_get_global_instance()` for retriever/store-back. Pass `bash scripts/check_singletons.sh`.
-- Render env: if a Qdrant URL/key is wrong, surface it to lead — do NOT raw-PUT Render env (use the guard / lead handles env flips as Tier-B).
 
-## Files likely touched
-- `tools/ingest/pipeline.py` and/or `kbl/ingest_endpoint.py` (whichever `/api/ingest` actually uses) — fix the write target / confirm upsert.
-- `kbl/` retriever module — only if the read client is the wrong one.
-- `tests/` — new round-trip ingest→retrieve test.
-- Possibly `outputs/dashboard.py:10425` — make `/api/ingest` confirm-before-success.
+- All DB/API calls wrapped in try/except **with `conn.rollback()`** in except (PG pool poisoning).
+- Singleton accessor only (no `SentinelRetriever()` / `SentinelStoreBack()` direct construction).
+- Voyage embedding adds ~1 API call per query — acceptable (search is user-initiated, not a loop). Note the per-query cost in the ship report.
+- Surgical: only the `/api/documents/search` Qdrant branch + its result mapping. Do NOT touch `/api/ingest` (#285) or the ILIKE fallback logic.
+- Score threshold 0.3 is the retriever default — keep it; note that it is why semantic returns fewer, more-relevant hits than ILIKE.
 
-## Do NOT Touch
-- `scripts/bus_post.*`, the drain fixture, unrelated triggers.
-- `migrations/` already-applied files.
+## Verification / Done rubric (answer literally in the ship report — not "tests pass")
 
-## Verification
-```bash
-python3 -c "import py_compile; py_compile.compile('tools/ingest/pipeline.py', doraise=True)"
-pytest -q   # plus the new round-trip test
-bash scripts/check_singletons.sh
-```
-**Live round-trip (mandatory, Lesson #86):** ingest a sentinel doc via the live `/api/ingest`, then `/api/documents/search` for its unique token and confirm it returns. Capture the token + result in the ship report. Mock-green alone is NOT acceptance for this bug.
+1. **Before/after on real queries:** run 3-5 representative queries (e.g. "Mandarin Oriental", a matter name, a concept phrase) against prod BEFORE (ILIKE, current) and AFTER (semantic). Report the result counts + top-5 titles for each. Confirm the semantic results are relevant and a known document is still findable. (Expected: counts drop, relevance rises — e.g. ~635 ILIKE hits → ≤200 semantic.)
+2. **Known-doc retrievable:** the AC285 sentinel doc (or any recently-ingested doc) is returned by a semantic query for its content.
+3. **Fallback intact:** simulate Qdrant-empty/error → confirm ILIKE fallback still returns; filter-only (no `q`) still works.
+4. **Result `id` resolves to a real Postgres `documents.id`** (open-document link works) — show one id round-trip.
+5. `bash scripts/check_singletons.sh` = OK; literal `pytest` output (py3.12) for touched tests + a new guard test asserting the handler imports `SentinelRetriever` (not `Retriever`) and calls `search_collection`.
 
-## Quality Checkpoints (Acceptance criteria)
-1. Root cause documented with runtime-config evidence (which divergence).
-2. A doc ingested via `/api/ingest` is retrievable via `/api/documents/search` (live-proven).
-3. Round-trip self-test added + green on literal `pytest`.
-4. mo-prague `appendix-2-3-transcribed.md` retrievable post-fix (token `82557265` returns it).
-5. `scripts/check_singletons.sh` passes.
-6. Phase-2 coverage report filed + bus-posted (separate from the fix PR).
+## Files likely modified
+- `outputs/dashboard.py` — `/api/documents/search` Qdrant branch + result mapping (~2246-2300).
+- `tests/test_documents_search_semantic.py` (new) — guard the import/method + result-mapping + fallback.
 
-## Done rubric (required final state)
-PR open against baker-master `main`: `/api/ingest` writes land where `/api/documents/search` reads;
-round-trip test proves it; mo-prague doc retrievable; Phase-2 coverage report filed. Answer this
-rubric in the ship report (not just "tests passed").
+## Do NOT touch
+- `/api/ingest` handler (#285).
+- The PostgreSQL ILIKE fallback block (keep as safety net).
+- Other `SentinelRetriever` call sites (slack/waha/cli) — out of scope.
 
-## Gate plan
-- **G0 codex-arch** — review the root-cause diagnosis + fix BEFORE merge (this one is subtle; pre-merge codex is worth it).
-- **G1 lead** — literal `pytest` + the live round-trip re-run + singleton guard.
-- **G2 /security-review** — light (no new external surface; config/pipeline).
-- Merge on green → lead flips mailbox COMPLETE + bus-posts. Phase-2 report reviewed separately.
+## Gate plan (Harness V2)
+- G0 codex brief review (lead dispatches before you start).
+- G1 lead — literal pytest + diff review + a live before/after query comparison.
+- G2 `/security-review` — endpoint change, mandatory (Lesson #52). (Note: query text already flows to ILIKE params parameterized; semantic path sends it to Voyage embed — no new injection surface, but confirm.)
+- G3 codex — code correctness/architecture + payload-key mapping sanity.
+- POST_DEPLOY_AC_VERDICT v1 after merge (live before/after query proof on prod).
 
-Harness-V2: applies (production pipeline bug-fix + investigation) — Context Contract, task class, done rubric, gate plan all above.
+## Reply target
+Bus-post findings + ship report to `lead`. Plain technical prose (NOT Director-facing register — no `Bottom line:` / `Recommendation:` / `Bus:` closers). **Surface the payload-id-resolution decision explicitly** — it's the one real design fork in this fix.
