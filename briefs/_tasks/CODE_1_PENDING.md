@@ -1,57 +1,48 @@
-# CODE_1_PENDING — DASHBOARD_WHOLE_CARD_WORKING_GLOW_1
-
-status: COMPLETE
-completed: 2026-06-02 — PR #58 merged abb3a9c (squash). G0 codex PASS-WITH-NOTE #1614 + G1 lead static PASS (compute glance once + classList.toggle glance-working on WORKING only; dot untouched; amber #d29922; cache-bust v20/v24) + G2 narrow /security-review PASS (no innerHTML/fetch/auth/storage/endpoint; CSS+class-toggle only). Tests: resolver 8/8 + toggle-contract 6/6. POST_DEPLOY_AC = Director visual judge (whole-card amber on live dashboard).
+---
+dispatch: M365_GRAPH_CLIENT_FOUNDATION_1
+to: b1
+from: lead
 dispatched_by: lead
-ship-report recipient: lead
-repo: brisen-lab (your brisen-lab checkout; base current main 2d0fc42 — includes #55 dashboard card + #57)
-task class: production implementation (dashboard UI, frontend-only)
-gate plan: G0 codex (brief PASS-WITH-NOTE #1614) → G1 lead static → G2 narrow /security-review REQUIRED → merge → post-deploy AC (Director visual judge)
-bus topics: ship/dashboard-whole-card-working-glow-1
+status: PENDING
+dispatched_at: 2026-06-03T10:00:00Z
+authored: 2026-06-03
+brief_path: briefs/BRIEF_M365_GRAPH_CLIENT_FOUNDATION_1.md
+target_repo: baker-master
+estimated_time: ~2-3h
+complexity: Medium
+brief_version: v2 — codex-arch G0 PASS-WITH-NOTES (#1670); 3 #1668 folds + params exactness note applied
+codex_pre_review: PASS-WITH-NOTES (codex-arch #1670) — flag-gate enforcement, no raw-bearer cache, get_url() for delta, secret+token caplog all confirmed
+reply_to: lead
+ship_topic: ship/m365-graph-client-foundation-1
+program: BRIEF_M365_MIGRATION_PROGRAM (Phase 1 of 5)
+anchor_chat: Director 2026-06-03 "go ... use Deputy, B codes, codex arch ... follow harness v2 ... use /write-brief sop" — Brisen migrated to Microsoft 365; Baker mail/calendar re-platform onto Microsoft Graph.
+---
 
-## Context
+### Surface contract: N/A — pure backend module (auth client + config + tests); no clickable surface. Full block in brief Context.
 
-Canonical brief (READ IN FULL FIRST): `~/baker-vault/_ops/briefs/BRIEF_DASHBOARD_WHOLE_CARD_WORKING_GLOW_1.md` (commit c280969; codex G0 PASS-WITH-NOTE #1614).
+# b1 dispatch — M365_GRAPH_CLIENT_FOUNDATION_1
 
-Director feedback 2026-06-02: the just-merged DASHBOARD_CARD_WORKSTATE_CLARITY_1 (#55) narrowed the work-state signal to a small dot near the name. Director wants the WHOLE CARD to light amber when an agent is working and go dark when done (the original plan). Restore the whole-card amber glow as the PRIMARY signal AND keep the dot (Director wants both).
+Read `briefs/BRIEF_M365_GRAPH_CLIENT_FOUNDATION_1.md` end-to-end before any code. **Target repo: baker-master** (your `~/bm-b1` baker-master clone — files are `kbl/`, `config/settings.py`, `requirements.txt`, `tests/`).
 
-## Problem
+Brief cleared **codex-arch G0 = PASS-WITH-NOTES** (#1670, 2026-06-03). All 3 prior findings + the params exactness note are already folded into the brief. No further pre-write review required.
 
-The work-state signal is now only the small dot. Restore a whole-card amber glow driven by the SAME `WORKING` glance-state; card extinguishes (no glow) when not WORKING.
+**What this is:** Phase 1 of 5 in the Microsoft 365 migration. Brisen moved email+calendar from Google to M365. Build the **shared Microsoft Graph auth + REST client** that Phases 2-4 (mail poll / calendar / send) will reuse. It ships **DORMANT** behind `BAKER_USE_GRAPH` (default false) with **NO poller/scheduler/Gmail/EVOK wiring** — blast radius ~zero. Fully buildable + unit-testable NOW with mocks (no live Azure creds yet — those come from a separate external Phase 0).
 
-## Files Modified
+**Scope (4 files, all in the brief with copy-pasteable skeleton):**
+- `requirements.txt` — add `msal>=1.28.0` (keep `msgraph-sdk` commented; we use msal + existing `requests`).
+- `config/settings.py` — add `GraphConfig` dataclass (mirrors `GeminiConfig`; reads `M365_TENANT_ID/CLIENT_ID/CLIENT_SECRET` + `BAKER_USE_GRAPH`).
+- `kbl/graph_client.py` — NEW `GraphClient` (the brief's interface is binding: `is_configured/is_enabled/is_ready/_acquire_token/get/get_url/health`).
+- `tests/test_graph_client.py` — NEW unit tests (mock MSAL + requests; no network). All 9 Test-AC cases.
 
-(per brief §Stable Paths) — `static/app.js` (`renderCard`: capture `const glance = computeGlanceState(alias)` once, pass to `renderStateDot`, AND `card.classList.toggle("glance-working", glance === "WORKING")`), `static/styles.css` (`.card.glance-working` amber `#d29922` rule + cache-bust → v20), `static/index.html` (`styles.css?v=20`, `app.js?v=24`).
+**Load-bearing (do not regress — these are the G0 findings):**
+1. `is_ready()` = `is_enabled() and is_configured()` is the ONLY gate. Creds present + `BAKER_USE_GRAPH=false` ⇒ NO MSAL construction, NO `requests.get`. Test it.
+2. Do NOT cache the raw bearer on the instance. MSAL `acquire_token_for_client` owns the token cache/renewal.
+3. `get_url(url)` passes opaque `@odata.nextLink`/`deltaLink` URLs unchanged (`params=None`) and NEVER logs the full URL/query (redacted marker only).
+4. Neither `M365_CLIENT_SECRET` nor any `access_token` may appear in logs — caplog asserts on success AND failure paths.
+5. Never-raise contract on `_acquire_token`/`get`/`get_url`.
 
-Do NOT touch: `static/glance_state.js` (resolver correct + tested), `renderStateDot`/the dot (Director wants it kept), backend (`bus.py`/`app.py`/`db.py` — no data change).
+**Constraints:** do NOT touch `triggers/*`, `scripts/extract_gmail.py`, `outputs/email_*.py`, the scheduler, or `triggers/exchange_*.py`. No secrets in code (env-name references only).
 
-## Quality Checkpoints (codex #1614 confirmed)
+**Gates:** G1 (lead static review) → **G2 `/security-review` REQUIRED** (new credential acquisition + bearer-token handling — codex-arch confirmed) → G3 (architect, light).
 
-1. WORKING → whole-card amber glow; every other state → no glow ("extinguished"). codex confirmed `classList.toggle` in `renderCard` is the minimal correct hook.
-2. Glow auto-extinguishes when WORKING ends — the existing renderCard re-eval (app.js ~1177-1179, "Re-eval card statuses every 5s") that decays the dot also removes the class. No stale-glow gap.
-3. ONLY WORKING lights the card — NEW stays dot-only (Director: working→amber, finished→extinguished).
-4. Dot unchanged; `node tests/test_glance_state_resolver.js` still 8/8 (regression).
-5. Cortex card untouched (its resolver derives only NEW/DONE/IDLE, no WORKING).
-6. Amber `#d29922` matches the dot; glow legible on dark bg, not overwhelming.
-
-## Suggested CSS (refine as needed)
-
-```css
-.card.glance-working {
-  border-color: #d29922;
-  box-shadow: 0 0 0 1px #d29922, 0 0 16px rgba(210, 153, 34, 0.38);
-  background: rgba(210, 153, 34, 0.07);
-}
-```
-
-## G2 note (REQUIRED — narrow)
-
-codex #1614: do NOT mark G2 globally N/A on a Tier-A merge. A NARROW /security-review is required confirming: no raw HTML / `innerHTML`, no new fetch/auth/storage, no endpoint/data change — CSS rule + `classList.toggle` only.
-
-## Verification
-
-Per brief §Acceptance. Literal `node tests/test_glance_state_resolver.js` (resolver untouched → 8/8) + a small assertion that `renderCard` toggles `glance-working` iff glance is WORKING (if feasible in the JS harness; else document manual check). Cache-bust every changed asset. Post-deploy: live dashboard working b-code = whole-card amber, dark within ~2 min of finishing → emit `POST_DEPLOY_AC_VERDICT v1` (Director is visual judge).
-
-## Constraints
-
-Frontend-only; no backend/DB/endpoint. Keep the dot. No secrets. No `--no-verify`. Ship to topic `ship/dashboard-whole-card-working-glow-1`; do NOT merge (lead gates). Ship report answers the done rubric + carries POST_DEPLOY_AC_VERDICT (DONE only at Director's live visual sign-off).
+**Ship:** open PR on `baker-master`; bus-post `ship/m365-graph-client-foundation-1` to `lead`. **Do NOT merge** (AH gate). Answer the done-rubric in the ship report: task class = backend foundation library; build AC (imports + is_ready gating + `pytest tests/test_graph_client.py -v` GREEN on a literal run); post-deploy AC = N/A this phase (no live creds until Phase 0) — state that explicitly, it is not a cop-out.
