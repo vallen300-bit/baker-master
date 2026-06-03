@@ -819,7 +819,8 @@ TOOLS = [
         name="baker_inbox_post",
         description=(
             "Post a message to the Brisen Lab V2 message bus. "
-            "Posts as `from_terminal` = caller's terminal slug (BAKER_ROLE env). "
+            "The sender is derived server-side from the X-Terminal-Key (the "
+            "caller's terminal slug); you do not set it. "
             "Recipients are the `to` array; `kind` is one of dispatch / broadcast / "
             "ratify_required / ratify_decision. For `ratify_required`, set "
             "`tier_required` (B / A / director_only); the daemon validates it against "
@@ -871,7 +872,7 @@ TOOLS = [
                 },
                 "from_terminal": {
                     "type": "string",
-                    "description": "Override caller terminal slug (defaults to $BAKER_ROLE lower-cased; useful for cowork→cowork-ah1 mapping).",
+                    "description": "Deprecated / no-op. The sender is derived server-side from the X-Terminal-Key; this field does not affect routing or sender attribution. Kept for backward compatibility only.",
                 },
             },
             "required": ["to", "kind", "body"],
@@ -1369,7 +1370,20 @@ def _brisen_lab_paste_block_fallback(operation: str, payload: dict) -> str:
 
 
 def _brisen_lab_post_via_http(args: dict) -> str:
-    """POST /msg/<from_terminal> on the Brisen Lab daemon.
+    """POST /msg/<recipient> on the Brisen Lab daemon.
+
+    Wire contract — matches ``scripts/bus_post.py`` (the canonical correct
+    client) exactly:
+      - Recipients live in the body key ``to`` (a list). The daemon reads
+        ``body["to"]`` for delivery; ``body.get("to") or [terminal]`` makes the
+        URL path only a fallback.
+      - The URL path is the FIRST recipient (``POST /msg/{recipient}``).
+      - The SENDER is derived server-side from the ``X-Terminal-Key`` — never
+        from the URL path or any body field.
+    A prior drift sent body key ``to_terminals`` (which the daemon ignores) and
+    addressed the URL to the SENDER, so every message fell back to being
+    delivered to its own sender and never reached the recipient (Lesson #8:
+    the unit tests encoded the drift and stayed green).
 
     Fail-open semantics:
       - HTTP 503 → paste-block fallback marker (V2 disabled state)
@@ -1388,7 +1402,7 @@ def _brisen_lab_post_via_http(args: dict) -> str:
         return "Error: to must be a string or list of strings"
 
     payload: dict = {
-        "to_terminals": to,
+        "to": to,
         "kind": kind,
         "body": body,
     }
@@ -1401,8 +1415,9 @@ def _brisen_lab_post_via_http(args: dict) -> str:
     if args.get("tier_required"):
         payload["tier_required"] = args["tier_required"]
 
-    from_terminal = args.get("from_terminal") or _brisen_lab_caller_terminal()
-    url = f"{_brisen_lab_url()}/msg/{from_terminal}"
+    # POST to the first recipient with the full `to` list in the body; the
+    # daemon fans out to every slug in body["to"]. Mirrors bus_post.py._post.
+    url = f"{_brisen_lab_url()}/msg/{to[0]}"
     headers = {
         "X-Terminal-Key": _brisen_lab_terminal_key(),
         "Content-Type": "application/json",

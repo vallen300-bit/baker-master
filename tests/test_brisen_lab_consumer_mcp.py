@@ -3,9 +3,16 @@
 Brief: ``briefs/BRIEF_BRISEN_LAB_V2_BRIDGE_1.md`` §A7 + mailbox UPDATE 2026-05-05.
 
 Tools exercised:
-  - ``baker_inbox_post``  → POST /msg/<from_terminal>
+  - ``baker_inbox_post``  → POST /msg/<recipient>   (body["to"] = recipients;
+                            sender derived server-side from X-Terminal-Key)
   - ``baker_inbox_read``  → GET /msg/<terminal>?...
   - ``baker_inbox_ack``   → POST /msg/<id>/ack
+
+Wire contract matches ``scripts/bus_post.py`` (canonical). MCP_INBOX_CONTRACT_FIX_1
+corrected a drift where the tool POSTed to /msg/<sender> with body key
+``to_terminals`` (which the daemon ignores) — so every message fell back to
+being delivered to its own sender. The round-trip test below is the regression
+guard against a sender/recipient swap (Lesson #8: tests had encoded the drift).
 
 All HTTP traffic stubbed via ``httpx.MockTransport`` — hermetic, no live daemon.
 
@@ -106,7 +113,7 @@ def test_baker_inbox_ack_schema_takes_msg_id_or_msg_ids():
 # ==========================================================================
 
 
-def test_post_routes_to_from_terminal_url_and_includes_terminal_key(patch_httpx):
+def test_post_routes_to_recipient_url_and_includes_terminal_key(patch_httpx):
     captured = {}
 
     def handler(request: httpx.Request) -> httpx.Response:
@@ -122,10 +129,12 @@ def test_post_routes_to_from_terminal_url_and_includes_terminal_key(patch_httpx)
         {"to": "lead", "kind": "dispatch", "body": "hello"},
     )
     assert "42" in out
-    # BAKER_ROLE=b4 → URL path /msg/b4
-    assert captured["url"] == "https://brisen-lab.test/msg/b4"
+    # Daemon contract: URL path is the RECIPIENT, not the sender (BAKER_ROLE=b4).
+    assert captured["url"] == "https://brisen-lab.test/msg/lead"
     assert captured["method"] == "POST"
-    assert captured["body"]["to_terminals"] == ["lead"]
+    # Body key is `to` (daemon reads body["to"]); `to_terminals` is the old drift.
+    assert captured["body"]["to"] == ["lead"]
+    assert "to_terminals" not in captured["body"]
     assert captured["body"]["kind"] == "dispatch"
     assert captured["body"]["body"] == "hello"
     assert captured["x_terminal_key"] == "test-terminal-key"
@@ -140,13 +149,14 @@ def test_post_coerces_to_string_to_one_element_list(patch_httpx):
 
     patch_httpx(handler)
     srv._dispatch("baker_inbox_post", {"to": "lead", "kind": "broadcast", "body": "x"})
-    assert captured["body"]["to_terminals"] == ["lead"]
+    assert captured["body"]["to"] == ["lead"]
 
 
 def test_post_passes_array_to_through(patch_httpx):
     captured = {}
 
     def handler(request):
+        captured["url"] = str(request.url)
         captured["body"] = json.loads(request.content.decode("utf-8"))
         return httpx.Response(200, json={"id": 1})
 
@@ -155,7 +165,10 @@ def test_post_passes_array_to_through(patch_httpx):
         "baker_inbox_post",
         {"to": ["lead", "deputy"], "kind": "broadcast", "body": "x"},
     )
-    assert captured["body"]["to_terminals"] == ["lead", "deputy"]
+    # Multi-recipient: full list in body["to"], URL path = FIRST recipient
+    # (daemon fans out to body["to"]). Mirrors bus_post.py._post(recipients[0]).
+    assert captured["body"]["to"] == ["lead", "deputy"]
+    assert captured["url"] == "https://brisen-lab.test/msg/lead"
 
 
 def test_post_attaches_human_confirmation_token_header(patch_httpx):
@@ -207,8 +220,11 @@ def test_post_optional_fields_passed_through(patch_httpx):
     assert body["parent_id"] == 5
 
 
-def test_post_from_terminal_override(patch_httpx, monkeypatch):
-    """Cowork (no BAKER_ROLE) can still post as cowork-ah1 via override."""
+def test_post_from_terminal_is_noop_url_still_recipient(patch_httpx, monkeypatch):
+    """`from_terminal` is deprecated / no-op: the URL path is always the
+    RECIPIENT, and the sender is derived server-side from the X-Terminal-Key.
+    Passing from_terminal must NOT redirect the URL to that slug (the old
+    broken behavior that addressed messages to the sender)."""
     monkeypatch.delenv("BAKER_ROLE", raising=False)
     captured = {}
 
@@ -221,7 +237,36 @@ def test_post_from_terminal_override(patch_httpx, monkeypatch):
         "baker_inbox_post",
         {"to": "lead", "kind": "dispatch", "body": "x", "from_terminal": "cowork-ah1"},
     )
-    assert captured["url"] == "https://brisen-lab.test/msg/cowork-ah1"
+    # Routed to the recipient (lead), NOT to from_terminal (cowork-ah1).
+    assert captured["url"] == "https://brisen-lab.test/msg/lead"
+
+
+def test_post_round_trip_routes_to_recipient_not_sender(patch_httpx, monkeypatch):
+    """End-to-end regression guard (Lesson #8). A message posted BY b4 TO lead
+    must be addressed to the RECIPIENT (lead) in BOTH the URL path and
+    body["to"] — never to the sender (b4). The prior drift POSTed to
+    /msg/<sender> with body key `to_terminals`; the daemon reads `body["to"]`
+    (else falls back to the URL path), so messages were stored addressed to
+    their own sender and never delivered. This test fails the moment a
+    sender/recipient swap is reintroduced."""
+    monkeypatch.setenv("BAKER_ROLE", "b4")  # sender
+    captured = {}
+
+    def handler(request):
+        captured["path"] = request.url.path
+        captured["body"] = json.loads(request.content.decode("utf-8"))
+        return httpx.Response(200, json={"message_id": 1, "thread_id": "t"})
+
+    patch_httpx(handler)
+    srv._dispatch(
+        "baker_inbox_post",
+        {"to": "lead", "kind": "dispatch", "body": "ping"},
+    )
+    # Addressed to the RECIPIENT, never the SENDER.
+    assert captured["path"] == "/msg/lead"
+    assert captured["path"] != "/msg/b4"
+    assert captured["body"]["to"] == ["lead"]
+    assert "to_terminals" not in captured["body"]
 
 
 # ==========================================================================
