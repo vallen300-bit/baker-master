@@ -120,55 +120,61 @@ def backfill_email_attachments(limit: int = None, dry_run: bool = False):
 
             try:
                 file_hash = hashlib.sha256(text.encode()).hexdigest()
+                source_path = f"email:{message_id}/{filename}"
+                doc_exists = file_hash in existing_hashes
 
-                if file_hash in existing_hashes:
+                # Circuit breaker BEFORE any paid work (Voyage embed + Haiku classify).
+                from orchestrator.cost_monitor import check_circuit_breaker
+                allowed, daily_cost = check_circuit_breaker()
+                if not allowed:
+                    logger.warning(f"  Circuit breaker at €{daily_cost:.2f}, stopping extraction")
+                    break
+
+                # --- Postgres half: only for attachments without a documents row ---
+                if doc_exists:
+                    # documents row already present (Postgres half done in a prior run).
+                    # Do NOT re-store or re-classify — but STILL fall through to the
+                    # Qdrant half below: this is the 347-historical-rows population that
+                    # this task exists to embed (G3 #1725). ingest_text self-dedups on
+                    # ingestion_log, so re-runs are cheap/idempotent.
                     skipped += 1
-                    continue
+                else:
+                    doc_id = store.store_document_full(
+                        source_path=source_path,
+                        filename=filename,
+                        file_hash=file_hash,
+                        full_text=text,
+                        token_count=len(text) // 4,
+                    )
+                    if doc_id:
+                        stored += 1
+                        existing_hashes.add(file_hash)
+                        logger.info(f"  Stored: {filename} → doc {doc_id} ({len(text):,} chars) [from: {subject[:40]}]")
 
-                doc_id = store.store_document_full(
-                    source_path=f"email:{message_id}/{filename}",
-                    filename=filename,
-                    file_hash=file_hash,
-                    full_text=text,
-                    token_count=len(text) // 4,
-                )
+                        # Classify (synchronous, cost-controlled)
+                        from tools.document_pipeline import run_pipeline
+                        time.sleep(2)
+                        run_pipeline(doc_id)
+                        classified += 1
 
-                if doc_id:
-                    stored += 1
-                    existing_hashes.add(file_hash)
-                    logger.info(f"  Stored: {filename} → doc {doc_id} ({len(text):,} chars) [from: {subject[:40]}]")
-
-                    # Circuit breaker BEFORE any paid work (Voyage embed + Haiku classify)
-                    from orchestrator.cost_monitor import check_circuit_breaker
-                    allowed, daily_cost = check_circuit_breaker()
-                    if not allowed:
-                        logger.warning(f"  Circuit breaker at €{daily_cost:.2f}, stopping extraction")
-                        break
-
-                    # ATTACHMENT_TWO_WRITE_PARITY_1: Qdrant half — embed the
-                    # already-stored text into baker-documents for semantic RAG.
-                    # Uses ingest_text directly (not the full promote helper) to
-                    # keep this script's proven synchronous run_pipeline + circuit
-                    # breaker classification path intact rather than swapping it
-                    # for the helper's async queue_extraction.
-                    try:
-                        from tools.ingest.pipeline import ingest_text
-                        ir = ingest_text(
-                            full_text=text,
-                            filename=filename,
-                            source_path=f"email:{message_id}/{filename}",
-                            file_hash=file_hash,
-                        )
-                        if ir and ir.chunk_count:
-                            embedded += 1
-                    except Exception as qe:
-                        logger.warning(f"  Qdrant embed failed (non-fatal) {filename}: {qe}")
-
-                    # Classify (synchronous, cost-controlled)
-                    from tools.document_pipeline import run_pipeline
-                    time.sleep(2)
-                    run_pipeline(doc_id)
-                    classified += 1
+                # --- Qdrant half: ALWAYS attempt (for both new AND pre-existing
+                # documents rows). ingest_text short-circuits on (filename, file_hash)
+                # already in ingestion_log, so already-embedded rows are skipped here.
+                # Uses ingest_text directly (not the full promote helper) to keep this
+                # script's proven synchronous run_pipeline classify path intact rather
+                # than swapping it for the helper's async queue_extraction.
+                try:
+                    from tools.ingest.pipeline import ingest_text
+                    ir = ingest_text(
+                        full_text=text,
+                        filename=filename,
+                        source_path=source_path,
+                        file_hash=file_hash,
+                    )
+                    if ir and ir.chunk_count:
+                        embedded += 1
+                except Exception as qe:
+                    logger.warning(f"  Qdrant embed failed (non-fatal) {filename}: {qe}")
 
             except Exception as e:
                 logger.warning(f"  Error processing {filename}: {e}")

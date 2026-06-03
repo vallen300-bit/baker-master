@@ -59,6 +59,79 @@ def test_backfill_email_attachments_adds_qdrant_half():
     assert "store_document_full(" in src  # Postgres half preserved
 
 
+def test_backfill_embeds_preexisting_documents_rows(monkeypatch):
+    """G3 #1725 regression: an attachment whose `documents` row ALREADY exists
+    (its hash is in existing_hashes) must STILL reach ingest_text for the Qdrant
+    half — that pre-existing population (the 347 Postgres-only email:% rows) is the
+    whole point of the backfill. The old code `continue`d before ingest_text, so
+    those rows never embedded."""
+    import hashlib
+    import scripts.backfill_email_attachments as bf
+    import memory.store_back as sb
+    import orchestrator.cost_monitor as cm
+    import tools.ingest.pipeline as pipe
+    import tools.document_pipeline as dp
+    from tools.ingest.models import IngestResult
+
+    text = "Historical attachment body that is comfortably over twenty characters."
+    h = hashlib.sha256(text.encode()).hexdigest()
+    att_section = f"=== ATTACHMENTS ===\n--- Attachment: old.pdf ---\n{text}\n"
+
+    class _Cur:
+        def __init__(self):
+            self._q = ""
+
+        def execute(self, q, *a):
+            self._q = q
+
+        def fetchall(self):
+            if "file_hash" in self._q and "documents" in self._q:
+                return [(h,)]                       # seed existing_hashes with our hash
+            return [("mid-1", "Subj", att_section)]  # the email-with-attachments row
+
+        def close(self):
+            pass
+
+    class _Conn:
+        def cursor(self, *a, **k):
+            return _Cur()
+
+    class _Store:
+        def _get_conn(self):
+            return _Conn()
+
+        def _put_conn(self, c):
+            pass
+
+        def store_document_full(self, **k):
+            raise AssertionError("store_document_full must NOT run for a pre-existing row")
+
+    monkeypatch.setattr(sb.SentinelStoreBack, "_get_global_instance",
+                        classmethod(lambda cls: _Store()))
+    monkeypatch.setattr(cm, "check_circuit_breaker", lambda: (True, 0.0))
+
+    ingest_calls = []
+
+    def _fake_ingest_text(full_text, filename, source_path, file_hash=None, **k):
+        ingest_calls.append({"filename": filename, "source_path": source_path,
+                             "file_hash": file_hash})
+        return IngestResult(filename=filename, file_hash=file_hash or "h",
+                            file_size_bytes=1, collection="baker-documents", chunk_count=2)
+
+    monkeypatch.setattr(pipe, "ingest_text", _fake_ingest_text)
+
+    pipeline_calls = []
+    monkeypatch.setattr(dp, "run_pipeline", lambda doc_id: pipeline_calls.append(doc_id))
+
+    bf.backfill_email_attachments(limit=10, dry_run=False)
+
+    assert len(ingest_calls) == 1, "ingest_text must run for the pre-existing documents row"
+    assert ingest_calls[0]["filename"] == "old.pdf"
+    assert ingest_calls[0]["source_path"] == "email:mid-1/old.pdf"
+    assert ingest_calls[0]["file_hash"] == h
+    assert pipeline_calls == [], "run_pipeline must NOT run for a pre-existing row"
+
+
 def test_no_ingest_file_at_text_only_sites():
     """The foot-gun: ingest_file re-extracts from a filepath. It must NOT be called
     at the already-extracted-text attachment sites."""
