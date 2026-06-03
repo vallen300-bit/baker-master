@@ -2306,36 +2306,54 @@ async def get_document_facets():
 
 
 def _resolve_semantic_doc_hits(
-    hits, pg_rows_by_filename, matter_list, type_list, source_list, offset, limit
+    hits, pg_rows_by_filename, matter_list, type_list, source_list, offset, limit,
+    pg_rows_by_id=None,
 ):
     """Group Qdrant chunk hits into one result per PostgreSQL document.
 
-    DOCUMENTS_SEARCH_SEMANTIC_RESTORE_1 deterministic id-resolution:
-      - join key is `source_file` (Qdrant `baker-documents` payload carries only
-        text/source_file/source_path — no documents.id), matched to PG `filename`.
-      - 1 PG row for a filename  → use it.
-      - multiple PG rows          → prefer the one whose source_path also matches
-                                    the Qdrant hit's source_path; else most-recent ingested_at.
-      - zero PG rows              → DROP the hit (no openable documents.id).
+    Id-resolution (DOCUMENTS_SEARCH_SEMANTIC_RESTORE_1 + B1 follow-up #1761):
+      - PREFER the durable join: if a hit's payload carries `document_id` and that PG
+        row is present (`pg_rows_by_id`), use it directly — robust even when the
+        Qdrant `source_file` is stale/mismatched vs PG `filename`.
+      - LEGACY fallback (points without `document_id`): match `source_file` → PG
+        `filename`. 1 row → use it; multiple → prefer the one whose source_path also
+        matches the hit's, else most-recent ingested_at.
+      - zero PG rows by either path → DROP the hit (no openable documents.id).
       - filters applied against PG row fields (authoritative; Qdrant payload lacks them).
       - dedup by documents.id, keeping the highest chunk score per document.
     Returns (page_results, total). `hits` items expose .metadata (dict), .score, .content.
     """
+    pg_rows_by_id = pg_rows_by_id or {}
     grouped = {}  # documents.id -> result dict (highest-scoring chunk wins)
     for h in hits:
         meta = getattr(h, "metadata", {}) or {}
-        sf = meta.get("source_file") or ""
         sp = meta.get("source_path") or ""
-        candidates = pg_rows_by_filename.get(sf, [])
-        if not candidates:
-            continue  # zero PG rows → drop (never surface an unopenable hit)
-        if len(candidates) == 1:
-            row = candidates[0]
-        else:
-            path_match = [c for c in candidates if (c.get("source_path") or "") == sp]
-            pool = path_match if path_match else candidates
-            # most-recent ingested_at; None sorts lowest (avoids None/datetime compare)
-            row = max(pool, key=lambda c: (c.get("ingested_at") is not None, c.get("ingested_at")))
+        row = None
+
+        # B1 follow-up (#1761): durable id resolution wins when present. Robust to a
+        # stale/mismatched source_file (the exact gap the codex probe caught).
+        did = meta.get("document_id")
+        if did is not None:
+            try:
+                did = int(did)
+            except (TypeError, ValueError):
+                did = None
+        if did is not None:
+            row = pg_rows_by_id.get(did)
+
+        # Legacy fallback: resolve by source_file → PG filename.
+        if row is None:
+            sf = meta.get("source_file") or ""
+            candidates = pg_rows_by_filename.get(sf, [])
+            if not candidates:
+                continue  # zero PG rows → drop (never surface an unopenable hit)
+            if len(candidates) == 1:
+                row = candidates[0]
+            else:
+                path_match = [c for c in candidates if (c.get("source_path") or "") == sp]
+                pool = path_match if path_match else candidates
+                # most-recent ingested_at; None sorts lowest (avoids None/datetime compare)
+                row = max(pool, key=lambda c: (c.get("ingested_at") is not None, c.get("ingested_at")))
 
         # PG-authoritative filters
         if matter_list and (row.get("matter_slug") or "") not in matter_list:
@@ -2453,24 +2471,41 @@ async def search_documents_endpoint(
                 use_ilike = True
                 mode = "ilike_fallback"
             else:
-                # ── Enrich from PostgreSQL by filename (conn held ONLY for this batch query) ──
-                filenames = [f for f in {(getattr(h, "metadata", {}) or {}).get("source_file") or "" for h in hits} if f]
+                # ── Enrich from PostgreSQL (conn held ONLY for these batch queries) ──
+                # B1 follow-up (#1761): resolve by the durable `document_id` payload key
+                # when present (robust to a stale/mismatched source_file), and keep the
+                # legacy `source_file`→`filename` join for points that predate the id.
+                _metas = [(getattr(h, "metadata", {}) or {}) for h in hits]
+                filenames = [f for f in {m.get("source_file") or "" for m in _metas} if f]
+                doc_ids = set()
+                for m in _metas:
+                    d = m.get("document_id")
+                    if d is not None:
+                        try:
+                            doc_ids.add(int(d))
+                        except (TypeError, ValueError):
+                            pass
+                doc_ids = list(doc_ids)
+                _PG_COLS = ("SELECT id, filename, document_type, matter_slug, source_path, ingested_at, "
+                            "LEFT(full_text, 200) AS text_preview FROM documents WHERE ")
                 pg_rows_by_filename = {}
-                if filenames:
+                pg_rows_by_id = {}
+                if filenames or doc_ids:
                     conn = store._get_conn()
                     if conn:
                         try:
                             import psycopg2.extras
                             cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
-                            cur.execute(
-                                "SELECT id, filename, document_type, matter_slug, source_path, ingested_at, "
-                                "LEFT(full_text, 200) AS text_preview "
-                                "FROM documents WHERE filename = ANY(%s)",
-                                (filenames,),
-                            )
-                            for r in cur.fetchall():
-                                r = dict(r)
-                                pg_rows_by_filename.setdefault(r["filename"], []).append(r)
+                            if doc_ids:
+                                cur.execute(_PG_COLS + "id = ANY(%s)", (doc_ids,))
+                                for r in cur.fetchall():
+                                    r = dict(r)
+                                    pg_rows_by_id[r["id"]] = r
+                            if filenames:
+                                cur.execute(_PG_COLS + "filename = ANY(%s)", (filenames,))
+                                for r in cur.fetchall():
+                                    r = dict(r)
+                                    pg_rows_by_filename.setdefault(r["filename"], []).append(r)
                             cur.close()
                         except Exception as enr_err:
                             try:
@@ -2479,6 +2514,7 @@ async def search_documents_endpoint(
                                 pass
                             logger.warning(f"PG enrichment for semantic search failed: {enr_err}")
                             pg_rows_by_filename = {}
+                            pg_rows_by_id = {}
                             enrichment_failed = True  # B5.3: enrichment query raised
                         finally:
                             store._put_conn(conn)
@@ -2491,7 +2527,8 @@ async def search_documents_endpoint(
                 # Group → one result per documents.id; deterministic resolution; PG-authoritative filters.
                 # Semantic path is authoritative once Qdrant returns hits — no ILIKE blending.
                 results, total = _resolve_semantic_doc_hits(
-                    hits, pg_rows_by_filename, matter_list, type_list, source_list, offset, limit
+                    hits, pg_rows_by_filename, matter_list, type_list, source_list, offset, limit,
+                    pg_rows_by_id=pg_rows_by_id,
                 )
                 mode = "semantic"
 

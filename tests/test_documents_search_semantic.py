@@ -516,3 +516,91 @@ def test_enrichment_failed_true_when_conn_unavailable(monkeypatch):
     assert body["mode"] == "semantic"
     assert body["total"] == 0
     assert body["enrichment_failed"] is True
+
+
+# ─── B1 follow-up (#1761): /api/documents/search resolves on document_id ────────
+
+
+@pytestmark_helper
+def test_resolves_by_document_id_when_source_file_mismatched():
+    """The codex #1761 probe: a hit carrying document_id=42 + a stale/legacy source_file
+    (no PG filename match) MUST still resolve via the id. Pre-fix this returned ([],0)."""
+    from outputs.dashboard import _resolve_semantic_doc_hits
+
+    h = _hit("legacy-name.pdf", "/old/legacy-name.pdf", score=0.7)
+    h.metadata["document_id"] = 42
+    pg_by_id = {42: _pg(42, "Mandarin.pdf", "/vault/Mandarin.pdf", matter="mo-vie", dtype="contract")}
+    # pg_rows_by_filename is EMPTY (source_file doesn't match any PG filename).
+    results, total = _resolve_semantic_doc_hits([h], {}, [], [], [], 0, 20, pg_rows_by_id=pg_by_id)
+    assert total == 1 and results[0]["id"] == 42, "document_id must resolve despite source_file mismatch"
+    assert results[0]["matter"] == "mo-vie"
+
+
+@pytestmark_helper
+def test_document_id_takes_priority_over_filename():
+    from outputs.dashboard import _resolve_semantic_doc_hits
+
+    h = _hit("shared.pdf", "/a/shared.pdf", score=0.7)
+    h.metadata["document_id"] = 99
+    pg_by_id = {99: _pg(99, "shared.pdf", "/a/shared.pdf", matter="rg7")}
+    pg_by_fn = {"shared.pdf": [_pg(7, "shared.pdf", "/a/shared.pdf", matter="other")]}
+    results, total = _resolve_semantic_doc_hits([h], pg_by_fn, [], [], [], 0, 20, pg_rows_by_id=pg_by_id)
+    assert results[0]["id"] == 99, "id resolution wins over the filename join"
+
+
+@pytestmark_helper
+def test_falls_back_to_filename_when_id_row_absent():
+    """document_id present but its PG row wasn't fetched (e.g. deleted) → legacy
+    filename fallback still resolves; nothing regresses for legacy points."""
+    from outputs.dashboard import _resolve_semantic_doc_hits
+
+    h = _hit("a.pdf", "/a.pdf", score=0.5)
+    h.metadata["document_id"] = 555  # not present in pg_rows_by_id
+    pg_by_fn = {"a.pdf": [_pg(1, "a.pdf", "/a.pdf")]}
+    results, total = _resolve_semantic_doc_hits([h], pg_by_fn, [], [], [], 0, 20, pg_rows_by_id={})
+    assert total == 1 and results[0]["id"] == 1, "missing id row → legacy filename fallback"
+
+
+@pytestmark_helper
+def test_search_endpoint_resolves_by_document_id_end_to_end(monkeypatch):
+    """Endpoint-level proof of the #1761 fix: the enrichment collects document_id from
+    hits, fetches the PG row by id, and returns it even when source_file mismatches."""
+    from fastapi.testclient import TestClient
+    import outputs.dashboard as dash
+
+    monkeypatch.setenv("BAKER_API_KEY", "test-key")
+    monkeypatch.setattr(dash, "_BAKER_API_KEY", "test-key", raising=False)
+    dash.app.dependency_overrides.pop(dash.verify_api_key, None)
+
+    class _Cur:
+        def execute(self, sql, params=None):
+            self._is_id = "id = ANY" in sql
+        def fetchall(self):
+            if self._is_id:
+                return [{"id": 42, "filename": "Mandarin.pdf", "document_type": "contract",
+                         "matter_slug": "mo-vie", "source_path": "/vault/Mandarin.pdf",
+                         "ingested_at": None, "text_preview": "prev"}]
+            return []  # filename query → no match (the stale source_file)
+        def close(self):
+            pass
+    class _Conn:
+        def cursor(self, cursor_factory=None):
+            return _Cur()
+        def rollback(self):
+            pass
+    class _Store:
+        def _get_conn(self):
+            return _Conn()
+        def _put_conn(self, c):
+            pass
+    monkeypatch.setattr(dash, "_get_store", lambda: _Store())
+
+    h = _hit("legacy.pdf", "/old/legacy.pdf", score=0.7)
+    h.metadata["document_id"] = 42
+    _stub_retriever(monkeypatch, hits=[h])
+
+    body = TestClient(dash.app).get("/api/documents/search", params={"q": "mandarin"},
+                                    headers={"X-Baker-Key": "test-key"}).json()
+    assert body["mode"] == "semantic"
+    assert body["total"] == 1 and body["results"][0]["id"] == 42
+    assert body["enrichment_failed"] is False
