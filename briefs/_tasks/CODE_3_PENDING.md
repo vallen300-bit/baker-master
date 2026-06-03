@@ -3,7 +3,8 @@ dispatch: MCP_INBOX_CONTRACT_FIX_1
 to: b3
 from: lead
 dispatched_by: lead
-status: PENDING
+status: COMPLETE
+completed: 2026-06-03 — PR #283 merged baker-master (squash 89613c3). Gates: G0 waived (AH2 #1675 design review) + G1 lead PASS (34/34 pytest py3.12 literal + diff matches scripts/bus_post.py) + G2 light security PASS (caller's own key unchanged, daemon derives sender from key — no spoofing, no weakened check). Post-deploy AC DONE LIVE: b3 round-trip vs prod daemon (post b3->b3 msg 1679 delivered, read returned it, ack 200). Lesson #86 added. from_terminal kept as documented no-op (backward-compat).
 dispatched_at: 2026-06-03T10:15:00Z
 authored: 2026-06-03
 brief_path: briefs/BRIEF_MCP_INBOX_CONTRACT_FIX_1.md
