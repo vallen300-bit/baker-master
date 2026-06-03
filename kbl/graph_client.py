@@ -9,6 +9,8 @@ Never raises to callers — every external call returns None + logs on failure.
 from __future__ import annotations
 
 import logging
+import pathlib
+from urllib.parse import urlparse
 
 import requests
 from msal import ConfidentialClientApplication
@@ -32,9 +34,19 @@ class GraphClient:
         # MSAL app holds the token cache; we never cache the raw bearer ourselves.
         self._app = None
 
+    def _has_cert(self) -> bool:
+        """True if a cert credential (inline PEM or path) + thumbprint are present."""
+        return bool((self.cfg.cert_private_key or self.cfg.cert_path) and self.cfg.cert_thumbprint)
+
     def is_configured(self) -> bool:
-        """True only if tenant_id + client_id + client_secret are all present."""
-        return bool(self.cfg.tenant_id and self.cfg.client_id and self.cfg.client_secret)
+        """True if tenant_id + client_id + a usable credential are present.
+
+        A usable credential is EITHER a client_secret OR a certificate
+        (inline PEM or PEM file path) paired with its thumbprint.
+        """
+        if not (self.cfg.tenant_id and self.cfg.client_id):
+            return False
+        return bool(self.cfg.client_secret) or self._has_cert()
 
     def is_enabled(self) -> bool:
         """Reflects the BAKER_USE_GRAPH flag (GraphConfig.enabled)."""
@@ -59,10 +71,21 @@ class GraphClient:
             return None
         try:
             if self._app is None:
+                # Cert takes precedence over client_secret when both are set.
+                if self._has_cert():
+                    private_key = self.cfg.cert_private_key or pathlib.Path(
+                        self.cfg.cert_path
+                    ).read_text()
+                    credential = {
+                        "private_key": private_key,
+                        "thumbprint": self.cfg.cert_thumbprint,
+                    }
+                else:
+                    credential = self.cfg.client_secret
                 self._app = ConfidentialClientApplication(
                     self.cfg.client_id,
                     authority=self.cfg.authority_tmpl.format(tenant=self.cfg.tenant_id),
-                    client_credential=self.cfg.client_secret,
+                    client_credential=credential,
                 )
             result = self._app.acquire_token_for_client(scopes=self.cfg.scope)
             if "access_token" in result:
@@ -76,6 +99,13 @@ class GraphClient:
 
     def _request(self, url: str, params: dict | None, timeout: int, log_url: str) -> dict | None:
         """Shared GET path. Never raises; never logs the token or full delta URL."""
+        # Host-pin BEFORE acquiring a token: never attach the app bearer to a
+        # non-Graph URL (latent credential leak via get_url). On reject: no token
+        # acquired, no requests.get, and the rejected URL is NOT logged.
+        p = urlparse(url)
+        if p.scheme != "https" or p.hostname != "graph.microsoft.com":
+            logger.error("Graph GET rejected: non-Graph URL (%s)", log_url)
+            return None
         token = self._acquire_token()
         if not token:
             return None
