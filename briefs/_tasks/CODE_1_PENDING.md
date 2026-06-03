@@ -3,7 +3,8 @@ dispatch: M365_GRAPH_CLIENT_FOUNDATION_1
 to: b1
 from: lead
 dispatched_by: lead
-status: PENDING
+status: COMPLETE
+completed: 2026-06-03 — PR #282 merged baker-master (squash 045292f). Gates: G0 codex-arch PASS-WITH-NOTES (#1670) + G1 lead PASS (22/22 pytest py3.12 literal) + G2 /security-review CLEAR (no high-confidence findings) + G3 codex-arch PASS-WITH-NOTES (#1676, isolated worktree 22 passed). Dormant flag-gated (BAKER_USE_GRAPH=false); post-deploy AC = N/A (no live Azure creds until Phase 0). Phase-2 carry: validate get_url host=graph.microsoft.com + https before attaching bearer.
 dispatched_at: 2026-06-03T10:00:00Z
 authored: 2026-06-03
 brief_path: briefs/BRIEF_M365_GRAPH_CLIENT_FOUNDATION_1.md
