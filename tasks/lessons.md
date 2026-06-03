@@ -699,3 +699,13 @@ Anchor: Director chat 2026-05-23 evening; AH2 bus #788 (Layer 2) + bus #790
 **Rule:** for any HTTP/wire contract, (1) verify against the live server's actual handler code, not the client's self-consistent tests; (2) add an end-to-end ROUND-TRIP test that captures the real URL path + body and asserts recipient≠sender, so a swap can't pass green again; (3) before "done", exercise the real flow against the live service (here: post→read→ack b3→b3 against production daemon, message_id 1679, DELIVERED + ack 200). Tests that re-derive the contract from the same broken code never catch the drift.
 
 **Anchor:** MCP_INBOX_CONTRACT_FIX_1 (b3, 2026-06-03); surfaced by deputy/AH2 #1675 after codex-arch hit it. Canonical correct contract: `scripts/bus_post.py`.
+
+### 87. Don't run GUI-app AppleScript (Outlook etc.) from the Cowork/Claude.app shell — no Automation grant → hang the target app (2026-06-03)
+
+**What broke:** verifying the new Outlook.app email path, I ran an `osascript` against `Microsoft Outlook` from the Cowork shell. First call errored `-609 Connection is invalid`; the retry (with `activate`) hung — and froze Outlook on Director's screen (spinning beachball). Root cause: the Cowork/Claude.app session host lacks the macOS Automation (TCC) grant to control Outlook. The permission gate stalled the AppleScript ↔ Outlook bridge, blocking Outlook's main thread. Recovery = `pkill -9 -x "Microsoft Outlook"` + `open -a "Microsoft Outlook"`.
+
+**Why it's a trap:** the same script Director ran live last session worked — because his interactive Terminal context HAS the grant. The shell context, not the script syntax, is the variable. `-609` from a GUI app almost always = TCC/connection, not a code bug (sibling of Lessons #83/#84 — Accessibility≠Automation, borrowed-grant false pass).
+
+**Rule:** never drive a GUI app via AppleScript from the Cowork shell to "verify" — it can hang the app on Director's machine. Live email/compose verification belongs to a granted Terminal context or Director's own send. Encode the Director-confirmed-live pattern in the doc; don't re-prove it from here. If a GUI app beachballs after your script: force-quit (`pkill -9 -x`) + relaunch (`open -a`), don't keep retrying.
+
+**Anchor:** Outlook engine swap (email-send-via-mail-app, baker-vault `4987d8d`, 2026-06-03). Froze Director's Outlook mid-session; force-quit + relaunch recovered it.
