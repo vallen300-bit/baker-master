@@ -3,7 +3,8 @@ dispatch: MCP_INBOX_READ_UNACKED_FILTER_1
 to: b3
 from: lead
 dispatched_by: lead
-status: PENDING
+status: COMPLETE
+completed: 2026-06-03 — PR #284 merged baker-master (squash 22bc518). Gates: G0 codex-arch PASS-WITH-NOTES (#1687, 2 notes relayed/addressed) + G1 lead PASS (39/39 pytest py3.12 literal + diff matches brief) + G2 /security-review CLEAR (param+client-filter only, no SQL/injection/auth/secret surface). Live prod round-trip DONE (b3 msg 1686: post->read present->ack 200->read absent->include_acked present among 96; 96-vs-1 = bug fixed). Known >200 daemon-cap limitation noted in PR. Report: briefs/_reports/B3_MCP_INBOX_READ_UNACKED_FILTER_1_20260603.md
 dispatched_at: 2026-06-03
 authored: 2026-06-03
 target_repo: baker-master (vallen300-bit/baker-master)
