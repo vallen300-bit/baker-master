@@ -2281,16 +2281,10 @@ async def get_document_facets():
             """)
             types = [dict(r) for r in cur.fetchall()]
 
-            # Source counts (derived from source_path)
-            cur.execute("""
+            # Source counts (derived from source_path) — B2: via SOURCE_PREFIXES contract
+            cur.execute(f"""
                 SELECT
-                    CASE
-                        WHEN source_path ILIKE '%%email%%' OR source_path ILIKE '%%gmail%%' THEN 'email'
-                        WHEN source_path ILIKE '%%whatsapp%%' THEN 'whatsapp'
-                        WHEN source_path ILIKE '%%clickup%%' THEN 'clickup'
-                        WHEN source_path ILIKE '%%fireflies%%' THEN 'fireflies'
-                        ELSE 'dropbox'
-                    END AS name,
+                    {_source_case_sql()},
                     COUNT(*) AS count
                 FROM documents GROUP BY name ORDER BY count DESC
             """)
@@ -2396,6 +2390,15 @@ async def search_documents_endpoint(
       - "filter_only"    — no query text; PG WHERE-clause path by design.
     A silent regression to keyword search (the original Bug A) is now visible
     in both the response and the logs.
+
+    Pagination bound (B4): on the semantic path the response also carries
+    `total_is_windowed: true` — `total` counts only documents within the
+    ≤300-chunk over-fetch window (`qdrant_limit`), not the true corpus, so deep
+    `offset`s past the window return a shifting/under-count total. Callers should
+    treat semantic `total` as a windowed estimate; the ILIKE/filter_only paths
+    return an exact `COUNT(*)` and omit the flag. The semantic path also carries
+    `enrichment_failed` (B5.3) to distinguish a genuinely-empty result from a PG
+    enrichment failure (both otherwise look like `total: 0`).
     """
     try:
         store = _get_store()
@@ -2414,6 +2417,10 @@ async def search_documents_endpoint(
         # back to keyword match (degradation OR legitimate no-match — split in logs);
         # "filter_only" = no query text, PG WHERE-clause path by design.
         mode = "filter_only" if not qtext else None
+        # B5.3: set True if the semantic path got Qdrant hits but PG enrichment could
+        # not run (conn down or query raised). Without this, an enrichment failure is
+        # indistinguishable from "semantic ran, found nothing" (both → total:0).
+        enrichment_failed = False
 
         # ── Semantic phase: Qdrant search with NO PG connection held ──
         if qtext:
@@ -2472,8 +2479,15 @@ async def search_documents_endpoint(
                                 pass
                             logger.warning(f"PG enrichment for semantic search failed: {enr_err}")
                             pg_rows_by_filename = {}
+                            enrichment_failed = True  # B5.3: enrichment query raised
                         finally:
                             store._put_conn(conn)
+                    else:
+                        # Had hits to resolve but no DB conn → every hit will be dropped
+                        # (no PG row → no openable id). Make that observable (B5.3).
+                        enrichment_failed = True
+                        logger.error("Semantic search: PG conn unavailable for enrichment — "
+                                     "results will be empty despite Qdrant hits")
                 # Group → one result per documents.id; deterministic resolution; PG-authoritative filters.
                 # Semantic path is authoritative once Qdrant returns hits — no ILIKE blending.
                 results, total = _resolve_semantic_doc_hits(
@@ -2505,22 +2519,8 @@ async def search_documents_endpoint(
                     conditions.append(f"COALESCE(document_type, 'unknown') IN ({placeholders})")
                     params.extend(type_list)
                 if source_list:
-                    source_conds = []
-                    for src in source_list:
-                        if src == "email":
-                            source_conds.append("(source_path ILIKE '%%email%%' OR source_path ILIKE '%%gmail%%')")
-                        elif src == "whatsapp":
-                            source_conds.append("source_path ILIKE '%%whatsapp%%'")
-                        elif src == "clickup":
-                            source_conds.append("source_path ILIKE '%%clickup%%'")
-                        elif src == "fireflies":
-                            source_conds.append("source_path ILIKE '%%fireflies%%'")
-                        else:
-                            source_conds.append(
-                                "(source_path NOT ILIKE '%%email%%' AND source_path NOT ILIKE '%%gmail%%' "
-                                "AND source_path NOT ILIKE '%%whatsapp%%' AND source_path NOT ILIKE '%%clickup%%' "
-                                "AND source_path NOT ILIKE '%%fireflies%%')"
-                            )
+                    # B2: every source clause comes from the SOURCE_PREFIXES contract.
+                    source_conds = [_source_ilike_clause(src) for src in source_list]
                     if source_conds:
                         conditions.append("(" + " OR ".join(source_conds) + ")")
 
@@ -2571,7 +2571,15 @@ async def search_documents_endpoint(
             finally:
                 store._put_conn(conn)
 
-        return {"results": results, "total": total, "offset": offset, "mode": mode}
+        response = {"results": results, "total": total, "offset": offset, "mode": mode}
+        if mode == "semantic":
+            # B4: semantic `total` counts only the documents within the ≤300-chunk
+            # over-fetch window, NOT the true corpus total; deep offsets give a
+            # shifting total. Flag it so the UI can label/disable deep pagination.
+            response["total_is_windowed"] = True
+            # B5.3: surface enrichment failure so it isn't mistaken for an empty result.
+            response["enrichment_failed"] = enrichment_failed
+        return response
     except HTTPException:
         raise
     except Exception as e:
@@ -2678,18 +2686,56 @@ async def triage_idea(idea_id: int, request: Request):
         store._put_conn(conn)
 
 
+# B2 (INGEST_SEARCH_DURABILITY_FOLLOWUPS_1): the source_path → source-label
+# contract, in ONE place. THREE surfaces consume it and MUST agree, or the
+# Documents facet counts, the source filter, and the per-row label drift apart:
+#   1. facet-count CASE   — _source_case_sql()      (counts per source)
+#   2. SQL source filter  — _source_ilike_clause()  (WHERE when filtering by source)
+#   3. per-row label      — _derive_source()         (label on each search result)
+# Order matters: first matching label wins. `m365` is mapped now (inert until M365
+# ingestion lands — no source_path carries it yet) so the contract is ready for it.
+# Note on '%%': both SQL surfaces use doubled percent. The facet query passes no
+# params (psycopg2 sends '%%' verbatim; SQL LIKE collapses the double wildcard); the
+# filter query passes params (psycopg2 un-escapes '%%'→'%'). One clause string serves
+# both correctly.
+SOURCE_PREFIXES = {
+    "email": ["email", "gmail"],
+    "whatsapp": ["whatsapp"],
+    "clickup": ["clickup"],
+    "fireflies": ["fireflies"],
+    "m365": ["m365"],
+}
+SOURCE_DEFAULT = "dropbox"  # source_path matching none of the mapped prefixes
+
+
 def _derive_source(source_path: str) -> str:
-    """Derive source label from source_path."""
+    """Derive the source label from source_path (B2: via the SOURCE_PREFIXES contract)."""
     sp = (source_path or "").lower()
-    if "email" in sp or "gmail" in sp:
-        return "email"
-    if "whatsapp" in sp:
-        return "whatsapp"
-    if "clickup" in sp:
-        return "clickup"
-    if "fireflies" in sp:
-        return "fireflies"
-    return "dropbox"
+    for label, prefixes in SOURCE_PREFIXES.items():
+        if any(p in sp for p in prefixes):
+            return label
+    return SOURCE_DEFAULT
+
+
+def _source_ilike_clause(label: str, col: str = "source_path") -> str:
+    """SQL boolean expression matching one source label, from SOURCE_PREFIXES.
+    A mapped label → OR of its prefix ILIKEs; the default label → NOT any known
+    prefix. Doubled-percent so it is correct under both parameterized and
+    non-parameterized execute() (see SOURCE_PREFIXES note)."""
+    prefixes = SOURCE_PREFIXES.get(label)
+    if prefixes:
+        return "(" + " OR ".join(f"{col} ILIKE '%%{p}%%'" for p in prefixes) + ")"
+    known = [p for ps in SOURCE_PREFIXES.values() for p in ps]
+    return "(" + " AND ".join(f"{col} NOT ILIKE '%%{p}%%'" for p in known) + ")"
+
+
+def _source_case_sql(col: str = "source_path", alias: str = "name") -> str:
+    """SQL CASE expression mapping source_path → source label, from SOURCE_PREFIXES
+    (facet-count query)."""
+    whens = " ".join(
+        f"WHEN {_source_ilike_clause(label, col)} THEN '{label}'" for label in SOURCE_PREFIXES
+    )
+    return f"CASE {whens} ELSE '{SOURCE_DEFAULT}' END AS {alias}"
 
 
 @app.get("/api/doc-pipeline/status", tags=["system"], dependencies=[Depends(verify_api_key)])
@@ -10644,8 +10690,14 @@ async def ingest_document(
     if role and role not in ALLOWED_ROLES:
         raise HTTPException(400, f"Invalid role: {role}. Valid: {', '.join(sorted(ALLOWED_ROLES))}")
 
+    # B3 (INGEST_SEARCH_DURABILITY_FOLLOWUPS_1): compute the path-stripped filename
+    # ONCE and reuse it for ext derivation, temp path, the PG row (store_document_full
+    # source_path/filename), the Qdrant source_file (= temp basename), the response,
+    # and logs. A client sending "folder/Mandarin.pdf" must not diverge across surfaces.
+    safe_filename = Path(file.filename).name
+
     # 1. Validate file extension
-    ext = Path(file.filename).suffix.lower()
+    ext = Path(safe_filename).suffix.lower()
     if ext == ".doc":
         raise HTTPException(
             status_code=400,
@@ -10689,7 +10741,7 @@ async def ingest_document(
     tmp_path = None
     try:
         tmp_dir = tempfile.mkdtemp()
-        tmp_path = Path(tmp_dir) / Path(file.filename).name  # strip any path separators
+        tmp_path = Path(tmp_dir) / safe_filename  # B3: same path-stripped name as every other surface
         tmp_path.write_bytes(contents)
 
         # 6. Run pipeline in thread to avoid blocking event loop
@@ -10722,13 +10774,22 @@ async def ingest_document(
         # documents) and for skipped ingests (dedup / empty). store_document_full
         # is idempotent (ON CONFLICT file_hash + content_hash dedup) so re-uploads
         # collapse instead of duplicating.
+        #
+        # B5.2 — partial-embed posture (DELIBERATE, contrasts with dropbox_trigger):
+        # `result.skipped` is True with skip_reason="partial_embed" when A2 refused to
+        # seal a half-embedded doc. Gating the PG write on `not result.skipped` means a
+        # partial embed writes NEITHER store → the one-shot upload stays fully
+        # retryable (the user re-uploads; nothing half-lands). dropbox_trigger takes the
+        # opposite, also-deliberate posture (PG-first, ungated) because it is a
+        # re-runnable poller; its PG-without-Qdrant drift is surfaced by the A3
+        # reconciliation query (_documents_missing_qdrant) for re-ingest.
         document_id = None
         if not result.skipped and not result.card_data and result.full_text:
             try:
                 store = _get_store()
                 document_id = store.store_document_full(
-                    source_path=file.filename,
-                    filename=file.filename,
+                    source_path=safe_filename,
+                    filename=safe_filename,
                     file_hash=result.file_hash,
                     full_text=result.full_text,
                     token_count=result.token_count,
@@ -10736,6 +10797,16 @@ async def ingest_document(
                 )
                 result.document_id = document_id
                 if document_id:
+                    # B1: patch the durable join key onto the Qdrant points. /api/ingest
+                    # writes Qdrant (ingest_file) BEFORE it has the PG id, so unlike the
+                    # dropbox/promote callers it can't thread document_id at embed time —
+                    # set_payload it after the fact. Best-effort; legacy filename join is
+                    # the fallback if this fails.
+                    try:
+                        from tools.ingest.pipeline import set_document_payload
+                        set_document_payload(result.collection, result.point_ids, document_id=document_id)
+                    except Exception as pe:
+                        logger.warning(f"/api/ingest: set_document_payload failed for doc {document_id} (non-fatal): {pe}")
                     # Queue classification + extraction (SPECIALIST-UPGRADE-1B),
                     # matching the dropbox-trigger flow so facets/matter tags populate.
                     try:
@@ -10748,14 +10819,14 @@ async def ingest_document(
                     logger.error(
                         "/api/ingest: store_document_full returned no id for %s — "
                         "doc is in Qdrant but NOT retrievable via /api/documents/search",
-                        file.filename,
+                        safe_filename,
                     )
             except Exception as doc_err:
-                logger.error(f"/api/ingest: documents-table write failed for {file.filename} (non-fatal): {doc_err}")
+                logger.error(f"/api/ingest: documents-table write failed for {safe_filename} (non-fatal): {doc_err}")
 
         response = {
             "status": "skipped" if result.skipped else "success",
-            "filename": file.filename,
+            "filename": safe_filename,
             "collection": result.collection,
             "chunks": result.chunk_count,
             "dedup": result.skipped and "duplicate" in (result.skip_reason or "").lower(),

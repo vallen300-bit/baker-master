@@ -227,6 +227,15 @@ def _poll_single_path(client, watch_path: str) -> tuple:
                         continue
 
                     # 5a2. Store full text in PostgreSQL (SPECIALIST-UPGRADE-1A)
+                    # B5.2 — partial-embed posture (DELIBERATE, contrasts with /api/ingest):
+                    # this poller writes PG FIRST (ungated), then Qdrant (5b). On a partial
+                    # embed, ingest_file (A2) refuses to seal ingestion_log, so the PG row
+                    # exists without the Qdrant half. That is intentional for a re-runnable
+                    # poller — the doc stays in the Documents UI + FTS immediately, and the
+                    # A3 reconciliation query (_documents_missing_qdrant) surfaces the
+                    # missing Qdrant half for re-ingest. /api/ingest, a one-shot upload,
+                    # takes the opposite posture (writes neither store on partial).
+                    doc_id = None  # B1: bound before the try so 5b can thread it even if 5a2 fails
                     try:
                         from tools.ingest.extractors import extract
                         from tools.ingest.dedup import compute_file_hash
@@ -255,9 +264,11 @@ def _poll_single_path(client, watch_path: str) -> tuple:
                     except Exception as e:
                         logger.warning(f"Full text storage failed for {entry_name} (non-fatal): {e}")
 
-                    # 5b. Ingest (chunks to Qdrant — unchanged)
+                    # 5b. Ingest (chunks to Qdrant) — carry document_id (B1) so the
+                    # Qdrant payload holds the durable PG join key for new points.
                     from tools.ingest.pipeline import ingest_file
-                    result = ingest_file(local_path, collection="baker-documents")
+                    result = ingest_file(local_path, collection="baker-documents",
+                                         document_id=doc_id)
 
                     # 5c. Check result
                     if result.skipped:

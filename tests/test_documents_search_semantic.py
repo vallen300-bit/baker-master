@@ -64,9 +64,13 @@ def test_ingest_document_temp_filename_matches_original_in_source():
         "ingest_document must not prefix the temp basename — it breaks the "
         "Qdrant source_file -> documents.filename join used by semantic search"
     )
-    # The fix: temp directory + original filename, cleaned up via rmtree.
+    # The fix: temp directory + original filename, cleaned up via rmtree. B3 folded
+    # the path-strip into a single `safe_filename` reused across every surface, so the
+    # temp basename is now `safe_filename` (== Path(file.filename).name) — same value,
+    # same join guarantee.
     assert "tempfile.mkdtemp()" in handler
-    assert "Path(tmp_dir) / Path(file.filename).name" in handler
+    assert "safe_filename = Path(file.filename).name" in handler
+    assert "Path(tmp_dir) / safe_filename" in handler
     assert "shutil.rmtree(tmp_dir" in handler
 
 
@@ -444,3 +448,71 @@ def test_reconciliation_endpoint_returns_missing_docs(monkeypatch):
     assert len(body["documents"]) == 2
     assert body["documents"][0]["id"] == 7
     assert body["documents"][1]["ingested_at"] is None
+
+
+# ─── Part B: B4 windowed-total + B5.3 enrichment_failed sub-signal ─────────────
+
+
+@pytestmark_helper
+def test_semantic_response_flags_total_is_windowed(monkeypatch):
+    """B4: semantic responses carry total_is_windowed=true (total is bounded by the
+    over-fetch window, not the corpus)."""
+    client, _ = _search_client(monkeypatch)
+    _stub_retriever(monkeypatch, hits=[_hit("x.pdf", "x.pdf", 0.6)])
+    body = client.get("/api/documents/search", params={"q": "mandarin"},
+                      headers={"X-Baker-Key": "test-key"}).json()
+    assert body["mode"] == "semantic"
+    assert body["total_is_windowed"] is True
+
+
+@pytestmark_helper
+def test_ilike_and_filter_only_omit_windowed_flag(monkeypatch):
+    """B4: the exact-COUNT paths must NOT claim a windowed total."""
+    client, _ = _search_client(monkeypatch)
+    _stub_retriever(monkeypatch, raise_err=True)  # → ilike_fallback
+    body_il = client.get("/api/documents/search", params={"q": "x"},
+                         headers={"X-Baker-Key": "test-key"}).json()
+    assert body_il["mode"] == "ilike_fallback"
+    assert "total_is_windowed" not in body_il
+    body_fo = client.get("/api/documents/search", params={"matter": "mo-vie"},
+                         headers={"X-Baker-Key": "test-key"}).json()
+    assert body_fo["mode"] == "filter_only"
+    assert "total_is_windowed" not in body_fo
+
+
+@pytestmark_helper
+def test_enrichment_failed_false_on_successful_enrichment(monkeypatch):
+    """B5.3: enrichment ran (conn present, query succeeded) → enrichment_failed False
+    even though the resolver dropped all hits (no PG rows in the fake)."""
+    client, _ = _search_client(monkeypatch)
+    _stub_retriever(monkeypatch, hits=[_hit("x.pdf", "x.pdf", 0.6)])
+    body = client.get("/api/documents/search", params={"q": "mandarin"},
+                      headers={"X-Baker-Key": "test-key"}).json()
+    assert body["mode"] == "semantic"
+    assert body["enrichment_failed"] is False
+
+
+@pytestmark_helper
+def test_enrichment_failed_true_when_conn_unavailable(monkeypatch):
+    """B5.3: Qdrant returned hits but the PG conn is unavailable → enrichment_failed
+    True (distinguishes from a genuinely-empty semantic result)."""
+    from fastapi.testclient import TestClient
+    import outputs.dashboard as dash
+
+    monkeypatch.setenv("BAKER_API_KEY", "test-key")
+    monkeypatch.setattr(dash, "_BAKER_API_KEY", "test-key", raising=False)
+    dash.app.dependency_overrides.pop(dash.verify_api_key, None)
+
+    class _NoConnStore:
+        def _get_conn(self):
+            return None
+        def _put_conn(self, c):
+            pass
+    monkeypatch.setattr(dash, "_get_store", lambda: _NoConnStore())
+    _stub_retriever(monkeypatch, hits=[_hit("x.pdf", "x.pdf", 0.6)])
+
+    body = TestClient(dash.app).get("/api/documents/search", params={"q": "mandarin"},
+                                    headers={"X-Baker-Key": "test-key"}).json()
+    assert body["mode"] == "semantic"
+    assert body["total"] == 0
+    assert body["enrichment_failed"] is True
