@@ -689,3 +689,13 @@ Anchor: Director chat 2026-05-23 evening; AH2 bus #788 (Layer 2) + bus #790
 **Applies to:** every auto-wake / autonomous-loop claim; every new agent brought onto the bus; every "why didn't agent X act on my dispatch" triage. Layer onto Lesson #84 (false pass from borrowed runtime context) — same family: the mechanism "fired" but the production host context made it inert.
 
 **Anchor:** researcher loop test 2026-06-02; bus #1652 delivered-but-inert; Director: *"You cannot wake him up from the terminal … he did not act because I never wake him up … same as AH-1 co-work app."*
+
+### 86. Wire-contract drift hidden by tests that encode the drift (baker_inbox_* MCP) — round-trip or it didn't ship (2026-06-03)
+
+**What broke:** `baker_inbox_post` (MCP) sent body key `to_terminals` and POSTed to `/msg/{sender}`. The Brisen Lab daemon reads recipients from body `to` (`to_terminals = body_json.get("to") or [terminal]`) and derives the sender from the `X-Terminal-Key` — it ignores `to_terminals` entirely. So every MCP-sent message fell back to `[terminal]` = the URL path = the sender, was stored addressed to its own sender, and never reached the recipient. Read/ack 403s were downstream symptoms (a recipient can't ack a message addressed to the sender).
+
+**Why it stayed green:** the unit tests asserted the WRONG contract (`captured["body"]["to_terminals"]`, URL `/msg/b4`=sender). Compile-clean AND test-green, both wrong (Lesson #8 family). The fleet never noticed because every agent uses the shell helpers (`bus_post.sh`/`bus_post.py`) — the canonical correct client.
+
+**Rule:** for any HTTP/wire contract, (1) verify against the live server's actual handler code, not the client's self-consistent tests; (2) add an end-to-end ROUND-TRIP test that captures the real URL path + body and asserts recipient≠sender, so a swap can't pass green again; (3) before "done", exercise the real flow against the live service (here: post→read→ack b3→b3 against production daemon, message_id 1679, DELIVERED + ack 200). Tests that re-derive the contract from the same broken code never catch the drift.
+
+**Anchor:** MCP_INBOX_CONTRACT_FIX_1 (b3, 2026-06-03); surfaced by deputy/AH2 #1675 after codex-arch hit it. Canonical correct contract: `scripts/bus_post.py`.
