@@ -707,26 +707,22 @@ def extract_attachments_text(service, message: Dict) -> List[Dict]:
                 f"gmail-attachment-download FAILED mid={message_id} file={filename} ext={ext} err_type={type(e).__name__} err={e}"
             )
 
-    # SPECIALIST-UPGRADE-1B: Store each attachment as a standalone document
+    # SPECIALIST-UPGRADE-1B + ATTACHMENT_TWO_WRITE_PARITY_1: promote each
+    # attachment to BOTH stores (Postgres documents + Qdrant baker-documents) via
+    # the shared two-write helper, so live email attachments reach semantic RAG.
     if results:
         try:
-            import hashlib
-            from memory.store_back import SentinelStoreBack
-            store = SentinelStoreBack._get_global_instance()
+            from tools.ingest.attachments import promote_attachment_text_to_document_and_qdrant
             for att in results:
-                att_hash = hashlib.sha256(att["text"].encode()).hexdigest()
-                doc_id = store.store_document_full(
+                res = promote_attachment_text_to_document_and_qdrant(
                     source_path=f"email:{message_id}/{att['filename']}",
                     filename=att["filename"],
-                    file_hash=att_hash,
                     full_text=att["text"],
-                    token_count=len(att["text"]) // 4,
                 )
-                if doc_id:
-                    from tools.document_pipeline import queue_extraction
-                    queue_extraction(doc_id)
+                if res.get("doc_id"):
                     logging.getLogger("sentinel.gmail").info(
-                        f"Email attachment stored as doc {doc_id}: {att['filename']}"
+                        f"Email attachment promoted doc={res['doc_id']} "
+                        f"qdrant_chunks={res['chunk_count']}: {att['filename']}"
                     )
         except Exception as e:
             logging.getLogger("sentinel.gmail").warning(

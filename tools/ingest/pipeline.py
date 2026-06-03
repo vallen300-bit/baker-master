@@ -3,6 +3,7 @@
 Orchestrates: extract → classify → dedup → chunk → embed → upsert → log.
 Reuses chunking and embedding logic from scripts/bulk_ingest.py.
 """
+import hashlib
 import logging
 import os
 import time
@@ -145,7 +146,8 @@ def ingest_file(
         )
 
     # --- Step 5+6: Embed + Upsert ---
-    point_ids = _embed_and_upsert(chunks, target, filepath, verbose, project=project, role=role)
+    point_ids = _embed_and_upsert(chunks, target, filepath.name, str(filepath),
+                                  verbose, project=project, role=role)
 
     # --- Step 6b: Business card → dual-write to PostgreSQL contacts ---
     contact_result = None
@@ -197,7 +199,8 @@ def ingest_file(
 def _embed_and_upsert(
     chunks: list[str],
     collection: str,
-    filepath: Path,
+    source_file: str,
+    source_path: str,
     verbose: bool = False,
     project: Optional[str] = None,
     role: Optional[str] = None,
@@ -207,6 +210,12 @@ def _embed_and_upsert(
     Rate-limited with configurable batch size and delay via env vars:
         INGEST_EMBED_BATCH (default: 3)
         INGEST_EMBED_DELAY (default: 25s)
+
+    Args:
+        source_file: Filename for the Qdrant payload `source_file` metadata.
+        source_path: Durable origin path for the Qdrant payload `source_path`
+            metadata (e.g. "email:<mid>/<name>" or a Dropbox path) — never a
+            temp filepath that gets deleted post-extraction.
 
     Returns:
         List of Qdrant point IDs.
@@ -224,7 +233,7 @@ def _embed_and_upsert(
     points_buffer = []
     batches = [chunks[i:i + embed_batch] for i in range(0, len(chunks), embed_batch)]
 
-    metadata = {"source_file": filepath.name, "source_path": str(filepath)}
+    metadata = {"source_file": source_file, "source_path": source_path}
     if project:
         metadata["project"] = project
     if role:
@@ -279,3 +288,92 @@ def _embed_and_upsert(
         qdrant.upsert(collection_name=collection, points=points_buffer)
 
     return all_point_ids
+
+
+def ingest_text(
+    full_text: str,
+    filename: str,
+    source_path: str,
+    collection: str = "baker-documents",
+    file_hash: Optional[str] = None,
+    project: Optional[str] = None,
+    role: Optional[str] = None,
+    skip_dedup: bool = False,
+    verbose: bool = False,
+) -> IngestResult:
+    """Chunk + embed + upsert ALREADY-EXTRACTED text into Qdrant. No re-extraction.
+
+    Mirrors ingest_file Steps 4-6 (chunk → embed → upsert → log) for callers that
+    hold extracted text but NOT a durable file on disk (e.g. email / WhatsApp
+    attachments whose temp file is deleted right after extraction). Do NOT route
+    such callers through ingest_file — it re-extracts from a filepath (Step 1) and
+    would double-extract / break on the already-deleted temp file.
+
+    Idempotent: dedup short-circuits on (filename, file_hash) in ingestion_log, and
+    point IDs are deterministic (make_point_id over chunk text), so re-running upserts
+    the same points rather than duplicating them.
+
+    Args:
+        full_text: Already-extracted text to embed.
+        filename: Logical filename (Qdrant payload + dedup key).
+        source_path: Durable origin path (Qdrant payload `source_path`); never a
+            temp filepath that gets deleted post-extraction.
+        collection: Target Qdrant collection (default baker-documents).
+        file_hash: SHA-256 of the source bytes/text; computed from full_text if None.
+        skip_dedup: Skip the ingestion_log duplicate short-circuit.
+
+    Returns:
+        IngestResult (chunk_count, point_ids) — skipped=True with skip_reason on
+        empty text or duplicate.
+    """
+    if not full_text or not full_text.strip():
+        return IngestResult(
+            filename=filename, file_hash=file_hash or "", file_size_bytes=0,
+            collection="", chunk_count=0, skipped=True,
+            skip_reason="Empty text",
+        )
+
+    if file_hash is None:
+        file_hash = hashlib.sha256(full_text.encode()).hexdigest()
+
+    target = collection or "baker-documents"
+    if target not in VALID_COLLECTIONS:
+        logger.warning("Collection '%s' not in known set — using anyway", target)
+
+    file_size = len(full_text.encode())
+
+    # --- Dedup (skip re-embedding identical already-ingested text) ---
+    if not skip_dedup and is_duplicate(filename, file_hash):
+        return IngestResult(
+            filename=filename, file_hash=file_hash, file_size_bytes=file_size,
+            collection=target, chunk_count=0, skipped=True,
+            skip_reason="Duplicate (same filename + hash already ingested)",
+        )
+
+    # --- Chunk → Embed → Upsert ---
+    chunks = chunk_text(full_text)
+    if verbose:
+        logger.info("  ingest_text: %s → %d chunks", filename, len(chunks))
+
+    point_ids = _embed_and_upsert(chunks, target, filename, source_path,
+                                  verbose, project=project, role=role)
+
+    # --- Log ---
+    log_ingestion(
+        filename=filename,
+        file_hash=file_hash,
+        file_size_bytes=file_size,
+        collection=target,
+        chunk_count=len(chunks),
+        point_ids=point_ids,
+        source_path=source_path,
+        project=project,
+        role=role,
+    )
+
+    return IngestResult(
+        filename=filename, file_hash=file_hash, file_size_bytes=file_size,
+        collection=target, chunk_count=len(chunks),
+        project=project, role=role, point_ids=point_ids,
+        full_text=full_text, token_count=estimate_tokens(full_text),
+    )
