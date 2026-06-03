@@ -2210,6 +2210,68 @@ async def get_document_facets():
         raise HTTPException(status_code=500, detail=str(e))
 
 
+def _resolve_semantic_doc_hits(
+    hits, pg_rows_by_filename, matter_list, type_list, source_list, offset, limit
+):
+    """Group Qdrant chunk hits into one result per PostgreSQL document.
+
+    DOCUMENTS_SEARCH_SEMANTIC_RESTORE_1 deterministic id-resolution:
+      - join key is `source_file` (Qdrant `baker-documents` payload carries only
+        text/source_file/source_path — no documents.id), matched to PG `filename`.
+      - 1 PG row for a filename  → use it.
+      - multiple PG rows          → prefer the one whose source_path also matches
+                                    the Qdrant hit's source_path; else most-recent ingested_at.
+      - zero PG rows              → DROP the hit (no openable documents.id).
+      - filters applied against PG row fields (authoritative; Qdrant payload lacks them).
+      - dedup by documents.id, keeping the highest chunk score per document.
+    Returns (page_results, total). `hits` items expose .metadata (dict), .score, .content.
+    """
+    grouped = {}  # documents.id -> result dict (highest-scoring chunk wins)
+    for h in hits:
+        meta = getattr(h, "metadata", {}) or {}
+        sf = meta.get("source_file") or ""
+        sp = meta.get("source_path") or ""
+        candidates = pg_rows_by_filename.get(sf, [])
+        if not candidates:
+            continue  # zero PG rows → drop (never surface an unopenable hit)
+        if len(candidates) == 1:
+            row = candidates[0]
+        else:
+            path_match = [c for c in candidates if (c.get("source_path") or "") == sp]
+            pool = path_match if path_match else candidates
+            # most-recent ingested_at; None sorts lowest (avoids None/datetime compare)
+            row = max(pool, key=lambda c: (c.get("ingested_at") is not None, c.get("ingested_at")))
+
+        # PG-authoritative filters
+        if matter_list and (row.get("matter_slug") or "") not in matter_list:
+            continue
+        if type_list and (row.get("document_type") or "unknown") not in type_list:
+            continue
+        if source_list and _derive_source(row.get("source_path") or "") not in source_list:
+            continue
+
+        doc_id = row["id"]
+        score = round(getattr(h, "score", 0) or 0, 3)
+        existing = grouped.get(doc_id)
+        if existing is None or score > existing["score"]:
+            ing = row.get("ingested_at")
+            grouped[doc_id] = {
+                "id": doc_id,
+                "title": row.get("filename") or "Untitled",
+                "document_type": row.get("document_type") or "document",
+                "matter": row.get("matter_slug") or "",
+                "source": _derive_source(row.get("source_path") or ""),
+                "source_path": row.get("source_path") or "",
+                "date": ing.strftime("%Y-%m-%d") if hasattr(ing, "strftime") and ing else "",
+                "summary": row.get("text_preview") or (getattr(h, "content", "") or "")[:200],
+                "score": score,
+            }
+
+    ordered = sorted(grouped.values(), key=lambda d: d["score"], reverse=True)
+    total = len(ordered)
+    return ordered[offset:offset + limit], total
+
+
 @app.get("/api/documents/search", tags=["documents"], dependencies=[Depends(verify_api_key)])
 async def search_documents_endpoint(
     q: str = Query("", max_length=500),
@@ -2227,81 +2289,88 @@ async def search_documents_endpoint(
     """
     try:
         store = _get_store()
-        conn = store._get_conn()
-        if not conn:
-            raise HTTPException(status_code=503, detail="Database unavailable")
-        try:
-            import psycopg2.extras
-            cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
 
-            # Parse comma-separated filters
-            matter_list = [m.strip() for m in matter.split(",") if m.strip()] if matter.strip() else []
-            type_list = [t.strip() for t in doc_type.split(",") if t.strip()] if doc_type.strip() else []
-            source_list = [s.strip() for s in source.split(",") if s.strip()] if source.strip() else []
+        # Parse comma-separated filters
+        matter_list = [m.strip() for m in matter.split(",") if m.strip()] if matter.strip() else []
+        type_list = [t.strip() for t in doc_type.split(",") if t.strip()] if doc_type.strip() else []
+        source_list = [s.strip() for s in source.split(",") if s.strip()] if source.strip() else []
 
-            results = []
-            total = 0
+        qtext = q.strip()
+        results = []
+        total = 0
+        use_ilike = not qtext  # filter-only queries always use the PostgreSQL path
 
-            if q.strip():
-                # ── Qdrant semantic search ──
-                try:
-                    from memory.retriever import Retriever
-                    retriever = Retriever()
-                    qdrant_limit = min(offset + limit + 50, 200)  # fetch extra for filtering
-                    hits = retriever.search("baker-documents", q.strip(), limit=qdrant_limit)
+        # ── Semantic phase: Qdrant search with NO PG connection held ──
+        if qtext:
+            hits = None
+            try:
+                from memory.retriever import SentinelRetriever
+                retriever = SentinelRetriever._get_global_instance()   # singleton — never SentinelRetriever()
+                query_vector = retriever._embed_query(qtext)           # 1 Voyage call (user-initiated)
+                qdrant_limit = min((offset + limit) * 3 + 50, 300)     # over-fetch for grouping/filtering
+                hits = retriever.search_collection(
+                    query_vector=query_vector,
+                    collection="baker-documents",
+                    limit=qdrant_limit,
+                    score_threshold=0.3,
+                )
+            except Exception as vec_err:
+                logger.warning(f"Qdrant semantic search failed, falling back to PostgreSQL ILIKE: {vec_err}")
+                hits = None
 
-                    # Filter by metadata
-                    filtered = []
-                    for h in hits:
-                        meta = h.get("metadata", {}) or {}
-                        h_matter = meta.get("matter_slug", "") or ""
-                        h_type = meta.get("document_type", "") or ""
-                        h_source_path = meta.get("source_path", "") or ""
+            if not hits:
+                # Qdrant error, or genuinely no semantic match → ILIKE last resort
+                use_ilike = True
+            else:
+                # ── Enrich from PostgreSQL by filename (conn held ONLY for this batch query) ──
+                filenames = [f for f in {(getattr(h, "metadata", {}) or {}).get("source_file") or "" for h in hits} if f]
+                pg_rows_by_filename = {}
+                if filenames:
+                    conn = store._get_conn()
+                    if conn:
+                        try:
+                            import psycopg2.extras
+                            cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+                            cur.execute(
+                                "SELECT id, filename, document_type, matter_slug, source_path, ingested_at, "
+                                "LEFT(full_text, 200) AS text_preview "
+                                "FROM documents WHERE filename = ANY(%s)",
+                                (filenames,),
+                            )
+                            for r in cur.fetchall():
+                                r = dict(r)
+                                pg_rows_by_filename.setdefault(r["filename"], []).append(r)
+                            cur.close()
+                        except Exception as enr_err:
+                            try:
+                                conn.rollback()
+                            except Exception:
+                                pass
+                            logger.warning(f"PG enrichment for semantic search failed: {enr_err}")
+                            pg_rows_by_filename = {}
+                        finally:
+                            store._put_conn(conn)
+                # Group → one result per documents.id; deterministic resolution; PG-authoritative filters.
+                # Semantic path is authoritative once Qdrant returns hits — no ILIKE blending.
+                results, total = _resolve_semantic_doc_hits(
+                    hits, pg_rows_by_filename, matter_list, type_list, source_list, offset, limit
+                )
 
-                        if matter_list and h_matter not in matter_list:
-                            continue
-                        if type_list and h_type not in type_list:
-                            continue
-                        if source_list:
-                            h_src = "email" if "email" in h_source_path.lower() or "gmail" in h_source_path.lower() else \
-                                    "whatsapp" if "whatsapp" in h_source_path.lower() else \
-                                    "clickup" if "clickup" in h_source_path.lower() else \
-                                    "fireflies" if "fireflies" in h_source_path.lower() else "dropbox"
-                            if h_src not in source_list:
-                                continue
-                        filtered.append(h)
+        # ── PostgreSQL ILIKE / filter-only path (conn held only here) ──
+        if use_ilike:
+            conn = store._get_conn()
+            if not conn:
+                raise HTTPException(status_code=503, detail="Database unavailable")
+            try:
+                import psycopg2.extras
+                cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
 
-                    total = len(filtered)
-                    page = filtered[offset:offset + limit]
-
-                    for h in page:
-                        meta = h.get("metadata", {}) or {}
-                        text_snippet = (h.get("text", "") or "")[:200]
-                        results.append({
-                            "id": meta.get("doc_id") or h.get("id"),
-                            "title": meta.get("filename", "Untitled"),
-                            "document_type": meta.get("document_type", "document"),
-                            "matter": meta.get("matter_slug", ""),
-                            "source": _derive_source(meta.get("source_path", "")),
-                            "source_path": meta.get("source_path", ""),
-                            "date": (meta.get("ingested_at", "") or "")[:10],
-                            "summary": text_snippet,
-                            "score": round(h.get("score", 0), 3),
-                        })
-                except Exception as vec_err:
-                    logger.warning(f"Qdrant search failed, falling back to PostgreSQL: {vec_err}")
-                    # Fall through to PostgreSQL below
-                    results = []
-                    total = 0
-
-            if not results and not q.strip() or (q.strip() and not results):
-                # ── PostgreSQL fallback / filter-only ──
                 conditions = []
                 params = []
 
-                if q.strip():
+                if qtext:
                     conditions.append("(filename ILIKE %s OR full_text ILIKE %s)")
-                    params.extend([f"%{q.strip()}%", f"%{q.strip()}%"])
+                    params.extend([f"%{qtext}%", f"%{qtext}%"])
                 if matter_list:
                     placeholders = ",".join(["%s"] * len(matter_list))
                     conditions.append(f"matter_slug IN ({placeholders})")
@@ -2350,8 +2419,8 @@ async def search_documents_endpoint(
                     f"FROM documents {where} ORDER BY {order_by} LIMIT %s OFFSET %s",
                     params + [limit, offset],
                 )
-                rows = cur.fetchall()
-                for r in rows:
+                results = []
+                for r in cur.fetchall():
                     r = dict(r)
                     results.append({
                         "id": r["id"],
@@ -2364,11 +2433,20 @@ async def search_documents_endpoint(
                         "summary": r.get("text_preview") or "",
                         "score": None,
                     })
+                cur.close()
+            except HTTPException:
+                raise
+            except Exception as ilike_err:
+                try:
+                    conn.rollback()
+                except Exception:
+                    pass
+                logger.error(f"GET /api/documents/search ILIKE path failed: {ilike_err}")
+                raise HTTPException(status_code=500, detail=str(ilike_err))
+            finally:
+                store._put_conn(conn)
 
-            cur.close()
-            return {"results": results, "total": total, "offset": offset}
-        finally:
-            store._put_conn(conn)
+        return {"results": results, "total": total, "offset": offset}
     except HTTPException:
         raise
     except Exception as e:
