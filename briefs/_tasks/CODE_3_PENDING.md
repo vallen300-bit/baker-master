@@ -60,7 +60,7 @@ def promote_attachment_text_to_document_and_qdrant(source_path, filename, full_t
 1. Build `ingest_text(...)` + `promote_attachment_text_to_document_and_qdrant(...)`.
 2. Replace the store-only block in `scripts/extract_gmail.py:710-727` with the helper (keeps Postgres write, ADDS Qdrant).
 3. Apply the helper to `scripts/backfill_missed_attachments.py` (same gap).
-4. WhatsApp media: after `extract_media_text` (in `triggers/waha_webhook.py`), call the helper for each media item (full two-write if currently inline-only).
+4. WhatsApp media: after `extract_media_text` (in `triggers/waha_webhook.py`), call the helper for each media item (currently inline-into-body at `~953-975` + stored as parent WA message at `~983-994` — so full two-write). **Pass a durable `source_path` to the helper** — prefer `media_dropbox_path` (`~949-950`), with a deterministic `whatsapp:{msg_id}/...` fallback if the Dropbox upload returned no path. **Do NOT use the local filepath** — the `finally` block deletes it at `~959-963` (codex G0 nit).
 5. **Keep parent inline text unchanged** (no regression to email/WA text search).
 
 ## Key Constraints
