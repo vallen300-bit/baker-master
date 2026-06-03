@@ -10551,16 +10551,21 @@ async def ingest_document(
     if len(contents) > 100 * 1024 * 1024:
         raise HTTPException(status_code=413, detail="File too large. Maximum size: 100MB.")
 
-    # 5. Write to temp file (preserve original filename for classifier heuristics)
+    # 5. Write to temp file under a temp DIRECTORY using the ORIGINAL filename.
+    #    DOCUMENTS_SEARCH_SEMANTIC_RESTORE_1: ingest_file derives the Qdrant
+    #    `source_file` payload from filepath.name, while store_document_full (7b)
+    #    writes documents.filename = file.filename. The semantic-search resolver
+    #    joins Qdrant source_file -> documents.filename, so the temp basename MUST
+    #    equal the original filename. A NamedTemporaryFile prefix produced
+    #    `Mandarin_<rand>.pdf` ≠ documents.filename `Mandarin.pdf`, dropping every
+    #    /api/ingest-uploaded doc from semantic search (regressed the #285 path).
+    import shutil
+    tmp_dir = None
     tmp_path = None
     try:
-        with tempfile.NamedTemporaryFile(
-            delete=False,
-            suffix=ext,
-            prefix=Path(file.filename).stem + "_",
-        ) as tmp:
-            tmp.write(contents)
-            tmp_path = Path(tmp.name)
+        tmp_dir = tempfile.mkdtemp()
+        tmp_path = Path(tmp_dir) / Path(file.filename).name  # strip any path separators
+        tmp_path.write_bytes(contents)
 
         # 6. Run pipeline in thread to avoid blocking event loop
         result = await asyncio.to_thread(
@@ -10646,9 +10651,9 @@ async def ingest_document(
 
         return response
     finally:
-        # 8. Clean up temp file
-        if tmp_path and tmp_path.exists():
-            tmp_path.unlink()
+        # 8. Clean up the temp directory (and the file inside it)
+        if tmp_dir:
+            shutil.rmtree(tmp_dir, ignore_errors=True)
 
 
 @app.get("/api/ingest/collections", tags=["ingest"], dependencies=[Depends(verify_api_key)])

@@ -46,6 +46,30 @@ def test_handler_uses_sentinelretriever_singleton_in_source():
     assert "_resolve_semantic_doc_hits(" in src
 
 
+def test_ingest_document_temp_filename_matches_original_in_source():
+    """G3 regression guard (codex #1724): /api/ingest must write its temp file under
+    the ORIGINAL filename, so ingest_file's Qdrant `source_file` payload (= filepath.name)
+    equals documents.filename (= file.filename). A NamedTemporaryFile prefix produced
+    `Mandarin_<rand>.pdf` ≠ `Mandarin.pdf`, dropping every /api/ingest doc from the new
+    semantic resolver (filename is the Qdrant↔PG join key)."""
+    src = Path("outputs/dashboard.py").read_text()
+    # Scope to the ingest_document handler (the path that writes Qdrant via
+    # ingest_file). upload_document also uses NamedTemporaryFile but never calls
+    # ingest_file → no Qdrant source_file → not affected, so don't assert on it.
+    start = src.index("async def ingest_document(")
+    end = src.index('@app.get("/api/ingest/collections"', start)
+    handler = src[start:end]
+    # The mangling prefix must be gone from the ingest path.
+    assert 'prefix=Path(file.filename).stem + "_"' not in handler, (
+        "ingest_document must not prefix the temp basename — it breaks the "
+        "Qdrant source_file -> documents.filename join used by semantic search"
+    )
+    # The fix: temp directory + original filename, cleaned up via rmtree.
+    assert "tempfile.mkdtemp()" in handler
+    assert "Path(tmp_dir) / Path(file.filename).name" in handler
+    assert "shutil.rmtree(tmp_dir" in handler
+
+
 # ─── Pure resolution-logic unit tests (run under py3.12 where dashboard imports) ──
 
 def _dashboard_importable() -> bool:
@@ -219,3 +243,24 @@ def test_type_and_source_filters_against_pg_fields():
     # type filter: only contract survives
     res_t, tot_t = _resolve_semantic_doc_hits(hits, pg, [], ["contract"], [], 0, 20)
     assert tot_t == 1 and res_t[0]["id"] == 2
+
+
+@pytestmark_helper
+def test_ingest_filename_parity_resolves_not_dropped():
+    """G3 regression witness (codex #1724): a doc uploaded via /api/ingest must be
+    found by semantic search. POST-FIX the Qdrant source_file == documents.filename
+    ('Mandarin.pdf'), so the resolver returns the PG row. PRE-FIX the source_file was
+    the mangled temp basename ('Mandarin_ab12cd.pdf') with no PG row → dropped."""
+    from outputs.dashboard import _resolve_semantic_doc_hits
+
+    pg = {"Mandarin.pdf": [_pg(99, "Mandarin.pdf", "Mandarin.pdf", matter="mo-vie")]}
+
+    # POST-FIX: temp basename == original filename → joins → returned (not dropped).
+    fixed_hit = [_hit("Mandarin.pdf", "/tmp/abc/Mandarin.pdf", score=0.77)]
+    results, total = _resolve_semantic_doc_hits(fixed_hit, pg, [], [], [], 0, 20)
+    assert total == 1 and results[0]["id"] == 99, "uploaded doc must be retrievable"
+
+    # PRE-FIX witness: mangled source_file has no matching PG filename → dropped.
+    mangled_hit = [_hit("Mandarin_ab12cd.pdf", "/tmp/Mandarin_ab12cd.pdf", score=0.77)]
+    dropped, dtotal = _resolve_semantic_doc_hits(mangled_hit, pg, [], [], [], 0, 20)
+    assert dtotal == 0 and dropped == [], "mangled basename must NOT join (the bug)"
