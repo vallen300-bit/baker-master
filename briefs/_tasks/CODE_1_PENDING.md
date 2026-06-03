@@ -72,6 +72,18 @@ Literal pytest green on a new `tests/test_reingest_missing_qdrant.py` covering A
 - The M365 2-year email backfill (separate epic, lead-scoped).
 - Running the actual 1,036-doc backfill on prod — that's lead's POST_DEPLOY op once the endpoint ships.
 
+## G0 FOLDS — codex #1772 REVISE (BLOCKING; these SUPERSEDE any conflicting line above)
+
+Data-proven against live prod: of the 1,036 filename-predicate rows, only **460 are embeddable**; **576 have NULL/blank `full_text`**; 76 duplicate filenames cover 165 rows. The brief's filename-only approach is unsafe for a write+resume loop. Fold ALL three:
+
+1. **[HIGH] Row-level dedup key, not filename-only.** Dedup/seal is `(filename, file_hash)` (`tools/ingest/dedup.py:40-42,88-93`). The WRITE selector must `SELECT d.file_hash` and use `NOT EXISTS` on `il.collection + il.filename + il.file_hash` (row-level). Filename-only can seal one sibling and hide others from `remaining_after`. Add a duplicate-filename regression test.
+2. **[HIGH] Exclude empty text from the write selector — it stalls resume.** Skipping empties writes no `ingestion_log`, so they re-select forever and `remaining_after` never reaches 0. Write selector requires `full_text IS NOT NULL AND btrim(full_text) <> ''`. Return SEPARATE counts: `{total_missing, embeddable_missing, skipped_empty_total, attempted, embedded, skipped_dedup, failed, remaining_after}` where **`remaining_after` = remaining EMBEDDABLE rows**, not all legacy-missing. Add a test: repeated dry_run/write calls do NOT keep returning the same empty rows and do NOT block progress.
+3. **[MED] Thread the real file_hash.** Call `ingest_text(..., file_hash=d.file_hash, document_id=d.id, matter_slug=d.matter_slug)` — the brief omitted `file_hash`, so `ingest_text` would `sha256(full_text)` instead of using `documents.file_hash` (present for all 1,036). Keep `skip_dedup=False`.
+
+**Predicate sharing:** do NOT factor only the raw filename predicate for the write path. Either update `_documents_missing_qdrant` to the row-level key too (same return shape) OR create TWO NAMED helpers — `legacy_reconciliation_count` vs `embeddable_reingest_selector` — so the semantic difference is explicit and can't drift silently.
+
+Confirmed non-blocking by codex: auth via `verify_api_key`, dry_run default true, limit-bound synchronous caller-driven batches, per-doc try/except, no scheduler/startup hook, embed-only.
+
 ## Notes
-- `ingest_text` already takes `document_id` + `matter_slug` (you added them in Part B).
+- `ingest_text` already takes `document_id` + `matter_slug` (you added them in Part B). Extracted-text col = `documents.full_text` (confirmed by b1: `store_back.py:379/460`).
 - Bus-only to lead on ship/blocker/claim. NOT Director-facing register.
