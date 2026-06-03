@@ -887,6 +887,8 @@ TOOLS = [
             "after processing each consumed message (NM3: workers cannot write the "
             "DB directly). Filters: `since` (ISO timestamp), `kind`, `topic` "
             "(prefix LIKE), `exclude_self` (drop messages from this terminal). "
+            "Unacked-only by default (client-filters acknowledged_at IS NULL even if "
+            "the daemon returns acked rows); pass include_acked=true for the full set. "
             "Fail-open: returns empty list with a fallback notice when V2 disabled."
         ),
         inputSchema={
@@ -917,6 +919,11 @@ TOOLS = [
                     "type": "integer",
                     "description": "Max rows (default 50; daemon caps preview at 8K bytes per row).",
                     "default": 50,
+                },
+                "include_acked": {
+                    "type": "boolean",
+                    "description": "If true, return acked messages too (default false = unacked only).",
+                    "default": False,
                 },
             },
         },
@@ -1460,12 +1467,21 @@ def _brisen_lab_read_via_http(args: dict) -> str:
         params["topic"] = args["topic"]
     if args.get("exclude_self"):
         params["exclude_self"] = "true"
+    # User-facing display limit (what the caller asked to SEE).
     try:
-        limit = int(args.get("limit", 50))
+        display_limit = int(args.get("limit", 50))
     except (TypeError, ValueError):
-        limit = 50
-    limit = max(1, min(limit, 200))
-    params["limit"] = limit
+        display_limit = 50
+    display_limit = max(1, min(display_limit, 200))
+
+    include_acked = bool(args.get("include_acked", False))
+
+    # Fetch wide so unacked rows aren't buried behind acked ones in a small page.
+    # Daemon hard-caps ~200; fetch the max when we intend to client-filter.
+    params["limit"] = 200 if not include_acked else display_limit
+    # Hint the daemon too (harmless if it ignores the param — contract says it might).
+    if not include_acked:
+        params["unread"] = "true"
 
     url = f"{_brisen_lab_url()}/msg/{terminal}"
     headers = {"X-Terminal-Key": _brisen_lab_terminal_key()}
@@ -1490,8 +1506,17 @@ def _brisen_lab_read_via_http(args: dict) -> str:
         return f"Error: brisen-lab GET non-JSON response: {err}"
 
     rows = data if isinstance(data, list) else data.get("messages") or data.get("rows") or []
+
+    if not include_acked:
+        # Load-bearing: filter regardless of whether the daemon honored `unread`.
+        rows = [r for r in rows if not r.get("acknowledged_at")]
+
+    rows = rows[:display_limit]
+
     if not rows:
-        return f"Inbox empty for {terminal} (filters: {json.dumps({k: v for k, v in params.items() if k != 'limit'})})"
+        shown = {k: v for k, v in params.items() if k not in ("limit", "unread")}
+        suffix = "" if include_acked else " (unacked only; pass include_acked=true to see acked)"
+        return f"Inbox empty for {terminal} (filters: {json.dumps(shown)}){suffix}"
     return json.dumps(rows, default=_json_serial, indent=2)
 
 
