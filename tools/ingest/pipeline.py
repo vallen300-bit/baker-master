@@ -146,8 +146,22 @@ def ingest_file(
         )
 
     # --- Step 5+6: Embed + Upsert ---
-    point_ids = _embed_and_upsert(chunks, target, filepath.name, str(filepath),
-                                  verbose, project=project, role=role)
+    point_ids, failed_batches = _embed_and_upsert(chunks, target, filepath.name, str(filepath),
+                                                  verbose, project=project, role=role)
+
+    # --- A2 (INGEST_SEARCH_DURABILITY_FOLLOWUPS_1): do NOT seal a partial embed ---
+    # Return before contact write + log_ingestion so the doc stays retryable
+    # (is_duplicate False on re-run). Mirrors ingest_text.
+    if failed_batches:
+        logger.error("  ingest_file PARTIAL: %s — %d batch(es) failed; NOT sealing (retryable)",
+                     filename, len(failed_batches))
+        return IngestResult(
+            filename=filename, file_hash=file_hash, file_size_bytes=file_size,
+            collection=target, chunk_count=len(chunks),
+            project=project, role=role, point_ids=point_ids,
+            full_text=text, token_count=token_est,
+            skipped=True, skip_reason="partial_embed",
+        )
 
     # --- Step 6b: Business card → dual-write to PostgreSQL contacts ---
     contact_result = None
@@ -204,7 +218,7 @@ def _embed_and_upsert(
     verbose: bool = False,
     project: Optional[str] = None,
     role: Optional[str] = None,
-) -> list[str]:
+) -> tuple[list[str], list[int]]:
     """Embed chunks via Voyage AI and upsert into Qdrant.
 
     Rate-limited with configurable batch size and delay via env vars:
@@ -218,7 +232,12 @@ def _embed_and_upsert(
             temp filepath that gets deleted post-extraction.
 
     Returns:
-        List of Qdrant point IDs.
+        (point_ids, failed_batches) — point_ids are the IDs that DID land in
+        Qdrant; failed_batches is the list of 1-based batch numbers that could
+        not be embedded after retries. A NON-EMPTY failed_batches means the
+        upsert is PARTIAL (INGEST_SEARCH_DURABILITY_FOLLOWUPS_1 A2): the caller
+        MUST NOT seal the doc via log_ingestion, or the missing chunks become a
+        permanent half-index (is_duplicate would short-circuit every re-run).
     """
     voyage = voyageai.Client(api_key=config.voyage.api_key)
     qdrant = QdrantClient(url=config.qdrant.url, api_key=config.qdrant.api_key)
@@ -230,6 +249,7 @@ def _embed_and_upsert(
     upsert_batch = 100
 
     all_point_ids = []
+    failed_batches = []
     points_buffer = []
     batches = [chunks[i:i + embed_batch] for i in range(0, len(chunks), embed_batch)]
 
@@ -263,7 +283,9 @@ def _embed_and_upsert(
                     raise
 
         if result is None:
-            logger.error("  FAILED batch %d after %d retries — skipping", batch_num, max_retries)
+            logger.error("  FAILED batch %d after %d retries — partial embed, doc will NOT be sealed",
+                         batch_num, max_retries)
+            failed_batches.append(batch_num)
             continue
 
         for text, vector in zip(batch, result.embeddings):
@@ -287,7 +309,7 @@ def _embed_and_upsert(
     if points_buffer:
         qdrant.upsert(collection_name=collection, points=points_buffer)
 
-    return all_point_ids
+    return all_point_ids, failed_batches
 
 
 def ingest_text(
@@ -355,8 +377,23 @@ def ingest_text(
     if verbose:
         logger.info("  ingest_text: %s → %d chunks", filename, len(chunks))
 
-    point_ids = _embed_and_upsert(chunks, target, filename, source_path,
-                                  verbose, project=project, role=role)
+    point_ids, failed_batches = _embed_and_upsert(chunks, target, filename, source_path,
+                                                  verbose, project=project, role=role)
+
+    # --- A2 (INGEST_SEARCH_DURABILITY_FOLLOWUPS_1): do NOT seal a partial embed ---
+    # If any batch failed, skip log_ingestion so is_duplicate stays False and a
+    # re-run retries the WHOLE doc (point IDs are deterministic → successful
+    # chunks re-upsert idempotently; missing chunks get embedded).
+    if failed_batches:
+        logger.error("  ingest_text PARTIAL: %s — %d/%d batch(es) failed; NOT sealing (retryable)",
+                     filename, len(failed_batches), -(-len(chunks) // max(1, int(os.environ.get("INGEST_EMBED_BATCH", "3")))))
+        return IngestResult(
+            filename=filename, file_hash=file_hash, file_size_bytes=file_size,
+            collection=target, chunk_count=len(chunks),
+            project=project, role=role, point_ids=point_ids,
+            full_text=full_text, token_count=estimate_tokens(full_text),
+            skipped=True, skip_reason="partial_embed",
+        )
 
     # --- Log ---
     log_ingestion(

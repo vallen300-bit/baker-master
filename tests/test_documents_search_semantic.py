@@ -264,3 +264,183 @@ def test_ingest_filename_parity_resolves_not_dropped():
     mangled_hit = [_hit("Mandarin_ab12cd.pdf", "/tmp/Mandarin_ab12cd.pdf", score=0.77)]
     dropped, dtotal = _resolve_semantic_doc_hits(mangled_hit, pg, [], [], [], 0, 20)
     assert dtotal == 0 and dropped == [], "mangled basename must NOT join (the bug)"
+
+
+# ─── INGEST_SEARCH_DURABILITY_FOLLOWUPS_1 A1: observable retrieval mode ─────────
+
+
+def test_search_handler_reports_mode_in_source():
+    """A1: the response dict must carry `mode`, and the three legitimate values
+    must exist so a silent ILIKE regression (original Bug A) is observable."""
+    src = Path("outputs/dashboard.py").read_text()
+    start = src.index("async def search_documents_endpoint(")
+    end = src.index("async def get_document_text(", start)
+    handler = src[start:end]
+    assert '"mode": mode' in handler, "search response must include the mode field"
+    assert '"semantic"' in handler
+    assert '"ilike_fallback"' in handler
+    assert '"filter_only"' in handler
+
+
+def test_search_handler_splits_fallback_logging_in_source():
+    """A1: a RAISED Qdrant/Voyage error is degradation → logger.error; an empty
+    result above threshold is a legitimate last-resort → logger.info. They must
+    not both collapse to one warning anymore."""
+    src = Path("outputs/dashboard.py").read_text()
+    start = src.index("async def search_documents_endpoint(")
+    end = src.index("async def get_document_text(", start)
+    handler = src[start:end]
+    assert "logger.error(f\"Qdrant/Voyage semantic search RAISED" in handler, (
+        "the Qdrant/Voyage exception path must log at ERROR (it should alert)"
+    )
+    assert "logger.info(f\"Semantic search returned no hits above threshold" in handler, (
+        "the no-hit-above-threshold path must log at INFO (legitimate, not a fault)"
+    )
+
+
+# ─── A1 functional: mode is correct end-to-end (TestClient) ────────────────────
+
+
+def _search_client(monkeypatch):
+    """A FakeStore whose conn is a no-op cursor (COUNT→0, rows→[]), so both the
+    ILIKE path and the semantic-enrichment path complete with empty results and
+    we can assert `mode` without a live DB."""
+    from fastapi.testclient import TestClient
+    import outputs.dashboard as dash
+
+    monkeypatch.setenv("BAKER_API_KEY", "test-key")
+    monkeypatch.setattr(dash, "_BAKER_API_KEY", "test-key", raising=False)
+    dash.app.dependency_overrides.pop(dash.verify_api_key, None)
+
+    class _Cur:
+        def execute(self, sql, params=None):
+            self._count = "COUNT(*)" in sql
+        def fetchone(self):
+            return {"total": 0}
+        def fetchall(self):
+            return []
+        def close(self):
+            pass
+    class _Conn:
+        def cursor(self, cursor_factory=None):
+            return _Cur()
+        def rollback(self):
+            pass
+    class _Store:
+        def _get_conn(self):
+            return _Conn()
+        def _put_conn(self, c):
+            pass
+    monkeypatch.setattr(dash, "_get_store", lambda: _Store())
+    return TestClient(dash.app), dash
+
+
+def _stub_retriever(monkeypatch, *, hits=None, raise_err=False):
+    import memory.retriever as mr
+
+    class _FakeRetriever:
+        def _embed_query(self, q):
+            if raise_err:
+                raise RuntimeError("voyage down")
+            return [0.1] * 8
+        def search_collection(self, query_vector=None, collection=None, limit=None,
+                              score_threshold=None):
+            if raise_err:
+                raise RuntimeError("qdrant down")
+            return hits or []
+    monkeypatch.setattr(mr.SentinelRetriever, "_get_global_instance",
+                        classmethod(lambda cls: _FakeRetriever()))
+
+
+@pytestmark_helper
+def test_mode_semantic_when_qdrant_returns_hits(monkeypatch):
+    client, _ = _search_client(monkeypatch)
+    # Hits with no PG row → dropped by resolver, but the SEMANTIC path still ran.
+    _stub_retriever(monkeypatch, hits=[_hit("x.pdf", "x.pdf", 0.6)])
+    resp = client.get("/api/documents/search", params={"q": "mandarin"},
+                      headers={"X-Baker-Key": "test-key"})
+    assert resp.status_code == 200, resp.text
+    assert resp.json()["mode"] == "semantic"
+
+
+@pytestmark_helper
+def test_mode_ilike_fallback_when_qdrant_raises(monkeypatch):
+    client, _ = _search_client(monkeypatch)
+    _stub_retriever(monkeypatch, raise_err=True)
+    resp = client.get("/api/documents/search", params={"q": "mandarin"},
+                      headers={"X-Baker-Key": "test-key"})
+    assert resp.status_code == 200, resp.text
+    assert resp.json()["mode"] == "ilike_fallback"
+
+
+@pytestmark_helper
+def test_mode_filter_only_when_no_query(monkeypatch):
+    client, _ = _search_client(monkeypatch)
+    resp = client.get("/api/documents/search", params={"matter": "mo-vie"},
+                      headers={"X-Baker-Key": "test-key"})
+    assert resp.status_code == 200, resp.text
+    assert resp.json()["mode"] == "filter_only"
+
+
+# ─── INGEST_SEARCH_DURABILITY_FOLLOWUPS_1 A3: cross-store reconciliation ────────
+
+
+def test_health_exposes_documents_missing_qdrant_in_source():
+    """A3: /health must surface the drift count (informational, must NOT flip
+    status — legacy backlog can't be allowed to fail Render's liveness probe)."""
+    src = Path("outputs/dashboard.py").read_text()
+    assert '"documents_missing_qdrant": docs_missing_qdrant' in src
+    assert "def _documents_missing_qdrant(" in src
+    # Guard: the drift count must not be wired into the degraded-status condition.
+    cond_start = src.index("status = \"healthy\"")
+    cond = src[cond_start:cond_start + 200]
+    assert "documents_missing_qdrant" not in cond, (
+        "drift count must stay informational — not flip /health to degraded"
+    )
+
+
+@pytestmark_helper
+def test_reconciliation_endpoint_returns_missing_docs(monkeypatch):
+    from fastapi.testclient import TestClient
+    import outputs.dashboard as dash
+    from datetime import datetime
+
+    monkeypatch.setenv("BAKER_API_KEY", "test-key")
+    monkeypatch.setattr(dash, "_BAKER_API_KEY", "test-key", raising=False)
+    dash.app.dependency_overrides.pop(dash.verify_api_key, None)
+
+    class _Cur:
+        def execute(self, sql, params=None):
+            self._count = "COUNT(*)" in sql
+        def fetchone(self):
+            return {"c": 2}
+        def fetchall(self):
+            return [
+                {"id": 7, "filename": "a.pdf", "source_path": "email:1/a.pdf",
+                 "matter_slug": "mo-vie", "ingested_at": datetime(2026, 6, 1)},
+                {"id": 8, "filename": "b.pdf", "source_path": "email:2/b.pdf",
+                 "matter_slug": "", "ingested_at": None},
+            ]
+        def close(self):
+            pass
+    class _Conn:
+        def cursor(self, cursor_factory=None):
+            return _Cur()
+        def rollback(self):
+            pass
+    class _Store:
+        def _get_conn(self):
+            return _Conn()
+        def _put_conn(self, c):
+            pass
+    monkeypatch.setattr(dash, "_get_store", lambda: _Store())
+
+    client = TestClient(dash.app)
+    resp = client.get("/api/documents/reconciliation",
+                      headers={"X-Baker-Key": "test-key"})
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+    assert body["missing_qdrant_count"] == 2
+    assert len(body["documents"]) == 2
+    assert body["documents"][0]["id"] == 7
+    assert body["documents"][1]["ingested_at"] is None
