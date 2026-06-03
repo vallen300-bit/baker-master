@@ -1,5 +1,5 @@
 ---
-status: PENDING
+status: COMPLETE (merged PR #286 1831f8f; gates G1/G2-CLEAR/G3-codex PASS/architect SHIP-WITH-FOLLOWUPS)
 brief_id: ATTACHMENT_TWO_WRITE_PARITY_1
 dispatch: ATTACHMENT_TWO_WRITE_PARITY_1
 to: b3
