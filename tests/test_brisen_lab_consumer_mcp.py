@@ -99,6 +99,9 @@ def test_baker_inbox_read_schema_optional_terminal():
     tool = next(t for t in srv.TOOLS if t.name == "baker_inbox_read")
     assert "required" not in tool.inputSchema or not tool.inputSchema.get("required")
     assert "exclude_self" in tool.inputSchema["properties"]
+    # MCP_INBOX_READ_UNACKED_FILTER_1: unacked-only escape hatch present + defaults off.
+    assert "include_acked" in tool.inputSchema["properties"]
+    assert tool.inputSchema["properties"]["include_acked"]["default"] is False
 
 
 def test_baker_inbox_ack_schema_takes_msg_id_or_msg_ids():
@@ -388,7 +391,10 @@ def test_read_passes_filters_in_querystring(patch_httpx):
     assert "since=" in url
     assert "kind=dispatch" in url
     assert "exclude_self=true" in url
-    assert "limit=25" in url
+    # Unacked-only path fetches a WIDE window (daemon cap 200) and slices to the
+    # display limit client-side AFTER filtering — so the wire limit is 200, not 25.
+    assert "limit=200" in url
+    assert "unread=true" in url
 
 
 def test_read_terminal_override(patch_httpx):
@@ -441,6 +447,97 @@ def test_read_caps_limit_at_200(patch_httpx):
     patch_httpx(handler)
     srv._dispatch("baker_inbox_read", {"limit": 9999})
     assert "limit=200" in captured["url"]
+
+
+# --- unacked-only filter (MCP_INBOX_READ_UNACKED_FILTER_1) -----------------
+
+
+def test_read_filters_out_acked_rows_by_default(patch_httpx):
+    """Docstring promises acknowledged_at IS NULL — client-filter even if the
+    daemon hands back acked rows."""
+    def handler(request):
+        return httpx.Response(
+            200,
+            json=[
+                {"id": 1, "kind": "dispatch", "body": "fresh-alpha", "acknowledged_at": None},
+                {"id": 2, "kind": "dispatch", "body": "processed-bravo",
+                 "acknowledged_at": "2026-06-03T10:00:00Z"},
+                {"id": 3, "kind": "broadcast", "body": "fresh-charlie"},
+            ],
+        )
+
+    patch_httpx(handler)
+    out = srv._dispatch("baker_inbox_read", {})
+    rows = json.loads(out)
+    ids = [r["id"] for r in rows]
+    assert ids == [1, 3]  # acked id=2 dropped; missing-field id=3 kept
+    assert "processed-bravo" not in out
+
+
+def test_read_include_acked_returns_all_rows(patch_httpx):
+    """include_acked=true is the escape hatch — full set, no client filter."""
+    def handler(request):
+        return httpx.Response(
+            200,
+            json=[
+                {"id": 1, "body": "unacked", "acknowledged_at": None},
+                {"id": 2, "body": "acked", "acknowledged_at": "2026-06-03T10:00:00Z"},
+            ],
+        )
+
+    patch_httpx(handler)
+    out = srv._dispatch("baker_inbox_read", {"include_acked": True})
+    rows = json.loads(out)
+    assert [r["id"] for r in rows] == [1, 2]
+
+
+def test_read_include_acked_does_not_send_unread_hint(patch_httpx):
+    """include_acked path fetches the display limit and omits the unread hint."""
+    captured = {}
+
+    def handler(request):
+        captured["url"] = str(request.url)
+        return httpx.Response(200, json=[])
+
+    patch_httpx(handler)
+    srv._dispatch("baker_inbox_read", {"include_acked": True, "limit": 25})
+    assert "limit=25" in captured["url"]
+    assert "unread" not in captured["url"]
+
+
+def test_read_all_acked_returns_unacked_only_notice(patch_httpx):
+    """All rows acked → friendly empty notice, NOT an error."""
+    def handler(request):
+        return httpx.Response(
+            200,
+            json=[
+                {"id": 1, "body": "a", "acknowledged_at": "2026-06-03T09:00:00Z"},
+                {"id": 2, "body": "b", "acknowledged_at": "2026-06-03T10:00:00Z"},
+            ],
+        )
+
+    patch_httpx(handler)
+    out = srv._dispatch("baker_inbox_read", {})
+    assert "Inbox empty for b4" in out
+    assert "unacked only" in out
+    assert not out.startswith("Error")
+
+
+def test_read_display_limit_honored_after_filter(patch_httpx):
+    """Display limit slices the UNACKED set, so the count is meaningful even when
+    acked rows are interleaved in the daemon's wide page."""
+    def handler(request):
+        rows = []
+        for i in range(1, 11):
+            rows.append({"id": i, "body": f"m{i}",
+                         "acknowledged_at": None if i % 2 else "2026-06-03T10:00:00Z"})
+        return httpx.Response(200, json=rows)
+
+    patch_httpx(handler)
+    out = srv._dispatch("baker_inbox_read", {"limit": 2})
+    rows = json.loads(out)
+    # 5 unacked (odd ids 1,3,5,7,9); limit=2 slices the filtered set → first 2.
+    assert [r["id"] for r in rows] == [1, 3]
 
 
 # ==========================================================================
