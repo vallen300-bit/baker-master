@@ -1850,6 +1850,40 @@ async def scheduler_heartbeat_health():
 # Root — serve index.html
 # ============================================================
 
+# TWO NAMED predicates (G0 codex #1772 fold) — they select DIFFERENT row sets on
+# purpose and must NOT be collapsed:
+#
+#   _RECON_MISSING_QDRANT_PREDICATE  — filename-level. The reconciliation REPORT's
+#     legacy view: "how many filenames in `documents` have no baker-documents
+#     ingestion at all". Read-only, manual-decision surface. Unchanged behaviour.
+#
+#   _REINGEST_MISSING_QDRANT_PREDICATE — row-level (filename + file_hash). The
+#     REPAIR selector. ingestion_log's dedup key is (filename, file_hash), so a
+#     filename-only predicate would hide a row whose filename matches an
+#     already-embedded sibling with a different hash (live: 76 dup filenames cover
+#     165 rows) — that row would never be embedded yet never re-selected, so the
+#     resume loop could never reach remaining_after == 0. Row-level is resume-safe.
+#
+# `d` is the alias for the `documents` table in every consumer. Collection is
+# pinned to baker-documents in both (an embed into another collection does not
+# satisfy semantic document search).
+_RECON_MISSING_QDRANT_PREDICATE = (
+    "NOT EXISTS (SELECT 1 FROM ingestion_log il "
+    "WHERE il.collection = 'baker-documents' AND il.filename = d.filename)"
+)
+_REINGEST_MISSING_QDRANT_PREDICATE = (
+    "NOT EXISTS (SELECT 1 FROM ingestion_log il "
+    "WHERE il.collection = 'baker-documents' "
+    "AND il.filename = d.filename AND il.file_hash = d.file_hash)"
+)
+# Embeddable = row-level-missing AND has non-blank extracted text. Empty/NULL
+# full_text rows can never be embedded (ingest_text returns skipped "Empty text"
+# and writes no ingestion_log), so including them in the repair selector would
+# re-return them every call and STALL the resume loop (live: 576 of 1036 legacy
+# rows are blank, only 460 embeddable). The repair selector filters them at SQL.
+_HAS_EXTRACTED_TEXT = "d.full_text IS NOT NULL AND btrim(d.full_text) <> ''"
+
+
 def _documents_missing_qdrant(limit: int = 50):
     """A3 (INGEST_SEARCH_DURABILITY_FOLLOWUPS_1): cross-store reconciliation.
 
@@ -1869,11 +1903,7 @@ def _documents_missing_qdrant(limit: int = 50):
     try:
         import psycopg2.extras
         cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
-        # filename is the shared join key used by the search enrichment path.
-        not_in_qdrant = (
-            "NOT EXISTS (SELECT 1 FROM ingestion_log il "
-            "WHERE il.collection = 'baker-documents' AND il.filename = d.filename)"
-        )
+        not_in_qdrant = _RECON_MISSING_QDRANT_PREDICATE
         cur.execute(f"SELECT COUNT(*) AS c FROM documents d WHERE {not_in_qdrant}")
         count = cur.fetchone()["c"]
         cur.execute(
@@ -1939,6 +1969,179 @@ async def documents_reconciliation(limit: int = Query(50, ge=1, le=500)):
         "limit": limit,
         "note": "documents present in Postgres but absent from baker-documents ingestion_log; "
                 "includes legacy backlog predating the Qdrant two-write. Manual re-ingest decision.",
+    }
+
+
+def _reingest_missing_counts(cur):
+    """Compute the three repair-progress counts off a live cursor.
+
+    - total_missing: filename-level legacy view (matches /api/documents/reconciliation).
+    - embeddable_missing: row-level-missing AND has non-blank text — the set the
+      repair actually processes; remaining_after re-reads THIS so the loop converges.
+    - skipped_empty_total: row-level-missing but blank/NULL text — never embeddable,
+      reported for visibility, deliberately excluded from the repair selector.
+    """
+    cur.execute(f"SELECT COUNT(*) AS c FROM documents d WHERE {_RECON_MISSING_QDRANT_PREDICATE}")
+    total_missing = cur.fetchone()["c"]
+    cur.execute(
+        f"SELECT COUNT(*) AS c FROM documents d "
+        f"WHERE {_REINGEST_MISSING_QDRANT_PREDICATE} AND {_HAS_EXTRACTED_TEXT}"
+    )
+    embeddable_missing = cur.fetchone()["c"]
+    cur.execute(
+        f"SELECT COUNT(*) AS c FROM documents d "
+        f"WHERE {_REINGEST_MISSING_QDRANT_PREDICATE} AND NOT ({_HAS_EXTRACTED_TEXT})"
+    )
+    skipped_empty_total = cur.fetchone()["c"]
+    return total_missing, embeddable_missing, skipped_empty_total
+
+
+@app.post("/api/documents/reingest-missing", tags=["documents"], dependencies=[Depends(verify_api_key)])
+async def documents_reingest_missing(
+    limit: int = Query(50, ge=1, le=500),
+    dry_run: bool = Query(True),
+):
+    """REINGEST_MISSING_QDRANT_ENDPOINT_1: re-embed Postgres-only docs into Qdrant.
+
+    Repairs the legacy backlog of `documents` rows that have extracted text in
+    Postgres but no `baker-documents` Qdrant embedding (the keyword-only ~19% that
+    predates the two-write). The repair selector is ROW-LEVEL (filename + file_hash,
+    the ingestion_log dedup key) and EMBEDDABLE-ONLY (non-blank full_text) so the
+    resume loop converges — see `_REINGEST_MISSING_QDRANT_PREDICATE`. For each row
+    it re-embeds the already-extracted `full_text` via `ingest_text`, threading the
+    row's own `file_hash` (so dedup keys match documents.file_hash, not a re-hash
+    of the text), `document_id`, and `matter_slug`.
+
+    Safe-by-default: `dry_run=true` (the default) writes nothing. Caller must pass
+    `dry_run=false` to repair. Bounded + resumable — `limit` caps each call; re-run
+    until `remaining_after == 0` (remaining EMBEDDABLE rows). No background job /
+    scheduler / startup hook. Embed only: never re-classify or re-extract.
+    Idempotent (relies on ingest_text dedup + deterministic point IDs; does NOT
+    pass skip_dedup).
+    """
+    store = _get_store()
+    conn = store._get_conn()
+    if not conn:
+        return {"error": "no_db_connection", "dry_run": dry_run}
+    try:
+        import psycopg2.extras
+        cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+        total_missing, embeddable_missing, skipped_empty_total = _reingest_missing_counts(cur)
+        # Repair selector: row-level-missing AND embeddable, capped at limit.
+        cur.execute(
+            f"SELECT d.id, d.filename, d.source_path, d.matter_slug, d.file_hash, d.full_text "
+            f"FROM documents d "
+            f"WHERE {_REINGEST_MISSING_QDRANT_PREDICATE} AND {_HAS_EXTRACTED_TEXT} "
+            f"ORDER BY d.ingested_at DESC NULLS LAST LIMIT %s",
+            (limit,),
+        )
+        candidates = [dict(r) for r in cur.fetchall()]
+        cur.close()
+    except Exception as sel_err:
+        try:
+            conn.rollback()
+        except Exception:
+            pass
+        logger.error(f"reingest-missing select failed: {sel_err}")
+        # NOTE: do NOT _put_conn here — the finally below returns the conn exactly
+        # once. _put_conn itself rolls back before returning to the pool, so a
+        # second call here would roll back / return an already-returned conn under
+        # concurrency (codex G3 #1778/#1779 fold).
+        return {"error": "select_failed", "reason": str(sel_err), "dry_run": dry_run}
+    finally:
+        store._put_conn(conn)
+
+    if dry_run:
+        return {
+            "dry_run": True,
+            "total_missing": total_missing,
+            "embeddable_missing": embeddable_missing,
+            "skipped_empty_total": skipped_empty_total,
+            "limit": limit,
+            "would_process": [
+                {
+                    "id": c["id"],
+                    "filename": c.get("filename"),
+                    "text_len": len(c.get("full_text") or ""),
+                }
+                for c in candidates
+            ],
+        }
+
+    # --- Write path: re-embed each candidate; one failure must NOT abort batch ---
+    from tools.ingest.pipeline import ingest_text
+    attempted = 0
+    embedded = 0
+    skipped_empty = 0
+    skipped_dedup = 0
+    failed = []
+    for c in candidates:
+        attempted += 1
+        doc_id = c["id"]
+        full_text = c.get("full_text") or ""
+        # Defensive: the selector already filters empties at SQL, but never embed
+        # blank text (would seal nothing and waste an embed call).
+        if not full_text.strip():
+            skipped_empty += 1
+            continue
+        try:
+            result = ingest_text(
+                full_text=full_text,
+                filename=c.get("filename") or f"doc-{doc_id}",
+                source_path=c.get("source_path") or c.get("filename") or f"doc-{doc_id}",
+                file_hash=c.get("file_hash"),  # use documents.file_hash, do NOT re-hash text
+                document_id=doc_id,
+                matter_slug=c.get("matter_slug"),
+            )
+        except Exception as ing_err:
+            logger.error(f"reingest-missing id={doc_id} raised: {ing_err}")
+            failed.append({"id": doc_id, "reason": str(ing_err)})
+            continue
+        reason = (result.skip_reason or "") if result.skipped else ""
+        if not result.skipped:
+            embedded += 1
+        elif reason.startswith("Duplicate"):
+            skipped_dedup += 1
+        elif reason == "Empty text":
+            skipped_empty += 1
+        else:
+            # partial_embed or any other non-sealed outcome — retryable failure.
+            failed.append({"id": doc_id, "reason": reason or "skipped"})
+
+    # remaining_after: re-count remaining EMBEDDABLE rows post-batch so the caller
+    # sees real convergence (NOT total_missing, which includes never-embeddable empties).
+    remaining_after = None
+    conn2 = store._get_conn()
+    if conn2:
+        try:
+            cur2 = conn2.cursor()
+            cur2.execute(
+                f"SELECT COUNT(*) FROM documents d "
+                f"WHERE {_REINGEST_MISSING_QDRANT_PREDICATE} AND {_HAS_EXTRACTED_TEXT}"
+            )
+            remaining_after = cur2.fetchone()[0]
+            cur2.close()
+        except Exception as cnt_err:
+            try:
+                conn2.rollback()
+            except Exception:
+                pass
+            logger.error(f"reingest-missing remaining_after count failed: {cnt_err}")
+        finally:
+            store._put_conn(conn2)
+
+    return {
+        "dry_run": False,
+        "limit": limit,
+        "total_missing": total_missing,
+        "embeddable_missing": embeddable_missing,
+        "skipped_empty_total": skipped_empty_total,
+        "attempted": attempted,
+        "embedded": embedded,
+        "skipped_empty": skipped_empty,
+        "skipped_dedup": skipped_dedup,
+        "failed": failed,
+        "remaining_after": remaining_after,
     }
 
 
