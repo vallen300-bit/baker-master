@@ -87,6 +87,8 @@ class GraphConfig:
     authority_tmpl: str = "https://login.microsoftonline.com/{tenant}"
     scope: List[str] = field(default_factory=lambda: ["https://graph.microsoft.com/.default"])
     enabled: bool = os.getenv("BAKER_USE_GRAPH", "false").lower() == "true"
+    # M365_GRAPH_MAIL_POLL_2: mailbox the Graph poller reads (delta query).
+    mail_user: str = os.getenv("M365_MAIL_USER", "dvallen@brisengroup.com")
 
 
 @dataclass
@@ -301,6 +303,8 @@ class TriggerConfig:
     fireflies_scan_interval: int = 900  # 15 minutes (was 7200; FIREFLIES-FIX-1)
     # Email check interval
     email_check_interval: int = 300  # 5 minutes
+    # M365_GRAPH_MAIL_POLL_2: Microsoft Graph inbound mail poll interval
+    graph_mail_check_interval: int = int(os.getenv("GRAPH_MAIL_CHECK_INTERVAL", "300"))  # 5 minutes
     # WhatsApp: migrated to WAHA webhook (Session 26) — polling removed
     # Todoist polling interval
     todoist_check_interval: int = 1800  # 30 minutes

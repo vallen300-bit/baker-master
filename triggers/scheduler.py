@@ -71,6 +71,21 @@ class SentinelScheduler:
             f"Registered: email_poll (every {config.triggers.email_check_interval}s)"
         )
 
+        # -------------------------------------------------------
+        # M365_GRAPH_MAIL_POLL_2: Microsoft Graph mail polling — every 5 minutes
+        # Independent source adapter; inert unless BAKER_USE_GRAPH=true.
+        # -------------------------------------------------------
+        from triggers.graph_mail_trigger import check_new_graph_messages
+        self.scheduler.add_job(
+            check_new_graph_messages,
+            IntervalTrigger(seconds=config.triggers.graph_mail_check_interval),
+            id="graph_mail_poll",
+            name="Microsoft Graph mail polling",
+        )
+        logger.info(
+            f"Registered: graph_mail_poll (every {config.triggers.graph_mail_check_interval}s)"
+        )
+
         # WhatsApp: migrated to WAHA webhook (S26) — polling removed (WASSENGER-CLEANUP)
 
         # -------------------------------------------------------
