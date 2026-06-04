@@ -61,15 +61,42 @@ NOTE: this also flows into every other `direct_dsn_params` consumer (reingest lo
 scheduler_lease) — all want keepalives, so this is the right single place. Verify no consumer
 passes a conflicting keepalive kwarg.
 
-## Fix 2: heartbeat self-heals the lock connection instead of dying — defense in depth
-In `_scheduler_heartbeat()` (`embedded_scheduler.py:1536+`), when the `_held_conn` `SELECT 1`
-probe raises (dead conn), **reconnect + re-acquire the advisory lock in place** (call the
-`scheduler_lease` re-acquire path) rather than leaving `_held_conn` dead until the watchdog
-tears down the whole scheduler. Keep it diagnostic-only re: NOT calling `restart_scheduler()`
-from the job thread (reentrancy hazard, per the existing comment) — just repair the connection.
-If a clean re-acquire helper doesn't exist in `scheduler_lease.py`, add one (mirror
-`acquire_singleton_lock` with keepalives) and call it here. Watermark is still written FIRST
-(unchanged) so proof-of-life never depends on probe latency.
+## Fix 2: bound the probe so it FAILS FAST, then self-heal the lock connection (codex G0 REVISE #1815/#1855 fold)
+**Why "self-heal" alone is insufficient (the fold):** the watermark is already written FIRST
+(`embedded_scheduler.py:1546-1551`), so a *single* heartbeat run's proof-of-life is independent
+of probe latency. BUT the heartbeat job is `IntervalTrigger(minutes=5)` with **`max_instances=1`**
+(`:782-785`). If the probe `cur.execute("SELECT 1")` (`:1560`) **HANGS** on a half-open / idle-dropped
+TCP socket — which it can, because the held conn has no socket-read bound and no `statement_timeout`
+— the job thread stays alive. The next 5-min fire is then **skipped** ("maximum number of running
+instances reached"), so no new watermark is written, the watermark ages past the 720s / 2-cycle
+threshold, and the watchdog (`dashboard.py:188`) restarts the whole scheduler **even though the
+watermark was written first**. A blocking probe defeats watermark-first. So Fix 2 must make the
+probe **timeout-bounded** (fail in seconds, not minutes), THEN self-heal.
+
+**2a — bound the probe (load-bearing):**
+- TCP-dead detection: the Fix 1 keepalives (`keepalives_idle=30, interval=10, count=5`) bound a
+  half-open socket to ~80s of detection — comfortably under the 300s next-fire, so a hung
+  instance always clears before the next heartbeat. This is the primary bound for the idle-drop case.
+- Server-stall detection: set a **`statement_timeout` on the scheduler lock SESSION** so a
+  server-side stall also fails fast. Set it at acquire time **inside `scheduler_lease.py` only**
+  (e.g. `cur.execute("SET statement_timeout = '10s'")` right after `conn.autocommit = True` in
+  `acquire_singleton_lock`, before `pg_try_advisory_lock`) — **NOT** in the shared `direct_dsn_params`,
+  to avoid changing reingest/OCR lock-conn behavior. statement_timeout bounds the server-busy case;
+  keepalives bound the TCP-dead case; together the probe cannot block the heartbeat job thread.
+
+**2b — self-heal:** when the (now fast-failing) probe raises, **reconnect + re-acquire the advisory
+lock in place** via a new `reacquire_singleton_lock()` helper in `scheduler_lease.py` (mirror
+`acquire_singleton_lock` — close the dead `_held_conn` first, then keepalives + `autocommit` +
+`SET statement_timeout` + `pg_try_advisory_lock`, reset `_held_conn` under `_lock`). Call it from
+the heartbeat probe `except` branch. Still **diagnostic-only re: restart** — never call
+`restart_scheduler()` from the job thread (reentrancy: `shutdown(wait=True)` joins worker threads,
+a thread cannot join itself). Watermark stays written FIRST (unchanged).
+
+**Re-acquire failure posture:** if `reacquire_singleton_lock()` itself fails (DB still unreachable),
+leave `_held_conn = None`, log a single WARN, and return — do NOT raise out of the heartbeat job
+(must never fail the watermark path). The next heartbeat retries; the watchdog remains the backstop.
+Note `acquire_singleton_lock` already returns `None` (continues without lock) when the direct
+endpoint is unset — `reacquire` mirrors that non-fatal posture.
 
 ## Fix 3: log the teardown reason loudly — observability
 Ensure `restart_scheduler()` and the watchdog restart path log a single greppable line
@@ -96,7 +123,13 @@ restart-reason log.)
 ## Verification
 - `pytest tests/test_scheduler_liveness*.py tests/test_scheduler_lease*.py -v` (literal).
 - New unit: `direct_dsn_params` includes the 4 keepalive keys.
-- New unit: heartbeat with a mocked-dead `_held_conn` triggers a re-acquire (not a no-op), watermark still written.
+- New unit: `acquire_singleton_lock` issues `SET statement_timeout` on the lock session (assert the
+  `SET statement_timeout` call is made on the cursor; mock psycopg2.connect).
+- New unit: heartbeat probe whose `_held_conn` cursor **raises** triggers `reacquire_singleton_lock`
+  (assert called, not a no-op), and the watermark is still written FIRST (assert set_watermark called
+  before the probe).
+- New unit: `reacquire_singleton_lock` failure (connect raises) leaves `_held_conn=None`, logs WARN,
+  and the heartbeat job returns WITHOUT raising (assert no exception propagates).
 - Live: the Done-rubric ≥40-min window.
 
 ## POST_DEPLOY_AC_VERDICT v1 (B-code fills on prod)
