@@ -76,6 +76,7 @@ declare -a TERMINALS=(
   "CM-3:/Users/dimitry/baker-vault"
   "CM-4:/Users/dimitry/baker-vault"
   "hag-filer:/Users/dimitry/baker-vault"
+  "clerk:/Users/dimitry/baker-vault"
 )
 
 # Test-only override: if TERMINALS_OVERRIDE is set, replace the array. Format:

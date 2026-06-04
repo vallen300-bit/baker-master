@@ -60,6 +60,7 @@ case "${BAKER_ROLE:-}" in
     CM-3|cm-3|CM_3)                     SLUG=CM-3 ;;
     CM-4|cm-4|CM_4)                     SLUG=CM-4 ;;
     hag-filer|HAG-FILER|hag_filer)      SLUG=hag-filer ;;
+    clerk|CLERK)                        SLUG=clerk ;;
     *)
         # No BAKER_ROLE → silent no-op. Cwd-based fallback intentionally NOT
         # mirrored here to avoid auto-draining for sessions not meant to be on
