@@ -1,9 +1,10 @@
 ---
 dispatch: M365_GRAPH_MAIL_POLL_2
 target: b4
-status: PENDING
+status: COMPLETE
 from: cowork-ah1 (Director-directed 2026-06-04)
 gate_G0: codex PASS — bus #1806 (G0 v3; Findings 1-3 across #1801/#1804 all folded)
+merged: PR #292 squash dfdab00 (G1 lead + G2 /security-review NO-findings + G3 architect SHIP); dormant post-deploy AC PASS (scheduler 64 jobs, graph_mail inert)
 dispatched_by: cowork-ah1
 reply_to: cowork-ah1
 ---
