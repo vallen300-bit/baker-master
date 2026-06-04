@@ -40,7 +40,7 @@ def test_endpoint_is_auth_gated_and_safe_by_default():
     assert "dependencies=[Depends(verify_api_key)]" in decl, "must be auth-gated"
     assert 'tags=["documents"]' in decl
     assert "dry_run: bool = Query(True)" in decl, "must default dry_run=True (safe-by-default)"
-    assert "limit: int = Query(50, ge=1, le=500)" in decl
+    assert "limit: int = Query(10, ge=1, le=100)" in decl
 
 
 def test_repair_selector_is_row_level_and_embeddable_only():
@@ -67,14 +67,16 @@ def test_repair_selector_is_row_level_and_embeddable_only():
 
 def test_ingest_call_threads_file_hash_document_id_matter_slug():
     """Fold 3: ingest_text must receive documents.file_hash (not a re-hash), plus
-    document_id + matter_slug; skip_dedup must NOT be set True."""
+    document_id + matter_slug; skip_dedup must NOT be set True. The ingest_text call
+    lives in the _reingest_embed_batch helper (REINGEST_ASYNC_OFFLOAD_1 moved the loop
+    body off the event loop)."""
     src = Path("outputs/dashboard.py").read_text()
-    ep = src[src.index("async def documents_reingest_missing("):]
-    ep = ep[: ep.index("@app.get(", 1)] if "@app.get(" in ep else ep
-    assert "file_hash=c.get(\"file_hash\")" in ep, "must thread documents.file_hash"
-    assert "document_id=doc_id" in ep
-    assert "matter_slug=c.get(\"matter_slug\")" in ep
-    assert "skip_dedup=True" not in ep, "must rely on dedup (idempotency) — never skip it"
+    helper = src[src.index("def _reingest_embed_batch("):]
+    helper = helper[: helper.index("\n@app.")] if "\n@app." in helper else helper
+    assert "file_hash=c.get(\"file_hash\")" in helper, "must thread documents.file_hash"
+    assert "document_id=doc_id" in helper
+    assert "matter_slug=c.get(\"matter_slug\")" in helper
+    assert "skip_dedup=True" not in helper, "must rely on dedup (idempotency) — never skip it"
 
 
 def test_remaining_after_counts_embeddable_not_total():
@@ -150,11 +152,49 @@ class _FakeConn:
         pass
 
 
-def _client(monkeypatch, state, ingest_behaviour=None):
+class _LockCur:
+    """Fake cursor for the dedicated direct lock connection."""
+
+    def __init__(self, granted):
+        self._granted = granted
+        self._sql = ""
+
+    def execute(self, sql, params=None):
+        self._sql = sql
+
+    def fetchone(self):
+        if "pg_try_advisory_lock" in self._sql:
+            return (self._granted,)
+        return (None,)
+
+    def close(self):
+        pass
+
+
+class _LockConn:
+    """Fake dedicated DIRECT psycopg2 connection (autocommit session lock holder)."""
+
+    def __init__(self, granted):
+        self._granted = granted
+        self.autocommit = False
+        self.closed = False
+
+    def cursor(self):
+        return _LockCur(self._granted)
+
+    def close(self):
+        self.closed = True
+
+
+def _client(monkeypatch, state, ingest_behaviour=None, lock_granted=True):
     """Returns (TestClient, calls) with auth bypassed and store/ingest_text mocked.
 
     ingest_behaviour(row) -> IngestResult-like SimpleNamespace, or raises.
     Defaults to a clean embed (skipped=False).
+
+    REINGEST_ASYNC_OFFLOAD_1: the write path now takes a session advisory lock on a
+    dedicated DIRECT psycopg2 connection. We mock host_direct + psycopg2.connect so the
+    happy path acquires the lock (lock_granted=True) and dry_run=false tests still pass.
     """
     from fastapi.testclient import TestClient
     import importlib
@@ -173,6 +213,10 @@ def _client(monkeypatch, state, ingest_behaviour=None):
             return None
 
     monkeypatch.setattr(dash, "_get_store", lambda: _StubStore())
+    # Direct-conn session lock mocks (write path only; dry_run never reaches them).
+    monkeypatch.setattr("config.settings.config.postgres.host_direct", "direct.test",
+                        raising=False)
+    monkeypatch.setattr("psycopg2.connect", lambda **kw: _LockConn(lock_granted))
 
     calls = []
 
@@ -380,3 +424,65 @@ def test_fold2_loop_converges_despite_legacy_empties(monkeypatch):
     assert body["remaining_after"] == 0  # loop terminates
     assert body["total_missing"] == 50   # legacy count still surfaced for visibility
     assert calls == []
+
+
+# ─── REINGEST_ASYNC_OFFLOAD_1: thread offload + direct-conn advisory lock ──────
+
+
+def test_reingest_embed_batch_isolates_failures(monkeypatch):
+    """REINGEST_ASYNC_OFFLOAD_1: one doc raising must not abort the batch; counts classify."""
+    import outputs.dashboard as dash
+
+    class _Res:
+        def __init__(self, skipped=False, reason=None):
+            self.skipped = skipped; self.skip_reason = reason
+    def _fake_ingest(**kw):
+        if kw["document_id"] == 2:
+            raise RuntimeError("voyage 429")
+        if kw["document_id"] == 3:
+            return _Res(skipped=True, reason="Duplicate (filename, file_hash)")
+        return _Res(skipped=False)
+    # helper imports `from tools.ingest.pipeline import ingest_text` at call time —
+    # patch the source module attribute.
+    monkeypatch.setattr("tools.ingest.pipeline.ingest_text", _fake_ingest)
+
+    candidates = [
+        {"id": 1, "filename": "a", "source_path": "a", "file_hash": "h1", "matter_slug": None, "full_text": "x"},
+        {"id": 2, "filename": "b", "source_path": "b", "file_hash": "h2", "matter_slug": None, "full_text": "y"},
+        {"id": 3, "filename": "c", "source_path": "c", "file_hash": "h3", "matter_slug": None, "full_text": "z"},
+        {"id": 4, "filename": "d", "source_path": "d", "file_hash": "h4", "matter_slug": None, "full_text": "   "},
+    ]
+    stats = dash._reingest_embed_batch(candidates)
+    assert stats["attempted"] == 4
+    assert stats["embedded"] == 1          # doc 1
+    assert stats["skipped_dedup"] == 1     # doc 3
+    assert stats["skipped_empty"] == 1     # doc 4 (blank)
+    assert len(stats["failed"]) == 1 and stats["failed"][0]["id"] == 2  # doc 2 raised
+
+
+def test_reingest_write_path_offloads_and_locks_on_direct_conn():
+    """G0 #1809: write path must offload to a thread AND take the session lock on a
+    dedicated DIRECT connection (never the pooled store conn)."""
+    import inspect, outputs.dashboard as dash
+    src = inspect.getsource(dash.documents_reingest_missing)
+    assert "asyncio.to_thread(_reingest_embed_batch" in src        # offload
+    assert "pg_try_advisory_lock" in src and "pg_advisory_unlock" in src
+    assert "direct_dsn_params" in src                               # direct, not pooled
+    assert "host_direct" in src                                     # fail-loud guard
+    assert "store._put_conn(lock_conn)" not in src                 # NOT returned to pool
+    assert "lock_conn.autocommit = True" in src                    # G0 #1815: no idle-in-txn lock drop
+
+
+def test_reingest_lock_held_returns_backfill_in_progress(monkeypatch):
+    """G0 #1809/#1815 (mandatory): a held advisory lock ⇒ second writer gets
+    backfill_in_progress (proves the single-runner guard, not just a source check)."""
+    state = {
+        "total_missing": 3, "embeddable_missing": 3, "skipped_empty_total": 0,
+        "candidates": [_row(1), _row(2), _row(3)], "remaining_after": 3,
+    }
+    # lock_granted=False ⇒ pg_try_advisory_lock returns False ⇒ backfill_in_progress.
+    client, calls = _client(monkeypatch, state, lock_granted=False)
+    r = client.post("/api/documents/reingest-missing?dry_run=false&limit=10", headers=_HDR)
+    assert r.status_code == 200
+    assert r.json().get("error") == "backfill_in_progress"
+    assert calls == [], "no embed must run while another batch holds the lock"
