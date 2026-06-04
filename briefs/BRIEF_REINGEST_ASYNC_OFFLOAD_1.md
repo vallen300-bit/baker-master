@@ -1,0 +1,261 @@
+# BRIEF: REINGEST_ASYNC_OFFLOAD_1 — stop the reingest endpoint from taking Baker down
+
+## Context
+`POST /api/documents/reingest-missing` (shipped in #291, `cb9b984`) is an `async def`
+handler that calls the **synchronous** `ingest_text()` (chunk → Voyage embed → Qdrant
+upsert) directly inside the request, in a per-candidate loop. On Baker's single Uvicorn
+worker this blocks the event-loop thread for the entire batch — so `/health`, the
+dashboard, search, and MCP all queue behind it and time out. A live `limit=50` backfill
+run on 2026-06-04 made baker-master unresponsive for ~15 min and required a Render
+restart to recover (AH1 incident, PINNED §A-LEAD-0603-PM3). Lesson #25 also flags
+embedding catch-up as an OOM risk, so concurrent batches must be prevented.
+
+This brief makes the embed loop run **off** the event loop and guards against
+concurrent/overlapping runs. Scope is deliberately minimal (Option A, AH1-chosen over a
+job-queue to avoid over-engineering a near-one-time recovery).
+
+### Surface contract: N/A — backend-only fix to an admin JSON endpoint; no clickable/dashboard surface.
+
+## Harness V2
+
+- **Routed owner:** B-code (idle: b1). Single-file Python change in `outputs/dashboard.py` + 1 test file.
+- **Task class:** production-facing bug fix (availability). NOT docs-only.
+- **Context Contract:** all touch-points, signatures, and the exact diff are below; no discovery needed.
+- **Done rubric (answer literally — NOT "tests pass"):**
+  1. During a live `dry_run=false&limit=10` run against prod, a concurrent `GET /health`
+     returns 200 in <3s (proves the worker is no longer blocked). Paste both timestamps.
+  2. A second concurrent `POST .../reingest-missing?dry_run=false` returns
+     `{"error":"backfill_in_progress"}` (proves the advisory lock holds).
+  3. `embedded` count > 0 and `remaining_after` strictly decreases across two sequential calls.
+- **Gate plan:** G0 codex-arch (brief) → G1 lead (pytest literal + live probe) → G2 /security-review → G3 codex (PR) → merge → **POST_DEPLOY_AC_VERDICT v1**.
+
+## Estimated time: ~1h
+## Complexity: Low
+## Prerequisites: none (PR #291 already merged to main)
+
+---
+
+## Fix 1: Offload the embed loop to a thread + advisory lock + smaller default batch
+
+### Problem
+The write path (lines ~2071-2109 of `outputs/dashboard.py`) runs `ingest_text()`
+synchronously inside the `async def` handler. The event loop is blocked for the whole
+batch → total service unavailability on a single worker.
+
+### Current State
+`outputs/dashboard.py`:
+- `2000` `async def documents_reingest_missing(limit: int = Query(50, ge=1, le=500), dry_run: bool = Query(True))`
+- `2071-2109` the synchronous `for c in candidates:` embed loop (the blocking section).
+- `2111-2131` `remaining_after` recount (fast SQL — leave on the event loop).
+- `ingest_text` signature (verified, `tools/ingest/pipeline.py:369`):
+  `ingest_text(full_text, filename, source_path, collection="baker-documents", file_hash=None, project=None, role=None, skip_dedup=False, verbose=False, document_id=None, matter_slug=None) -> IngestResult` (`.skipped`, `.skip_reason`).
+- `asyncio` is already imported and `asyncio.to_thread(...)` is the established offload
+  idiom in this file (e.g. lines 839, 978, 1110, 6138).
+
+### Implementation
+
+**Step 1 — add a module-level sync helper** (place it directly above the endpoint, near
+the `_reingest_missing_counts` helper at line ~1975). This is the existing loop body
+moved verbatim into a function so it can run in a thread:
+
+```python
+# REINGEST_ASYNC_OFFLOAD_1: run the blocking embed loop in a worker thread so the
+# event loop (and /health, dashboard, search, MCP) stays responsive during a backfill.
+def _reingest_embed_batch(candidates: list) -> dict:
+    """Embed already-extracted full_text for each candidate. Pure ingest_text calls —
+    no DB connection held. One failure must NOT abort the batch. Runs in a thread via
+    asyncio.to_thread."""
+    from tools.ingest.pipeline import ingest_text
+    attempted = embedded = skipped_empty = skipped_dedup = 0
+    failed = []
+    for c in candidates:
+        attempted += 1
+        doc_id = c["id"]
+        full_text = c.get("full_text") or ""
+        if not full_text.strip():
+            skipped_empty += 1
+            continue
+        try:
+            result = ingest_text(
+                full_text=full_text,
+                filename=c.get("filename") or f"doc-{doc_id}",
+                source_path=c.get("source_path") or c.get("filename") or f"doc-{doc_id}",
+                file_hash=c.get("file_hash"),  # documents.file_hash, do NOT re-hash text
+                document_id=doc_id,
+                matter_slug=c.get("matter_slug"),
+            )
+        except Exception as ing_err:
+            logger.error(f"reingest-missing id={doc_id} raised: {ing_err}")
+            failed.append({"id": doc_id, "reason": str(ing_err)})
+            continue
+        reason = (result.skip_reason or "") if result.skipped else ""
+        if not result.skipped:
+            embedded += 1
+        elif reason.startswith("Duplicate"):
+            skipped_dedup += 1
+        elif reason == "Empty text":
+            skipped_empty += 1
+        else:
+            failed.append({"id": doc_id, "reason": reason or "skipped"})
+    return {
+        "attempted": attempted,
+        "embedded": embedded,
+        "skipped_empty": skipped_empty,
+        "skipped_dedup": skipped_dedup,
+        "failed": failed,
+    }
+
+
+# Session-level advisory lock key — only one reingest write-batch at a time across
+# all workers (prevents the Lesson #25 compounding-memory OOM on overlapping batches).
+_REINGEST_ADVISORY_LOCK_KEY = 0x5245494E  # ascii "REIN"
+```
+
+**Step 2 — lower the default + cap the ceiling** on the endpoint signature (line 2001).
+Smaller batches keep each call short and memory bounded (Lesson #25):
+
+```python
+    limit: int = Query(10, ge=1, le=100),
+```
+
+**Step 3 — replace the synchronous write path.** Delete the current inline block from
+`# --- Write path:` (~2071) through the end of the `for c in candidates:` loop (~2109) —
+that includes the inline `from tools.ingest.pipeline import ingest_text` import and the
+whole loop. Replace it with the advisory-locked, thread-offloaded version:
+
+```python
+    # --- Write path: acquire single-runner advisory lock, then embed off the event loop ---
+    lock_conn = store._get_conn()
+    if not lock_conn:
+        return {"error": "no_db_connection", "dry_run": False}
+    got_lock = False
+    try:
+        lc = lock_conn.cursor()
+        lc.execute("SELECT pg_try_advisory_lock(%s)", (_REINGEST_ADVISORY_LOCK_KEY,))
+        got_lock = bool(lc.fetchone()[0])
+        lc.close()
+        if not got_lock:
+            return {
+                "error": "backfill_in_progress",
+                "reason": "another reingest batch holds the advisory lock",
+                "dry_run": False,
+            }
+        # Blocking embed loop runs in a worker thread — event loop stays free.
+        stats = await asyncio.to_thread(_reingest_embed_batch, candidates)
+    except Exception as embed_err:
+        logger.error(f"reingest-missing embed batch failed: {embed_err}")
+        stats = {"attempted": 0, "embedded": 0, "skipped_empty": 0,
+                 "skipped_dedup": 0, "failed": [{"id": None, "reason": str(embed_err)}]}
+    finally:
+        if got_lock:
+            try:
+                uc = lock_conn.cursor()
+                uc.execute("SELECT pg_advisory_unlock(%s)", (_REINGEST_ADVISORY_LOCK_KEY,))
+                uc.close()
+                lock_conn.commit()
+            except Exception as unlock_err:
+                logger.error(f"reingest-missing advisory unlock failed: {unlock_err}")
+                try:
+                    lock_conn.rollback()
+                except Exception:
+                    pass
+        store._put_conn(lock_conn)
+
+    attempted = stats["attempted"]
+    embedded = stats["embedded"]
+    skipped_empty = stats["skipped_empty"]
+    skipped_dedup = stats["skipped_dedup"]
+    failed = stats["failed"]
+```
+
+The existing `remaining_after` recount block (lines ~2111-2131) and the final `return`
+dict (lines ~2133-2145) are UNCHANGED — `attempted/embedded/skipped_*/failed` are now
+unpacked from `stats` above, so the return dict keys still resolve.
+
+### Key Constraints
+- Do NOT change the dry_run branch (lines 2054-2069) — it writes nothing, needs no lock.
+- Do NOT change the candidate SELECT (2031-2038) or `_reingest_missing_counts` — fast SQL, stays on the event loop.
+- The advisory lock MUST acquire + release on the **same** connection (`lock_conn`) — session-level locks are per-connection.
+- Keep the lock scoped to the write path only; never around `dry_run`.
+- `ingest_text` remains idempotent (dedup + deterministic point IDs) — re-running a partial batch is safe.
+- One doc failing must not abort the batch (preserved in the helper).
+- Every except block rolls back / cleans up (preserved above).
+
+### Verification
+- `pytest tests/test_reingest_missing_qdrant.py -v` — existing 11 must still pass (the refactor is behavior-preserving for the happy path).
+- New test (Fix 2) proves the offload helper's failure-isolation contract.
+- Live: see Done rubric.
+
+---
+
+## Fix 2: Test the offload helper
+
+Add to `tests/test_reingest_missing_qdrant.py`:
+
+```python
+def test_reingest_embed_batch_isolates_failures(monkeypatch):
+    """REINGEST_ASYNC_OFFLOAD_1: one doc raising must not abort the batch; counts classify."""
+    import outputs.dashboard as dash
+
+    class _Res:
+        def __init__(self, skipped=False, reason=None):
+            self.skipped = skipped; self.skip_reason = reason
+    def _fake_ingest(**kw):
+        if kw["document_id"] == 2:
+            raise RuntimeError("voyage 429")
+        if kw["document_id"] == 3:
+            return _Res(skipped=True, reason="Duplicate (filename, file_hash)")
+        return _Res(skipped=False)
+    # helper imports `from tools.ingest.pipeline import ingest_text` at call time —
+    # patch the source module attribute (verify this target resolves before asserting).
+    monkeypatch.setattr("tools.ingest.pipeline.ingest_text", _fake_ingest)
+
+    candidates = [
+        {"id": 1, "filename": "a", "source_path": "a", "file_hash": "h1", "matter_slug": None, "full_text": "x"},
+        {"id": 2, "filename": "b", "source_path": "b", "file_hash": "h2", "matter_slug": None, "full_text": "y"},
+        {"id": 3, "filename": "c", "source_path": "c", "file_hash": "h3", "matter_slug": None, "full_text": "z"},
+        {"id": 4, "filename": "d", "source_path": "d", "file_hash": "h4", "matter_slug": None, "full_text": "   "},
+    ]
+    stats = dash._reingest_embed_batch(candidates)
+    assert stats["attempted"] == 4
+    assert stats["embedded"] == 1          # doc 1
+    assert stats["skipped_dedup"] == 1     # doc 3
+    assert stats["skipped_empty"] == 1     # doc 4 (blank)
+    assert len(stats["failed"]) == 1 and stats["failed"][0]["id"] == 2  # doc 2 raised
+```
+
+---
+
+## Files Modified
+- `outputs/dashboard.py` — add `_reingest_embed_batch` + lock key; lower default limit 50→10 (cap 500→100); replace sync write loop with locked `asyncio.to_thread` call.
+- `tests/test_reingest_missing_qdrant.py` — add the failure-isolation test.
+
+## Do NOT Touch
+- The dry_run branch, candidate SELECT, `_reingest_missing_counts`, `_REINGEST_MISSING_QDRANT_PREDICATE`, `_HAS_EXTRACTED_TEXT` — all correct as shipped in #291.
+- `tools/ingest/pipeline.py` — `ingest_text` is consumed as-is.
+- Any other endpoint.
+
+## Quality Checkpoints (post-deploy)
+1. Live `dry_run=false&limit=10` run completes; `embedded > 0`.
+2. Concurrent `GET /health` returns 200 <3s DURING that run (the core fix).
+3. Concurrent second `POST` returns `backfill_in_progress`.
+4. Two sequential calls: `remaining_after` strictly decreases.
+5. No Render OOM/restart during a run (watch deploy logs / memory).
+
+## Verification SQL
+```sql
+-- remaining embeddable rows (should fall toward 0 as batches run); single COUNT, no LIMIT needed
+SELECT COUNT(*) FROM documents d
+WHERE d.full_text IS NOT NULL AND length(btrim(d.full_text)) > 0
+  AND NOT EXISTS (
+    SELECT 1 FROM ingestion_log il
+    WHERE il.filename = d.filename AND il.file_hash = d.file_hash
+  );
+-- canonical source of truth = _REINGEST_MISSING_QDRANT_PREDICATE + _HAS_EXTRACTED_TEXT.
+```
+
+## POST_DEPLOY_AC_VERDICT v1 (B-code fills on prod, after merge+deploy)
+- AC1 health-during-backfill: PASS/FAIL + the two timestamps.
+- AC2 advisory-lock: PASS/FAIL + the `backfill_in_progress` response.
+- AC3 convergence: PASS/FAIL + two `remaining_after` values.
+- Overall: PASS only if all three pass on the live instance.
