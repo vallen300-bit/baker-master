@@ -119,6 +119,25 @@ each tick and, if set, calls `restart_scheduler()`. `restart_scheduler()` → `r
 spawns the existing 30s lock-retry thread → clean stand-down, no self-join. (If by then the other
 holder is gone, the retry thread re-starts jobs — existing behavior.) Watermark stays written FIRST.
 
+**2c — heartbeat control shape: `_held_conn is None` must mean "reacquire", never "skip" (codex G0
+REVISE #1872 Finding 1, HIGH).** The current probe is gated `if held is not None:` (`embedded_scheduler.py:1557`)
+— so it only *probes* when a conn exists. That gate is WRONG once self-heal exists: after a transient
+connect failure (2b row c) leaves `_held_conn = None` while the scheduler is still firing, the **next**
+heartbeat would see `held is None`, **skip the branch entirely**, write a fresh watermark, and keep
+firing jobs with no lock **forever** — the watchdog never restarts because the watermark stays fresh.
+That silently re-creates the no-jobs-without-lock violation 2b is meant to prevent. **Key invariant:**
+the heartbeat job itself is registered ONLY when `start_scheduler()` acquired the lock
+(`:1699-1707` registers no jobs and returns when the lock is unavailable) — therefore *if the heartbeat
+is running at all, this process is an active scheduler that MUST hold the lock.* So restructure the
+heartbeat's lock-health step to compute `need_reacquire`:
+- `held is None` → `need_reacquire = True` (active scheduler that lost its conn on a prior transient — must recover or stand down).
+- `held is not None` → run the bounded `SELECT 1` probe; on probe failure → `need_reacquire = True`.
+- if `need_reacquire`: call `reacquire_singleton_lock()` and act on its 3-state result exactly per the 2b table
+  (TRUE → continue; FALSE → `request_standdown()`; transient connect-fail → WARN + return, stays non-fatal
+  and **retries again next heartbeat because `held is None` now routes into reacquire, not skip**).
+This closes the loop: a transient failure is retried every 5 min until it either re-owns or stands down;
+it can never settle into "fresh watermark + firing + no lock". Watermark still written FIRST (unchanged).
+
 ## Fix 3: log the teardown reason loudly — observability
 Ensure `restart_scheduler()` and the watchdog restart path log a single greppable line
 (`SCHEDULER_RESTART reason=<...>`) so the cadence is observable and a regression is caught.
@@ -158,6 +177,11 @@ restart-reason log.)
   WARN, NO stand-down, heartbeat returns without raising.
 - New unit: `_check_scheduler_heartbeat()` with `_standdown_requested` set calls `restart_scheduler()`
   and clears the flag (test-and-clear is idempotent — second tick does not re-restart).
+- New unit (codex #1872 — held-None must reacquire, not skip): heartbeat with `_lease._held_conn = None`
+  (active scheduler after a prior transient) **calls `reacquire_singleton_lock()`** — assert it is NOT
+  skipped. Cover all 3 outcomes from that state: TRUE → `_held_conn` set + continue; FALSE →
+  `request_standdown()`; transient connect-fail → non-fatal, still None, and a *subsequent* heartbeat
+  calls reacquire again (assert the retry, proving no "skip + fresh watermark + lock-less firing" state).
 - Live: the Done-rubric ≥40-min window.
 
 ## POST_DEPLOY_AC_VERDICT v1 (B-code fills on prod)
