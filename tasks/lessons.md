@@ -719,3 +719,23 @@ Anchor: Director chat 2026-05-23 evening; AH2 bus #788 (Layer 2) + bus #790
 **Why it's a trap:** the post still "succeeds" (returns a message_id), so it reads as shipped. The corruption is invisible unless you re-read the stored body — and you CAN'T read another slug's inbox (reader_slug_mismatch), so you can't even verify another agent's received copy. Backticks are natural in technical bodies (tool names, paths, code) — exactly the messages most likely to carry them.
 
 **Rule:** in any `bus_post.sh <recipient> "<body>" <topic>` call, the body must contain NO backticks and NO `$(...)`/`` ` `` command-substitution and NO bare `$VAR`. Options: (a) drop the backticks (use plain words or single quotes inside: 'ocrmac'); (b) wrap the whole body in SINGLE quotes (but then no apostrophes); (c) prefer `bus_post.py` / a heredoc for bodies with shell metacharacters. Re-read the rendered command for stray `` ` `` / `$` before sending. Sibling of the "verify the real wire, not the success code" family (Lesson #86).
+
+### 89. "Latest N" via `ORDER BY ts ASC LIMIT n` returns the OLDEST n — silently truncates the wrong end once a collection passes the limit (2026-06-04)
+
+**What broke:** brisen-lab `GET /msg/{terminal}` used `ORDER BY created_at ASC LIMIT n`. cowork-ah1 dispatched #1795 to codex; codex woke but `check-codex-inbox.sh` (default limit=10) reported "no new buses." codex had 53 messages addressed to it, so ASC+LIMIT returned its OLDEST 10 (all long-acked) and the newest unacked #1795 fell outside the window. The flaw was present in the first bus commit (e5a6617, 2026-05-05) — latent for a month.
+
+**Why it stayed hidden:** (1) it only bites a FULL poll (no `since=`) once a terminal's total messages exceed the limit — while terminals had fewer than `limit` messages, ASC returned everything. (2) The routine session-start drain uses `?since=<last_seen>` (incremental) → only new-since-last rows → those always fit under the limit → the common path never triggered it. The happy path masked the bug. (3) Per-test fixtures truncate the table (<limit rows), so the threshold condition was never created, and no test asserted newest-vs-oldest window selection.
+
+**Rule:** any "latest / recent N" query must `ORDER BY <ts> DESC` (+ an `id DESC` tiebreaker for same-timestamp ties) and re-sort in the app only if chronological display is needed — never `ASC + LIMIT` for recency. Every limited/paginated endpoint gets a test that seeds MORE than the limit and asserts the NEWEST item is returned. When two paths serve the same data (full poll vs incremental `since=`), test BOTH — a bug in the rarely-exercised path hides behind the common one.
+
+**Anchor:** MSG_LIST_NEWEST_N_FIX_1 (brisen-lab PR #60, 2026-06-04). Latent since e5a6617 (2026-05-05). Sibling of #86 (contract verified against the wrong thing).
+
+### 90. Removing or shrinking an observable signal a human relies on IS a regression — even when the code "works as designed" (2026-06-04)
+
+**What broke:** Director relied on dashboard cards turning amber to see at a glance "who is working." A deliberate 2026-06-02 rework (FORGE_HEARTBEAT_TURN_GATED_1 + instant-extinguish, brisen-lab PR #59) changed amber from "lit whenever a session is open" to "lit only during an active turn, extinguished within seconds of turn-end." The intent (an honest live-work signal) was sound, but it removed the persistent at-a-glance signal Director actually used → he reported amber "stopped working." It passed review because it did exactly what it was designed to do.
+
+**Why it's a trap:** a change that REMOVES or shrinks information is invisible to tests and to "works-as-designed" review — what breaks is a stakeholder's reliance, which nothing in the code asserts. "Correct" and "no regression" are not the same thing when an observable signal changes. (The codex bug above is the inverse: a flaw the tests could have caught but didn't; this one no test could catch.)
+
+**Rule:** when a change alters or removes an observable behavior (a dashboard signal, a status colour, a log line, an output field, a default), the brief/PR must (1) name who or what relies on the current behavior, (2) get explicit sign-off from that stakeholder before shipping, (3) capture the reliance as a stated requirement so the next change sees it. Treat signal-removal as a breaking change by default.
+
+**Anchor:** dashboard amber working-glow, brisen-lab PR #59 (2026-06-02); Director-reported 2026-06-04. Paired with #89 (both surfaced the same session).
