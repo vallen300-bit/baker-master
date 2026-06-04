@@ -122,6 +122,33 @@ def test_reacquire_closes_conn_on_post_connect_failure(monkeypatch):
     assert lease.consume_standdown() is False  # transient never stands down
 
 
+def test_acquire_closes_conn_when_advisory_lock_raises(monkeypatch):
+    """codex G3 v2 #1888: if the advisory-lock cursor block raises after the conn
+    is open, acquire closes it (no leak) + returns None + _held_conn stays None."""
+    _direct_host(monkeypatch)
+    conn = MagicMock()
+    conn.cursor.return_value.execute.side_effect = RuntimeError("SELECT pg_try_advisory_lock failed")
+    with patch.object(lease.psycopg2, "connect", return_value=conn):
+        held = lease.acquire_singleton_lock()
+
+    assert held is None
+    conn.close.assert_called_once()
+    assert lease._held_conn is None
+
+
+def test_reacquire_closes_conn_when_advisory_lock_raises(monkeypatch):
+    """Mirror on reacquire: cursor-block raise → conn closed → REACQUIRE_TRANSIENT."""
+    _direct_host(monkeypatch)
+    conn = MagicMock()
+    conn.cursor.return_value.execute.side_effect = RuntimeError("SELECT failed")
+    with patch.object(lease.psycopg2, "connect", return_value=conn):
+        outcome = lease.reacquire_singleton_lock()
+
+    assert outcome == lease.REACQUIRE_TRANSIENT
+    conn.close.assert_called_once()
+    assert lease._held_conn is None
+
+
 # ---------- Fix 2b: reacquire 3-state split ----------
 
 

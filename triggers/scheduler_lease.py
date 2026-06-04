@@ -137,30 +137,45 @@ def acquire_singleton_lock() -> Optional[psycopg2.extensions.connection]:
             )
             return None
 
+        # Split connect from the lock-probe block so EVERY failure path after the
+        # connection is open closes it (codex G3 v2 #1888: the old single try/except
+        # returned None on a cursor-block raise WITHOUT closing conn → the 30s
+        # acquire-retry loop leaked a direct Neon session per cycle). Mirrors
+        # reacquire_singleton_lock's structure exactly.
         try:
             conn = _open_lock_session()
+        except Exception as e:
+            logger.error("scheduler singleton lock acquire connect failed: %s", e)
+            return None
+
+        try:
             cur = conn.cursor()
             cur.execute("SELECT pg_try_advisory_lock(%s)", (SCHEDULER_LOCK_KEY,))
             row = cur.fetchone()
             cur.close()
-            if not row or not row[0]:
-                conn.close()
-                logger.info(
-                    "scheduler singleton lock NOT acquired (key=%s) — "
-                    "another process holds it",
-                    SCHEDULER_LOCK_KEY,
-                )
-                return None
-            _held_conn = conn
-            logger.info(
-                "scheduler singleton lock ACQUIRED (key=%s) on direct host %s",
-                SCHEDULER_LOCK_KEY,
-                config.postgres.host_direct,
-            )
-            return conn
         except Exception as e:
-            logger.error("scheduler singleton lock acquire failed: %s", e)
+            try:
+                conn.close()
+            except Exception:
+                pass
+            logger.error("scheduler singleton lock acquire probe failed: %s", e)
             return None
+
+        if not row or not row[0]:
+            conn.close()
+            logger.info(
+                "scheduler singleton lock NOT acquired (key=%s) — "
+                "another process holds it",
+                SCHEDULER_LOCK_KEY,
+            )
+            return None
+        _held_conn = conn
+        logger.info(
+            "scheduler singleton lock ACQUIRED (key=%s) on direct host %s",
+            SCHEDULER_LOCK_KEY,
+            config.postgres.host_direct,
+        )
+        return conn
 
 
 def reacquire_singleton_lock() -> str:
