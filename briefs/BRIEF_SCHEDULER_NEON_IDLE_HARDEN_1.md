@@ -83,20 +83,41 @@ probe **timeout-bounded** (fail in seconds, not minutes), THEN self-heal.
   `acquire_singleton_lock`, before `pg_try_advisory_lock`) — **NOT** in the shared `direct_dsn_params`,
   to avoid changing reingest/OCR lock-conn behavior. statement_timeout bounds the server-busy case;
   keepalives bound the TCP-dead case; together the probe cannot block the heartbeat job thread.
+- **Connect-bound (codex G0 REVISE #1869 Finding 1, HIGH):** keepalives do NOT bound the *initial
+  TCP connect*, and `statement_timeout` only applies once a session exists — so the **self-heal
+  reconnect itself can hang** on a dead network, re-introducing the exact block we're removing. Pass
+  **`connect_timeout=5`** as an explicit kwarg on BOTH the `acquire_singleton_lock` and the new
+  `reacquire_singleton_lock` `psycopg2.connect(...)` calls in `scheduler_lease.py` (mirror the
+  existing direct-connect precedent at `embedded_scheduler.py:127` which already passes
+  `connect_timeout=5, **config.postgres.direct_dsn_params`). Keep it on the scheduler-lock connect
+  calls (not in shared `direct_dsn_params`) per the reviewer's scoping.
 
-**2b — self-heal:** when the (now fast-failing) probe raises, **reconnect + re-acquire the advisory
-lock in place** via a new `reacquire_singleton_lock()` helper in `scheduler_lease.py` (mirror
-`acquire_singleton_lock` — close the dead `_held_conn` first, then keepalives + `autocommit` +
-`SET statement_timeout` + `pg_try_advisory_lock`, reset `_held_conn` under `_lock`). Call it from
-the heartbeat probe `except` branch. Still **diagnostic-only re: restart** — never call
-`restart_scheduler()` from the job thread (reentrancy: `shutdown(wait=True)` joins worker threads,
-a thread cannot join itself). Watermark stays written FIRST (unchanged).
+**2b — self-heal with correct failure-mode split (codex G0 REVISE #1869 Finding 2, HIGH):** when the
+(now fast-failing) probe raises, call a new `reacquire_singleton_lock()` helper in `scheduler_lease.py`
+(mirror `acquire_singleton_lock` — close the dead `_held_conn` first, then `connect_timeout=5` +
+keepalives + `autocommit` + `SET statement_timeout` + `pg_try_advisory_lock`). It returns a **3-state
+result** the heartbeat acts on — because the singleton contract is *no jobs may run without the lock*
+(`embedded_scheduler.py:1699-1707` registers NO jobs when `acquire_singleton_lock()` returns None;
+`scheduler_lease.py:39-46` requires the caller hold the conn for process lifetime). The naive
+"reconnect, set `_held_conn`, continue" path is wrong: if **another process grabbed the freed lock**
+(deploy overlap), this process would keep firing its already-registered jobs **with no lock held** →
+duplicate scheduler. Split it:
 
-**Re-acquire failure posture:** if `reacquire_singleton_lock()` itself fails (DB still unreachable),
-leave `_held_conn = None`, log a single WARN, and return — do NOT raise out of the heartbeat job
-(must never fail the watermark path). The next heartbeat retries; the watchdog remains the backstop.
-Note `acquire_singleton_lock` already returns `None` (continues without lock) when the direct
-endpoint is unset — `reacquire` mirrors that non-fatal posture.
+| Outcome of reacquire | Meaning | Heartbeat action |
+|---|---|---|
+| reconnect OK + `pg_try_advisory_lock` **TRUE** | we re-own the same lock; no other holder | set `_held_conn`, log INFO, **continue firing** (the win path — conn died, we re-grabbed it, NO teardown) |
+| reconnect OK + `pg_try_advisory_lock` **FALSE** | another container owns the lock now → we are a zombie duplicate | close the conn, `_held_conn=None`, **request stand-down** (see below) — must STOP firing |
+| reconnect FAILS (connect_timeout / DB unreachable) | ownership indeterminate, transient | `_held_conn=None`, log WARN, **return** (next heartbeat retries; watchdog backstop). Do NOT stand down on a transient — if DB is unreachable to us it is generally unreachable to all, so no other process can grab the lock |
+
+**Stand-down via a non-self-join path:** never call `restart_scheduler()` / `shutdown(wait=True)`
+from the heartbeat *job thread* (a thread cannot join itself). Instead set a module-level flag in
+`scheduler_lease` (`request_standdown()` → sets `_standdown_requested`; `consume_standdown()` →
+test-and-clear). The **request-thread** middleware watchdog `_check_scheduler_heartbeat()`
+(`dashboard.py:188`, runs on request threads, NOT the job thread) checks `consume_standdown()` FIRST
+each tick and, if set, calls `restart_scheduler()`. `restart_scheduler()` → `release_singleton_lock()`
+→ `start_scheduler()` → `acquire_singleton_lock()` returns None (other holder) → registers NO jobs +
+spawns the existing 30s lock-retry thread → clean stand-down, no self-join. (If by then the other
+holder is gone, the retry thread re-starts jobs — existing behavior.) Watermark stays written FIRST.
 
 ## Fix 3: log the teardown reason loudly — observability
 Ensure `restart_scheduler()` and the watchdog restart path log a single greppable line
@@ -112,8 +133,9 @@ restart-reason log.)
 
 ## Files Modified
 - `config/settings.py` — keepalives in `direct_dsn_params`.
-- `triggers/scheduler_lease.py` — re-acquire helper (if needed) for Fix 2.
-- `triggers/embedded_scheduler.py` — heartbeat self-heals lock conn + restart-reason log.
+- `triggers/scheduler_lease.py` — `connect_timeout=5` + `SET statement_timeout` on acquire; new `reacquire_singleton_lock()` (3-state) + `request_standdown()`/`consume_standdown()` flag.
+- `triggers/embedded_scheduler.py` — heartbeat probe calls `reacquire_singleton_lock()` + acts on the 3-state result (continue / request stand-down / transient retry) + restart-reason log.
+- `outputs/dashboard.py` — `_check_scheduler_heartbeat()` checks `consume_standdown()` FIRST each tick → `restart_scheduler()` (non-self-join executor).
 - `tests/test_scheduler_*.py` — see Verification.
 
 ## Do NOT Touch
@@ -128,8 +150,14 @@ restart-reason log.)
 - New unit: heartbeat probe whose `_held_conn` cursor **raises** triggers `reacquire_singleton_lock`
   (assert called, not a no-op), and the watermark is still written FIRST (assert set_watermark called
   before the probe).
-- New unit: `reacquire_singleton_lock` failure (connect raises) leaves `_held_conn=None`, logs WARN,
-  and the heartbeat job returns WITHOUT raising (assert no exception propagates).
+- New unit: `acquire_singleton_lock` AND `reacquire_singleton_lock` pass `connect_timeout=5` to
+  `psycopg2.connect` (assert the kwarg; mock connect).
+- New unit (3-state split): (a) reconnect OK + advisory-lock TRUE → `_held_conn` set, NO stand-down
+  requested, heartbeat continues; (b) reconnect OK + advisory-lock FALSE → `_held_conn=None`, conn
+  closed, `request_standdown()` called; (c) reconnect raises (connect_timeout) → `_held_conn=None`,
+  WARN, NO stand-down, heartbeat returns without raising.
+- New unit: `_check_scheduler_heartbeat()` with `_standdown_requested` set calls `restart_scheduler()`
+  and clears the flag (test-and-clear is idempotent — second tick does not re-restart).
 - Live: the Done-rubric ≥40-min window.
 
 ## POST_DEPLOY_AC_VERDICT v1 (B-code fills on prod)
