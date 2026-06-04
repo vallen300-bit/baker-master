@@ -1996,9 +1996,61 @@ def _reingest_missing_counts(cur):
     return total_missing, embeddable_missing, skipped_empty_total
 
 
+# REINGEST_ASYNC_OFFLOAD_1: run the blocking embed loop in a worker thread so the
+# event loop (and /health, dashboard, search, MCP) stays responsive during a backfill.
+def _reingest_embed_batch(candidates: list) -> dict:
+    """Embed already-extracted full_text for each candidate. Pure ingest_text calls —
+    no DB connection held. One failure must NOT abort the batch. Runs in a thread via
+    asyncio.to_thread."""
+    from tools.ingest.pipeline import ingest_text
+    attempted = embedded = skipped_empty = skipped_dedup = 0
+    failed = []
+    for c in candidates:
+        attempted += 1
+        doc_id = c["id"]
+        full_text = c.get("full_text") or ""
+        if not full_text.strip():
+            skipped_empty += 1
+            continue
+        try:
+            result = ingest_text(
+                full_text=full_text,
+                filename=c.get("filename") or f"doc-{doc_id}",
+                source_path=c.get("source_path") or c.get("filename") or f"doc-{doc_id}",
+                file_hash=c.get("file_hash"),  # documents.file_hash, do NOT re-hash text
+                document_id=doc_id,
+                matter_slug=c.get("matter_slug"),
+            )
+        except Exception as ing_err:
+            logger.error(f"reingest-missing id={doc_id} raised: {ing_err}")
+            failed.append({"id": doc_id, "reason": str(ing_err)})
+            continue
+        reason = (result.skip_reason or "") if result.skipped else ""
+        if not result.skipped:
+            embedded += 1
+        elif reason.startswith("Duplicate"):
+            skipped_dedup += 1
+        elif reason == "Empty text":
+            skipped_empty += 1
+        else:
+            failed.append({"id": doc_id, "reason": reason or "skipped"})
+    return {
+        "attempted": attempted,
+        "embedded": embedded,
+        "skipped_empty": skipped_empty,
+        "skipped_dedup": skipped_dedup,
+        "failed": failed,
+    }
+
+
+# Session-level advisory lock key — only one reingest write-batch at a time across
+# all workers (prevents the Lesson #25 compounding-memory OOM on overlapping batches).
+_REINGEST_ADVISORY_LOCK_KEY = 0x5245494E  # ascii "REIN"
+
+
 @app.post("/api/documents/reingest-missing", tags=["documents"], dependencies=[Depends(verify_api_key)])
 async def documents_reingest_missing(
-    limit: int = Query(50, ge=1, le=500),
+    limit: int = Query(10, ge=1, le=100),
     dry_run: bool = Query(True),
 ):
     """REINGEST_MISSING_QDRANT_ENDPOINT_1: re-embed Postgres-only docs into Qdrant.
@@ -2068,45 +2120,72 @@ async def documents_reingest_missing(
             ],
         }
 
-    # --- Write path: re-embed each candidate; one failure must NOT abort batch ---
-    from tools.ingest.pipeline import ingest_text
-    attempted = 0
-    embedded = 0
-    skipped_empty = 0
-    skipped_dedup = 0
-    failed = []
-    for c in candidates:
-        attempted += 1
-        doc_id = c["id"]
-        full_text = c.get("full_text") or ""
-        # Defensive: the selector already filters empties at SQL, but never embed
-        # blank text (would seal nothing and waste an embed call).
-        if not full_text.strip():
-            skipped_empty += 1
-            continue
+    # --- Write path: single-runner SESSION advisory lock on a DEDICATED DIRECT
+    #     (non-pooled) connection. pgbouncer transaction-mode on the store pool resets
+    #     session state on commit and would release the lock (codex G0 #1809 HIGH). ---
+    import psycopg2
+    from config.settings import config as _cfg
+    if not getattr(_cfg.postgres, "host_direct", None):
+        # Direct endpoint required for a session lock; pooled host is unsafe. Fail loud.
+        return {
+            "error": "no_direct_dsn",
+            "reason": "session advisory lock requires a non-pooled (direct) Postgres endpoint; host_direct unset",
+            "dry_run": False,
+        }
+    try:
+        lock_conn = psycopg2.connect(**_cfg.postgres.direct_dsn_params)
+        # MUST be autocommit (codex G0 #1815 HIGH): default psycopg2 (autocommit=False)
+        # opens a transaction on the lock SELECT; the connection then sits
+        # idle-in-transaction while the embed batch runs in the worker thread. Live
+        # idle_in_transaction_session_timeout = 5min, so a slow batch (>5min) gets its
+        # session killed and the advisory lock silently released → overlapping batch.
+        # Precedent: triggers/scheduler_lease.py:63-67; BRIEF_SCHEDULER_SINGLETON_HARDEN_1.
+        lock_conn.autocommit = True
+    except Exception as conn_err:
+        logger.error(f"reingest-missing direct connect failed: {conn_err}")
         try:
-            result = ingest_text(
-                full_text=full_text,
-                filename=c.get("filename") or f"doc-{doc_id}",
-                source_path=c.get("source_path") or c.get("filename") or f"doc-{doc_id}",
-                file_hash=c.get("file_hash"),  # use documents.file_hash, do NOT re-hash text
-                document_id=doc_id,
-                matter_slug=c.get("matter_slug"),
-            )
-        except Exception as ing_err:
-            logger.error(f"reingest-missing id={doc_id} raised: {ing_err}")
-            failed.append({"id": doc_id, "reason": str(ing_err)})
-            continue
-        reason = (result.skip_reason or "") if result.skipped else ""
-        if not result.skipped:
-            embedded += 1
-        elif reason.startswith("Duplicate"):
-            skipped_dedup += 1
-        elif reason == "Empty text":
-            skipped_empty += 1
-        else:
-            # partial_embed or any other non-sealed outcome — retryable failure.
-            failed.append({"id": doc_id, "reason": reason or "skipped"})
+            lock_conn.close()  # may not be bound; guard
+        except Exception:
+            pass
+        return {"error": "lock_connect_failed", "reason": str(conn_err), "dry_run": False}
+    got_lock = False
+    try:
+        lc = lock_conn.cursor()
+        lc.execute("SELECT pg_try_advisory_lock(%s)", (_REINGEST_ADVISORY_LOCK_KEY,))
+        got_lock = bool(lc.fetchone()[0])
+        lc.close()
+        if not got_lock:
+            return {
+                "error": "backfill_in_progress",
+                "reason": "another reingest batch holds the advisory lock",
+                "dry_run": False,
+            }
+        # Blocking embed loop runs in a worker thread — event loop stays free.
+        stats = await asyncio.to_thread(_reingest_embed_batch, candidates)
+    except Exception as embed_err:
+        logger.error(f"reingest-missing embed batch failed: {embed_err}")
+        stats = {"attempted": 0, "embedded": 0, "skipped_empty": 0,
+                 "skipped_dedup": 0, "failed": [{"id": None, "reason": str(embed_err)}]}
+    finally:
+        if got_lock:
+            try:
+                uc = lock_conn.cursor()
+                uc.execute("SELECT pg_advisory_unlock(%s)", (_REINGEST_ADVISORY_LOCK_KEY,))
+                uc.close()
+            except Exception as unlock_err:
+                logger.error(f"reingest-missing advisory unlock failed: {unlock_err}")
+        # Dedicated connection — CLOSE it (session end also drops any held lock).
+        # Never store._put_conn() this; it is not a pool connection.
+        try:
+            lock_conn.close()
+        except Exception:
+            pass
+
+    attempted = stats["attempted"]
+    embedded = stats["embedded"]
+    skipped_empty = stats["skipped_empty"]
+    skipped_dedup = stats["skipped_dedup"]
+    failed = stats["failed"]
 
     # remaining_after: re-count remaining EMBEDDABLE rows post-batch so the caller
     # sees real convergence (NOT total_missing, which includes never-embeddable empties).
