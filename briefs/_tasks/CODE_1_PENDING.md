@@ -1,72 +1,32 @@
 ---
-status: COMPLETE
-brief_id: REINGEST_ASYNC_OFFLOAD_1
-dispatch: REINGEST_ASYNC_OFFLOAD_1
+status: PENDING
+brief_id: OCR_REEXTRACT_MISSING_1
+dispatch: OCR_REEXTRACT_MISSING_1
 to: b1
 from: lead
 dispatched_by: lead
-task_class: production bug fix (availability)
+task_class: production recovery feature + reliability guard
 harness_v2: applies
-gate_plan: G0 codex PASS (#1820, e54b2d8) → G1 lead (literal pytest + live health-during-backfill probe) → G2 /security-review → G3 codex (PR) → merge → POST_DEPLOY_AC_VERDICT v1
-brief_path: briefs/BRIEF_REINGEST_ASYNC_OFFLOAD_1.md
+gate_plan: G0 codex PASS (#1843, b92c31d) → G1 lead (literal pytest) → G2 /security-review → G3 codex (PR) → merge → POST_DEPLOY_AC_VERDICT v1
+brief_path: briefs/BRIEF_OCR_REEXTRACT_MISSING_1.md
 ---
 
-# B1 dispatch — REINGEST_ASYNC_OFFLOAD_1
+# B1 dispatch — OCR_REEXTRACT_MISSING_1
 
-**Full spec: `briefs/BRIEF_REINGEST_ASYNC_OFFLOAD_1.md` (commit e54b2d8). Read it — this envelope is the pointer + the gate contract, not the spec.**
+**Full spec: `briefs/BRIEF_OCR_REEXTRACT_MISSING_1.md` (commit b92c31d). codex G0 v2 PASS (#1843). Read the brief — this envelope is the pointer + gate contract.**
 
 ## Context Contract
+Recover ~580 blank-`full_text` scanned PDFs/DOCX via **Gemini 2.5 Pro vision** (Director-ratified reader). You hold the freshest reingest/ingest context (#291/#293). The brief carries every signature + file:line: `DropboxClient.download_file` (triggers/dropbox_client.py:198), `call_pro` vision (orchestrator/gemini_client.py:148, message image-part format :81-92), `_get_store`, the targeted-UPDATE write, and the document_pipeline fail-loud branch.
 
-You built REINGEST_MISSING_QDRANT_ENDPOINT_1 (#291) last session, so you own the freshest
-context on `POST /api/documents/reingest-missing` (`outputs/dashboard.py:1999`), the
-`_REINGEST_MISSING_QDRANT_PREDICATE` / `_HAS_EXTRACTED_TEXT` selectors, and
-`tools/ingest/pipeline.py:ingest_text()`.
+## Scope (Option A — codex PASS at b92c31d)
+1. **Part A:** `POST /api/documents/ocr-extract-missing` — select blank PDF/DOCX, download from Dropbox, rasterize via **new dep PyMuPDF@200dpi**, `call_pro` vision per page (verbatim-transcribe prompt, `[[UNREADABLE]]` for illegible), anti-hallucination guard (write only if legible≥20 chars & not all-unreadable, else fail into `failed` — NEVER write empty). **Write = targeted `UPDATE documents SET full_text/token_count/search_vector/ingested_at WHERE id=%s` (NOT store_document_full — preserves owner, exact row; codex folds 1/3/4). Verify rowcount==1.** Mirror #293's offload+direct-conn advisory lock (key `OCR1`, autocommit=True). Default limit=3, MAX_OCR_PAGES=40. Does NOT embed — feeds the reingest endpoint.
+2. **Part B:** fail-loud at `tools/document_pipeline.py:381-384` (the `if not full_text:` early return — NOT the triage branch; codex fold 2): ERROR + `OCR_CANDIDATE` marker + alert (reuse existing alert-insert, no migration).
+3. Tests: targeted-UPDATE happy path, **owner-preserved (dimitry-owned blank stays dimitry)**, all-`[[UNREADABLE]]`→no write+failed, one-doc-raise doesn't abort, lock-held⇒backfill_in_progress, Part B via `run_pipeline` with empty `_get_document_text` (mandatory).
 
-**The bug:** that endpoint is `async def` but calls the **synchronous** `ingest_text()`
-directly in a per-candidate loop, blocking the single Uvicorn event-loop thread for the
-whole batch. A live `limit=50` run on 2026-06-04 took baker-master fully unresponsive
-(`/health` timed out) for ~15 min and needed a Render restart (AH1 incident). This brief
-makes it non-blocking + single-runner safe.
-
-## Scope (Option A — minimal; codex G0 v3 PASS at e54b2d8)
-
-1. Move the embed loop into a module-level sync helper `_reingest_embed_batch(candidates)`
-   and call it via `await asyncio.to_thread(...)` so the event loop stays free.
-2. Single-runner `pg_try_advisory_lock` on a **DEDICATED DIRECT** connection
-   (`psycopg2.connect(**config.postgres.direct_dsn_params)`), `lock_conn.autocommit = True`
-   **before** the lock SELECT (idle-in-transaction 5min would else drop the lock mid-batch),
-   release+close that same conn in finally, never `store._put_conn` it; fail-loud
-   `no_direct_dsn` if `host_direct` is unset.
-3. Default `limit` 50→10 (cap 500→100).
-4. Tests: update the signature source-guard, add the `_reingest_embed_batch` failure-isolation
-   unit test, the offload/lock/autocommit source-guards, and the **mandatory** lock-held ⇒
-   `backfill_in_progress` endpoint test (do NOT silently skip — escalate to AH1 if the fixture
-   can't reach the write path; G3 will not pass on source guards alone).
-
-The exact copy-pasteable diffs, the `Do NOT touch` list, and all line refs are in the brief.
+Copy-pasteable diffs + Do-NOT-touch + line refs are in the brief. codex left an "implementation note for B-code" on bus #1843 — read it.
 
 ## Gate contract (Harness V2)
-
-- **Done rubric (answer literally — NOT "tests pass"):**
-  1. During a live `dry_run=false&limit=10` prod run, a concurrent `GET /health` returns 200 <3s — paste both timestamps.
-  2. A concurrent second `POST .../reingest-missing?dry_run=false` returns `{"error":"backfill_in_progress"}`.
-  3. `embedded > 0` and `remaining_after` strictly decreases across two sequential calls.
-- **Gates:** G0 PASS (codex #1820) → G1 lead literal `pytest tests/test_reingest_missing_qdrant.py -v` + the live health-during-backfill probe → G2 `/security-review` → G3 codex on the PR → AH1 merge → you fill `POST_DEPLOY_AC_VERDICT v1` (AC1/AC2/AC3) on prod after deploy.
-- Ship report answers the done rubric literally; bus-post to lead on ship.
-
-## Outcome — COMPLETE (2026-06-04)
-
-PR #293 merged to main (`3cf00cc`). All gates green: G0 codex #1820, G1 lead 14/14 py3.12,
-G2 /security-review CLEAR, G3 codex #1828 no-findings. **POST_DEPLOY_AC_VERDICT v1: PASS**
-(bus #1831, run on live prod `3cf00cc`):
-- **AC1 health-during-backfill — PASS.** Live `dry_run=false&limit=10` started 12:37:18Z;
-  concurrent `GET /health` → 200 in **0.88s** (12:37:19.49Z→12:37:20.44Z), re-probed 0.52s
-  mid-batch. Event loop not blocked (the core fix).
-- **AC2 advisory lock — PASS.** Concurrent 2nd POST → `{"error":"backfill_in_progress"}`.
-- **AC3 convergence — PASS.** `embeddable_missing` 444→443, `total_missing` 1000→999
-  (≥1 embedded, strictly decreasing via the canonical predicate count).
-- **Throughput caveat (operational, not a defect — `ingest_text` is Do-NOT-Touch):** the
-  `limit=10` batch hit heavy legacy docs (294K/146K/136K/135K/89K chars → ~300 Voyage calls
-  each); HTTP client times out at 120s while the server thread completes (idempotent — re-poll
-  the read-only count, do NOT blind-retry). Lead to pace the 441-doc backfill by small limits +
-  watching `embeddable_missing` fall, not by HTTP response.
+- **Done rubric (literal):** (1) live `dry_run=false&limit=3` recovers ≥1 doc — paste ids + before/after text_len; (2) that doc then appears in `reingest-missing?dry_run=true`; (3) an unreadable doc stays NULL + in `failed`; (4) concurrent `GET /health` 200 <3s during the run.
+- **Gates:** G0 PASS (#1843) → G1 lead literal `pytest tests/test_ocr_reextract_missing.py -v` → G2 `/security-review` → G3 codex on PR → AH1 merge → you fill `POST_DEPLOY_AC_VERDICT v1`.
+- Ship report answers the done rubric literally; bus to lead on ship.
+- **NOTE: baker-master scheduler is currently DOWN (separate incident, lead's lane). Your OCR endpoint is request-path, unaffected — proceed; do not touch the scheduler.**
