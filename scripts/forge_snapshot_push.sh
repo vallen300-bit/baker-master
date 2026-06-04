@@ -62,6 +62,7 @@ declare -a TERMINALS=(
   "lead:/Users/dimitry/bm-aihead1"
   "cowork-ah1:/Users/dimitry/bm-aihead1"
   "deputy:/Users/dimitry/bm-aihead2"
+  "deputy-codex:/Users/dimitry/bm-aihead2"
   "b1:/Users/dimitry/bm-b1,/Users/dimitry/bm-b1-brisen-lab"
   "b2:/Users/dimitry/bm-b2,/Users/dimitry/bm-b2-brisen-lab"
   "b3:/Users/dimitry/bm-b3,/Users/dimitry/bm-b3-brisen-lab"

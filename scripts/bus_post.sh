@@ -47,10 +47,10 @@ TOPIC="${3:-}"
 # codex added 2026-05-29 per CODEX_ON_BUS_1 slim install — CLI-based, no dashboard card / SessionStart hook;
 # origination-desk added 2026-05-29 per ORIGINATION_DESK_ON_BUS_1 matter-desk expansion).
 case "$RECIPIENT" in
-    director|cowork-ah1|lead|deputy|architect|b1|b2|b3|b4|b5|cortex|daemon|aid|codex|codex-arch|hag-desk|origination-desk|researcher|CM-1|CM-2|CM-3|CM-4|hag-filer|clerk) ;;
+    director|cowork-ah1|lead|deputy|deputy-codex|architect|b1|b2|b3|b4|b5|cortex|daemon|aid|codex|codex-arch|hag-desk|origination-desk|researcher|CM-1|CM-2|CM-3|CM-4|hag-filer|clerk) ;;
     *)
         echo "ERROR: unknown slug: $RECIPIENT" >&2
-        echo "  Valid: director cowork-ah1 lead deputy architect b1 b2 b3 b4 b5 cortex daemon aid codex codex-arch hag-desk origination-desk researcher CM-1 CM-2 CM-3 CM-4 hag-filer clerk" >&2
+        echo "  Valid: director cowork-ah1 lead deputy deputy-codex architect b1 b2 b3 b4 b5 cortex daemon aid codex codex-arch hag-desk origination-desk researcher CM-1 CM-2 CM-3 CM-4 hag-filer clerk" >&2
         exit 1
         ;;
 esac
@@ -61,6 +61,7 @@ case "${BAKER_ROLE:-}" in
     AH1|aihead1|lead|LEAD)              SENDER=lead ;;
     AH1-APP|cowork-ah1|COWORK-AH1)      SENDER=cowork-ah1 ;;
     AH2|aihead2|deputy|DEPUTY)          SENDER=deputy ;;
+    deputy-codex|DEPUTY-CODEX|deputy_codex) SENDER=deputy-codex ;;
     B1|b1)                              SENDER=b1 ;;
     B2|b2)                              SENDER=b2 ;;
     B3|b3)                              SENDER=b3 ;;
