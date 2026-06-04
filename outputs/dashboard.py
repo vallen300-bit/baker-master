@@ -2224,6 +2224,320 @@ async def documents_reingest_missing(
     }
 
 
+# ── OCR_REEXTRACT_MISSING_1: recover blank-full_text scanned PDFs/DOCX ─────────
+# ~580 documents rows have NULL/blank full_text because they are scanned/image PDFs
+# and pdfplumber (no OCR) returns "". They are invisible to search AND ineligible
+# for reingest-missing (which requires _HAS_EXTRACTED_TEXT). This endpoint downloads
+# each blank doc from Dropbox, reads it with Gemini 2.5 Pro vision, and populates
+# full_text via a TARGETED UPDATE (preserves owner — codex G0 #1836). It does NOT
+# embed; once full_text is populated the operator runs reingest-missing to embed.
+_OCR_ADVISORY_LOCK_KEY = 0x4F435231  # ascii "OCR1" — distinct from REIN
+_OCR_MAX_PAGES = 40                   # cap vision cost/time on big scans
+_OCR_MIN_CHARS = 20                   # anti-hallucination floor: write only if legible
+_OCR_PROMPT = (
+    "Transcribe ALL text on this page verbatim, preserving reading order. "
+    "Output ONLY the transcribed text, no commentary. If the page has NO legible "
+    "text (blank, pure image/photo, or an unreadable low-resolution chart), output "
+    "exactly the token [[UNREADABLE]] and nothing else."
+)
+
+
+def _ocr_extract_batch(candidates: list) -> dict:
+    """OCR-recover full_text for each blank doc. Per-doc try/except (one failure must
+    NOT abort the batch). Anti-hallucination guard: write ONLY if legible >= _OCR_MIN_CHARS
+    and not every page was [[UNREADABLE]] — never write empty. Write = targeted UPDATE of
+    the exact row by id (preserves owner; codex G0 #1836). Does NOT embed. Runs in a
+    worker thread via asyncio.to_thread so the event loop stays free."""
+    import base64
+    import shutil
+    import tempfile
+    from pathlib import Path
+
+    attempted = recovered = 0
+    failed = []
+    store = _get_store()
+
+    for c in candidates:
+        attempted += 1
+        doc_id = c["id"]
+        filename = c.get("filename") or f"doc-{doc_id}"
+        source_path = c.get("source_path") or ""
+        tmpdir = None
+        try:
+            if not source_path:
+                failed.append({"id": doc_id, "filename": filename, "reason": "no_source_path"})
+                continue
+            tmpdir = tempfile.mkdtemp(prefix="baker_ocr_")
+            # 1. Download from Dropbox (server-side; creds live on Render).
+            try:
+                from triggers.dropbox_client import DropboxClient
+                local = DropboxClient._get_global_instance().download_file(source_path, Path(tmpdir))
+            except Exception as dl_err:
+                logger.error(f"ocr-extract id={doc_id} download failed: {dl_err}")
+                failed.append({"id": doc_id, "filename": filename, "reason": "download_failed"})
+                continue
+
+            lower = filename.lower()
+            if lower.endswith(".docx"):
+                # DOCX (only 4 in the set) — direct text extract, not image OCR.
+                try:
+                    from tools.ingest.extractors import extract
+                    legible = (extract(local) or "").strip()
+                except Exception as dx_err:
+                    logger.error(f"ocr-extract id={doc_id} docx extract failed: {dx_err}")
+                    failed.append({"id": doc_id, "filename": filename, "reason": "docx_extract_failed"})
+                    continue
+                if len(legible) < _OCR_MIN_CHARS:
+                    failed.append({"id": doc_id, "filename": filename, "reason": "empty_ocr"})
+                    continue
+            else:
+                # PDF — rasterize @200dpi + Gemini vision per page.
+                try:
+                    import fitz
+                    pdf = fitz.open(local)
+                except Exception as rz_err:
+                    logger.error(f"ocr-extract id={doc_id} rasterize open failed: {rz_err}")
+                    failed.append({"id": doc_id, "filename": filename, "reason": "rasterize_failed"})
+                    continue
+                page_texts = []
+                gemini_failed = False
+                try:
+                    from orchestrator.gemini_client import call_pro
+                    n_pages = pdf.page_count
+                    for pno in range(min(n_pages, _OCR_MAX_PAGES)):
+                        page = pdf.load_page(pno)
+                        pix = page.get_pixmap(dpi=200)
+                        jpg = pix.tobytes("jpeg")
+                        b64 = base64.b64encode(jpg).decode("ascii")
+                        resp = call_pro(
+                            messages=[{"role": "user", "content": [
+                                {"type": "image", "source": {
+                                    "type": "base64", "media_type": "image/jpeg", "data": b64}},
+                                {"type": "text", "text": _OCR_PROMPT},
+                            ]}],
+                            max_tokens=4000,
+                        )
+                        page_texts.append((resp.text or "").strip())
+                except Exception as g_err:
+                    logger.error(f"ocr-extract id={doc_id} gemini vision failed: {g_err}")
+                    gemini_failed = True
+                finally:
+                    try:
+                        pdf.close()
+                    except Exception:
+                        pass
+                if gemini_failed:
+                    failed.append({"id": doc_id, "filename": filename, "reason": "gemini_error"})
+                    continue
+                # Anti-hallucination guard: every page unreadable ⇒ do NOT write.
+                all_unreadable = (
+                    all(pt in ("", "[[UNREADABLE]]") for pt in page_texts)
+                    if page_texts else True
+                )
+                if all_unreadable:
+                    failed.append({"id": doc_id, "filename": filename, "reason": "unreadable"})
+                    continue
+                legible = "\n\n".join(page_texts).replace("[[UNREADABLE]]", "").strip()
+                if len(legible) < _OCR_MIN_CHARS:
+                    failed.append({"id": doc_id, "filename": filename, "reason": "empty_ocr"})
+                    continue
+
+            # 2. Targeted UPDATE of the exact target row by id (codex G0 #1836: NOT
+            #    store_document_full — that overwrites owner + content_hash-dedups to
+            #    another row). This preserves owner and updates the exact blank row.
+            conn = store._get_conn()
+            if not conn:
+                failed.append({"id": doc_id, "filename": filename, "reason": "no_db_connection"})
+                continue
+            try:
+                cur = conn.cursor()
+                cur.execute(
+                    "UPDATE documents "
+                    "SET full_text = %s, token_count = %s, "
+                    "search_vector = to_tsvector('simple', %s), ingested_at = NOW() "
+                    "WHERE id = %s",
+                    (legible, len(legible) // 4, legible, doc_id),
+                )
+                rowcount = cur.rowcount
+                conn.commit()
+                cur.close()
+                if rowcount == 1:
+                    recovered += 1
+                else:
+                    failed.append({"id": doc_id, "filename": filename,
+                                   "reason": f"update_rowcount_{rowcount}"})
+            except Exception as up_err:
+                try:
+                    conn.rollback()
+                except Exception:
+                    pass
+                logger.error(f"ocr-extract id={doc_id} update failed: {up_err}")
+                failed.append({"id": doc_id, "filename": filename, "reason": "db_update_failed"})
+            finally:
+                store._put_conn(conn)
+        except Exception as doc_err:
+            logger.error(f"ocr-extract id={doc_id} unexpected error: {doc_err}")
+            failed.append({"id": doc_id, "filename": filename, "reason": str(doc_err)})
+        finally:
+            if tmpdir:
+                shutil.rmtree(tmpdir, ignore_errors=True)
+
+    return {"attempted": attempted, "recovered": recovered, "failed": failed}
+
+
+def _ocr_blank_count(cur) -> int:
+    """COUNT of the blank PDF/DOCX set (recovery target). Single COUNT, no LIMIT needed."""
+    cur.execute(
+        "SELECT COUNT(*) AS c FROM documents d "
+        "WHERE (d.full_text IS NULL OR btrim(d.full_text) = '') "
+        "AND lower(d.filename) ~ '\\.(pdf|docx)$'"
+    )
+    row = cur.fetchone()
+    # RealDictCursor → {"c": n}; plain cursor → (n,)
+    return row["c"] if isinstance(row, dict) else row[0]
+
+
+@app.post("/api/documents/ocr-extract-missing", tags=["documents"], dependencies=[Depends(verify_api_key)])
+async def documents_ocr_extract_missing(
+    limit: int = Query(3, ge=1, le=25),
+    dry_run: bool = Query(True),
+):
+    """OCR_REEXTRACT_MISSING_1: recover blank-full_text scanned PDFs/DOCX via Gemini
+    2.5 Pro vision, then populate full_text with a TARGETED UPDATE (preserves owner).
+
+    Safe-by-default: dry_run=true (the default) downloads nothing, calls no model,
+    writes nothing — it only lists what would process. Caller must pass dry_run=false
+    to recover. Bounded + resumable: limit caps each call (tiny default — vision on big
+    scans is slow); a recovered doc leaves the blank set so a re-run won't re-select it.
+    Re-run until remaining_after == 0. Does NOT embed — once full_text is populated, the
+    operator calls reingest-missing to embed. Mirrors reingest-missing's offload + direct
+    -conn session advisory lock (single-runner) discipline.
+    """
+    from config.settings import config as _cfg
+    # Respect the feature flag — fail loud, don't silently skip.
+    if not getattr(_cfg.gemini, "enabled", False):
+        return {"error": "gemini_disabled", "dry_run": dry_run}
+
+    store = _get_store()
+    conn = store._get_conn()
+    if not conn:
+        return {"error": "no_db_connection", "dry_run": dry_run}
+    try:
+        import psycopg2.extras
+        cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+        blank_count = _ocr_blank_count(cur)
+        cur.execute(
+            "SELECT d.id, d.filename, d.source_path, d.file_hash, d.matter_slug "
+            "FROM documents d "
+            "WHERE (d.full_text IS NULL OR btrim(d.full_text) = '') "
+            "AND lower(d.filename) ~ '\\.(pdf|docx)$' "
+            "ORDER BY d.ingested_at DESC NULLS LAST LIMIT %s",
+            (limit,),
+        )
+        candidates = [dict(r) for r in cur.fetchall()]
+        cur.close()
+    except Exception as sel_err:
+        try:
+            conn.rollback()
+        except Exception:
+            pass
+        logger.error(f"ocr-extract-missing select failed: {sel_err}")
+        # Single return of the conn happens in the finally (mirror reingest G3 fold).
+        return {"error": "select_failed", "reason": str(sel_err), "dry_run": dry_run}
+    finally:
+        store._put_conn(conn)
+
+    if dry_run:
+        return {
+            "dry_run": True,
+            "blank_count": blank_count,
+            "limit": limit,
+            "would_process": [
+                {"id": c["id"], "filename": c.get("filename"), "source_path": c.get("source_path")}
+                for c in candidates
+            ],
+        }
+
+    # --- Write path: single-runner SESSION advisory lock on a DEDICATED DIRECT
+    #     (non-pooled) connection, autocommit=True (no idle-in-txn lock drop).
+    #     Mirrors reingest-missing exactly (codex G0 #1809/#1815). ---
+    import psycopg2
+    if not getattr(_cfg.postgres, "host_direct", None):
+        return {
+            "error": "no_direct_dsn",
+            "reason": "session advisory lock requires a non-pooled (direct) Postgres endpoint; host_direct unset",
+            "dry_run": False,
+        }
+    try:
+        lock_conn = psycopg2.connect(**_cfg.postgres.direct_dsn_params)
+        lock_conn.autocommit = True  # codex #1815: no idle-in-transaction lock drop
+    except Exception as conn_err:
+        logger.error(f"ocr-extract-missing direct connect failed: {conn_err}")
+        try:
+            lock_conn.close()
+        except Exception:
+            pass
+        return {"error": "lock_connect_failed", "reason": str(conn_err), "dry_run": False}
+    got_lock = False
+    try:
+        lc = lock_conn.cursor()
+        lc.execute("SELECT pg_try_advisory_lock(%s)", (_OCR_ADVISORY_LOCK_KEY,))
+        got_lock = bool(lc.fetchone()[0])
+        lc.close()
+        if not got_lock:
+            return {
+                "error": "backfill_in_progress",
+                "reason": "another ocr-extract batch holds the advisory lock",
+                "dry_run": False,
+            }
+        # Blocking download+vision+update loop runs in a worker thread.
+        stats = await asyncio.to_thread(_ocr_extract_batch, candidates)
+    except Exception as ocr_err:
+        logger.error(f"ocr-extract-missing batch failed: {ocr_err}")
+        stats = {"attempted": 0, "recovered": 0,
+                 "failed": [{"id": None, "reason": str(ocr_err)}]}
+    finally:
+        if got_lock:
+            try:
+                uc = lock_conn.cursor()
+                uc.execute("SELECT pg_advisory_unlock(%s)", (_OCR_ADVISORY_LOCK_KEY,))
+                uc.close()
+            except Exception as unlock_err:
+                logger.error(f"ocr-extract-missing advisory unlock failed: {unlock_err}")
+        # Dedicated connection — CLOSE it (never store._put_conn this).
+        try:
+            lock_conn.close()
+        except Exception:
+            pass
+
+    # remaining_after: re-count the blank set post-batch so the caller sees convergence.
+    remaining_after = None
+    conn2 = store._get_conn()
+    if conn2:
+        try:
+            cur2 = conn2.cursor()
+            remaining_after = _ocr_blank_count(cur2)
+            cur2.close()
+        except Exception as cnt_err:
+            try:
+                conn2.rollback()
+            except Exception:
+                pass
+            logger.error(f"ocr-extract-missing remaining_after count failed: {cnt_err}")
+        finally:
+            store._put_conn(conn2)
+
+    return {
+        "dry_run": False,
+        "limit": limit,
+        "blank_count": blank_count,
+        "attempted": stats["attempted"],
+        "recovered": stats["recovered"],
+        "failed": stats["failed"],
+        "remaining_after": remaining_after,
+    }
+
+
 @app.get("/health", tags=["system"], include_in_schema=False)
 async def health_check():
     """Public health endpoint for Render + monitoring. No auth required."""

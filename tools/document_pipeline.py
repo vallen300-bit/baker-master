@@ -380,7 +380,40 @@ def run_pipeline(doc_id: int):
     """Run triage → classify → extract → cross-link for a single document."""
     full_text = _get_document_text(doc_id)
     if not full_text:
-        logger.warning(f"No text for doc {doc_id}, skipping pipeline")
+        # OCR_REEXTRACT_MISSING_1 Part B (codex G0 #1836 fold 2): fail loud on
+        # silent empty extraction. A scanned/image PDF whose extractor returned ""
+        # lands HERE (this pre-triage early return), NOT the triage 'empty' branch
+        # below — that branch is only reached after non-empty text exists. The 580-doc
+        # blank backlog accumulated invisibly because this branch only logged a warning.
+        # Upgrade a genuine OCR candidate (supported PDF/DOCX with a Dropbox source
+        # path) to an ERROR + a deduped alert pointing at the recovery endpoint.
+        filename, source_path = _get_document_meta(doc_id)
+        _is_ocr_candidate = (
+            filename.lower().rstrip().endswith((".pdf", ".docx")) and bool(source_path)
+        )
+        if _is_ocr_candidate:
+            logger.error(
+                f"OCR_CANDIDATE doc {doc_id} extracted empty — filename={filename!r} "
+                f"source_path={source_path!r} (recover via POST /api/documents/ocr-extract-missing)"
+            )
+            try:
+                # Reuse the canonical alert insert; dedup by source+source_id per
+                # codex #1843 relay (NOT title-only). One alert per doc id.
+                _get_store().create_alert(
+                    tier=2,
+                    title=f"Doc {doc_id} extracted empty — OCR candidate",
+                    body=(
+                        f"Document {doc_id} ({filename}) produced empty full_text on ingest "
+                        f"(likely a scanned/image PDF). Source: {source_path}. "
+                        f"Recover via POST /api/documents/ocr-extract-missing."
+                    ),
+                    source="doc_ocr_candidate",
+                    source_id=str(doc_id),
+                )
+            except Exception as alert_err:
+                logger.warning(f"OCR_CANDIDATE alert insert failed for doc {doc_id}: {alert_err}")
+        else:
+            logger.warning(f"No text for doc {doc_id}, skipping pipeline")
         return
 
     # Stage 0: Content triage (TAGGING-OVERHAUL-1, no Haiku cost)
