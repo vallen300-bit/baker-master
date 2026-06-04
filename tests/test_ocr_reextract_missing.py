@@ -327,7 +327,9 @@ def test_ac2_write_recovers_and_targets_row_by_id(monkeypatch):
     body = r.json()
     assert body["dry_run"] is False
     assert body["attempted"] == 2
-    assert body["recovered"] == 2
+    assert len(body["recovered"]) == 2
+    assert {rec["id"] for rec in body["recovered"]} == {1, 2}
+    assert all(rec["truncated"] is False for rec in body["recovered"]), "normal docs: not truncated"
     assert body["failed"] == []
     assert body["remaining_after"] == 0
     # Each doc updated its OWN id with non-empty full_text; 2 pages → gemini called 4x.
@@ -343,7 +345,7 @@ def test_ac3_all_unreadable_writes_nothing_and_fails(monkeypatch):
     client, calls = _client(monkeypatch, state, gemini_text="[[UNREADABLE]]")
     r = client.post("/api/documents/ocr-extract-missing?dry_run=false", headers=_HDR)
     body = r.json()
-    assert body["recovered"] == 0
+    assert body["recovered"] == []
     assert state.get("writes") is None, "unreadable doc must NOT be written"
     assert body["failed"] and body["failed"][0]["id"] == 1
     assert body["failed"][0]["reason"] == "unreadable"
@@ -355,7 +357,7 @@ def test_short_ocr_below_min_chars_fails(monkeypatch):
     client, calls = _client(monkeypatch, state, gemini_text="ok")  # 2 chars < 20
     r = client.post("/api/documents/ocr-extract-missing?dry_run=false", headers=_HDR)
     body = r.json()
-    assert body["recovered"] == 0
+    assert body["recovered"] == []
     assert state.get("writes") is None
     assert body["failed"][0]["reason"] == "empty_ocr"
 
@@ -406,7 +408,8 @@ def test_one_doc_failure_does_not_abort_batch(monkeypatch):
     r = client.post("/api/documents/ocr-extract-missing?dry_run=false", headers=_HDR)
     body = r.json()
     assert body["attempted"] == 2
-    assert body["recovered"] == 1, "doc 2 still recovered despite doc 1 download failure"
+    assert len(body["recovered"]) == 1, "doc 2 still recovered despite doc 1 download failure"
+    assert body["recovered"][0]["id"] == 2
     failed_ids = {f["id"]: f["reason"] for f in body["failed"]}
     assert failed_ids == {1: "download_failed"}
     assert [w["id"] for w in state["writes"]] == [2]
@@ -444,7 +447,8 @@ def test_docx_path_uses_text_extract_not_vision(monkeypatch):
                             docx_text="A fully legible docx body recovered via extract().")
     r = client.post("/api/documents/ocr-extract-missing?dry_run=false", headers=_HDR)
     body = r.json()
-    assert body["recovered"] == 1
+    assert len(body["recovered"]) == 1
+    assert body["recovered"][0]["truncated"] is False, "DOCX path is never page-truncated"
     assert calls["gemini"] == 0, "DOCX must not call Gemini vision"
     assert [w["id"] for w in state["writes"]] == [1]
 
@@ -485,6 +489,82 @@ def test_select_error_returns_conn_to_pool_exactly_once(monkeypatch):
     assert body["error"] == "select_failed"
     assert "select boom" in body["reason"]
     assert put_calls == [err_conn], "conn returned to the pool exactly once"
+
+
+# ─── codex G3 #1865 folds: cost governor (HIGH) + truncation signal (MED) ──────
+
+
+def test_truncated_flag_surfaces_past_max_pages(monkeypatch):
+    """FINDING 2 (MED): a PDF with > _OCR_MAX_PAGES still recovers (first cap pages) but
+    its recovered entry carries truncated=true — partial recovery is never silent."""
+    import outputs.dashboard as _d
+    cap = _d._OCR_MAX_PAGES
+    state = {"blank_count": 1, "candidates": [_row(1)], "remaining_after": 0}
+    client, calls = _client(monkeypatch, state, n_pages=cap + 1)
+    # Keep the governor cheap + deterministic for the cap-page loop.
+    monkeypatch.setattr("orchestrator.cost_monitor.check_circuit_breaker", lambda: (True, 0.0))
+    monkeypatch.setattr("orchestrator.cost_monitor.log_api_cost", lambda *a, **k: None)
+    r = client.post("/api/documents/ocr-extract-missing?dry_run=false", headers=_HDR)
+    body = r.json()
+    assert len(body["recovered"]) == 1
+    rec = body["recovered"][0]
+    assert rec["id"] == 1
+    assert rec["truncated"] is True, "partial recovery past the page cap must be flagged"
+    assert calls["gemini"] == cap, "only the first _OCR_MAX_PAGES pages are OCR'd"
+    assert [w["id"] for w in state["writes"]] == [1], "partial-but-legible text still written (beats blank)"
+
+
+def test_cost_breaker_tripped_writes_nothing(monkeypatch):
+    """FINDING 1 (HIGH): a tripped circuit breaker ⇒ NO call_pro for the throttled doc,
+    it lands in failed(reason=cost_breaker), and NOTHING is written (never a partial)."""
+    state = {"blank_count": 1, "candidates": [_row(1)], "remaining_after": 1}
+    client, calls = _client(monkeypatch, state, n_pages=3)
+    monkeypatch.setattr("orchestrator.cost_monitor.check_circuit_breaker", lambda: (False, 999.0))
+    logged = []
+    monkeypatch.setattr("orchestrator.cost_monitor.log_api_cost", lambda *a, **k: logged.append(a))
+    r = client.post("/api/documents/ocr-extract-missing?dry_run=false", headers=_HDR)
+    body = r.json()
+    assert body["recovered"] == []
+    assert calls["gemini"] == 0, "breaker trips before the first page call"
+    assert logged == [], "no cost logged when nothing was called"
+    assert state.get("writes") is None, "tripped breaker writes nothing (never partial)"
+    assert body["failed"][0]["id"] == 1 and body["failed"][0]["reason"] == "cost_breaker"
+
+
+def test_cost_logged_on_allowed_path(monkeypatch):
+    """FINDING 1 (HIGH): breaker allows ⇒ each page call_pro happens AND a cost row is
+    logged per page with model gemini-2.5-pro + source/capability tags."""
+    state = {"blank_count": 1, "candidates": [_row(1)], "remaining_after": 0}
+    client, calls = _client(monkeypatch, state, n_pages=2)
+    monkeypatch.setattr("orchestrator.cost_monitor.check_circuit_breaker", lambda: (True, 1.0))
+    logged = []
+    monkeypatch.setattr(
+        "orchestrator.cost_monitor.log_api_cost",
+        lambda model, *a, **k: logged.append((model, k.get("source"), k.get("capability_id"))),
+    )
+    r = client.post("/api/documents/ocr-extract-missing?dry_run=false", headers=_HDR)
+    body = r.json()
+    assert len(body["recovered"]) == 1
+    assert calls["gemini"] == 2
+    assert len(logged) == 2, "one cost row per page call"
+    assert logged[0] == ("gemini-2.5-pro", "document_pipeline", "ocr_extract")
+
+
+def test_cost_instrumentation_failure_is_fail_open(monkeypatch):
+    """FINDING 1 (HIGH): an instrumentation error (breaker raises) must NOT abort
+    recovery — OCR fails open and the doc still recovers."""
+    state = {"blank_count": 1, "candidates": [_row(1)], "remaining_after": 0}
+    client, calls = _client(monkeypatch, state, n_pages=2)
+
+    def _boom():
+        raise RuntimeError("cost_monitor exploded")
+
+    monkeypatch.setattr("orchestrator.cost_monitor.check_circuit_breaker", _boom)
+    monkeypatch.setattr("orchestrator.cost_monitor.log_api_cost", lambda *a, **k: None)
+    r = client.post("/api/documents/ocr-extract-missing?dry_run=false", headers=_HDR)
+    body = r.json()
+    assert len(body["recovered"]) == 1, "breaker failure must fail-open (OCR still runs)"
+    assert calls["gemini"] == 2
 
 
 # ─── Part B: fail-loud on silent empty extraction (document_pipeline) ──────────

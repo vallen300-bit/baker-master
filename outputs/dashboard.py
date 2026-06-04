@@ -2247,13 +2247,22 @@ def _ocr_extract_batch(candidates: list) -> dict:
     NOT abort the batch). Anti-hallucination guard: write ONLY if legible >= _OCR_MIN_CHARS
     and not every page was [[UNREADABLE]] — never write empty. Write = targeted UPDATE of
     the exact row by id (preserves owner; codex G0 #1836). Does NOT embed. Runs in a
-    worker thread via asyncio.to_thread so the event loop stays free."""
+    worker thread via asyncio.to_thread so the event loop stays free.
+
+    codex G3 #1865 folds:
+      F1 [HIGH]: per-page cost governor — check_circuit_breaker() before each call_pro
+        (trip ⇒ stop the doc, fail reason=cost_breaker, write NOTHING) + log_api_cost
+        after; fail-open so an instrumentation error never aborts recovery.
+      F2 [MED]: a PDF over _OCR_MAX_PAGES still recovers its first cap pages but its
+        `recovered` entry carries truncated=true (partial recovery is never silent).
+    Returns {attempted:int, recovered:[{id,filename,truncated}], failed:[{id,...,reason}]}."""
     import base64
     import shutil
     import tempfile
     from pathlib import Path
 
-    attempted = recovered = 0
+    attempted = 0
+    recovered = []          # per-doc entries: {id, filename, truncated} (codex G3 #1865 F2)
     failed = []
     store = _get_store()
 
@@ -2263,6 +2272,7 @@ def _ocr_extract_batch(candidates: list) -> dict:
         filename = c.get("filename") or f"doc-{doc_id}"
         source_path = c.get("source_path") or ""
         tmpdir = None
+        truncated = False   # True if a PDF exceeds _OCR_MAX_PAGES (partial recovery)
         try:
             if not source_path:
                 failed.append({"id": doc_id, "filename": filename, "reason": "no_source_path"})
@@ -2301,10 +2311,48 @@ def _ocr_extract_batch(candidates: list) -> dict:
                     continue
                 page_texts = []
                 gemini_failed = False
+                cost_breaker_tripped = False
+                # FINDING 1 (HIGH, codex G3 #1865): per-page cost governor on the
+                # Gemini Pro vision loop (repo standard lessons.md #68; precedent
+                # document_pipeline.py:193 pre / :341 post). Import is FAIL-OPEN — a
+                # cost_monitor import error must NOT abort recovery, only drop the
+                # governor for this doc.
+                _governor = None
+                try:
+                    from orchestrator.cost_monitor import check_circuit_breaker, log_api_cost
+                    _governor = (check_circuit_breaker, log_api_cost)
+                except Exception as imp_err:
+                    logger.warning(
+                        f"ocr-extract id={doc_id} cost_monitor unavailable "
+                        f"(fail-open, no governor this doc): {imp_err}")
                 try:
                     from orchestrator.gemini_client import call_pro
                     n_pages = pdf.page_count
+                    # FINDING 2 (MED, codex G3 #1865): signal silent truncation past
+                    # the page cap instead of writing partial text with no flag.
+                    truncated = n_pages > _OCR_MAX_PAGES
+                    if truncated:
+                        logger.warning(
+                            f"ocr-extract id={doc_id} has {n_pages} pages > cap "
+                            f"{_OCR_MAX_PAGES}; transcribing first {_OCR_MAX_PAGES} only "
+                            f"(truncated=true on recovered entry)")
                     for pno in range(min(n_pages, _OCR_MAX_PAGES)):
+                        # Cost governor: check BEFORE each call_pro. Trip ⇒ stop this
+                        # doc (write NOTHING — never a partial). Fail-open on a check error.
+                        if _governor is not None:
+                            try:
+                                allowed, daily_cost = _governor[0]()
+                            except Exception as cb_err:
+                                logger.warning(
+                                    f"ocr-extract id={doc_id} breaker check failed "
+                                    f"(fail-open): {cb_err}")
+                                allowed, daily_cost = True, 0.0
+                            if not allowed:
+                                logger.error(
+                                    f"ocr-extract id={doc_id} blocked by circuit breaker "
+                                    f"(€{daily_cost:.2f}) at page {pno} — writing nothing")
+                                cost_breaker_tripped = True
+                                break
                         page = pdf.load_page(pno)
                         pix = page.get_pixmap(dpi=200)
                         jpg = pix.tobytes("jpeg")
@@ -2318,6 +2366,20 @@ def _ocr_extract_batch(candidates: list) -> dict:
                             max_tokens=4000,
                         )
                         page_texts.append((resp.text or "").strip())
+                        # Log cost AFTER each call. getattr-safe: a resp without .usage
+                        # logs 0/0 (never crash); whole block fail-open.
+                        if _governor is not None:
+                            try:
+                                _u = getattr(resp, "usage", None)
+                                _in = getattr(_u, "input_tokens", 0) or 0
+                                _out = getattr(_u, "output_tokens", 0) or 0
+                                _governor[1]("gemini-2.5-pro", _in, _out,
+                                             source="document_pipeline",
+                                             capability_id="ocr_extract")
+                            except Exception as lc_err:
+                                logger.warning(
+                                    f"ocr-extract id={doc_id} cost-log failed "
+                                    f"(fail-open): {lc_err}")
                 except Exception as g_err:
                     logger.error(f"ocr-extract id={doc_id} gemini vision failed: {g_err}")
                     gemini_failed = True
@@ -2326,6 +2388,11 @@ def _ocr_extract_batch(candidates: list) -> dict:
                         pdf.close()
                     except Exception:
                         pass
+                if cost_breaker_tripped:
+                    # Partial recovery is worse than none here — leave the row blank
+                    # so a later (un-throttled) run re-selects + fully recovers it.
+                    failed.append({"id": doc_id, "filename": filename, "reason": "cost_breaker"})
+                    continue
                 if gemini_failed:
                     failed.append({"id": doc_id, "filename": filename, "reason": "gemini_error"})
                     continue
@@ -2362,7 +2429,7 @@ def _ocr_extract_batch(candidates: list) -> dict:
                 conn.commit()
                 cur.close()
                 if rowcount == 1:
-                    recovered += 1
+                    recovered.append({"id": doc_id, "filename": filename, "truncated": truncated})
                 else:
                     failed.append({"id": doc_id, "filename": filename,
                                    "reason": f"update_rowcount_{rowcount}"})
@@ -2494,7 +2561,7 @@ async def documents_ocr_extract_missing(
         stats = await asyncio.to_thread(_ocr_extract_batch, candidates)
     except Exception as ocr_err:
         logger.error(f"ocr-extract-missing batch failed: {ocr_err}")
-        stats = {"attempted": 0, "recovered": 0,
+        stats = {"attempted": 0, "recovered": [],
                  "failed": [{"id": None, "reason": str(ocr_err)}]}
     finally:
         if got_lock:
