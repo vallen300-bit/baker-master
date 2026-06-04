@@ -1,6 +1,10 @@
 ---
-status: PENDING
+status: COMPLETE
 brief_id: OCR_REEXTRACT_MISSING_1
+merged_pr: 294
+merged_sha: a34f1ed
+gates: G0 #1843 / G1 #1856 / G2 CLEAR / G3 #1879 (after #1865 fold)
+post_deploy_ac: PENDING — b1 runs once Render deploys a34f1ed
 dispatch: OCR_REEXTRACT_MISSING_1
 to: b1
 from: lead
