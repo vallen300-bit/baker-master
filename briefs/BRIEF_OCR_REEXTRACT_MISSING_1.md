@@ -74,20 +74,30 @@ Add `POST /api/documents/ocr-extract-missing` in `outputs/dashboard.py` (auth `D
      - DOCX (only 4): extract text directly via the existing `extract()` path (`tools/ingest/extractors.py`) — they are not image docs; if that still yields empty, treat as a failure (manual).
   3. Gemini per page: `call_pro(messages=[{"role":"user","content":[{"type":"image","source":{"type":"base64","media_type":"image/jpeg","data": b64}}, {"type":"text","text": OCR_PROMPT}]}], max_tokens=4000)`. `OCR_PROMPT` = "Transcribe ALL text on this page verbatim, preserving reading order. Output ONLY the transcribed text, no commentary. If the page has NO legible text (blank, pure image/photo, or an unreadable low-resolution chart), output exactly the token [[UNREADABLE]] and nothing else." Concatenate page outputs with `\n\n`.
   4. **Quality / anti-hallucination guard (fail-loud — vision models fabricate):** compute `legible = result with [[UNREADABLE]] page-markers removed`. Write `full_text` ONLY if `len(legible.strip()) >= MIN_OCR_CHARS (default 20)` AND not every page was `[[UNREADABLE]]`. Otherwise DO NOT write — append `{id, filename, reason}` to `failed` (reason `unreadable` / `empty_ocr` / `download_failed` / `gemini_error` / `rasterize_failed`). Never write `full_text=''`.
-  5. On pass: `store._get_store().store_document_full(source_path=source_path, filename=filename, file_hash=file_hash, full_text=legible, token_count=<len//4>, owner="shared")`. (UPSERT on file_hash updates the existing row in place.)
-- **Return:** `{dry_run:false, limit, blank_count, attempted, recovered, failed:[{id,reason}], remaining_after}` where `remaining_after` re-counts the blank set.
+  5. On pass: **targeted UPDATE of the exact target row by id** (codex G0 #1836 folds 1+3+4 — do NOT use `store_document_full`: it (a) overwrites `owner` to whatever is passed — 408 of the blank set are `owner=dimitry`, 172 `shared`, and overwriting to `shared` is an access-control regression; (b) short-circuits on `content_hash` dedup and returns another row's id, so the TARGET blank row is never updated and `blank_count` won't fall; (c) `store._get_store()` is a dead name). Use a fresh pooled conn (own try/except + rollback + `_put_conn` finally):
+     ```python
+     UPDATE documents
+     SET full_text = %s,
+         token_count = %s,
+         search_vector = to_tsvector('simple', %s),
+         ingested_at = NOW()
+     WHERE id = %s
+     ```
+     params `(legible, len(legible)//4, legible, doc_id)`. This preserves `owner` (untouched), updates the EXACT blank row (no content_hash dedup skip), and keeps keyword search consistent. Verify `cur.rowcount == 1`; count `recovered` only when the target row was actually updated. (The blocking embed stays the reingest endpoint's job — this only populates `full_text`.)
+- **Return:** `{dry_run:false, limit, blank_count, attempted, recovered, failed:[{id,reason}], remaining_after}` where `remaining_after` re-counts the blank set (must strictly fall by `recovered`).
 - **Do NOT embed here.** After a run, the operator calls `reingest-missing` to embed the now-populated docs.
 
 ### Key Constraints
 - Mirror #293's lock/offload/autocommit/close-dedicated-conn discipline verbatim (don't reinvent; don't `store._put_conn` the lock conn).
 - Tiny default limit (3) + `MAX_OCR_PAGES` cap — vision on big scans is slow; pace by small limits, watch `remaining_after`, do NOT rely on the HTTP response (heavy docs exceed the 120s client timeout while the server completes — proven on #293's AC; idempotent, re-poll the count).
-- Idempotent: re-running on an already-recovered doc just re-UPSERTs same `full_text` (or skips since it's no longer in the blank set).
+- Idempotent: a recovered doc leaves the blank set, so a re-run simply won't re-select it.
+- **Owner preserved (codex G0 #1836 HIGH):** the targeted UPDATE never touches `owner` — a `dimitry`-owned blank doc stays `dimitry`-owned after recovery. Test this explicitly.
 - Every DB query has a LIMIT; every except has `conn.rollback()`; temp files cleaned in finally.
 - NO secrets in code — `GEMINI_API_KEY` / Dropbox creds are read from env/config only.
 - Respect `config.gemini.enabled` — if false, return `{"error":"gemini_disabled"}` (fail loud, don't silently skip).
 
 ### Verification
-- `pytest tests/test_ocr_reextract_missing.py -v` (new) — mock `DropboxClient.download_file`, `fitz`, `call_pro`, and `store_document_full`; assert: dry_run writes nothing; a good doc writes non-empty full_text; an all-`[[UNREADABLE]]` doc writes NOTHING and lands in `failed`; one doc raising does not abort the batch; lock-held ⇒ `backfill_in_progress`.
+- `pytest tests/test_ocr_reextract_missing.py -v` (new) — mock `DropboxClient.download_file`, `fitz`, `call_pro`, and the DB cursor; assert: dry_run writes nothing; a good doc UPDATEs its own id to non-empty full_text; **a `dimitry`-owned blank doc is still `owner=dimitry` after recovery** (UPDATE never touches owner — fold 1); an all-`[[UNREADABLE]]` doc writes NOTHING and lands in `failed`; one doc raising does not abort the batch; lock-held ⇒ `backfill_in_progress`.
 - Live: Done rubric AC1-AC4.
 
 ---
@@ -96,29 +106,35 @@ Add `POST /api/documents/ocr-extract-missing` in `outputs/dashboard.py` (auth `D
 
 ### Problem
 Today a scanned PDF flows through ingest, `extract()` returns `""` (`extractors.py:61`,
-logged only as `warning`), `store_document_full` writes an empty row with no guard
-(`store_back.py:459-471`), and `document_pipeline.py:382-392` silently `return`s (triage
-`'empty'`). The 580-doc backlog accumulated invisibly. This must never be silent again.
+logged only as `warning`), and the pipeline hits a **pre-triage early return**:
+`tools/document_pipeline.py:381-384` — `full_text = _get_document_text(doc_id)` then
+`if not full_text: logger.warning(...); return`. The 580-doc backlog accumulated invisibly.
+
+**codex G0 #1836 fold 2 (HIGH) — hook the RIGHT branch.** The triage `'empty'` branch
+(`:386-392`) is only reached AFTER non-empty text exists, so a blank scanned PDF NEVER reaches
+it — it takes the `:381-384` early return first. Part B must fail-loud at the **`if not full_text`
+early return (`:381-384`)**, not the triage branch.
 
 ### Implementation (minimal, no schema migration)
-In `tools/document_pipeline.py` where a doc triages `'empty'` (`:388-392`) — i.e. extraction
-produced no usable text for a PDF/DOCX that DOES have source bytes — upgrade the silent skip
-to a **fail-loud signal**:
-1. `logger.error(...)` (not warning) with doc id + filename + source_path + a stable marker
-   string `OCR_CANDIDATE` so it is greppable/alertable.
-2. Write an alert row via the existing alert mechanism (B-code: `grep -n "INSERT INTO alerts\|def .*alert" outputs/dashboard.py memory/store_back.py triggers/` to find the canonical alert-insert; reuse it — do NOT invent a new table). Alert title e.g. `"Doc {id} extracted empty — OCR candidate"`, category that the dashboard already surfaces, deduped on doc id.
+At `tools/document_pipeline.py:381-384`, inside the `if not full_text:` branch, before the
+`return`: fetch the doc's filename + source_path (a small `_get_store()` SELECT by `doc_id`)
+and, if it is a supported PDF/DOCX with a Dropbox source path (i.e. a genuine OCR candidate,
+not an intentionally text-less record), upgrade to a fail-loud signal:
+1. `logger.error(...)` (not warning) with doc id + filename + source_path + the stable marker
+   `OCR_CANDIDATE` so it is greppable/alertable.
+2. Write an alert row via the existing alert mechanism (B-code: `grep -n "INSERT INTO alerts\|def .*alert" outputs/dashboard.py memory/store_back.py triggers/` to find the canonical alert-insert; reuse it — do NOT invent a new table). Title e.g. `"Doc {id} extracted empty — OCR candidate"`, deduped on doc id.
 3. This makes the blank set visible going forward; the Part A endpoint is the recovery tool the alert points to.
 
 If no clean alert-insert helper exists, fall back to the ERROR-level `OCR_CANDIDATE` log only,
 and flag to AH1 that an alert surface is needed — do NOT add a migration in this brief.
 
 ### Key Constraints
-- Behavior-preserving for non-empty docs (only the empty-triage branch changes).
+- Behavior-preserving for non-empty docs (only the empty early-return branch changes).
 - No new DB column / migration in this brief.
 - Dedupe alerts (don't re-alert the same doc id every poll).
 
 ### Verification
-- Unit: feed `triage_document` an empty-text PDF doc → assert ERROR log with `OCR_CANDIDATE` + (if wired) one alert insert; assert a normal doc is unaffected.
+- Unit: exercise `run_pipeline` with `_get_document_text` mocked to return `""` (codex fold 2 — NOT `triage_document` alone) → assert ERROR log with `OCR_CANDIDATE` + (if wired) one alert insert; assert a normal non-empty doc is unaffected.
 
 ---
 
@@ -132,7 +148,7 @@ and flag to AH1 that an alert surface is needed — do NOT add a migration in th
 ## Do NOT Touch
 - `tools/ingest/extractors.py` extraction logic (the OCR path is a separate recovery surface, not a change to the live extractor — Phase 2 could auto-route, out of scope here).
 - The reingest endpoint / `_HAS_EXTRACTED_TEXT` / `_REINGEST_MISSING_QDRANT_PREDICATE` (just shipped, correct).
-- `memory/store_back.py` `store_document_full` signature (consume as-is; the empty guard lives in the OCR endpoint, which simply never calls it with empty text).
+- `memory/store_back.py` `store_document_full` — do NOT call it from the OCR write path (codex G0 #1836: its owner-overwrite + content_hash dedup are wrong for in-place recovery; use the targeted `UPDATE documents ... WHERE id=%s` instead). Leave the function itself unchanged.
 - `tools/ingest/pipeline.py` `ingest_text`.
 
 ## Quality Checkpoints (post-deploy)
