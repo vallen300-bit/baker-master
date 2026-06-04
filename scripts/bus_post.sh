@@ -47,10 +47,10 @@ TOPIC="${3:-}"
 # codex added 2026-05-29 per CODEX_ON_BUS_1 slim install — CLI-based, no dashboard card / SessionStart hook;
 # origination-desk added 2026-05-29 per ORIGINATION_DESK_ON_BUS_1 matter-desk expansion).
 case "$RECIPIENT" in
-    director|cowork-ah1|lead|deputy|architect|b1|b2|b3|b4|b5|cortex|daemon|aid|codex|codex-arch|hag-desk|origination-desk|researcher|CM-1|CM-2|CM-3|CM-4|hag-filer) ;;
+    director|cowork-ah1|lead|deputy|architect|b1|b2|b3|b4|b5|cortex|daemon|aid|codex|codex-arch|hag-desk|origination-desk|researcher|CM-1|CM-2|CM-3|CM-4|hag-filer|clerk) ;;
     *)
         echo "ERROR: unknown slug: $RECIPIENT" >&2
-        echo "  Valid: director cowork-ah1 lead deputy architect b1 b2 b3 b4 b5 cortex daemon aid codex codex-arch hag-desk origination-desk researcher CM-1 CM-2 CM-3 CM-4 hag-filer" >&2
+        echo "  Valid: director cowork-ah1 lead deputy architect b1 b2 b3 b4 b5 cortex daemon aid codex codex-arch hag-desk origination-desk researcher CM-1 CM-2 CM-3 CM-4 hag-filer clerk" >&2
         exit 1
         ;;
 esac
@@ -79,9 +79,10 @@ case "${BAKER_ROLE:-}" in
     CM-3|cm-3|CM_3)                     SENDER=CM-3 ;;
     CM-4|cm-4|CM_4)                     SENDER=CM-4 ;;
     hag-filer|HAG-FILER|hag_filer)      SENDER=hag-filer ;;
+    clerk|CLERK)                        SENDER=clerk ;;
     *)
         echo "ERROR: BAKER_ROLE not set or unrecognized: '${BAKER_ROLE:-}'" >&2
-        echo "  Valid: AH1 (terminal=lead), AH1-APP (Cowork=cowork-ah1), AH2, B1-B5, architect, cortex, aid, codex, codex-arch, hag-desk, origination-desk, researcher, CM-1, CM-2, CM-3, CM-4, hag-filer" >&2
+        echo "  Valid: AH1 (terminal=lead), AH1-APP (Cowork=cowork-ah1), AH2, B1-B5, architect, cortex, aid, codex, codex-arch, hag-desk, origination-desk, researcher, CM-1, CM-2, CM-3, CM-4, hag-filer, clerk" >&2
         exit 1
         ;;
 esac
