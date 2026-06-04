@@ -1,6 +1,11 @@
 ---
-status: PENDING
+status: COMPLETE
 brief_id: CLERK_ON_BUS_1
+merged_prs: baker-master #295 (156b25e) + brisen-lab #61 (d037835)
+gates: G0 v3 #1850 / G1 lead+b3 / G2 CLEAR / G3 codex PASS both #1895
+tier_b_install: DONE (1P key API_CREDENTIAL, Render BRISEN_LAB_TERMINAL_KEYS 23→24 +redeploy live, zshrc clerk(), Terminal profile Clerk, wake-handler rebuilt, wake-listener +clerk kickstarted; AC11 forge N/A this host)
+ac12_smoke: PASS (clerk bus auth OK #1896, /api/v2/terminals incl clerk, card data-alias=clerk renders)
+pending_director: Cmd+Q+relaunch Terminal to load Clerk picker + open brisen-lab://wake/clerk spawn test
 dispatch: CLERK_ON_BUS_1 (repo-work rows; AH1 owns Tier-B + picker)
 to: b3
 from: lead
