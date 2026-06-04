@@ -1,5 +1,9 @@
 ---
-status: PENDING
+status: COMPLETE
+merged_pr: 296
+merged_sha: 8914cf6
+gates: G0 v5 #1875 / G1 69-green / G2 CLEAR / G3 #1892 (after 2 leak folds #1884/#1888)
+post_deploy_ac: PENDING — lead runs the ≥40-min live window (b2 lacks Render-log access)
 brief_id: SCHEDULER_NEON_IDLE_HARDEN_1
 dispatch: SCHEDULER_NEON_IDLE_HARDEN_1
 to: b2
