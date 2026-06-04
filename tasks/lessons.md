@@ -739,3 +739,43 @@ Anchor: Director chat 2026-05-23 evening; AH2 bus #788 (Layer 2) + bus #790
 **Rule:** when a change alters or removes an observable behavior (a dashboard signal, a status colour, a log line, an output field, a default), the brief/PR must (1) name who or what relies on the current behavior, (2) get explicit sign-off from that stakeholder before shipping, (3) capture the reliance as a stated requirement so the next change sees it. Treat signal-removal as a breaking change by default.
 
 **Anchor:** dashboard amber working-glow, brisen-lab PR #59 (2026-06-02); Director-reported 2026-06-04. Paired with #89 (both surfaced the same session).
+
+### 91. A single-key Render env PUT does NOT trigger a redeploy — the live instance keeps the old env (2026-06-04)
+
+**What broke:** wiring `deputy-codex` onto the brisen-lab bus, I added its key to the `BRISEN_LAB_TERMINAL_KEYS` JSON via the Render API single-key PUT (`PUT /services/{id}/env-vars/{key}`) and confirmed the value re-read correctly. But the running instance kept the OLD env: `POST /msg` (sender-resolve) intermittently worked while `GET /msg/deputy-codex` returned `bad_terminal_key`, because requests hit instances/states that hadn't loaded the new key. Only an explicit `POST /services/{id}/deploys` made it consistent.
+
+**Why it's a trap:** the env value is correct on read-back, so it LOOKS applied. `auth_lab.load_terminal_keys()` only runs at process startup — env changes are inert until a redeploy reloads them. Single-key PUT (unlike a service-settings change) does not auto-redeploy.
+
+**Rule:** after ANY Render env mutation that the app reads only at startup (terminal-key maps, feature flags, JSON config), trigger an explicit `POST /services/{id}/deploys` and poll the deploy to `live` before testing auth/behavior. Re-reading the env value back is NOT proof it's loaded. (Codifies SOP Row 9 "env PUT alone does not restart" as a lived recurrence.)
+
+**Anchor:** DEPUTY_CODEX_ON_BUS_1, brisen-lab BRISEN_LAB_TERMINAL_KEYS, deploy `dep-d8gu8ak2m8qs73aedql0` (2026-06-04).
+
+### 92. Testing a new slug's bus identity from inside a DIFFERENT agent's live session — the session's exported `BRISEN_LAB_TERMINAL_KEY` wins (2026-06-04)
+
+**What broke:** smoke-testing `deputy-codex` post/ack from within the live Claude-deputy (`slug=deputy`) session. `bus_post.sh` prefers a pre-exported `BRISEN_LAB_TERMINAL_KEY` env var (set by the picker launcher to deputy's key) over the op-read of the target slug's key. So messages "sent as deputy-codex" resolved `from_terminal=deputy`, and acks of deputy-codex-addressed messages 403'd (deputy key ≠ recipient). Looked like a wiring bug; wasn't.
+
+**Why it's a trap:** the bus derives identity from the KEY, not from `BAKER_ROLE`. A wrapper that sets `BAKER_ROLE=deputy-codex` still loses if `BRISEN_LAB_TERMINAL_KEY` is already exported for another slug — the env key silently overrides. A real `deputy-codex` session has the right key, so prod is fine; only the in-session test is contaminated.
+
+**Rule:** to validate a slug's bus identity, run from a clean shell with `BRISEN_LAB_TERMINAL_KEY` UNSET (force the op-read of the target slug's key), or `curl` with an explicitly op-read `X-Terminal-Key`. Never trust an identity smoke run from inside another agent's launcher-seeded session. Check `from_terminal` on the stored message, not just the 200.
+
+**Anchor:** DEPUTY_CODEX_ON_BUS_1 smoke posts #1903/#1904 (resolved `deputy`); env-clean curl ack returned HTTP 200 (2026-06-04).
+
+### 93. `build.sh` (rm -rf + fresh bundle) RESETS the macOS Automation grant fleet-wide; an in-place script swap + re-sign preserves it (2026-06-04)
+
+**What broke:** rebuilding the Brisen Lab Wake.app from the repo via `build.sh` (which does `rm -rf "$APP"` then fresh `osacompile` + ad-hoc sign) produced a new bundle/cdhash → macOS TCC dropped the "Brisen Lab Wake → control Terminal" Apple Events grant. Every auto-wake then SPAWNED a new Terminal window instead of nudging the open tab — fleet-wide — until the Director re-approved the prompt. A later submit-branch fix applied **in-place** (`osacompile` the script onto the existing bundle's `main.scpt` + `codesign --force` with NO rm -rf) preserved the grant — no re-prompt.
+
+**Why it's a trap:** the grant survives an in-place re-sign (proven by DEPUTY_CODEX_PICKER_PILOT_1) but NOT a full bundle rebuild; both "re-sign" in logs, so the difference is invisible unless you know rm-rf = new bundle = TCC reset. The blast radius is the whole fleet (one shared Wake.app), and the breakage only shows on the NEXT wake.
+
+**Rule:** never run `build.sh` (rm -rf rebuild) on the Wake.app while its Automation grant is live and the Director isn't present to re-approve. To change wake logic, edit the repo source then drop the compiled script in-place (`osacompile -o <bundle>/Contents/Resources/Scripts/main.scpt` + `codesign --force --deep --sign -`) — preserves the grant. If a full rebuild is unavoidable, schedule it with the Director on hand to click the re-grant, and warn that auto-wake spawns until then.
+
+**Anchor:** DEPUTY_CODEX_ON_BUS_1 wake rebuild + in-place submit fix, `com.brisen.lab.wake` (2026-06-04).
+
+### 94. A local Wake.app hot-edit not mirrored to the repo applescript silently regresses on the next rebuild — and alias-keyed codex checks must use procPattern, not the literal alias (2026-06-04)
+
+**What broke:** DEPUTY_CODEX_PICKER_PILOT_1 edited the LOCAL Wake.app `main.scpt` (deputy→codex pattern + a generalized submit branch) but never the repo `wake-handler.applescript`. When I rebuilt from the repo for `deputy-codex`, the rebuild RE-INTRODUCED the stale repo logic: the codex-TUI submit (empty `do script ""` = press Enter) and the nudge guard were gated on the LITERAL `aliasName is "codex"`, so `wake/deputy-codex` TYPED "check bus" into the tab but never SUBMITTED it — the codex deputy sat with unentered input.
+
+**Why it's a trap:** local↔repo drift on a built artifact is invisible until a rebuild silently reverts the hot-fix. And an alias-keyed branch (`if aliasName is "codex"`) looks correct but excludes every NEW codex-runtime alias; the type predicate (`procPatternForAlias(a) is "codex"`) is the right key.
+
+**Rule:** (1) any hot-edit to a BUILT artifact (Wake.app, compiled binary, deployed copy) MUST be mirrored to its repo source the SAME session, or the next rebuild regresses it — treat the repo as canonical and rebuild-from-repo, never hand-edit-only. (2) Route per-alias behavior through the runtime-TYPE predicate (procPattern), not the literal alias name, so new same-type aliases inherit it. Grep for sibling literal-alias gates when adding a new alias of an existing type.
+
+**Anchor:** DEPUTY_CODEX_ON_BUS_1 wake submit fix, brisen-lab PR #65; pilot drift from DEPUTY_CODEX_PICKER_PILOT_1 (2026-06-04).
