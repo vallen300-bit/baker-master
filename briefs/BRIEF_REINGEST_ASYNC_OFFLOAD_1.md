@@ -149,8 +149,19 @@ whole loop. Replace it with the advisory-locked, thread-offloaded version below.
         }
     try:
         lock_conn = psycopg2.connect(**_cfg.postgres.direct_dsn_params)
+        # MUST be autocommit (codex G0 #1815 HIGH): default psycopg2 (autocommit=False)
+        # opens a transaction on the lock SELECT; the connection then sits
+        # idle-in-transaction while the embed batch runs in the worker thread. Live
+        # idle_in_transaction_session_timeout = 5min, so a slow batch (>5min) gets its
+        # session killed and the advisory lock silently released → overlapping batch.
+        # Precedent: triggers/scheduler_lease.py:63-67; BRIEF_SCHEDULER_SINGLETON_HARDEN_1.
+        lock_conn.autocommit = True
     except Exception as conn_err:
         logger.error(f"reingest-missing direct connect failed: {conn_err}")
+        try:
+            lock_conn.close()  # may not be bound; guard
+        except Exception:
+            pass
         return {"error": "lock_connect_failed", "reason": str(conn_err), "dry_run": False}
     got_lock = False
     try:
@@ -271,6 +282,7 @@ def test_reingest_write_path_offloads_and_locks_on_direct_conn():
     assert "direct_dsn_params" in src                               # direct, not pooled
     assert "host_direct" in src                                     # fail-loud guard
     assert "store._put_conn(lock_conn)" not in src                 # NOT returned to pool
+    assert "lock_conn.autocommit = True" in src                    # G0 #1815: no idle-in-txn lock drop
 ```
 
 ### Fix 2d — endpoint test: lock-held ⇒ backfill_in_progress (G0 #1809 MED)
@@ -299,9 +311,10 @@ def test_reingest_lock_held_returns_backfill_in_progress(monkeypatch, <existing 
     assert r.json().get("error") == "backfill_in_progress"
 ```
 
-(If wiring the live psycopg2 mock against the existing fixture proves heavy, the source
-guards in 2c plus the unit test in 2a satisfy G3 — but the lock-held behavior test is
-preferred. Flag to AH1 if the fixture can't reach the write path cleanly.)
+This test is **mandatory** (codex G0 #1815 MED — this endpoint is an incident fix; the
+lock behavior must be proven, not just source-guarded). If the existing fixture cannot
+reach the write path cleanly, do NOT silently drop it — escalate to AH1 to resolve the
+fixture; G3 will not pass on source guards alone.
 
 ---
 
