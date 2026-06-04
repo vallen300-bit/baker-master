@@ -14410,6 +14410,162 @@ async def cortex_cycle_action(cycle_id: str, request: Request):
 
 
 # ============================================================
+# Worker self-wake (Stage 3 Phase 1) — BRIEF_WORKER_SELFWAKE_PHASE_1
+# ============================================================
+#
+# Per-B-code launchd worker on Director's Mac polls brisen-lab bus every
+# 120s and fires `claude --print` non-interactively in ~/bm-b{N}. After
+# each wake the worker POSTs to /api/worker/wake to audit-log the
+# invocation; /api/worker/digest aggregates the last N hours for the
+# daily Slack summary. Both endpoints reuse the existing X-Baker-Key
+# auth dependency. Worker-side caps (rate, cost, breaker, lock) live in
+# scripts/baker_worker.py — server is post-hoc audit only, not a budget
+# gate. Director-ratified 2026-05-14.
+
+@app.post("/api/worker/wake", tags=["worker"], dependencies=[Depends(verify_api_key)])
+async def worker_wake_log(request: Request):
+    """Audit-log endpoint for self-wake worker (B-code Phase 1).
+
+    Body (JSON):
+        worker_slug: "b1" | "b2" | "b3" | "b4"
+        wake_ts: ISO timestamp of the wake (worker-side clock)
+        messages_drained: int
+        message_ids: list[int]   (optional — tail for traceability)
+        claude_exit_code: int
+        claude_stdout_tokens: int   (best-effort parse from claude --print --output-format=json)
+        claude_stderr_truncated: str   (max 2000 chars)
+        duration_seconds: float
+        cost_eur_est: float
+    """
+    try:
+        body = await request.json()
+    except Exception:
+        raise HTTPException(status_code=400, detail="invalid_json_body")
+
+    required = {
+        "worker_slug", "wake_ts", "messages_drained", "claude_exit_code",
+        "claude_stdout_tokens", "duration_seconds", "cost_eur_est",
+    }
+    missing = required - set(body.keys())
+    if missing:
+        raise HTTPException(
+            status_code=400,
+            detail=f"missing_fields:{sorted(missing)}",
+        )
+    if body["worker_slug"] not in ("b1", "b2", "b3", "b4"):
+        raise HTTPException(
+            status_code=400,
+            detail=f"invalid_worker_slug:{body['worker_slug']!r}",
+        )
+
+    from memory.store_back import SentinelStoreBack
+    store = SentinelStoreBack._get_global_instance()
+    conn = store._get_conn()
+    if not conn:
+        raise HTTPException(status_code=503, detail="Database unavailable")
+    try:
+        cur = conn.cursor()
+        cur.execute(
+            """
+            INSERT INTO baker_actions
+                (action_type, payload, trigger_source, success,
+                 tier, cost_eur, action_class,
+                 committer_agent, committed_at, self_cost_eur)
+            VALUES (%s, %s::jsonb, %s, %s,
+                    %s, %s, %s,
+                    %s, %s::timestamptz, %s)
+            RETURNING id
+            """,
+            (
+                "worker_wake",
+                json.dumps(body, default=str),
+                "baker_worker_launchd",
+                int(body["claude_exit_code"]) == 0,
+                "B",
+                float(body["cost_eur_est"]),
+                "worker.wake.b_code",
+                f"worker-{body['worker_slug']}",
+                body["wake_ts"],
+                float(body["cost_eur_est"]),
+            ),
+        )
+        new_id = int(cur.fetchone()[0])
+        conn.commit()
+        cur.close()
+        return {"ok": True, "id": new_id}
+    except Exception as e:
+        try:
+            conn.rollback()
+        except Exception:
+            pass
+        logger.error("/api/worker/wake insert failed: %s", e)
+        raise HTTPException(status_code=500, detail=f"audit_write_failed:{str(e)[:200]}")
+    finally:
+        store._put_conn(conn)
+
+
+@app.get("/api/worker/digest", tags=["worker"], dependencies=[Depends(verify_api_key)])
+async def worker_digest(since: str):
+    """Aggregate worker.wake.b_code activity since the given ISO timestamp.
+
+    Returns one entry per b1-b4 plus total_cost_eur. Used by the daily
+    Slack summary cron (scripts/worker_digest.py). Empty workers omitted.
+    """
+    from memory.store_back import SentinelStoreBack
+    store = SentinelStoreBack._get_global_instance()
+    conn = store._get_conn()
+    if not conn:
+        raise HTTPException(status_code=503, detail="Database unavailable")
+    try:
+        cur = conn.cursor()
+        cur.execute(
+            """
+            SELECT committer_agent,
+                   COUNT(*) AS wakes,
+                   COALESCE(SUM((payload->>'claude_stdout_tokens')::int), 0) AS total_tokens,
+                   COALESCE(SUM(
+                       CASE WHEN (payload->>'claude_exit_code')::int <> 0
+                            THEN 1 ELSE 0 END
+                   ), 0) AS fails,
+                   COALESCE(SUM(cost_eur), 0) AS total_cost_eur
+              FROM baker_actions
+             WHERE action_class = 'worker.wake.b_code'
+               AND committed_at > %s::timestamptz
+             GROUP BY committer_agent
+             ORDER BY committer_agent
+             LIMIT 100
+            """,
+            (since,),
+        )
+        rows = cur.fetchall()
+        cur.close()
+    except Exception as e:
+        try:
+            conn.rollback()
+        except Exception:
+            pass
+        logger.error("/api/worker/digest query failed: %s", e)
+        raise HTTPException(status_code=500, detail=f"digest_query_failed:{str(e)[:200]}")
+    finally:
+        store._put_conn(conn)
+
+    out: dict = {"total_cost_eur": 0.0}
+    for committer, wakes, tokens, fails, cost in rows:
+        slug = (committer or "").replace("worker-", "")
+        if slug not in ("b1", "b2", "b3", "b4"):
+            continue
+        out[slug] = {
+            "wake_count": int(wakes or 0),
+            "total_tokens": int(tokens or 0),
+            "fail_count": int(fails or 0),
+            "breaker_tripped": False,
+        }
+        out["total_cost_eur"] += float(cost or 0)
+    out["total_cost_eur"] = round(out["total_cost_eur"], 4)
+    return out
+
+
+# ============================================================
 # CLI runner
 # ============================================================
 

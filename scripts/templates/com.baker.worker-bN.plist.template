@@ -1,0 +1,50 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  Template — install_workers.sh substitutes __SLUG__ + __BAKER_API_KEY__ +
+  __SLACK_WEBHOOK_URL__ + __WORKER_PATH__ on render. Do NOT install this
+  raw — it has placeholder strings.
+
+  StartInterval=120 (2 minutes) — Director-ratified 2026-05-14.
+-->
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>com.baker.worker-__SLUG__</string>
+  <key>ProgramArguments</key>
+  <array>
+    <string>/usr/bin/env</string>
+    <string>python3</string>
+    <string>__WORKER_PATH__</string>
+  </array>
+  <key>StartInterval</key>
+  <integer>120</integer>
+  <key>RunAtLoad</key>
+  <false/>
+  <key>StandardOutPath</key>
+  <string>__HOME__/Library/Logs/baker-worker-__SLUG__.log</string>
+  <key>StandardErrorPath</key>
+  <string>__HOME__/Library/Logs/baker-worker-__SLUG__.err.log</string>
+  <key>EnvironmentVariables</key>
+  <dict>
+    <key>PATH</key>
+    <string>/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin</string>
+    <key>BAKER_WORKER_SLUG</key>
+    <string>__SLUG__</string>
+    <key>BAKER_WORKER_ENABLED</key>
+    <string>true</string>
+    <key>BAKER_WORKER_STATE_DIR</key>
+    <string>__HOME__/Library/Application Support/baker/worker-__SLUG__</string>
+    <key>BAKER_WORKER_PICKER_DIR</key>
+    <string>__HOME__/bm-__SLUG__</string>
+    <key>BRISEN_LAB_DAEMON_URL</key>
+    <string>https://brisen-lab.onrender.com</string>
+    <key>BAKER_MASTER_URL</key>
+    <string>https://baker-master.onrender.com</string>
+    <key>BAKER_API_KEY</key>
+    <string>__BAKER_API_KEY__</string>
+    <key>SLACK_WEBHOOK_URL</key>
+    <string>__SLACK_WEBHOOK_URL__</string>
+  </dict>
+</dict>
+</plist>
