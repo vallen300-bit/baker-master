@@ -1,23 +1,3 @@
----
-dispatch: M365_GRAPH_MAIL_POLL_2
-target: b4
-status: PENDING
-from: cowork-ah1 (Director-directed 2026-06-04)
-gate_G0: codex PASS — bus #1806 (G0 v3; Findings 1-3 across #1801/#1804 all folded)
-dispatched_by: cowork-ah1
-reply_to: cowork-ah1
----
-
-# CODE_4_PENDING — M365_GRAPH_MAIL_POLL_2
-
-**b4 — MANDATORY before any reply:** Read this file + `~/baker-vault/_ops/agents/b4/orientation.md` + `~/.claude/projects/-Users-dimitry-Vallen-Dropbox-Dimitry-vallen-Baker-Project/memory/MEMORY.md`. Confirmation phrase: `"B4 oriented. Read: CODE_4_PENDING.md, MEMORY.md."`
-
-**Ship-report recipient:** cowork-ah1 (NOT lead). Bus on every state change (claim / ship / blocker). Gate chain after your ship: G1 lead-static (cowork-ah1) -> G2 /security-review -> G3 architect -> merge -> dormant post-deploy AC.
-
-**This dispatch passed codex G0 v3 (#1806). Implement exactly as the brief below specifies — the three folded findings (raise-on-ready-None, the imports, and the fully-inert dormant path) are load-bearing; do not regress them.**
-
----
-
 # BRIEF: M365_GRAPH_MAIL_POLL_2 — Microsoft Graph inbound mail poller (delta query)
 
 ## Context
