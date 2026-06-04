@@ -121,13 +121,37 @@ Smaller batches keep each call short and memory bounded (Lesson #25):
 **Step 3 — replace the synchronous write path.** Delete the current inline block from
 `# --- Write path:` (~2071) through the end of the `for c in candidates:` loop (~2109) —
 that includes the inline `from tools.ingest.pipeline import ingest_text` import and the
-whole loop. Replace it with the advisory-locked, thread-offloaded version:
+whole loop. Replace it with the advisory-locked, thread-offloaded version below.
+
+> **G0 #1809 HIGH fold — the session lock MUST run on a DEDICATED DIRECT (non-pooled)
+> connection.** `store._get_conn()` hands back the pgbouncer **transaction-mode** pool
+> (`config.postgres.dsn_params`), which resets session state on every commit and would
+> silently release a `pg_advisory_lock` (see `config/settings.py:192-200`
+> `direct_dsn_params` docstring). Use `psycopg2.connect(**config.postgres.direct_dsn_params)`,
+> acquire+release+**close** that same connection, and NEVER return it to the store pool.
+> If `config.postgres.host_direct` is unset (direct endpoint unavailable), the pooled
+> host cannot safely hold the lock — **fail loud** (`no_direct_dsn`) instead of claiming
+> a false lock. `config` is already imported at `outputs/dashboard.py:29`
+> (`from config.settings import config`).
 
 ```python
-    # --- Write path: acquire single-runner advisory lock, then embed off the event loop ---
-    lock_conn = store._get_conn()
-    if not lock_conn:
-        return {"error": "no_db_connection", "dry_run": False}
+    # --- Write path: single-runner SESSION advisory lock on a DEDICATED DIRECT
+    #     (non-pooled) connection. pgbouncer transaction-mode on the store pool resets
+    #     session state on commit and would release the lock (codex G0 #1809 HIGH). ---
+    import psycopg2
+    from config.settings import config as _cfg
+    if not getattr(_cfg.postgres, "host_direct", None):
+        # Direct endpoint required for a session lock; pooled host is unsafe. Fail loud.
+        return {
+            "error": "no_direct_dsn",
+            "reason": "session advisory lock requires a non-pooled (direct) Postgres endpoint; host_direct unset",
+            "dry_run": False,
+        }
+    try:
+        lock_conn = psycopg2.connect(**_cfg.postgres.direct_dsn_params)
+    except Exception as conn_err:
+        logger.error(f"reingest-missing direct connect failed: {conn_err}")
+        return {"error": "lock_connect_failed", "reason": str(conn_err), "dry_run": False}
     got_lock = False
     try:
         lc = lock_conn.cursor()
@@ -152,14 +176,14 @@ whole loop. Replace it with the advisory-locked, thread-offloaded version:
                 uc = lock_conn.cursor()
                 uc.execute("SELECT pg_advisory_unlock(%s)", (_REINGEST_ADVISORY_LOCK_KEY,))
                 uc.close()
-                lock_conn.commit()
             except Exception as unlock_err:
                 logger.error(f"reingest-missing advisory unlock failed: {unlock_err}")
-                try:
-                    lock_conn.rollback()
-                except Exception:
-                    pass
-        store._put_conn(lock_conn)
+        # Dedicated connection — CLOSE it (session end also drops any held lock).
+        # Never store._put_conn() this; it is not a pool connection.
+        try:
+            lock_conn.close()
+        except Exception:
+            pass
 
     attempted = stats["attempted"]
     embedded = stats["embedded"]
@@ -224,11 +248,66 @@ def test_reingest_embed_batch_isolates_failures(monkeypatch):
     assert len(stats["failed"]) == 1 and stats["failed"][0]["id"] == 2  # doc 2 raised
 ```
 
+### Fix 2b — update the signature source-guard (G0 #1809 MED)
+The existing source-introspection guard at `tests/test_reingest_missing_qdrant.py:43`
+asserts the OLD signature and will now fail. Update it:
+
+```python
+    # was: assert "limit: int = Query(50, ge=1, le=500)" in decl
+    assert "limit: int = Query(10, ge=1, le=100)" in decl
+```
+
+### Fix 2c — source-guards for the new invariants (cheap, match the file's existing style)
+Add a source-introspection test that reads `outputs/dashboard.py` and asserts:
+
+```python
+def test_reingest_write_path_offloads_and_locks_on_direct_conn():
+    """G0 #1809: write path must offload to a thread AND take the session lock on a
+    dedicated DIRECT connection (never the pooled store conn)."""
+    import inspect, outputs.dashboard as dash
+    src = inspect.getsource(dash.documents_reingest_missing)
+    assert "asyncio.to_thread(_reingest_embed_batch" in src        # offload
+    assert "pg_try_advisory_lock" in src and "pg_advisory_unlock" in src
+    assert "direct_dsn_params" in src                               # direct, not pooled
+    assert "host_direct" in src                                     # fail-loud guard
+    assert "store._put_conn(lock_conn)" not in src                 # NOT returned to pool
+```
+
+### Fix 2d — endpoint test: lock-held ⇒ backfill_in_progress (G0 #1809 MED)
+Mock the direct connection so the lock returns False; adapt the client/store fixtures to
+this file's existing harness (the suite already builds a fake store + candidate state —
+reuse it; only `psycopg2.connect` and `config.postgres.host_direct` need mocking):
+
+```python
+def test_reingest_lock_held_returns_backfill_in_progress(monkeypatch, <existing client/store fixture>):
+    monkeypatch.setattr("config.settings.config.postgres.host_direct", "direct.example", raising=False)
+
+    class _LockCur:
+        def execute(self, sql, params=None): self._sql = sql
+        def fetchone(self):
+            return (False,) if "pg_try_advisory_lock" in self._sql else (None,)
+        def close(self): pass
+    class _LockConn:
+        def cursor(self): return _LockCur()
+        def close(self): pass
+    monkeypatch.setattr("psycopg2.connect", lambda **kw: _LockConn())
+
+    # ... set up candidates so the write path is reached (dry_run=false) ...
+    r = client.post("/api/documents/reingest-missing?dry_run=false&limit=10",
+                    headers={"X-Baker-Key": <test key>})
+    assert r.status_code == 200
+    assert r.json().get("error") == "backfill_in_progress"
+```
+
+(If wiring the live psycopg2 mock against the existing fixture proves heavy, the source
+guards in 2c plus the unit test in 2a satisfy G3 — but the lock-held behavior test is
+preferred. Flag to AH1 if the fixture can't reach the write path cleanly.)
+
 ---
 
 ## Files Modified
-- `outputs/dashboard.py` — add `_reingest_embed_batch` + lock key; lower default limit 50→10 (cap 500→100); replace sync write loop with locked `asyncio.to_thread` call.
-- `tests/test_reingest_missing_qdrant.py` — add the failure-isolation test.
+- `outputs/dashboard.py` — add `_reingest_embed_batch` + lock key; lower default limit 50→10 (cap 500→100); replace sync write loop with a **direct-connection** advisory lock + `asyncio.to_thread` offload (`psycopg2` + `config` imported locally in the handler).
+- `tests/test_reingest_missing_qdrant.py` — update the signature guard (2b); add the failure-isolation unit test (2a), the offload/lock source-guards (2c), and the lock-held endpoint test (2d).
 
 ## Do NOT Touch
 - The dry_run branch, candidate SELECT, `_reingest_missing_counts`, `_REINGEST_MISSING_QDRANT_PREDICATE`, `_HAS_EXTRACTED_TEXT` — all correct as shipped in #291.
