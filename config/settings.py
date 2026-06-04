@@ -208,6 +208,14 @@ class PostgresConfig:
             "dbname": self.database,
             "user": self.user,
             "password": self.password,
+            # SCHEDULER_NEON_IDLE_HARDEN_1: keep the long-lived non-pooled lock
+            # connection alive so Neon does not idle-disconnect it between the
+            # 5-min heartbeat probes (root of the ~18-min scheduler restart loop).
+            # Shared across every direct-conn consumer (reingest/OCR locks benefit too).
+            "keepalives": 1,
+            "keepalives_idle": 30,
+            "keepalives_interval": 10,
+            "keepalives_count": 5,
         }
         if self.sslmode and self.sslmode != "disable":
             params["sslmode"] = self.sslmode

@@ -199,6 +199,25 @@ def _check_scheduler_heartbeat():
     + server logs still capture every restart.
     """
     global _watchdog_last_alert_ts, _watchdog_consecutive_stale
+    # SCHEDULER_NEON_IDLE_HARDEN_1: consume a stand-down request FIRST, on this
+    # request thread (NOT the heartbeat job thread — a thread cannot join itself).
+    # The heartbeat sets the flag when reacquire finds another container now holds
+    # the singleton lock; restart here drops our lock + re-runs the clean acquire
+    # path. Test-and-clear is idempotent, so a second tick does not re-restart.
+    try:
+        import triggers.scheduler_lease as _lease
+        if _lease.consume_standdown():
+            logger.error(
+                "SCHEDULER-WATCHDOG-1: stand-down requested (singleton lock lost "
+                "to another process). Restarting off the request thread."
+            )
+            from triggers.embedded_scheduler import restart_scheduler
+            restart_scheduler(reason="standdown_lock_lost")
+            _watchdog_consecutive_stale = 0
+            return
+    except Exception as e:
+        logger.debug(f"Scheduler stand-down check failed (non-fatal): {e}")
+
     try:
         from triggers.state import trigger_state
         hb = trigger_state.get_watermark("scheduler_heartbeat")
@@ -216,7 +235,7 @@ def _check_scheduler_heartbeat():
                 f"for 2 consecutive reads. Restarting..."
             )
             from triggers.embedded_scheduler import restart_scheduler
-            restart_scheduler()
+            restart_scheduler(reason=f"heartbeat_stale_{age_seconds:.0f}s")
             _watchdog_consecutive_stale = 0
             # Throttle log frequency (replaces the WA push, same cooldown)
             now_ts = time.time()

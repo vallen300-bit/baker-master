@@ -1550,10 +1550,19 @@ def _scheduler_heartbeat():
     except Exception as e:
         logger.error(f"Scheduler heartbeat write failed: {e}")
 
-    # 2) Probe singleton-lock connection — diagnostic only, NO restart from here.
+    # 2) Lock-health step (SCHEDULER_NEON_IDLE_HARDEN_1). The heartbeat job is
+    # registered ONLY when start_scheduler() acquired the lock (embedded_scheduler
+    # :1699-1707 registers NO jobs without it) — so if the heartbeat is running at
+    # all, this process is an active scheduler that MUST hold the lock. Therefore a
+    # None/dead lock conn means "recover or stand down", NEVER "skip": skipping would
+    # let a transient-dropped process keep firing lock-less with a fresh watermark
+    # forever (watchdog never trips). Watermark is already written FIRST above, so
+    # this step never gates proof-of-life; the bounded probe/reconnect (connect_timeout
+    # + keepalives + statement_timeout) cannot hang the job thread past the next fire.
     try:
         import triggers.scheduler_lease as _lease
         held = _lease._held_conn
+        need_reacquire = held is None  # lost conn on a prior transient → must recover
         if held is not None:
             try:
                 cur = held.cursor()
@@ -1562,13 +1571,33 @@ def _scheduler_heartbeat():
                 cur.close()
             except Exception as probe_err:
                 logger.warning(
-                    "scheduler singleton-lock connection probe failed (%s). "
-                    "Watchdog will restart on next stale-watermark detection; "
-                    "this job does NOT self-restart (reentrancy-hostile).",
+                    "scheduler singleton-lock connection probe failed (%s) — "
+                    "attempting self-heal reacquire.",
                     probe_err,
                 )
+                need_reacquire = True
+        if need_reacquire:
+            outcome = _lease.reacquire_singleton_lock()
+            if outcome == _lease.REACQUIRE_REOWNED:
+                logger.info(
+                    "scheduler singleton-lock reacquired by heartbeat — "
+                    "continuing without teardown."
+                )
+            elif outcome == _lease.REACQUIRE_LOST:
+                logger.error(
+                    "scheduler singleton-lock now held by another process — "
+                    "requesting stand-down (request-thread watchdog restarts off "
+                    "the job thread; no self-join)."
+                )
+                _lease.request_standdown()
+            else:  # REACQUIRE_TRANSIENT — indeterminate, retry next heartbeat
+                logger.warning(
+                    "scheduler singleton-lock reacquire transient-failed — will "
+                    "retry next heartbeat (held stays None → routes to reacquire "
+                    "again, not skip; watchdog backstop active)."
+                )
     except Exception:
-        pass  # never fail heartbeat from probe path
+        pass  # never fail heartbeat from the lock-health path
 
 
 def _get_rss_mb():
@@ -1643,15 +1672,19 @@ def _memory_watchdog():
         logger.warning(f"Memory watchdog failed (non-fatal): {e}")
 
 
-def restart_scheduler():
+def restart_scheduler(reason: str = "unspecified"):
     """SCHEDULER-WATCHDOG-1: Force restart the scheduler. Called by request-time watchdog.
 
     Uses ``wait=True`` (B1 RCA 2026-04-29 — ``wait=False`` left job-execution
     threads firing without a scheduler reference). Drops the singleton lock
     so the re-acquire path runs cleanly through ``start_scheduler()``.
+
+    SCHEDULER_NEON_IDLE_HARDEN_1: emits a single greppable
+    ``SCHEDULER_RESTART reason=<...>`` line so the restart cadence is observable
+    and a regression (the ~18-min loop) is caught immediately.
     """
     global _scheduler
-    logger.warning("SCHEDULER-WATCHDOG-1: Force-restarting scheduler...")
+    logger.warning("SCHEDULER_RESTART reason=%s — force-restarting scheduler...", reason)
     try:
         if _scheduler is not None:
             try:
