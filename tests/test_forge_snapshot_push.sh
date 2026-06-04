@@ -41,7 +41,7 @@ run_daemon() {
 
 assert_no_prod_aliases() {
   local output_file="$1"
-  for alias in lead deputy b1 b2 b3 b4; do
+  for alias in lead deputy deputy-codex b1 b2 b3 b4; do
     if grep -q "\[forge-push\] ${alias}:" "$output_file"; then
       echo "FAIL: production alias '$alias' processed despite TERMINALS_OVERRIDE" >&2
       exit 1

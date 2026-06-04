@@ -44,6 +44,7 @@ case "${BAKER_ROLE:-}" in
     AH1|aihead1|lead|LEAD)              SLUG=lead ;;
     AH1-APP|cowork-ah1|COWORK-AH1)      SLUG=cowork-ah1 ;;
     AH2|aihead2|deputy|DEPUTY)          SLUG=deputy ;;
+    deputy-codex|DEPUTY-CODEX|deputy_codex) SLUG=deputy-codex ;;
     B1|b1)                              SLUG=b1 ;;
     B2|b2)                              SLUG=b2 ;;
     B3|b3)                              SLUG=b3 ;;
