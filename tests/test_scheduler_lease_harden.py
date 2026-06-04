@@ -46,6 +46,26 @@ def _mock_lock_conn(lock_granted: bool) -> MagicMock:
     return conn
 
 
+class _AutocommitBoomConn:
+    """A connection whose post-connect setup (autocommit setter) raises — used to
+    prove _open_lock_session closes the half-opened conn instead of leaking it
+    (codex G3 #1884). Tracks whether close() was called."""
+
+    def __init__(self):
+        self.closed = False
+
+    @property
+    def autocommit(self):
+        return False
+
+    @autocommit.setter
+    def autocommit(self, value):
+        raise RuntimeError("post-connect setup failed")
+
+    def close(self):
+        self.closed = True
+
+
 # ---------- Fix 1: keepalives ----------
 
 
@@ -62,6 +82,8 @@ def test_direct_dsn_params_has_keepalives():
 
 
 def test_acquire_sets_statement_timeout_and_connect_timeout(monkeypatch):
+    """connect_timeout=5 + statement_timeout applied at CONNECT time via libpq options
+    (codex G3 #1884: a post-connect SET had an unprotected leak/hang window)."""
     _direct_host(monkeypatch)
     fake_conn = _mock_lock_conn(lock_granted=True)
     with patch.object(lease.psycopg2, "connect", return_value=fake_conn) as mconnect:
@@ -69,9 +91,35 @@ def test_acquire_sets_statement_timeout_and_connect_timeout(monkeypatch):
 
     assert held is fake_conn
     assert mconnect.call_args.kwargs.get("connect_timeout") == 5
-    executed = [c.args[0] for c in fake_conn.cursor.return_value.execute.call_args_list]
-    assert any("SET statement_timeout" in s for s in executed)
-    assert any("'10s'" in s for s in executed)
+    assert mconnect.call_args.kwargs.get("options") == "-c statement_timeout=10s"
+
+
+# ---------- codex G3 #1884: no connection leak on post-connect setup failure ----------
+
+
+def test_acquire_closes_conn_on_post_connect_failure(monkeypatch):
+    """If a post-connect step raises, acquire closes the conn (no leak) + returns None."""
+    _direct_host(monkeypatch)
+    boom = _AutocommitBoomConn()
+    with patch.object(lease.psycopg2, "connect", return_value=boom):
+        held = lease.acquire_singleton_lock()
+
+    assert held is None
+    assert boom.closed is True
+    assert lease._held_conn is None
+
+
+def test_reacquire_closes_conn_on_post_connect_failure(monkeypatch):
+    """Same leak guard on the reacquire path → REACQUIRE_TRANSIENT, conn closed."""
+    _direct_host(monkeypatch)
+    boom = _AutocommitBoomConn()
+    with patch.object(lease.psycopg2, "connect", return_value=boom):
+        outcome = lease.reacquire_singleton_lock()
+
+    assert outcome == lease.REACQUIRE_TRANSIENT
+    assert boom.closed is True
+    assert lease._held_conn is None
+    assert lease.consume_standdown() is False  # transient never stands down
 
 
 # ---------- Fix 2b: reacquire 3-state split ----------
@@ -88,9 +136,8 @@ def test_reacquire_reowned_sets_held_no_standdown(monkeypatch):
     assert lease._held_conn is fake_conn
     assert lease.consume_standdown() is False
     assert mconnect.call_args.kwargs.get("connect_timeout") == 5
-    # statement_timeout set on the reacquired session too
-    executed = [c.args[0] for c in fake_conn.cursor.return_value.execute.call_args_list]
-    assert any("SET statement_timeout" in s for s in executed)
+    # statement_timeout applied at connect time on the reacquired session too
+    assert mconnect.call_args.kwargs.get("options") == "-c statement_timeout=10s"
 
 
 def test_reacquire_lost_clears_held_closes_conn_requests_standdown(monkeypatch):

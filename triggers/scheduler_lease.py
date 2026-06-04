@@ -85,16 +85,28 @@ def _open_lock_session() -> psycopg2.extensions.connection:
       * a per-session ``statement_timeout`` bounds a server-side stall.
     Raises on connect failure — callers handle the transient case.
     """
+    # statement_timeout is applied at CONNECT time via libpq options (codex G3
+    # #1884): a post-connect `SET` has an unprotected failure/hang window and, if
+    # it raised, the half-opened connection leaked (acquire->None / reacquire->
+    # TRANSIENT never closed it → the 30s retry loop leaks a direct Neon session
+    # each cycle). _STATEMENT_TIMEOUT is a fixed module constant (never user input);
+    # direct_dsn_params carries no conflicting 'options' key.
     conn = psycopg2.connect(
-        connect_timeout=_CONNECT_TIMEOUT_S, **config.postgres.direct_dsn_params
+        connect_timeout=_CONNECT_TIMEOUT_S,
+        options="-c statement_timeout=%s" % _STATEMENT_TIMEOUT,
+        **config.postgres.direct_dsn_params,
     )
-    # Advisory locks need a real session, not pgbouncer transaction-mode;
-    # autocommit avoids accidental session-state drift on idle.
-    conn.autocommit = True
-    cur = conn.cursor()
-    # _STATEMENT_TIMEOUT is a fixed module constant (never user input).
-    cur.execute("SET statement_timeout = '%s'" % _STATEMENT_TIMEOUT)
-    cur.close()
+    try:
+        # Advisory locks need a real session, not pgbouncer transaction-mode;
+        # autocommit avoids accidental session-state drift on idle. Guard EVERY
+        # post-connect step so ANY failure closes the conn instead of leaking it.
+        conn.autocommit = True
+    except Exception:
+        try:
+            conn.close()
+        except Exception:
+            pass
+        raise
     return conn
 
 
