@@ -1,5 +1,5 @@
 ---
-status: PENDING
+status: COMPLETE
 brief_id: REINGEST_ASYNC_OFFLOAD_1
 dispatch: REINGEST_ASYNC_OFFLOAD_1
 to: b1
@@ -53,3 +53,20 @@ The exact copy-pasteable diffs, the `Do NOT touch` list, and all line refs are i
   3. `embedded > 0` and `remaining_after` strictly decreases across two sequential calls.
 - **Gates:** G0 PASS (codex #1820) → G1 lead literal `pytest tests/test_reingest_missing_qdrant.py -v` + the live health-during-backfill probe → G2 `/security-review` → G3 codex on the PR → AH1 merge → you fill `POST_DEPLOY_AC_VERDICT v1` (AC1/AC2/AC3) on prod after deploy.
 - Ship report answers the done rubric literally; bus-post to lead on ship.
+
+## Outcome — COMPLETE (2026-06-04)
+
+PR #293 merged to main (`3cf00cc`). All gates green: G0 codex #1820, G1 lead 14/14 py3.12,
+G2 /security-review CLEAR, G3 codex #1828 no-findings. **POST_DEPLOY_AC_VERDICT v1: PASS**
+(bus #1831, run on live prod `3cf00cc`):
+- **AC1 health-during-backfill — PASS.** Live `dry_run=false&limit=10` started 12:37:18Z;
+  concurrent `GET /health` → 200 in **0.88s** (12:37:19.49Z→12:37:20.44Z), re-probed 0.52s
+  mid-batch. Event loop not blocked (the core fix).
+- **AC2 advisory lock — PASS.** Concurrent 2nd POST → `{"error":"backfill_in_progress"}`.
+- **AC3 convergence — PASS.** `embeddable_missing` 444→443, `total_missing` 1000→999
+  (≥1 embedded, strictly decreasing via the canonical predicate count).
+- **Throughput caveat (operational, not a defect — `ingest_text` is Do-NOT-Touch):** the
+  `limit=10` batch hit heavy legacy docs (294K/146K/136K/135K/89K chars → ~300 Voyage calls
+  each); HTTP client times out at 120s while the server thread completes (idempotent — re-poll
+  the read-only count, do NOT blind-retry). Lead to pace the 441-doc backfill by small limits +
+  watching `embeddable_missing` fall, not by HTTP response.
