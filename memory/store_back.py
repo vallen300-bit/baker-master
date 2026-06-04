@@ -1235,7 +1235,8 @@ class SentinelStoreBack:
                     ('render.deploy.web_service.standard', 25.00, 'Render Standard web service spawn (monthly billing approximation)'),
                     ('render.env.flip',                    0.00,  'Render env-var flip; zero direct cost; logged for audit'),
                     ('vendor.subscription.monthly',        50.00, 'Generic monthly SaaS subscription default; override with specific class as registry grows'),
-                    ('test.synthetic',                     1.00,  'Test-only class for integration tests')
+                    ('test.synthetic',                     1.00,  'Test-only class for integration tests'),
+                    ('worker.wake.b_code',                 0.10,  'B-code self-wake invocation (claude --print non-interactive); WORKER_SELFWAKE_PHASE_1')
                 ON CONFLICT (class_name) DO NOTHING
             """)
             conn.commit()

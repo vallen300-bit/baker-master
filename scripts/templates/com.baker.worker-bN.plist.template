@@ -1,0 +1,46 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>com.baker.worker-bN</string>
+  <key>ProgramArguments</key>
+  <array>
+    <string>/usr/bin/python3</string>
+    <string>/Users/dimitry/Desktop/baker-code/scripts/baker_worker.py</string>
+  </array>
+  <key>StartInterval</key>
+  <integer>120</integer>
+  <key>RunAtLoad</key>
+  <true/>
+  <key>StandardOutPath</key>
+  <string>/Users/dimitry/Library/Logs/baker-worker-bN.log</string>
+  <key>StandardErrorPath</key>
+  <string>/Users/dimitry/Library/Logs/baker-worker-bN.err.log</string>
+  <key>ProcessType</key>
+  <string>Background</string>
+  <key>EnvironmentVariables</key>
+  <dict>
+    <key>PATH</key>
+    <string>/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin</string>
+    <key>HOME</key>
+    <string>/Users/dimitry</string>
+    <key>BAKER_WORKER_SLUG</key>
+    <string>bN</string>
+    <key>BAKER_WORKER_ENABLED</key>
+    <string>true</string>
+    <key>BAKER_WORKER_STATE_DIR</key>
+    <string>/Users/dimitry/Library/Application Support/baker/worker-bN</string>
+    <key>BAKER_WORKER_PICKER_DIR</key>
+    <string>/Users/dimitry/bm-bN</string>
+    <key>BRISEN_LAB_DAEMON_URL</key>
+    <string>https://brisen-lab.onrender.com</string>
+    <key>BAKER_MASTER_URL</key>
+    <string>https://baker-master.onrender.com</string>
+    <key>BAKER_KEY</key>
+    <string>FILLED_BY_INSTALLER</string>
+    <key>SLACK_WEBHOOK_URL</key>
+    <string>FILLED_BY_INSTALLER</string>
+  </dict>
+</dict>
+</plist>
