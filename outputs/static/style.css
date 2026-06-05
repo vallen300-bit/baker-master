@@ -3,8 +3,8 @@
    Luxury Concierge: dark charcoal, champagne gold, serif headlines
    ============================================================ */
 
-/* SCHEDULER-WATCHDOG-1: Red banner when scheduler is dead */
-.scheduler-banner { background: #dc3545; color: #fff; text-align: center; padding: 8px 16px; font-size: 13px; font-weight: 600; z-index: 9999; position: fixed; top: 0; left: 0; right: 0; }
+/* SCHEDULER-WATCHDOG-1: Amber/info banner when scheduler is auto-restarting (S3: routine auto-restart is not an alarm) */
+.scheduler-banner { background: var(--amber); color: #1a1a1a; text-align: center; padding: 8px 16px; font-size: 13px; font-weight: 600; z-index: 9999; position: fixed; top: 0; left: 0; right: 0; }
 
 * { margin: 0; padding: 0; box-sizing: border-box; }
 
@@ -815,9 +815,10 @@ body {
   font-size: 13px; color: var(--text2); margin-top: 6px; line-height: 1.6;
 }
 
-/* Board view (kanban) */
-.board-view { display: flex; gap: 14px; overflow-x: auto; }
-.board-column { flex: 1; min-width: 200px; }
+/* Board view (kanban) — S4: reflow columns to fit the viewport (grid auto-fit wraps
+   surplus columns to a new row instead of clipping them off-screen at narrow widths) */
+.board-view { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 14px; }
+.board-column { min-width: 0; }
 .board-column-header {
   font-family: var(--mono); font-size: 11px; font-weight: 600;
   text-transform: uppercase; letter-spacing: 0.5px; color: var(--text3);
