@@ -1,5 +1,5 @@
 ---
-status: AC_PENDING
+status: COMPLETE
 brief_id: COCKPIT_UX_S4_S3_FIX_1
 dispatch: COCKPIT_UX_S4_S3_FIX_1
 to: b1
@@ -8,7 +8,7 @@ dispatched_by: lead
 task_class: presentation-only UX fix (CSS)
 harness_v2: applies (small/presentation — light gate)
 spec_source: bus #1910 (inline dispatch IS the authoritative spec — no separate brief file written)
-gate_plan: G1 lead 20/20 PASS -> light G2 CLEAR (CSS-only) -> MERGED PR #299 (8b4822c) -> POST_DEPLOY_AC pending b1 (verify v80 css live @1280/1440)
+gate_plan: G1 lead 20/20 PASS -> light G2 CLEAR (CSS-only) -> MERGED PR #299 (8b4822c) -> POST_DEPLOY_AC PASS (b1 #1926): deployed v80, S4 no-clip 3/4-col @1280/1440, S3 amber rgb(212,165,53) dark-text, health 0.44s. DONE.
 prior_envelope: OCR_REEXTRACT_MISSING_1 (PR #294 a34f1ed) — COMPLETE + POST_DEPLOY_AC PASS (#1914); superseded by this dispatch
 ---
 
