@@ -13,6 +13,7 @@ so the suite stays DB-free.
 """
 from __future__ import annotations
 
+import re
 import uuid
 from pathlib import Path
 
@@ -121,9 +122,9 @@ def test_pending_tab_button_in_static_index_html():
     src = Path("outputs/static/index.html").read_text()
     assert 'id="cortexTabPending"' in src
     assert "_cortexTab('pending')" in src
-    # Cache-bust present (literals updated by COCKPIT_UX_S4_S3_FIX_1: style.css->v80; app.js at v123)
-    assert "app.js?v=123" in src
-    assert "style.css?v=80" in src
+    # Cache-bust param present on each asset (version-agnostic — survives future bumps)
+    assert re.search(r"app\.js\?v=\d+", src), "app.js cache-bust param missing"
+    assert re.search(r"style\.css\?v=\d+", src), "style.css cache-bust param missing"
 
 
 def test_cortex_ratify_js_helpers_exist():
