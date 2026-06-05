@@ -178,6 +178,21 @@ def _register_jobs(scheduler: BackgroundScheduler):
     register_expected_job("email_poll", config.triggers.email_check_interval)
     logger.info(f"Registered: email_poll (every {config.triggers.email_check_interval}s)")
 
+    # M365 Graph mail polling — every GRAPH_MAIL_CHECK_INTERVAL seconds.
+    # Independent source adapter; inert unless BAKER_USE_GRAPH=true (the
+    # check_new_graph_messages entrypoint returns with zero side effects when
+    # GraphClient.is_ready() is False). Mirrors triggers/scheduler.py #292;
+    # this is the LIVE registration (BlockingScheduler version never runs in prod).
+    from triggers.graph_mail_trigger import check_new_graph_messages
+    scheduler.add_job(
+        check_new_graph_messages,
+        IntervalTrigger(seconds=config.triggers.graph_mail_check_interval),
+        id="graph_mail_poll", name="Microsoft Graph mail polling",
+        coalesce=True, max_instances=1, replace_existing=True,
+    )
+    register_expected_job("graph_mail_poll", config.triggers.graph_mail_check_interval)
+    logger.info(f"Registered: graph_mail_poll (every {config.triggers.graph_mail_check_interval}s)")
+
     # WhatsApp: migrated from Wassenger polling to WAHA webhook (Session 26)
     # whatsapp_poll job removed — inbound messages now arrive via POST /api/webhook/whatsapp
 
