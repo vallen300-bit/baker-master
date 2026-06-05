@@ -121,9 +121,9 @@ def test_pending_tab_button_in_static_index_html():
     src = Path("outputs/static/index.html").read_text()
     assert 'id="cortexTabPending"' in src
     assert "_cortexTab('pending')" in src
-    # Cache-bust bumped (CORTEX_DIRECTOR_CARD_V1_1)
-    assert "app.js?v=118" in src
-    assert "style.css?v=77" in src
+    # Cache-bust present (literals updated by COCKPIT_UX_S4_S3_FIX_1: style.css->v80; app.js at v123)
+    assert "app.js?v=123" in src
+    assert "style.css?v=80" in src
 
 
 def test_cortex_ratify_js_helpers_exist():
