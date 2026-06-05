@@ -1,5 +1,5 @@
 ---
-status: PENDING
+status: AC_PENDING
 brief_id: COCKPIT_UX_S4_S3_FIX_1
 dispatch: COCKPIT_UX_S4_S3_FIX_1
 to: b1
@@ -8,7 +8,7 @@ dispatched_by: lead
 task_class: presentation-only UX fix (CSS)
 harness_v2: applies (small/presentation — light gate)
 spec_source: bus #1910 (inline dispatch IS the authoritative spec — no separate brief file written)
-gate_plan: G1 lead (literal pytest) -> light G2 (presentation-only, no endpoint/data/query change) -> ship to lead
+gate_plan: G1 lead 20/20 PASS -> light G2 CLEAR (CSS-only) -> MERGED PR #299 (8b4822c) -> POST_DEPLOY_AC pending b1 (verify v80 css live @1280/1440)
 prior_envelope: OCR_REEXTRACT_MISSING_1 (PR #294 a34f1ed) — COMPLETE + POST_DEPLOY_AC PASS (#1914); superseded by this dispatch
 ---
 
