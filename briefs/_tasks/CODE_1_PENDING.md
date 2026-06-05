@@ -3,7 +3,7 @@ dispatch: COCKPIT_CACHEBUST_TEST_REGEX_1
 to: b1
 from: lead
 dispatched_by: cowork-ah1 (AH1)
-status: PENDING
+status: COMPLETE
 dispatched_at: 2026-06-05
 authored: 2026-06-05
 target_repo: baker-master
@@ -37,3 +37,6 @@ assert re.search(r"style\.css\?v=\d+", src), "style.css cache-bust param missing
 **Gate:** G1 lead literal pytest (`python3.12 -m pytest tests/test_dashboard_cortex_ratify.py::test_pending_tab_button_in_static_index_html -v`) → light G2 → ship. No POST_DEPLOY_AC (no deploy-surface change).
 
 **Return:** `briefs/_reports/CODE_1_RETURN.md` + PR number on bus to lead. Use `python3.12` (default python3 here is 3.9, breaks collection).
+
+
+> COCKPIT_CACHEBUST_TEST_REGEX_1 merged PR #300 (afbd63d). G1 20/20 + light G2. Test-only, no AC. COMPLETE.
