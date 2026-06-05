@@ -788,6 +788,16 @@ Anchor: Director chat 2026-05-23 evening; AH2 bus #788 (Layer 2) + bus #790
 
 **Rule:** when installing ANY Codex-runtime agent that needs a live card, wire `UserPromptSubmit`→`turn-start-hook.sh` and `Stop`→`turn-stop-hook.sh` into `~/.codex/hooks.json` (PascalCase keys; forge hooks self-gate on `$FORGE_TERMINAL` so they no-op for the codex CODER), ensure `FORGE_KEY`+`LAB_URL` are in env, then complete the REQUIRED `/hooks` trust step on relaunch. Verify by the FLAG appearing during an active turn (AC1) — not by "Codex started cleanly". Canonical recipe: `_ops/processes/codex-runtime-forge-amber-wiring.md`.
 
+### 96. Two Codex-runtime agents sharing procPattern "codex" collide in the wake-handler unless one has a stable cwd anchor — disambiguate by EXCLUSION (2026-06-05)
+
+**What broke:** clicking the codex *reviewer* card (alias `codex`) on Brisen Lab woke nothing / the wrong tab. The wake-handler's `findRunningPickerTab(targetDir, procPattern)` finds the Terminal tab by `procPattern` then matches cwd to `targetDir`. The codex *deputy* (`deputy-codex`) anchors on a stable cwd (`bm-aihead2`) via `cwdForAlias`. The reviewer (`cvi` = bare `codex -m gpt-5.5`) has NO `cwdForAlias` entry → `targetDir=""` → the `[ -z targetDir ]` branch matched ANY tab running a `codex` process — so a `codex` wake could nudge the deputy's tab. Both agents run the identical `codex` binary (same procPattern), so process-name matching can't tell them apart.
+
+**Why it's a trap:** the wake-listener dispatched `alias=codex` correctly (log confirmed) — the failure was one layer down in tab-targeting, invisible without reading the handler. Title-matching is fragile (codex TUI / shell precmd overwrites the OSC-set title with the cwd basename — observed). Model-flag matching (`-m gpt-5.5`) couples to a version string. cwd-anchoring fails because the reviewer is mobile (runs from `~`, may cd into repos).
+
+**Rule:** when two same-runtime agents share a procPattern, give each a discriminator the LAUNCHER controls deterministically. Best for a mobile sibling with a fixed sibling: EXCLUSION — match "the codex tab that is NOT the other one's cwd" (`excludeDir = cwdForAlias("deputy-codex")`), not a positive anchor. Identity-based, survives the mobile agent cd-ing anywhere except into the fixed sibling's dir, no model coupling. Caveat: exclusion is one-directional (protects the mobile alias; the fixed alias relies on its own cwd anchor). Apply wake-handler edits IN-PLACE (`osacompile` onto the bundle's `main.scpt` + `codesign --force`), NEVER `build.sh` rm-rf (Lesson #93 — resets the TCC grant fleet-wide).
+
+**Anchor:** codex reviewer wake collision 2026-06-05; AH2 fix (excludeDir param), code-reviewer APPROVE; verified live (`open brisen-lab://wake/codex` targeted reviewer ttys017, not deputy ttys012); brisen-lab `fb79cf3`.
+
 **Anchor:** Director observed deputy-codex never ambering 2026-06-05; AH2 diagnosed + fixed (`~/.codex/hooks.json` + trust); code-reviewer + codex worker #1920 both PASS; verified live (flag fired on prompt, card ambered, flag removed on turn-end).
 
 ### 96. A Terminal profile cloned by raw plist edit will NOT appear in the Shell menu picker — Terminal serves a stale in-memory profile cache and clobbers disk on quit; import via Terminal's own `.terminal` path instead (2026-06-05)
