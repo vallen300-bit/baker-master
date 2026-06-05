@@ -1,29 +1,39 @@
 ---
-status: COMPLETE
-brief_id: COCKPIT_UX_S4_S3_FIX_1
-dispatch: COCKPIT_UX_S4_S3_FIX_1
+dispatch: COCKPIT_CACHEBUST_TEST_REGEX_1
 to: b1
 from: lead
-dispatched_by: lead
-task_class: presentation-only UX fix (CSS)
-harness_v2: applies (small/presentation — light gate)
-spec_source: bus #1910 (inline dispatch IS the authoritative spec — no separate brief file written)
-gate_plan: G1 lead 20/20 PASS -> light G2 CLEAR (CSS-only) -> MERGED PR #299 (8b4822c) -> POST_DEPLOY_AC PASS (b1 #1926): deployed v80, S4 no-clip 3/4-col @1280/1440, S3 amber rgb(212,165,53) dark-text, health 0.44s. DONE.
-prior_envelope: OCR_REEXTRACT_MISSING_1 (PR #294 a34f1ed) — COMPLETE + POST_DEPLOY_AC PASS (#1914); superseded by this dispatch
+dispatched_by: cowork-ah1 (AH1)
+status: PENDING
+dispatched_at: 2026-06-05
+authored: 2026-06-05
+target_repo: baker-master
+estimated_time: ~15-20min
+complexity: trivial
+reply_to: lead
+priority: tier-b-lowpri
+anchor: b1 POST_DEPLOY_AC_VERDICT bus #1926 — cache-bust test pins exact CSS/JS versions, re-breaks on every bump
+brief_path: briefs/BRIEF_COCKPIT_CACHEBUST_TEST_REGEX_1.md
+prior_mailbox_state: superseded — COCKPIT_UX_S4_S3_FIX_1 shipped (PR #299 merged 8b4822c, POST_DEPLOY_AC PASS, CODE_1 flipped COMPLETE 2026-06-05)
 ---
 
-# B1 dispatch — COCKPIT_UX_S4_S3_FIX_1
+# B1 dispatch — COCKPIT_CACHEBUST_TEST_REGEX_1
 
-**Authoritative spec = bus #1910 (inline). No separate brief file exists — confirmed not in git or local (b1 #1919, lead #1923).** Two presentation-only Cockpit UX fixes from a live Nielsen heuristic eval, Director-ratified.
+Trivial test-only refactor. Full spec in `briefs/BRIEF_COCKPIT_CACHEBUST_TEST_REGEX_1.md`.
 
-## Scope
-- **S4 (catastrophe):** Critical card column clipped off viewport at 1280px, no scroll affordance. Reflow the container to fit. DevTools-confirm the live class first — candidate `.board-view` (`outputs/static/style.css:819`; `app.js:4098` sets `className board-view`).
-- **S3 (major):** `.scheduler-banner` `#dc3545` alarm-red for routine auto-restart (`outputs/static/style.css:7`; `app.js` banner logic ~7969). Downgrade to amber/info.
+**One-liner:** In `tests/test_dashboard_cortex_ratify.py::test_pending_tab_button_in_static_index_html` (lines ~120-126), replace the two exact-version asserts:
+```python
+assert "app.js?v=123" in src
+assert "style.css?v=80" in src
+```
+with version-agnostic regex:
+```python
+import re  # module-scoped, top of file if not already present
+assert re.search(r"app\.js\?v=\d+", src), "app.js cache-bust param missing"
+assert re.search(r"style\.css\?v=\d+", src), "style.css cache-bust param missing"
+```
 
-## Constraints
-- Surgical CSS only. No data / query / endpoint change.
-- Cache-bust `style.css`.
-- Fail loud: screenshots at 1280px AND 1440px; report literal pytest output.
-- Ship-report to `lead` with PRs / SHA / screenshots; write `CODE_1_RETURN.md`.
+**Constraints:** test-only; touch NO runtime file; keep the two presence asserts (`id="cortexTabPending"`, `_cortexTab('pending')`) unchanged; regex must still FAIL if `?v=` is absent entirely (negative-check it locally).
 
-Est: ~1-1.5h, Low.
+**Gate:** G1 lead literal pytest (`python3.12 -m pytest tests/test_dashboard_cortex_ratify.py::test_pending_tab_button_in_static_index_html -v`) → light G2 → ship. No POST_DEPLOY_AC (no deploy-surface change).
+
+**Return:** `briefs/_reports/CODE_1_RETURN.md` + PR number on bus to lead. Use `python3.12` (default python3 here is 3.9, breaks collection).
