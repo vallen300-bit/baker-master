@@ -1,3 +1,6 @@
+import threading
+import time
+
 import httpx
 
 from orchestrator.clerk_bus_worker import (
@@ -21,7 +24,14 @@ class _Response:
 
 
 class _HTTP:
-    def __init__(self, messages=None, fail_reply=False, fail_full_body=False):
+    def __init__(
+        self,
+        messages=None,
+        fail_reply=False,
+        fail_full_body=False,
+        fail_task_state=False,
+        block_task_state=False,
+    ):
         self.messages = []
         self.full_bodies = {}
         for msg in messages or []:
@@ -32,6 +42,10 @@ class _HTTP:
             self.messages.append(msg)
         self.fail_reply = fail_reply
         self.fail_full_body = fail_full_body
+        self.fail_task_state = fail_task_state
+        self.block_task_state = block_task_state
+        self.task_state_entered = threading.Event()
+        self.release_task_state = threading.Event()
         self.get_calls = []
         self.post_calls = []
 
@@ -46,6 +60,12 @@ class _HTTP:
 
     def post(self, url, **kwargs):
         self.post_calls.append({"url": url, **kwargs})
+        if url.endswith("/api/agent-task-state"):
+            self.task_state_entered.set()
+            if self.block_task_state:
+                self.release_task_state.wait(timeout=5.0)
+            if self.fail_task_state:
+                return _Response({"error": "fail"}, status_code=500, url=url, method="POST")
         if self.fail_reply and url.endswith("/msg/lead"):
             return _Response({"error": "fail"}, status_code=500, url=url, method="POST")
         if url.endswith("/msg/lead"):
@@ -141,6 +161,16 @@ def _msg(msg_id=101, body="convert this", sender="lead", topic="dispatch/test", 
     }
 
 
+def _task_state_calls(http, expected_count, timeout_s=1.0):
+    deadline = time.monotonic() + timeout_s
+    while time.monotonic() < deadline:
+        calls = [c for c in http.post_calls if c["url"].endswith("/api/agent-task-state")]
+        if len(calls) >= expected_count:
+            return calls
+        time.sleep(0.01)
+    return [c for c in http.post_calls if c["url"].endswith("/api/agent-task-state")]
+
+
 def test_ready_message_replies_then_acks_and_records_reply_id():
     http = _HTTP(messages=[_msg(body="convert this fully", body_preview="convert this...")])
     store = _Store()
@@ -165,14 +195,24 @@ def test_ready_message_replies_then_acks_and_records_reply_id():
     assert http.get_calls[1]["url"] == "https://lab.test/event/101/full"
     assert run_calls == ["convert this fully"]
     post_urls = [c["url"] for c in http.post_calls]
-    assert post_urls == [
+    assert [u for u in post_urls if not u.endswith("/api/agent-task-state")] == [
         "https://lab.test/api/register",
         "https://lab.test/api/event",
         "https://lab.test/api/event",
         "https://lab.test/msg/lead",
         "https://lab.test/msg/101/ack",
     ]
-    reply_payload = http.post_calls[3]["json"]
+    task_state_calls = _task_state_calls(http, 3)
+    task_states = [c["json"]["state"] for c in task_state_calls]
+    assert task_states == ["received", "working", "idle"]
+    assert all(
+        c["json"]["terminal_alias"] == "clerk"
+        and c["json"]["session_uuid"] == "bus-101"
+        and c["headers"]["X-Forge-Key"] == "forge-key"
+        and c["timeout"] == 3.0
+        for c in task_state_calls
+    )
+    reply_payload = next(c["json"] for c in http.post_calls if c["url"].endswith("/msg/lead"))
     assert reply_payload["parent_id"] == 101
     assert reply_payload["topic"] == "dispatch/test"
     assert "Edit: https://baker.test/clerk/edit/bus-101" in reply_payload["body"]
@@ -253,7 +293,8 @@ def test_full_body_fetch_failure_skips_without_running_or_ack():
         "https://lab.test/msg/clerk",
         "https://lab.test/event/101/full",
     ]
-    assert http.post_calls == []
+    task_state_calls = _task_state_calls(http, 2)
+    assert [c["json"]["state"] for c in task_state_calls] == ["received", "idle"]
 
 
 def test_reply_failure_leaves_inbound_unacked_for_retry():
@@ -273,6 +314,65 @@ def test_reply_failure_leaves_inbound_unacked_for_retry():
     assert stats["errors"] == 1
     assert "bus_reply_message_id" not in store.sessions["bus-101"]["result_json"]
     assert not any(c["url"].endswith("/msg/101/ack") for c in http.post_calls)
+    assert [c["json"]["state"] for c in _task_state_calls(http, 3)] == [
+        "received",
+        "working",
+        "idle",
+    ]
+
+
+def test_task_state_failure_does_not_block_reply_or_ack():
+    http = _HTTP(messages=[_msg()], fail_task_state=True)
+    store = _Store()
+    worker = ClerkBusWorker(
+        cfg=_cfg(),
+        http_client=http,
+        store=store,
+        run_clerk_task_fn=lambda task: {"status": "ready", "answer": "Ready: /x"},
+    )
+
+    stats = worker.poll_once()
+
+    assert stats["acked"] == 1
+    assert stats["errors"] == 0
+    assert any(c["url"].endswith("/msg/lead") for c in http.post_calls)
+    assert any(c["url"].endswith("/msg/101/ack") for c in http.post_calls)
+    assert [c["json"]["state"] for c in _task_state_calls(http, 3)] == [
+        "received",
+        "working",
+        "idle",
+    ]
+
+
+def test_slow_task_state_post_does_not_delay_reply_or_ack():
+    http = _HTTP(messages=[_msg()], block_task_state=True)
+    store = _Store()
+    worker = ClerkBusWorker(
+        cfg=_cfg(),
+        http_client=http,
+        store=store,
+        run_clerk_task_fn=lambda task: {"status": "ready", "answer": "Ready: /x"},
+    )
+
+    started = time.monotonic()
+    try:
+        stats = worker.poll_once()
+        elapsed = time.monotonic() - started
+
+        assert stats["acked"] == 1
+        assert stats["errors"] == 0
+        assert elapsed < 0.5
+        assert http.task_state_entered.wait(timeout=0.5)
+        assert any(c["url"].endswith("/msg/lead") for c in http.post_calls)
+        assert any(c["url"].endswith("/msg/101/ack") for c in http.post_calls)
+    finally:
+        http.release_task_state.set()
+
+    assert [c["json"]["state"] for c in _task_state_calls(http, 3)] == [
+        "received",
+        "working",
+        "idle",
+    ]
 
 
 def test_reply_marker_persist_failure_still_acks_and_prevents_duplicate_reply():
