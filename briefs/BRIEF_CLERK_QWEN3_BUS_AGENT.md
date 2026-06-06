@@ -61,8 +61,9 @@ on the bus, and updates the existing card while a job is active.
   terminal key, run `orchestrator.clerk_runtime.run_clerk_task()`, reply to the
   inbound `from_terminal`, and ACK only after the reply succeeds.
 - **Idempotency:** deterministic `clerk_sessions.session_id = bus-<msg_id>`.
-  `result_json.bus_reply_message_id` records the successful reply. A retry after
-  reply only ACKs; a retry before reply reuses the stored Clerk result.
+  The bus ACK is the durable dedup boundary: once a reply POST succeeds, ACK is
+  attempted even if the best-effort `result_json.bus_reply_message_id` write
+  fails. A retry before reply reuses the stored Clerk result.
 - **Heartbeat/card:** no brisen-lab code delta. The worker calls `/api/register`
   for the bus session and emits job-scoped `/api/event` heartbeats only while a
   Clerk bus job is active. This refreshes `forge_sessions.last_seen_at` without
@@ -121,7 +122,8 @@ silently omit any row from `~/baker-vault/_ops/processes/install-agent-to-brisen
 - Polling is bounded by `CLERK_BUS_POLL_LIMIT` and `CLERK_BUS_BATCH_CAP`.
 - `clerk_sessions.session_id` is deterministic (`bus-<msg_id>`) and idempotent.
 - Reply is posted before ACK; reply failure leaves inbound unacked for retry.
-- `result_json.bus_reply_message_id` suppresses duplicate replies on retry.
+- Reply-posted implies ACK attempted; `result_json.bus_reply_message_id` is a
+  best-effort secondary marker and cannot block ACK.
 - Existing Clerk denylist statuses are returned on the bus as blockers/approval.
 - Scheduler liveness registers `clerk_bus_poll`.
 - Direct DB access uses the hardened direct-connection path.

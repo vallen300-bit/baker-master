@@ -37,6 +37,11 @@ class _HTTP:
             return _Response({"error": "fail"}, status_code=500, url=url)
         if url.endswith("/msg/lead"):
             return _Response({"message_id": 9001, "thread_id": "thread-1"}, url=url)
+        if url.endswith("/ack"):
+            msg_id = int(url.rstrip("/").split("/")[-2])
+            for msg in self.messages:
+                if msg.get("id") == msg_id:
+                    msg["acknowledged_at"] = "2026-06-06T10:00:00Z"
         return _Response({"ok": True}, url=url)
 
 
@@ -81,6 +86,20 @@ class _Store:
                 "error": None,
             },
         ).update(fields)
+
+
+class _FailReplyMarkerStore(_Store):
+    def __init__(self):
+        super().__init__()
+        self.marker_failures = 0
+
+    def update_session(self, session_id, **fields):
+        result_json = fields.get("result_json")
+        if isinstance(result_json, dict) and result_json.get("bus_reply_message_id"):
+            self.marker_failures += 1
+            if self.marker_failures == 1:
+                raise RuntimeError("marker persist failed")
+        super().update_session(session_id, **fields)
 
 
 def _cfg(**overrides):
@@ -211,6 +230,30 @@ def test_reply_failure_leaves_inbound_unacked_for_retry():
     assert stats["errors"] == 1
     assert "bus_reply_message_id" not in store.sessions["bus-101"]["result_json"]
     assert not any(c["url"].endswith("/msg/101/ack") for c in http.post_calls)
+
+
+def test_reply_marker_persist_failure_still_acks_and_prevents_duplicate_reply():
+    http = _HTTP(messages=[_msg()])
+    store = _FailReplyMarkerStore()
+    worker = ClerkBusWorker(
+        cfg=_cfg(),
+        http_client=http,
+        store=store,
+        run_clerk_task_fn=lambda task: {"status": "ready", "answer": "Ready: /x"},
+    )
+
+    first = worker.poll_once()
+    second = worker.poll_once()
+
+    reply_posts = [c for c in http.post_calls if c["url"].endswith("/msg/lead")]
+    ack_posts = [c for c in http.post_calls if c["url"].endswith("/msg/101/ack")]
+    assert first["processed"] == 1
+    assert first["acked"] == 1
+    assert first["errors"] == 0
+    assert second["processed"] == 0
+    assert len(reply_posts) == 1
+    assert len(ack_posts) == 1
+    assert http.messages[0]["acknowledged_at"] == "2026-06-06T10:00:00Z"
 
 
 def test_batch_cap_bounds_processing():

@@ -376,7 +376,7 @@ class ClerkBusWorker:
         session_id = f"bus-{message_id}"
         sender = str(msg.get("from_terminal") or msg.get("sender") or "").strip()
         topic = str(msg.get("topic") or "dispatch/clerk").strip()
-        task = str(msg.get("body") or msg.get("body_preview") or "").strip()
+        task = str(msg.get("body") or "").strip()
 
         if sender == _CLERK_SLUG:
             self._ack_message(message_id)
@@ -443,7 +443,14 @@ class ClerkBusWorker:
         result_with_reply["bus_reply_message_id"] = reply_message_id
         if reply.get("thread_id"):
             result_with_reply["bus_reply_thread_id"] = reply["thread_id"]
-        self.store.update_session(session_id, result_json=result_with_reply)
+        try:
+            self.store.update_session(session_id, result_json=result_with_reply)
+        except Exception as e:
+            # ACK is the durable bus-level dedup. After a successful reply POST,
+            # marker persistence is best-effort; otherwise a transient DB write
+            # failure can leave the inbound unacked and cause duplicate replies.
+            # Residual at-least-once window: the ACK POST itself can still fail.
+            logger.warning("clerk reply marker persist failed: %s", type(e).__name__)
         self._ack_message(message_id)
         return {"status": status, "acked": True, "reply_message_id": reply_message_id}
 
