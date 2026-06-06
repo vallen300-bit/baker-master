@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import hashlib
+import hmac
 from datetime import datetime, timezone
 from threading import RLock
 
@@ -8,11 +10,17 @@ from fastapi.testclient import TestClient
 
 def _set_api_key(monkeypatch, key="test-key-clerk"):
     monkeypatch.setenv("BAKER_API_KEY", key)
+    monkeypatch.delenv("CLERK_SAVE_APPROVAL_SECRET", raising=False)
     import outputs.dashboard as dash
 
     dash._BAKER_API_KEY = key
     dash.app.dependency_overrides.pop(dash.verify_api_key, None)
     return dash
+
+
+def _manual_save_token(secret, session_id, target_path):
+    payload = f"clerk-save-v1:{session_id}:{target_path}"
+    return hmac.new(secret.encode("utf-8"), payload.encode("utf-8"), hashlib.sha256).hexdigest()
 
 
 def _unwrap_json_param(value):
@@ -262,8 +270,83 @@ def test_clerk_save_non_working_target_requires_approval(monkeypatch):
     assert store.rows["sess-reject"]["status"] == "pending_approval"
 
 
+def test_clerk_save_rejects_api_key_derived_token_when_secret_unset(monkeypatch):
+    dash, store = _install_fake_store(monkeypatch)
+    now = datetime.now(timezone.utc)
+    target = "/Baker-Feed/Approved/out.md"
+    store.rows["sess-api-key-token"] = {
+        "session_id": "sess-api-key-token",
+        "task": "save",
+        "status": "ready",
+        "result_json": {},
+        "draft_content": "old",
+        "draft_path": "/Baker-Feed/Clerk-Workbench/out.md",
+        "source_meta": {},
+        "error": None,
+        "created_at": now,
+        "updated_at": now,
+    }
+    token = _manual_save_token("test-key-clerk", "sess-api-key-token", target)
+
+    client = TestClient(dash.app)
+    resp = client.post(
+        "/api/clerk/save/sess-api-key-token",
+        json={"content": "new", "target_path": target, "approval_token": token},
+        headers={"X-Baker-Key": "test-key-clerk"},
+    )
+
+    assert resp.status_code == 403, resp.text
+    assert resp.json()["detail"]["status"] == "pending_approval"
+    assert store.rows["sess-api-key-token"]["status"] == "pending_approval"
+
+
+def test_clerk_save_secret_unset_rejects_approved_root_but_allows_working_folder(monkeypatch):
+    dash, store = _install_fake_store(monkeypatch)
+    now = datetime.now(timezone.utc)
+    store.rows["sess-no-secret"] = {
+        "session_id": "sess-no-secret",
+        "task": "save",
+        "status": "ready",
+        "result_json": {},
+        "draft_content": "old",
+        "draft_path": "/Baker-Feed/Clerk-Workbench/out.md",
+        "source_meta": {},
+        "error": None,
+        "created_at": now,
+        "updated_at": now,
+    }
+    calls = []
+
+    def fake_save(session_id, content, target_path, approved_save_paths):
+        calls.append((session_id, content, target_path, approved_save_paths))
+        return {"session_id": session_id, "status": "saved", "path": target_path}
+
+    monkeypatch.setattr(dash, "_clerk_save_content_sync", fake_save)
+    client = TestClient(dash.app)
+
+    approved = client.post(
+        "/api/clerk/save/sess-no-secret",
+        json={
+            "content": "approved",
+            "target_path": "/Baker-Feed/Approved/out.md",
+            "approval_token": "not-enough",
+        },
+        headers={"X-Baker-Key": "test-key-clerk"},
+    )
+    working = client.post(
+        "/api/clerk/save/sess-no-secret",
+        json={"content": "working", "target_path": "/Baker-Feed/Clerk-Workbench/out.md"},
+        headers={"X-Baker-Key": "test-key-clerk"},
+    )
+
+    assert approved.status_code == 403, approved.text
+    assert working.status_code == 200, working.text
+    assert calls == [("sess-no-secret", "working", "/Baker-Feed/Clerk-Workbench/out.md", set())]
+
+
 def test_clerk_save_exact_approved_target_passes_approved_path_set(monkeypatch):
     dash, store = _install_fake_store(monkeypatch)
+    monkeypatch.setenv("CLERK_SAVE_APPROVAL_SECRET", "distinct-server-only-secret")
     now = datetime.now(timezone.utc)
     target = "/Baker-Feed/Approved/out.md"
     store.rows["sess-approved"] = {

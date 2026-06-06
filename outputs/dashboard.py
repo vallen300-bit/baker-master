@@ -336,7 +336,7 @@ def _clerk_approved_save_roots() -> tuple[str, ...]:
 
 
 def _clerk_approval_secret() -> str:
-    return os.getenv("CLERK_SAVE_APPROVAL_SECRET") or _BAKER_API_KEY
+    return os.getenv("CLERK_SAVE_APPROVAL_SECRET", "")
 
 
 def _clerk_save_approval_token(session_id: str, target_path: str) -> str:
