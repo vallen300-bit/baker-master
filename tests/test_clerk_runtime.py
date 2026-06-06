@@ -1,4 +1,5 @@
 import json
+import tempfile
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -31,6 +32,21 @@ class _FakeMessages:
 class _FakeClient:
     def __init__(self, responses):
         self.messages = _FakeMessages(responses)
+
+
+class _RaisingMessages:
+    def __init__(self, exc):
+        self.exc = exc
+        self.calls = []
+
+    def create(self, **kwargs):
+        self.calls.append(kwargs)
+        raise self.exc
+
+
+class _RaisingClient:
+    def __init__(self, exc):
+        self.messages = _RaisingMessages(exc)
 
 
 class _FakeRegistry:
@@ -112,8 +128,15 @@ def test_malformed_tool_output_retries_once_then_escalates():
         ("deploy production after changing code", "blocked", 3),
         ("create matter slug new-project", "blocked", 4),
         ("delete this email after reading", "pending_approval", 5),
+        ("purge the message", "pending_approval", 5),
+        ("remove this email", "pending_approval", 5),
         ("send external email to person@example.com", "pending_approval", 6),
+        ("email the invoice to a@b.com", "pending_approval", 6),
+        ("forward this to a@b.com", "pending_approval", 6),
+        ("reply to X with the file", "pending_approval", 6),
         ("permanently finalize transaction", "pending_approval", 7),
+        ("pay the supplier 5000 EUR", "blocked", 1),
+        ("wire 10k to vendor", "blocked", 1),
     ],
 )
 def test_denylist_enforced_before_model_call(task, status, item):
@@ -126,16 +149,13 @@ def test_denylist_enforced_before_model_call(task, status, item):
     assert client.messages.calls == []
 
 
-def test_approval_token_allows_approval_required_item_to_continue():
+def test_approval_required_items_cannot_be_unlocked_by_phase1_token():
     client = _FakeClient([_ToolResponse([_TextBlock("Ready: draft")], "end_turn")])
 
-    result = ClerkAgent(model_client=client, registry=_FakeRegistry(), cfg=_cfg()).run(
-        "delete this email after reading",
-        approval_token="director-approved",
-    )
+    result = ClerkAgent(model_client=client, registry=_FakeRegistry(), cfg=_cfg()).run("delete this email after reading")
 
-    assert result["status"] == "ready"
-    assert len(client.messages.calls) == 1
+    assert result["status"] == "pending_approval"
+    assert client.messages.calls == []
 
 
 def test_step_cap_stops_unbounded_loop():
@@ -168,7 +188,7 @@ def test_timeout_stops_before_model_call():
 
 
 def test_qwen_host_guard_for_hosted_and_local_backends():
-    with pytest.raises(ClerkRuntimeError, match="rejects localhost"):
+    with pytest.raises(ClerkRuntimeError, match="local/private/reserved"):
         Qwen3ToolClient(Qwen3Config(
             base_url="https://localhost:11434/v1",
             api_key="x",
@@ -176,13 +196,45 @@ def test_qwen_host_guard_for_hosted_and_local_backends():
             backend="qwen3_hosted",
         ), http_client=SimpleNamespace())
 
+    with pytest.raises(ClerkRuntimeError, match="local/private/reserved"):
+        Qwen3ToolClient(Qwen3Config(
+            base_url="https://169.254.169.254/v1",
+            api_key="x",
+            model="qwen3-coder",
+            backend="qwen3_hosted",
+        ), http_client=SimpleNamespace())
+
+    with pytest.raises(ClerkRuntimeError, match="local/private/reserved"):
+        Qwen3ToolClient(Qwen3Config(
+            base_url="https://10.0.0.5/v1",
+            api_key="x",
+            model="qwen3-coder",
+            backend="qwen3_hosted",
+        ), http_client=SimpleNamespace())
+
+    with pytest.raises(ClerkRuntimeError, match="local/private/reserved"):
+        Qwen3ToolClient(Qwen3Config(
+            base_url="https://127.1/v1",
+            api_key="x",
+            model="qwen3-coder",
+            backend="qwen3_hosted",
+        ), http_client=SimpleNamespace())
+
     with pytest.raises(ClerkRuntimeError, match="only permits localhost"):
         Qwen3ToolClient(Qwen3Config(
-            base_url="https://qwen.example/v1",
+            base_url="https://8.8.8.8/v1",
             api_key="",
             model="qwen3-coder",
             backend="qwen3_ollama_local",
         ), http_client=SimpleNamespace())
+
+    hosted = Qwen3ToolClient(Qwen3Config(
+        base_url="https://8.8.8.8/v1",
+        api_key="x",
+        model="qwen3-coder",
+        backend="qwen3_hosted",
+    ), http_client=SimpleNamespace())
+    assert hosted.base_url == "https://8.8.8.8/v1"
 
     client = Qwen3ToolClient(Qwen3Config(
         base_url="http://localhost:11434/v1",
@@ -214,20 +266,53 @@ def test_file_save_uses_dropbox_upload_file_signature():
     assert dropbox.calls[0][1] == "/Baker-Feed/Clerk-Workbench/out.md"
 
 
-def test_file_save_outside_working_folder_requires_approved_path():
-    registry = ClerkToolRegistry(dropbox_client=SimpleNamespace(upload_file=lambda *_: {}))
+def test_file_save_outside_working_folder_blocks_even_if_model_sets_approved_path():
+    calls = []
+    registry = ClerkToolRegistry(dropbox_client=SimpleNamespace(upload_file=lambda *args: calls.append(args) or {}))
 
     raw = registry.execute(
         "file_save",
-        {"content": "hello", "filename": "out.md", "dropbox_path": "/Somewhere/out.md"},
+        {
+            "content": "hello",
+            "filename": "out.md",
+            "dropbox_path": "/Director-Private/exfil.md",
+            "approved_path": True,
+        },
     )
 
     parsed = json.loads(raw)
-    assert parsed["status"] == "pending_approval"
+    assert parsed["status"] == "blocked"
+    assert calls == []
+
+
+def test_file_save_path_boundary_blocks_prefix_smuggling():
+    calls = []
+    registry = ClerkToolRegistry(dropbox_client=SimpleNamespace(upload_file=lambda *args: calls.append(args) or {}))
+
+    raw = registry.execute(
+        "file_save",
+        {
+            "content": "hello",
+            "filename": "out.md",
+            "dropbox_path": "/Baker-Feed/Clerk-Workbench-Evil/out.md",
+        },
+    )
+
+    parsed = json.loads(raw)
+    assert parsed["status"] == "blocked"
+    assert calls == []
+
+
+def test_file_save_schema_does_not_expose_approved_path_to_model():
+    registry = ClerkToolRegistry()
+    file_save = next(tool for tool in registry.tools if tool["name"] == "file_save")
+
+    assert "approved_path" not in file_save["input_schema"]["properties"]
 
 
 def test_format_convert_reuses_extractors_signature(tmp_path, monkeypatch):
-    target = tmp_path / "doc.md"
+    root = Path(tempfile.mkdtemp(prefix="clerk_doc_"))
+    target = root / "doc.md"
     target.write_text("hello", encoding="utf-8")
     seen = {}
 
@@ -245,6 +330,17 @@ def test_format_convert_reuses_extractors_signature(tmp_path, monkeypatch):
     assert seen["path"] == target
 
 
+def test_format_convert_blocks_arbitrary_local_file(tmp_path):
+    target = tmp_path / "secret.md"
+    target.write_text("secret", encoding="utf-8")
+    registry = ClerkToolRegistry()
+
+    raw = registry.execute("format_convert", {"local_path": str(target), "target_format": "markdown"})
+
+    parsed = json.loads(raw)
+    assert parsed["status"] == "blocked"
+
+
 def test_document_fetch_returns_persistent_local_path(tmp_path, monkeypatch):
     class Dropbox:
         def download_file(self, path, dest_dir):
@@ -260,3 +356,87 @@ def test_document_fetch_returns_persistent_local_path(tmp_path, monkeypatch):
     parsed = json.loads(raw)
     assert parsed["text"] == "body"
     assert Path(parsed["local_path"]).exists()
+
+
+def test_document_fetch_blocks_private_dropbox_paths():
+    registry = ClerkToolRegistry(dropbox_client=SimpleNamespace(download_file=lambda *_: (_ for _ in ()).throw(AssertionError("no download"))))
+
+    raw = registry.execute("document_fetch", {"path": "/Director-Private/secret.pdf"})
+
+    parsed = json.loads(raw)
+    assert parsed["status"] == "blocked"
+
+
+def test_document_fetch_blocks_prefix_smuggling():
+    registry = ClerkToolRegistry(dropbox_client=SimpleNamespace(download_file=lambda *_: (_ for _ in ()).throw(AssertionError("no download"))))
+
+    raw = registry.execute("document_fetch", {"path": "/Baker-Feed-Evil/source.md"})
+
+    parsed = json.loads(raw)
+    assert parsed["status"] == "blocked"
+
+
+def test_forbidden_tool_capability_rejected_before_execution():
+    agent = ClerkAgent(model_client=_FakeClient([]), registry=_FakeRegistry(), cfg=_cfg())
+
+    valid, error = agent._validate_tool_use(SimpleNamespace(name="send_email", input={}))
+
+    assert valid is False
+    assert "forbidden tool capability" in error
+
+
+def test_escalation_path_cannot_upload_outside_working_folder():
+    class Dropbox:
+        def __init__(self):
+            self.calls = []
+
+        def upload_file(self, *args):
+            self.calls.append(args)
+            return {"path_display": args[1]}
+
+    dropbox = Dropbox()
+    registry = ClerkToolRegistry(dropbox_client=dropbox)
+    qwen = _FakeClient([
+        _ToolResponse([_ToolUseBlock("bad_1", "file_save", {"__malformed_json": "{"})], "tool_use"),
+        _ToolResponse([_ToolUseBlock("bad_2", "file_save", {"__malformed_json": "{"})], "tool_use"),
+    ])
+    gemini = _FakeClient([
+        _ToolResponse([
+            _ToolUseBlock(
+                "esc_1",
+                "file_save",
+                {"content": "x", "filename": "x.md", "dropbox_path": "/Somewhere/x.md", "approved_path": True},
+            )
+        ], "tool_use")
+    ])
+
+    result = ClerkAgent(model_client=qwen, escalation_client=gemini, registry=registry, cfg=_cfg()).run("fetch")
+
+    assert result["status"] == "ready"
+    assert "blocked" in result["answer"]
+    assert dropbox.calls == []
+
+
+def test_model_transport_exception_returns_controlled_blocked_result():
+    client = _RaisingClient(TimeoutError("slow model"))
+
+    result = ClerkAgent(model_client=client, registry=_FakeRegistry(), cfg=_cfg()).run("fetch")
+
+    assert result["status"] == "blocked"
+    assert result["reason"] == "model call failed"
+    assert result["error_type"] == "TimeoutError"
+
+
+def test_model_call_receives_remaining_task_timeout():
+    ticks = iter([0.0, 0.25])
+    client = _FakeClient([_ToolResponse([_TextBlock("Ready")], "end_turn")])
+
+    result = ClerkAgent(
+        model_client=client,
+        registry=_FakeRegistry(),
+        cfg=_cfg(timeout=1),
+        clock=lambda: next(ticks),
+    ).run("fetch")
+
+    assert result["status"] == "ready"
+    assert client.messages.calls[0]["timeout"] == pytest.approx(0.75)

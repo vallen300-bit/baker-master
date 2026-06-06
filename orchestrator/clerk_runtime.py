@@ -6,9 +6,12 @@ and hard guardrails. Browser workbench surfaces are intentionally out of scope.
 from __future__ import annotations
 
 import base64
+import ipaddress
 import json
 import logging
+import posixpath
 import re
+import socket
 import tempfile
 import time
 from dataclasses import dataclass
@@ -22,12 +25,31 @@ from config.settings import GraphConfig, Qwen3Config, config
 
 logger = logging.getLogger("baker.clerk_runtime")
 
-_LOCAL_HOSTS = frozenset({"localhost", "127.0.0.1", "::1"})
 _DEFAULT_SAVE_PREFIX = "/Baker-Feed/Clerk-Workbench"
+_ALLOWED_FETCH_PREFIXES = (
+    "/Baker-Feed/",
+    "/Apps/Baker/Clerk/",
+)
 _ALLOWED_SAVE_PREFIXES = (
     _DEFAULT_SAVE_PREFIX,
     "/Baker-Feed/Clerk",
     "/Apps/Baker/Clerk",
+)
+_FORBIDDEN_TOOL_NAME_FRAGMENTS = frozenset({
+    "send",
+    "delete",
+    "remove",
+    "move",
+    "archive",
+    "mark",
+    "pay",
+    "payment",
+    "wire",
+    "transfer",
+})
+_FORBIDDEN_TOOL_ARG_VALUES = re.compile(
+    r"\b(send|delete|remove|move|archive|mark\s+read|mark\s+unread|pay|payment|wire|transfer)\b",
+    re.I,
 )
 
 
@@ -89,17 +111,79 @@ def _validate_qwen_base_url(cfg: Qwen3Config) -> str:
     if parsed.scheme not in {"http", "https"} or not parsed.netloc:
         raise ClerkRuntimeError("CLERK_QWEN_BASE_URL must be an absolute http(s) URL")
 
-    host = parsed.hostname or ""
+    host = (parsed.hostname or "").rstrip(".").lower()
+    resolved_ips = _resolve_host_ips(host)
     if cfg.backend == "qwen3_ollama_local":
-        if host not in _LOCAL_HOSTS:
+        if not resolved_ips or not all(ip.is_loopback for ip in resolved_ips):
             raise ClerkRuntimeError("qwen3_ollama_local backend only permits localhost/127.0.0.1")
     else:
         if parsed.scheme != "https":
             raise ClerkRuntimeError("qwen3_hosted backend requires https")
-        if host in _LOCAL_HOSTS:
-            raise ClerkRuntimeError("qwen3_hosted backend rejects localhost endpoints")
+        if any(_is_forbidden_remote_ip(ip) for ip in resolved_ips):
+            raise ClerkRuntimeError("qwen3_hosted backend rejects local/private/reserved endpoints")
 
     return base_url
+
+
+def _resolve_host_ips(host: str) -> set[ipaddress.IPv4Address | ipaddress.IPv6Address]:
+    if not host:
+        raise ClerkRuntimeError("CLERK_QWEN_BASE_URL host is required")
+    try:
+        return {ipaddress.ip_address(host)}
+    except ValueError:
+        pass
+    try:
+        infos = socket.getaddrinfo(host, None, type=socket.SOCK_STREAM)
+    except socket.gaierror as e:
+        raise ClerkRuntimeError(f"CLERK_QWEN_BASE_URL host could not be resolved: {host}") from e
+    ips = {ipaddress.ip_address(info[4][0]) for info in infos}
+    if not ips:
+        raise ClerkRuntimeError(f"CLERK_QWEN_BASE_URL host resolved to no addresses: {host}")
+    return ips
+
+
+def _is_forbidden_remote_ip(ip: ipaddress.IPv4Address | ipaddress.IPv6Address) -> bool:
+    return any((
+        ip.is_private,
+        ip.is_loopback,
+        ip.is_link_local,
+        ip.is_reserved,
+        ip.is_unspecified,
+        ip.is_multicast,
+    ))
+
+
+def _normalize_dropbox_path(path: str) -> str:
+    if not path.startswith("/"):
+        return ""
+    normalized = posixpath.normpath(path)
+    if normalized == "." or not normalized.startswith("/"):
+        return ""
+    return normalized
+
+
+def _is_allowed_dropbox_path(path: str, prefixes: tuple[str, ...]) -> bool:
+    normalized = _normalize_dropbox_path(path)
+    if not normalized:
+        return False
+    for prefix in prefixes:
+        allowed = posixpath.normpath(prefix)
+        if normalized == allowed or normalized.startswith(allowed.rstrip("/") + "/"):
+            return True
+    return False
+
+
+def _is_allowed_local_convert_path(path: Path) -> bool:
+    try:
+        resolved = path.resolve(strict=True)
+    except OSError:
+        return False
+    try:
+        temp_root = Path(tempfile.gettempdir()).resolve(strict=True)
+        resolved.relative_to(temp_root)
+    except (OSError, ValueError):
+        return False
+    return any(part.startswith("clerk_doc_") for part in resolved.parts)
 
 
 def _openai_messages_from_anthropic(system: str | None, messages: list[dict[str, Any]]) -> list[dict[str, Any]]:
@@ -188,7 +272,7 @@ class _QwenMessages:
         system: str | None = None,
         tools: list[dict[str, Any]] | None = None,
         max_tokens: int = 2000,
-        **_: Any,
+        **kwargs: Any,
     ) -> _ToolResponse:
         payload: dict[str, Any] = {
             "model": model,
@@ -208,7 +292,7 @@ class _QwenMessages:
             f"{self._owner.base_url}/chat/completions",
             headers=headers,
             json=payload,
-            timeout=self._owner.timeout,
+            timeout=min(float(kwargs.get("timeout") or self._owner.timeout), self._owner.timeout),
         )
         resp.raise_for_status()
         data = resp.json()
@@ -273,27 +357,33 @@ class GuardrailDecision:
 
 
 class ClerkGuardrails:
-    """Deterministic denylist enforcement for Clerk tasks and tool calls."""
+    """Defense-in-depth prose checks.
+
+    The real security boundary is the tool registry: Phase 1 exposes no send,
+    delete, move/archive, payment, slug-creation, or production-change tools.
+    These regexes catch obvious user/model instructions early, but tool
+    capability checks remain authoritative.
+    """
 
     _hard_blocks: tuple[tuple[int, re.Pattern[str], str], ...] = (
-        (1, re.compile(r"\b(pay|wire|transfer|release|send)\s+(money|funds|payment|cash)\b|\bmake\s+a\s+payment\b", re.I), "money/payment action"),
+        (1, re.compile(r"\b(pay|wire|transfer|release|send)\s+(money|funds|payment|cash)\b|\bmake\s+a\s+payment\b|\bpay\s+the\s+\w+|\bwire\s+[\d,.]+\s*(eur|usd|gbp|chf|k)\b|\bwire\s+.*\b(to|vendor|supplier)\b", re.I), "money/payment action"),
         (2, re.compile(r"\b(as|pretend to be)\s+(dimitry|the director)\b|\bact\s+as\s+(dimitry|director)\b", re.I), "acting as Director"),
         (3, re.compile(r"\b(write|change|edit|deploy|restart|push|merge)\s+(code|production|prod|render|service|system)\b|\bgit\s+push\b", re.I), "code/production-system change"),
         (4, re.compile(r"\b(create|mint)\s+(a\s+)?matter\s+slug\b|\brestructure\s+(the\s+)?vault\b|\b(rename|move)\s+(vault|folder|directory)\b", re.I), "matter slug or vault restructuring"),
     )
     _approval_required: tuple[tuple[int, re.Pattern[str], str], ...] = (
-        (5, re.compile(r"\b(delete|move|archive|mark\s+read|mark\s+unread|mark-email|mark\s+email)\b", re.I), "email/file state change"),
-        (6, re.compile(r"\b(send|deliver)\s+(an\s+)?(external\s+)?e-?mail\b|\bsend\s+to\s+[^@\s]+@[^@\s]+\b", re.I), "external email send"),
+        (5, re.compile(r"\b(delete|move|archive|purge|remove)\s+(this\s+|the\s+)?(message|email|mail|file|document)\b|\bmark\s+(this\s+|the\s+)?(message|email|mail)\s+(read|unread)\b|\bmark-email\b", re.I), "email/file state change"),
+        (6, re.compile(r"\b(send|deliver|email|forward)\s+(an\s+)?(external\s+)?e?-?mail\b|\b(email|forward|send)\b.*\bto\s+[^@\s]+@[^@\s]+\b|\breply\s+to\s+.+\bwith\s+(the\s+)?(file|attachment|document)\b", re.I), "external email send"),
         (7, re.compile(r"\b(irreversible|permanent|permanently|submit\s+filing|sign\s+(contract|agreement)|finalize\s+transaction)\b", re.I), "irreversible action"),
     )
 
-    def check(self, text: str, approval_token: str | None = None) -> GuardrailDecision:
+    def check(self, text: str) -> GuardrailDecision:
         haystack = text or ""
         for item, pattern, reason in self._hard_blocks:
             if pattern.search(haystack):
                 return GuardrailDecision("blocked", reason, item)
         for item, pattern, reason in self._approval_required:
-            if pattern.search(haystack) and not approval_token:
+            if pattern.search(haystack):
                 return GuardrailDecision("pending_approval", reason, item)
         return GuardrailDecision("allowed", "ok")
 
@@ -364,7 +454,6 @@ class ClerkToolRegistry:
                         "content": {"type": "string"},
                         "filename": {"type": "string"},
                         "dropbox_path": {"type": "string"},
-                        "approved_path": {"type": "boolean", "default": False},
                     },
                     "required": ["content", "filename"],
                 },
@@ -476,6 +565,12 @@ class ClerkToolRegistry:
         path = str(args.get("path", "")).strip()
         if not path or ".." in Path(path).parts:
             return _safe_json({"error": "invalid document path"})
+        if not _is_allowed_dropbox_path(path, _ALLOWED_FETCH_PREFIXES):
+            return _safe_json({
+                "status": "blocked",
+                "reason": "document path outside Clerk-readable Dropbox prefixes",
+                "path": path,
+            })
         if source != "dropbox":
             return _safe_json({"error": f"unsupported document source: {source}"})
 
@@ -500,6 +595,8 @@ class ClerkToolRegistry:
             p = Path(local_path)
             if not p.exists() or not p.is_file():
                 return _safe_json({"error": "local_path does not exist"})
+            if not _is_allowed_local_convert_path(p):
+                return _safe_json({"status": "blocked", "reason": "local_path outside Clerk temp workspace"})
             from tools.ingest.extractors import extract
             return _safe_json({"target_format": args.get("target_format", "markdown"), "text": extract(p) or ""})
 
@@ -517,14 +614,13 @@ class ClerkToolRegistry:
         content = str(args.get("content", ""))
         filename = Path(str(args.get("filename", "clerk-output.md"))).name or "clerk-output.md"
         dropbox_path = str(args.get("dropbox_path", "")).strip()
-        approved_path = bool(args.get("approved_path", False))
         if not dropbox_path:
             dropbox_path = f"{_DEFAULT_SAVE_PREFIX}/{filename}"
         if not dropbox_path.startswith("/"):
             return _safe_json({"error": "dropbox_path must be absolute"})
-        if not approved_path and not dropbox_path.startswith(_ALLOWED_SAVE_PREFIXES):
+        if not _is_allowed_dropbox_path(dropbox_path, _ALLOWED_SAVE_PREFIXES):
             return _safe_json({
-                "status": "pending_approval",
+                "status": "blocked",
                 "reason": "dropbox_path outside Clerk working folder",
                 "dropbox_path": dropbox_path,
             })
@@ -576,8 +672,8 @@ class ClerkAgent:
             return self.model_client
         return Qwen3ToolClient(self.cfg)
 
-    def run(self, task: str, approval_token: str | None = None) -> dict[str, Any]:
-        guard = self.guardrails.check(task, approval_token)
+    def run(self, task: str) -> dict[str, Any]:
+        guard = self.guardrails.check(task)
         if not guard.allowed:
             return self._guardrail_result(guard)
 
@@ -592,16 +688,27 @@ class ClerkAgent:
         client = self._client()
 
         for step in range(max_steps):
-            if self.clock() - started > timeout_s:
+            remaining_s = timeout_s - (self.clock() - started)
+            if remaining_s <= 0:
                 return {"status": "timeout", "reason": "task timeout exceeded", "tool_calls": tool_log}
 
-            response = client.messages.create(
-                model=self.cfg.model,
-                max_tokens=2000,
-                system=_CLERK_SYSTEM_PROMPT,
-                messages=messages,
-                tools=self.registry.tools,
-            )
+            try:
+                response = client.messages.create(
+                    model=self.cfg.model,
+                    max_tokens=2000,
+                    system=_CLERK_SYSTEM_PROMPT,
+                    messages=messages,
+                    tools=self.registry.tools,
+                    timeout=max(0.001, remaining_s),
+                )
+            except Exception as e:
+                logger.warning("Clerk model call failed: %s", type(e).__name__)
+                return {
+                    "status": "blocked",
+                    "reason": "model call failed",
+                    "error_type": type(e).__name__,
+                    "tool_calls": tool_log,
+                }
             in_tok, out_tok = self._usage(response)
             total_in += in_tok
             total_out += out_tok
@@ -629,7 +736,15 @@ class ClerkAgent:
                 if not valid:
                     schema_failures += 1
                     if schema_failures >= 2:
-                        return self._escalate(messages, tool_log, f"repeated schema/tool failure: {validation_error}")
+                        remaining_s = timeout_s - (self.clock() - started)
+                        if remaining_s <= 0:
+                            return {"status": "timeout", "reason": "task timeout exceeded", "tool_calls": tool_log}
+                        return self._escalate(
+                            messages,
+                            tool_log,
+                            f"repeated schema/tool failure: {validation_error}",
+                            timeout_s=max(0.001, remaining_s),
+                        )
                     tool_results.append({
                         "type": "tool_result",
                         "tool_use_id": tool_use.id,
@@ -638,7 +753,7 @@ class ClerkAgent:
                     })
                     continue
 
-                guard = self.guardrails.check(_safe_json(tool_use.input), approval_token)
+                guard = self.guardrails.check(_safe_json(tool_use.input))
                 if not guard.allowed:
                     return self._guardrail_result(guard, tool_log=tool_log)
 
@@ -652,18 +767,34 @@ class ClerkAgent:
 
         return {"status": "blocked", "reason": "max_steps exceeded", "tool_calls": tool_log}
 
-    def _escalate(self, messages: list[dict[str, Any]], tool_log: list[dict[str, Any]], reason: str) -> dict[str, Any]:
+    def _escalate(
+        self,
+        messages: list[dict[str, Any]],
+        tool_log: list[dict[str, Any]],
+        reason: str,
+        timeout_s: float | None = None,
+    ) -> dict[str, Any]:
         client = self.escalation_client
         if client is None:
             from orchestrator.gemini_client import GeminiToolClient
             client = GeminiToolClient()
-        response = client.messages.create(
-            model=config.gemini.pro_model,
-            max_tokens=2000,
-            system=f"{_CLERK_SYSTEM_PROMPT}\nEscalation reason: {reason}",
-            messages=messages,
-            tools=self.registry.tools,
-        )
+        try:
+            response = client.messages.create(
+                model=config.gemini.pro_model,
+                max_tokens=2000,
+                system=f"{_CLERK_SYSTEM_PROMPT}\nEscalation reason: {reason}",
+                messages=messages,
+                tools=self.registry.tools,
+                timeout=timeout_s,
+            )
+        except Exception as e:
+            logger.warning("Clerk escalation call failed: %s", type(e).__name__)
+            return {
+                "status": "blocked",
+                "reason": "escalation model call failed",
+                "error_type": type(e).__name__,
+                "tool_calls": tool_log,
+            }
         in_tok, out_tok = self._usage(response)
         self._log_cost(config.gemini.pro_model, in_tok, out_tok)
         if response.stop_reason == "tool_use":
@@ -673,6 +804,9 @@ class ClerkAgent:
                 if not valid:
                     results.append({"tool": getattr(tool_use, "name", ""), "error": validation_error})
                     continue
+                guard = self.guardrails.check(_safe_json(tool_use.input))
+                if not guard.allowed:
+                    return self._guardrail_result(guard, tool_log=tool_log)
                 result = self.registry.execute(tool_use.name, tool_use.input)
                 tool_log.append({"name": tool_use.name, "input": tool_use.input, "duration_ms": 0, "escalated": True})
                 results.append({"tool": tool_use.name, "result": result})
@@ -698,12 +832,19 @@ class ClerkAgent:
     def _validate_tool_use(self, tool_use: Any) -> tuple[bool, str]:
         if not getattr(tool_use, "name", ""):
             return False, "tool call missing function name"
+        lowered_name = tool_use.name.lower()
+        if any(fragment in lowered_name for fragment in _FORBIDDEN_TOOL_NAME_FRAGMENTS):
+            return False, f"forbidden tool capability: {tool_use.name}"
         if tool_use.name not in {t["name"] for t in self.registry.tools}:
             return False, f"unknown tool: {tool_use.name}"
         if not isinstance(getattr(tool_use, "input", None), dict):
             return False, "tool input must be a JSON object"
         if "__malformed_json" in tool_use.input:
             return False, "tool arguments were malformed JSON"
+        for key in ("action", "operation", "mode", "intent"):
+            val = tool_use.input.get(key)
+            if isinstance(val, str) and _FORBIDDEN_TOOL_ARG_VALUES.search(val):
+                return False, f"forbidden tool operation: {val}"
         return True, ""
 
     @staticmethod
@@ -729,6 +870,6 @@ class ClerkAgent:
         }
 
 
-def run_clerk_task(task: str, approval_token: str | None = None) -> dict[str, Any]:
+def run_clerk_task(task: str) -> dict[str, Any]:
     """Convenience entry point for headless Clerk invocations."""
-    return ClerkAgent().run(task, approval_token=approval_token)
+    return ClerkAgent().run(task)
