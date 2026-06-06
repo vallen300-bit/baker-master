@@ -740,7 +740,7 @@ echo "PASS: Case M — non-b-code single-clone slug (Cowork-App-only) — mailbo
 # its own tempdir to keep isolation tight. Locks in the worker-pool slug
 # pattern alongside hag-desk + researcher.
 # ─────────────────────────────────────────────────────────────────────────────
-for spec in "n:CM-1" "o:CM-2" "p:CM-3" "q:CM-4" "r:hag-filer" "s:codex" "t:clerk"; do
+for spec in "n:CM-1" "o:CM-2" "p:CM-3" "q:CM-4" "r:hag-filer" "s:codex" "t:clerk" "u:codex-arch" "v:clerk-haiku"; do
   CASE_LABEL="${spec%%:*}"
   CASE_SLUG="${spec##*:}"
   CASE_REPO="$TMP/case-${CASE_LABEL}-${CASE_SLUG}"
@@ -770,4 +770,4 @@ for spec in "n:CM-1" "o:CM-2" "p:CM-3" "q:CM-4" "r:hag-filer" "s:codex" "t:clerk
 done
 
 echo ""
-echo "All 20 cases PASS."
+echo "All 22 cases PASS."

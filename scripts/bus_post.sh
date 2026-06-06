@@ -7,13 +7,7 @@
 #
 # Env:
 #   BAKER_ROLE              — required. Maps to sender slug.
-#                             AH1/aihead1/lead → lead
-#                             AH2/aihead2/deputy → deputy
-#                             B1-B5/b1-b5 → b1-b5
-#                             architect → architect
-#                             cortex → cortex
-#                             aid/AID → aid
-#                             codex/CODEX → codex
+#                             Resolved via generated agent identity registry map.
 #   BRISEN_LAB_DAEMON_URL   — optional. Default: https://brisen-lab.onrender.com
 #
 # Exits non-zero on any failure with descriptive stderr.
@@ -21,6 +15,9 @@
 set -euo pipefail
 
 DAEMON_URL="${BRISEN_LAB_DAEMON_URL:-https://brisen-lab.onrender.com}"
+SCRIPT_DIR="$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)"
+# shellcheck source=scripts/agent_identity_generated.sh
+. "$SCRIPT_DIR/agent_identity_generated.sh"
 
 # --- arg parsing ---
 
@@ -40,53 +37,20 @@ TOPIC="${3:-}"
 # BRISEN_LAB_DIRECTOR_RECIPIENT_BLOCKED. Single control point — flipping the
 # daemon flag is now the only kill-switch (no script-layer drift).
 
-# Validate against canonical slug registry (Director ratified aid 2026-05-10;
-# hag-desk added 2026-05-21 per HAGENAUER_DESK_ON_BUS_1 single-desk pilot;
-# researcher added 2026-05-22 per RESEARCHER_ON_BUS_1 Cowork-App-only install;
-# CM-1..4 + hag-filer added 2026-05-24 per HAG_WORKERS_PHASE_1 worker pool build;
-# codex added 2026-05-29 per CODEX_ON_BUS_1 slim install — CLI-based, no dashboard card / SessionStart hook;
-# origination-desk added 2026-05-29 per ORIGINATION_DESK_ON_BUS_1 matter-desk expansion).
-case "$RECIPIENT" in
-    director|cowork-ah1|lead|deputy|deputy-codex|architect|b1|b2|b3|b4|b5|cortex|daemon|aid|codex|codex-arch|hag-desk|origination-desk|researcher|CM-1|CM-2|CM-3|CM-4|hag-filer|clerk) ;;
-    *)
-        echo "ERROR: unknown slug: $RECIPIENT" >&2
-        echo "  Valid: director cowork-ah1 lead deputy deputy-codex architect b1 b2 b3 b4 b5 cortex daemon aid codex codex-arch hag-desk origination-desk researcher CM-1 CM-2 CM-3 CM-4 hag-filer clerk" >&2
-        exit 1
-        ;;
-esac
+# Validate against generated registry slugs plus fixed system endpoints.
+if ! agent_identity_is_valid_slug "$RECIPIENT"; then
+    echo "ERROR: unknown slug: $RECIPIENT" >&2
+    echo "  Valid: ${AGENT_IDENTITY_VALID_SLUGS[*]}" >&2
+    exit 1
+fi
 
 # --- sender slug from BAKER_ROLE ---
 
-case "${BAKER_ROLE:-}" in
-    AH1|aihead1|lead|LEAD)              SENDER=lead ;;
-    AH1-APP|cowork-ah1|COWORK-AH1)      SENDER=cowork-ah1 ;;
-    AH2|aihead2|deputy|DEPUTY)          SENDER=deputy ;;
-    deputy-codex|DEPUTY-CODEX|deputy_codex) SENDER=deputy-codex ;;
-    B1|b1)                              SENDER=b1 ;;
-    B2|b2)                              SENDER=b2 ;;
-    B3|b3)                              SENDER=b3 ;;
-    B4|b4)                              SENDER=b4 ;;
-    B5|b5)                              SENDER=b5 ;;
-    architect|ARCHITECT)                SENDER=architect ;;
-    cortex|CORTEX)                      SENDER=cortex ;;
-    aid|AID)                            SENDER=aid ;;
-    codex|CODEX)                        SENDER=codex ;;
-    codex-arch|CODEX-ARCH)               SENDER=codex-arch ;;
-    hag-desk|HAG-DESK|hagenauer-desk)   SENDER=hag-desk ;;
-    origination-desk|ORIGINATION-DESK|ORIGINATION_DESK|origination_desk) SENDER=origination-desk ;;
-    researcher|RESEARCHER)              SENDER=researcher ;;
-    CM-1|cm-1|CM_1)                     SENDER=CM-1 ;;
-    CM-2|cm-2|CM_2)                     SENDER=CM-2 ;;
-    CM-3|cm-3|CM_3)                     SENDER=CM-3 ;;
-    CM-4|cm-4|CM_4)                     SENDER=CM-4 ;;
-    hag-filer|HAG-FILER|hag_filer)      SENDER=hag-filer ;;
-    clerk|CLERK)                        SENDER=clerk ;;
-    *)
-        echo "ERROR: BAKER_ROLE not set or unrecognized: '${BAKER_ROLE:-}'" >&2
-        echo "  Valid: AH1 (terminal=lead), AH1-APP (Cowork=cowork-ah1), AH2, B1-B5, architect, cortex, aid, codex, codex-arch, hag-desk, origination-desk, researcher, CM-1, CM-2, CM-3, CM-4, hag-filer, clerk" >&2
-        exit 1
-        ;;
-esac
+if ! SENDER="$(agent_identity_resolve_role "${BAKER_ROLE:-}")"; then
+    echo "ERROR: BAKER_ROLE not set or unrecognized: '${BAKER_ROLE:-}'" >&2
+    echo "  Valid registry roles: ${AGENT_IDENTITY_BUS_AGENT_SLUGS[*]} plus aliases" >&2
+    exit 1
+fi
 
 # --- credential fetch ---
 # Prefer pre-fetched env var (set by picker functions like cdx() to avoid

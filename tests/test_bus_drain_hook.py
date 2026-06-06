@@ -171,6 +171,21 @@ def test_empty_inbox_quiet_noop(stubs_dir, base_env, tmp_path):
     assert result.stdout == "", f"expected silent no-op, got: {result.stdout!r}"
 
 
+def test_clerk_haiku_role_resolves_to_clerk_haiku_state(stubs_dir, base_env, tmp_path):
+    """Generated role map includes Clerk Chat's clerk-haiku terminal slug."""
+    _make_stub(stubs_dir / "op", "#!/bin/bash\nexit 1\n")
+    _make_stub(stubs_dir / "curl", "#!/bin/bash\necho 'curl should not be called'\nexit 99\n")
+
+    env = dict(base_env, BAKER_ROLE="clerk-haiku")
+    result = _run_hook(env, tmp_path)
+
+    assert result.returncode == 0, result.stderr
+    payload = json.loads(result.stdout)
+    ctx = payload["hookSpecificOutput"]["additionalContext"]
+    assert "1Password fetch failed" in ctx
+    assert "slug=clerk-haiku" in ctx
+
+
 # ---------------------------------------------------------------------------
 # Failure path 5b: Daemon returns auth error JSON ({detail: ...})
 # ---------------------------------------------------------------------------

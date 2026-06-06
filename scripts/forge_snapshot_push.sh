@@ -10,6 +10,9 @@ set -o pipefail
 
 LAB_URL="${LAB_URL:-https://brisen-lab.onrender.com}"
 FORGE_KEY="${FORGE_KEY:-}"
+SCRIPT_DIR="$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)"
+# shellcheck source=scripts/agent_identity_generated.sh
+. "$SCRIPT_DIR/agent_identity_generated.sh"
 
 if [[ -z "$FORGE_KEY" ]]; then
   echo "[forge-push] FATAL: FORGE_KEY env var unset" >&2
@@ -54,31 +57,9 @@ if ! acquire_lock; then
 fi
 trap 'rm -rf "$LOCK_DIR" 2>/dev/null' EXIT
 
-# Map: alias -> comma-separated candidate repo paths. b-codes work in two
-# clones (baker-master + brisen-lab); the daemon picks the active one per
-# pick_active_clone() scoring. lead/deputy stay single-path. Edit here if
-# a terminal's primary clone moves.
-declare -a TERMINALS=(
-  "lead:/Users/dimitry/bm-aihead1"
-  "cowork-ah1:/Users/dimitry/bm-aihead1"
-  "deputy:/Users/dimitry/bm-aihead2"
-  "deputy-codex:/Users/dimitry/bm-aihead2"
-  "b1:/Users/dimitry/bm-b1,/Users/dimitry/bm-b1-brisen-lab"
-  "b2:/Users/dimitry/bm-b2,/Users/dimitry/bm-b2-brisen-lab"
-  "b3:/Users/dimitry/bm-b3,/Users/dimitry/bm-b3-brisen-lab"
-  "b4:/Users/dimitry/bm-b4,/Users/dimitry/bm-b4-brisen-lab"
-  "hag-desk:/Users/dimitry/baker-vault"
-  "origination-desk:/Users/dimitry/baker-vault"
-  "researcher:/Users/dimitry/baker-vault"
-  "aid:/Users/dimitry/baker-vault"
-  "codex:/Users/dimitry/baker-vault"
-  "CM-1:/Users/dimitry/baker-vault"
-  "CM-2:/Users/dimitry/baker-vault"
-  "CM-3:/Users/dimitry/baker-vault"
-  "CM-4:/Users/dimitry/baker-vault"
-  "hag-filer:/Users/dimitry/baker-vault"
-  "clerk:/Users/dimitry/baker-vault"
-)
+# Map: alias -> comma-separated candidate repo paths. Generated from the
+# canonical agent registry plus the local path convention in the generator.
+declare -a TERMINALS=("${AGENT_IDENTITY_SNAPSHOT_TERMINALS[@]}")
 
 # Test-only override: if TERMINALS_OVERRIDE is set, replace the array. Format:
 # "alias1:/path/to/repo1 alias2:/path/to/repoA,/path/to/repoB" (space-separated
