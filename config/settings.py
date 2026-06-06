@@ -71,6 +71,23 @@ class GeminiConfig:
 
 
 @dataclass
+class Qwen3Config:
+    """CLERK_WORKBENCH_1: Qwen3-Coder runtime configuration for Clerk."""
+    base_url: str = os.getenv("CLERK_QWEN_BASE_URL", "")
+    api_key: str = os.getenv("CLERK_QWEN_API_KEY", "")
+    model: str = os.getenv("CLERK_QWEN_MODEL", "qwen3-coder")
+    backend: str = os.getenv("CLERK_MODEL_BACKEND", "qwen3_hosted")
+    max_steps: int = int(os.getenv("CLERK_MAX_STEPS", "12"))
+    task_timeout_s: int = int(os.getenv("CLERK_TASK_TIMEOUT_S", "180"))
+
+    @property
+    def enabled(self) -> bool:
+        if self.backend == "qwen3_ollama_local":
+            return bool(self.base_url and self.model)
+        return bool(self.base_url and self.api_key and self.model)
+
+
+@dataclass
 class GraphConfig:
     """M365_GRAPH_CLIENT_FOUNDATION_1: Microsoft Graph (M365) configuration.
     Dormant until Phase 0 creds + BAKER_USE_GRAPH=true."""
@@ -384,6 +401,7 @@ class SentinelConfig:
     voyage: VoyageConfig = field(default_factory=VoyageConfig)
     claude: ClaudeConfig = field(default_factory=ClaudeConfig)
     gemini: GeminiConfig = field(default_factory=GeminiConfig)
+    qwen3: Qwen3Config = field(default_factory=Qwen3Config)
     gmail: GmailConfig = field(default_factory=GmailConfig)
     fireflies: FirefliesConfig = field(default_factory=FirefliesConfig)
     plaud: PlaudConfig = field(default_factory=PlaudConfig)
