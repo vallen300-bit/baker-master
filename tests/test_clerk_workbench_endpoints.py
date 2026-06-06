@@ -215,6 +215,8 @@ def test_clerk_edit_shell_no_header_and_fetches_auth_gated_content(monkeypatch):
     assert "<script>alert(1)</script>" not in resp.text
     assert "innerHTML" not in resp.text
     assert "/api/clerk/session/${sessionId}" in resp.text
+    assert 'fetch("/api/client-config")' in resp.text
+    assert "loadClientConfig().then(loadSession)" in resp.text
 
     unauthenticated_api = client.get("/api/clerk/session/sess-1")
     assert unauthenticated_api.status_code == 401
@@ -261,6 +263,8 @@ def test_clerk_launcher_shell_and_sessions_endpoint(monkeypatch):
     assert launcher.status_code == 200
     assert "test-key-clerk" not in launcher.text
     assert "/api/clerk/run" in launcher.text
+    assert 'fetch("/api/client-config")' in launcher.text
+    assert "loadClientConfig().then(loadSessions)" in launcher.text
 
     no_key = client.get("/api/clerk/sessions")
     assert no_key.status_code == 401

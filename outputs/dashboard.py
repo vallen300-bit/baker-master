@@ -694,7 +694,20 @@ const runButton = document.getElementById("runButton");
 const runStateNode = document.getElementById("runState");
 const sessionListNode = document.getElementById("sessionList");
 const sessionStateNode = document.getElementById("sessionState");
+const BAKER_CONFIG = { apiKey: "" };
+async function loadClientConfig() {
+  try {
+    const resp = await fetch("/api/client-config");
+    if (resp.ok) {
+      const data = await resp.json();
+      BAKER_CONFIG.apiKey = data.apiKey || "";
+    }
+  } catch (err) {
+    console.error("Failed to load client config:", err);
+  }
+}
 function apiKey() {
+  if (BAKER_CONFIG.apiKey) return BAKER_CONFIG.apiKey;
   return window.localStorage.getItem("BAKER_API_KEY")
     || window.localStorage.getItem("baker_api_key")
     || window.localStorage.getItem("bakerApiKey")
@@ -780,7 +793,7 @@ runButton.addEventListener("click", async () => {
     runButton.disabled = false;
   }
 });
-loadSessions();
+loadClientConfig().then(loadSessions);
 </script>
 </body>
 </html>"""
@@ -840,9 +853,22 @@ const saveStateNode = document.getElementById("saveState");
 const saveButton = document.getElementById("saveButton");
 const contentNode = document.getElementById("content");
 const targetPathNode = document.getElementById("targetPath");
+const BAKER_CONFIG = {{ apiKey: "" }};
 sessionNode.textContent = sessionId;
 statusNode.textContent = "loading";
+async function loadClientConfig() {{
+  try {{
+    const resp = await fetch("/api/client-config");
+    if (resp.ok) {{
+      const data = await resp.json();
+      BAKER_CONFIG.apiKey = data.apiKey || "";
+    }}
+  }} catch (err) {{
+    console.error("Failed to load client config:", err);
+  }}
+}}
 function apiKey() {{
+  if (BAKER_CONFIG.apiKey) return BAKER_CONFIG.apiKey;
   return window.localStorage.getItem("BAKER_API_KEY")
     || window.localStorage.getItem("baker_api_key")
     || window.localStorage.getItem("bakerApiKey")
@@ -920,7 +946,7 @@ saveButton.addEventListener("click", async () => {{
     saveButton.disabled = false;
   }}
 }});
-loadSession();
+loadClientConfig().then(loadSession);
 </script>
 </body>
 </html>"""
