@@ -391,8 +391,17 @@ class ClerkGuardrails:
 class ClerkToolRegistry:
     """Tool wrappers exposed to the Clerk model."""
 
-    def __init__(self, dropbox_client: Any | None = None):
+    def __init__(
+        self,
+        dropbox_client: Any | None = None,
+        approved_save_paths: set[str] | tuple[str, ...] | None = None,
+    ):
         self._dropbox_client = dropbox_client
+        self._approved_save_paths = frozenset(
+            normalized
+            for normalized in (_normalize_dropbox_path(str(path)) for path in (approved_save_paths or ()))
+            if normalized
+        )
 
     @property
     def tools(self) -> list[dict[str, Any]]:
@@ -473,7 +482,7 @@ class ClerkToolRegistry:
             if name == "file_save":
                 return self._file_save(args)
             return _safe_json({"error": f"unknown tool: {name}"})
-        except Exception as e:
+        except BaseException as e:
             logger.warning("Clerk tool failed (%s): %s", name, type(e).__name__)
             return _safe_json({"error": f"{name} failed: {type(e).__name__}"})
 
@@ -618,12 +627,19 @@ class ClerkToolRegistry:
             dropbox_path = f"{_DEFAULT_SAVE_PREFIX}/{filename}"
         if not dropbox_path.startswith("/"):
             return _safe_json({"error": "dropbox_path must be absolute"})
-        if not _is_allowed_dropbox_path(dropbox_path, _ALLOWED_SAVE_PREFIXES):
+        normalized_path = _normalize_dropbox_path(dropbox_path)
+        if not normalized_path:
+            return _safe_json({"error": "invalid dropbox_path"})
+        if (
+            not _is_allowed_dropbox_path(normalized_path, _ALLOWED_SAVE_PREFIXES)
+            and normalized_path not in self._approved_save_paths
+        ):
             return _safe_json({
                 "status": "blocked",
                 "reason": "dropbox_path outside Clerk working folder",
-                "dropbox_path": dropbox_path,
+                "dropbox_path": normalized_path,
             })
+        dropbox_path = normalized_path
 
         client = self._dropbox_client
         if client is None:

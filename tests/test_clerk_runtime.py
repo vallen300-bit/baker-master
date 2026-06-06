@@ -285,6 +285,40 @@ def test_file_save_outside_working_folder_blocks_even_if_model_sets_approved_pat
     assert calls == []
 
 
+def test_file_save_allows_caller_side_exact_approved_path():
+    calls = []
+    target = "/Baker-Feed/Approved/out.md"
+    registry = ClerkToolRegistry(
+        dropbox_client=SimpleNamespace(upload_file=lambda *args: calls.append(args) or {"path_display": target}),
+        approved_save_paths={target},
+    )
+
+    raw = registry.execute(
+        "file_save",
+        {
+            "content": "hello",
+            "filename": "out.md",
+            "dropbox_path": target,
+        },
+    )
+
+    parsed = json.loads(raw)
+    assert parsed["status"] == "ready"
+    assert parsed["path"] == target
+    assert calls[0][1] == target
+
+
+def test_registry_execute_catches_system_exit_as_controlled_error():
+    class Registry(ClerkToolRegistry):
+        def _file_save(self, args):
+            raise SystemExit("gmail credentials missing")
+
+    raw = Registry().execute("file_save", {"content": "hello", "filename": "out.md"})
+
+    parsed = json.loads(raw)
+    assert parsed == {"error": "file_save failed: SystemExit"}
+
+
 def test_file_save_path_boundary_blocks_prefix_smuggling():
     calls = []
     registry = ClerkToolRegistry(dropbox_client=SimpleNamespace(upload_file=lambda *args: calls.append(args) or {}))
