@@ -8,16 +8,20 @@ Includes /api/scan SSE endpoint for interactive Baker chat.
 import asyncio
 import decimal as _decimal
 import hashlib
+import hmac
+import html as _html
 import json
 import logging
 import os
+import posixpath
 import re
 import tempfile
 import threading
 import time
 from datetime import date, datetime, timezone
 from pathlib import Path
-from typing import Literal, Optional
+from typing import Any, Literal, Optional
+from uuid import uuid4
 
 import anthropic
 from fastapi import BackgroundTasks, Body, Depends, FastAPI, File, Form, Header, HTTPException, Query, Request, UploadFile
@@ -279,6 +283,415 @@ def _get_retriever():
         from memory.retriever import SentinelRetriever
         _retriever = SentinelRetriever._get_global_instance()
     return _retriever
+
+
+# ============================================================
+# Clerk Workbench (CLERK_WORKBENCH_2)
+# ============================================================
+
+_CLERK_WORKING_PREFIX = "/Baker-Feed/Clerk-Workbench"
+_CLERK_APPROVED_SAVE_ROOTS_DEFAULT = "/Baker-Feed/;/Apps/Baker/Clerk/"
+_CLERK_SAVE_TOKEN_VERSION = "clerk-save-v1"
+
+
+class ClerkRunRequest(BaseModel):
+    task: str = Field(..., min_length=3, max_length=12000)
+    approval_token: Optional[str] = Field(default=None, max_length=512)
+
+
+class ClerkSaveRequest(BaseModel):
+    content: str = Field(..., max_length=2_000_000)
+    target_path: Optional[str] = Field(default=None, max_length=1024)
+    approval_token: Optional[str] = Field(default=None, max_length=512)
+
+
+def _clerk_normalize_dropbox_path(path: str) -> str:
+    raw = (path or "").strip()
+    if not raw.startswith("/"):
+        return ""
+    normalized = posixpath.normpath(raw)
+    if normalized == "." or not normalized.startswith("/"):
+        return ""
+    return normalized
+
+
+def _clerk_path_under(path: str, roots: tuple[str, ...]) -> bool:
+    normalized = _clerk_normalize_dropbox_path(path)
+    if not normalized:
+        return False
+    for root in roots:
+        allowed = posixpath.normpath(root)
+        if normalized == allowed or normalized.startswith(allowed.rstrip("/") + "/"):
+            return True
+    return False
+
+
+def _clerk_approved_save_roots() -> tuple[str, ...]:
+    roots = os.getenv("CLERK_APPROVED_SAVE_ROOTS", _CLERK_APPROVED_SAVE_ROOTS_DEFAULT)
+    return tuple(
+        normalized
+        for normalized in (_clerk_normalize_dropbox_path(part) for part in roots.split(";"))
+        if normalized
+    )
+
+
+def _clerk_approval_secret() -> str:
+    return os.getenv("CLERK_SAVE_APPROVAL_SECRET") or _BAKER_API_KEY
+
+
+def _clerk_save_approval_token(session_id: str, target_path: str) -> str:
+    normalized = _clerk_normalize_dropbox_path(target_path)
+    secret = _clerk_approval_secret()
+    if not session_id or not normalized or not secret:
+        return ""
+    payload = f"{_CLERK_SAVE_TOKEN_VERSION}:{session_id}:{normalized}"
+    return hmac.new(secret.encode("utf-8"), payload.encode("utf-8"), hashlib.sha256).hexdigest()
+
+
+def _clerk_validate_save_approval(session_id: str, target_path: str, approval_token: str | None) -> bool:
+    normalized = _clerk_normalize_dropbox_path(target_path)
+    if not normalized or not approval_token:
+        return False
+    if not _clerk_path_under(normalized, _clerk_approved_save_roots()):
+        return False
+    expected = _clerk_save_approval_token(session_id, normalized)
+    return bool(expected) and hmac.compare_digest(approval_token, expected)
+
+
+def _clerk_json_param(value: Any):
+    import psycopg2.extras
+
+    return psycopg2.extras.Json(value)
+
+
+def _clerk_create_session(session_id: str, task: str, source_meta: dict[str, Any]) -> None:
+    store = _get_store()
+    conn = store._get_conn()
+    if not conn:
+        raise HTTPException(status_code=503, detail="DB unavailable")
+    try:
+        cur = conn.cursor()
+        cur.execute(
+            """
+            INSERT INTO clerk_sessions (session_id, task, status, source_meta)
+            VALUES (%s, %s, %s, %s)
+            """,
+            (session_id, task, "running", _clerk_json_param(source_meta)),
+        )
+        conn.commit()
+        cur.close()
+    except Exception as e:
+        try:
+            conn.rollback()
+        except Exception:
+            pass
+        logger.error("clerk session create failed: %s", type(e).__name__)
+        raise HTTPException(status_code=500, detail="clerk_session_create_failed")
+    finally:
+        store._put_conn(conn)
+
+
+def _clerk_fetch_session(session_id: str) -> dict[str, Any] | None:
+    store = _get_store()
+    conn = store._get_conn()
+    if not conn:
+        raise HTTPException(status_code=503, detail="DB unavailable")
+    try:
+        import psycopg2.extras
+
+        cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+        cur.execute(
+            """
+            SELECT session_id, task, status, result_json, draft_content, draft_path,
+                   source_meta, error, created_at, updated_at
+            FROM clerk_sessions
+            WHERE session_id = %s
+            LIMIT 1
+            """,
+            (session_id,),
+        )
+        row = cur.fetchone()
+        cur.close()
+        return dict(row) if row else None
+    except Exception:
+        try:
+            conn.rollback()
+        except Exception:
+            pass
+        logger.exception("clerk session fetch failed")
+        raise HTTPException(status_code=500, detail="clerk_session_fetch_failed")
+    finally:
+        store._put_conn(conn)
+
+
+def _clerk_update_session(session_id: str, **fields: Any) -> None:
+    if not fields:
+        return
+    allowed = {
+        "status",
+        "result_json",
+        "draft_content",
+        "draft_path",
+        "source_meta",
+        "error",
+    }
+    unknown = set(fields) - allowed
+    if unknown:
+        raise ValueError(f"unsupported clerk session fields: {sorted(unknown)}")
+
+    store = _get_store()
+    conn = store._get_conn()
+    if not conn:
+        raise HTTPException(status_code=503, detail="DB unavailable")
+    try:
+        sets = []
+        params: list[Any] = []
+        for key, value in fields.items():
+            sets.append(f"{key} = %s")
+            if key in {"result_json", "source_meta"}:
+                params.append(_clerk_json_param(value or {}))
+            else:
+                params.append(value)
+        sets.append("updated_at = NOW()")
+        params.append(session_id)
+        cur = conn.cursor()
+        cur.execute(
+            f"UPDATE clerk_sessions SET {', '.join(sets)} WHERE session_id = %s",
+            tuple(params),
+        )
+        conn.commit()
+        cur.close()
+    except Exception:
+        try:
+            conn.rollback()
+        except Exception:
+            pass
+        logger.exception("clerk session update failed")
+        raise
+    finally:
+        store._put_conn(conn)
+
+
+def _clerk_extract_draft(result: dict[str, Any]) -> tuple[str, str | None]:
+    content = ""
+    path = None
+    for call in result.get("tool_calls") or []:
+        if call.get("name") != "file_save":
+            continue
+        args = call.get("input") or {}
+        if isinstance(args, dict):
+            if isinstance(args.get("content"), str):
+                content = args["content"]
+            raw_path = args.get("dropbox_path")
+            if isinstance(raw_path, str) and raw_path.strip():
+                path = _clerk_normalize_dropbox_path(raw_path)
+            elif isinstance(args.get("filename"), str):
+                filename = Path(args["filename"]).name or "clerk-output.md"
+                path = f"{_CLERK_WORKING_PREFIX}/{filename}"
+    if not path:
+        answer = str(result.get("answer") or "")
+        match = re.search(r"Ready:\s*(/[^\s]+)", answer)
+        if match:
+            path = _clerk_normalize_dropbox_path(match.group(1))
+    if not content:
+        content = str(result.get("answer") or result.get("reason") or "")
+    return content, path or None
+
+
+def _clerk_public_session(row: dict[str, Any]) -> dict[str, Any]:
+    result_json = row.get("result_json") or {}
+    if isinstance(result_json, str):
+        try:
+            result_json = json.loads(result_json)
+        except Exception:
+            result_json = {"raw": result_json}
+    return {
+        "session_id": row.get("session_id"),
+        "status": row.get("status"),
+        "result": result_json,
+        "draft_path": row.get("draft_path"),
+        "error": row.get("error"),
+        "created_at": row.get("created_at").isoformat() if row.get("created_at") else None,
+        "updated_at": row.get("updated_at").isoformat() if row.get("updated_at") else None,
+    }
+
+
+def _clerk_run_session_sync(session_id: str, task: str) -> None:
+    try:
+        from orchestrator.clerk_runtime import run_clerk_task
+
+        result = run_clerk_task(task)
+        if not isinstance(result, dict):
+            result = {"status": "error", "error": "clerk returned non-dict result"}
+        status = str(result.get("status") or "error")
+        draft_content, draft_path = _clerk_extract_draft(result)
+        _clerk_update_session(
+            session_id,
+            status=status,
+            result_json=result,
+            draft_content=draft_content,
+            draft_path=draft_path,
+            error=str(result.get("reason") or result.get("error") or "") or None,
+        )
+    except BaseException as e:
+        logger.warning("clerk background run failed (%s): %s", session_id, type(e).__name__)
+        try:
+            _clerk_update_session(
+                session_id,
+                status="error",
+                result_json={"status": "error", "error_type": type(e).__name__},
+                error=f"clerk failed: {type(e).__name__}",
+            )
+        except Exception:
+            logger.exception("clerk background failure update failed")
+
+
+async def _clerk_run_session_background(session_id: str, task: str) -> None:
+    await asyncio.to_thread(_clerk_run_session_sync, session_id, task)
+
+
+def _clerk_save_content_sync(
+    session_id: str,
+    content: str,
+    target_path: str,
+    approved_save_paths: set[str],
+) -> dict[str, Any]:
+    from orchestrator.clerk_runtime import ClerkToolRegistry
+
+    registry = ClerkToolRegistry(approved_save_paths=approved_save_paths)
+    raw = registry.execute(
+        "file_save",
+        {
+            "content": content,
+            "filename": Path(target_path).name or f"{session_id}.md",
+            "dropbox_path": target_path,
+        },
+    )
+    try:
+        parsed = json.loads(raw)
+    except Exception:
+        parsed = {"error": "file_save returned invalid JSON", "raw": raw[:500]}
+
+    status = parsed.get("status")
+    if status == "ready":
+        saved_path = parsed.get("path") or target_path
+        _clerk_update_session(
+            session_id,
+            status="saved",
+            draft_content=content,
+            draft_path=saved_path,
+            result_json={"status": "saved", "path": saved_path, "file_save": parsed},
+            error=None,
+        )
+        return {"session_id": session_id, "status": "saved", "path": saved_path, "file_save": parsed}
+
+    _clerk_update_session(
+        session_id,
+        status=parsed.get("status") or "error",
+        result_json={"status": parsed.get("status") or "error", "file_save": parsed},
+        error=parsed.get("reason") or parsed.get("error") or "file_save failed",
+    )
+    return {"session_id": session_id, "status": parsed.get("status") or "error", "file_save": parsed}
+
+
+def _clerk_edit_html(row: dict[str, Any]) -> str:
+    session_id = str(row.get("session_id") or "")
+    status = str(row.get("status") or "unknown")
+    draft_path = str(row.get("draft_path") or f"{_CLERK_WORKING_PREFIX}/{session_id}.md")
+    content = str(row.get("draft_content") or row.get("error") or "")
+    title = f"Clerk Workbench {session_id}"
+    return f"""<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{_html.escape(title)}</title>
+  <style>
+    :root {{ color-scheme: light dark; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }}
+    body {{ margin: 0; background: #f6f7f9; color: #121417; }}
+    main {{ max-width: 1120px; margin: 0 auto; padding: 24px; }}
+    header {{ display: flex; justify-content: space-between; gap: 16px; align-items: center; margin-bottom: 16px; }}
+    h1 {{ font-size: 20px; line-height: 1.2; margin: 0; }}
+    .meta {{ color: #53606f; font-size: 13px; overflow-wrap: anywhere; }}
+    .bar {{ display: flex; gap: 8px; align-items: center; flex-wrap: wrap; margin: 12px 0; }}
+    textarea {{ width: 100%; min-height: 62vh; box-sizing: border-box; padding: 14px; border: 1px solid #c7ccd4; border-radius: 6px; font: 14px/1.5 ui-monospace, SFMono-Regular, Menlo, monospace; background: #fff; color: #111; }}
+    input {{ min-width: 360px; max-width: 100%; padding: 8px 10px; border: 1px solid #c7ccd4; border-radius: 6px; }}
+    button {{ padding: 8px 12px; border: 1px solid #9aa3af; border-radius: 6px; background: #fff; color: #111; cursor: pointer; }}
+    button:disabled {{ opacity: .55; cursor: wait; }}
+    @media (prefers-color-scheme: dark) {{
+      body {{ background: #151719; color: #f2f4f7; }}
+      textarea, input, button {{ background: #20242a; color: #f2f4f7; border-color: #3b424c; }}
+      .meta {{ color: #a8b0ba; }}
+    }}
+  </style>
+</head>
+<body>
+<main>
+  <header>
+    <div>
+      <h1>Clerk Workbench</h1>
+      <div class="meta">Session <span id="session"></span></div>
+    </div>
+    <div class="meta">Status <span id="status"></span></div>
+  </header>
+  <div class="bar">
+    <input id="targetPath" value="{_html.escape(draft_path, quote=True)}" aria-label="Save path">
+    <button id="saveButton" type="button">Save</button>
+    <span id="saveState" class="meta"></span>
+  </div>
+  <textarea id="content" spellcheck="false">{_html.escape(content)}</textarea>
+</main>
+<script>
+const sessionId = {json.dumps(session_id)};
+const initialStatus = {json.dumps(status)};
+const sessionNode = document.getElementById("session");
+const statusNode = document.getElementById("status");
+const saveStateNode = document.getElementById("saveState");
+const saveButton = document.getElementById("saveButton");
+const contentNode = document.getElementById("content");
+const targetPathNode = document.getElementById("targetPath");
+sessionNode.textContent = sessionId;
+statusNode.textContent = initialStatus;
+function apiKey() {{
+  return window.localStorage.getItem("BAKER_API_KEY")
+    || window.localStorage.getItem("baker_api_key")
+    || window.localStorage.getItem("bakerApiKey")
+    || "";
+}}
+async function poll() {{
+  const key = apiKey();
+  if (!key || statusNode.textContent !== "running") return;
+  const resp = await fetch(`/api/clerk/session/${{sessionId}}`, {{headers: {{"X-Baker-Key": key}}}});
+  if (!resp.ok) return;
+  const data = await resp.json();
+  statusNode.textContent = data.status || "";
+  if (data.draft_path) targetPathNode.value = data.draft_path;
+  if (data.status === "running") window.setTimeout(poll, 2500);
+  if (data.status && data.status !== "running") window.location.reload();
+}}
+saveButton.addEventListener("click", async () => {{
+  const key = apiKey();
+  saveButton.disabled = true;
+  saveStateNode.textContent = "Saving";
+  try {{
+    const resp = await fetch(`/api/clerk/save/${{sessionId}}`, {{
+      method: "POST",
+      headers: {{"Content-Type": "application/json", "X-Baker-Key": key}},
+      body: JSON.stringify({{content: contentNode.value, target_path: targetPathNode.value}})
+    }});
+    const data = await resp.json();
+    saveStateNode.textContent = data.path || data.detail || data.status || "Saved";
+    if (data.status) statusNode.textContent = data.status;
+  }} catch (err) {{
+    saveStateNode.textContent = "Save failed";
+  }} finally {{
+    saveButton.disabled = false;
+  }}
+}});
+poll();
+</script>
+</body>
+</html>"""
 
 
 def _extract_correction_safe(task: dict):
@@ -6441,6 +6854,86 @@ async def cortex_run_stream(req: CortexRunRequest):
         ),
         media_type="text/event-stream",
     )
+
+
+@app.post("/api/clerk/run", tags=["clerk"], dependencies=[Depends(verify_api_key)])
+async def clerk_run(req: ClerkRunRequest, background_tasks: BackgroundTasks):
+    """Start a Clerk Qwen3 workbench session without blocking the event loop."""
+    task = req.task.strip()
+    if not task:
+        raise HTTPException(status_code=400, detail="task is required")
+    session_id = str(uuid4())
+    _clerk_create_session(
+        session_id,
+        task,
+        {"approval_token_supplied": bool(req.approval_token)},
+    )
+    background_tasks.add_task(_clerk_run_session_background, session_id, task)
+    row = _clerk_fetch_session(session_id)
+    return _clerk_public_session(row or {"session_id": session_id, "status": "running"})
+
+
+@app.get("/api/clerk/session/{session_id}", tags=["clerk"], dependencies=[Depends(verify_api_key)])
+async def clerk_session(session_id: str):
+    row = _clerk_fetch_session(session_id)
+    if not row:
+        raise HTTPException(status_code=404, detail="clerk_session_not_found")
+    return _clerk_public_session(row)
+
+
+@app.get("/clerk/edit/{session_id}", tags=["clerk"], response_class=HTMLResponse, dependencies=[Depends(verify_api_key)])
+async def clerk_edit(session_id: str):
+    row = _clerk_fetch_session(session_id)
+    if not row:
+        raise HTTPException(status_code=404, detail="clerk_session_not_found")
+    return HTMLResponse(_clerk_edit_html(row))
+
+
+@app.post("/api/clerk/save/{session_id}", tags=["clerk"], dependencies=[Depends(verify_api_key)])
+async def clerk_save(session_id: str, req: ClerkSaveRequest):
+    row = _clerk_fetch_session(session_id)
+    if not row:
+        raise HTTPException(status_code=404, detail="clerk_session_not_found")
+
+    target_path = _clerk_normalize_dropbox_path(
+        req.target_path or row.get("draft_path") or f"{_CLERK_WORKING_PREFIX}/{session_id}.md"
+    )
+    if not target_path:
+        raise HTTPException(status_code=400, detail="invalid_target_path")
+
+    approved_save_paths: set[str] = set()
+    if _clerk_path_under(target_path, (_CLERK_WORKING_PREFIX,)):
+        pass
+    elif _clerk_validate_save_approval(session_id, target_path, req.approval_token):
+        approved_save_paths.add(target_path)
+    else:
+        _clerk_update_session(
+            session_id,
+            status="pending_approval",
+            result_json={"status": "pending_approval", "target_path": target_path},
+            error="target path requires Director approval",
+        )
+        raise HTTPException(
+            status_code=403,
+            detail={
+                "status": "pending_approval",
+                "reason": "target path requires Director approval",
+                "target_path": target_path,
+            },
+        )
+
+    result = await asyncio.to_thread(
+        _clerk_save_content_sync,
+        session_id,
+        req.content,
+        target_path,
+        approved_save_paths,
+    )
+    if result.get("status") == "saved":
+        return result
+    if result.get("status") == "blocked":
+        raise HTTPException(status_code=403, detail=result)
+    raise HTTPException(status_code=500, detail=result)
 
 
 # CORTEX_PRE_REVIEW_GATE_1: tap-from-Slack endpoint for the cost gate.
