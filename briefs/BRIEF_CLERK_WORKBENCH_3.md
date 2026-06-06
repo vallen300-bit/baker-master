@@ -32,8 +32,15 @@ this phase makes it "live with a button". No runtime/endpoint logic changes — 
 - **Recent sessions (small, optional-but-preferred):** the launcher lists the last ~10 `clerk_sessions`
   (id, truncated task, status, created_at) each linking to its `/clerk/edit/<id>`, so an interrupted
   review is one click to resume. Served by a new bounded `GET /api/clerk/sessions?limit=10`.
-- **Auth:** `GET /clerk` is an HTML shell (no secret in markup); every data call carries `X-Baker-Key`
-  from `localStorage` exactly like `/clerk/edit`. The new list endpoint is `Depends(verify_api_key)`.
+- **Auth:** `GET /clerk` is an HTML shell (no secret in markup); every data call carries `X-Baker-Key`.
+  The new list endpoint is `Depends(verify_api_key)`.
+- **KEY-SOURCE FOLD (G3 codex #1977, HIGH integration gap):** the Clerk shells are standalone inline-JS
+  pages, NOT served through `app.js`. The dashboard obtains its key by `fetch('/api/client-config')` →
+  `BAKER_CONFIG.apiKey = data.apiKey` (app.js:15-18) — it NEVER writes the key to `localStorage`.
+  So a shell that reads only `localStorage` lands with NO key on a normal Director click → Run + Recent
+  Sessions are dead. Fix: BOTH `/clerk` and `/clerk/edit` shells must obtain the key the same way the
+  dashboard does — `await fetch('/api/client-config')` on load, hold `data.apiKey` in a module var, and
+  use it for every `X-Baker-Key` call; keep `localStorage` only as a fallback. Mirror app.js:15-18 exactly.
 - **States:** empty (ready for a task) / submitting (button disabled, "Starting…") / error (key missing
   or run rejected — show the message inline, do not redirect).
 - **Mobile:** desktop dashboard surface only this phase; cache-bust any new/edited static asset (`?v=N`).
@@ -92,6 +99,7 @@ this phase makes it "live with a button". No runtime/endpoint logic changes — 
 - **AC6** A "Clerk" entry is visible in the Cockpit sidebar and opens `/clerk` in one click.
 - **AC7** The list renders task text via `createTextNode`/escaping (no `innerHTML` of session task) — XSS-safe, same invariant as the edit page.
 - **AC8 (auth fold)** `GET /clerk/edit/<id>` opens in a browser with NO header (the redirect works); the shell source contains NO session content/secret; the doc loads via client `fetch /api/clerk/session/<id>` which STILL returns 401 without a key. Updated edit tests pass.
+- **AC9 (key-source fold, G3 #1977)** With EMPTY `localStorage`, opening `/clerk` (or clicking the Cockpit Clerk link) still authenticates: the shell `fetch('/api/client-config')`, uses `data.apiKey`, and Run + Recent Sessions work. Regression: a test proves the launcher path obtains the key via `/api/client-config` (not localStorage-only). Both `/clerk` and `/clerk/edit` covered.
 - **POST_DEPLOY_AC** (live prod, paid Qwen3): open the Cockpit → click Clerk → type a benign task → Run → land on `/clerk/edit` → session reaches `ready` → Save to Dropbox working folder. Full button→doc→save round-trip, no raw API call.
 
 ## Gate plan (Harness V2)
