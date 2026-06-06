@@ -509,11 +509,57 @@ def _clerk_public_session(row: dict[str, Any]) -> dict[str, Any]:
         "session_id": row.get("session_id"),
         "status": row.get("status"),
         "result": result_json,
+        "draft_content": row.get("draft_content"),
         "draft_path": row.get("draft_path"),
         "error": row.get("error"),
         "created_at": row.get("created_at").isoformat() if row.get("created_at") else None,
         "updated_at": row.get("updated_at").isoformat() if row.get("updated_at") else None,
     }
+
+
+def _clerk_public_session_summary(row: dict[str, Any]) -> dict[str, Any]:
+    task = str(row.get("task") or "")
+    if len(task) > 120:
+        task = task[:117] + "..."
+    created_at = row.get("created_at")
+    return {
+        "session_id": row.get("session_id"),
+        "task": task,
+        "status": row.get("status"),
+        "created_at": created_at.isoformat() if hasattr(created_at, "isoformat") else created_at,
+    }
+
+
+def _clerk_list_sessions(limit: int) -> list[dict[str, Any]]:
+    store = _get_store()
+    conn = store._get_conn()
+    if not conn:
+        raise HTTPException(status_code=503, detail="DB unavailable")
+    try:
+        import psycopg2.extras
+
+        cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+        cur.execute(
+            """
+            SELECT session_id, task, status, created_at
+            FROM clerk_sessions
+            ORDER BY created_at DESC
+            LIMIT %s
+            """,
+            (limit,),
+        )
+        rows = cur.fetchall()
+        cur.close()
+        return [_clerk_public_session_summary(dict(row)) for row in rows]
+    except Exception:
+        try:
+            conn.rollback()
+        except Exception:
+            pass
+        logger.exception("clerk sessions list failed")
+        raise HTTPException(status_code=500, detail="clerk_sessions_list_failed")
+    finally:
+        store._put_conn(conn)
 
 
 def _clerk_run_session_sync(session_id: str, task: str) -> None:
@@ -594,11 +640,168 @@ def _clerk_save_content_sync(
     return {"session_id": session_id, "status": parsed.get("status") or "error", "file_save": parsed}
 
 
+def _clerk_launcher_html() -> str:
+    return """<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Clerk Launcher</title>
+  <style>
+    :root { color-scheme: light dark; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
+    body { margin: 0; background: #f6f7f9; color: #121417; }
+    main { max-width: 920px; margin: 0 auto; padding: 24px; }
+    header { display: flex; justify-content: space-between; gap: 16px; align-items: center; margin-bottom: 16px; }
+    h1 { font-size: 20px; line-height: 1.2; margin: 0; }
+    h2 { font-size: 15px; margin: 24px 0 10px; }
+    .meta { color: #53606f; font-size: 13px; overflow-wrap: anywhere; }
+    textarea { width: 100%; min-height: 220px; box-sizing: border-box; padding: 14px; border: 1px solid #c7ccd4; border-radius: 6px; font: 14px/1.5 ui-monospace, SFMono-Regular, Menlo, monospace; background: #fff; color: #111; }
+    button { margin-top: 10px; padding: 8px 12px; border: 1px solid #9aa3af; border-radius: 6px; background: #fff; color: #111; cursor: pointer; }
+    button:disabled { opacity: .55; cursor: wait; }
+    ul { list-style: none; padding: 0; margin: 0; display: grid; gap: 8px; }
+    li { border: 1px solid #d8dde5; border-radius: 6px; background: #fff; padding: 10px; }
+    a { color: inherit; font-weight: 600; text-decoration: none; }
+    a:hover { text-decoration: underline; }
+    @media (prefers-color-scheme: dark) {
+      body { background: #151719; color: #f2f4f7; }
+      textarea, button, li { background: #20242a; color: #f2f4f7; border-color: #3b424c; }
+      .meta { color: #a8b0ba; }
+    }
+  </style>
+</head>
+<body>
+<main>
+  <header>
+    <div>
+      <h1>Clerk</h1>
+      <div class="meta">Qwen3 workbench launcher</div>
+    </div>
+  </header>
+  <textarea id="task" spellcheck="true" placeholder="Type the Clerk task"></textarea>
+  <div>
+    <button id="runButton" type="button">Run</button>
+    <span id="runState" class="meta"></span>
+  </div>
+  <section>
+    <h2>Recent Sessions</h2>
+    <ul id="sessionList"></ul>
+    <div id="sessionState" class="meta"></div>
+  </section>
+</main>
+<script>
+const taskNode = document.getElementById("task");
+const runButton = document.getElementById("runButton");
+const runStateNode = document.getElementById("runState");
+const sessionListNode = document.getElementById("sessionList");
+const sessionStateNode = document.getElementById("sessionState");
+const BAKER_CONFIG = { apiKey: "" };
+async function loadClientConfig() {
+  try {
+    const resp = await fetch("/api/client-config");
+    if (resp.ok) {
+      const data = await resp.json();
+      BAKER_CONFIG.apiKey = data.apiKey || "";
+    }
+  } catch (err) {
+    console.error("Failed to load client config:", err);
+  }
+}
+function apiKey() {
+  if (BAKER_CONFIG.apiKey) return BAKER_CONFIG.apiKey;
+  return window.localStorage.getItem("BAKER_API_KEY")
+    || window.localStorage.getItem("baker_api_key")
+    || window.localStorage.getItem("bakerApiKey")
+    || "";
+}
+function detailText(data, fallback) {
+  if (!data) return fallback;
+  if (typeof data.detail === "string") return data.detail;
+  if (data.detail && typeof data.detail === "object") return data.detail.status || data.detail.reason || fallback;
+  return data.status || data.error || fallback;
+}
+function renderSessions(sessions) {
+  sessionListNode.textContent = "";
+  if (!sessions.length) {
+    sessionStateNode.textContent = "No recent sessions";
+    return;
+  }
+  sessionStateNode.textContent = "";
+  sessions.forEach((session) => {
+    const li = document.createElement("li");
+    const a = document.createElement("a");
+    const sessionId = session.session_id || "";
+    a.href = "/clerk/edit/" + encodeURIComponent(sessionId);
+    a.textContent = session.task || sessionId || "Untitled session";
+    const meta = document.createElement("div");
+    meta.className = "meta";
+    meta.textContent = [session.status, session.created_at].filter(Boolean).join(" | ");
+    li.appendChild(a);
+    li.appendChild(meta);
+    sessionListNode.appendChild(li);
+  });
+}
+async function loadSessions() {
+  const key = apiKey();
+  if (!key) {
+    sessionStateNode.textContent = "Recent sessions require Baker API key";
+    return;
+  }
+  try {
+    const resp = await fetch("/api/clerk/sessions?limit=10", {headers: {"X-Baker-Key": key}});
+    const data = await resp.json().catch(() => ({}));
+    if (!resp.ok) {
+      sessionStateNode.textContent = detailText(data, "Recent sessions unavailable");
+      return;
+    }
+    renderSessions(data.sessions || []);
+  } catch (err) {
+    sessionStateNode.textContent = "Recent sessions unavailable";
+  }
+}
+runButton.addEventListener("click", async () => {
+  const task = taskNode.value.trim();
+  if (!task) {
+    runStateNode.textContent = "Task is required";
+    return;
+  }
+  const key = apiKey();
+  if (!key) {
+    runStateNode.textContent = "Baker API key is required";
+    return;
+  }
+  runButton.disabled = true;
+  runStateNode.textContent = "Starting...";
+  try {
+    const resp = await fetch("/api/clerk/run", {
+      method: "POST",
+      headers: {"Content-Type": "application/json", "X-Baker-Key": key},
+      body: JSON.stringify({task})
+    });
+    const data = await resp.json().catch(() => ({}));
+    if (!resp.ok) {
+      runStateNode.textContent = detailText(data, "Run failed");
+      return;
+    }
+    if (!data.session_id) {
+      runStateNode.textContent = "Run did not return a session";
+      return;
+    }
+    window.location.assign("/clerk/edit/" + encodeURIComponent(data.session_id));
+  } catch (err) {
+    runStateNode.textContent = "Run failed";
+  } finally {
+    runButton.disabled = false;
+  }
+});
+loadClientConfig().then(loadSessions);
+</script>
+</body>
+</html>"""
+
+
 def _clerk_edit_html(row: dict[str, Any]) -> str:
     session_id = str(row.get("session_id") or "")
-    status = str(row.get("status") or "unknown")
-    draft_path = str(row.get("draft_path") or f"{_CLERK_WORKING_PREFIX}/{session_id}.md")
-    content = str(row.get("draft_content") or row.get("error") or "")
+    default_path = f"{_CLERK_WORKING_PREFIX}/{session_id}.md"
     title = f"Clerk Workbench {session_id}"
     return f"""<!doctype html>
 <html lang="en">
@@ -635,42 +838,97 @@ def _clerk_edit_html(row: dict[str, Any]) -> str:
     <div class="meta">Status <span id="status"></span></div>
   </header>
   <div class="bar">
-    <input id="targetPath" value="{_html.escape(draft_path, quote=True)}" aria-label="Save path">
-    <button id="saveButton" type="button">Save</button>
+    <input id="targetPath" value="" aria-label="Save path">
+    <button id="saveButton" type="button" disabled>Save</button>
     <span id="saveState" class="meta"></span>
   </div>
-  <textarea id="content" spellcheck="false">{_html.escape(content)}</textarea>
+  <textarea id="content" spellcheck="false"></textarea>
 </main>
 <script>
 const sessionId = {json.dumps(session_id)};
-const initialStatus = {json.dumps(status)};
+const defaultPath = {json.dumps(default_path)};
 const sessionNode = document.getElementById("session");
 const statusNode = document.getElementById("status");
 const saveStateNode = document.getElementById("saveState");
 const saveButton = document.getElementById("saveButton");
 const contentNode = document.getElementById("content");
 const targetPathNode = document.getElementById("targetPath");
+const BAKER_CONFIG = {{ apiKey: "" }};
 sessionNode.textContent = sessionId;
-statusNode.textContent = initialStatus;
+statusNode.textContent = "loading";
+async function loadClientConfig() {{
+  try {{
+    const resp = await fetch("/api/client-config");
+    if (resp.ok) {{
+      const data = await resp.json();
+      BAKER_CONFIG.apiKey = data.apiKey || "";
+    }}
+  }} catch (err) {{
+    console.error("Failed to load client config:", err);
+  }}
+}}
 function apiKey() {{
+  if (BAKER_CONFIG.apiKey) return BAKER_CONFIG.apiKey;
   return window.localStorage.getItem("BAKER_API_KEY")
     || window.localStorage.getItem("baker_api_key")
     || window.localStorage.getItem("bakerApiKey")
     || "";
 }}
-async function poll() {{
-  const key = apiKey();
-  if (!key || statusNode.textContent !== "running") return;
-  const resp = await fetch(`/api/clerk/session/${{sessionId}}`, {{headers: {{"X-Baker-Key": key}}}});
-  if (!resp.ok) return;
-  const data = await resp.json();
+function detailText(data, fallback) {{
+  if (!data) return fallback;
+  if (typeof data.detail === "string") return data.detail;
+  if (data.detail && typeof data.detail === "object") return data.detail.status || data.detail.reason || fallback;
+  return data.status || data.error || fallback;
+}}
+function applySession(data) {{
+  sessionNode.textContent = data.session_id || sessionId;
   statusNode.textContent = data.status || "";
-  if (data.draft_path) targetPathNode.value = data.draft_path;
-  if (data.status === "running") window.setTimeout(poll, 2500);
-  if (data.status && data.status !== "running") window.location.reload();
+  targetPathNode.value = data.draft_path || defaultPath;
+  contentNode.value = data.draft_content || data.error || "";
+  saveButton.disabled = data.status === "running";
+  if (data.status === "running") window.setTimeout(loadSession, 2500);
+}}
+async function loadSession() {{
+  const key = apiKey();
+  if (!key) {{
+    statusNode.textContent = "auth required";
+    saveStateNode.textContent = "Baker API key is required";
+    saveButton.disabled = true;
+    targetPathNode.value = defaultPath;
+    return;
+  }}
+  try {{
+    const resp = await fetch(`/api/clerk/session/${{sessionId}}`, {{headers: {{"X-Baker-Key": key}}}});
+    const data = await resp.json().catch(() => ({{}}));
+    if (resp.status === 404) {{
+      statusNode.textContent = "not found";
+      saveStateNode.textContent = "Session not found";
+      saveButton.disabled = true;
+      targetPathNode.value = defaultPath;
+      return;
+    }}
+    if (!resp.ok) {{
+      statusNode.textContent = "load failed";
+      saveStateNode.textContent = detailText(data, "Load failed");
+      saveButton.disabled = true;
+      targetPathNode.value = defaultPath;
+      return;
+    }}
+    saveStateNode.textContent = "";
+    applySession(data);
+  }} catch (err) {{
+    statusNode.textContent = "load failed";
+    saveStateNode.textContent = "Load failed";
+    saveButton.disabled = true;
+    targetPathNode.value = defaultPath;
+  }}
 }}
 saveButton.addEventListener("click", async () => {{
   const key = apiKey();
+  if (!key) {{
+    saveStateNode.textContent = "Baker API key is required";
+    return;
+  }}
   saveButton.disabled = true;
   saveStateNode.textContent = "Saving";
   try {{
@@ -680,7 +938,7 @@ saveButton.addEventListener("click", async () => {{
       body: JSON.stringify({{content: contentNode.value, target_path: targetPathNode.value}})
     }});
     const data = await resp.json();
-    saveStateNode.textContent = data.path || data.detail || data.status || "Saved";
+    saveStateNode.textContent = data.path || detailText(data, data.status || "Saved");
     if (data.status) statusNode.textContent = data.status;
   }} catch (err) {{
     saveStateNode.textContent = "Save failed";
@@ -688,7 +946,7 @@ saveButton.addEventListener("click", async () => {{
     saveButton.disabled = false;
   }}
 }});
-poll();
+loadClientConfig().then(loadSession);
 </script>
 </body>
 </html>"""
@@ -6873,6 +7131,17 @@ async def clerk_run(req: ClerkRunRequest, background_tasks: BackgroundTasks):
     return _clerk_public_session(row or {"session_id": session_id, "status": "running"})
 
 
+@app.get("/clerk", tags=["clerk"], response_class=HTMLResponse)
+async def clerk_launcher():
+    return HTMLResponse(_clerk_launcher_html())
+
+
+@app.get("/api/clerk/sessions", tags=["clerk"], dependencies=[Depends(verify_api_key)])
+async def clerk_sessions(limit: int = Query(10, ge=1)):
+    bounded_limit = min(limit, 50)
+    return {"sessions": _clerk_list_sessions(bounded_limit)}
+
+
 @app.get("/api/clerk/session/{session_id}", tags=["clerk"], dependencies=[Depends(verify_api_key)])
 async def clerk_session(session_id: str):
     row = _clerk_fetch_session(session_id)
@@ -6881,12 +7150,9 @@ async def clerk_session(session_id: str):
     return _clerk_public_session(row)
 
 
-@app.get("/clerk/edit/{session_id}", tags=["clerk"], response_class=HTMLResponse, dependencies=[Depends(verify_api_key)])
+@app.get("/clerk/edit/{session_id}", tags=["clerk"], response_class=HTMLResponse)
 async def clerk_edit(session_id: str):
-    row = _clerk_fetch_session(session_id)
-    if not row:
-        raise HTTPException(status_code=404, detail="clerk_session_not_found")
-    return HTMLResponse(_clerk_edit_html(row))
+    return HTMLResponse(_clerk_edit_html({"session_id": session_id}))
 
 
 @app.post("/api/clerk/save/{session_id}", tags=["clerk"], dependencies=[Depends(verify_api_key)])

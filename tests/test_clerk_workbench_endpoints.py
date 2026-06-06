@@ -33,6 +33,7 @@ class _FakeCursor:
     def __init__(self, store):
         self.store = store
         self._row = None
+        self._rows = []
 
     def execute(self, sql, params=()):
         compact = " ".join(sql.split()).lower()
@@ -54,10 +55,22 @@ class _FakeCursor:
                 }
                 return
 
+            if compact.startswith("select session_id") and "order by created_at desc" in compact:
+                limit = params[0]
+                rows = sorted(
+                    self.store.rows.values(),
+                    key=lambda row: row["created_at"],
+                    reverse=True,
+                )[:limit]
+                self._rows = [dict(row) for row in rows]
+                self._row = None
+                return
+
             if compact.startswith("select session_id"):
                 session_id = params[0]
                 row = self.store.rows.get(session_id)
                 self._row = dict(row) if row else None
+                self._rows = []
                 return
 
             if compact.startswith("update clerk_sessions set"):
@@ -80,6 +93,9 @@ class _FakeCursor:
 
     def fetchone(self):
         return self._row
+
+    def fetchall(self):
+        return self._rows
 
     def close(self):
         pass
@@ -169,10 +185,11 @@ def test_clerk_run_creates_session_and_background_persists_result(monkeypatch):
     )
     assert poll.status_code == 200
     assert poll.json()["status"] == "ready"
+    assert poll.json()["draft_content"] == "draft body"
     assert poll.json()["draft_path"] == "/Baker-Feed/Clerk-Workbench/out.md"
 
 
-def test_clerk_edit_404_and_escapes_document_content(monkeypatch):
+def test_clerk_edit_shell_no_header_and_fetches_auth_gated_content(monkeypatch):
     dash, store = _install_fake_store(monkeypatch)
     now = datetime.now(timezone.utc)
     store.rows["sess-1"] = {
@@ -189,14 +206,77 @@ def test_clerk_edit_404_and_escapes_document_content(monkeypatch):
     }
 
     client = TestClient(dash.app)
-    missing = client.get("/clerk/edit/missing", headers={"X-Baker-Key": "test-key-clerk"})
-    assert missing.status_code == 404
+    missing = client.get("/clerk/edit/missing")
+    assert missing.status_code == 200
+    assert "Session not found" in missing.text
 
-    resp = client.get("/clerk/edit/sess-1", headers={"X-Baker-Key": "test-key-clerk"})
+    resp = client.get("/clerk/edit/sess-1")
     assert resp.status_code == 200, resp.text
-    assert "&lt;script&gt;alert(1)&lt;/script&gt;" in resp.text
     assert "<script>alert(1)</script>" not in resp.text
     assert "innerHTML" not in resp.text
+    assert "/api/clerk/session/${sessionId}" in resp.text
+    assert 'fetch("/api/client-config")' in resp.text
+    assert "loadClientConfig().then(loadSession)" in resp.text
+
+    unauthenticated_api = client.get("/api/clerk/session/sess-1")
+    assert unauthenticated_api.status_code == 401
+
+    authenticated_api = client.get(
+        "/api/clerk/session/sess-1",
+        headers={"X-Baker-Key": "test-key-clerk"},
+    )
+    assert authenticated_api.status_code == 200
+    assert authenticated_api.json()["draft_content"] == "<script>alert(1)</script>"
+
+
+def test_clerk_launcher_shell_and_sessions_endpoint(monkeypatch):
+    dash, store = _install_fake_store(monkeypatch)
+    older = datetime(2026, 1, 1, tzinfo=timezone.utc)
+    newer = datetime(2026, 1, 2, tzinfo=timezone.utc)
+    store.rows["older"] = {
+        "session_id": "older",
+        "task": "old task",
+        "status": "ready",
+        "result_json": {},
+        "draft_content": "old",
+        "draft_path": "/Baker-Feed/Clerk-Workbench/old.md",
+        "source_meta": {},
+        "error": None,
+        "created_at": older,
+        "updated_at": older,
+    }
+    store.rows["newer"] = {
+        "session_id": "newer",
+        "task": "x" * 140,
+        "status": "running",
+        "result_json": {},
+        "draft_content": None,
+        "draft_path": None,
+        "source_meta": {},
+        "error": None,
+        "created_at": newer,
+        "updated_at": newer,
+    }
+
+    client = TestClient(dash.app)
+    launcher = client.get("/clerk")
+    assert launcher.status_code == 200
+    assert "test-key-clerk" not in launcher.text
+    assert "/api/clerk/run" in launcher.text
+    assert 'fetch("/api/client-config")' in launcher.text
+    assert "loadClientConfig().then(loadSessions)" in launcher.text
+
+    no_key = client.get("/api/clerk/sessions")
+    assert no_key.status_code == 401
+
+    resp = client.get("/api/clerk/sessions?limit=1", headers={"X-Baker-Key": "test-key-clerk"})
+    assert resp.status_code == 200, resp.text
+    sessions = resp.json()["sessions"]
+    assert len(sessions) == 1
+    assert sessions[0]["session_id"] == "newer"
+    assert sessions[0]["status"] == "running"
+    assert len(sessions[0]["task"]) == 120
+    assert sessions[0]["task"].endswith("...")
 
 
 def test_clerk_save_working_folder_uses_save_helper(monkeypatch):
