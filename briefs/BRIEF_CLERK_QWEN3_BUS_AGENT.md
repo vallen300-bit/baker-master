@@ -49,6 +49,9 @@ on the bus, and updates the existing card while a job is active.
 - **Data contract:** reuse `clerk_sessions`; no new migration/table.
 - **Bus contract:** sender is derived from Clerk's terminal key; inbound is ACKed
   only after a successful reply to the original `from_terminal`.
+- **Body contract:** `GET /msg/clerk` rows are preview-shaped and may omit
+  `body`; the executable task must come from `GET /event/<msg_id>/full`. Never
+  run Clerk from `body_preview`.
 
 ## G0 Design Decisions
 
@@ -58,8 +61,9 @@ on the bus, and updates the existing card while a job is active.
 - **Feature flag:** `CLERK_BUS_WORKER_ENABLED=false` by default. Tier-B flips it
   after merge with the required Render env.
 - **Worker contract:** poll `GET /msg/clerk?limit=<bounded>` with the Clerk
-  terminal key, run `orchestrator.clerk_runtime.run_clerk_task()`, reply to the
-  inbound `from_terminal`, and ACK only after the reply succeeds.
+  terminal key, fetch each new task body via `GET /event/<msg_id>/full`, run
+  `orchestrator.clerk_runtime.run_clerk_task()`, reply to the inbound
+  `from_terminal`, and ACK only after the reply succeeds.
 - **Idempotency:** deterministic `clerk_sessions.session_id = bus-<msg_id>`.
   The bus ACK is the durable dedup boundary: once a reply POST succeeds, ACK is
   attempted even if the best-effort `result_json.bus_reply_message_id` write
@@ -127,6 +131,8 @@ silently omit any row from `~/baker-vault/_ops/processes/install-agent-to-brisen
 - Existing Clerk denylist statuses are returned on the bus as blockers/approval.
 - Scheduler liveness registers `clerk_bus_poll`.
 - Direct DB access uses the hardened direct-connection path.
+- Bus-worker tests mirror the live list/full split: list fixtures carry
+  `body_preview` without `body`, and execution depends on `/event/<id>/full`.
 
 ## Verification
 
