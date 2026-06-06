@@ -2421,6 +2421,10 @@ def _ocr_extract_batch(candidates: list) -> dict:
                     if page_texts else True
                 )
                 if all_unreadable:
+                    # OCR_UNREADABLE_MARKER_1: persist terminal state so the
+                    # candidate query drops this doc on the next drain (zero
+                    # Gemini re-bill). full_text untouched — no search pollution.
+                    _ocr_mark_unreadable(store, doc_id)
                     failed.append({"id": doc_id, "filename": filename, "reason": "unreadable"})
                     continue
                 legible = "\n\n".join(page_texts).replace("[[UNREADABLE]]", "").strip()
@@ -2471,12 +2475,57 @@ def _ocr_extract_batch(candidates: list) -> dict:
     return {"attempted": attempted, "recovered": recovered, "failed": failed}
 
 
-def _ocr_blank_count(cur) -> int:
-    """COUNT of the blank PDF/DOCX set (recovery target). Single COUNT, no LIMIT needed."""
+# OCR_UNREADABLE_MARKER_1 (lead G0 #1945, mechanism A): docs that returned the
+# all-pages [[UNREADABLE]] guard are marked terminal via ocr_status='unreadable'
+# (see _ocr_mark_unreadable). This fragment drops them from the blank-candidate
+# pool so a normal drain never re-selects + re-bills them to Gemini. IS DISTINCT
+# FROM keeps NULL (unmarked) rows eligible. The ?include_unreadable=true force
+# path omits this fragment so a future better-OCR run can re-attempt the set.
+_OCR_UNREADABLE_EXCLUDE = " AND (d.ocr_status IS DISTINCT FROM 'unreadable')"
+
+
+def _ocr_mark_unreadable(store, doc_id) -> bool:
+    """OCR_UNREADABLE_MARKER_1: persist the terminal 'unreadable' state so a
+    normal drain never re-selects (and re-bills gemini-2.5-pro on) this doc.
+    full_text is left UNTOUCHED — the marker lives only in ocr_status, so the
+    doc never surfaces as a junk hit in /api/documents/search (AC3). Fault-
+    tolerant: any DB error is logged + swallowed (the doc simply stays eligible
+    and is retried next drain — no worse than the pre-marker behaviour, never
+    a crash). Returns True on a 1-row update."""
+    conn = store._get_conn()
+    if not conn:
+        return False
+    try:
+        cur = conn.cursor()
+        cur.execute(
+            "UPDATE documents SET ocr_status = 'unreadable' WHERE id = %s",
+            (doc_id,),
+        )
+        rc = cur.rowcount
+        conn.commit()
+        cur.close()
+        return rc == 1
+    except Exception as mk_err:
+        try:
+            conn.rollback()
+        except Exception:
+            pass
+        logger.error(f"ocr-extract id={doc_id} mark-unreadable failed: {mk_err}")
+        return False
+    finally:
+        store._put_conn(conn)
+
+
+def _ocr_blank_count(cur, include_unreadable: bool = False) -> int:
+    """COUNT of the blank PDF/DOCX set (recovery target). Single COUNT, no LIMIT
+    needed. By default excludes docs marked terminal-unreadable so the count (and
+    the caller's remaining_after convergence signal) stops counting the dead set
+    (AC2). include_unreadable=True restores the raw blank count for the force path."""
     cur.execute(
         "SELECT COUNT(*) AS c FROM documents d "
         "WHERE (d.full_text IS NULL OR btrim(d.full_text) = '') "
         "AND lower(d.filename) ~ '\\.(pdf|docx)$'"
+        + ("" if include_unreadable else _OCR_UNREADABLE_EXCLUDE)
     )
     row = cur.fetchone()
     # RealDictCursor → {"c": n}; plain cursor → (n,)
@@ -2487,6 +2536,12 @@ def _ocr_blank_count(cur) -> int:
 async def documents_ocr_extract_missing(
     limit: int = Query(3, ge=1, le=25),
     dry_run: bool = Query(True),
+    include_unreadable: bool = Query(
+        False,
+        description="OCR_UNREADABLE_MARKER_1 force path: when true, re-include docs "
+        "marked terminal (ocr_status='unreadable') so a better-OCR run can re-attempt "
+        "them. Default false = idempotent drain that skips the dead set.",
+    ),
 ):
     """OCR_REEXTRACT_MISSING_1: recover blank-full_text scanned PDFs/DOCX via Gemini
     2.5 Pro vision, then populate full_text with a TARGETED UPDATE (preserves owner).
@@ -2511,13 +2566,15 @@ async def documents_ocr_extract_missing(
     try:
         import psycopg2.extras
         cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
-        blank_count = _ocr_blank_count(cur)
+        blank_count = _ocr_blank_count(cur, include_unreadable=include_unreadable)
         cur.execute(
             "SELECT d.id, d.filename, d.source_path, d.file_hash, d.matter_slug "
             "FROM documents d "
             "WHERE (d.full_text IS NULL OR btrim(d.full_text) = '') "
             "AND lower(d.filename) ~ '\\.(pdf|docx)$' "
-            "ORDER BY d.ingested_at DESC NULLS LAST LIMIT %s",
+            # OCR_UNREADABLE_MARKER_1: skip the terminal-unreadable set unless forced.
+            + ("" if include_unreadable else _OCR_UNREADABLE_EXCLUDE)
+            + " ORDER BY d.ingested_at DESC NULLS LAST LIMIT %s",
             (limit,),
         )
         candidates = [dict(r) for r in cur.fetchall()]
@@ -2538,6 +2595,7 @@ async def documents_ocr_extract_missing(
             "dry_run": True,
             "blank_count": blank_count,
             "limit": limit,
+            "include_unreadable": include_unreadable,
             "would_process": [
                 {"id": c["id"], "filename": c.get("filename"), "source_path": c.get("source_path")}
                 for c in candidates
@@ -2602,7 +2660,9 @@ async def documents_ocr_extract_missing(
     if conn2:
         try:
             cur2 = conn2.cursor()
-            remaining_after = _ocr_blank_count(cur2)
+            # Same exclusion as the candidate query so convergence is real:
+            # on a normal drain remaining_after stops counting the marked set (AC2).
+            remaining_after = _ocr_blank_count(cur2, include_unreadable=include_unreadable)
             cur2.close()
         except Exception as cnt_err:
             try:
@@ -2617,6 +2677,7 @@ async def documents_ocr_extract_missing(
         "dry_run": False,
         "limit": limit,
         "blank_count": blank_count,
+        "include_unreadable": include_unreadable,
         "attempted": stats["attempted"],
         "recovered": stats["recovered"],
         "failed": stats["failed"],

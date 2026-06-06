@@ -120,7 +120,13 @@ class _FakeCursor:
 
     def execute(self, sql, params=None):
         self.last_sql = " ".join(sql.split())
-        if self.last_sql.startswith("UPDATE documents"):
+        if self.last_sql.startswith("UPDATE documents SET ocr_status"):
+            # OCR_UNREADABLE_MARKER_1 terminal marker: params = (doc_id,). Routed to
+            # a SEPARATE bucket so `writes` stays recovery-only (full_text) — proves
+            # the marker never touches full_text (AC3 no search pollution).
+            self.state.setdefault("ocr_marks", []).append(params[0])
+            self.rowcount = self.state.get("mark_rowcount", 1)
+        elif self.last_sql.startswith("UPDATE documents"):
             # params = (legible, token_count, legible_for_tsv, doc_id)
             doc_id = params[-1]
             self.state.setdefault("writes", []).append({"id": doc_id, "full_text": params[0]})
@@ -653,3 +659,67 @@ def test_part_b_non_empty_doc_unaffected(monkeypatch):
     monkeypatch.setattr(dp, "_get_store", lambda: _AlertStore())
     dp.run_pipeline(5)
     assert created == [], "non-empty doc must not trigger the OCR_CANDIDATE alert"
+
+
+# ─── OCR_UNREADABLE_MARKER_1: terminal marker for un-OCR-able docs ─────────────
+
+
+def test_marker_ac1_unreadable_doc_marked_terminal_full_text_untouched(monkeypatch):
+    """AC1 + AC3: a doc that returns all-pages [[UNREADABLE]] is marked terminal via
+    ocr_status='unreadable' — and full_text is NEVER written (no search pollution), so a
+    second drain (which excludes the marked set) won't re-send it to Gemini."""
+    state = {"blank_count": 1, "candidates": [_row(1)], "remaining_after": 1}
+    client, calls = _client(monkeypatch, state, gemini_text="[[UNREADABLE]]")
+    r = client.post("/api/documents/ocr-extract-missing?dry_run=false", headers=_HDR)
+    body = r.json()
+    # Lands in failed(unreadable) exactly as before...
+    assert body["failed"] and body["failed"][0]["id"] == 1
+    assert body["failed"][0]["reason"] == "unreadable"
+    assert body["recovered"] == []
+    # ...AND is now marked terminal (the new behaviour)...
+    assert state.get("ocr_marks") == [1], "unreadable doc must be marked ocr_status='unreadable'"
+    # ...with full_text left untouched (AC3 — marker lives only in ocr_status).
+    assert state.get("writes") is None, "marker must NOT write full_text (no search pollution)"
+
+
+def test_marker_ac2_candidate_query_and_count_exclude_marked_set(monkeypatch):
+    """AC2: BOTH blank-set consumers — the candidate SELECT and _ocr_blank_count (which
+    feeds blank_count + the remaining_after convergence signal) — drop the terminal set on
+    a normal drain, and the exclusion is gated so the force path can restore it."""
+    src = Path("outputs/dashboard.py").read_text()
+    # The shared exclusion fragment exists and targets ocr_status terminal state.
+    assert "_OCR_UNREADABLE_EXCLUDE" in src
+    assert "ocr_status IS DISTINCT FROM 'unreadable'" in src, \
+        "IS DISTINCT FROM keeps NULL (unmarked) rows eligible"
+
+    # _ocr_blank_count applies it, gated by include_unreadable (default excludes).
+    bc = src[src.index("def _ocr_blank_count("):]
+    bc = bc[: bc.index("\n\n", bc.index("return"))]
+    assert "include_unreadable: bool = False" in bc, "count defaults to excluding the dead set"
+    assert "_OCR_UNREADABLE_EXCLUDE" in bc and "if include_unreadable else" in bc
+
+    # The endpoint: candidate SELECT applies the same gated exclusion, and
+    # remaining_after re-counts with the SAME flag so convergence is real (stops at 0).
+    ep = src[src.index("async def documents_ocr_extract_missing("):]
+    ep = ep[: ep.index('@app.get("/health"')]
+    sel = ep[ep.index('"SELECT d.id, d.filename'): ep.index("ORDER BY d.ingested_at")]
+    assert "_OCR_UNREADABLE_EXCLUDE" in sel and "if include_unreadable else" in sel, \
+        "candidate SELECT must drop the marked set unless forced"
+    assert "_ocr_blank_count(cur2, include_unreadable=include_unreadable)" in ep, \
+        "remaining_after must use the same exclusion as the candidate query"
+
+
+def test_marker_ac4_force_include_unreadable_reattempts_marked_set(monkeypatch):
+    """AC4: ?include_unreadable=true re-includes the terminal set (force re-OCR path) and
+    the response echoes the flag so the caller can confirm which mode ran."""
+    state = {"blank_count": 5, "candidates": [_row(1), _row(2)]}
+    client, calls = _client(monkeypatch, state)
+    # dry_run echoes the flag and still lists candidates (the force path processes them).
+    r = client.post(
+        "/api/documents/ocr-extract-missing?dry_run=true&include_unreadable=true", headers=_HDR)
+    body = r.json()
+    assert body["include_unreadable"] is True, "force flag must surface in the response"
+    assert len(body["would_process"]) == 2, "force path re-includes the marked candidates"
+    # Default (no flag) drain reports include_unreadable=false — the idempotent mode.
+    r2 = client.post("/api/documents/ocr-extract-missing?dry_run=true", headers=_HDR)
+    assert r2.json()["include_unreadable"] is False
