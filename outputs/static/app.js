@@ -1634,6 +1634,7 @@ async function loadMattersSummary() {
         // SIDEBAR-RESTRUCTURE-1: Render 3-tier sidebar
         _renderMatterSection('projectsSubList', data.projects || [], 'projectsCount');
         _renderMatterSection('operationsSubList', data.operations || [], 'operationsCount');
+        _appendClerkNavLink();
         // SIDEBAR-HIERARCHY-1: Render inbox sub-items
         _renderMatterSection('inboxSubList', data.inbox || [], 'inboxCount');
 
@@ -1644,6 +1645,27 @@ async function loadMattersSummary() {
     } catch (e) {
         console.error('loadMattersSummary failed:', e);
     }
+}
+
+function _appendClerkNavLink() {
+    var container = document.getElementById('operationsSubList');
+    if (!container || container.querySelector('[data-clerk-link="1"]')) return;
+
+    var link = document.createElement('a');
+    link.className = 'nav-item nav-item-external';
+    link.href = '/clerk';
+    link.dataset.clerkLink = '1';
+
+    var dot = document.createElement('span');
+    dot.className = 'nav-dot blue';
+    link.appendChild(dot);
+
+    var label = document.createElement('span');
+    label.className = 'nav-label';
+    label.textContent = 'Clerk';
+    link.appendChild(label);
+
+    container.appendChild(link);
 }
 
 function _renderMatterSection(containerId, matters, countId) {
