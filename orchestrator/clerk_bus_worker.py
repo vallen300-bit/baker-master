@@ -376,24 +376,13 @@ class ClerkBusWorker:
         session_id = f"bus-{message_id}"
         sender = str(msg.get("from_terminal") or msg.get("sender") or "").strip()
         topic = str(msg.get("topic") or "dispatch/clerk").strip()
-        task = str(msg.get("body") or "").strip()
 
         if sender == _CLERK_SLUG:
             self._ack_message(message_id)
             return {"status": "skipped_self", "acked": True}
-        if not sender or not task:
+        if not sender:
             return {"status": "skipped_invalid", "acked": False}
 
-        self.store.create_session_if_absent(
-            session_id,
-            task,
-            {
-                "source": "bus",
-                "bus_message_id": message_id,
-                "from_terminal": sender,
-                "topic": topic,
-            },
-        )
         row = self.store.get_session(session_id) or {}
         existing_result = _coerce_dict(row.get("result_json"))
 
@@ -408,6 +397,20 @@ class ClerkBusWorker:
             draft_path = row.get("draft_path")
             error = row.get("error")
         else:
+            task = self._fetch_full_body(message_id)
+            if not task:
+                logger.warning("clerk bus message skipped; full body unavailable id=%s", message_id)
+                return {"status": "skipped_invalid", "acked": False}
+            self.store.create_session_if_absent(
+                session_id,
+                task,
+                {
+                    "source": "bus",
+                    "bus_message_id": message_id,
+                    "from_terminal": sender,
+                    "topic": topic,
+                },
+            )
             with ActiveForgeJob(
                 self.telemetry,
                 session_id=session_id,
@@ -453,6 +456,24 @@ class ClerkBusWorker:
             logger.warning("clerk reply marker persist failed: %s", type(e).__name__)
         self._ack_message(message_id)
         return {"status": status, "acked": True, "reply_message_id": reply_message_id}
+
+    def _fetch_full_body(self, message_id: int) -> str:
+        try:
+            resp = self.http.get(
+                f"{self.cfg.lab_url}/event/{message_id}/full",
+                headers={"X-Terminal-Key": self.cfg.terminal_key},
+                timeout=self.cfg.http_timeout_s,
+            )
+            resp.raise_for_status()
+            data = resp.json()
+        except Exception as e:
+            logger.warning("clerk full body fetch failed id=%s error=%s", message_id, type(e).__name__)
+            return ""
+        if not isinstance(data, dict):
+            logger.warning("clerk full body fetch returned non-dict id=%s", message_id)
+            return ""
+        body = data.get("body")
+        return body.strip() if isinstance(body, str) else ""
 
     def _run_task(self, task: str) -> dict[str, Any]:
         try:

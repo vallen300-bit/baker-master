@@ -7,10 +7,10 @@ from orchestrator.clerk_bus_worker import (
 
 
 class _Response:
-    def __init__(self, data, status_code=200, url="https://lab.test"):
+    def __init__(self, data, status_code=200, url="https://lab.test", method="GET"):
         self._data = data
         self.status_code = status_code
-        self.request = httpx.Request("POST", url)
+        self.request = httpx.Request(method, url)
 
     def json(self):
         return self._data
@@ -21,28 +21,41 @@ class _Response:
 
 
 class _HTTP:
-    def __init__(self, messages=None, fail_reply=False):
-        self.messages = messages or []
+    def __init__(self, messages=None, fail_reply=False, fail_full_body=False):
+        self.messages = []
+        self.full_bodies = {}
+        for msg in messages or []:
+            msg = dict(msg)
+            full_body = msg.pop("_full_body", "")
+            if full_body:
+                self.full_bodies[int(msg["id"])] = full_body
+            self.messages.append(msg)
         self.fail_reply = fail_reply
+        self.fail_full_body = fail_full_body
         self.get_calls = []
         self.post_calls = []
 
     def get(self, url, **kwargs):
         self.get_calls.append({"url": url, **kwargs})
+        if "/event/" in url and url.endswith("/full"):
+            if self.fail_full_body:
+                return _Response({"error": "fail"}, status_code=500, url=url)
+            msg_id = int(url.rstrip("/").split("/")[-2])
+            return _Response({"body": self.full_bodies.get(msg_id, "")}, url=url)
         return _Response(self.messages, url=url)
 
     def post(self, url, **kwargs):
         self.post_calls.append({"url": url, **kwargs})
         if self.fail_reply and url.endswith("/msg/lead"):
-            return _Response({"error": "fail"}, status_code=500, url=url)
+            return _Response({"error": "fail"}, status_code=500, url=url, method="POST")
         if url.endswith("/msg/lead"):
-            return _Response({"message_id": 9001, "thread_id": "thread-1"}, url=url)
+            return _Response({"message_id": 9001, "thread_id": "thread-1"}, url=url, method="POST")
         if url.endswith("/ack"):
             msg_id = int(url.rstrip("/").split("/")[-2])
             for msg in self.messages:
                 if msg.get("id") == msg_id:
                     msg["acknowledged_at"] = "2026-06-06T10:00:00Z"
-        return _Response({"ok": True}, url=url)
+        return _Response({"ok": True}, url=url, method="POST")
 
 
 class _Store:
@@ -117,19 +130,21 @@ def _cfg(**overrides):
     return ClerkBusWorkerConfig(**base)
 
 
-def _msg(msg_id=101, body="convert this", sender="lead", topic="dispatch/test"):
+def _msg(msg_id=101, body="convert this", sender="lead", topic="dispatch/test", body_preview=None):
     return {
         "id": msg_id,
         "from_terminal": sender,
         "topic": topic,
-        "body": body,
+        "body_preview": body_preview if body_preview is not None else body[:80],
+        "_full_body": body,
         "acknowledged_at": None,
     }
 
 
 def test_ready_message_replies_then_acks_and_records_reply_id():
-    http = _HTTP(messages=[_msg()])
+    http = _HTTP(messages=[_msg(body="convert this fully", body_preview="convert this...")])
     store = _Store()
+    run_calls = []
     result = {
         "status": "ready",
         "answer": "Ready: /Baker-Feed/Clerk-Workbench/out.md / Source: test",
@@ -139,13 +154,16 @@ def test_ready_message_replies_then_acks_and_records_reply_id():
         cfg=_cfg(),
         http_client=http,
         store=store,
-        run_clerk_task_fn=lambda task: result,
+        run_clerk_task_fn=lambda task: run_calls.append(task) or result,
     )
 
     stats = worker.poll_once()
 
     assert stats == {"status": "ok", "fetched": 1, "processed": 1, "acked": 1, "errors": 0}
+    assert "body" not in http.messages[0]
     assert http.get_calls[0]["params"] == {"limit": 7}
+    assert http.get_calls[1]["url"] == "https://lab.test/event/101/full"
+    assert run_calls == ["convert this fully"]
     post_urls = [c["url"] for c in http.post_calls]
     assert post_urls == [
         "https://lab.test/api/register",
@@ -195,11 +213,12 @@ def test_existing_bus_reply_id_only_acks_without_rerun_or_reply():
 def test_pending_approval_status_replies_needs_approval_and_acks():
     http = _HTTP(messages=[_msg(body="send external email")])
     store = _Store()
+    run_calls = []
     worker = ClerkBusWorker(
         cfg=_cfg(),
         http_client=http,
         store=store,
-        run_clerk_task_fn=lambda task: {
+        run_clerk_task_fn=lambda task: run_calls.append(task) or {
             "status": "pending_approval",
             "reason": "external email requires Director approval",
         },
@@ -208,9 +227,33 @@ def test_pending_approval_status_replies_needs_approval_and_acks():
     stats = worker.poll_once()
 
     assert stats["acked"] == 1
+    assert run_calls == ["send external email"]
     reply_payload = next(c["json"] for c in http.post_calls if c["url"].endswith("/msg/lead"))
     assert "Status: pending_approval" in reply_payload["body"]
     assert "Needs approval/blocker: external email requires Director approval" in reply_payload["body"]
+
+
+def test_full_body_fetch_failure_skips_without_running_or_ack():
+    http = _HTTP(messages=[_msg()], fail_full_body=True)
+    store = _Store()
+    run_calls = []
+    worker = ClerkBusWorker(
+        cfg=_cfg(),
+        http_client=http,
+        store=store,
+        run_clerk_task_fn=lambda task: run_calls.append(task) or {"status": "ready"},
+    )
+
+    stats = worker.poll_once()
+
+    assert stats == {"status": "ok", "fetched": 1, "processed": 1, "acked": 0, "errors": 0}
+    assert run_calls == []
+    assert store.sessions == {}
+    assert [c["url"] for c in http.get_calls] == [
+        "https://lab.test/msg/clerk",
+        "https://lab.test/event/101/full",
+    ]
+    assert http.post_calls == []
 
 
 def test_reply_failure_leaves_inbound_unacked_for_retry():
