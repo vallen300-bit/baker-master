@@ -14,6 +14,7 @@ import os
 import posixpath
 import re
 import threading
+from concurrent.futures import ThreadPoolExecutor
 from contextlib import AbstractContextManager
 from dataclasses import dataclass
 from datetime import datetime, timezone
@@ -30,6 +31,8 @@ _CLERK_SLUG = "clerk"
 _CLERK_PICKER_PATH_DEFAULT = "/Users/dimitry/bm-clerk"
 _CLERK_WORKING_PREFIX = "/Baker-Feed/Clerk-Workbench"
 _TERMINAL_STATUSES = {"ready", "pending_approval", "blocked", "timeout", "error", "saved"}
+_TASK_STATE_TIMEOUT_S = 3.0
+_TASK_STATE_EXECUTOR = ThreadPoolExecutor(max_workers=1, thread_name_prefix="clerk-task-state")
 
 
 class ClerkBusConfigError(RuntimeError):
@@ -254,15 +257,41 @@ class ForgeJobTelemetry:
             "session_uuid": session_id,
             "project_path": self.cfg.picker_path,
         }
-        self._post("/api/agent-task-state", payload)
+        _TASK_STATE_EXECUTOR.submit(self._post_task_state, payload)
 
     def _post(self, path: str, payload: dict[str, Any]) -> None:
+        self._post_with_client(self.http, path, payload, self.cfg.http_timeout_s)
+
+    def _post_task_state(self, payload: dict[str, Any]) -> None:
+        if isinstance(self.http, httpx.Client):
+            with httpx.Client(timeout=_TASK_STATE_TIMEOUT_S) as http_client:
+                self._post_with_client(
+                    http_client,
+                    "/api/agent-task-state",
+                    payload,
+                    _TASK_STATE_TIMEOUT_S,
+                )
+        else:
+            self._post_with_client(
+                self.http,
+                "/api/agent-task-state",
+                payload,
+                _TASK_STATE_TIMEOUT_S,
+            )
+
+    def _post_with_client(
+        self,
+        http_client: Any,
+        path: str,
+        payload: dict[str, Any],
+        timeout_s: float,
+    ) -> None:
         try:
-            resp = self.http.post(
+            resp = http_client.post(
                 f"{self.cfg.lab_url}{path}",
                 headers={"X-Forge-Key": self.cfg.forge_key, "Content-Type": "application/json"},
                 json=payload,
-                timeout=self.cfg.http_timeout_s,
+                timeout=timeout_s,
             )
             resp.raise_for_status()
         except Exception as e:
