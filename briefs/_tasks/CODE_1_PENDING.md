@@ -1,5 +1,5 @@
 ---
-status: PENDING
+status: COMPLETE
 brief_id: OCR_UNREADABLE_MARKER_1
 dispatch: OCR_UNREADABLE_MARKER_1
 to: b1
@@ -15,3 +15,6 @@ prior_envelope: COCKPIT_CACHEBUST_TEST_REGEX_1 (PR #300 afbd63d) — COMPLETE
 # B1 dispatch — OCR_UNREADABLE_MARKER_1
 
 **Full spec: `briefs/BRIEF_OCR_UNREADABLE_MARKER_1.md`.** You built the OCR endpoint (PR #294); this fixes its non-idempotency — the 287 `unreadable` docs get re-selected + re-billed to Gemini every drain. Mark them terminal so they drop out of the candidate query (propose mechanism A vs B at G0). Keep a `force`/`--include-unreadable` re-attempt path. No search pollution. POST_DEPLOY_AC = one clean drain returning 0 dead candidates.
+
+
+> OCR_UNREADABLE_MARKER_1 (#302) + _2 (#303) MERGED + POST_DEPLOY_AC v2 PASS (#1955): unreadable+empty_ocr mark terminal, drop out, zero re-bill, AC3 clean, transient retryable, lock 24->40. MARKER arc CLOSED. (Optional ops: full drain to recover the ~278 still-recoverable blanks = Gemini cost, Director lane.)
