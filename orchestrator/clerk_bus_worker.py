@@ -247,6 +247,15 @@ class ForgeJobTelemetry:
         }
         self._post("/api/event", body)
 
+    def task_state(self, session_id: str, state: str) -> None:
+        payload = {
+            "terminal_alias": _CLERK_SLUG,
+            "state": state,
+            "session_uuid": session_id,
+            "project_path": self.cfg.picker_path,
+        }
+        self._post("/api/agent-task-state", payload)
+
     def _post(self, path: str, payload: dict[str, Any]) -> None:
         try:
             resp = self.http.post(
@@ -287,6 +296,7 @@ class ActiveForgeJob(AbstractContextManager):
         payload = self._payload()
         self.telemetry.register_session(self.session_id)
         self.telemetry.event(self.session_id, "clerk_bus_job_started", payload)
+        self.telemetry.task_state(self.session_id, "working")
         if self.interval_s > 0:
             self._thread = threading.Thread(target=self._active_loop, name=f"clerk-bus-{self.message_id}", daemon=True)
             self._thread.start()
@@ -304,6 +314,7 @@ class ActiveForgeJob(AbstractContextManager):
     def _active_loop(self) -> None:
         while not self._stop.wait(self.interval_s):
             self.telemetry.event(self.session_id, "clerk_bus_job_active", self._payload())
+            self.telemetry.task_state(self.session_id, "working")
 
     def _payload(self) -> dict[str, Any]:
         return {
@@ -390,72 +401,76 @@ class ClerkBusWorker:
             self._ack_message(message_id)
             return {"status": "already_replied", "acked": True}
 
-        status = str(row.get("status") or "")
-        if status in _TERMINAL_STATUSES and existing_result:
-            result = existing_result
-            draft_content = str(row.get("draft_content") or "")
-            draft_path = row.get("draft_path")
-            error = row.get("error")
-        else:
-            task = self._fetch_full_body(message_id)
-            if not task:
-                logger.warning("clerk bus message skipped; full body unavailable id=%s", message_id)
-                return {"status": "skipped_invalid", "acked": False}
-            self.store.create_session_if_absent(
-                session_id,
-                task,
-                {
-                    "source": "bus",
-                    "bus_message_id": message_id,
-                    "from_terminal": sender,
-                    "topic": topic,
-                },
-            )
-            with ActiveForgeJob(
-                self.telemetry,
-                session_id=session_id,
-                message_id=message_id,
-                from_terminal=sender,
-                topic=topic,
-                interval_s=self.cfg.event_interval_s,
-            ):
-                result = self._run_task(task)
-            status = str(result.get("status") or "error")
-            draft_content, draft_path = _extract_draft(result)
-            error = str(result.get("reason") or result.get("error") or "") or None
-            self.store.update_session(
-                session_id,
-                status=status,
-                result_json=result,
-                draft_content=draft_content,
-                draft_path=draft_path,
-                error=error,
-            )
-
-        reply_body = self._format_reply(
-            message_id=message_id,
-            session_id=session_id,
-            result=result,
-            draft_content=draft_content,
-            draft_path=str(draft_path or ""),
-            error=str(error or ""),
-        )
-        reply = self._post_reply(sender=sender, topic=topic, body=reply_body, parent_id=message_id)
-        reply_message_id = reply.get("message_id") or reply.get("id") or "posted_without_id"
-        result_with_reply = dict(result)
-        result_with_reply["bus_reply_message_id"] = reply_message_id
-        if reply.get("thread_id"):
-            result_with_reply["bus_reply_thread_id"] = reply["thread_id"]
         try:
-            self.store.update_session(session_id, result_json=result_with_reply)
-        except Exception as e:
-            # ACK is the durable bus-level dedup. After a successful reply POST,
-            # marker persistence is best-effort; otherwise a transient DB write
-            # failure can leave the inbound unacked and cause duplicate replies.
-            # Residual at-least-once window: the ACK POST itself can still fail.
-            logger.warning("clerk reply marker persist failed: %s", type(e).__name__)
-        self._ack_message(message_id)
-        return {"status": status, "acked": True, "reply_message_id": reply_message_id}
+            status = str(row.get("status") or "")
+            if status in _TERMINAL_STATUSES and existing_result:
+                result = existing_result
+                draft_content = str(row.get("draft_content") or "")
+                draft_path = row.get("draft_path")
+                error = row.get("error")
+            else:
+                self.telemetry.task_state(session_id, "received")
+                task = self._fetch_full_body(message_id)
+                if not task:
+                    logger.warning("clerk bus message skipped; full body unavailable id=%s", message_id)
+                    return {"status": "skipped_invalid", "acked": False}
+                self.store.create_session_if_absent(
+                    session_id,
+                    task,
+                    {
+                        "source": "bus",
+                        "bus_message_id": message_id,
+                        "from_terminal": sender,
+                        "topic": topic,
+                    },
+                )
+                with ActiveForgeJob(
+                    self.telemetry,
+                    session_id=session_id,
+                    message_id=message_id,
+                    from_terminal=sender,
+                    topic=topic,
+                    interval_s=self.cfg.event_interval_s,
+                ):
+                    result = self._run_task(task)
+                status = str(result.get("status") or "error")
+                draft_content, draft_path = _extract_draft(result)
+                error = str(result.get("reason") or result.get("error") or "") or None
+                self.store.update_session(
+                    session_id,
+                    status=status,
+                    result_json=result,
+                    draft_content=draft_content,
+                    draft_path=draft_path,
+                    error=error,
+                )
+
+            reply_body = self._format_reply(
+                message_id=message_id,
+                session_id=session_id,
+                result=result,
+                draft_content=draft_content,
+                draft_path=str(draft_path or ""),
+                error=str(error or ""),
+            )
+            reply = self._post_reply(sender=sender, topic=topic, body=reply_body, parent_id=message_id)
+            reply_message_id = reply.get("message_id") or reply.get("id") or "posted_without_id"
+            result_with_reply = dict(result)
+            result_with_reply["bus_reply_message_id"] = reply_message_id
+            if reply.get("thread_id"):
+                result_with_reply["bus_reply_thread_id"] = reply["thread_id"]
+            try:
+                self.store.update_session(session_id, result_json=result_with_reply)
+            except Exception as e:
+                # ACK is the durable bus-level dedup. After a successful reply POST,
+                # marker persistence is best-effort; otherwise a transient DB write
+                # failure can leave the inbound unacked and cause duplicate replies.
+                # Residual at-least-once window: the ACK POST itself can still fail.
+                logger.warning("clerk reply marker persist failed: %s", type(e).__name__)
+            self._ack_message(message_id)
+            return {"status": status, "acked": True, "reply_message_id": reply_message_id}
+        finally:
+            self.telemetry.task_state(session_id, "idle")
 
     def _fetch_full_body(self, message_id: int) -> str:
         try:
