@@ -8,12 +8,14 @@ import pytest
 from config.settings import Qwen3Config
 from orchestrator.clerk_runtime import (
     ClerkAgent,
+    ClerkGuardrails,
     ClerkRuntimeError,
     ClerkToolRegistry,
     Qwen3ToolClient,
     _TextBlock,
     _ToolResponse,
     _ToolUseBlock,
+    _CLERK_SYSTEM_PROMPT,
 )
 
 
@@ -156,6 +158,20 @@ def test_approval_required_items_cannot_be_unlocked_by_phase1_token():
 
     assert result["status"] == "pending_approval"
     assert client.messages.calls == []
+
+
+def test_internal_bus_reply_task_is_allowed_not_external_send():
+    task = "reply on the bus to lead with a one-line ack"
+    client = _FakeClient([_ToolResponse([_TextBlock("Ack: received")], "end_turn")])
+
+    result = ClerkAgent(model_client=client, registry=_FakeRegistry(), cfg=_cfg()).run(task)
+
+    assert ClerkGuardrails().check(task).allowed is True
+    assert result["status"] == "ready"
+    assert result["answer"] == "Ack: received"
+    assert len(client.messages.calls) == 1
+    assert "internal Brisen agent bus" in client.messages.calls[0]["system"]
+    assert "not an external send" in " ".join(_CLERK_SYSTEM_PROMPT.split())
 
 
 def test_step_cap_stops_unbounded_loop():
