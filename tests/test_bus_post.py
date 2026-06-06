@@ -1,8 +1,8 @@
 """F2 — bus_post.{sh,py} subprocess + stub-daemon tests.
 
 Covers:
-- Director-recipient block (load-bearing safety check)
-- 12-slug registry validation
+- Director-recipient pass-through (daemon owns the safety check)
+- generated registry slug validation
 - BAKER_ROLE → sender-slug resolution
 - 1Password CLI fetch (mocked via PATH-shim)
 - HTTP error propagation
@@ -308,3 +308,16 @@ def test_15_py_baker_role_missing():
     )
     assert r.returncode != 0
     assert "BAKER_ROLE not set" in r.stderr
+
+
+def test_16_clerk_haiku_recipient_and_sender(stub_daemon, fake_op_path):
+    """clerk-haiku is generated as both legal recipient and legal sender."""
+    url, captured = stub_daemon
+    r = _run_sh(
+        ["clerk-haiku", "hello clerk chat", "dispatch/clerk-haiku-smoke"],
+        _env_with({"BAKER_ROLE": "clerk-haiku", "BRISEN_LAB_DAEMON_URL": url},
+                  fake_op_dir=fake_op_path),
+    )
+    assert r.returncode == 0, r.stderr
+    assert captured[0]["path"] == "/msg/clerk-haiku"
+    assert captured[0]["payload"]["to"] == ["clerk-haiku"]

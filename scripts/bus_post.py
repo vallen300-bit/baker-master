@@ -21,39 +21,17 @@ import subprocess
 import sys
 import urllib.error
 import urllib.request
+from pathlib import Path
+
+REPO_ROOT = Path(__file__).resolve().parents[1]
+if str(REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(REPO_ROOT))
+
+from orchestrator.agent_identity_data import ROLE_TO_SLUG, VALID_BUS_SLUGS  # noqa: E402
 
 DAEMON_URL = os.environ.get("BRISEN_LAB_DAEMON_URL", "https://brisen-lab.onrender.com")
 
-VALID_SLUGS = {
-    "director", "cowork-ah1", "lead", "deputy", "architect",
-    "b1", "b2", "b3", "b4", "b5",
-    "cortex", "daemon", "aid", "codex", "codex-arch",
-    "hag-desk", "origination-desk", "researcher",
-    "CM-1", "CM-2", "CM-3", "CM-4", "hag-filer",
-}
-
-ROLE_TO_SLUG = {
-    "AH1": "lead", "aihead1": "lead", "lead": "lead", "LEAD": "lead",
-    "AH2": "deputy", "aihead2": "deputy", "deputy": "deputy", "DEPUTY": "deputy",
-    "B1": "b1", "b1": "b1",
-    "B2": "b2", "b2": "b2",
-    "B3": "b3", "b3": "b3",
-    "B4": "b4", "b4": "b4",
-    "B5": "b5", "b5": "b5",
-    "architect": "architect", "ARCHITECT": "architect",
-    "cortex": "cortex", "CORTEX": "cortex",
-    "aid": "aid", "AID": "aid",
-    "codex": "codex", "CODEX": "codex", "codex-arch": "codex-arch", "CODEX-ARCH": "codex-arch",
-    "hag-desk": "hag-desk", "HAG-DESK": "hag-desk", "hagenauer-desk": "hag-desk",
-    "origination-desk": "origination-desk", "ORIGINATION-DESK": "origination-desk",
-    "ORIGINATION_DESK": "origination-desk", "origination_desk": "origination-desk",
-    "researcher": "researcher", "RESEARCHER": "researcher",
-    "CM-1": "CM-1", "cm-1": "CM-1", "CM_1": "CM-1",
-    "CM-2": "CM-2", "cm-2": "CM-2", "CM_2": "CM-2",
-    "CM-3": "CM-3", "cm-3": "CM-3", "CM_3": "CM-3",
-    "CM-4": "CM-4", "cm-4": "CM-4", "CM_4": "CM-4",
-    "hag-filer": "hag-filer", "HAG-FILER": "hag-filer", "hag_filer": "hag-filer",
-}
+VALID_SLUGS = set(VALID_BUS_SLUGS)
 
 
 def _resolve_sender() -> str:
@@ -61,7 +39,8 @@ def _resolve_sender() -> str:
     if role not in ROLE_TO_SLUG:
         sys.exit(
             f"ERROR: BAKER_ROLE not set or unrecognized: {role!r}. "
-            f"Valid: AH1, AH2, B1-B5, architect, cortex, aid, codex, codex-arch"
+            "Valid registry roles: "
+            f"{', '.join(sorted(set(ROLE_TO_SLUG.values())))} plus aliases"
         )
     return ROLE_TO_SLUG[role]
 

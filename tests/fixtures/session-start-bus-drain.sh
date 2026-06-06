@@ -38,30 +38,34 @@ print(json.dumps({"hookSpecificOutput": {"hookEventName": "SessionStart", "addit
 ' 2>/dev/null || true
 }
 
-# --- resolve sender slug from BAKER_ROLE (mirror scripts/bus_post.sh:54-70) ---
+# --- resolve sender slug from BAKER_ROLE ---
 
+# BEGIN GENERATED AGENT IDENTITY ROLE MAP
+# Generated from /Users/dimitry/baker-vault/_ops/registries/agent_registry.yml
+# SHA256: 851feca2101e2324f4bfdddd0db0bc5f3be0ec1163195e52de922f2c0f1a732d
 case "${BAKER_ROLE:-}" in
-    AH1|aihead1|lead|LEAD)              SLUG=lead ;;
-    AH1-APP|cowork-ah1|COWORK-AH1)      SLUG=cowork-ah1 ;;
-    AH2|aihead2|deputy|DEPUTY)          SLUG=deputy ;;
-    deputy-codex|DEPUTY-CODEX|deputy_codex) SLUG=deputy-codex ;;
-    B1|b1)                              SLUG=b1 ;;
-    B2|b2)                              SLUG=b2 ;;
-    B3|b3)                              SLUG=b3 ;;
-    B4|b4)                              SLUG=b4 ;;
-    B5|b5)                              SLUG=b5 ;;
-    architect|ARCHITECT)                SLUG=architect ;;
-    cortex|CORTEX)                      SLUG=cortex ;;
-    aid|AID)                            SLUG=aid ;;
-    hag-desk|HAG-DESK|hagenauer-desk)   SLUG=hag-desk ;;
-    origination-desk|ORIGINATION-DESK|ORIGINATION_DESK|origination_desk) SLUG=origination-desk ;;
-    researcher|RESEARCHER)              SLUG=researcher ;;
-    CM-1|cm-1|CM_1)                     SLUG=CM-1 ;;
-    CM-2|cm-2|CM_2)                     SLUG=CM-2 ;;
-    CM-3|cm-3|CM_3)                     SLUG=CM-3 ;;
-    CM-4|cm-4|CM_4)                     SLUG=CM-4 ;;
-    hag-filer|HAG-FILER|hag_filer)      SLUG=hag-filer ;;
-    clerk|CLERK)                        SLUG=clerk ;;
+    lead|LEAD|AH1|aihead1|AIHEAD1) SLUG=lead ;;
+    cowork-ah1|COWORK-AH1|cowork_ah1|COWORK_AH1|AH1-APP) SLUG=cowork-ah1 ;;
+    deputy|DEPUTY|AH2|aihead2|AIHEAD2) SLUG=deputy ;;
+    deputy-codex|DEPUTY-CODEX|deputy_codex|DEPUTY_CODEX) SLUG=deputy-codex ;;
+    cortex|CORTEX) SLUG=cortex ;;
+    aid|AID|ai-dennis|AI-DENNIS) SLUG=aid ;;
+    b1|B1) SLUG=b1 ;;
+    b2|B2) SLUG=b2 ;;
+    b3|B3) SLUG=b3 ;;
+    b4|B4) SLUG=b4 ;;
+    researcher|RESEARCHER|research-agent|RESEARCH-AGENT) SLUG=researcher ;;
+    codex|CODEX) SLUG=codex ;;
+    codex-arch|CODEX-ARCH|codex_arch|CODEX_ARCH) SLUG=codex-arch ;;
+    clerk|CLERK) SLUG=clerk ;;
+    clerk-haiku|CLERK-HAIKU|clerk_haiku|CLERK_HAIKU) SLUG=clerk-haiku ;;
+    hag-desk|HAG-DESK|hag_desk|HAG_DESK|hagenauer-desk|HAGENAUER-DESK) SLUG=hag-desk ;;
+    origination-desk|ORIGINATION-DESK|origination_desk|ORIGINATION_DESK) SLUG=origination-desk ;;
+    CM-1|CM_1|cm-1) SLUG=CM-1 ;;
+    CM-2|CM_2|cm-2) SLUG=CM-2 ;;
+    CM-3|CM_3|cm-3) SLUG=CM-3 ;;
+    CM-4|CM_4|cm-4) SLUG=CM-4 ;;
+    hag-filer|HAG-FILER|hag_filer|HAG_FILER) SLUG=hag-filer ;;
     *)
         # No BAKER_ROLE → silent no-op. Cwd-based fallback intentionally NOT
         # mirrored here to avoid auto-draining for sessions not meant to be on
@@ -69,6 +73,7 @@ case "${BAKER_ROLE:-}" in
         exit 0
         ;;
 esac
+# END GENERATED AGENT IDENTITY ROLE MAP
 
 # --- fetch terminal key from 1Password ---
 
