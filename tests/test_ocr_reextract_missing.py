@@ -358,7 +358,8 @@ def test_ac3_all_unreadable_writes_nothing_and_fails(monkeypatch):
 
 
 def test_short_ocr_below_min_chars_fails(monkeypatch):
-    """A legible-but-tiny transcription (< _OCR_MIN_CHARS) is treated as empty_ocr, no write."""
+    """A legible-but-tiny transcription (< _OCR_MIN_CHARS) is treated as empty_ocr, no write.
+    OCR_UNREADABLE_MARKER_2: the PDF empty_ocr branch now also marks the doc terminal."""
     state = {"blank_count": 1, "candidates": [_row(1)], "remaining_after": 1}
     client, calls = _client(monkeypatch, state, gemini_text="ok")  # 2 chars < 20
     r = client.post("/api/documents/ocr-extract-missing?dry_run=false", headers=_HDR)
@@ -366,6 +367,8 @@ def test_short_ocr_below_min_chars_fails(monkeypatch):
     assert body["recovered"] == []
     assert state.get("writes") is None
     assert body["failed"][0]["reason"] == "empty_ocr"
+    # MARKER_2: PDF sub-threshold extraction is deterministic-terminal → marked.
+    assert state.get("ocr_marks") == [1], "PDF empty_ocr must be marked terminal (MARKER_2)"
 
 
 def test_one_doc_failure_does_not_abort_batch(monkeypatch):
@@ -419,6 +422,8 @@ def test_one_doc_failure_does_not_abort_batch(monkeypatch):
     failed_ids = {f["id"]: f["reason"] for f in body["failed"]}
     assert failed_ids == {1: "download_failed"}
     assert [w["id"] for w in state["writes"]] == [2]
+    # MARKER_2 safety: download_failed is TRANSIENT — doc 1 must NOT be marked terminal.
+    assert state.get("ocr_marks") is None, "transient download_failed must stay UNMARKED"
 
 
 def test_lock_held_returns_backfill_in_progress(monkeypatch):
@@ -535,6 +540,8 @@ def test_cost_breaker_tripped_writes_nothing(monkeypatch):
     assert logged == [], "no cost logged when nothing was called"
     assert state.get("writes") is None, "tripped breaker writes nothing (never partial)"
     assert body["failed"][0]["id"] == 1 and body["failed"][0]["reason"] == "cost_breaker"
+    # MARKER_2 safety: cost_breaker is TRANSIENT — must NOT be marked terminal (retries later).
+    assert state.get("ocr_marks") is None, "transient cost_breaker must stay UNMARKED (retryable)"
 
 
 def test_cost_logged_on_allowed_path(monkeypatch):
@@ -723,3 +730,21 @@ def test_marker_ac4_force_include_unreadable_reattempts_marked_set(monkeypatch):
     # Default (no flag) drain reports include_unreadable=false — the idempotent mode.
     r2 = client.post("/api/documents/ocr-extract-missing?dry_run=true", headers=_HDR)
     assert r2.json()["include_unreadable"] is False
+
+
+def test_marker2_docx_empty_ocr_marked_terminal(monkeypatch):
+    """OCR_UNREADABLE_MARKER_2: a near-empty DOCX (extract < _OCR_MIN_CHARS) takes the
+    empty_ocr branch on the docx text-extract path (no Gemini) and is marked terminal so
+    it drops out of the drain (the live finding: doc 11836 'Storytelling Way.docx')."""
+    state = {"blank_count": 1,
+             "candidates": [_row(1, fname="Storytelling Way.docx", src="/Baker-Project/sw.docx")],
+             "remaining_after": 1}
+    client, calls = _client(monkeypatch, state, docx_text="hi")  # 2 chars < 20
+    r = client.post("/api/documents/ocr-extract-missing?dry_run=false", headers=_HDR)
+    body = r.json()
+    assert body["recovered"] == []
+    assert calls["gemini"] == 0, "docx path never calls Gemini vision"
+    assert body["failed"][0]["id"] == 1 and body["failed"][0]["reason"] == "empty_ocr"
+    assert state.get("writes") is None, "near-empty docx writes no full_text"
+    # MARKER_2: docx sub-threshold extraction is deterministic-terminal → marked.
+    assert state.get("ocr_marks") == [1], "docx empty_ocr must be marked terminal (MARKER_2)"

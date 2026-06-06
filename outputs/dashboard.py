@@ -2317,6 +2317,14 @@ def _ocr_extract_batch(candidates: list) -> dict:
                     failed.append({"id": doc_id, "filename": filename, "reason": "docx_extract_failed"})
                     continue
                 if len(legible) < _OCR_MIN_CHARS:
+                    # OCR_UNREADABLE_MARKER_2: a sub-threshold (<_OCR_MIN_CHARS) extraction is
+                    # deterministic-terminal — an image-only scan / near-empty docx that already
+                    # ran OCR (or docx extract) and yielded almost nothing. Mark it so the drain
+                    # stops re-selecting (and, for the PDF path, re-billing Gemini on) it. The
+                    # include_unreadable force flag still covers a future better-OCR re-attempt.
+                    # Only deterministic-terminal branches are marked; transient failures
+                    # (cost_breaker, gemini_error, download_failed, etc.) stay UNMARKED to retry.
+                    _ocr_mark_unreadable(store, doc_id)
                     failed.append({"id": doc_id, "filename": filename, "reason": "empty_ocr"})
                     continue
             else:
@@ -2429,6 +2437,14 @@ def _ocr_extract_batch(candidates: list) -> dict:
                     continue
                 legible = "\n\n".join(page_texts).replace("[[UNREADABLE]]", "").strip()
                 if len(legible) < _OCR_MIN_CHARS:
+                    # OCR_UNREADABLE_MARKER_2: a sub-threshold (<_OCR_MIN_CHARS) extraction is
+                    # deterministic-terminal — an image-only scan / near-empty docx that already
+                    # ran OCR (or docx extract) and yielded almost nothing. Mark it so the drain
+                    # stops re-selecting (and, for the PDF path, re-billing Gemini on) it. The
+                    # include_unreadable force flag still covers a future better-OCR re-attempt.
+                    # Only deterministic-terminal branches are marked; transient failures
+                    # (cost_breaker, gemini_error, download_failed, etc.) stay UNMARKED to retry.
+                    _ocr_mark_unreadable(store, doc_id)
                     failed.append({"id": doc_id, "filename": filename, "reason": "empty_ocr"})
                     continue
 
