@@ -103,7 +103,29 @@ def test_missing_api_key_degrades_cleanly_when_1password_absent(monkeypatch, cap
     err = capsys.readouterr().err
     assert code == 2
     assert "Baker API key missing" in err
-    assert "1Password item 'BAKER_API_KEY'" in err
+    assert "1Password item 'API Baker'" in err
+
+
+def test_1password_fallback_reads_api_baker_item(monkeypatch, capsys):
+    monkeypatch.delenv("BAKER_API_KEY", raising=False)
+    op_calls = []
+
+    def fake_run(args, **kwargs):
+        op_calls.append(args)
+        return subprocess.CompletedProcess(args, 0, "one-password-key\n", "")
+
+    def fake_urlopen(req, timeout):
+        assert req.headers["X-baker-key"] == "one-password-key"
+        return _FakeResponse({"session_id": "sess-op", "status": "ready"})
+
+    monkeypatch.setattr(subprocess, "run", fake_run)
+    monkeypatch.setattr(urllib.request, "urlopen", fake_urlopen)
+
+    code = clerk_qwen.main(["status", "--base-url", "https://baker.test", "sess-op"])
+
+    assert code == 0
+    assert op_calls == [["op", "read", "op://Baker API Keys/API Baker/credential"]]
+    assert "Status: ready" in capsys.readouterr().out
 
 
 def test_list_json_outputs_payload(monkeypatch, capsys):

@@ -40,7 +40,7 @@ def _load_json(raw: bytes) -> Any:
 def _onepassword_api_key() -> str:
     try:
         proc = subprocess.run(
-            ["op", "read", "op://Baker API Keys/BAKER_API_KEY/credential"],
+            ["op", "read", "op://Baker API Keys/API Baker/credential"],
             check=False,
             capture_output=True,
             text=True,
@@ -65,7 +65,7 @@ def resolve_api_key(cli_value: str | None) -> str:
         return value
     raise ClerkQwenError(
         "Baker API key missing. Pass --api-key, set BAKER_API_KEY, or add the "
-        "1Password item 'BAKER_API_KEY' in vault 'Baker API Keys'."
+        "1Password item 'API Baker' in vault 'Baker API Keys'."
     )
 
 
