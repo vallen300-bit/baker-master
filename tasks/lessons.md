@@ -809,3 +809,23 @@ Anchor: Director chat 2026-05-23 evening; AH2 bus #788 (Layer 2) + bus #790
 **Rule:** to add a Terminal profile reliably, generate a single-profile `.terminal` plist and register it through Terminal's OWN import path: `open ~/path/Profile.terminal` (Launch Services, NOT AppleScript-driving — safe from the Cowork GUI-freeze trap, Lesson #87). That makes the running Terminal ingest + persist the profile into its live cache, so it appears in the picker immediately and survives quit. Keep the `.terminal` file as a re-import tool. NEVER claim a Terminal-profile install done from a plist read alone — verify the profile renders in Shell → New Window after import.
 
 **Anchor:** CLERK_ON_BUS_1 picker install (2026-06-05). Two prior false "done" claims (PINNED §A-LEAD-0604-PM2 + its 22:00 correction) both verified the plist, never the menu render; `open Clerk.terminal` fixed it in one shot. Supersedes the install-agent SOP "Terminal profile clone" row foot-gun.
+
+## Lesson #97 — "save PASS" must exercise a real upload; Dropbox app token was read-only (2026-06-06)
+CLERK_WORKBENCH_2 reported "save writes to Dropbox PASS" but the file_save → DropboxClient.upload_file
+path had NEVER actually written: the Baker-Sentinel Dropbox app's refresh token was minted read-only
+(scopes: account_info.read files.content.read files.metadata.read sharing.read — NO files.content.write).
+Every save returned an opaque "file_save failed: HTTPStatusError" (the underlying Dropbox 401
+missing_scope/files.content.write was swallowed). Surfaced only at CLERK_WORKBENCH_3 post-deploy AC when
+the real round-trip ran.
+- ROOT: app permissions already included files.content.write, but the LIVE refresh token predated that
+  grant — OAuth refresh tokens capture scopes at authorization time, not the app's current config.
+- FIX: re-authorize (https://www.dropbox.com/oauth2/authorize?client_id=...&response_type=code&token_access_type=offline),
+  select the SAME account that owns /Baker-Feed (dvallen@bluewin.ch — NOT vallen300@gmail.com), exchange
+  code→refresh_token, swap DROPBOX_REFRESH_TOKEN on Render (single-key PUT merge) + 1P. New token is a
+  superset (read+write) so read-polling is unaffected.
+- RULE 1: an AC that claims a write/persist works MUST exercise a real write end-to-end (Lesson #8 family),
+  never "by inspection" or path-validation-only. A swallowed HTTPStatusError hid a never-worked feature.
+- RULE 2: surface the real HTTP status/body from external-API errors. file_save's bare "HTTPStatusError"
+  cost a full diagnostic cycle; echo resp.status_code + Dropbox error_summary in the tool error dict.
+- RULE 3: after a Render env-var swap, the OLD instance serves during roll-over — a post-deploy AC can hit
+  the pre-swap instance and false-fail. Retry after the deploy reaches "live" + old instance drains.
