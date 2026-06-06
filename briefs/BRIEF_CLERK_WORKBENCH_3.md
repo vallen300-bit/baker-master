@@ -16,8 +16,17 @@ this phase makes it "live with a button". No runtime/endpoint logic changes — 
 ### Surface contract
 - **New surface:** `GET /clerk` — a self-contained launcher page: a task textarea + a **Run** button.
   On Run: `POST /api/clerk/run` (key from `localStorage`, same pattern as the edit page), then
-  redirect the browser to `/clerk/edit/<session_id>` (which already polls running→ready and renders
-  the editable doc). One uninterrupted Director flow: type task → Run → review → Save.
+  redirect the browser to `/clerk/edit/<session_id>`. One uninterrupted Director flow: type task →
+  Run → review → Save.
+- **AUTH FOLD (G0 deputy-codex #1970, HIGH flow-blocker):** today `GET /clerk/edit/<id>` is
+  `Depends(verify_api_key)` (dashboard.py:6884) and `verify_api_key` only reads the `X-Baker-Key`
+  HEADER (dashboard.py:109-121). A top-level browser `window.location.assign()` navigation CANNOT
+  attach that header → the redirect would 401 on the Director's first click (probe-confirmed). Fold:
+  convert `/clerk/edit/<id>` into a browser-openable HTML **shell** that embeds NO session content and
+  NO secret, then client-fetches the already-auth-gated `GET /api/clerk/session/<id>` with the
+  `X-Baker-Key` from `localStorage` and renders via `textContent`/`value` (XSS-safe). Same no-secret-
+  in-markup invariant as the launcher. The session DATA stays protected by the API; only the empty
+  shell is public. (`/clerk/edit` shell behavior is therefore IN scope — see Do-NOT-Touch note.)
 - **Cockpit entry point:** a visible nav link/button in the existing dashboard sidebar (Operations
   section) that opens `/clerk`. Director never types a URL.
 - **Recent sessions (small, optional-but-preferred):** the launcher lists the last ~10 `clerk_sessions`
@@ -50,11 +59,19 @@ this phase makes it "live with a button". No runtime/endpoint logic changes — 
    try/except with `conn.rollback()`; return `{sessions: [...]}`. Reuse the existing PG connection
    helper used by `_clerk_fetch_session` (do NOT open a new pool pattern).
 3. **Cockpit nav entry** — add a visible "Clerk" link/button to the dashboard sidebar Operations
-   section that opens `/clerk`. The sidebar lives in `outputs/static/index.html` (sidebar-nav, the
-   Operations sub-list `#operationsSubList` is populated by `outputs/static/app.js`). G0 design decides
-   the cleanest insertion (static markup vs the app.js sub-list builder); whichever, it must render
-   without an API round-trip and survive the existing nav collapse/expand behavior. Cache-bust `app.js`
-   / `index.html` references if edited (`?v=N`).
+   section that opens `/clerk`. The sidebar lives in `outputs/static/index.html` (sidebar-nav).
+   **WARNING (G0 deputy-codex #1970):** `#operationsSubList` is wiped on load — `_renderMatterSection`
+   does `container.textContent = ''` (app.js:1652) then appends (app.js:1686-1711). A static Clerk
+   link placed INSIDE that div is erased. Put the link OUTSIDE the dynamic sub-list (or append it
+   after render). It must render without an API round-trip and survive nav collapse/expand. Cache-bust
+   `app.js?v=N` at `index.html:579` if app.js changes.
+4. **`/clerk/edit/<id>` shell refactor (the AUTH FOLD)** — drop `Depends(verify_api_key)` from the
+   `GET /clerk/edit/<id>` HTML route ONLY; rewrite `_clerk_edit_html` (dashboard.py:597-694) so the
+   shell embeds NO `draft_content`/`error`/session text server-side. The page client-fetches
+   `GET /api/clerk/session/<id>` (stays auth-gated) with the localStorage key and populates the
+   textarea/status via `value`/`textContent`. Save flow already client-fetches — unchanged. Unknown id
+   surfaces a clean "not found" client-side (the API returns 404). Update the existing edit-endpoint
+   tests (tests/test_clerk_workbench_endpoints.py:192,195) to the new shell contract.
 
 ## Out of scope / Do NOT touch
 - The Qwen3 runtime (`orchestrator/clerk_runtime.py`), the denylist, SSRF guard, escalation — frozen + verified.
@@ -62,6 +79,9 @@ this phase makes it "live with a button". No runtime/endpoint logic changes — 
 - The `clerk_sessions` schema — read-only here; no migration. (`GET /api/clerk/sessions` only SELECTs.)
 - The Haiku Terminal-picker Clerk — stays the conversational fallback; untouched.
 - Render env wiring — already live (paid `qwen/qwen3-coder`); no env change this phase.
+- **EXCEPTION (AUTH FOLD):** the `/clerk/edit` shell + `_clerk_edit_html` ARE now in scope (scope item 4)
+  — convert to a no-secret browser-openable shell. The `/api/clerk/run|save|session` request/response
+  logic stays reuse-only; only the `/clerk/edit` HTML route's auth + content-embedding changes.
 
 ## Acceptance Criteria
 - **AC1** `GET /clerk` returns the launcher HTML; page source contains NO API key (key only read from `localStorage` at runtime).
@@ -71,6 +91,7 @@ this phase makes it "live with a button". No runtime/endpoint logic changes — 
 - **AC5** `GET /api/clerk/sessions` returns the last ≤10 sessions, bounded + rollback-safe; auth-gated (no key → 401/403); unknown/empty table → `{sessions: []}`, not an error.
 - **AC6** A "Clerk" entry is visible in the Cockpit sidebar and opens `/clerk` in one click.
 - **AC7** The list renders task text via `createTextNode`/escaping (no `innerHTML` of session task) — XSS-safe, same invariant as the edit page.
+- **AC8 (auth fold)** `GET /clerk/edit/<id>` opens in a browser with NO header (the redirect works); the shell source contains NO session content/secret; the doc loads via client `fetch /api/clerk/session/<id>` which STILL returns 401 without a key. Updated edit tests pass.
 - **POST_DEPLOY_AC** (live prod, paid Qwen3): open the Cockpit → click Clerk → type a benign task → Run → land on `/clerk/edit` → session reaches `ready` → Save to Dropbox working folder. Full button→doc→save round-trip, no raw API call.
 
 ## Gate plan (Harness V2)
@@ -87,10 +108,11 @@ endpoint, launcher XSS / no-secret-in-markup, bounded query) → G3 codex → AH
 - Cache-bust any edited static asset (`?v=N`) — iOS/Cockpit cache requirement.
 
 ## Files Modified (expected)
-- `outputs/dashboard.py` — `GET /clerk` launcher route + `GET /api/clerk/sessions` list endpoint.
-- `outputs/static/index.html` and/or `outputs/static/app.js` — Cockpit sidebar "Clerk" entry (+ `?v=N` bump).
+- `outputs/dashboard.py` — `GET /clerk` launcher route + `GET /api/clerk/sessions` list endpoint + `/clerk/edit` shell auth-fold (drop header-dep on the HTML route, `_clerk_edit_html` no longer embeds session content).
+- `outputs/static/index.html` and/or `outputs/static/app.js` — Cockpit sidebar "Clerk" entry, placed OUTSIDE `#operationsSubList` (+ `?v=N` bump).
+- `tests/test_clerk_workbench_endpoints.py` — update edit-shell tests (:192,:195) to the no-auth-on-shell / client-fetch contract.
 
 ## Do NOT Touch
 - `orchestrator/clerk_runtime.py` — runtime/denylist/SSRF/escalation frozen.
-- Existing `/api/clerk/run|save|session` + `/clerk/edit` handlers — reuse, don't modify.
+- `/api/clerk/run` + `/api/clerk/save` + `/api/clerk/session` request/response logic — reuse, don't modify (these stay auth-gated). Only the `/clerk/edit` HTML shell route changes (scope item 4).
 - `clerk_sessions` migration / schema — read-only this phase.
