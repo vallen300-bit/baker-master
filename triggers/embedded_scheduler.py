@@ -193,6 +193,23 @@ def _register_jobs(scheduler: BackgroundScheduler):
     register_expected_job("graph_mail_poll", config.triggers.graph_mail_check_interval)
     logger.info(f"Registered: graph_mail_poll (every {config.triggers.graph_mail_check_interval}s)")
 
+    # Clerk Qwen3 bus worker — headless server-side drain for slug "clerk".
+    # CLERK_BUS_WORKER_ENABLED defaults false; the job still registers so
+    # scheduler_liveness observes the polling surface before Tier-B flag flip.
+    from orchestrator.clerk_bus_worker import (
+        poll_clerk_bus,
+        clerk_bus_poll_interval_seconds,
+    )
+    _clerk_bus_interval = clerk_bus_poll_interval_seconds()
+    scheduler.add_job(
+        poll_clerk_bus,
+        IntervalTrigger(seconds=_clerk_bus_interval),
+        id="clerk_bus_poll", name="Clerk Qwen3 bus polling",
+        coalesce=True, max_instances=1, replace_existing=True,
+    )
+    register_expected_job("clerk_bus_poll", _clerk_bus_interval)
+    logger.info(f"Registered: clerk_bus_poll (every {_clerk_bus_interval}s)")
+
     # WhatsApp: migrated from Wassenger polling to WAHA webhook (Session 26)
     # whatsapp_poll job removed — inbound messages now arrive via POST /api/webhook/whatsapp
 
