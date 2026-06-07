@@ -155,6 +155,14 @@ def test_clerk_run_creates_session_and_background_persists_result(monkeypatch):
         lambda task: {
             "status": "ready",
             "answer": "Ready: /Baker-Feed/Clerk-Workbench/out.md",
+            "usage": {
+                "prompt_tokens": 12000,
+                "completion_tokens": 345,
+                "total_tokens": 12345,
+                "context_window_used": 12000,
+                "context_window_max": 1000000,
+                "session_cost_usd": 0.0042,
+            },
             "tool_calls": [
                 {
                     "name": "file_save",
@@ -187,6 +195,12 @@ def test_clerk_run_creates_session_and_background_persists_result(monkeypatch):
     assert poll.json()["status"] == "ready"
     assert poll.json()["draft_content"] == "draft body"
     assert poll.json()["draft_path"] == "/Baker-Feed/Clerk-Workbench/out.md"
+    assert poll.json()["prompt_tokens"] == 12000
+    assert poll.json()["completion_tokens"] == 345
+    assert poll.json()["total_tokens"] == 12345
+    assert poll.json()["context_window_used"] == 12000
+    assert poll.json()["context_window_max"] == 1000000
+    assert poll.json()["session_cost_usd"] == 0.0042
 
 
 def test_clerk_edit_shell_no_header_and_fetches_auth_gated_content(monkeypatch):

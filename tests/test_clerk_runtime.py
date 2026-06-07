@@ -95,14 +95,19 @@ def test_tool_round_trip_with_mock_qwen_client():
     assert result["status"] == "ready"
     assert "Ready:" in result["answer"]
     assert registry.calls == [("file_save", {"content": "hello", "filename": "out.md"})]
-    assert result["usage"] == {"input_tokens": 18, "output_tokens": 9}
+    assert result["usage"]["input_tokens"] == 18
+    assert result["usage"]["output_tokens"] == 9
+    assert result["usage"]["prompt_tokens"] == 18
+    assert result["usage"]["completion_tokens"] == 9
+    assert result["usage"]["total_tokens"] == 27
+    assert result["usage"]["context_window_used"] == 10
 
 
 def test_malformed_tool_output_retries_once_then_escalates():
     registry = _FakeRegistry()
     qwen = _FakeClient([
-        _ToolResponse([_ToolUseBlock("bad_1", "file_save", {"__malformed_json": "{"})], "tool_use"),
-        _ToolResponse([_ToolUseBlock("bad_2", "file_save", {"__malformed_json": "{"})], "tool_use"),
+        _ToolResponse([_ToolUseBlock("bad_1", "file_save", {"__malformed_json": "{"})], "tool_use", 11, 5, cost=0.001),
+        _ToolResponse([_ToolUseBlock("bad_2", "file_save", {"__malformed_json": "{"})], "tool_use", 13, 7, cost=0.002),
     ])
     gemini = _FakeClient([
         _ToolResponse([_TextBlock("Ready: escalated")], "end_turn", 3, 2)
@@ -120,6 +125,36 @@ def test_malformed_tool_output_retries_once_then_escalates():
     assert "repeated schema/tool failure" in result["reason"]
     assert len(qwen.messages.calls) == 2
     assert len(gemini.messages.calls) == 1
+    assert result["usage"]["prompt_tokens"] == 24
+    assert result["usage"]["completion_tokens"] == 12
+    assert result["usage"]["total_tokens"] == 36
+    assert result["usage"]["context_window_used"] == 13
+    assert result["usage"]["session_cost_usd"] == pytest.approx(0.003)
+
+
+def test_tool_input_guardrail_preserves_usage_before_approval_exit():
+    registry = _FakeRegistry()
+    client = _FakeClient([
+        _ToolResponse(
+            [_ToolUseBlock("call_1", "file_save", {"content": "delete this email", "filename": "out.md"})],
+            "tool_use",
+            17,
+            6,
+            total_tokens=25,
+            cost=0.0042,
+        )
+    ])
+
+    result = ClerkAgent(model_client=client, registry=registry, cfg=_cfg()).run("save the note")
+
+    assert result["status"] == "pending_approval"
+    assert result["denylist_item"] == 5
+    assert registry.calls == []
+    assert result["usage"]["prompt_tokens"] == 17
+    assert result["usage"]["completion_tokens"] == 6
+    assert result["usage"]["total_tokens"] == 25
+    assert result["usage"]["context_window_used"] == 17
+    assert result["usage"]["session_cost_usd"] == pytest.approx(0.0042)
 
 
 @pytest.mark.parametrize(
@@ -259,6 +294,116 @@ def test_qwen_host_guard_for_hosted_and_local_backends():
         backend="qwen3_ollama_local",
     ), http_client=SimpleNamespace())
     assert client.base_url == "http://localhost:11434/v1"
+
+
+def test_qwen_client_parses_openrouter_usage_cost():
+    class HTTP:
+        def __init__(self):
+            self.calls = []
+
+        def post(self, url, **kwargs):
+            self.calls.append((url, kwargs))
+            return SimpleNamespace(
+                raise_for_status=lambda: None,
+                json=lambda: {
+                    "choices": [{"message": {"content": "Ready"}}],
+                    "usage": {
+                        "prompt_tokens": 12000,
+                        "completion_tokens": 345,
+                        "total_tokens": 12345,
+                        "cost": 0.0042,
+                    },
+                },
+            )
+
+    http = HTTP()
+    client = Qwen3ToolClient(Qwen3Config(
+        base_url="https://8.8.8.8/v1",
+        api_key="x",
+        model="qwen3-coder",
+        backend="qwen3_hosted",
+    ), http_client=http)
+
+    resp = client.messages.create(model="qwen3-coder", messages=[{"role": "user", "content": "hi"}])
+
+    assert http.calls[0][0] == "https://8.8.8.8/v1/chat/completions"
+    assert "usage" not in http.calls[0][1]["json"]
+    assert resp.usage.prompt_tokens == 12000
+    assert resp.usage.completion_tokens == 345
+    assert resp.usage.total_tokens == 12345
+    assert resp.usage.cost == 0.0042
+
+
+def test_qwen_client_preserves_missing_usage_as_unknown():
+    class HTTP:
+        def post(self, url, **kwargs):
+            return SimpleNamespace(
+                raise_for_status=lambda: None,
+                json=lambda: {"choices": [{"message": {"content": "Ready"}}]},
+            )
+
+    client = Qwen3ToolClient(Qwen3Config(
+        base_url="https://8.8.8.8/v1",
+        api_key="x",
+        model="qwen3-coder",
+        backend="qwen3_hosted",
+    ), http_client=HTTP())
+
+    resp = client.messages.create(model="qwen3-coder", messages=[{"role": "user", "content": "hi"}])
+
+    assert resp.usage.prompt_tokens is None
+    assert resp.usage.completion_tokens is None
+    assert resp.usage.total_tokens is None
+    assert resp.usage.cost is None
+    assert resp.usage.input_tokens == 0
+    assert resp.usage.output_tokens == 0
+
+
+def test_agent_computes_cost_only_from_configured_prices_when_api_cost_absent():
+    cfg = Qwen3Config(
+        base_url="https://qwen.example/v1",
+        api_key="test-key",
+        model="qwen3-coder",
+        backend="qwen3_hosted",
+        max_steps=12,
+        task_timeout_s=180,
+        context_window_max=1000000,
+        prompt_price_per_m=0.3,
+        completion_price_per_m=0.8,
+    )
+    client = _FakeClient([
+        _ToolResponse([_TextBlock("Ready")], "end_turn", 1000, 2000),
+    ])
+
+    result = ClerkAgent(model_client=client, registry=_FakeRegistry(), cfg=cfg).run("draft")
+
+    assert result["usage"]["context_window_max"] == 1000000
+    assert result["usage"]["context_window_used"] == 1000
+    assert result["usage"]["total_tokens"] == 3000
+    assert result["usage"]["session_cost_usd"] == pytest.approx(0.0019)
+
+
+def test_agent_accumulates_api_provided_cost():
+    client = _FakeClient([
+        _ToolResponse([_TextBlock("Ready")], "end_turn", 12000, 345, total_tokens=12345, cost=0.0042),
+    ])
+
+    result = ClerkAgent(model_client=client, registry=_FakeRegistry(), cfg=_cfg()).run("draft")
+
+    assert result["usage"]["prompt_tokens"] == 12000
+    assert result["usage"]["completion_tokens"] == 345
+    assert result["usage"]["total_tokens"] == 12345
+    assert result["usage"]["session_cost_usd"] == pytest.approx(0.0042)
+
+
+def test_agent_leaves_cost_unknown_when_api_and_prices_are_absent():
+    client = _FakeClient([
+        _ToolResponse([_TextBlock("Ready")], "end_turn", 1000, 2000),
+    ])
+
+    result = ClerkAgent(model_client=client, registry=_FakeRegistry(), cfg=_cfg()).run("draft")
+
+    assert result["usage"]["session_cost_usd"] is None
 
 
 def test_file_save_uses_dropbox_upload_file_signature():

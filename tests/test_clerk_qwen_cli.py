@@ -68,6 +68,72 @@ def test_run_wait_uses_clerk_endpoints_and_prints_pending_approval(monkeypatch, 
     assert "https://baker.test/clerk/edit/sess-1" in out
 
 
+def test_chat_sends_plain_english_line_and_prints_real_footer(monkeypatch, capsys):
+    calls = []
+    inputs = iter(["find emails from Peter in my Outlook", "exit"])
+
+    def fake_input(prompt):
+        assert prompt == "clerk> "
+        return next(inputs)
+
+    def fake_urlopen(req, timeout):
+        calls.append(req)
+        url = req.full_url
+        if url == "https://baker.test/api/clerk/run":
+            assert req.get_method() == "POST"
+            assert json.loads(req.data.decode("utf-8")) == {"task": "find emails from Peter in my Outlook"}
+            return _FakeResponse({"session_id": "sess-chat", "status": "running"})
+        if url == "https://baker.test/api/clerk/session/sess-chat":
+            return _FakeResponse({
+                "session_id": "sess-chat",
+                "status": "ready",
+                "draft_path": "/Baker-Feed/Clerk-Workbench/peter.md",
+                "context_window_used": 12000,
+                "context_window_max": 1000000,
+                "total_tokens": 12345,
+                "session_cost_usd": 0.0042,
+            })
+        raise AssertionError(f"unexpected URL {url}")
+
+    monkeypatch.setattr("builtins.input", fake_input)
+    monkeypatch.setattr(urllib.request, "urlopen", fake_urlopen)
+
+    code = clerk_qwen.main([
+        "chat",
+        "--base-url",
+        "https://baker.test",
+        "--api-key",
+        "test-key",
+        "--interval-s",
+        "0",
+    ])
+
+    out = capsys.readouterr().out
+    assert code == 0
+    assert len(calls) == 2
+    assert "Clerk Qwen3 - Brisen document clerk" in out
+    assert "Status: ready" in out
+    assert "Draft path: /Baker-Feed/Clerk-Workbench/peter.md" in out
+    assert "Qwen3-Coder | ctx 12000/1000000 (1.2%) | 12345 tok | $0.0042" in out
+
+
+def test_chat_footer_renders_na_for_missing_telemetry():
+    assert clerk_qwen._telemetry_footer({"status": "ready"}) == (
+        "Qwen3-Coder | ctx n/a/n/a (n/a) | n/a tok | $n/a"
+    )
+
+
+def test_no_args_defaults_to_chat(monkeypatch, capsys):
+    monkeypatch.setenv("BAKER_API_KEY", "env-key")
+    monkeypatch.setattr("builtins.input", lambda prompt: "exit")
+
+    code = clerk_qwen.main([])
+
+    out = capsys.readouterr().out
+    assert code == 0
+    assert "Clerk Qwen3 - Brisen document clerk" in out
+
+
 def test_status_uses_env_key_without_1password(monkeypatch, capsys):
     monkeypatch.setenv("BAKER_API_KEY", "env-key")
 

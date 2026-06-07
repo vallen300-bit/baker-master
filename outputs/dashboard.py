@@ -403,7 +403,9 @@ def _clerk_fetch_session(session_id: str) -> dict[str, Any] | None:
         cur.execute(
             """
             SELECT session_id, task, status, result_json, draft_content, draft_path,
-                   source_meta, error, created_at, updated_at
+                   source_meta, error, prompt_tokens, completion_tokens, total_tokens,
+                   context_window_used, context_window_max, session_cost_usd,
+                   created_at, updated_at
             FROM clerk_sessions
             WHERE session_id = %s
             LIMIT 1
@@ -434,6 +436,12 @@ def _clerk_update_session(session_id: str, **fields: Any) -> None:
         "draft_path",
         "source_meta",
         "error",
+        "prompt_tokens",
+        "completion_tokens",
+        "total_tokens",
+        "context_window_used",
+        "context_window_max",
+        "session_cost_usd",
     }
     unknown = set(fields) - allowed
     if unknown:
@@ -498,6 +506,53 @@ def _clerk_extract_draft(result: dict[str, Any]) -> tuple[str, str | None]:
     return content, path or None
 
 
+def _clerk_int_or_none(value: Any) -> int | None:
+    if value is None:
+        return None
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return None
+
+
+def _clerk_float_or_none(value: Any) -> float | None:
+    if value is None:
+        return None
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return None
+
+
+def _clerk_usage_update_fields(result: dict[str, Any]) -> dict[str, Any]:
+    usage = result.get("usage")
+    if not isinstance(usage, dict):
+        return {}
+    fields: dict[str, Any] = {}
+    mapping = {
+        "prompt_tokens": "prompt_tokens",
+        "completion_tokens": "completion_tokens",
+        "total_tokens": "total_tokens",
+        "context_window_used": "context_window_used",
+        "context_window_max": "context_window_max",
+    }
+    for source, target in mapping.items():
+        if source in usage:
+            fields[target] = _clerk_int_or_none(usage.get(source))
+    if "session_cost_usd" in usage:
+        fields["session_cost_usd"] = _clerk_float_or_none(usage.get("session_cost_usd"))
+    return fields
+
+
+def _clerk_json_number(value: Any) -> Any:
+    if value is None:
+        return None
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return value
+
+
 def _clerk_public_session(row: dict[str, Any]) -> dict[str, Any]:
     result_json = row.get("result_json") or {}
     if isinstance(result_json, str):
@@ -512,6 +567,12 @@ def _clerk_public_session(row: dict[str, Any]) -> dict[str, Any]:
         "draft_content": row.get("draft_content"),
         "draft_path": row.get("draft_path"),
         "error": row.get("error"),
+        "prompt_tokens": _clerk_int_or_none(row.get("prompt_tokens")),
+        "completion_tokens": _clerk_int_or_none(row.get("completion_tokens")),
+        "total_tokens": _clerk_int_or_none(row.get("total_tokens")),
+        "context_window_used": _clerk_int_or_none(row.get("context_window_used")),
+        "context_window_max": _clerk_int_or_none(row.get("context_window_max")),
+        "session_cost_usd": _clerk_json_number(row.get("session_cost_usd")),
         "created_at": row.get("created_at").isoformat() if row.get("created_at") else None,
         "updated_at": row.get("updated_at").isoformat() if row.get("updated_at") else None,
     }
@@ -571,6 +632,7 @@ def _clerk_run_session_sync(session_id: str, task: str) -> None:
             result = {"status": "error", "error": "clerk returned non-dict result"}
         status = str(result.get("status") or "error")
         draft_content, draft_path = _clerk_extract_draft(result)
+        usage_fields = _clerk_usage_update_fields(result)
         _clerk_update_session(
             session_id,
             status=status,
@@ -578,6 +640,7 @@ def _clerk_run_session_sync(session_id: str, task: str) -> None:
             draft_content=draft_content,
             draft_path=draft_path,
             error=str(result.get("reason") or result.get("error") or "") or None,
+            **usage_fields,
         )
     except BaseException as e:
         logger.warning("clerk background run failed (%s): %s", session_id, type(e).__name__)
