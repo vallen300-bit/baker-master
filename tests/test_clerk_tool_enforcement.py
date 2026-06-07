@@ -90,6 +90,11 @@ def _cfg(max_steps=12, timeout=180):
     "no matching emails",
     "zero documents",
     "I don’t see any messages",  # U+2019 curly apostrophe normalized
+    # #2270 (3) bias-toward-firing absence idioms WITHOUT a hard data noun
+    "I don't see anything on Peter Storer",
+    "nothing on Peter Storer",
+    "no relevant results",
+    "I do not see anything",
 ])
 def test_lookup_assertion_detected(text):
     assert _asserts_unsubstantiated_lookup(text) is True
@@ -133,6 +138,9 @@ def test_non_lookup_text_not_flagged(text):
     ("Peter Storer emails", True),
     ("Peter Storer docs", True),
     ("anything on Storer", True),
+    ("info on Peter Storer", True),
+    ("details about the RG7 matter", True),
+    ("something on Storer", True),
     ("hi, what can you do?", False),
     ("draft an email to Storer", False),       # data noun + action verb -> not lookup
     ("save this note to my folder", False),

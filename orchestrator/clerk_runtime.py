@@ -1612,7 +1612,8 @@ _GROUNDING_TOOLS = _SEARCH_TOOLS | frozenset({"document_fetch", "email_download"
 _LOOKUP_INTENT_RE = re.compile(
     r"\b(?:find|search|look\s*up|look\s+for|how\s+many|count|list|pull(?:\s+up)?|retrieve|"
     r"show\s+me|tell\s+me\s+about|dig\s+up|do\s+we\s+have|do\s+you\s+have|have\s+we\s+got|"
-    r"got\s+anything|anything\s+(?:on|about)|what(?:'s|\s+do\s+we\s+have)\s+on|"
+    r"got\s+anything|(?:anything|info|information|details|something|stuff)\s+(?:on|about)|"
+    r"what(?:'s|\s+do\s+we\s+have)\s+on|"
     r"is\s+there|are\s+there|who\s+(?:is|are|sent|wrote|mentioned)|what\s+about|mentions?)\b",
     re.IGNORECASE,
 )
@@ -1670,7 +1671,14 @@ _LOOKUP_ASSERTION_RE = re.compile(
     rf"|\bunable\s+to\s+(?:find|locate|see|identify|retrieve)\s+{_OBJ}\b"
     rf"|\b\d+\s+{_DATA_NOUN}\b"
     r"|\bI\s+(?:searched|looked|checked)\b"
-    r"|\bsearch(?:ed)?\s+(?:returned|came\s+back|found|yielded)\b",
+    r"|\bsearch(?:ed)?\s+(?:returned|came\s+back|found|yielded)\b"
+    # CLERK_QWEN3_GUARD_COVERAGE_1 #2270 (3) — bias-toward-firing absence idioms
+    # WITHOUT a hard data noun. Safe to loosen: grounding (any retrieval tool)
+    # short-circuits the guard, so these can only over-fire on a no-tool task
+    # (LOW per the convergence bar), never block a real workflow.
+    rf"|\b{_NEG}\s+see\s+(?:any(?:thing)?|nothing)\b"
+    r"|\bnothing\s+(?:on|about|regarding|matching|relevant\s+to)\b"
+    r"|\bno\s+(?:relevant|matching|related)\b",
     re.IGNORECASE,
 )
 
