@@ -32,6 +32,11 @@ def _env_float(name: str, default: float = 0.0) -> float:
         return default
 
 
+def _env_choice(name: str, default: str, allowed: set[str]) -> str:
+    value = (os.getenv(name, default) or default).strip().lower()
+    return value if value in allowed else default
+
+
 @dataclass
 class QdrantConfig:
     url: str = os.getenv("QDRANT_URL", "")
@@ -96,6 +101,9 @@ class Qwen3Config:
     context_window_max: int = _env_int("CLERK_QWEN_CONTEXT_WINDOW_MAX", 0)
     prompt_price_per_m: float = _env_float("CLERK_QWEN_PROMPT_PRICE_PER_M", 0.0)
     completion_price_per_m: float = _env_float("CLERK_QWEN_COMPLETION_PRICE_PER_M", 0.0)
+    default_mail_provider: str = field(
+        default_factory=lambda: _env_choice("CLERK_DEFAULT_MAIL_PROVIDER", "graph", {"gmail", "graph"})
+    )
 
     @property
     def enabled(self) -> bool:

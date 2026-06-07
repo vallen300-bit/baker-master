@@ -193,6 +193,7 @@ def test_clerk_run_creates_session_and_background_persists_result(monkeypatch):
     )
     assert poll.status_code == 200
     assert poll.json()["status"] == "ready"
+    assert poll.json()["result"]["answer"] == "Ready: /Baker-Feed/Clerk-Workbench/out.md"
     assert poll.json()["draft_content"] == "draft body"
     assert poll.json()["draft_path"] == "/Baker-Feed/Clerk-Workbench/out.md"
     assert poll.json()["prompt_tokens"] == 12000

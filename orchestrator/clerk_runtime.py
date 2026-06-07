@@ -466,6 +466,7 @@ class ClerkToolRegistry:
 
     @property
     def tools(self) -> list[dict[str, Any]]:
+        default_mail_provider = self._default_mail_provider()
         return [
             {
                 "name": "email_search",
@@ -474,7 +475,7 @@ class ClerkToolRegistry:
                     "type": "object",
                     "properties": {
                         "query": {"type": "string"},
-                        "provider": {"type": "string", "enum": ["gmail", "graph"], "default": "gmail"},
+                        "provider": {"type": "string", "enum": ["gmail", "graph"], "default": default_mail_provider},
                         "max_results": {"type": "integer", "default": 10, "minimum": 1, "maximum": 50},
                     },
                     "required": ["query"],
@@ -487,7 +488,7 @@ class ClerkToolRegistry:
                     "type": "object",
                     "properties": {
                         "message_id": {"type": "string"},
-                        "provider": {"type": "string", "enum": ["gmail", "graph"], "default": "gmail"},
+                        "provider": {"type": "string", "enum": ["gmail", "graph"], "default": default_mail_provider},
                         "include_attachments": {"type": "boolean", "default": False},
                     },
                     "required": ["message_id"],
@@ -547,8 +548,13 @@ class ClerkToolRegistry:
             logger.warning("Clerk tool failed (%s): %s", name, type(e).__name__)
             return _safe_json({"error": f"{name} failed: {type(e).__name__}"})
 
+    @staticmethod
+    def _default_mail_provider() -> str:
+        provider = str(getattr(config.qwen3, "default_mail_provider", "graph") or "graph").strip().lower()
+        return provider if provider in {"gmail", "graph"} else "graph"
+
     def _email_search(self, args: dict[str, Any]) -> str:
-        provider = args.get("provider", "gmail")
+        provider = str(args.get("provider") or self._default_mail_provider()).strip().lower()
         query = str(args.get("query", "")).strip()
         max_results = min(max(int(args.get("max_results", 10) or 10), 1), 50)
         if provider == "graph":
@@ -559,7 +565,7 @@ class ClerkToolRegistry:
         return dispatch_gmail("baker_gmail_search", {"query": query, "max_results": max_results})
 
     def _email_download(self, args: dict[str, Any]) -> str:
-        provider = args.get("provider", "gmail")
+        provider = str(args.get("provider") or self._default_mail_provider()).strip().lower()
         message_id = str(args.get("message_id", "")).strip()
         if provider == "graph":
             return self._graph_email_download(message_id)
