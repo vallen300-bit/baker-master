@@ -396,6 +396,253 @@ def test_list_json_outputs_payload(monkeypatch, capsys):
     assert json.loads(capsys.readouterr().out)["sessions"][0]["session_id"] == "sess-a"
 
 
+def test_open_cli_opens_given_session_id_without_listing(monkeypatch, capsys):
+    opened = []
+    monkeypatch.setattr(clerk_qwen.webbrowser, "open", lambda url: opened.append(url) or True)
+
+    def fail_urlopen(*args, **kwargs):
+        raise AssertionError("open <id> must not hit the network")
+
+    monkeypatch.setattr(urllib.request, "urlopen", fail_urlopen)
+
+    code = clerk_qwen.main([
+        "open",
+        "--base-url",
+        "https://baker.test",
+        "--api-key",
+        "test-key",
+        "sess-given",
+    ])
+
+    out = capsys.readouterr().out
+    assert code == 0
+    assert opened == ["https://baker.test/clerk/edit/sess-given"]
+    assert "Opening https://baker.test/clerk/edit/sess-given" in out
+
+
+def test_open_cli_no_arg_opens_most_recent_session(monkeypatch, capsys):
+    opened = []
+    monkeypatch.setattr(clerk_qwen.webbrowser, "open", lambda url: opened.append(url) or True)
+
+    def fake_urlopen(req, timeout):
+        assert req.full_url == "https://baker.test/api/clerk/sessions?limit=1"
+        return _FakeResponse({"sessions": [{"session_id": "sess-recent", "status": "ready"}]})
+
+    monkeypatch.setattr(urllib.request, "urlopen", fake_urlopen)
+
+    code = clerk_qwen.main([
+        "open",
+        "--base-url",
+        "https://baker.test",
+        "--api-key",
+        "test-key",
+    ])
+
+    out = capsys.readouterr().out
+    assert code == 0
+    assert opened == ["https://baker.test/clerk/edit/sess-recent"]
+    assert "Opening https://baker.test/clerk/edit/sess-recent" in out
+
+
+def test_open_cli_no_sessions_prints_clean_message(monkeypatch, capsys):
+    def fake_urlopen(req, timeout):
+        assert req.full_url == "https://baker.test/api/clerk/sessions?limit=1"
+        return _FakeResponse({"sessions": []})
+
+    monkeypatch.setattr(urllib.request, "urlopen", fake_urlopen)
+
+    def fail_open(url):
+        raise AssertionError("must not open a browser when there is no session")
+
+    monkeypatch.setattr(clerk_qwen.webbrowser, "open", fail_open)
+
+    code = clerk_qwen.main([
+        "open",
+        "--base-url",
+        "https://baker.test",
+        "--api-key",
+        "test-key",
+    ])
+
+    out = capsys.readouterr().out
+    assert code == 0
+    assert clerk_qwen.NO_SESSION_MSG in out
+
+
+def test_chat_open_opens_tracked_session(monkeypatch, capsys):
+    opened = []
+    monkeypatch.setattr(clerk_qwen.webbrowser, "open", lambda url: opened.append(url) or True)
+    inputs = iter(["find emails from Peter", "open", "exit"])
+    monkeypatch.setattr("builtins.input", lambda prompt: next(inputs))
+
+    def fake_urlopen(req, timeout):
+        url = req.full_url
+        if url == "https://baker.test/api/clerk/run":
+            return _FakeResponse({"session_id": "sess-chat-open", "status": "running"})
+        if url == "https://baker.test/api/clerk/session/sess-chat-open":
+            return _FakeResponse({
+                "session_id": "sess-chat-open",
+                "status": "ready",
+                "result": {"answer": "Ready: /Baker-Feed/Clerk-Workbench/peter.md"},
+            })
+        raise AssertionError(f"unexpected URL {url}")
+
+    monkeypatch.setattr(urllib.request, "urlopen", fake_urlopen)
+
+    code = clerk_qwen.main([
+        "chat",
+        "--base-url",
+        "https://baker.test",
+        "--api-key",
+        "test-key",
+        "--interval-s",
+        "0",
+    ])
+
+    out = capsys.readouterr().out
+    assert code == 0
+    assert opened == ["https://baker.test/clerk/edit/sess-chat-open"]
+    assert clerk_qwen.OPEN_HINT in out
+
+
+def test_is_session_id_matches_uuid_and_bus_only():
+    assert clerk_qwen._is_session_id("12345678-1234-1234-1234-123456789abc")
+    assert clerk_qwen._is_session_id("bus-123")
+    assert clerk_qwen._is_session_id("bus-0")
+    assert not clerk_qwen._is_session_id("latest Peter email")
+    assert not clerk_qwen._is_session_id("/Baker-Project/foo.txt")
+    assert not clerk_qwen._is_session_id("bus-")
+    assert not clerk_qwen._is_session_id("the document about X")
+
+
+def test_chat_open_with_uuid_arg_opens_that_session(monkeypatch, capsys):
+    opened = []
+    monkeypatch.setattr(clerk_qwen.webbrowser, "open", lambda url: opened.append(url) or True)
+    sid = "12345678-1234-1234-1234-123456789abc"
+    inputs = iter([f"open {sid}", "exit"])
+    monkeypatch.setattr("builtins.input", lambda prompt: next(inputs))
+
+    def fail_urlopen(*args, **kwargs):
+        raise AssertionError("open <uuid> must not hit the Clerk API")
+
+    monkeypatch.setattr(urllib.request, "urlopen", fail_urlopen)
+
+    code = clerk_qwen.main([
+        "chat", "--base-url", "https://baker.test", "--api-key", "test-key",
+    ])
+
+    assert code == 0
+    assert opened == [f"https://baker.test/clerk/edit/{sid}"]
+
+
+def test_chat_open_with_bus_id_arg_opens_that_session(monkeypatch, capsys):
+    opened = []
+    monkeypatch.setattr(clerk_qwen.webbrowser, "open", lambda url: opened.append(url) or True)
+    inputs = iter(["open bus-123", "exit"])
+    monkeypatch.setattr("builtins.input", lambda prompt: next(inputs))
+
+    def fail_urlopen(*args, **kwargs):
+        raise AssertionError("open bus-<id> must not hit the Clerk API")
+
+    monkeypatch.setattr(urllib.request, "urlopen", fail_urlopen)
+
+    code = clerk_qwen.main([
+        "chat", "--base-url", "https://baker.test", "--api-key", "test-key",
+    ])
+
+    assert code == 0
+    assert opened == ["https://baker.test/clerk/edit/bus-123"]
+
+
+def test_chat_open_natural_task_passes_through_to_clerk(monkeypatch, capsys):
+    # "open latest Peter email" is a natural task, NOT the local open command.
+    opened = []
+    monkeypatch.setattr(clerk_qwen.webbrowser, "open", lambda url: opened.append(url) or True)
+    inputs = iter(["open latest Peter email", "exit"])
+    monkeypatch.setattr("builtins.input", lambda prompt: next(inputs))
+
+    calls = []
+
+    def fake_urlopen(req, timeout):
+        calls.append(req)
+        url = req.full_url
+        if url == "https://baker.test/api/clerk/run":
+            assert json.loads(req.data.decode("utf-8")) == {"task": "open latest Peter email"}
+            return _FakeResponse({"session_id": "sess-peter", "status": "running"})
+        if url == "https://baker.test/api/clerk/session/sess-peter":
+            return _FakeResponse({
+                "session_id": "sess-peter",
+                "status": "ready",
+                "result": {"answer": "Ready: /Baker-Feed/Clerk-Workbench/peter.md"},
+            })
+        raise AssertionError(f"unexpected URL {url}")
+
+    monkeypatch.setattr(urllib.request, "urlopen", fake_urlopen)
+
+    code = clerk_qwen.main([
+        "chat", "--base-url", "https://baker.test", "--api-key", "test-key", "--interval-s", "0",
+    ])
+
+    out = capsys.readouterr().out
+    assert code == 0
+    assert opened == []  # browser never launched
+    assert len(calls) == 2  # task went to Clerk
+    assert "Ready: /Baker-Feed/Clerk-Workbench/peter.md" in out
+
+
+def test_chat_open_path_task_passes_through_to_clerk(monkeypatch, capsys):
+    monkeypatch.setattr(clerk_qwen.webbrowser, "open", lambda url: (_ for _ in ()).throw(AssertionError("no browser")))
+    inputs = iter(["open /Baker-Project/foo.txt in browser", "exit"])
+    monkeypatch.setattr("builtins.input", lambda prompt: next(inputs))
+
+    calls = []
+
+    def fake_urlopen(req, timeout):
+        calls.append(req)
+        url = req.full_url
+        if url == "https://baker.test/api/clerk/run":
+            assert json.loads(req.data.decode("utf-8")) == {"task": "open /Baker-Project/foo.txt in browser"}
+            return _FakeResponse({"session_id": "sess-path", "status": "running"})
+        if url == "https://baker.test/api/clerk/session/sess-path":
+            return _FakeResponse({"session_id": "sess-path", "status": "ready", "result": {"answer": "ok"}})
+        raise AssertionError(f"unexpected URL {url}")
+
+    monkeypatch.setattr(urllib.request, "urlopen", fake_urlopen)
+
+    code = clerk_qwen.main([
+        "chat", "--base-url", "https://baker.test", "--api-key", "test-key", "--interval-s", "0",
+    ])
+
+    assert code == 0
+    assert len(calls) == 2
+
+
+def test_chat_open_without_prior_session_prints_no_session(monkeypatch, capsys):
+    def fail_open(url):
+        raise AssertionError("must not open a browser before any session")
+
+    monkeypatch.setattr(clerk_qwen.webbrowser, "open", fail_open)
+    inputs = iter(["open", "exit"])
+    monkeypatch.setattr("builtins.input", lambda prompt: next(inputs))
+
+    def fail_urlopen(*args, **kwargs):
+        raise AssertionError("open before any task must not hit the network")
+
+    monkeypatch.setattr(urllib.request, "urlopen", fail_urlopen)
+
+    code = clerk_qwen.main([
+        "chat",
+        "--base-url",
+        "https://baker.test",
+        "--api-key",
+        "test-key",
+    ])
+
+    out = capsys.readouterr().out
+    assert code == 0
+    assert clerk_qwen.NO_SESSION_MSG in out
+
+
 def test_http_error_message_is_clean(monkeypatch, capsys):
     def fake_urlopen(req, timeout):
         body = json.dumps({"detail": {"status": "pending_approval", "reason": "target path requires Director approval"}}).encode()

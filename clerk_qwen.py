@@ -5,12 +5,14 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import re
 import subprocess
 import sys
 import time
 import urllib.error
 import urllib.parse
 import urllib.request
+import webbrowser
 from typing import Any
 
 DEFAULT_BASE_URL = "https://baker-master.onrender.com"
@@ -20,8 +22,21 @@ CHAT_INTRO = 'Clerk Qwen3 (Brisen doc clerk) - type a task; "help" for reach/lim
 CHAT_HELP_LINES = (
     "Reach: Gmail, Outlook/Graph, WhatsApp, Slack, transcripts, calendar, Dropbox/documents, sent mail, RSS/Substack, Baker search, internal bus.",
     "Limits: no money, no external sends, no production changes; risky acts return drafts or pending_approval.",
-    "Usage: type a task. Empty line, Ctrl-D, exit, or quit ends the session.",
+    "Usage: type a task. 'open' views the last result in your browser; 'open <id>' views a specific session. Empty line, Ctrl-D, exit, or quit ends the session.",
 )
+NO_SESSION_MSG = "No session yet — run a Clerk task first, then use open."
+OPEN_HINT = "  (type open to view in browser)"
+# Session-id shapes: server sessions are UUIDs (dashboard.py uses str(uuid4()));
+# bus sessions are "bus-<message_id>" (clerk_bus_worker.py). Used to decide
+# whether `open <token>` is a local open-session command or a natural-language
+# task like "open latest Peter email" that must pass through to Clerk.
+_SESSION_ID_RE = re.compile(
+    r"^(?:[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}|bus-\d+)$"
+)
+
+
+def _is_session_id(token: str) -> bool:
+    return bool(_SESSION_ID_RE.match(token.strip()))
 CONTEXT_BAR_CELLS = 10
 CONTEXT_BAR_FULL = "▓"
 CONTEXT_BAR_EMPTY = "░"
@@ -84,6 +99,31 @@ def edit_url(base_url: str, session_id: str) -> str:
     base = base_url.rstrip("/")
     quoted = urllib.parse.quote(session_id, safe="")
     return f"{base}/clerk/edit/{quoted}"
+
+
+def _open_in_browser(url: str) -> bool:
+    """Open url in the local default browser. Cross-platform via webbrowser,
+    with a macOS `open` fallback. Returns True if a launcher was invoked."""
+    try:
+        if webbrowser.open(url):
+            return True
+    except Exception:
+        pass
+    if sys.platform == "darwin":
+        try:
+            subprocess.run(["open", url], check=False, timeout=5)
+            return True
+        except (OSError, subprocess.TimeoutExpired):
+            return False
+    return False
+
+
+def _open_session(base_url: str, session_id: str) -> None:
+    url = edit_url(base_url, session_id)
+    if _open_in_browser(url):
+        print(f"Opening {url}")
+    else:
+        print(f"Could not launch a browser. Edit URL: {url}")
 
 
 class ClerkQwenClient:
@@ -404,9 +444,23 @@ def cmd_url(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_open(args: argparse.Namespace) -> int:
+    session_id = (args.session_id or "").strip()
+    if not session_id:
+        client = ClerkQwenClient(args.base_url, resolve_api_key(args.api_key))
+        sessions = client.list_sessions(1).get("sessions") or []
+        session_id = str(sessions[0].get("session_id") or "") if sessions else ""
+        if not session_id:
+            print(NO_SESSION_MSG)
+            return 0
+    _open_session(args.base_url, session_id)
+    return 0
+
+
 def cmd_chat(args: argparse.Namespace) -> int:
     client = ClerkQwenClient(args.base_url, resolve_api_key(args.api_key))
     print(CHAT_INTRO)
+    last_session_id = ""
     while True:
         try:
             task = input("clerk> ").strip()
@@ -420,6 +474,17 @@ def cmd_chat(args: argparse.Namespace) -> int:
             for line in CHAT_HELP_LINES:
                 print(line)
             continue
+        if task.lower() == "open":
+            if not last_session_id:
+                print(NO_SESSION_MSG)
+            else:
+                _open_session(args.base_url, last_session_id)
+            continue
+        if task.lower().startswith("open ") and _is_session_id(task.split(maxsplit=1)[1]):
+            # "open <session-id>" — local open. Natural tasks like
+            # "open latest Peter email" fall through to Clerk below.
+            _open_session(args.base_url, task.split(maxsplit=1)[1].strip())
+            continue
         if not task or task.lower() in {"exit", "quit"}:
             return 0
         try:
@@ -427,6 +492,9 @@ def cmd_chat(args: argparse.Namespace) -> int:
             _print_chat_result(session)
             _print_chat_trailer(session, args.base_url)
             _print_turn_footer(session)
+            if session.get("session_id"):
+                last_session_id = str(session["session_id"])
+                print(OPEN_HINT)
         except ClerkQwenError as e:
             print(f"ERROR: {e}")
         except KeyboardInterrupt:
@@ -470,6 +538,14 @@ def build_parser() -> argparse.ArgumentParser:
     url = sub.add_parser("url", parents=[common], help="Print the edit URL for a session")
     url.add_argument("session_id")
     url.set_defaults(func=cmd_url)
+
+    open_cmd = sub.add_parser("open", parents=[common], help="Open a session's edit URL in your browser")
+    open_cmd.add_argument(
+        "session_id",
+        nargs="?",
+        help="Session id to open; defaults to the most recent session",
+    )
+    open_cmd.set_defaults(func=cmd_open)
     return parser
 
 
