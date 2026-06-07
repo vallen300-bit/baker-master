@@ -642,6 +642,19 @@ class ClerkToolRegistry:
                 return self._file_save(args)
             return _safe_json({"error": f"unknown tool: {name}"})
         except BaseException as e:
+            # CLERK_SEARCH_BACKEND_FAILSILENT_FIX_1 (B): a backend OUTAGE must
+            # render as a retryable error, never silently as "no results found".
+            try:
+                from memory.retriever import SearchBackendUnavailable
+                if isinstance(e, SearchBackendUnavailable):
+                    logger.error("Clerk tool %s: search backend unavailable: %s", name, e)
+                    return _safe_json({
+                        "error": "search backend unavailable — retry",
+                        "backend_unavailable": True,
+                        "tool": name,
+                    })
+            except Exception:
+                pass
             logger.warning("Clerk tool failed (%s): %s", name, type(e).__name__)
             return _safe_json({"error": f"{name} failed: {type(e).__name__}"})
 
@@ -859,15 +872,39 @@ class ClerkToolRegistry:
         if not query:
             return _safe_json({"error": "query is required"})
         limit = self._clamped_limit(args.get("max_results"), default=8, upper=20)
-        from memory.retriever import SentinelRetriever
+        # CLERK_SEARCH_BACKEND_FAILSILENT_FIX_1 (C): reuse the SAME in-process
+        # retrieval that GET /api/documents/search uses (PG `documents`
+        # semantic+ILIKE — proven to return the real hits, e.g. 43 for "Peter
+        # Storer") instead of SentinelRetriever.search_all_collections, whose
+        # Qdrant-collection path returned 0 for the identical query. Lazy import:
+        # clerk runs inside the dashboard process (POST /api/clerk/run background
+        # task), so outputs.dashboard is already loaded at call time. A backend
+        # outage raises SearchBackendUnavailable, surfaced fail-loud by execute().
+        from outputs.dashboard import search_documents_core
 
-        retriever = SentinelRetriever._get_global_instance()
-        contexts = retriever.search_all_collections(
-            query=query,
-            limit_per_collection=limit,
-            score_threshold=0.3,
-        )
-        return self._contexts_json("baker_search", contexts, limit)
+        payload = search_documents_core(query, limit=limit)
+        docs = payload.get("results", []) or []
+        results = []
+        for d in docs[:limit]:
+            results.append({
+                "source": d.get("source") or "document",
+                "score": d.get("score"),
+                "label": d.get("title") or "",
+                "date": d.get("date") or "",
+                "metadata": {
+                    "id": d.get("id"),
+                    "document_type": d.get("document_type"),
+                    "matter": d.get("matter"),
+                    "source_path": d.get("source_path"),
+                },
+                "content": str(d.get("summary") or "")[:_TOOL_TEXT_LIMIT],
+            })
+        return _safe_json({
+            "channel": "baker_search",
+            "count": payload.get("total", len(results)),
+            "results": results,
+            "mode": payload.get("mode"),
+        })
 
     def _email_search(self, args: dict[str, Any]) -> str:
         provider = str(args.get("provider") or self._default_mail_provider()).strip().lower()
@@ -942,6 +979,7 @@ class ClerkToolRegistry:
             ("gmail", lambda: self._gmail_email_search(query, max_results)),
             ("store", lambda: self._email_store_search(query, max_results)),
         )
+        backend_unavailable = False
         for name, fn in providers:
             try:
                 payload = self._parse_tool_json(fn())
@@ -950,6 +988,16 @@ class ClerkToolRegistry:
                     errors[name] = error
                 results[name] = payload
             except BaseException as e:
+                # CLERK_SEARCH_BACKEND_FAILSILENT_FIX_1 (B): distinguish a backend
+                # OUTAGE (e.g. store provider's PG conn refused) from a provider
+                # that ran and found nothing — the former must surface, not read
+                # as "no emails found".
+                try:
+                    from memory.retriever import SearchBackendUnavailable
+                    if isinstance(e, SearchBackendUnavailable):
+                        backend_unavailable = True
+                except Exception:
+                    pass
                 logger.warning("Clerk email_search provider failed (%s): %s", name, type(e).__name__)
                 errors[name] = type(e).__name__
                 results[name] = {"error": type(e).__name__}
@@ -966,6 +1014,9 @@ class ClerkToolRegistry:
             "match_count": match_count,
             "results": results,
             "errors": errors,
+            # B: when set, the model must say "search backend unavailable — retry",
+            # NOT "no emails found" — a match_count of 0 here is NOT trustworthy.
+            **({"backend_unavailable": True} if backend_unavailable else {}),
             **({"query_guard": query_guard} if query_guard else {}),
         })
 
