@@ -22,6 +22,10 @@ CHAT_HELP_LINES = (
     "Limits: no money, no external sends, no production changes; risky acts return drafts or pending_approval.",
     "Usage: type a task. Empty line, Ctrl-D, exit, or quit ends the session.",
 )
+CONTEXT_BAR_CELLS = 10
+CONTEXT_BAR_FULL = "▓"
+CONTEXT_BAR_EMPTY = "░"
+CLERK_STATUS_LINE = '  ⏵⏵ read-only clerk · action-guardrails on · "help" for reach'
 
 
 class ClerkQwenError(RuntimeError):
@@ -232,7 +236,7 @@ def _print_chat_trailer(session: dict[str, Any], base_url: str) -> None:
 
 def _print_turn_footer(session: dict[str, Any]) -> None:
     footer = _telemetry_footer(session)
-    print("-" * len(footer))
+    print("-" * max(len(line) for line in footer.splitlines()))
     print(footer)
 
 
@@ -299,23 +303,66 @@ def _cost_text(value: Any) -> str:
     return f"{num:.6f}".rstrip("0").rstrip(".")
 
 
+def _model_label(model: Any) -> str:
+    raw = str(model or "").strip()
+    normalized = raw.lower().strip()
+    aliases = {
+        "qwen/qwen3-coder-plus": "Qwen3 Plus",
+        "qwen3-coder-plus": "Qwen3 Plus",
+        "qwen/qwen3-coder": "Qwen3 Coder",
+        "qwen3-coder": "Qwen3 Coder",
+        "qwen/qwen3-coder-flash": "Qwen3 Flash",
+        "qwen3-coder-flash": "Qwen3 Flash",
+    }
+    if normalized in aliases:
+        return aliases[normalized]
+    if not raw:
+        return "Qwen3 Coder"
+    tidied = raw.rsplit("/", 1)[-1].replace("_", "-").replace("-", " ")
+    return " ".join(part.capitalize() for part in tidied.split()) or "Qwen3 Coder"
+
+
+def _session_model(session: dict[str, Any], usage: dict[str, Any]) -> str:
+    for source in (
+        session.get("model"),
+        session.get("clerk_model"),
+        usage.get("model"),
+        usage.get("clerk_model"),
+        os.getenv("CLERK_QWEN_MODEL"),
+    ):
+        if isinstance(source, str) and source.strip():
+            return source.strip()
+    return "qwen3-coder"
+
+
+def _context_pct(used: Any, max_ctx: Any) -> int | None:
+    used_num = _number_or_none(used)
+    max_num = _number_or_none(max_ctx)
+    if used_num is None or max_num is None or max_num <= 0:
+        return None
+    pct = int((used_num / max_num) * 100 + 0.5)
+    return max(0, min(100, pct))
+
+
+def _context_bar(pct: int | None) -> str:
+    if pct is None:
+        filled = 0
+    else:
+        filled = int((pct / 10) + 0.5)
+        filled = max(0, min(CONTEXT_BAR_CELLS, filled))
+    return CONTEXT_BAR_FULL * filled + CONTEXT_BAR_EMPTY * (CONTEXT_BAR_CELLS - filled)
+
+
 def _telemetry_footer(session: dict[str, Any]) -> str:
     usage = session.get("usage") if isinstance(session.get("usage"), dict) else {}
     used = session.get("context_window_used", usage.get("context_window_used"))
     max_ctx = session.get("context_window_max", usage.get("context_window_max"))
-    total = session.get("total_tokens", usage.get("total_tokens"))
     cost = session.get("session_cost_usd", usage.get("session_cost_usd"))
 
-    used_num = _number_or_none(used)
-    max_num = _number_or_none(max_ctx)
-    if used_num is not None and max_num and max_num > 0:
-        pct = f"{(used_num / max_num) * 100:.1f}%"
-    else:
-        pct = "n/a"
-    return (
-        f"Qwen3-Coder | ctx {_int_text(used)}/{_int_text(max_ctx)} ({pct}) | "
-        f"{_int_text(total)} tok | ${_cost_text(cost)}"
-    )
+    pct = _context_pct(used, max_ctx)
+    pct_text = f"{pct}%" if pct is not None else "--%"
+    line_1 = f"{_model_label(_session_model(session, usage))} │ {_context_bar(pct)} {pct_text} │ ${_cost_text(cost)}"
+    return f"{line_1}\n{CLERK_STATUS_LINE}"
 
 
 def cmd_run(args: argparse.Namespace) -> int:

@@ -97,6 +97,7 @@ def test_chat_sends_plain_english_line_and_prints_real_footer(monkeypatch, capsy
                 "context_window_max": 1000000,
                 "total_tokens": 12345,
                 "session_cost_usd": 0.0042,
+                "model": "qwen/qwen3-coder-plus",
             })
         raise AssertionError(f"unexpected URL {url}")
 
@@ -124,9 +125,11 @@ def test_chat_sends_plain_english_line_and_prints_real_footer(monkeypatch, capsy
     assert "Latest email from Peter Storer: status note about the hotel asset." in out
     assert "Ready path: /Baker-Feed/Clerk-Workbench/peter.md" in out
     assert "Status: ready" in out
-    assert "Qwen3-Coder | ctx 12000/1000000 (1.2%) | 12345 tok | $0.0042" in out
+    assert "Qwen3 Plus │ ░░░░░░░░░░ 1% │ $0.0042" in out
+    assert '  ⏵⏵ read-only clerk · action-guardrails on · "help" for reach' in out
+    assert "12345 tok" not in out
     assert out.index("Ready: /Baker-Feed/Clerk-Workbench/peter.md") < out.index("Status: ready")
-    assert out.index("Status: ready") < out.index("Qwen3-Coder | ctx")
+    assert out.index("Status: ready") < out.index("Qwen3 Plus │")
 
 
 def test_chat_prints_blocked_reason_inline(monkeypatch, capsys):
@@ -168,7 +171,7 @@ def test_chat_prints_blocked_reason_inline(monkeypatch, capsys):
     assert len(calls) == 2
     assert "Blocked: money/payment action" in out
     assert "Status: blocked" in out
-    assert "Qwen3-Coder | ctx n/a/n/a (n/a) | n/a tok | $n/a" in out
+    assert "Qwen3 Coder │ ░░░░░░░░░░ --% │ $n/a" in out
 
 
 def test_chat_help_prints_reach_limits_without_api_call(monkeypatch, capsys):
@@ -267,8 +270,37 @@ def test_chat_draft_preview_truncates_to_readable_size(capsys):
 
 def test_chat_footer_renders_na_for_missing_telemetry():
     assert clerk_qwen._telemetry_footer({"status": "ready"}) == (
-        "Qwen3-Coder | ctx n/a/n/a (n/a) | n/a tok | $n/a"
+        'Qwen3 Coder │ ░░░░░░░░░░ --% │ $n/a\n'
+        '  ⏵⏵ read-only clerk · action-guardrails on · "help" for reach'
     )
+
+
+def test_chat_footer_bar_tracks_pct_and_model_label_maps():
+    footer = clerk_qwen._telemetry_footer({
+        "status": "ready",
+        "model": "qwen/qwen3-coder-plus",
+        "context_window_used": 340000,
+        "context_window_max": 1000000,
+        "session_cost_usd": 0.006919,
+    })
+
+    first_line, second_line = footer.splitlines()
+    assert first_line == "Qwen3 Plus │ ▓▓▓░░░░░░░ 34% │ $0.006919"
+    assert len("▓▓▓░░░░░░░") == 10
+    assert second_line == '  ⏵⏵ read-only clerk · action-guardrails on · "help" for reach'
+    assert clerk_qwen._model_label("qwen/qwen3-coder") == "Qwen3 Coder"
+    assert clerk_qwen._model_label("qwen/qwen3-coder-flash") == "Qwen3 Flash"
+
+
+def test_chat_footer_uses_model_env_when_session_omits_model(monkeypatch):
+    monkeypatch.setenv("CLERK_QWEN_MODEL", "qwen/qwen3-coder-plus")
+
+    assert clerk_qwen._telemetry_footer({
+        "status": "ready",
+        "context_window_used": 990000,
+        "context_window_max": 1000000,
+        "session_cost_usd": 0.1,
+    }).splitlines()[0] == "Qwen3 Plus │ ▓▓▓▓▓▓▓▓▓▓ 99% │ $0.1"
 
 
 def test_no_args_defaults_to_chat(monkeypatch, capsys):
