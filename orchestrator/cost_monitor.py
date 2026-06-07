@@ -35,6 +35,12 @@ MODEL_COSTS = {
     "gemini-2.5-pro": {"input": 1.25, "output": 10.00},
     # xAI (GROK_API_CAPABILITY_1; pricing per xAI docs 2026-05-17)
     "grok-4.3": {"input": 1.25, "output": 2.50},
+    # Perplexity Sonar (CLERK_FULL_CAPABILITY_POLICY_1 PR 2d-2; pricing per
+    # Perplexity docs 2026-06-07 — token rate only; the per-request search fee
+    # is not token-attributable and is excluded from this estimate).
+    "sonar": {"input": 1.00, "output": 1.00},
+    "sonar-pro": {"input": 3.00, "output": 15.00},
+    "sonar-reasoning": {"input": 1.00, "output": 5.00},
 }
 DEFAULT_COSTS = {"input": 15.00, "output": 75.00}
 

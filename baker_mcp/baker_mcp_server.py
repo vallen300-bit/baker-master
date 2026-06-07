@@ -979,6 +979,18 @@ except Exception as _grok_import_err:  # pragma: no cover — defensive import
         return f"Error: Grok tools failed to load: {_grok_import_err}"
 
 
+# Perplexity Sonar cited ask — defensive import mirroring ClaimsMax + Grok.
+try:
+    from tools.perplexity import PERPLEXITY_TOOLS, PERPLEXITY_TOOL_NAMES, dispatch_perplexity
+    TOOLS.extend(PERPLEXITY_TOOLS)
+except Exception as _perplexity_import_err:  # pragma: no cover — defensive import
+    logger.warning("Perplexity tools unavailable: %s", _perplexity_import_err)
+    PERPLEXITY_TOOL_NAMES = frozenset()
+
+    def dispatch_perplexity(name: str, args: dict) -> str:  # type: ignore[no-redef]
+        return f"Error: Perplexity tools failed to load: {_perplexity_import_err}"
+
+
 # Gmail on-demand attachment read — defensive import mirroring ClaimsMax + Grok.
 try:
     from tools.gmail import GMAIL_TOOLS, GMAIL_TOOL_NAMES, dispatch_gmail
@@ -2177,6 +2189,9 @@ def _dispatch(name: str, args: dict) -> str:
 
     elif name in GROK_TOOL_NAMES:
         return dispatch_grok(name, args)
+
+    elif name in PERPLEXITY_TOOL_NAMES:
+        return dispatch_perplexity(name, args)
 
     elif name in GMAIL_TOOL_NAMES:
         return dispatch_gmail(name, args)
