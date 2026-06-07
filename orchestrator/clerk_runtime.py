@@ -162,6 +162,38 @@ _CLERK_BAKER_READ_TOOLS = (
     "baker_health",
 )
 
+# CLERK_FULL_CAPABILITY_POLICY_1 PR 2c — gmail + claimsmax READS, routed through the
+# governed tools.gmail.dispatch_gmail / tools.claimsmax.dispatch_claimsmax. Reads only.
+# NOTE: baker_claimsmax_ask (LLM Q&A = cost) + investigate/save/convert (cost/side
+# effects) are deliberately NOT here — ask is left UNMAPPED (default-DENY, fail-safe),
+# the rest are APPROVAL-class.
+_CLERK_GMAIL_READ_TOOLS = (
+    "baker_gmail_search",
+    "baker_gmail_read_message",
+    "baker_gmail_attachment_read",
+)
+_CLERK_CLAIMSMAX_READ_TOOLS = (
+    "baker_claimsmax_search",
+    "baker_claimsmax_check_investigation",
+    "baker_claimsmax_get_document",
+)
+
+
+def _pick_tool_schemas(tools: list[Any], wanted: frozenset[str]) -> list[dict[str, Any]]:
+    """Convert source MCP Tool objects (.name/.description/.inputSchema) into Clerk's
+    tool-schema dicts for the wanted names — reuse from source of truth, no drift."""
+    out: list[dict[str, Any]] = []
+    for tool in tools:
+        name = getattr(tool, "name", None)
+        if name in wanted:
+            out.append({
+                "name": name,
+                "description": getattr(tool, "description", "") or "",
+                "input_schema": getattr(tool, "inputSchema", None) or {"type": "object", "properties": {}},
+            })
+    return out
+
+
 # Name-fragment fail-closed catch for money/external-send shapes not explicitly
 # mapped (defence in depth; default-DENY already covers unknowns).
 _CLERK_DENY_FRAGMENTS = ("_send", "send_", "payment", "wire", "transfer", "remit", "payout")
@@ -813,29 +845,32 @@ class ClerkToolRegistry:
                     "required": ["prompt"],
                 },
             },
-        ] + self._baker_read_tool_schemas()
+        ] + self._extra_read_tool_schemas()
 
     @staticmethod
-    def _baker_read_tool_schemas() -> list[dict[str, Any]]:
-        """CLERK_FULL_CAPABILITY_POLICY_1 PR 2b: pure-SELECT Baker MCP read tools,
-        schemas reused from the MCP TOOLS source of truth (no drift). Routed at
-        execute() through the governed baker_mcp._dispatch. Import is lazy + failure-
-        tolerant so a Clerk run never breaks if the MCP module can't load."""
+    def _extra_read_tool_schemas() -> list[dict[str, Any]]:
+        """Read tools wired from governed dispatchers, schemas reused from each
+        source's TOOLS (no drift). Each import is lazy + failure-tolerant so a Clerk
+        run never breaks if one source module can't load:
+          PR 2b — Baker MCP PG reads via baker_mcp._dispatch;
+          PR 2c — gmail reads via tools.gmail.dispatch_gmail + claimsmax reads via
+                  tools.claimsmax.dispatch_claimsmax."""
+        out: list[dict[str, Any]] = []
         try:
             from baker_mcp.baker_mcp_server import TOOLS as _MCP_TOOLS
+            out += _pick_tool_schemas(_MCP_TOOLS, frozenset(_CLERK_BAKER_READ_TOOLS))
         except Exception:
             logger.warning("Clerk: baker_mcp TOOLS import failed — baker reads unavailable")
-            return []
-        wanted = set(_CLERK_BAKER_READ_TOOLS)
-        out: list[dict[str, Any]] = []
-        for tool in _MCP_TOOLS:
-            name = getattr(tool, "name", None)
-            if name in wanted:
-                out.append({
-                    "name": name,
-                    "description": getattr(tool, "description", "") or "",
-                    "input_schema": getattr(tool, "inputSchema", None) or {"type": "object", "properties": {}},
-                })
+        try:
+            from tools.gmail import GMAIL_TOOLS
+            out += _pick_tool_schemas(GMAIL_TOOLS, frozenset(_CLERK_GMAIL_READ_TOOLS))
+        except Exception:
+            logger.warning("Clerk: gmail TOOLS import failed — gmail reads unavailable")
+        try:
+            from tools.claimsmax import CLAIMSMAX_TOOLS
+            out += _pick_tool_schemas(CLAIMSMAX_TOOLS, frozenset(_CLERK_CLAIMSMAX_READ_TOOLS))
+        except Exception:
+            logger.warning("Clerk: claimsmax TOOLS import failed — claimsmax reads unavailable")
         return out
 
     def execute(self, name: str, args: dict[str, Any]) -> str:
@@ -860,6 +895,10 @@ class ClerkToolRegistry:
                 return self._grok_dispatch(name, args)
             if name in _CLERK_BAKER_READ_TOOLS:
                 return self._baker_mcp_read(name, args)
+            if name in _CLERK_GMAIL_READ_TOOLS:
+                return self._gmail_dispatch(name, args)
+            if name in _CLERK_CLAIMSMAX_READ_TOOLS:
+                return self._claimsmax_dispatch(name, args)
             return _safe_json({"error": f"unknown tool: {name}"})
         except BaseException as e:
             # CLERK_SEARCH_BACKEND_FAILSILENT_FIX_1 (B): a backend OUTAGE must
@@ -1770,6 +1809,21 @@ class ClerkToolRegistry:
         from baker_mcp.baker_mcp_server import _dispatch
         return _dispatch(name, args if isinstance(args, dict) else {})
 
+    # ── CLERK_FULL_CAPABILITY_POLICY_1 PR 2c — gmail + claimsmax reads via dispatchers ──
+    def _gmail_dispatch(self, name: str, args: dict[str, Any]) -> str:
+        """Route Clerk's gmail reads through tools.gmail.dispatch_gmail — the governed
+        sync entrypoint the MCP server uses. Only the read names reach here (policy
+        gate + read-only registration); execute() try/except renders failures cleanly."""
+        from tools.gmail import dispatch_gmail
+        return dispatch_gmail(name, args if isinstance(args, dict) else {})
+
+    def _claimsmax_dispatch(self, name: str, args: dict[str, Any]) -> str:
+        """Route Clerk's claimsmax reads through tools.claimsmax.dispatch_claimsmax —
+        the governed sync entrypoint. Only the 3 read names are registered + ALLOW;
+        ask/investigate/save/convert (cost/side-effects) are DENY/APPROVAL and unwired."""
+        from tools.claimsmax import dispatch_claimsmax
+        return dispatch_claimsmax(name, args if isinstance(args, dict) else {})
+
     # ── CLERK_FULL_CAPABILITY_POLICY_1 PR 2a — live web/X search via Grok (xAI) ──
     def _grok_dispatch(self, name: str, args: dict[str, Any]) -> str:
         """Route Clerk's Grok tools through tools.grok.dispatch_grok so they inherit
@@ -1853,7 +1907,8 @@ _SEARCH_TOOLS = frozenset({"baker_search", "email_search", "channel_search", "tr
 # grok_ask is NOT here — it is training-knowledge Q&A, not retrieval.
 _GROUNDING_TOOLS = _SEARCH_TOOLS | frozenset({
     "document_fetch", "email_download", "baker_grok_web_search", "baker_grok_x_search",
-}) | frozenset(_CLERK_BAKER_READ_TOOLS)  # PR 2b: Baker MCP reads retrieve real data, so they ground a lookup answer
+}) | frozenset(_CLERK_BAKER_READ_TOOLS) | frozenset(_CLERK_GMAIL_READ_TOOLS) | frozenset(_CLERK_CLAIMSMAX_READ_TOOLS)
+# ^ PR 2b/2c: Baker MCP + gmail + claimsmax reads retrieve real data, so they ground a lookup answer
 
 # Lookup INTENT in the user task (verbs/phrases that demand a retrieval). codex G3
 # Finding A: added terse "what do we have on / anything on / what's on / got
