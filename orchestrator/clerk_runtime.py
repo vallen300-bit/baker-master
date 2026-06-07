@@ -66,6 +66,19 @@ _CHANNEL_SEARCH_CHANNELS = (
 )
 _SUBSTACK_COLLECTIONS = ("baker-substack-natesnewsletter",)
 _TOOL_TEXT_LIMIT = 8_000
+_PLACEHOLDER_EMAIL_RE = re.compile(
+    r"(?P<prefix>\bfrom:\s*)?(?P<local>[a-z0-9._%+\-]+)@(?P<domain>[a-z0-9.\-]+)",
+    re.I,
+)
+_PLACEHOLDER_DOMAINS = frozenset({
+    "example.com",
+    "example.org",
+    "example.net",
+    "test.com",
+    "test.org",
+    "test.net",
+})
+_PLACEHOLDER_LOCAL_PARTS = frozenset({"foo", "bar", "test", "example", "user", "email"})
 
 
 class ClerkRuntimeError(RuntimeError):
@@ -501,7 +514,13 @@ class ClerkToolRegistry:
             },
             {
                 "name": "email_search",
-                "description": "Search Gmail, Outlook/Graph, and Baker's stored email index by query/sender/subject/date/message id.",
+                "description": (
+                    "Search Gmail, Outlook/Graph, and Baker's stored email index. "
+                    "Query may be a person's name, subject keywords, or a real known email address. "
+                    "Default provider is all (Gmail + Outlook/Graph + store merged). "
+                    "Do not synthesize or guess an address; when only a name is known, search the name itself "
+                    "across provider all instead of a made-up from: filter."
+                ),
                 "input_schema": {
                     "type": "object",
                     "properties": {
@@ -667,6 +686,62 @@ class ClerkToolRegistry:
                 return len(val)
         return 0
 
+    @staticmethod
+    def _is_placeholder_email(local: str, domain: str) -> bool:
+        normalized_domain = domain.strip().lower().rstrip(".")
+        normalized_local = local.strip().lower()
+        if normalized_domain in _PLACEHOLDER_DOMAINS:
+            return True
+        if normalized_domain == "bar" and normalized_local == "foo":
+            return True
+        if "." not in normalized_domain and normalized_local in _PLACEHOLDER_LOCAL_PARTS:
+            return True
+        return False
+
+    @staticmethod
+    def _name_from_email_local_part(local: str) -> str:
+        cleaned = re.sub(r"[._%+\-]+", " ", local or "")
+        cleaned = re.sub(r"\b(test|example|user|email|mail|foo|bar)\b", " ", cleaned, flags=re.I)
+        return re.sub(r"\s+", " ", cleaned).strip()
+
+    def _normalize_email_search_args(self, provider: str, query: str, max_results: int) -> tuple[str, str, int, dict[str, Any] | None]:
+        replacements: list[tuple[str, str]] = []
+        for match in _PLACEHOLDER_EMAIL_RE.finditer(query):
+            local = match.group("local") or ""
+            domain = match.group("domain") or ""
+            if not self._is_placeholder_email(local, domain):
+                continue
+            name = self._name_from_email_local_part(local)
+            replacements.append((match.group(0), name))
+
+        if not replacements:
+            return provider, query, max_results, None
+
+        normalized_query = query
+        for raw, replacement in replacements:
+            normalized_query = normalized_query.replace(raw, replacement)
+        normalized_query = re.sub(r"\bfrom:\s*", " ", normalized_query, flags=re.I)
+        normalized_query = re.sub(r"[^A-Za-z0-9@._+\-\s]", " ", normalized_query)
+        normalized_query = re.sub(r"\s+", " ", normalized_query).strip()
+
+        if not normalized_query:
+            names = [name for _, name in replacements if name]
+            normalized_query = re.sub(r"\s+", " ", " ".join(names)).strip()
+
+        guard = {
+            "reason": "fabricated_placeholder_address",
+            "original_provider": provider,
+            "original_query": query,
+            "normalized_query": normalized_query,
+        }
+        logger.info(
+            "Clerk email_search normalized fabricated placeholder address: provider=%s query=%r normalized=%r",
+            provider,
+            query,
+            normalized_query,
+        )
+        return "all", normalized_query, max(max_results, 10), guard
+
     def _contexts_json(self, channel: str, contexts: list[Any], limit: int) -> str:
         results = []
         for ctx in contexts[:limit]:
@@ -701,8 +776,9 @@ class ClerkToolRegistry:
         provider = str(args.get("provider") or self._default_mail_provider()).strip().lower()
         query = str(args.get("query", "")).strip()
         max_results = self._clamped_limit(args.get("max_results"), default=10, upper=50)
+        provider, query, max_results, query_guard = self._normalize_email_search_args(provider, query, max_results)
         if provider == "all":
-            return self._email_search_all(query, max_results)
+            return self._email_search_all(query, max_results, query_guard=query_guard)
         if provider == "graph":
             return self._graph_email_search(query, max_results)
         if provider == "store":
@@ -748,7 +824,7 @@ class ClerkToolRegistry:
         parsed["attachment_texts"] = attachments
         return _safe_json(parsed)
 
-    def _email_search_all(self, query: str, max_results: int) -> str:
+    def _email_search_all(self, query: str, max_results: int, query_guard: dict[str, Any] | None = None) -> str:
         results: dict[str, Any] = {}
         errors: dict[str, str] = {}
         providers = (
@@ -769,9 +845,11 @@ class ClerkToolRegistry:
                 results[name] = {"error": type(e).__name__}
         return _safe_json({
             "provider": "all",
+            "query": query,
             "match_count": sum(self._payload_count(payload) for payload in results.values()),
             "results": results,
             "errors": errors,
+            **({"query_guard": query_guard} if query_guard else {}),
         })
 
     def _email_download_all(self, message_id: str, include_attachments: bool) -> str:
@@ -1238,6 +1316,10 @@ email index, WhatsApp, Slack, meeting transcripts (Plaud/Fireflies/YouTube),
 calendar/events, Dropbox/documents, sent emails, RSS/Substack, and unified semantic
 retrieval. Use conversion/document tools when a fetched document needs extraction,
 and save only Director-reviewable files to Clerk's working folder.
+When the user gives a person's name without an email address, search by the name
+itself across provider="all" with max_results at least 10. Never invent, guess,
+or fabricate email addresses or placeholder domains such as example.com or test.com;
+if only a name is known, query the name itself, not a made-up from: filter.
 Never execute money/payment actions, impersonate the Director, change code/production systems,
 create matter slugs, or restructure vault/folders. Posting to the internal Brisen agent bus
 (lead, deputy, clerk, b1-b4, and other fleet agents) is internal coordination: allowed, not
