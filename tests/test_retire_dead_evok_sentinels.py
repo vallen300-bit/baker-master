@@ -147,3 +147,125 @@ def test_check_stale_watermarks_skips_retired_evok_but_alerts_live(monkeypatch):
 
     assert "stale_watermark_exchange_poll" not in fired  # retired -> silenced
     assert "stale_watermark_email_poll" in fired         # live -> still alerts
+
+
+# ---- RETIRED_SOURCE_STALE_ALERT_CLEANUP_1 -----------------------------------
+# A retired source must not leave a dangling fired alert behind. PR #315 stopped
+# *future* fires; these prove the *existing* fired alert is resolved/cleared.
+
+
+class _CaptureCur:
+    """Cursor stub that records the last UPDATE's SQL + params and reports a
+    configurable rowcount."""
+
+    def __init__(self, rowcount=1):
+        self.sql = None
+        self.params = None
+        self.rowcount = rowcount
+
+    def execute(self, sql, params=None):
+        self.sql = sql
+        self.params = params
+
+    def close(self):
+        pass
+
+
+class _CaptureConn:
+    def __init__(self, cur):
+        self._cur = cur
+        self.committed = False
+        self.rolled_back = False
+
+    def cursor(self, *a, **k):
+        return self._cur
+
+    def commit(self):
+        self.committed = True
+
+    def rollback(self):
+        self.rolled_back = True
+
+
+def _patch_capture(monkeypatch, cur):
+    conn = _CaptureConn(cur)
+    monkeypatch.setattr(sh, "_get_conn", lambda: (conn, object()))
+    monkeypatch.setattr(sh, "_put_conn", lambda store, c: None)
+    monkeypatch.setattr(sh, "_ensure_table", lambda c: None)
+    return conn
+
+
+def test_clear_retired_source_alerts_resolves_dangling_with_source_retired(monkeypatch):
+    """The dangling fired alert is UPDATEd to status=resolved with
+    exit_reason='source-retired' (a legit resolution, not a user dismiss)."""
+    cur = _CaptureCur(rowcount=1)
+    conn = _patch_capture(monkeypatch, cur)
+
+    cleared = sh.clear_retired_source_alerts()
+
+    assert cleared == 1
+    assert conn.committed is True
+    sql = " ".join(cur.sql.split())
+    assert "UPDATE alerts" in sql
+    assert "status = 'resolved'" in sql
+    assert "exit_reason = 'source-retired'" in sql
+    # exact source_id match (ANY of an explicit list), never a title LIKE heuristic
+    assert "source_id = ANY(" in sql
+    assert "title" not in sql.lower()
+    assert "like" not in sql.lower()
+    # only sentinel_health stale-watermark alerts, and only still-active ones
+    assert "source = 'sentinel_health'" in sql
+    assert "status NOT IN ('resolved', 'dismissed')" in sql
+
+
+def test_clear_retired_source_alerts_scoped_to_retired_watermarks_only(monkeypatch):
+    """The source_id list passed to the UPDATE covers exactly the retired
+    watermark source_ids and never a live one (email_poll)."""
+    cur = _CaptureCur(rowcount=2)
+    _patch_capture(monkeypatch, cur)
+
+    sh.clear_retired_source_alerts()
+
+    (source_ids,) = cur.params  # single %s param = the list
+    assert "stale_watermark_exchange_poll" in source_ids
+    assert "stale_watermark_exchange_poll_sent" in source_ids
+    assert "stale_watermark_email_poll" not in source_ids
+    # one source_id per retired watermark source, nothing extra
+    assert set(source_ids) == {
+        f"stale_watermark_{wm}" for wm in sh.RETIRED_WATERMARK_SOURCES
+    }
+
+
+def test_clear_retired_source_alerts_does_not_call_resolve_alert(monkeypatch):
+    """Must use the scoped UPDATE, NOT store_back.resolve_alert (which fires
+    dismiss_related_alerts -> over-resolve risk)."""
+    cur = _CaptureCur(rowcount=1)
+    _patch_capture(monkeypatch, cur)
+
+    import memory.store_back as msb
+
+    def _boom(self, alert_id):  # pragma: no cover - must never run
+        raise AssertionError("resolve_alert must not be used for retired cleanup")
+
+    monkeypatch.setattr(msb.SentinelStoreBack, "resolve_alert", _boom)
+
+    # No exception => resolve_alert was never touched.
+    assert sh.clear_retired_source_alerts() == 1
+
+
+def test_check_stale_watermarks_clears_orphan_alerts(monkeypatch):
+    """check_stale_watermarks() runs the orphan cleanup so retiring a source
+    self-heals (acceptance #2: never leaves an orphaned fired alert)."""
+    calls = {"n": 0}
+
+    def _spy():
+        calls["n"] += 1
+        return 1
+
+    monkeypatch.setattr(sh, "clear_retired_source_alerts", _spy)
+    # Make the rest of check_stale_watermarks a cheap no-op: no DB.
+    monkeypatch.setattr(sh, "_get_conn", lambda: (None, None))
+
+    sh.check_stale_watermarks()
+
+    assert calls["n"] == 1
