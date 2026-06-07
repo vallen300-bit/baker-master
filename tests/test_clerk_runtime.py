@@ -210,33 +210,42 @@ def test_internal_bus_reply_task_is_allowed_not_external_send():
     assert "not an external send" in " ".join(_CLERK_SYSTEM_PROMPT.split())
 
 
-def test_email_tools_default_to_graph_provider(monkeypatch):
-    monkeypatch.setattr("orchestrator.clerk_runtime.config.qwen3.default_mail_provider", "graph")
+def test_email_search_defaults_to_all_provider_and_merges_mailboxes(monkeypatch):
+    monkeypatch.setattr("orchestrator.clerk_runtime.config.qwen3.default_mail_provider", "all")
     registry = ClerkToolRegistry()
     calls = []
 
     def fake_graph_search(query, max_results):
         calls.append(("search", query, max_results))
-        return json.dumps({"provider": "graph", "query": query, "max_results": max_results})
+        return json.dumps({"provider": "graph", "match_count": 1, "matches": [{"subject": "graph"}]})
 
-    def fake_graph_download(message_id):
-        calls.append(("download", message_id))
-        return json.dumps({"provider": "graph", "message_id": message_id})
+    def fake_store_search(query, max_results):
+        calls.append(("store", query, max_results))
+        return json.dumps({"channel": "email_store", "count": 1, "results": [{"subject": "store"}]})
+
+    def fake_dispatch(tool_name, payload):
+        calls.append(("gmail", tool_name, payload))
+        return json.dumps({"messages": [{"subject": "gmail"}]})
 
     monkeypatch.setattr(registry, "_graph_email_search", fake_graph_search)
-    monkeypatch.setattr(registry, "_graph_email_download", fake_graph_download)
+    monkeypatch.setattr(registry, "_email_store_search", fake_store_search)
+    monkeypatch.setitem(sys.modules, "tools.gmail", SimpleNamespace(dispatch_gmail=fake_dispatch))
 
     search_tool = next(tool for tool in registry.tools if tool["name"] == "email_search")
     download_tool = next(tool for tool in registry.tools if tool["name"] == "email_download")
-    assert search_tool["input_schema"]["properties"]["provider"]["default"] == "graph"
-    assert download_tool["input_schema"]["properties"]["provider"]["default"] == "graph"
+    assert search_tool["input_schema"]["properties"]["provider"]["default"] == "all"
+    assert download_tool["input_schema"]["properties"]["provider"]["default"] == "all"
 
     search = json.loads(registry.execute("email_search", {"query": "from:peter"}))
-    download = json.loads(registry.execute("email_download", {"message_id": "m-1"}))
 
-    assert search["provider"] == "graph"
-    assert download["provider"] == "graph"
-    assert calls == [("search", "from:peter", 10), ("download", "m-1")]
+    assert search["provider"] == "all"
+    assert search["match_count"] == 3
+    assert set(search["results"]) == {"graph", "gmail", "store"}
+    assert calls == [
+        ("search", "from:peter", 10),
+        ("gmail", "baker_gmail_search", {"query": "from:peter", "max_results": 10}),
+        ("store", "from:peter", 10),
+    ]
 
 
 def test_email_search_keeps_explicit_gmail_provider_selectable(monkeypatch):
@@ -254,6 +263,82 @@ def test_email_search_keeps_explicit_gmail_provider_selectable(monkeypatch):
 
     assert result["provider"] == "gmail"
     assert calls == [("baker_gmail_search", {"query": "from:peter", "max_results": 10})]
+
+
+def test_baker_search_reuses_existing_sentinel_retriever(monkeypatch):
+    calls = []
+
+    class FakeRetriever:
+        def search_all_collections(self, **kwargs):
+            calls.append(kwargs)
+            return [
+                SimpleNamespace(
+                    content="semantic hit",
+                    source="whatsapp",
+                    score=0.91,
+                    metadata={"label": "WA", "date": "2026-06-07"},
+                )
+            ]
+
+    class FakeSentinelRetriever:
+        @staticmethod
+        def _get_global_instance():
+            return FakeRetriever()
+
+    monkeypatch.setitem(sys.modules, "memory.retriever", SimpleNamespace(SentinelRetriever=FakeSentinelRetriever))
+    registry = ClerkToolRegistry()
+
+    result = json.loads(registry.execute("baker_search", {"query": "Peter Storer", "max_results": 4}))
+
+    assert result["channel"] == "baker_search"
+    assert result["count"] == 1
+    assert result["results"][0]["source"] == "whatsapp"
+    assert calls == [{"query": "Peter Storer", "limit_per_collection": 4, "score_threshold": 0.3}]
+
+
+def test_channel_search_slack_and_rss_use_read_only_sql(monkeypatch):
+    registry = ClerkToolRegistry()
+    calls = []
+
+    def fake_query_rows(sql, params):
+        calls.append((sql, params))
+        if "FROM slack_messages" in sql:
+            return [{"id": "slack-1", "channel_name": "cockpit", "full_text": "Peter update"}]
+        if "FROM rss_articles" in sql:
+            return [{"id": 7, "title": "NVIDIA", "feed_title": "Tech", "summary": "GPU news"}]
+        raise AssertionError(sql)
+
+    monkeypatch.setattr(registry, "_query_rows", fake_query_rows)
+
+    slack = json.loads(registry.execute("channel_search", {"channel": "slack", "query": "Peter"}))
+    rss = json.loads(registry.execute("channel_search", {"channel": "rss", "query": "NVIDIA"}))
+
+    assert slack == {"channel": "slack", "count": 1, "results": [{"id": "slack-1", "channel_name": "cockpit", "full_text": "Peter update"}]}
+    assert rss["channel"] == "rss"
+    assert rss["results"][0]["title"] == "NVIDIA"
+    assert all("INSERT " not in sql and "UPDATE " not in sql and "DELETE " not in sql for sql, _ in calls)
+
+
+def test_transcripts_by_matter_filters_existing_transcript_table(monkeypatch):
+    registry = ClerkToolRegistry()
+    seen = {}
+
+    def fake_query_rows(sql, params):
+        seen["sql"] = sql
+        seen["params"] = params
+        return [{"id": "mtg-1", "title": "Hag meeting", "matter_slug": "hagenauer-rg7", "transcript": "body"}]
+
+    monkeypatch.setattr(registry, "_query_rows", fake_query_rows)
+
+    result = json.loads(registry.execute(
+        "transcripts_by_matter",
+        {"matter_slug": "hagenauer-rg7", "query": "court", "max_results": 3},
+    ))
+
+    assert result["channel"] == "transcripts_by_matter"
+    assert result["results"][0]["matter_slug"] == "hagenauer-rg7"
+    assert "FROM meeting_transcripts" in seen["sql"]
+    assert "%hagenauer-rg7%" in seen["params"]
 
 
 def test_step_cap_stops_unbounded_loop():
