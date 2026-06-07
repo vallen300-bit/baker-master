@@ -18,6 +18,52 @@ from datetime import datetime, timezone
 logger = logging.getLogger("sentinel.health")
 
 # ─────────────────────────────────────────────
+# RETIRE_DEAD_EVOK_SENTINELS_1
+# ─────────────────────────────────────────────
+# The Evok Exchange host (exchange.evok.ch) was decommissioned in the
+# ~2026-06-03 Microsoft 365 cutover; the live Graph mail path (graph_mail) is
+# its replacement. These 3 sentinels can never succeed again, so polling them
+# only manufactures a permanent 'down' status that drags /health to "degraded"
+# and masks real failures. They are retired centrally here:
+#   - should_skip_poll() returns True   -> pollers never attempt IMAP/EWS.
+#   - report_success/report_failure()   -> no-op -> row can't be (re)written 'down'.
+#   - get_all_sentinel_health()         -> normalizes their status to 'disabled'
+#                                          so no health surface counts them down.
+# Single control point: add/remove a source here and every surface follows.
+RETIRED_SOURCES = frozenset({"exchange", "exchange_sent", "exchange_calendar"})
+
+# Watermark source names differ from sentinel source names: the `exchange`
+# sentinel advances the `exchange_poll` row in trigger_watermarks. Map each
+# retired sentinel to the watermark source(s) it owns so check_stale_watermarks()
+# skips them too — otherwise a retired source keeps firing a permanent
+# "STALE DATA" alert even after it is correctly dropped from the /health degraded
+# count (G3/codex M1 on PR #315). Same control point: add a source to
+# RETIRED_SOURCES + its watermark mapping and every surface follows.
+_RETIRED_WATERMARK_MAP = {
+    "exchange": ("exchange_poll",),        # INBOX poll watermark (WATERMARK_KEY)
+    "exchange_sent": ("exchange_poll_sent",),  # Sent poll watermark (WATERMARK_KEY_SENT)
+    "exchange_calendar": (),               # EWS calendar poll keeps no watermark
+}
+RETIRED_WATERMARK_SOURCES = frozenset(
+    wm for src in RETIRED_SOURCES for wm in _RETIRED_WATERMARK_MAP.get(src, ())
+)
+
+
+def _apply_retirement(rows: list) -> list:
+    """Normalize retired sentinels' status to 'disabled' on the health surface.
+
+    Read-time transform (no write) so it is safe even when the DB is in a
+    read-only transaction. The stored row is left untouched; every consumer of
+    get_all_sentinel_health() — /health, /api/sentinel-health, etc. — sees
+    'disabled', so a retired source is never counted toward sentinels_down.
+    """
+    for r in rows:
+        if r.get("source") in RETIRED_SOURCES and r.get("status") != "disabled":
+            r["status"] = "disabled"
+    return rows
+
+
+# ─────────────────────────────────────────────
 # Table DDL — called on first DB access
 # ─────────────────────────────────────────────
 
@@ -82,6 +128,8 @@ def _status_for_failures(n: int) -> str:
 
 def report_success(source: str):
     """Called after a successful poll. Resets failure count. Fires recovery alert if was down."""
+    if source in RETIRED_SOURCES:
+        return  # RETIRE_DEAD_EVOK_SENTINELS_1: never resurrect a retired row.
     conn, store = _get_conn()
     if not conn:
         return
@@ -123,6 +171,8 @@ def report_success(source: str):
 
 def report_failure(source: str, error: str):
     """Called after a failed poll. Increments failure count. Fires alert at 3."""
+    if source in RETIRED_SOURCES:
+        return  # RETIRE_DEAD_EVOK_SENTINELS_1: retired source can't go 'down'.
     conn, store = _get_conn()
     if not conn:
         return
@@ -297,6 +347,10 @@ def should_skip_poll(source: str) -> bool:
 
     Call this at the top of every trigger's run function.
     """
+    if source in RETIRED_SOURCES:
+        # RETIRE_DEAD_EVOK_SENTINELS_1: permanent skip, no DB read required so a
+        # retired source is skipped even when the DB is unreachable.
+        return True
     conn, store = _get_conn()
     if not conn:
         return False  # fail open — allow poll if DB is unreachable
@@ -395,6 +449,10 @@ def check_stale_watermarks():
 
         # Check named sources
         for source, max_hours in _WATERMARK_MAX_AGE.items():
+            if source in RETIRED_WATERMARK_SOURCES:
+                # RETIRE_DEAD_EVOK_SENTINELS_1: retired Evok watermark — the host
+                # is decommissioned, so a stale gap is expected, not an alert.
+                continue
             cur.execute(
                 "SELECT last_seen, updated_at FROM trigger_watermarks WHERE source = %s",
                 (source,),
@@ -496,7 +554,7 @@ def get_all_sentinel_health() -> list:
         """)
         rows = [dict(r) for r in cur.fetchall()]
         cur.close()
-        return rows
+        return _apply_retirement(rows)
     except Exception as e:
         logger.warning(f"get_all_sentinel_health failed: {e}")
         return []

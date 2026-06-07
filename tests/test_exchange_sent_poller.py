@@ -81,7 +81,26 @@ def test_detect_sent_folder_mixed_quoted_and_unquoted():
 # ---- poll_exchange_sent ------------------------------------------------------
 
 
+def _bypass_retirement(monkeypatch):
+    """RETIRE_DEAD_EVOK_SENTINELS_1: poll_exchange_sent() now short-circuits via
+    should_skip_poll('exchange_sent') -> True. The IMAP mechanics below still
+    exist (lead kept the shared code), so bypass the retirement guard to keep
+    that logic under test. poll_exchange_sent imports the symbol at call time,
+    so patching it on the source module takes effect."""
+    monkeypatch.setattr("triggers.sentinel_health.should_skip_poll", lambda s: False)
+
+
+def test_poll_exchange_sent_retired_short_circuits(monkeypatch):
+    """The Evok Sent source is retired: even with a password + a working mock
+    connection, the poller returns [] without touching IMAP."""
+    monkeypatch.setattr(exchange_poller, "EXCHANGE_PASS", "secret")
+    with mock.patch("triggers.exchange_poller.imaplib.IMAP4_SSL") as imap:
+        assert exchange_poller.poll_exchange_sent() == []
+        imap.assert_not_called()
+
+
 def test_poll_exchange_sent_skips_when_no_password(monkeypatch):
+    _bypass_retirement(monkeypatch)
     monkeypatch.setattr(exchange_poller, "EXCHANGE_PASS", "")
     assert exchange_poller.poll_exchange_sent() == []
 
@@ -119,6 +138,7 @@ def _build_raw_email(message_id: str, subject: str, body: str, date_hdr: str) ->
 
 
 def test_poll_exchange_sent_returns_outbound_and_advances_watermark(monkeypatch):
+    _bypass_retirement(monkeypatch)
     monkeypatch.setattr(exchange_poller, "EXCHANGE_PASS", "secret")
 
     watermark_sink: list = []
@@ -164,6 +184,7 @@ def test_poll_exchange_sent_returns_outbound_and_advances_watermark(monkeypatch)
 
 
 def test_poll_exchange_sent_returns_empty_when_sent_folder_missing(monkeypatch):
+    _bypass_retirement(monkeypatch)
     monkeypatch.setattr(exchange_poller, "EXCHANGE_PASS", "secret")
 
     watermark_sink: list = []

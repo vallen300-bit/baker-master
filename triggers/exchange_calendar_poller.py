@@ -32,6 +32,10 @@ def poll_exchange_todays_meetings() -> list:
         "source": "exchange"
     }
     """
+    # RETIRE_DEAD_EVOK_SENTINELS_1: Evok host decommissioned; graph_mail replaces it.
+    from triggers.sentinel_health import should_skip_poll
+    if should_skip_poll("exchange_calendar"):
+        return []
     if not EXCHANGE_PASS:
         logger.warning("EXCHANGE_PASS not set — skipping Exchange calendar poll")
         return []

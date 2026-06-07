@@ -94,6 +94,10 @@ def poll_exchange() -> list:
         "metadata": { "source": "exchange", "thread_id": "...", ... }
     }
     """
+    # RETIRE_DEAD_EVOK_SENTINELS_1: Evok host decommissioned; graph_mail replaces it.
+    from triggers.sentinel_health import should_skip_poll
+    if should_skip_poll("exchange"):
+        return []
     if not EXCHANGE_PASS:
         logger.warning("EXCHANGE_PASS not set — skipping Exchange poll")
         return []
@@ -279,6 +283,10 @@ def poll_exchange_sent() -> list:
     Director's address). Downstream retrievers distinguish outbound by sender
     filter; no metadata.direction column exists on email_messages.
     """
+    # RETIRE_DEAD_EVOK_SENTINELS_1: Evok host decommissioned; graph_mail replaces it.
+    from triggers.sentinel_health import should_skip_poll
+    if should_skip_poll("exchange_sent"):
+        return []
     if not EXCHANGE_PASS:
         logger.warning("EXCHANGE_PASS not set — skipping Exchange Sent poll")
         return []
