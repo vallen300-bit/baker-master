@@ -748,7 +748,7 @@ class ClerkToolRegistry:
     def _candidate_words(cls, row: dict[str, Any]) -> list[str]:
         text = " ".join(
             str(row.get(key) or "")
-            for key in ("sender_name", "sender_email", "subject", "body_preview")
+            for key in ("sender_name", "sender_email")
         )
         return [
             normalized
@@ -762,10 +762,14 @@ class ClerkToolRegistry:
         for query_token in query_tokens:
             best = ""
             for candidate_token in candidate_tokens:
-                if query_token == candidate_token or query_token in candidate_token or candidate_token in query_token:
+                if query_token == candidate_token:
                     best = candidate_token
                     break
-                if cls._distance_at_most(query_token, candidate_token, max_distance=2):
+                max_distance = 1 if len(query_tokens) == 1 or len(query_token) <= 4 else 2
+                if (
+                    query_token[0] == candidate_token[0]
+                    and cls._distance_at_most(query_token, candidate_token, max_distance=max_distance)
+                ):
                     best = candidate_token
                     break
             if not best:
@@ -1045,14 +1049,13 @@ class ClerkToolRegistry:
         rows = self._query_rows(
             """
             SELECT message_id, thread_id, sender_name, sender_email, subject,
-                   body_preview, received_date, priority, ingested_at
+                   LEFT(full_body, %s) AS body_preview, received_date, priority, ingested_at
             FROM email_messages
             WHERE sender_name IS NOT NULL OR sender_email IS NOT NULL
-                  OR subject IS NOT NULL OR body_preview IS NOT NULL
             ORDER BY received_date DESC NULLS LAST, ingested_at DESC NULLS LAST
             LIMIT %s
             """,
-            (candidate_limit,),
+            (_TOOL_TEXT_LIMIT, candidate_limit),
         )
 
         query_display = self._word_display_map(query)
@@ -1065,7 +1068,7 @@ class ClerkToolRegistry:
                 continue
             candidate_display = self._word_display_map(" ".join(
                 str(row.get(key) or "")
-                for key in ("sender_name", "sender_email", "subject", "body_preview")
+                for key in ("sender_name", "sender_email")
             ))
             for src, dst in interpreted.items():
                 interpreted_display.setdefault(

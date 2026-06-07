@@ -386,7 +386,47 @@ def test_email_store_search_fuzzy_fallback_resolves_name_typo(monkeypatch):
     assert result["fuzzy"]["interpreted"] == {"Petzer": "Peter"}
     assert "interpreted 'Petzer' as 'Peter'" in result["fuzzy"]["note"]
     assert query_calls
-    assert query_calls[0][1] == (1000,)
+    assert query_calls[0][1] == (8000, 1000)
+
+
+def test_email_store_fuzzy_query_uses_real_email_message_columns(monkeypatch):
+    registry = ClerkToolRegistry()
+    captured = {}
+
+    def fake_query_rows(sql, params):
+        captured["sql"] = sql
+        captured["params"] = params
+        return []
+
+    monkeypatch.setattr(registry, "_query_rows", fake_query_rows)
+
+    result = json.loads(registry._email_store_fuzzy_search("Petzer Storer", 10))
+
+    assert result == {"channel": "email_store", "count": 0, "results": []}
+    assert "body_preview" not in captured["sql"].split("FROM email_messages", 1)[1]
+    assert "LEFT(full_body, %s) AS body_preview" in captured["sql"]
+    assert "WHERE sender_name IS NOT NULL OR sender_email IS NOT NULL" in " ".join(captured["sql"].split())
+    assert captured["params"] == (8000, 1000)
+
+
+def test_email_store_fuzzy_person_single_token_does_not_match_subject_substring(monkeypatch):
+    registry = ClerkToolRegistry()
+
+    monkeypatch.setattr(registry, "_query_rows", lambda *args: [{
+        "message_id": "msg-annual",
+        "thread_id": "thread-annual",
+        "sender_name": "Finance Bot",
+        "sender_email": "finance@example.com",
+        "subject": "Annual budget update",
+        "body_preview": "Annual plan",
+        "received_date": "2026-06-06T10:00:00Z",
+        "priority": None,
+        "ingested_at": "2026-06-06T10:01:00Z",
+    }])
+
+    result = json.loads(registry._email_store_fuzzy_search("person:Ann", 10))
+
+    assert result == {"channel": "email_store", "count": 0, "results": []}
 
 
 def test_email_store_fuzzy_fallback_does_not_fire_for_single_keyword(monkeypatch):
