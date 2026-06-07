@@ -734,6 +734,59 @@ class ClerkToolRegistry:
                     "required": ["content", "filename"],
                 },
             },
+            # CLERK_FULL_CAPABILITY_POLICY_1 PR 2a — live web/X search via Grok (xAI).
+            # Read-only: returns a cited summary; performs no writes or sends.
+            {
+                "name": "baker_grok_web_search",
+                "description": (
+                    "Live web search via Grok (xAI) with citations. Use for current/"
+                    "external facts not in Baker's own memory (news, public companies, "
+                    "market data, recent events). Returns a summary plus source URLs."
+                ),
+                "input_schema": {
+                    "type": "object",
+                    "properties": {
+                        "query": {"type": "string"},
+                        "allowed_domains": {"type": "array", "items": {"type": "string"}},
+                        "excluded_domains": {"type": "array", "items": {"type": "string"}},
+                    },
+                    "required": ["query"],
+                },
+            },
+            {
+                "name": "baker_grok_x_search",
+                "description": (
+                    "Live X/Twitter search via Grok (xAI). Use for what people are saying "
+                    "on X about a topic/person/event. Returns a summary plus cited posts."
+                ),
+                "input_schema": {
+                    "type": "object",
+                    "properties": {
+                        "query": {"type": "string"},
+                        "from_date": {"type": "string", "description": "ISO date YYYY-MM-DD lower bound"},
+                        "to_date": {"type": "string", "description": "ISO date YYYY-MM-DD upper bound"},
+                        "allowed_x_handles": {"type": "array", "items": {"type": "string"}},
+                        "excluded_x_handles": {"type": "array", "items": {"type": "string"}},
+                    },
+                    "required": ["query"],
+                },
+            },
+            {
+                "name": "baker_grok_ask",
+                "description": (
+                    "Ask Grok (xAI) a plain question under its own training + reasoning "
+                    "(no live retrieval). Use for general knowledge / synthesis when Baker "
+                    "memory and web/X search are not the right fit."
+                ),
+                "input_schema": {
+                    "type": "object",
+                    "properties": {
+                        "prompt": {"type": "string"},
+                        "instructions": {"type": "string"},
+                    },
+                    "required": ["prompt"],
+                },
+            },
         ]
 
     def execute(self, name: str, args: dict[str, Any]) -> str:
@@ -754,6 +807,8 @@ class ClerkToolRegistry:
                 return self._format_convert(args)
             if name == "file_save":
                 return self._file_save(args)
+            if name in ("baker_grok_web_search", "baker_grok_x_search", "baker_grok_ask"):
+                return self._grok_dispatch(name, args)
             return _safe_json({"error": f"unknown tool: {name}"})
         except BaseException as e:
             # CLERK_SEARCH_BACKEND_FAILSILENT_FIX_1 (B): a backend OUTAGE must
@@ -1654,6 +1709,15 @@ class ClerkToolRegistry:
             Path(tmp_path).unlink(missing_ok=True)
         return _safe_json({"status": "ready", "path": meta.get("path_display", dropbox_path), "metadata": meta})
 
+    # ── CLERK_FULL_CAPABILITY_POLICY_1 PR 2a — live web/X search via Grok (xAI) ──
+    def _grok_dispatch(self, name: str, args: dict[str, Any]) -> str:
+        """Route Clerk's Grok tools through tools.grok.dispatch_grok so they inherit
+        the SAME cost circuit-breaker + usage logging (source=grok_realtime) +
+        timeout validation as every other Grok caller. Calling GrokClient directly
+        would be an unmetered live-xAI path for an autonomous model (G0 #2391)."""
+        from tools.grok import dispatch_grok
+        return dispatch_grok(name, args)
+
 
 _CLERK_SYSTEM_PROMPT = """You are Clerk, Brisen's document clerk.
 Use read-only tools to search Baker memory across Gmail, Outlook/Graph, the stored
@@ -1719,11 +1783,16 @@ _CLERK_SEARCH_FAILLOUD_MSG = (
 # below is the SECONDARY safety net (for lookup tasks the classifier missed),
 # tightened to require a data object so it stops over-triggering on chit-chat.
 
-# A Baker-data lookup is GROUNDED iff a search OR a fetch tool ran this turn.
+# A lookup is GROUNDED iff a search OR a fetch tool ran this turn.
 # (codex G3 Finding B: a successful document_fetch/email_download retrieves real
 # data and must NOT be forced into a search retry.)
 _SEARCH_TOOLS = frozenset({"baker_search", "email_search", "channel_search", "transcripts_by_matter"})
-_GROUNDING_TOOLS = _SEARCH_TOOLS | frozenset({"document_fetch", "email_download"})
+# CLERK_FULL_CAPABILITY_POLICY_1 PR 2a: a live web/X retrieval also grounds a lookup
+# answer (the model really did retrieve), so it must NOT trip the fabrication-retry.
+# grok_ask is NOT here — it is training-knowledge Q&A, not retrieval.
+_GROUNDING_TOOLS = _SEARCH_TOOLS | frozenset({
+    "document_fetch", "email_download", "baker_grok_web_search", "baker_grok_x_search",
+})
 
 # Lookup INTENT in the user task (verbs/phrases that demand a retrieval). codex G3
 # Finding A: added terse "what do we have on / anything on / what's on / got
