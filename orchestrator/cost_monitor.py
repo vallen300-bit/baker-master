@@ -15,6 +15,7 @@ Usage:
                  matter_slug="oskolkov")  # matter_slug optional
 """
 import logging
+import math
 import os
 from datetime import date, datetime, timezone
 from typing import Optional, Tuple
@@ -35,6 +36,17 @@ MODEL_COSTS = {
     "gemini-2.5-pro": {"input": 1.25, "output": 10.00},
     # xAI (GROK_API_CAPABILITY_1; pricing per xAI docs 2026-05-17)
     "grok-4.3": {"input": 1.25, "output": 2.50},
+    # Perplexity Sonar (CLERK_FULL_CAPABILITY_POLICY_1 PR 2d-2; pricing per
+    # Perplexity docs 2026-06-07). These are the TOKEN rates only — the per-request
+    # search fee is NOT token-attributable. For Perplexity calls the real spend is
+    # recorded via log_api_cost(cost_usd_override=...) from the API's
+    # usage.cost.total_cost (which already folds in the request fee); this table is
+    # the token-estimate fallback used only when the API omits usage.cost.
+    # sonar-reasoning was deprecated by Perplexity 2025-12-15 -> replaced by
+    # sonar-reasoning-pro (G0 #2443 M2).
+    "sonar": {"input": 1.00, "output": 1.00},
+    "sonar-pro": {"input": 3.00, "output": 15.00},
+    "sonar-reasoning-pro": {"input": 2.00, "output": 8.00},
 }
 DEFAULT_COSTS = {"input": 15.00, "output": 75.00}
 
@@ -190,6 +202,19 @@ def calculate_cost_eur(
 # Logging
 # ─────────────────────────────────────────────
 
+def _is_usable_cost(value) -> bool:
+    """True if ``value`` is a finite, non-negative number safe to record as cost.
+
+    Guards the cost_usd_override path against NaN / inf / negative provider values
+    so a malformed usage block can never poison the daily total or the breaker.
+    """
+    try:
+        v = float(value)
+    except (TypeError, ValueError):
+        return False
+    return math.isfinite(v) and v >= 0.0
+
+
 def log_api_cost(
     model: str,
     input_tokens: int,
@@ -200,6 +225,7 @@ def log_api_cost(
     matter_slug: str = None,
     cache_creation_input_tokens: int = 0,
     cache_read_input_tokens: int = 0,
+    cost_usd_override: Optional[float] = None,
 ) -> Optional[float]:
     """Log an API call cost. Returns cost in EUR or None on failure.
 
@@ -208,13 +234,24 @@ def log_api_cost(
       - cache_creation_input_tokens / cache_read_input_tokens: Anthropic
         prompt-cache accounting; default 0 so non-caching callers
         (capability_runner, pipeline, Gemini paths) work unchanged.
+      - cost_usd_override: when the provider reports an authoritative USD cost that
+        the token-rate table cannot reproduce (e.g. Perplexity Sonar's
+        usage.cost.total_cost, which folds in a non-token per-request search fee),
+        pass it here. The row's cost_eur is then this exact USD value converted to
+        EUR rather than the token estimate — so the daily total + circuit breaker
+        do NOT undercount metered spend (G0 #2443 H1). Tokens are still recorded
+        for audit. Default None preserves the token-estimate path for every other
+        caller. A non-finite / negative override is ignored (falls back to estimate).
     All trailing params are kwargs-defaulted — call sites should pass by name.
     """
-    cost_eur = calculate_cost_eur(
-        model, input_tokens, output_tokens,
-        cache_creation_input_tokens=cache_creation_input_tokens,
-        cache_read_input_tokens=cache_read_input_tokens,
-    )
+    if cost_usd_override is not None and _is_usable_cost(cost_usd_override):
+        cost_eur = round(float(cost_usd_override) * USD_TO_EUR, 6)
+    else:
+        cost_eur = calculate_cost_eur(
+            model, input_tokens, output_tokens,
+            cache_creation_input_tokens=cache_creation_input_tokens,
+            cache_read_input_tokens=cache_read_input_tokens,
+        )
     try:
         from memory.store_back import SentinelStoreBack
         store = SentinelStoreBack._get_global_instance()

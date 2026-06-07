@@ -98,7 +98,10 @@ _CLERK_TOOL_POLICY: dict[str, str] = {
     "baker_grok_ask": CLERK_ALLOW,
     "baker_grok_web_search": CLERK_ALLOW,
     "baker_grok_x_search": CLERK_ALLOW,
-    "perplexity_ask": CLERK_ALLOW,
+    # ALLOW — Perplexity Sonar cited web-grounded ask (PR 2d-2; metered LLM call,
+    # routed through the governed tools.perplexity.dispatch_perplexity so it inherits
+    # the cost circuit-breaker + usage logging, NOT a direct-client bypass).
+    "baker_perplexity_ask": CLERK_ALLOW,
     # ALLOW — internal agent bus (NOT an external send; coordination only)
     "baker_inbox_read": CLERK_ALLOW,
     "baker_inbox_post": CLERK_ALLOW,
@@ -187,6 +190,14 @@ _CLERK_BUS_TOOLS = (
     "baker_inbox_read",
     "baker_inbox_post",
     "baker_inbox_ack",
+)
+
+# CLERK_FULL_CAPABILITY_POLICY_1 PR 2d-2 — Perplexity Sonar cited web-grounded ask,
+# routed through the governed tools.perplexity.dispatch_perplexity (cost breaker +
+# usage logging — a metered LLM call, NOT a direct-client bypass). A real web
+# retrieval, so it IS a grounding tool.
+_CLERK_PERPLEXITY_TOOLS = (
+    "baker_perplexity_ask",
 )
 
 # G2 H1 HIGH (#2431): the MCP baker_inbox_post schema's `kind` enum includes the
@@ -947,6 +958,12 @@ class ClerkToolRegistry:
             out += _pick_tool_schemas(CLAIMSMAX_TOOLS, frozenset(_CLERK_CLAIMSMAX_READ_TOOLS))
         except Exception:
             logger.warning("Clerk: claimsmax TOOLS import failed — claimsmax reads unavailable")
+        try:
+            # PR 2d-2 — Perplexity Sonar cited ask, schema reused from source TOOLS.
+            from tools.perplexity import PERPLEXITY_TOOLS
+            out += _pick_tool_schemas(PERPLEXITY_TOOLS, frozenset(_CLERK_PERPLEXITY_TOOLS))
+        except Exception:
+            logger.warning("Clerk: perplexity TOOLS import failed — perplexity ask unavailable")
         return out
 
     def execute(self, name: str, args: dict[str, Any]) -> str:
@@ -975,6 +992,8 @@ class ClerkToolRegistry:
                 return self._gmail_dispatch(name, args)
             if name in _CLERK_CLAIMSMAX_READ_TOOLS:
                 return self._claimsmax_dispatch(name, args)
+            if name in _CLERK_PERPLEXITY_TOOLS:
+                return self._perplexity_dispatch(name, args)
             return _safe_json({"error": f"unknown tool: {name}"})
         except BaseException as e:
             # CLERK_SEARCH_BACKEND_FAILSILENT_FIX_1 (B): a backend OUTAGE must
@@ -1917,6 +1936,16 @@ class ClerkToolRegistry:
         from tools.grok import dispatch_grok
         return dispatch_grok(name, args)
 
+    # ── CLERK_FULL_CAPABILITY_POLICY_1 PR 2d-2 — Perplexity Sonar cited ask ──
+    def _perplexity_dispatch(self, name: str, args: dict[str, Any]) -> str:
+        """Route Clerk's Perplexity ask through tools.perplexity.dispatch_perplexity so
+        it inherits the SAME cost circuit-breaker + usage logging
+        (source=perplexity_realtime) + timeout validation. baker_perplexity_ask is a
+        metered LLM call — constructing PerplexityClient directly would be an unmetered
+        live path for an autonomous model (the G0 #2391 lesson)."""
+        from tools.perplexity import dispatch_perplexity
+        return dispatch_perplexity(name, args if isinstance(args, dict) else {})
+
 
 _CLERK_SYSTEM_PROMPT = """You are Clerk, Brisen's document clerk.
 Use read-only tools to search Baker memory across Gmail, Outlook/Graph, the stored
@@ -1991,8 +2020,9 @@ _SEARCH_TOOLS = frozenset({"baker_search", "email_search", "channel_search", "tr
 # grok_ask is NOT here — it is training-knowledge Q&A, not retrieval.
 _GROUNDING_TOOLS = _SEARCH_TOOLS | frozenset({
     "document_fetch", "email_download", "baker_grok_web_search", "baker_grok_x_search",
-}) | frozenset(_CLERK_BAKER_READ_TOOLS) | frozenset(_CLERK_GMAIL_READ_TOOLS) | frozenset(_CLERK_CLAIMSMAX_READ_TOOLS)
+}) | frozenset(_CLERK_BAKER_READ_TOOLS) | frozenset(_CLERK_GMAIL_READ_TOOLS) | frozenset(_CLERK_CLAIMSMAX_READ_TOOLS) | frozenset(_CLERK_PERPLEXITY_TOOLS)
 # ^ PR 2b/2c: Baker MCP + gmail + claimsmax reads retrieve real data, so they ground a lookup answer
+# ^ PR 2d-2: baker_perplexity_ask is a live web retrieval (cited) — it grounds a lookup answer too.
 
 # Lookup INTENT in the user task (verbs/phrases that demand a retrieval). codex G3
 # Finding A: added terse "what do we have on / anything on / what's on / got
