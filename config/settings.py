@@ -102,7 +102,7 @@ class Qwen3Config:
     prompt_price_per_m: float = _env_float("CLERK_QWEN_PROMPT_PRICE_PER_M", 0.0)
     completion_price_per_m: float = _env_float("CLERK_QWEN_COMPLETION_PRICE_PER_M", 0.0)
     default_mail_provider: str = field(
-        default_factory=lambda: _env_choice("CLERK_DEFAULT_MAIL_PROVIDER", "graph", {"gmail", "graph"})
+        default_factory=lambda: _env_choice("CLERK_DEFAULT_MAIL_PROVIDER", "all", {"all", "gmail", "graph"})
     )
 
     @property

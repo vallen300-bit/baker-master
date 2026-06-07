@@ -354,7 +354,7 @@ def cmd_url(args: argparse.Namespace) -> int:
 def cmd_chat(args: argparse.Namespace) -> int:
     client = ClerkQwenClient(args.base_url, resolve_api_key(args.api_key))
     print("Clerk Qwen3 - Brisen document clerk")
-    print("Reach: Gmail, Outlook/Graph, Dropbox, Baker Clerk workbench, internal bus.")
+    print("Reach: Gmail, Outlook/Graph, WhatsApp, Slack, transcripts, calendar, Dropbox/documents, sent mail, RSS/Substack, Baker search, internal bus.")
     print("Limits: no money, no external sends, no production changes; risky acts return drafts or pending_approval.")
     print("Type a task. Empty line, Ctrl-D, exit, or quit ends the session.")
     while True:

@@ -51,6 +51,21 @@ _FORBIDDEN_TOOL_ARG_VALUES = re.compile(
     r"\b(send|delete|remove|move|archive|mark\s+read|mark\s+unread|pay|payment|wire|transfer)\b",
     re.I,
 )
+_EMAIL_SEARCH_PROVIDERS = ("all", "gmail", "graph", "store")
+_EMAIL_DOWNLOAD_PROVIDERS = ("all", "gmail", "graph", "store")
+_CHANNEL_SEARCH_CHANNELS = (
+    "email_store",
+    "whatsapp",
+    "slack",
+    "transcripts",
+    "calendar",
+    "documents",
+    "sent_emails",
+    "rss",
+    "substack",
+)
+_SUBSTACK_COLLECTIONS = ("baker-substack-natesnewsletter",)
+_TOOL_TEXT_LIMIT = 8_000
 
 
 class ClerkRuntimeError(RuntimeError):
@@ -469,13 +484,33 @@ class ClerkToolRegistry:
         default_mail_provider = self._default_mail_provider()
         return [
             {
-                "name": "email_search",
-                "description": "Search Gmail or the ready Graph mailbox by query/sender/subject/date/message id.",
+                "name": "baker_search",
+                "description": (
+                    "Unified read-only semantic search across Baker memory/retrieval "
+                    "collections, including emails, WhatsApp, Slack, meetings, documents, "
+                    "RSS/Substack where indexed, contacts, and project memory."
+                ),
                 "input_schema": {
                     "type": "object",
                     "properties": {
                         "query": {"type": "string"},
-                        "provider": {"type": "string", "enum": ["gmail", "graph"], "default": default_mail_provider},
+                        "max_results": {"type": "integer", "default": 8, "minimum": 1, "maximum": 20},
+                    },
+                    "required": ["query"],
+                },
+            },
+            {
+                "name": "email_search",
+                "description": "Search Gmail, Outlook/Graph, and Baker's stored email index by query/sender/subject/date/message id.",
+                "input_schema": {
+                    "type": "object",
+                    "properties": {
+                        "query": {"type": "string"},
+                        "provider": {
+                            "type": "string",
+                            "enum": list(_EMAIL_SEARCH_PROVIDERS),
+                            "default": default_mail_provider,
+                        },
                         "max_results": {"type": "integer", "default": 10, "minimum": 1, "maximum": 50},
                     },
                     "required": ["query"],
@@ -488,10 +523,45 @@ class ClerkToolRegistry:
                     "type": "object",
                     "properties": {
                         "message_id": {"type": "string"},
-                        "provider": {"type": "string", "enum": ["gmail", "graph"], "default": default_mail_provider},
+                        "provider": {
+                            "type": "string",
+                            "enum": list(_EMAIL_DOWNLOAD_PROVIDERS),
+                            "default": default_mail_provider,
+                        },
                         "include_attachments": {"type": "boolean", "default": False},
                     },
                     "required": ["message_id"],
+                },
+            },
+            {
+                "name": "channel_search",
+                "description": (
+                    "Read-only exact search in a specific Baker channel using existing "
+                    "retrievers/tables: email_store, whatsapp, slack, transcripts, "
+                    "calendar, documents, sent_emails, rss, or substack."
+                ),
+                "input_schema": {
+                    "type": "object",
+                    "properties": {
+                        "channel": {"type": "string", "enum": list(_CHANNEL_SEARCH_CHANNELS)},
+                        "query": {"type": "string", "default": ""},
+                        "matter_slug": {"type": "string"},
+                        "max_results": {"type": "integer", "default": 5, "minimum": 1, "maximum": 20},
+                    },
+                    "required": ["channel"],
+                },
+            },
+            {
+                "name": "transcripts_by_matter",
+                "description": "Read-only search of Plaud/Fireflies/YouTube meeting transcripts by matter slug.",
+                "input_schema": {
+                    "type": "object",
+                    "properties": {
+                        "matter_slug": {"type": "string"},
+                        "query": {"type": "string", "default": ""},
+                        "max_results": {"type": "integer", "default": 5, "minimum": 1, "maximum": 20},
+                    },
+                    "required": ["matter_slug"],
                 },
             },
             {
@@ -533,10 +603,16 @@ class ClerkToolRegistry:
 
     def execute(self, name: str, args: dict[str, Any]) -> str:
         try:
+            if name == "baker_search":
+                return self._baker_search(args)
             if name == "email_search":
                 return self._email_search(args)
             if name == "email_download":
                 return self._email_download(args)
+            if name == "channel_search":
+                return self._channel_search(args)
+            if name == "transcripts_by_matter":
+                return self._transcripts_by_matter(args)
             if name == "document_fetch":
                 return self._document_fetch(args)
             if name == "format_convert":
@@ -550,15 +626,87 @@ class ClerkToolRegistry:
 
     @staticmethod
     def _default_mail_provider() -> str:
-        provider = str(getattr(config.qwen3, "default_mail_provider", "graph") or "graph").strip().lower()
-        return provider if provider in {"gmail", "graph"} else "graph"
+        provider = str(getattr(config.qwen3, "default_mail_provider", "all") or "all").strip().lower()
+        return provider if provider in set(_EMAIL_SEARCH_PROVIDERS) else "all"
+
+    @staticmethod
+    def _clamped_limit(value: Any, default: int = 5, upper: int = 20) -> int:
+        try:
+            limit = int(value or default)
+        except (TypeError, ValueError):
+            limit = default
+        return min(max(limit, 1), upper)
+
+    @staticmethod
+    def _parse_tool_json(raw: str) -> Any:
+        try:
+            return json.loads(raw)
+        except Exception:
+            return raw
+
+    @staticmethod
+    def _payload_error(payload: Any) -> str | None:
+        if isinstance(payload, dict):
+            error = payload.get("error")
+            return str(error) if error else None
+        return None
+
+    @staticmethod
+    def _payload_count(payload: Any) -> int:
+        if isinstance(payload, list):
+            return len(payload)
+        if not isinstance(payload, dict):
+            return 1 if payload else 0
+        for key in ("match_count", "count", "total"):
+            val = payload.get(key)
+            if isinstance(val, int):
+                return val
+        for key in ("matches", "messages", "results", "articles", "items"):
+            val = payload.get(key)
+            if isinstance(val, list):
+                return len(val)
+        return 0
+
+    def _contexts_json(self, channel: str, contexts: list[Any], limit: int) -> str:
+        results = []
+        for ctx in contexts[:limit]:
+            metadata = dict(getattr(ctx, "metadata", {}) or {})
+            content = str(getattr(ctx, "content", "") or "")
+            results.append({
+                "source": getattr(ctx, "source", channel),
+                "score": getattr(ctx, "score", None),
+                "label": metadata.get("label") or metadata.get("type") or "",
+                "date": metadata.get("date") or metadata.get("created_at") or metadata.get("ingested_at") or "",
+                "metadata": metadata,
+                "content": content[:_TOOL_TEXT_LIMIT],
+            })
+        return _safe_json({"channel": channel, "count": len(results), "results": results})
+
+    def _baker_search(self, args: dict[str, Any]) -> str:
+        query = str(args.get("query", "")).strip()
+        if not query:
+            return _safe_json({"error": "query is required"})
+        limit = self._clamped_limit(args.get("max_results"), default=8, upper=20)
+        from memory.retriever import SentinelRetriever
+
+        retriever = SentinelRetriever._get_global_instance()
+        contexts = retriever.search_all_collections(
+            query=query,
+            limit_per_collection=limit,
+            score_threshold=0.3,
+        )
+        return self._contexts_json("baker_search", contexts, limit)
 
     def _email_search(self, args: dict[str, Any]) -> str:
         provider = str(args.get("provider") or self._default_mail_provider()).strip().lower()
         query = str(args.get("query", "")).strip()
-        max_results = min(max(int(args.get("max_results", 10) or 10), 1), 50)
+        max_results = self._clamped_limit(args.get("max_results"), default=10, upper=50)
+        if provider == "all":
+            return self._email_search_all(query, max_results)
         if provider == "graph":
             return self._graph_email_search(query, max_results)
+        if provider == "store":
+            return self._email_store_search(query, max_results)
 
         from tools.gmail import dispatch_gmail
 
@@ -567,8 +715,12 @@ class ClerkToolRegistry:
     def _email_download(self, args: dict[str, Any]) -> str:
         provider = str(args.get("provider") or self._default_mail_provider()).strip().lower()
         message_id = str(args.get("message_id", "")).strip()
+        if provider == "all":
+            return self._email_download_all(message_id, bool(args.get("include_attachments")))
         if provider == "graph":
             return self._graph_email_download(message_id)
+        if provider == "store":
+            return self._email_store_download(message_id)
 
         from tools.gmail import dispatch_gmail
 
@@ -595,6 +747,108 @@ class ClerkToolRegistry:
                 attachments.append({"filename": filename, "error": att_raw})
         parsed["attachment_texts"] = attachments
         return _safe_json(parsed)
+
+    def _email_search_all(self, query: str, max_results: int) -> str:
+        results: dict[str, Any] = {}
+        errors: dict[str, str] = {}
+        providers = (
+            ("graph", lambda: self._graph_email_search(query, max_results)),
+            ("gmail", lambda: self._gmail_email_search(query, max_results)),
+            ("store", lambda: self._email_store_search(query, max_results)),
+        )
+        for name, fn in providers:
+            try:
+                payload = self._parse_tool_json(fn())
+                error = self._payload_error(payload)
+                if error:
+                    errors[name] = error
+                results[name] = payload
+            except BaseException as e:
+                logger.warning("Clerk email_search provider failed (%s): %s", name, type(e).__name__)
+                errors[name] = type(e).__name__
+                results[name] = {"error": type(e).__name__}
+        return _safe_json({
+            "provider": "all",
+            "match_count": sum(self._payload_count(payload) for payload in results.values()),
+            "results": results,
+            "errors": errors,
+        })
+
+    def _email_download_all(self, message_id: str, include_attachments: bool) -> str:
+        results: dict[str, Any] = {}
+        errors: dict[str, str] = {}
+        providers = (
+            ("graph", lambda: self._graph_email_download(message_id)),
+            ("gmail", lambda: self._gmail_email_download(message_id, include_attachments)),
+            ("store", lambda: self._email_store_download(message_id)),
+        )
+        for name, fn in providers:
+            try:
+                payload = self._parse_tool_json(fn())
+                error = self._payload_error(payload)
+                if error:
+                    errors[name] = error
+                results[name] = payload
+            except BaseException as e:
+                logger.warning("Clerk email_download provider failed (%s): %s", name, type(e).__name__)
+                errors[name] = type(e).__name__
+                results[name] = {"error": type(e).__name__}
+        return _safe_json({"provider": "all", "message_id": message_id, "results": results, "errors": errors})
+
+    @staticmethod
+    def _gmail_email_search(query: str, max_results: int) -> str:
+        from tools.gmail import dispatch_gmail
+
+        return dispatch_gmail("baker_gmail_search", {"query": query, "max_results": max_results})
+
+    def _gmail_email_download(self, message_id: str, include_attachments: bool) -> str:
+        from tools.gmail import dispatch_gmail
+
+        raw = dispatch_gmail("baker_gmail_read_message", {"message_id": message_id})
+        if not include_attachments:
+            return raw
+
+        try:
+            parsed = json.loads(raw)
+        except Exception:
+            return raw
+        attachments = []
+        for att in parsed.get("attachments") or []:
+            filename = att.get("filename")
+            if not filename:
+                continue
+            att_raw = dispatch_gmail(
+                "baker_gmail_attachment_read",
+                {"message_id": message_id, "filename": filename, "include_bytes": False},
+            )
+            try:
+                attachments.append(json.loads(att_raw))
+            except Exception:
+                attachments.append({"filename": filename, "error": att_raw})
+        parsed["attachment_texts"] = attachments
+        return _safe_json(parsed)
+
+    def _email_store_search(self, query: str, max_results: int) -> str:
+        from memory.retriever import SentinelRetriever
+
+        retriever = SentinelRetriever._get_global_instance()
+        contexts = retriever.get_email_messages(query, limit=max_results) if query else retriever.get_recent_emails(limit=max_results)
+        return self._contexts_json("email_store", contexts, max_results)
+
+    def _email_store_download(self, message_id: str) -> str:
+        rows = self._query_rows(
+            """
+            SELECT message_id, thread_id, sender_name, sender_email, subject,
+                   full_body, received_date, priority, ingested_at
+            FROM email_messages
+            WHERE message_id = %s
+            LIMIT 1
+            """,
+            (message_id,),
+        )
+        if not rows:
+            return _safe_json({"error": "email not found in email_messages", "message_id": message_id})
+        return _safe_json({"provider": "store", "message": rows[0]})
 
     def _graph_email_search(self, query: str, max_results: int) -> str:
         from kbl.graph_client import GraphClient
@@ -635,6 +889,261 @@ class ClerkToolRegistry:
         if msg is None:
             return _safe_json({"error": "graph message fetch failed"})
         return _safe_json(msg)
+
+    def _channel_search(self, args: dict[str, Any]) -> str:
+        channel = str(args.get("channel", "")).strip().lower()
+        query = str(args.get("query", "")).strip()
+        matter_slug = str(args.get("matter_slug", "")).strip()
+        limit = self._clamped_limit(args.get("max_results"), default=5, upper=20)
+        if channel not in set(_CHANNEL_SEARCH_CHANNELS):
+            return _safe_json({"error": f"unsupported channel: {channel}", "allowed": list(_CHANNEL_SEARCH_CHANNELS)})
+        if channel == "email_store":
+            return self._email_store_search(query, limit)
+        if channel == "whatsapp":
+            from memory.retriever import SentinelRetriever
+
+            retriever = SentinelRetriever._get_global_instance()
+            contexts = retriever.get_whatsapp_messages(query, limit=limit) if query else retriever.get_recent_whatsapp(limit=limit)
+            return self._contexts_json("whatsapp", contexts, limit)
+        if channel == "transcripts":
+            if matter_slug:
+                return self._transcripts_by_matter({"matter_slug": matter_slug, "query": query, "max_results": limit})
+            from memory.retriever import SentinelRetriever
+
+            retriever = SentinelRetriever._get_global_instance()
+            contexts = (
+                retriever.get_meeting_transcripts(query, limit=limit)
+                if query else retriever.get_recent_meeting_transcripts(limit=limit)
+            )
+            return self._contexts_json("transcripts", contexts, limit)
+        if channel == "calendar":
+            return self._calendar_search(query, limit)
+        if channel == "documents":
+            return self._documents_search(query, matter_slug, limit)
+        if channel == "slack":
+            return self._slack_search(query, limit)
+        if channel == "sent_emails":
+            return self._sent_emails_search(query, limit)
+        if channel == "rss":
+            return self._rss_search(query, limit)
+        if channel == "substack":
+            return self._substack_search(query, limit)
+        return _safe_json({"error": f"unsupported channel: {channel}"})
+
+    def _query_rows(self, sql: str, params: tuple[Any, ...]) -> list[dict[str, Any]]:
+        from memory.store_back import SentinelStoreBack
+        import psycopg2.extras
+
+        store = SentinelStoreBack._get_global_instance()
+        conn = store._get_conn()
+        if not conn:
+            return []
+        try:
+            cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+            cur.execute(sql, params)
+            rows = [dict(row) for row in cur.fetchall()]
+            cur.close()
+            return rows
+        except Exception:
+            try:
+                conn.rollback()
+            except Exception:
+                pass
+            raise
+        finally:
+            store._put_conn(conn)
+
+    @staticmethod
+    def _like(query: str) -> str:
+        return f"%{query}%"
+
+    def _rows_json(self, channel: str, rows: list[dict[str, Any]]) -> str:
+        return _safe_json({"channel": channel, "count": len(rows), "results": rows})
+
+    def _documents_search(self, query: str, matter_slug: str, limit: int) -> str:
+        params: list[Any] = [query, self._like(query), self._like(query), self._like(query), self._like(query)]
+        matter_clause = ""
+        if matter_slug:
+            matter_clause = " AND matter_slug ILIKE %s"
+            params.append(self._like(matter_slug))
+        params.append(limit)
+        rows = self._query_rows(
+            f"""
+            SELECT id, filename, source_path, document_type, matter_slug, parties,
+                   token_count, ingested_at, LEFT(full_text, %s) AS text
+            FROM documents
+            WHERE full_text IS NOT NULL
+              AND (%s = '' OR filename ILIKE %s OR source_path ILIKE %s
+                   OR matter_slug ILIKE %s OR full_text ILIKE %s)
+              {matter_clause}
+            ORDER BY ingested_at DESC NULLS LAST
+            LIMIT %s
+            """,
+            (_TOOL_TEXT_LIMIT, *params),
+        )
+        return self._rows_json("documents", rows)
+
+    def _slack_search(self, query: str, limit: int) -> str:
+        like = self._like(query)
+        rows = self._query_rows(
+            """
+            SELECT id, channel_id, channel_name, user_id, user_name,
+                   full_text, thread_ts, received_at, ingested_at
+            FROM slack_messages
+            WHERE %s = '' OR channel_name ILIKE %s OR user_name ILIKE %s OR full_text ILIKE %s
+            ORDER BY received_at DESC NULLS LAST, ingested_at DESC NULLS LAST
+            LIMIT %s
+            """,
+            (query, like, like, like, limit),
+        )
+        return self._rows_json("slack", rows)
+
+    def _sent_emails_search(self, query: str, limit: int) -> str:
+        like = self._like(query)
+        rows = self._query_rows(
+            """
+            SELECT id, to_address, subject, body_preview, gmail_message_id,
+                   gmail_thread_id, channel, reply_received, reply_received_at,
+                   reply_snippet, reply_from, created_at
+            FROM sent_emails
+            WHERE %s = '' OR to_address ILIKE %s OR subject ILIKE %s
+                  OR body_preview ILIKE %s OR reply_snippet ILIKE %s OR reply_from ILIKE %s
+            ORDER BY created_at DESC NULLS LAST
+            LIMIT %s
+            """,
+            (query, like, like, like, like, like, limit),
+        )
+        return self._rows_json("sent_emails", rows)
+
+    def _rss_search(self, query: str, limit: int) -> str:
+        like = self._like(query)
+        rows = self._query_rows(
+            """
+            SELECT a.id, a.title, a.url, a.author, a.summary, a.published_at,
+                   a.ingested_at, f.title AS feed_title, f.category
+            FROM rss_articles a
+            LEFT JOIN rss_feeds f ON a.feed_id = f.id
+            WHERE %s = '' OR a.title ILIKE %s OR a.summary ILIKE %s
+                  OR a.author ILIKE %s OR f.title ILIKE %s OR f.category ILIKE %s
+            ORDER BY a.published_at DESC NULLS LAST, a.ingested_at DESC NULLS LAST
+            LIMIT %s
+            """,
+            (query, like, like, like, like, like, limit),
+        )
+        return self._rows_json("rss", rows)
+
+    def _transcripts_by_matter(self, args: dict[str, Any]) -> str:
+        matter_slug = str(args.get("matter_slug", "")).strip()
+        query = str(args.get("query", "")).strip()
+        limit = self._clamped_limit(args.get("max_results"), default=5, upper=20)
+        if not matter_slug:
+            return _safe_json({"error": "matter_slug is required"})
+        like = self._like(query)
+        rows = self._query_rows(
+            """
+            SELECT id, title, meeting_date, duration, organizer, participants,
+                   summary, source, matter_slug, ingested_at,
+                   LEFT(full_transcript, %s) AS transcript
+            FROM meeting_transcripts
+            WHERE matter_slug ILIKE %s
+              AND (%s = '' OR title ILIKE %s OR organizer ILIKE %s
+                   OR participants ILIKE %s OR summary ILIKE %s OR full_transcript ILIKE %s)
+            ORDER BY meeting_date DESC NULLS LAST, ingested_at DESC NULLS LAST
+            LIMIT %s
+            """,
+            (_TOOL_TEXT_LIMIT, self._like(matter_slug), query, like, like, like, like, like, limit),
+        )
+        return self._rows_json("transcripts_by_matter", rows)
+
+    def _substack_search(self, query: str, limit: int) -> str:
+        if not query:
+            return _safe_json({"channel": "substack", "count": 0, "results": [], "note": "query is required for Substack vector search"})
+        from memory.retriever import SentinelRetriever
+
+        retriever = SentinelRetriever._get_global_instance()
+        query_vector = retriever._embed_query(query)
+        contexts = []
+        errors: dict[str, str] = {}
+        for collection in _SUBSTACK_COLLECTIONS:
+            try:
+                contexts.extend(
+                    retriever.search_collection(
+                        query_vector=query_vector,
+                        collection=collection,
+                        limit=limit,
+                        score_threshold=0.2,
+                    )
+                )
+            except Exception as e:
+                errors[collection] = type(e).__name__
+        contexts.sort(key=lambda ctx: getattr(ctx, "score", 0) or 0, reverse=True)
+        payload = json.loads(self._contexts_json("substack", contexts, limit))
+        payload["errors"] = errors
+        return _safe_json(payload)
+
+    def _calendar_search(self, query: str, limit: int) -> str:
+        errors: dict[str, str] = {}
+        meetings: list[dict[str, Any]] = []
+        for name, fn in (
+            ("google_today", self._poll_google_today),
+            ("google_upcoming", self._poll_google_upcoming),
+            ("exchange_today", self._poll_exchange_today),
+        ):
+            try:
+                meetings.extend(fn())
+            except BaseException as e:
+                logger.warning("Clerk calendar source failed (%s): %s", name, type(e).__name__)
+                errors[name] = type(e).__name__
+
+        seen: set[tuple[str, str]] = set()
+        deduped = []
+        for meeting in meetings:
+            key = (str(meeting.get("source", "")), str(meeting.get("id", "")))
+            if key in seen:
+                continue
+            seen.add(key)
+            deduped.append(meeting)
+
+        if query:
+            q = query.lower()
+            filtered = []
+            for meeting in deduped:
+                attendees = " ".join(
+                    f"{a.get('name', '')} {a.get('email', '')}"
+                    for a in meeting.get("attendees", [])
+                    if isinstance(a, dict)
+                )
+                hay = " ".join([
+                    str(meeting.get("title", "")),
+                    str(meeting.get("description", "")),
+                    str(meeting.get("location", "")),
+                    str(meeting.get("organizer", "")),
+                    attendees,
+                ]).lower()
+                if q in hay:
+                    filtered.append(meeting)
+            deduped = filtered
+
+        deduped.sort(key=lambda item: str(item.get("start", "")))
+        return _safe_json({"channel": "calendar", "count": len(deduped[:limit]), "results": deduped[:limit], "errors": errors})
+
+    @staticmethod
+    def _poll_google_today() -> list[dict[str, Any]]:
+        from triggers.calendar_trigger import poll_todays_meetings
+
+        return poll_todays_meetings()
+
+    @staticmethod
+    def _poll_google_upcoming() -> list[dict[str, Any]]:
+        from triggers.calendar_trigger import poll_upcoming_meetings
+
+        return poll_upcoming_meetings(hours_ahead=72)
+
+    @staticmethod
+    def _poll_exchange_today() -> list[dict[str, Any]]:
+        from triggers.exchange_calendar_poller import poll_exchange_todays_meetings
+
+        return poll_exchange_todays_meetings()
 
     def _document_fetch(self, args: dict[str, Any]) -> str:
         source = args.get("source", "dropbox")
@@ -724,7 +1233,11 @@ class ClerkToolRegistry:
 
 
 _CLERK_SYSTEM_PROMPT = """You are Clerk, Brisen's document clerk.
-Use tools to fetch email/documents, convert content, and save a Director-reviewable file.
+Use read-only tools to search Baker memory across Gmail, Outlook/Graph, the stored
+email index, WhatsApp, Slack, meeting transcripts (Plaud/Fireflies/YouTube),
+calendar/events, Dropbox/documents, sent emails, RSS/Substack, and unified semantic
+retrieval. Use conversion/document tools when a fetched document needs extraction,
+and save only Director-reviewable files to Clerk's working folder.
 Never execute money/payment actions, impersonate the Director, change code/production systems,
 create matter slugs, or restructure vault/folders. Posting to the internal Brisen agent bus
 (lead, deputy, clerk, b1-b4, and other fleet agents) is internal coordination: allowed, not
