@@ -432,10 +432,77 @@ _CLICKUP_WORKSPACE_IDS = ["2652545", "24368967", "24382372", "24382764", "243852
 _WAHA_POLL_STATE: dict[str, int] = {"non_healthy_streak": 0, "starting_streak": 0}
 
 
+def clear_retired_source_alerts() -> int:
+    """RETIRED_SOURCE_STALE_ALERT_CLEANUP_1: resolve any stale-watermark alert
+    still sitting active for a now-retired watermark source.
+
+    PR #315 retired the Evok exchange sources so check_stale_watermarks() stops
+    *firing* new STALE DATA alerts for them (RETIRED_WATERMARK_SOURCES skip). But
+    an alert fired *before* the retirement persists as a dangling 'pending' row
+    and keeps surfacing on /health and the alert board even though its source no
+    longer exists.
+
+    Scoped, exact-source_id UPDATE (no title heuristics): only alerts whose
+    source_id is 'stale_watermark_<retired-wm-source>' are touched. We do NOT
+    route through SentinelStoreBack.resolve_alert() — that fires
+    dismiss_related_alerts() (ALERT-DEDUP-2) and could over-resolve unrelated
+    alerts that merely share a matter/topic. exit_reason='source-retired' records
+    this as a legitimate resolution (source decommissioned), not a user dismiss.
+
+    Idempotent: rows already resolved/dismissed are excluded, so re-running is a
+    no-op. Called from check_stale_watermarks() so retiring a source self-heals
+    any orphan within one job tick (the scheduler piggybacks next_run_time=now so
+    it also runs immediately on deploy). Returns the number of rows cleared.
+    """
+    if not RETIRED_WATERMARK_SOURCES:
+        return 0
+    source_ids = [f"stale_watermark_{wm}" for wm in sorted(RETIRED_WATERMARK_SOURCES)]
+    conn, store = _get_conn()
+    if not conn:
+        return 0
+    try:
+        cur = conn.cursor()
+        cur.execute(
+            """
+            UPDATE alerts
+               SET status = 'resolved',
+                   exit_reason = 'source-retired',
+                   resolved_at = NOW()
+             WHERE source = 'sentinel_health'
+               AND source_id = ANY(%s)
+               AND status NOT IN ('resolved', 'dismissed')
+            """,
+            (source_ids,),
+        )
+        conn.commit()
+        cleared = cur.rowcount or 0
+        cur.close()
+        if cleared:
+            logger.info(
+                "Cleared %d dangling stale-watermark alert(s) for retired "
+                "source(s): %s",
+                cleared, source_ids,
+            )
+        return cleared
+    except Exception as e:
+        try:
+            conn.rollback()
+        except Exception:
+            pass
+        logger.warning(f"clear_retired_source_alerts failed: {e}")
+        return 0
+    finally:
+        _put_conn(store, conn)
+
+
 def check_stale_watermarks():
     """SENTINEL-SAFETY-1: Check trigger_watermarks for sources that haven't
     advanced in longer than expected. Fires a T2 alert per stale source.
     Run every 6 hours."""
+    # RETIRED_SOURCE_STALE_ALERT_CLEANUP_1: clear any orphaned fired alert for a
+    # retired source first, so retiring a source never leaves a dangling alert
+    # behind (the suppression above only stops *future* fires).
+    clear_retired_source_alerts()
     conn, store = _get_conn()
     if not conn:
         return

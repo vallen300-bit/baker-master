@@ -575,6 +575,13 @@ def _register_jobs(scheduler: BackgroundScheduler):
         IntervalTrigger(hours=6),
         id="stale_watermark_check", name="Stale watermark detector",
         coalesce=True, max_instances=1, replace_existing=True,
+        # RETIRED_SOURCE_STALE_ALERT_CLEANUP_1: run once immediately on deploy
+        # (not just every 6h) so check_stale_watermarks() — which now also clears
+        # orphaned alerts for retired sources via clear_retired_source_alerts() —
+        # purges any dangling stale-watermark alert (e.g. the retired
+        # stale_watermark_exchange_poll) as soon as the process comes up. Leaner
+        # than a separate startup one-shot job (one surface, not two).
+        next_run_time=datetime.now(timezone.utc),
     )
     register_expected_job("stale_watermark_check", 6 * 60 * 60)
     logger.info("Registered: stale_watermark_check (every 6 hours)")
