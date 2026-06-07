@@ -265,7 +265,7 @@ def test_email_search_keeps_explicit_gmail_provider_selectable(monkeypatch):
     assert calls == [("baker_gmail_search", {"query": "from:peter", "max_results": 10})]
 
 
-def test_email_search_rewrites_fabricated_from_address_to_all_name_search(monkeypatch):
+def test_email_search_rewrites_fabricated_from_address_to_all_name_search(monkeypatch, caplog):
     registry = ClerkToolRegistry()
     calls = []
 
@@ -284,22 +284,49 @@ def test_email_search_rewrites_fabricated_from_address_to_all_name_search(monkey
     monkeypatch.setattr(registry, "_graph_email_search", fake_graph_search)
     monkeypatch.setattr(registry, "_email_store_search", fake_store_search)
     monkeypatch.setitem(sys.modules, "tools.gmail", SimpleNamespace(dispatch_gmail=fake_dispatch))
+    caplog.set_level("INFO", logger="baker.clerk_runtime")
 
     result = json.loads(registry.execute(
         "email_search",
-        {"provider": "graph", "query": "from:peter.storer@example.com", "max_results": 1},
+        {"provider": "graph", "query": "private-extra from:peter.storer@example.com", "max_results": 1},
     ))
 
     assert result["provider"] == "all"
     assert result["query"] == "peter storer"
     assert result["query_guard"]["reason"] == "fabricated_placeholder_address"
     assert result["query_guard"]["original_provider"] == "graph"
-    assert "example.com" not in json.dumps(calls)
+    serialized = json.dumps(result) + json.dumps(calls) + caplog.text
+    assert "example.com" not in serialized
+    assert "private-extra" not in serialized
     assert calls == [
         ("graph", "peter storer", 10),
         ("gmail", "baker_gmail_search", {"query": "peter storer", "max_results": 10}),
         ("store", "peter storer", 10),
     ]
+
+
+def test_email_search_placeholder_without_name_does_not_broaden_to_recent_mail(monkeypatch):
+    registry = ClerkToolRegistry()
+    calls = []
+
+    monkeypatch.setattr(registry, "_graph_email_search", lambda *args: calls.append(("graph", args)) or "{}")
+    monkeypatch.setattr(registry, "_email_store_search", lambda *args: calls.append(("store", args)) or "{}")
+    monkeypatch.setitem(
+        sys.modules,
+        "tools.gmail",
+        SimpleNamespace(dispatch_gmail=lambda *args: calls.append(("gmail", args)) or "{}"),
+    )
+
+    result = json.loads(registry.execute(
+        "email_search",
+        {"provider": "graph", "query": "from:foo@bar", "max_results": 1},
+    ))
+
+    assert result["status"] == "blocked"
+    assert result["match_count"] == 0
+    assert result["query_guard"]["status"] == "blocked"
+    assert "query" not in result
+    assert calls == []
 
 
 def test_email_search_prompt_and_description_forbid_synthesized_addresses():

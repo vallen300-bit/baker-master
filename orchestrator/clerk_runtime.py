@@ -705,40 +705,38 @@ class ClerkToolRegistry:
         return re.sub(r"\s+", " ", cleaned).strip()
 
     def _normalize_email_search_args(self, provider: str, query: str, max_results: int) -> tuple[str, str, int, dict[str, Any] | None]:
-        replacements: list[tuple[str, str]] = []
+        names: list[str] = []
+        placeholder_count = 0
         for match in _PLACEHOLDER_EMAIL_RE.finditer(query):
             local = match.group("local") or ""
             domain = match.group("domain") or ""
             if not self._is_placeholder_email(local, domain):
                 continue
+            placeholder_count += 1
             name = self._name_from_email_local_part(local)
-            replacements.append((match.group(0), name))
+            if name:
+                names.append(name)
 
-        if not replacements:
+        if placeholder_count == 0:
             return provider, query, max_results, None
 
-        normalized_query = query
-        for raw, replacement in replacements:
-            normalized_query = normalized_query.replace(raw, replacement)
-        normalized_query = re.sub(r"\bfrom:\s*", " ", normalized_query, flags=re.I)
-        normalized_query = re.sub(r"[^A-Za-z0-9@._+\-\s]", " ", normalized_query)
-        normalized_query = re.sub(r"\s+", " ", normalized_query).strip()
-
-        if not normalized_query:
-            names = [name for _, name in replacements if name]
-            normalized_query = re.sub(r"\s+", " ", " ".join(names)).strip()
+        normalized_query = re.sub(r"\s+", " ", " ".join(names)).strip()
 
         guard = {
             "reason": "fabricated_placeholder_address",
             "original_provider": provider,
-            "original_query": query,
-            "normalized_query": normalized_query,
+            "placeholder_count": placeholder_count,
         }
+        if normalized_query:
+            guard["normalized_query"] = normalized_query[:120]
+        else:
+            guard["status"] = "blocked"
+            guard["message"] = "Could not derive a search term from placeholder address; give a name or a real email address."
         logger.info(
-            "Clerk email_search normalized fabricated placeholder address: provider=%s query=%r normalized=%r",
+            "Clerk email_search normalized fabricated placeholder address: provider=%s normalized_name_present=%s placeholder_count=%d",
             provider,
-            query,
-            normalized_query,
+            bool(normalized_query),
+            placeholder_count,
         )
         return "all", normalized_query, max(max_results, 10), guard
 
@@ -777,6 +775,19 @@ class ClerkToolRegistry:
         query = str(args.get("query", "")).strip()
         max_results = self._clamped_limit(args.get("max_results"), default=10, upper=50)
         provider, query, max_results, query_guard = self._normalize_email_search_args(provider, query, max_results)
+        if query_guard and query_guard.get("status") == "blocked":
+            logger.info(
+                "Clerk email_search placeholder guard completed: provider=all match_count=0 normalized_name_present=False"
+            )
+            return _safe_json({
+                "provider": "all",
+                "status": "blocked",
+                "reason": query_guard["message"],
+                "match_count": 0,
+                "results": {},
+                "errors": {},
+                "query_guard": query_guard,
+            })
         if provider == "all":
             return self._email_search_all(query, max_results, query_guard=query_guard)
         if provider == "graph":
@@ -843,10 +854,17 @@ class ClerkToolRegistry:
                 logger.warning("Clerk email_search provider failed (%s): %s", name, type(e).__name__)
                 errors[name] = type(e).__name__
                 results[name] = {"error": type(e).__name__}
+        match_count = sum(self._payload_count(payload) for payload in results.values())
+        if query_guard:
+            logger.info(
+                "Clerk email_search placeholder guard completed: provider=all match_count=%d normalized_name_present=%s",
+                match_count,
+                bool(query_guard.get("normalized_query")),
+            )
         return _safe_json({
             "provider": "all",
             "query": query,
-            "match_count": sum(self._payload_count(payload) for payload in results.values()),
+            "match_count": match_count,
             "results": results,
             "errors": errors,
             **({"query_guard": query_guard} if query_guard else {}),
