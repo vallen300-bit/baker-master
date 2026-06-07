@@ -893,13 +893,14 @@ def test_document_fetch_blocks_prefix_smuggling():
     assert parsed["status"] == "blocked"
 
 
-def test_forbidden_tool_capability_rejected_before_execution():
-    agent = ClerkAgent(model_client=_FakeClient([]), registry=_FakeRegistry(), cfg=_cfg())
+def test_forbidden_tool_capability_denied_by_policy():
+    # CLERK_FULL_CAPABILITY_POLICY_1: the old _validate_tool_use name-fragment
+    # denylist is retired; an external-send tool is now refused by the DENY class.
+    from orchestrator.clerk_runtime import _classify_tool, CLERK_DENY
 
-    valid, error = agent._validate_tool_use(SimpleNamespace(name="send_email", input={}))
-
-    assert valid is False
-    assert "forbidden tool capability" in error
+    assert _classify_tool("send_email") == CLERK_DENY
+    assert _classify_tool("baker_gmail_send") == CLERK_DENY
+    assert _classify_tool("whatsapp_send") == CLERK_DENY
 
 
 def test_escalation_path_cannot_upload_outside_working_folder():

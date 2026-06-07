@@ -6,6 +6,7 @@ and hard guardrails. Browser workbench surfaces are intentionally out of scope.
 from __future__ import annotations
 
 import base64
+import hashlib
 import ipaddress
 import json
 import logging
@@ -36,22 +37,132 @@ _ALLOWED_SAVE_PREFIXES = (
     "/Baker-Feed/Clerk",
     "/Apps/Baker/Clerk",
 )
-_FORBIDDEN_TOOL_NAME_FRAGMENTS = frozenset({
-    "send",
-    "delete",
-    "remove",
-    "move",
-    "archive",
-    "mark",
-    "pay",
-    "payment",
-    "wire",
-    "transfer",
-})
+# CLERK_FULL_CAPABILITY_POLICY_1 — argument-value belt-and-suspenders (kept). The
+# old _FORBIDDEN_TOOL_NAME_FRAGMENTS substring denylist is RETIRED in favour of the
+# capability-CLASS policy below (_CLERK_TOOL_POLICY + _classify_tool, default-DENY).
 _FORBIDDEN_TOOL_ARG_VALUES = re.compile(
     r"\b(send|delete|remove|move|archive|mark\s+read|mark\s+unread|pay|payment|wire|transfer)\b",
     re.I,
 )
+
+# ── Capability-class policy (CLERK_FULL_CAPABILITY_POLICY_1, Director-ratified) ──
+# Every Baker tool slots into exactly one class. UNKNOWN tools are DENIED
+# (fail-closed) so a newly-registered-but-unclassified tool is refused until it is
+# explicitly added here — adding a capability becomes one line, not a guardrail PR.
+#   ALLOW    — reads / search / analysis (+ live web, + Clerk drafting into its own
+#              /Baker-Feed/Clerk-Workbench sandbox via file_save; out-of-sandbox
+#              file_save is still gated by the registry path-gate / HMAC).
+#   APPROVAL — real data mutations; never executes without a server-issued approval
+#              action-key (the model can NEVER self-approve).
+#   DENY     — money/payment/transfer + any external-to-human send; never executes
+#              even WITH a valid approval token.
+CLERK_ALLOW = "allow"
+CLERK_APPROVAL = "approval"
+CLERK_DENY = "deny"
+
+_CLERK_TOOL_POLICY: dict[str, str] = {
+    # ALLOW — currently wired read/search/analysis + sandbox file_save
+    "baker_search": CLERK_ALLOW,
+    "email_search": CLERK_ALLOW,
+    "email_download": CLERK_ALLOW,
+    "channel_search": CLERK_ALLOW,
+    "transcripts_by_matter": CLERK_ALLOW,
+    "document_fetch": CLERK_ALLOW,
+    "format_convert": CLERK_ALLOW,
+    "file_save": CLERK_ALLOW,  # sandbox save is core Clerk work; path-gate handles out-of-folder
+    # ALLOW — Baker MCP reads to be wired in PR 2 (pre-classified so they slot in)
+    "baker_deadlines": CLERK_ALLOW,
+    "baker_vip_contacts": CLERK_ALLOW,
+    "baker_sent_emails": CLERK_ALLOW,
+    "baker_actions": CLERK_ALLOW,
+    "baker_clickup_tasks": CLERK_ALLOW,
+    "baker_todoist_tasks": CLERK_ALLOW,
+    "baker_rss_feeds": CLERK_ALLOW,
+    "baker_rss_articles": CLERK_ALLOW,
+    "baker_deep_analyses": CLERK_ALLOW,
+    "baker_briefing_queue": CLERK_ALLOW,
+    "baker_watermarks": CLERK_ALLOW,
+    "baker_conversation_memory": CLERK_ALLOW,
+    "baker_get_preferences": CLERK_ALLOW,
+    "baker_browser_tasks": CLERK_ALLOW,
+    "baker_browser_results": CLERK_ALLOW,
+    "baker_gmail_search": CLERK_ALLOW,
+    "baker_gmail_read_message": CLERK_ALLOW,
+    "baker_gmail_attachment_read": CLERK_ALLOW,
+    "baker_health": CLERK_ALLOW,
+    "baker_scan": CLERK_ALLOW,
+    # ALLOW — ClaimsMax reads
+    "baker_claimsmax_search": CLERK_ALLOW,
+    "baker_claimsmax_check_investigation": CLERK_ALLOW,
+    "baker_claimsmax_get_document": CLERK_ALLOW,
+    # ALLOW — live web search
+    "baker_grok_ask": CLERK_ALLOW,
+    "baker_grok_web_search": CLERK_ALLOW,
+    "baker_grok_x_search": CLERK_ALLOW,
+    "perplexity_ask": CLERK_ALLOW,
+    # ALLOW — internal agent bus (NOT an external send; coordination only)
+    "baker_inbox_read": CLERK_ALLOW,
+    "baker_inbox_post": CLERK_ALLOW,
+    "baker_inbox_ack": CLERK_ALLOW,
+    # APPROVAL — real internal mutations (server-issued action-key required)
+    "baker_vault_write": CLERK_APPROVAL,
+    "baker_raw_write": CLERK_APPROVAL,
+    "baker_ingest_text": CLERK_APPROVAL,
+    "baker_store_decision": CLERK_APPROVAL,
+    "baker_store_analysis": CLERK_APPROVAL,
+    "baker_add_deadline": CLERK_APPROVAL,
+    "baker_upsert_vip": CLERK_APPROVAL,
+    "baker_update_vip_profile": CLERK_APPROVAL,
+    "baker_upsert_preference": CLERK_APPROVAL,
+    "baker_upsert_matter": CLERK_APPROVAL,
+    "baker_claimsmax_save_investigation": CLERK_APPROVAL,
+    "baker_claimsmax_convert_to_html": CLERK_APPROVAL,
+    "baker_claimsmax_convert_to_pdf": CLERK_APPROVAL,
+    # APPROVAL — fire-and-forget multi-step run = real cost + side effect (G2 M2)
+    "baker_claimsmax_investigate": CLERK_APPROVAL,
+    # DENY — raw SQL is NOT safely read-only: the MCP read guard is a startswith
+    # keyword check that a writable CTE (WITH x AS (DELETE ... RETURNING ...) SELECT
+    # ...) slips past, and _query autocommits — so a cheap model is one prompt from a
+    # mutate/DELETE. Hard-DENY (not APPROVAL: even an approved call could write) until
+    # the MCP layer is structurally SELECT-only / readonly-role (separate follow-up). (G2 H1)
+    "baker_raw_query": CLERK_DENY,
+    # DENY — money/payment + external-to-human sends (never executable, even approved)
+    "baker_gmail_send": CLERK_DENY,
+    "gmail_send": CLERK_DENY,
+    "email_send": CLERK_DENY,
+    "whatsapp_send": CLERK_DENY,
+    "slack_send": CLERK_DENY,
+    "baker_payment": CLERK_DENY,
+    "baker_wire": CLERK_DENY,
+}
+
+# Name-fragment fail-closed catch for money/external-send shapes not explicitly
+# mapped (defence in depth; default-DENY already covers unknowns).
+_CLERK_DENY_FRAGMENTS = ("_send", "send_", "payment", "wire", "transfer", "remit", "payout")
+
+
+def _classify_tool(name: str) -> str:
+    """Return the capability class for a tool name. UNKNOWN -> DENY (fail-closed)."""
+    if not name:
+        return CLERK_DENY
+    mapped = _CLERK_TOOL_POLICY.get(name)
+    if mapped is not None:
+        return mapped
+    lowered = name.lower()
+    if any(frag in lowered for frag in _CLERK_DENY_FRAGMENTS):
+        return CLERK_DENY
+    return CLERK_DENY  # default-deny: unclassified tools are refused until mapped
+
+
+def _clerk_action_key(name: str, args: dict[str, Any] | None) -> str:
+    """Stable per-(tool, args) key an APPROVAL-class call must match in the run's
+    server-issued approved-actions set. The session boundary is the per-run
+    provisioning of that set; the secret/token never touches the model."""
+    try:
+        canonical = json.dumps(args or {}, sort_keys=True, separators=(",", ":"), default=str)
+    except (TypeError, ValueError):
+        canonical = repr(args)
+    return hashlib.sha256(f"{name}\x00{canonical}".encode("utf-8")).hexdigest()
 _EMAIL_SEARCH_PROVIDERS = ("all", "gmail", "graph", "store")
 _EMAIL_DOWNLOAD_PROVIDERS = ("all", "gmail", "graph", "store")
 _CHANNEL_SEARCH_CHANNELS = (
@@ -1727,6 +1838,7 @@ class ClerkAgent:
         guardrails: ClerkGuardrails | None = None,
         cfg: Qwen3Config | None = None,
         clock: Any | None = None,
+        approved_actions: set[str] | frozenset[str] | tuple[str, ...] | None = None,
     ):
         self.cfg = cfg or config.qwen3
         self.model_client = model_client
@@ -1734,6 +1846,11 @@ class ClerkAgent:
         self.registry = registry or ClerkToolRegistry()
         self.guardrails = guardrails or ClerkGuardrails()
         self.clock = clock or time.monotonic
+        # CLERK_FULL_CAPABILITY_POLICY_1: server-issued approval action-keys for THIS
+        # run (the per-run set is the session boundary). Empty by default — the model
+        # cannot populate it, so APPROVAL-class tools return pending_approval and
+        # DENY-class tools refuse regardless.
+        self._approved_actions = frozenset(approved_actions or ())
 
     def _client(self) -> Any:
         if self.model_client is not None:
@@ -1847,6 +1964,14 @@ class ClerkAgent:
 
             tool_results: list[dict[str, Any]] = []
             for tool_use in uses:
+                # CLERK_FULL_CAPABILITY_POLICY_1: capability gate runs FIRST —
+                # DENY (incl. unknown, fail-closed) refuses outright even with a
+                # valid approval key; APPROVAL returns pending_approval unless this
+                # exact (tool,args) was server-approved for this run. ALLOW falls
+                # through to schema validation + execute.
+                policy_block = self._policy_gate(tool_use, tool_log, usage_totals, saved_paths)
+                if policy_block is not None:
+                    return policy_block
                 valid, validation_error = self._validate_tool_use(tool_use)
                 if not valid:
                     schema_failures += 1
@@ -1930,6 +2055,11 @@ class ClerkAgent:
             results = []
             saved_paths: list[str] = []
             for tool_use in _tool_uses(response.content):
+                # CLERK_FULL_CAPABILITY_POLICY_1: the escalation (Gemini) path is gated
+                # too, so it can never become a capability bypass.
+                policy_block = self._policy_gate(tool_use, tool_log, usage_totals, saved_paths)
+                if policy_block is not None:
+                    return {**policy_block, "escalated": True, "reason": reason}
                 valid, validation_error = self._validate_tool_use(tool_use)
                 if not valid:
                     results.append({"tool": getattr(tool_use, "name", ""), "error": validation_error})
@@ -1973,12 +2103,47 @@ class ClerkAgent:
                 out.append({"type": "tool_use", "id": block.id, "name": block.name, "input": block.input})
         return out
 
+    def _policy_gate(
+        self,
+        tool_use: Any,
+        tool_log: list[dict[str, Any]],
+        usage_totals: dict[str, Any],
+        saved_paths: list[str],
+    ) -> dict[str, Any] | None:
+        """CLERK_FULL_CAPABILITY_POLICY_1 capability gate. Returns a TERMINAL result
+        dict to abort the run when the tool is DENY (refuse, even with a valid key)
+        or APPROVAL-without-approval (pending_approval); returns None to proceed."""
+        name = getattr(tool_use, "name", "") or ""
+        cls = _classify_tool(name)
+        if cls == CLERK_DENY:
+            logger.warning("Clerk: tool '%s' denied by capability policy", name)
+            return {
+                "status": "blocked",
+                "reason": f"tool '{name}' is denied by Clerk capability policy",
+                "denied_tool": name,
+                "tool_calls": tool_log,
+                "usage": self._usage_payload(usage_totals),
+                "saved_paths": saved_paths,
+            }
+        if cls == CLERK_APPROVAL:
+            args = getattr(tool_use, "input", {})
+            args = args if isinstance(args, dict) else {}
+            if _clerk_action_key(name, args) not in self._approved_actions:
+                logger.info("Clerk: tool '%s' requires approval (pending)", name)
+                return {
+                    "status": "pending_approval",
+                    "reason": f"tool '{name}' requires Director approval before it can run",
+                    "pending_tool": name,
+                    "tool_calls": tool_log,
+                    "usage": self._usage_payload(usage_totals),
+                    "saved_paths": saved_paths,
+                }
+        return None
+
     def _validate_tool_use(self, tool_use: Any) -> tuple[bool, str]:
         if not getattr(tool_use, "name", ""):
             return False, "tool call missing function name"
-        lowered_name = tool_use.name.lower()
-        if any(fragment in lowered_name for fragment in _FORBIDDEN_TOOL_NAME_FRAGMENTS):
-            return False, f"forbidden tool capability: {tool_use.name}"
+        # Capability denylist is enforced by _policy_gate (DENY class), not here.
         if tool_use.name not in {t["name"] for t in self.registry.tools}:
             return False, f"unknown tool: {tool_use.name}"
         if not isinstance(getattr(tool_use, "input", None), dict):
