@@ -1698,6 +1698,24 @@ def _asserts_unsubstantiated_lookup(answer: str) -> bool:
     return bool(_LOOKUP_ASSERTION_RE.search(normalized))
 
 
+def _verified_saved_path(file_save_result: str) -> str | None:
+    """CLERK_READY_PATH_CONTRADICTION_FIX_1: return the real Dropbox path from a
+    SUCCESSFUL file_save result ONLY. _file_save returns {"status":"ready","path":
+    <real path_display>} on a genuine upload, or {"status":"blocked",...} when the
+    requested path is outside Clerk's working folder. A Ready/draft path may be
+    advertised to the Director only when it is grounded in a status:"ready" result —
+    so a blocked/rejected path, or a path the model merely asserted in free text
+    (it never reaches this function), can never be surfaced as a saved file."""
+    try:
+        data = json.loads(file_save_result)
+    except (TypeError, ValueError):
+        return None
+    if not isinstance(data, dict) or data.get("status") != "ready":
+        return None
+    path = data.get("path")
+    return path if isinstance(path, str) and path.strip() else None
+
+
 class ClerkAgent:
     """Bounded Clerk tool loop with Qwen default and Gemini Pro escalation."""
 
@@ -1732,6 +1750,10 @@ class ClerkAgent:
         max_steps = max(int(self.cfg.max_steps or 12), 1)
         messages: list[dict[str, Any]] = [{"role": "user", "content": task}]
         tool_log: list[dict[str, Any]] = []
+        # CLERK_READY_PATH_CONTRADICTION_FIX_1: verified Dropbox paths from
+        # SUCCESSFUL file_save results only — the sole grounded source for any
+        # Ready/draft path the worker later surfaces to the Director.
+        saved_paths: list[str] = []
         usage_totals = self._new_usage_totals()
         schema_failures = 0
         client = self._client()
@@ -1800,6 +1822,7 @@ class ClerkAgent:
                         "tool_calls": tool_log,
                         "usage": self._usage_payload(usage_totals),
                         "tool_enforcement": "forced_retry_no_tool_call",
+                        "saved_paths": saved_paths,
                     }
                 usage_payload = self._usage_payload(usage_totals)
                 return {
@@ -1808,6 +1831,7 @@ class ClerkAgent:
                     "iterations": step + 1,
                     "tool_calls": tool_log,
                     "usage": usage_payload,
+                    "saved_paths": saved_paths,
                 }
 
             uses = _tool_uses(response.content)
@@ -1853,6 +1877,10 @@ class ClerkAgent:
                 result = self.registry.execute(tool_use.name, tool_use.input)
                 elapsed_ms = int((self.clock() - t0) * 1000)
                 tool_log.append({"name": tool_use.name, "input": tool_use.input, "duration_ms": elapsed_ms})
+                if tool_use.name == "file_save":
+                    verified = _verified_saved_path(result)
+                    if verified:
+                        saved_paths.append(verified)
                 tool_results.append({"type": "tool_result", "tool_use_id": tool_use.id, "content": result})
 
             messages.append({"role": "user", "content": tool_results})
@@ -1862,6 +1890,7 @@ class ClerkAgent:
             "reason": "max_steps exceeded",
             "tool_calls": tool_log,
             "usage": self._usage_payload(usage_totals),
+            "saved_paths": saved_paths,
         }
 
     def _escalate(
@@ -1899,6 +1928,7 @@ class ClerkAgent:
         self._log_cost(config.gemini.pro_model, in_tok, out_tok)
         if response.stop_reason == "tool_use":
             results = []
+            saved_paths: list[str] = []
             for tool_use in _tool_uses(response.content):
                 valid, validation_error = self._validate_tool_use(tool_use)
                 if not valid:
@@ -1909,6 +1939,10 @@ class ClerkAgent:
                     return self._guardrail_result(guard, tool_log=tool_log, usage_totals=usage_totals)
                 result = self.registry.execute(tool_use.name, tool_use.input)
                 tool_log.append({"name": tool_use.name, "input": tool_use.input, "duration_ms": 0, "escalated": True})
+                if tool_use.name == "file_save":
+                    verified = _verified_saved_path(result)
+                    if verified:
+                        saved_paths.append(verified)
                 results.append({"tool": tool_use.name, "result": result})
             return {
                 "status": "ready",
@@ -1916,6 +1950,7 @@ class ClerkAgent:
                 "escalated": True,
                 "reason": reason,
                 "tool_calls": tool_log,
+                "saved_paths": saved_paths,
                 **({"usage": usage_payload} if usage_payload is not None else {}),
             }
         return {
@@ -1924,6 +1959,7 @@ class ClerkAgent:
             "escalated": True,
             "reason": reason,
             "tool_calls": tool_log,
+            "saved_paths": [],
             **({"usage": usage_payload} if usage_payload is not None else {}),
         }
 
