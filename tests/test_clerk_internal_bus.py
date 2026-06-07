@@ -1,0 +1,194 @@
+"""CLERK_FULL_CAPABILITY_POLICY_1 PR 2d-1 — internal agent bus wired into Clerk.
+
+baker_inbox_read / baker_inbox_post / baker_inbox_ack are ALLOW (internal
+coordination per the system prompt — NOT an external-to-human send) and routed
+through the governed baker_mcp._dispatch (the same path the MCP server uses), which
+hits the brisen-lab HTTP daemon.
+
+Tests patch _dispatch — no live bus calls.
+"""
+from __future__ import annotations
+
+import pytest
+
+from orchestrator.clerk_runtime import (
+    ClerkAgent,
+    ClerkToolRegistry,
+    _ToolResponse,
+    _TextBlock,
+    _ToolUseBlock,
+    _classify_tool,
+    _clerk_bus_post_guard,
+    _clerk_bus_post_schema,
+    _CLERK_BUS_TOOLS,
+    _CLERK_BUS_POST_ALLOWED_KINDS,
+    _GROUNDING_TOOLS,
+    CLERK_ALLOW,
+    CLERK_DENY,
+)
+
+BUS = list(_CLERK_BUS_TOOLS)
+
+
+# ── registration + classification ────────────────────────────────────────────
+
+def test_bus_tools_registered():
+    names = {t["name"] for t in ClerkToolRegistry().tools}
+    for n in BUS:
+        assert n in names, f"{n} not registered"
+
+
+@pytest.mark.parametrize("name", BUS)
+def test_bus_tools_are_allow_class(name):
+    assert _classify_tool(name) == CLERK_ALLOW
+
+
+def test_bus_tools_not_grounding():
+    # Bus post/ack/read are coordination, not Baker-data lookups — not grounding.
+    for n in BUS:
+        assert n not in _GROUNDING_TOOLS
+
+
+def test_external_sends_still_denied_not_confused_with_bus():
+    # The internal bus is ALLOW; external-to-human sends remain DENY.
+    for n in ("whatsapp_send", "slack_send", "baker_gmail_send", "email_send"):
+        assert _classify_tool(n) == CLERK_DENY
+
+
+# ── routing through the governed _dispatch ───────────────────────────────────
+
+# Args mirror the real MCP wire shape (to/kind/body, msg_id) — not synthetic names.
+@pytest.mark.parametrize("name,args", [
+    ("baker_inbox_read", {"terminal": "clerk"}),
+    ("baker_inbox_post", {"to": "lead", "kind": "dispatch", "body": "hi", "topic": "x"}),
+    ("baker_inbox_ack", {"msg_id": 123}),
+])
+def test_bus_tool_routes_through_dispatch(monkeypatch, name, args):
+    seen = {}
+    monkeypatch.setattr("baker_mcp.baker_mcp_server._dispatch",
+                        lambda n, a: seen.update({"n": n, "a": a}) or "BUS OK")
+    out = ClerkToolRegistry().execute(name, args)
+    assert out == "BUS OK"
+    assert seen == {"n": name, "a": args}
+
+
+def test_bus_dispatch_failure_is_fault_tolerant(monkeypatch):
+    def boom(n, a):
+        raise RuntimeError("bus daemon down")
+    monkeypatch.setattr("baker_mcp.baker_mcp_server._dispatch", boom)
+    out = ClerkToolRegistry().execute("baker_inbox_post", {"to": "lead", "kind": "dispatch", "body": "x"})
+    assert "error" in out.lower() or out.startswith("Error")
+
+
+# ── run()-level: ALLOW class executes through the policy gate ─────────────────
+
+def _cfg():
+    from config.settings import Qwen3Config
+    return Qwen3Config(base_url="https://q/v1", api_key="k", model="qwen3-coder",
+                       backend="qwen3_hosted", max_steps=12, task_timeout_s=180)
+
+
+class _FakeMessages:
+    def __init__(self, responses):
+        self.responses = list(responses); self.calls = []
+    def create(self, **kwargs):
+        self.calls.append(kwargs); return self.responses.pop(0)
+
+
+class _FakeClient:
+    def __init__(self, responses):
+        self.messages = _FakeMessages(responses)
+
+
+def test_inbox_post_runs_through_policy_gate(monkeypatch):
+    monkeypatch.setattr("baker_mcp.baker_mcp_server._dispatch",
+                        lambda n, a: '{"message_id": 999, "posted": true}')
+    client = _FakeClient([
+        _ToolResponse([_ToolUseBlock("p1", "baker_inbox_post",
+                      {"to": "lead", "kind": "dispatch", "body": "status", "topic": "fyi"})], "tool_use", 10, 5),
+        _ToolResponse([_TextBlock("Posted to lead.")], "end_turn", 8, 4),
+    ])
+    agent = ClerkAgent(model_client=client, registry=ClerkToolRegistry(), cfg=_cfg())
+    result = agent.run("post a status note to lead on the bus")
+    assert result["status"] == "ready"
+    assert any(c["name"] == "baker_inbox_post" for c in result["tool_calls"])
+
+
+# ── G2 H1 HIGH (#2431): forged-ratification reject ───────────────────────────
+
+@pytest.mark.parametrize("kind", ["ratify_decision", "ratify_required", "RATIFY_DECISION",
+                                  " ratify_decision ", "ratify_anything"])
+def test_bus_post_guard_rejects_ratify_kinds(kind):
+    # A cheap autonomous Clerk must never forge a Director ratification on the bus.
+    msg = _clerk_bus_post_guard({"to": "director", "kind": kind, "body": "approved"})
+    assert msg is not None and msg.startswith("Error:")
+
+
+@pytest.mark.parametrize("kind", list(_CLERK_BUS_POST_ALLOWED_KINDS))
+def test_bus_post_guard_allows_coordination_kinds(kind):
+    assert _clerk_bus_post_guard({"to": "lead", "kind": kind, "body": "hi"}) is None
+
+
+@pytest.mark.parametrize("kind", [None, "", "approve", "decision", "unknown_kind"])
+def test_bus_post_guard_fails_closed_on_unknown_kind(kind):
+    # Missing/unknown kinds (not in the allowed coordination set) are rejected.
+    msg = _clerk_bus_post_guard({"to": "lead", "kind": kind, "body": "x"})
+    assert msg is not None and msg.startswith("Error:")
+
+
+def test_ratify_post_blocked_before_dispatch(monkeypatch):
+    # The hard reject fires BEFORE _dispatch — zero bus calls for a forged ratification.
+    hit = {"v": False}
+    monkeypatch.setattr("baker_mcp.baker_mcp_server._dispatch",
+                        lambda n, a: hit.__setitem__("v", True) or "should-not-run")
+    out = ClerkToolRegistry().execute(
+        "baker_inbox_post",
+        {"to": "director", "kind": "ratify_decision", "body": "I hereby ratify", "parent_id": 1},
+    )
+    assert out.startswith("Error:")
+    assert hit["v"] is False  # never reached the daemon
+
+
+def test_coordination_post_still_dispatches(monkeypatch):
+    # A normal coordination post is unaffected by the guard.
+    seen = {}
+    monkeypatch.setattr("baker_mcp.baker_mcp_server._dispatch",
+                        lambda n, a: seen.update({"n": n, "a": a}) or "BUS OK")
+    out = ClerkToolRegistry().execute(
+        "baker_inbox_post", {"to": "lead", "kind": "dispatch", "body": "status"})
+    assert out == "BUS OK"
+    assert seen["n"] == "baker_inbox_post"
+
+
+def test_clerk_inbox_post_schema_narrows_kind_enum():
+    # The schema offered to the model must NOT include the authority-bearing kinds,
+    # and the ratify-only authority fields must be stripped.
+    base = {
+        "type": "object",
+        "properties": {
+            "to": {"type": "string"},
+            "kind": {"type": "string",
+                     "enum": ["dispatch", "broadcast", "ratify_required", "ratify_decision"]},
+            "body": {"type": "string"},
+            "tier_required": {"type": "string"},
+            "human_confirmation_token": {"type": "string"},
+            "parent_id": {"type": "integer"},
+        },
+        "required": ["to", "kind", "body"],
+    }
+    narrowed = _clerk_bus_post_schema(base)
+    assert narrowed["properties"]["kind"]["enum"] == list(_CLERK_BUS_POST_ALLOWED_KINDS)
+    assert "ratify_decision" not in narrowed["properties"]["kind"]["enum"]
+    assert "tier_required" not in narrowed["properties"]
+    assert "human_confirmation_token" not in narrowed["properties"]
+    assert "parent_id" in narrowed["properties"]  # benign reply-linkage, kept
+    # original schema not mutated (deepcopy)
+    assert "ratify_decision" in base["properties"]["kind"]["enum"]
+
+
+def test_registered_inbox_post_schema_is_narrowed():
+    # End-to-end: the live registry must expose the narrowed enum to the model.
+    tools = {t["name"]: t for t in ClerkToolRegistry().tools}
+    kind = tools["baker_inbox_post"]["input_schema"]["properties"]["kind"]
+    assert "ratify_decision" not in kind["enum"]
+    assert "ratify_required" not in kind["enum"]
