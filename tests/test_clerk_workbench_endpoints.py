@@ -170,6 +170,10 @@ def test_clerk_run_creates_session_and_background_persists_result(monkeypatch):
                     "duration_ms": 1,
                 }
             ],
+            # CLERK_READY_PATH_CONTRADICTION_FIX_2: the draft path now derives ONLY
+            # from a verified save (clerk_runtime saved_paths), not the answer text or
+            # input args. A genuine file_save success surfaces its real Dropbox path.
+            "saved_paths": ["/Baker-Feed/Clerk-Workbench/out.md"],
         },
     )
 
@@ -482,3 +486,73 @@ def test_clerk_routes_use_asyncio_to_thread():
 
     assert "await asyncio.to_thread(_clerk_run_session_sync" in src
     assert "await asyncio.to_thread(\n        _clerk_save_content_sync" in src
+
+
+# ── CLERK_READY_PATH_CONTRADICTION_FIX_2: dashboard _clerk_extract_draft grounding ──
+# The Director-visible /clerk browser surface (twin of clerk_bus_worker._extract_draft,
+# fixed in FIX_1 #326). Draft path must derive ONLY from a verified save (saved_paths),
+# never the free-text 'Ready:' answer scrape or the unverified file_save input-arg path.
+
+def test_dashboard_extract_draft_hallucinated_ready_line_yields_no_path():
+    from outputs.dashboard import _clerk_extract_draft
+
+    # The exact live bug: search-only turn, model wrote a Ready: line, no file_save.
+    result = {
+        "status": "ready",
+        "answer": "48 documents mention nvidia. Ready: /Baker-Project/search_results_nvidia.txt",
+        "tool_calls": [{"name": "baker_search", "input": {"query": "nvidia"}}],
+        "saved_paths": [],
+    }
+    content, path = _clerk_extract_draft(result)
+    assert path is None
+    assert "Ready: /Baker-Project" in content  # answer preserved as draft content
+
+
+def test_dashboard_extract_draft_blocked_save_input_path_not_surfaced():
+    from outputs.dashboard import _clerk_extract_draft
+
+    # file_save attempted to /Baker-Project and blocked -> saved_paths empty. The
+    # unverified INPUT-arg path must NOT leak.
+    result = {
+        "status": "ready",
+        "answer": "I tried to save the results.",
+        "tool_calls": [{"name": "file_save", "input": {"content": "draft body", "dropbox_path": "/Baker-Project/x.txt"}}],
+        "saved_paths": [],
+    }
+    content, path = _clerk_extract_draft(result)
+    assert path is None
+    assert content == "draft body"
+
+
+def test_dashboard_extract_draft_real_save_surfaces_verified_path():
+    from outputs.dashboard import _clerk_extract_draft
+
+    result = {
+        "status": "ready",
+        "answer": "Saved.",
+        "tool_calls": [{"name": "file_save", "input": {"content": "draft body", "filename": "out.md"}}],
+        "saved_paths": ["/Baker-Feed/Clerk-Workbench/out.md"],
+    }
+    content, path = _clerk_extract_draft(result)
+    assert path == "/Baker-Feed/Clerk-Workbench/out.md"
+    assert content == "draft body"
+
+
+def test_dashboard_extract_draft_missing_saved_paths_key_yields_no_path():
+    from outputs.dashboard import _clerk_extract_draft
+
+    # Defensive: a result with a 'Ready:' answer but no saved_paths key -> no path.
+    result = {
+        "status": "ready",
+        "answer": "Ready: /Baker-Feed/Clerk-Workbench/out.md",
+        "tool_calls": [],
+    }
+    _, path = _clerk_extract_draft(result)
+    assert path is None
+
+
+def test_dashboard_no_free_text_ready_scrape_remains():
+    # Guard against regression: the ungrounded free-text scrape must be gone from the
+    # dashboard surface.
+    src = open("outputs/dashboard.py", encoding="utf-8").read()
+    assert 're.search(r"Ready:' not in src
