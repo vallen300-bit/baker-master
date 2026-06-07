@@ -1596,13 +1596,25 @@ _CLERK_SEARCH_FAILLOUD_MSG = (
 # Fires only on answers that ASSERT a search happened / report a count / assert
 # absence of Baker data — NOT on capability descriptions ("I can search documents")
 # or chit-chat, so it does not over-trigger on non-lookup turns.
+# CLERK_QWEN3_GUARD_COVERAGE_1: widened to cover absence phrasings the first cut
+# missed (codex FAIL-M1): "could not LOCATE", "do not SEE any", "do not APPEAR to
+# be", "unable to find/locate". Negation verbs broadened to find/locate/see/spot/
+# identify and to appear/seem; contraction variants (couldn't/don't/doesn't/can't)
+# covered by `n[o']?t`. Still bounded alternations (no ReDoS), and keyed on result-
+# ASSERTIONS not the words search/documents, so chit-chat + capability text stays
+# untriggered.
+# Negated modals: couldn't/could not, cannot/can not/can't, don't/do not,
+# doesn't/does not, didn't/did not. ("can't" = can+'t, so it needs its own arm.)
+_NEG = r"(?:could\s*n[o']?t|can\s*n[o']?t|can[o']?t|do\s*n[o']?t|does\s*n[o']?t|did\s*n[o']?t)"
 _LOOKUP_ASSERTION_RE = re.compile(
-    r"\bno\s+(?:documents?|results?|matches|emails?|messages?|records?|hits?|transcripts?)\b"
+    r"\bno\s+(?:documents?|results?|matches|emails?|messages?|records?|hits?|transcripts?|files?)\b"
     r"|\bfound\s+(?:no|nothing|none|\d+)\b"
-    r"|\bnothing\s+(?:found|came\s+back)\b"
-    r"|\b(?:could\s*n[o']?t|cannot|can[o']?t|did\s*n[o']?t)\s+find\b"
-    r"|\b(?:do|does)\s*n[o']?t\s+(?:have|find)\s+any\b"
-    r"|\b\d+\s+(?:documents?|emails?|results?|matches|messages?|transcripts?|records?)\b"
+    r"|\bnothing\s+(?:found|came\s+back|turned\s+up)\b"
+    rf"|\b{_NEG}\s+(?:find|locate|spot|identify)\b"
+    rf"|\b{_NEG}\s+(?:see|have|find|locate|spot)\s+any\b"
+    r"|\b(?:do|does|did)\s*n[o']?t\s+(?:appear|seem)\b"
+    r"|\bunable\s+to\s+(?:find|locate|see|identify|retrieve)\b"
+    r"|\b\d+\s+(?:documents?|emails?|results?|matches|messages?|transcripts?|records?|files?)\b"
     r"|\bI\s+(?:searched|looked|checked)\b"
     r"|\bsearch(?:ed)?\s+(?:returned|came\s+back|found|yielded)\b",
     re.IGNORECASE,

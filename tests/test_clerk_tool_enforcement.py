@@ -70,6 +70,17 @@ def _cfg(max_steps=12, timeout=180):
     "found nothing",
     "couldn't find any emails",
     "Search returned no matches.",
+    # CLERK_QWEN3_GUARD_COVERAGE_1 — codex FAIL-M1 proven gaps (must now be True):
+    "I could not locate any documents about Peter Storer",
+    "I do not see any documents about Peter Storer",
+    "There do not appear to be documents about Peter Storer",
+    # + siblings
+    "I couldn't locate any emails",
+    "I can't see any results",
+    "cannot find any matches",
+    "unable to find any records",
+    "does not appear to be any transcripts",
+    "No files found",
 ])
 def test_lookup_assertion_detected(text):
     assert _asserts_unsubstantiated_lookup(text) is True
@@ -81,9 +92,36 @@ def test_lookup_assertion_detected(text):
     "Here is the draft you asked for.",
     "I'm Clerk, Brisen's document clerk.",
     "",
+    # CLERK_QWEN3_GUARD_COVERAGE_1 — anti-over-trigger: idiomatic "see"/"no"
+    # phrases that are NOT lookup outcomes must stay False.
+    "There is no need to worry.",
+    "I do not see why not, here is the plan.",
+    "I do not see how that helps.",
+    "I can't wait to help!",
 ])
 def test_non_lookup_text_not_flagged(text):
     assert _asserts_unsubstantiated_lookup(text) is False
+
+
+@pytest.mark.parametrize("fabrication", [
+    "I could not locate any documents about Peter Storer.",
+    "I do not see any documents about Peter Storer.",
+    "There do not appear to be documents about Peter Storer.",
+])
+def test_widened_absence_phrasings_trigger_forced_retry(fabrication):
+    # CLERK_QWEN3_GUARD_COVERAGE_1: each codex-proven phrasing, emitted with ZERO
+    # tool calls, must now trip the guard. With no tool on the forced retry, that
+    # is the fail-loud non-answer (never the fabricated absence).
+    client = _FakeClient([
+        _ToolResponse([_TextBlock(fabrication)], "end_turn", 10, 5),
+        _ToolResponse([_TextBlock(fabrication)], "end_turn", 9, 4),  # forced retry, still no tool
+    ])
+    agent = ClerkAgent(model_client=client, registry=ClerkToolRegistry(), cfg=_cfg())
+    result = agent.run("find documents about Peter Storer")
+    assert result["status"] == "needs_retry"
+    assert result["answer"] == _CLERK_SEARCH_FAILLOUD_MSG
+    assert len(client.messages.calls) == 2  # one forced retry, bounded
+    assert client.messages.calls[1].get("tool_choice") == "required"
 
 
 # ── (1)+(2) guard forces a search retry; (1) tool fires on retry ─────────────
