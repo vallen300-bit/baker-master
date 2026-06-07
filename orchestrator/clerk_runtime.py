@@ -90,7 +90,6 @@ _CLERK_TOOL_POLICY: dict[str, str] = {
     "baker_gmail_read_message": CLERK_ALLOW,
     "baker_gmail_attachment_read": CLERK_ALLOW,
     "baker_health": CLERK_ALLOW,
-    "baker_scan": CLERK_ALLOW,
     # ALLOW — ClaimsMax reads
     "baker_claimsmax_search": CLERK_ALLOW,
     "baker_claimsmax_check_investigation": CLERK_ALLOW,
@@ -120,6 +119,11 @@ _CLERK_TOOL_POLICY: dict[str, str] = {
     "baker_claimsmax_convert_to_pdf": CLERK_APPROVAL,
     # APPROVAL — fire-and-forget multi-step run = real cost + side effect (G2 M2)
     "baker_claimsmax_investigate": CLERK_APPROVAL,
+    # APPROVAL — _dispatch routes baker_scan to /api/scan = a full Opus Cortex run
+    # (expensive LLM + side effects). Same principle as grok cost-gate / raw_query /
+    # claimsmax_investigate: an autonomous cheap model must not trigger Opus scans
+    # freely. APPROVAL-class + intentionally NOT registered yet (PR 2b defers it).
+    "baker_scan": CLERK_APPROVAL,
     # DENY — raw SQL is NOT safely read-only: the MCP read guard is a startswith
     # keyword check that a writable CTE (WITH x AS (DELETE ... RETURNING ...) SELECT
     # ...) slips past, and _query autocommits — so a cheap model is one prompt from a
@@ -135,6 +139,28 @@ _CLERK_TOOL_POLICY: dict[str, str] = {
     "baker_payment": CLERK_DENY,
     "baker_wire": CLERK_DENY,
 }
+
+# CLERK_FULL_CAPABILITY_POLICY_1 PR 2b — pure-SELECT Baker MCP reads wired into
+# Clerk via the governed baker_mcp._dispatch entrypoint (the same sync path the MCP
+# server's call_tool uses). All are read-only in _dispatch (verified); schemas are
+# reused from the MCP TOOLS source of truth to avoid drift. baker_scan is NOT here
+# (it is APPROVAL-class — an Opus scan, not a cheap read).
+_CLERK_BAKER_READ_TOOLS = (
+    "baker_deadlines",
+    "baker_vip_contacts",
+    "baker_sent_emails",
+    "baker_actions",
+    "baker_rss_feeds",
+    "baker_rss_articles",
+    "baker_deep_analyses",
+    "baker_briefing_queue",
+    "baker_watermarks",
+    "baker_conversation_memory",
+    "baker_get_preferences",
+    "baker_browser_tasks",
+    "baker_browser_results",
+    "baker_health",
+)
 
 # Name-fragment fail-closed catch for money/external-send shapes not explicitly
 # mapped (defence in depth; default-DENY already covers unknowns).
@@ -787,7 +813,30 @@ class ClerkToolRegistry:
                     "required": ["prompt"],
                 },
             },
-        ]
+        ] + self._baker_read_tool_schemas()
+
+    @staticmethod
+    def _baker_read_tool_schemas() -> list[dict[str, Any]]:
+        """CLERK_FULL_CAPABILITY_POLICY_1 PR 2b: pure-SELECT Baker MCP read tools,
+        schemas reused from the MCP TOOLS source of truth (no drift). Routed at
+        execute() through the governed baker_mcp._dispatch. Import is lazy + failure-
+        tolerant so a Clerk run never breaks if the MCP module can't load."""
+        try:
+            from baker_mcp.baker_mcp_server import TOOLS as _MCP_TOOLS
+        except Exception:
+            logger.warning("Clerk: baker_mcp TOOLS import failed — baker reads unavailable")
+            return []
+        wanted = set(_CLERK_BAKER_READ_TOOLS)
+        out: list[dict[str, Any]] = []
+        for tool in _MCP_TOOLS:
+            name = getattr(tool, "name", None)
+            if name in wanted:
+                out.append({
+                    "name": name,
+                    "description": getattr(tool, "description", "") or "",
+                    "input_schema": getattr(tool, "inputSchema", None) or {"type": "object", "properties": {}},
+                })
+        return out
 
     def execute(self, name: str, args: dict[str, Any]) -> str:
         try:
@@ -809,6 +858,8 @@ class ClerkToolRegistry:
                 return self._file_save(args)
             if name in ("baker_grok_web_search", "baker_grok_x_search", "baker_grok_ask"):
                 return self._grok_dispatch(name, args)
+            if name in _CLERK_BAKER_READ_TOOLS:
+                return self._baker_mcp_read(name, args)
             return _safe_json({"error": f"unknown tool: {name}"})
         except BaseException as e:
             # CLERK_SEARCH_BACKEND_FAILSILENT_FIX_1 (B): a backend OUTAGE must
@@ -1709,6 +1760,16 @@ class ClerkToolRegistry:
             Path(tmp_path).unlink(missing_ok=True)
         return _safe_json({"status": "ready", "path": meta.get("path_display", dropbox_path), "metadata": meta})
 
+    # ── CLERK_FULL_CAPABILITY_POLICY_1 PR 2b — Baker MCP reads via governed _dispatch ──
+    def _baker_mcp_read(self, name: str, args: dict[str, Any]) -> str:
+        """Route a pure-SELECT Baker read through baker_mcp.baker_mcp_server._dispatch
+        — the SAME sync entrypoint the MCP server's call_tool uses. Only ALLOW-class
+        read tool names reach here (the policy gate blocks writes before execute), and
+        _dispatch for these names is SELECT-only. Returns _dispatch's text result;
+        the outer execute() try/except renders any failure as a clean error."""
+        from baker_mcp.baker_mcp_server import _dispatch
+        return _dispatch(name, args if isinstance(args, dict) else {})
+
     # ── CLERK_FULL_CAPABILITY_POLICY_1 PR 2a — live web/X search via Grok (xAI) ──
     def _grok_dispatch(self, name: str, args: dict[str, Any]) -> str:
         """Route Clerk's Grok tools through tools.grok.dispatch_grok so they inherit
@@ -1792,7 +1853,7 @@ _SEARCH_TOOLS = frozenset({"baker_search", "email_search", "channel_search", "tr
 # grok_ask is NOT here — it is training-knowledge Q&A, not retrieval.
 _GROUNDING_TOOLS = _SEARCH_TOOLS | frozenset({
     "document_fetch", "email_download", "baker_grok_web_search", "baker_grok_x_search",
-})
+}) | frozenset(_CLERK_BAKER_READ_TOOLS)  # PR 2b: Baker MCP reads retrieve real data, so they ground a lookup answer
 
 # Lookup INTENT in the user task (verbs/phrases that demand a retrieval). codex G3
 # Finding A: added terse "what do we have on / anything on / what's on / got
