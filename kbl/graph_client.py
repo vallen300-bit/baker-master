@@ -8,6 +8,7 @@ Never raises to callers — every external call returns None + logs on failure.
 """
 from __future__ import annotations
 
+import hashlib
 import logging
 import pathlib
 from urllib.parse import urlparse
@@ -33,10 +34,47 @@ class GraphClient:
         self.cfg = config or GraphConfig()
         # MSAL app holds the token cache; we never cache the raw bearer ourselves.
         self._app = None
+        self._app_cache_key = None
 
     def _has_cert(self) -> bool:
         """True if a cert credential (inline PEM or path) + thumbprint are present."""
         return bool((self.cfg.cert_private_key or self.cfg.cert_path) and self.cfg.cert_thumbprint)
+
+    @staticmethod
+    def _fingerprint(value: str) -> str:
+        """Stable non-secret cache token for credential identity checks."""
+        if not value:
+            return ""
+        return hashlib.sha256(value.encode("utf-8")).hexdigest()
+
+    def _cert_path_identity(self) -> tuple:
+        cert_path = self.cfg.cert_path
+        if not cert_path:
+            return ("",)
+        try:
+            stat = pathlib.Path(cert_path).stat()
+            return (cert_path, stat.st_mtime_ns, stat.st_size)
+        except OSError:
+            return (cert_path,)
+
+    def _current_app_cache_key(self) -> tuple:
+        """Current Graph auth identity; changing env/creds forces MSAL rebuild."""
+        if self._has_cert():
+            credential_identity = (
+                "cert",
+                self._fingerprint(self.cfg.cert_private_key),
+                self._cert_path_identity(),
+                self.cfg.cert_thumbprint,
+            )
+        else:
+            credential_identity = ("secret", self._fingerprint(self.cfg.client_secret))
+        return (
+            self.cfg.tenant_id,
+            self.cfg.client_id,
+            self.cfg.authority_tmpl,
+            tuple(self.cfg.scope),
+            credential_identity,
+        )
 
     def is_configured(self) -> bool:
         """True if tenant_id + client_id + a usable credential are present.
@@ -70,7 +108,8 @@ class GraphClient:
         if not self.is_ready():
             return None
         try:
-            if self._app is None:
+            app_cache_key = self._current_app_cache_key()
+            if self._app is None or self._app_cache_key != app_cache_key:
                 # Cert takes precedence over client_secret when both are set.
                 if self._has_cert():
                     private_key = self.cfg.cert_private_key or pathlib.Path(
@@ -87,6 +126,7 @@ class GraphClient:
                     authority=self.cfg.authority_tmpl.format(tenant=self.cfg.tenant_id),
                     client_credential=credential,
                 )
+                self._app_cache_key = app_cache_key
             result = self._app.acquire_token_for_client(scopes=self.cfg.scope)
             if "access_token" in result:
                 return result["access_token"]

@@ -140,6 +140,47 @@ def test_acquire_token_uses_env_changed_after_construction(monkeypatch):
         assert kwargs["client_credential"] == SECRET
 
 
+def test_acquire_token_rebuilds_msal_when_env_credentials_change(monkeypatch):
+    for name in (
+        "M365_TENANT_ID",
+        "M365_CLIENT_ID",
+        "M365_CLIENT_SECRET",
+        "M365_CERT_PRIVATE_KEY",
+        "M365_CERT_PATH",
+        "M365_CERT_THUMBPRINT",
+        "BAKER_USE_GRAPH",
+    ):
+        monkeypatch.delenv(name, raising=False)
+
+    client = GraphClient(GraphConfig())
+    monkeypatch.setenv("M365_TENANT_ID", "tenant-1")
+    monkeypatch.setenv("M365_CLIENT_ID", "client-1")
+    monkeypatch.setenv("M365_CLIENT_SECRET", "secret-1")
+    monkeypatch.setenv("BAKER_USE_GRAPH", "true")
+
+    with mock.patch(MSAL_PATH) as m_msal:
+        m_msal.return_value.acquire_token_for_client.return_value = {"access_token": TOKEN}
+        assert client._acquire_token() == TOKEN
+
+        monkeypatch.setenv("M365_TENANT_ID", "tenant-2")
+        monkeypatch.setenv("M365_CLIENT_ID", "client-2")
+        monkeypatch.setenv("M365_CLIENT_SECRET", "secret-2")
+        assert client.cfg.tenant_id == "tenant-2"
+        assert client.cfg.client_id == "client-2"
+        assert client.cfg.client_secret == "secret-2"
+        assert client._acquire_token() == TOKEN
+
+        assert m_msal.call_count == 2
+        first_args, first_kwargs = m_msal.call_args_list[0]
+        second_args, second_kwargs = m_msal.call_args_list[1]
+        assert first_args[0] == "client-1"
+        assert first_kwargs["authority"] == "https://login.microsoftonline.com/tenant-1"
+        assert first_kwargs["client_credential"] == "secret-1"
+        assert second_args[0] == "client-2"
+        assert second_kwargs["authority"] == "https://login.microsoftonline.com/tenant-2"
+        assert second_kwargs["client_credential"] == "secret-2"
+
+
 def test_constructor_values_override_later_env_changes(monkeypatch):
     cfg = GraphConfig(
         tenant_id="",
