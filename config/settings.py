@@ -112,25 +112,125 @@ class Qwen3Config:
         return bool(self.base_url and self.api_key and self.model)
 
 
-@dataclass
+@dataclass(init=False)
 class GraphConfig:
     """M365_GRAPH_CLIENT_FOUNDATION_1: Microsoft Graph (M365) configuration.
-    Dormant until Phase 0 creds + BAKER_USE_GRAPH=true."""
-    tenant_id: str = os.getenv("M365_TENANT_ID", "")
-    client_id: str = os.getenv("M365_CLIENT_ID", "")
-    client_secret: str = os.getenv("M365_CLIENT_SECRET", "")
-    # Certificate auth (production-preferred per program Phase 0). Cert takes
-    # precedence over client_secret when both are set. PEM private key may be
-    # supplied inline (cert_private_key) or via a PEM file path (cert_path).
-    cert_private_key: str = os.getenv("M365_CERT_PRIVATE_KEY", "")
-    cert_path: str = os.getenv("M365_CERT_PATH", "")
-    cert_thumbprint: str = os.getenv("M365_CERT_THUMBPRINT", "")
+    Dormant until Phase 0 creds + BAKER_USE_GRAPH=true.
+
+    Env-derived values are properties so long-lived imports do not freeze Graph
+    toggles or credentials. Explicit constructor values still override env for
+    tests and callers that need a stable config snapshot.
+    """
     base_url: str = "https://graph.microsoft.com/v1.0"
     authority_tmpl: str = "https://login.microsoftonline.com/{tenant}"
     scope: List[str] = field(default_factory=lambda: ["https://graph.microsoft.com/.default"])
-    enabled: bool = os.getenv("BAKER_USE_GRAPH", "false").lower() == "true"
-    # M365_GRAPH_MAIL_POLL_2: mailbox the Graph poller reads (delta query).
-    mail_user: str = os.getenv("M365_MAIL_USER", "dvallen@brisengroup.com")
+
+    def __init__(
+        self,
+        tenant_id: Optional[str] = None,
+        client_id: Optional[str] = None,
+        client_secret: Optional[str] = None,
+        cert_private_key: Optional[str] = None,
+        cert_path: Optional[str] = None,
+        cert_thumbprint: Optional[str] = None,
+        base_url: str = "https://graph.microsoft.com/v1.0",
+        authority_tmpl: str = "https://login.microsoftonline.com/{tenant}",
+        scope: Optional[List[str]] = None,
+        enabled: Optional[bool] = None,
+        mail_user: Optional[str] = None,
+    ) -> None:
+        self._tenant_id = tenant_id
+        self._client_id = client_id
+        self._client_secret = client_secret
+        self._cert_private_key = cert_private_key
+        self._cert_path = cert_path
+        self._cert_thumbprint = cert_thumbprint
+        self.base_url = base_url
+        self.authority_tmpl = authority_tmpl
+        self.scope = scope if scope is not None else ["https://graph.microsoft.com/.default"]
+        self._enabled = enabled
+        self._mail_user = mail_user
+
+    @staticmethod
+    def _env_flag(name: str, default: bool = False) -> bool:
+        fallback = "true" if default else "false"
+        return os.getenv(name, fallback).lower() == "true"
+
+    @property
+    def tenant_id(self) -> str:
+        return self._tenant_id if self._tenant_id is not None else os.getenv("M365_TENANT_ID", "")
+
+    @tenant_id.setter
+    def tenant_id(self, value: str) -> None:
+        self._tenant_id = value
+
+    @property
+    def client_id(self) -> str:
+        return self._client_id if self._client_id is not None else os.getenv("M365_CLIENT_ID", "")
+
+    @client_id.setter
+    def client_id(self, value: str) -> None:
+        self._client_id = value
+
+    @property
+    def client_secret(self) -> str:
+        return self._client_secret if self._client_secret is not None else os.getenv("M365_CLIENT_SECRET", "")
+
+    @client_secret.setter
+    def client_secret(self, value: str) -> None:
+        self._client_secret = value
+
+    @property
+    def cert_private_key(self) -> str:
+        return (
+            self._cert_private_key
+            if self._cert_private_key is not None
+            else os.getenv("M365_CERT_PRIVATE_KEY", "")
+        )
+
+    @cert_private_key.setter
+    def cert_private_key(self, value: str) -> None:
+        self._cert_private_key = value
+
+    @property
+    def cert_path(self) -> str:
+        return self._cert_path if self._cert_path is not None else os.getenv("M365_CERT_PATH", "")
+
+    @cert_path.setter
+    def cert_path(self, value: str) -> None:
+        self._cert_path = value
+
+    @property
+    def cert_thumbprint(self) -> str:
+        return (
+            self._cert_thumbprint
+            if self._cert_thumbprint is not None
+            else os.getenv("M365_CERT_THUMBPRINT", "")
+        )
+
+    @cert_thumbprint.setter
+    def cert_thumbprint(self, value: str) -> None:
+        self._cert_thumbprint = value
+
+    @property
+    def enabled(self) -> bool:
+        return self._enabled if self._enabled is not None else self._env_flag("BAKER_USE_GRAPH")
+
+    @enabled.setter
+    def enabled(self, value: bool) -> None:
+        self._enabled = value
+
+    @property
+    def mail_user(self) -> str:
+        return (
+            self._mail_user
+            if self._mail_user is not None
+            else os.getenv("M365_MAIL_USER", "dvallen@brisengroup.com")
+        )
+
+    @mail_user.setter
+    def mail_user(self, value: str) -> None:
+        self._mail_user = value
 
 
 @dataclass
