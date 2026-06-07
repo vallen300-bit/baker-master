@@ -1606,15 +1606,19 @@ _CLERK_SEARCH_FAILLOUD_MSG = (
 # Negated modals: couldn't/could not, cannot/can not/can't, don't/do not,
 # doesn't/does not, didn't/did not. ("can't" = can+'t, so it needs its own arm.)
 _NEG = r"(?:could\s*n[o']?t|can\s*n[o']?t|can[o']?t|do\s*n[o']?t|does\s*n[o']?t|did\s*n[o']?t)"
+# Baker-data nouns — the "<NEG> see/have ... any <X>" arm is constrained to these
+# so "I don't have any questions/updates/preference" (chit-chat) does NOT trip it
+# (CLERK_QWEN3_GUARD_COVERAGE_1, codex anti-over-trigger FAIL-M1).
+_DATA_NOUN = r"(?:documents?|results?|matches|emails?|messages?|records?|hits?|transcripts?|files?)"
 _LOOKUP_ASSERTION_RE = re.compile(
-    r"\bno\s+(?:documents?|results?|matches|emails?|messages?|records?|hits?|transcripts?|files?)\b"
+    rf"\bno\s+{_DATA_NOUN}\b"
     r"|\bfound\s+(?:no|nothing|none|\d+)\b"
     r"|\bnothing\s+(?:found|came\s+back|turned\s+up)\b"
     rf"|\b{_NEG}\s+(?:find|locate|spot|identify)\b"
-    rf"|\b{_NEG}\s+(?:see|have|find|locate|spot)\s+any\b"
+    rf"|\b{_NEG}\s+(?:see|have|find|locate|spot)\s+any\s+{_DATA_NOUN}\b"
     r"|\b(?:do|does|did)\s*n[o']?t\s+(?:appear|seem)\b"
     r"|\bunable\s+to\s+(?:find|locate|see|identify|retrieve)\b"
-    r"|\b\d+\s+(?:documents?|emails?|results?|matches|messages?|transcripts?|records?|files?)\b"
+    rf"|\b\d+\s+{_DATA_NOUN}\b"
     r"|\bI\s+(?:searched|looked|checked)\b"
     r"|\bsearch(?:ed)?\s+(?:returned|came\s+back|found|yielded)\b",
     re.IGNORECASE,

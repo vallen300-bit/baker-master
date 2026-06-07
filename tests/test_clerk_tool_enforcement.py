@@ -81,6 +81,7 @@ def _cfg(max_steps=12, timeout=180):
     "unable to find any records",
     "does not appear to be any transcripts",
     "No files found",
+    "I do not have any documents about Peter Storer",  # have+any+data-noun still fires
 ])
 def test_lookup_assertion_detected(text):
     assert _asserts_unsubstantiated_lookup(text) is True
@@ -98,6 +99,11 @@ def test_lookup_assertion_detected(text):
     "I do not see why not, here is the plan.",
     "I do not see how that helps.",
     "I can't wait to help!",
+    # CLERK_QWEN3_GUARD_COVERAGE_1 codex anti-over-trigger FAIL-M1: "have any X"
+    # where X is NOT a Baker-data noun is chit-chat, must stay False.
+    "I do not have any questions",
+    "I don't have any updates yet",
+    "I don't have any preference",
 ])
 def test_non_lookup_text_not_flagged(text):
     assert _asserts_unsubstantiated_lookup(text) is False
