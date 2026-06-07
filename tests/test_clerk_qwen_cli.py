@@ -116,7 +116,9 @@ def test_chat_sends_plain_english_line_and_prints_real_footer(monkeypatch, capsy
     out = capsys.readouterr().out
     assert code == 0
     assert len(calls) == 2
-    assert "Clerk Qwen3 - Brisen document clerk" in out
+    assert 'Clerk Qwen3 (Brisen doc clerk) - type a task; "help" for reach/limits; exit to quit.' in out
+    assert "Reach:" not in out
+    assert "Limits:" not in out
     assert "Ready: /Baker-Feed/Clerk-Workbench/peter.md / Source: Outlook" in out
     assert "Draft preview:" in out
     assert "Latest email from Peter Storer: status note about the hotel asset." in out
@@ -167,6 +169,35 @@ def test_chat_prints_blocked_reason_inline(monkeypatch, capsys):
     assert "Blocked: money/payment action" in out
     assert "Status: blocked" in out
     assert "Qwen3-Coder | ctx n/a/n/a (n/a) | n/a tok | $n/a" in out
+
+
+def test_chat_help_prints_reach_limits_without_api_call(monkeypatch, capsys):
+    inputs = iter(["help", "exit"])
+
+    def fake_input(prompt):
+        assert prompt == "clerk> "
+        return next(inputs)
+
+    def fail_urlopen(*args, **kwargs):
+        raise AssertionError("help must not call the Clerk API")
+
+    monkeypatch.setattr("builtins.input", fake_input)
+    monkeypatch.setattr(urllib.request, "urlopen", fail_urlopen)
+
+    code = clerk_qwen.main([
+        "chat",
+        "--base-url",
+        "https://baker.test",
+        "--api-key",
+        "test-key",
+    ])
+
+    out = capsys.readouterr().out
+    assert code == 0
+    assert out.count("Clerk Qwen3 (Brisen doc clerk)") == 1
+    assert "Reach: Gmail, Outlook/Graph" in out
+    assert "Limits: no money, no external sends" in out
+    assert "Usage: type a task." in out
 
 
 def test_chat_prints_escalation_reason_and_answer(monkeypatch, capsys):
@@ -248,7 +279,7 @@ def test_no_args_defaults_to_chat(monkeypatch, capsys):
 
     out = capsys.readouterr().out
     assert code == 0
-    assert "Clerk Qwen3 - Brisen document clerk" in out
+    assert "Clerk Qwen3 (Brisen doc clerk)" in out
 
 
 def test_status_uses_env_key_without_1password(monkeypatch, capsys):
