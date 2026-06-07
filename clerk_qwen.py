@@ -15,6 +15,7 @@ from typing import Any
 
 DEFAULT_BASE_URL = "https://baker-master.onrender.com"
 RUNNING_STATUSES = {"running"}
+DRAFT_PREVIEW_CHARS = 600
 
 
 class ClerkQwenError(RuntimeError):
@@ -157,6 +158,78 @@ def _print_session(session: dict[str, Any], base_url: str) -> None:
         print("How to approve: route this session_id and requested action to lead/Director approval.")
 
 
+def _result_payload(session: dict[str, Any]) -> dict[str, Any]:
+    result = session.get("result")
+    return result if isinstance(result, dict) else {}
+
+
+def _first_text(payload: dict[str, Any], keys: tuple[str, ...]) -> str:
+    for key in keys:
+        value = payload.get(key)
+        if isinstance(value, str) and value.strip():
+            return value.strip()
+    return ""
+
+
+def _trim_preview(text: str, limit: int = DRAFT_PREVIEW_CHARS) -> str:
+    stripped = text.strip()
+    if len(stripped) <= limit:
+        return stripped
+    return stripped[:limit].rstrip() + "..."
+
+
+def _print_chat_result(session: dict[str, Any]) -> None:
+    status = str(session.get("status") or "unknown")
+    result = _result_payload(session)
+    answer = _first_text(result, ("answer", "summary", "result", "message", "text", "output", "draft_preview"))
+    if not answer and isinstance(result.get("path"), str) and result["path"].strip():
+        answer = f"Ready: {result['path'].strip()}"
+    reason = _session_reason(session)
+    draft_content = session.get("draft_content")
+    draft_path = session.get("draft_path")
+
+    if (result.get("escalated") is True or status == "escalated") and reason:
+        print(f"Escalated: {reason}")
+        if answer:
+            print(answer)
+    elif status == "blocked" and reason:
+        print(f"Blocked: {reason}")
+    elif status == "pending_approval" and reason:
+        print(f"Pending approval: {reason}")
+    elif status == "error" and reason:
+        print(f"Error: {reason}")
+    elif answer:
+        print(answer)
+    elif reason:
+        print(f"Reason: {reason}")
+    else:
+        print(f"Clerk finished with status: {status}")
+
+    if isinstance(draft_content, str) and draft_content.strip():
+        preview = _trim_preview(draft_content)
+        if preview and preview != answer:
+            print("")
+            print("Draft preview:")
+            print(preview)
+    if draft_path:
+        print(f"Ready path: {draft_path}")
+
+
+def _print_chat_trailer(session: dict[str, Any], base_url: str) -> None:
+    session_id = str(session.get("session_id") or "")
+    status = str(session.get("status") or "unknown")
+    print(f"Session: {session_id or '(missing)'}")
+    print(f"Status: {status}")
+    if session_id:
+        print(f"Edit URL: {edit_url(base_url, session_id)}")
+
+
+def _print_turn_footer(session: dict[str, Any]) -> None:
+    footer = _telemetry_footer(session)
+    print("-" * len(footer))
+    print(footer)
+
+
 def _print_sessions(sessions: list[dict[str, Any]], base_url: str) -> None:
     if not sessions:
         print("No Clerk sessions.")
@@ -297,8 +370,9 @@ def cmd_chat(args: argparse.Namespace) -> int:
             return 0
         try:
             session = _run_task_and_wait(client, task, args.timeout_s, args.interval_s)
-            _print_session(session, args.base_url)
-            print(_telemetry_footer(session))
+            _print_chat_result(session)
+            _print_chat_trailer(session, args.base_url)
+            _print_turn_footer(session)
         except ClerkQwenError as e:
             print(f"ERROR: {e}")
         except KeyboardInterrupt:

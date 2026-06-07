@@ -87,6 +87,11 @@ def test_chat_sends_plain_english_line_and_prints_real_footer(monkeypatch, capsy
             return _FakeResponse({
                 "session_id": "sess-chat",
                 "status": "ready",
+                "result": {
+                    "status": "ready",
+                    "answer": "Ready: /Baker-Feed/Clerk-Workbench/peter.md / Source: Outlook",
+                },
+                "draft_content": "Latest email from Peter Storer: status note about the hotel asset.",
                 "draft_path": "/Baker-Feed/Clerk-Workbench/peter.md",
                 "context_window_used": 12000,
                 "context_window_max": 1000000,
@@ -112,9 +117,121 @@ def test_chat_sends_plain_english_line_and_prints_real_footer(monkeypatch, capsy
     assert code == 0
     assert len(calls) == 2
     assert "Clerk Qwen3 - Brisen document clerk" in out
+    assert "Ready: /Baker-Feed/Clerk-Workbench/peter.md / Source: Outlook" in out
+    assert "Draft preview:" in out
+    assert "Latest email from Peter Storer: status note about the hotel asset." in out
+    assert "Ready path: /Baker-Feed/Clerk-Workbench/peter.md" in out
     assert "Status: ready" in out
-    assert "Draft path: /Baker-Feed/Clerk-Workbench/peter.md" in out
     assert "Qwen3-Coder | ctx 12000/1000000 (1.2%) | 12345 tok | $0.0042" in out
+    assert out.index("Ready: /Baker-Feed/Clerk-Workbench/peter.md") < out.index("Status: ready")
+    assert out.index("Status: ready") < out.index("Qwen3-Coder | ctx")
+
+
+def test_chat_prints_blocked_reason_inline(monkeypatch, capsys):
+    calls = []
+    inputs = iter(["wire money", "exit"])
+
+    def fake_input(prompt):
+        assert prompt == "clerk> "
+        return next(inputs)
+
+    def fake_urlopen(req, timeout):
+        calls.append(req)
+        url = req.full_url
+        if url == "https://baker.test/api/clerk/run":
+            return _FakeResponse({"session_id": "sess-blocked", "status": "running"})
+        if url == "https://baker.test/api/clerk/session/sess-blocked":
+            return _FakeResponse({
+                "session_id": "sess-blocked",
+                "status": "blocked",
+                "result": {"status": "blocked", "reason": "money/payment action"},
+            })
+        raise AssertionError(f"unexpected URL {url}")
+
+    monkeypatch.setattr("builtins.input", fake_input)
+    monkeypatch.setattr(urllib.request, "urlopen", fake_urlopen)
+
+    code = clerk_qwen.main([
+        "chat",
+        "--base-url",
+        "https://baker.test",
+        "--api-key",
+        "test-key",
+        "--interval-s",
+        "0",
+    ])
+
+    out = capsys.readouterr().out
+    assert code == 0
+    assert len(calls) == 2
+    assert "Blocked: money/payment action" in out
+    assert "Status: blocked" in out
+    assert "Qwen3-Coder | ctx n/a/n/a (n/a) | n/a tok | $n/a" in out
+
+
+def test_chat_prints_escalation_reason_and_answer(monkeypatch, capsys):
+    calls = []
+    inputs = iter(["summarize difficult document", "exit"])
+
+    def fake_input(prompt):
+        assert prompt == "clerk> "
+        return next(inputs)
+
+    def fake_urlopen(req, timeout):
+        calls.append(req)
+        url = req.full_url
+        if url == "https://baker.test/api/clerk/run":
+            return _FakeResponse({"session_id": "sess-escalated", "status": "running"})
+        if url == "https://baker.test/api/clerk/session/sess-escalated":
+            return _FakeResponse({
+                "session_id": "sess-escalated",
+                "status": "ready",
+                "result": {
+                    "status": "ready",
+                    "escalated": True,
+                    "reason": "repeated schema/tool failure: tool arguments were malformed JSON",
+                    "answer": "Ready: escalated",
+                },
+            })
+        raise AssertionError(f"unexpected URL {url}")
+
+    monkeypatch.setattr("builtins.input", fake_input)
+    monkeypatch.setattr(urllib.request, "urlopen", fake_urlopen)
+
+    code = clerk_qwen.main([
+        "chat",
+        "--base-url",
+        "https://baker.test",
+        "--api-key",
+        "test-key",
+        "--interval-s",
+        "0",
+    ])
+
+    out = capsys.readouterr().out
+    assert code == 0
+    assert len(calls) == 2
+    assert "Escalated: repeated schema/tool failure: tool arguments were malformed JSON" in out
+    assert "Ready: escalated" in out
+    assert out.index("Escalated: repeated schema/tool failure") < out.index("Ready: escalated")
+    assert "Status: ready" in out
+
+
+def test_chat_draft_preview_truncates_to_readable_size(capsys):
+    long_text = "x" * 650
+    session = {
+        "session_id": "sess-long",
+        "status": "ready",
+        "result": {"answer": "Ready: /Baker-Feed/Clerk-Workbench/long.md"},
+        "draft_content": long_text,
+        "draft_path": "/Baker-Feed/Clerk-Workbench/long.md",
+    }
+
+    clerk_qwen._print_chat_result(session)
+
+    out = capsys.readouterr().out
+    assert ("x" * 600) + "..." in out
+    assert ("x" * 601) not in out
 
 
 def test_chat_footer_renders_na_for_missing_telemetry():

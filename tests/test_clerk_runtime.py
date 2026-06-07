@@ -1,4 +1,5 @@
 import json
+import sys
 import tempfile
 from pathlib import Path
 from types import SimpleNamespace
@@ -207,6 +208,52 @@ def test_internal_bus_reply_task_is_allowed_not_external_send():
     assert len(client.messages.calls) == 1
     assert "internal Brisen agent bus" in client.messages.calls[0]["system"]
     assert "not an external send" in " ".join(_CLERK_SYSTEM_PROMPT.split())
+
+
+def test_email_tools_default_to_graph_provider(monkeypatch):
+    monkeypatch.setattr("orchestrator.clerk_runtime.config.qwen3.default_mail_provider", "graph")
+    registry = ClerkToolRegistry()
+    calls = []
+
+    def fake_graph_search(query, max_results):
+        calls.append(("search", query, max_results))
+        return json.dumps({"provider": "graph", "query": query, "max_results": max_results})
+
+    def fake_graph_download(message_id):
+        calls.append(("download", message_id))
+        return json.dumps({"provider": "graph", "message_id": message_id})
+
+    monkeypatch.setattr(registry, "_graph_email_search", fake_graph_search)
+    monkeypatch.setattr(registry, "_graph_email_download", fake_graph_download)
+
+    search_tool = next(tool for tool in registry.tools if tool["name"] == "email_search")
+    download_tool = next(tool for tool in registry.tools if tool["name"] == "email_download")
+    assert search_tool["input_schema"]["properties"]["provider"]["default"] == "graph"
+    assert download_tool["input_schema"]["properties"]["provider"]["default"] == "graph"
+
+    search = json.loads(registry.execute("email_search", {"query": "from:peter"}))
+    download = json.loads(registry.execute("email_download", {"message_id": "m-1"}))
+
+    assert search["provider"] == "graph"
+    assert download["provider"] == "graph"
+    assert calls == [("search", "from:peter", 10), ("download", "m-1")]
+
+
+def test_email_search_keeps_explicit_gmail_provider_selectable(monkeypatch):
+    monkeypatch.setattr("orchestrator.clerk_runtime.config.qwen3.default_mail_provider", "graph")
+    calls = []
+
+    def fake_dispatch(tool_name, payload):
+        calls.append((tool_name, payload))
+        return json.dumps({"provider": "gmail", "payload": payload})
+
+    monkeypatch.setitem(sys.modules, "tools.gmail", SimpleNamespace(dispatch_gmail=fake_dispatch))
+    registry = ClerkToolRegistry()
+
+    result = json.loads(registry.execute("email_search", {"provider": "gmail", "query": "from:peter"}))
+
+    assert result["provider"] == "gmail"
+    assert calls == [("baker_gmail_search", {"query": "from:peter", "max_results": 10})]
 
 
 def test_step_cap_stops_unbounded_loop():
