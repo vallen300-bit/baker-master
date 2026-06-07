@@ -128,14 +128,39 @@ def test_non_lookup_text_not_flagged(text):
     ("find emails from Storer", True),
     ("do we have any files on the Hagenauer matter", True),
     ("list the meeting transcripts about RG7", True),
+    # CLERK_QWEN3_GUARD_COVERAGE_1 codex G3 Finding A: terse forms must qualify.
+    ("what do we have on Peter Storer", True),
+    ("Peter Storer emails", True),
+    ("Peter Storer docs", True),
+    ("anything on Storer", True),
     ("hi, what can you do?", False),
-    ("draft an email to Storer", False),
+    ("draft an email to Storer", False),       # data noun + action verb -> not lookup
     ("save this note to my folder", False),
     ("convert this file to pdf", False),
+    ("reply to this email", False),
+    ("summarize this document", False),
     ("thanks!", False),
 ])
 def test_task_lookup_shape_classifier(task, expected):
     assert _task_is_lookup_shaped(task) is expected
+
+
+def test_document_fetch_satisfies_grounding_no_forced_retry(monkeypatch):
+    # CLERK_QWEN3_GUARD_COVERAGE_1 codex G3 Finding B: a successful document_fetch
+    # (or email_download) retrieves real Baker data and must NOT be forced into a
+    # search retry just because no SEARCH tool ran.
+    reg = ClerkToolRegistry()
+    monkeypatch.setattr(reg, "_document_fetch",
+                        lambda args: json.dumps({"status": "ok", "path": args.get("path")}))
+    client = _FakeClient([
+        _ToolResponse([_ToolUseBlock("d1", "document_fetch", {"path": "/foo.pdf"})], "tool_use", 10, 5),
+        _ToolResponse([_TextBlock("Ready: /foo.pdf / Source: dropbox")], "end_turn", 8, 4),
+    ])
+    agent = ClerkAgent(model_client=client, registry=reg, cfg=_cfg())
+    result = agent.run("retrieve the file /foo.pdf")
+    assert result["status"] == "ready"
+    assert any(c["name"] == "document_fetch" for c in result["tool_calls"])
+    assert len(client.messages.calls) == 2  # no forced retry
 
 
 def test_structural_primary_fires_regardless_of_answer_phrasing():
