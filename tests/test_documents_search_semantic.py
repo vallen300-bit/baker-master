@@ -277,7 +277,10 @@ def test_search_handler_reports_mode_in_source():
     """A1: the response dict must carry `mode`, and the three legitimate values
     must exist so a silent ILIKE regression (original Bug A) is observable."""
     src = Path("outputs/dashboard.py").read_text()
-    start = src.index("async def search_documents_endpoint(")
+    # CLERK_SEARCH_BACKEND_FAILSILENT_FIX_1: the retrieval logic moved into the
+    # reusable search_documents_core(); the endpoint is now a thin wrapper. Slice
+    # from the core so the mode/logging guards still cover the real logic.
+    start = src.index("def search_documents_core(")
     end = src.index("async def get_document_text(", start)
     handler = src[start:end]
     assert '"mode": mode' in handler, "search response must include the mode field"
@@ -291,7 +294,10 @@ def test_search_handler_splits_fallback_logging_in_source():
     result above threshold is a legitimate last-resort → logger.info. They must
     not both collapse to one warning anymore."""
     src = Path("outputs/dashboard.py").read_text()
-    start = src.index("async def search_documents_endpoint(")
+    # CLERK_SEARCH_BACKEND_FAILSILENT_FIX_1: the retrieval logic moved into the
+    # reusable search_documents_core(); the endpoint is now a thin wrapper. Slice
+    # from the core so the mode/logging guards still cover the real logic.
+    start = src.index("def search_documents_core(")
     end = src.index("async def get_document_text(", start)
     handler = src[start:end]
     assert "logger.error(f\"Qdrant/Voyage semantic search RAISED" in handler, (

@@ -17,6 +17,40 @@ from config.settings import config
 
 logger = logging.getLogger("sentinel.retriever")
 
+
+# CLERK_SEARCH_BACKEND_FAILSILENT_FIX_1 (B — fail loud): a backend that is
+# UNREACHABLE (Postgres connection refused/dropped, Qdrant/Voyage transport
+# down) must be distinguishable from a query that ran and legitimately found
+# nothing. The search helpers historically swallowed *both* as `return []`,
+# which masked an outage as "no results found" (Lesson #8 green-but-broken).
+# They now raise this on connection-class failures so callers (clerk,
+# /api/search/unified, /api/documents/search) can surface "search backend
+# unavailable — retry" instead of a false empty. Genuine empty stays `[]`.
+class SearchBackendUnavailable(Exception):
+    """Raised when a search backend is unreachable (not merely empty)."""
+
+
+def _is_backend_unavailable_error(exc: BaseException) -> bool:
+    """True if `exc` is a connection/transport-level backend failure (vs a
+    query/programming error or a genuine empty result). Kept name-based so we
+    don't hard-import psycopg2/httpx at module top (psycopg2 is lazy-imported)."""
+    # psycopg2 connection-level failures: OperationalError, InterfaceError
+    # (connection refused, server closed, SSL drop, DNS). Walk the cause chain.
+    seen = set()
+    cur = exc
+    while cur is not None and id(cur) not in seen:
+        seen.add(id(cur))
+        name = type(cur).__name__
+        if name in {"OperationalError", "InterfaceError", "ConnectionError",
+                    "ConnectError", "ConnectTimeout", "ConnectionRefusedError",
+                    "PoolTimeout", "ResponseHandlingException"}:
+            return True
+        # OSError family with ECONNREFUSED (Errno 111) / connection-reset.
+        if isinstance(cur, OSError) and getattr(cur, "errno", None) in {111, 104, 61}:
+            return True
+        cur = cur.__cause__ or cur.__context__
+    return False
+
 # COST-OPT-WAVE3 (3a): Per-trigger retrieval profiles
 # Controls how much context gets retrieved for each trigger type.
 # Pipeline triggers get lean profiles; interactive queries use "default".
@@ -921,8 +955,11 @@ class SentinelRetriever:
                 ))
             return contexts
         except Exception as e:
-            logger.warning(f"Meeting transcript search failed (non-fatal): {e}")
             self._reset_pg_conn()
+            if _is_backend_unavailable_error(e):
+                logger.error(f"Meeting transcript search backend unavailable: {e}")
+                raise SearchBackendUnavailable(str(e)) from e
+            logger.warning(f"Meeting transcript search failed (non-fatal): {e}")
             return []
 
     # ----------------------------------------------------------------
@@ -981,8 +1018,11 @@ class SentinelRetriever:
                 ))
             return contexts
         except Exception as e:
-            logger.warning(f"Email message search failed (non-fatal): {e}")
             self._reset_pg_conn()
+            if _is_backend_unavailable_error(e):
+                logger.error(f"Email message search backend unavailable: {e}")
+                raise SearchBackendUnavailable(str(e)) from e
+            logger.warning(f"Email message search failed (non-fatal): {e}")
             return []
 
     def get_recent_emails(self, limit: int = 5) -> list[RetrievedContext]:
@@ -1085,8 +1125,11 @@ class SentinelRetriever:
                 ))
             return contexts
         except Exception as e:
-            logger.warning(f"WhatsApp message search failed (non-fatal): {e}")
             self._reset_pg_conn()
+            if _is_backend_unavailable_error(e):
+                logger.error(f"WhatsApp message search backend unavailable: {e}")
+                raise SearchBackendUnavailable(str(e)) from e
+            logger.warning(f"WhatsApp message search failed (non-fatal): {e}")
             return []
 
     def get_recent_whatsapp(self, limit: int = 5) -> list[RetrievedContext]:

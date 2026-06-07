@@ -451,35 +451,39 @@ def test_email_store_fuzzy_fallback_does_not_fire_for_single_keyword(monkeypatch
     assert query_calls == []
 
 
-def test_baker_search_reuses_existing_sentinel_retriever(monkeypatch):
+def test_baker_search_reuses_documents_search_core(monkeypatch):
+    # CLERK_SEARCH_BACKEND_FAILSILENT_FIX_1 (C): baker_search no longer calls
+    # SentinelRetriever.search_all_collections (the Qdrant path that returned 0
+    # for "Peter Storer"); it reuses search_documents_core — the SAME PG
+    # documents semantic+ILIKE retrieval GET /api/documents/search uses (43 hits).
     calls = []
 
-    class FakeRetriever:
-        def search_all_collections(self, **kwargs):
-            calls.append(kwargs)
-            return [
-                SimpleNamespace(
-                    content="semantic hit",
-                    source="whatsapp",
-                    score=0.91,
-                    metadata={"label": "WA", "date": "2026-06-07"},
-                )
-            ]
+    def fake_core(query, **kwargs):
+        calls.append((query, kwargs))
+        return {
+            "results": [{
+                "id": 11,
+                "title": "storer.pdf",
+                "document_type": "letter",
+                "matter": "hagenauer-rg7",
+                "source_path": "/v/storer.pdf",
+                "date": "2026-06-07",
+                "summary": "Peter Storer ...",
+                "score": 0.91,
+            }],
+            "total": 43,
+            "mode": "semantic",
+        }
 
-    class FakeSentinelRetriever:
-        @staticmethod
-        def _get_global_instance():
-            return FakeRetriever()
-
-    monkeypatch.setitem(sys.modules, "memory.retriever", SimpleNamespace(SentinelRetriever=FakeSentinelRetriever))
+    monkeypatch.setitem(sys.modules, "outputs.dashboard", SimpleNamespace(search_documents_core=fake_core))
     registry = ClerkToolRegistry()
 
     result = json.loads(registry.execute("baker_search", {"query": "Peter Storer", "max_results": 4}))
 
     assert result["channel"] == "baker_search"
-    assert result["count"] == 1
-    assert result["results"][0]["source"] == "whatsapp"
-    assert calls == [{"query": "Peter Storer", "limit_per_collection": 4, "score_threshold": 0.3}]
+    assert result["count"] == 43
+    assert result["results"][0]["label"] == "storer.pdf"
+    assert calls and calls[0][0] == "Peter Storer" and calls[0][1].get("limit") == 4
 
 
 def test_channel_search_slack_and_rss_use_read_only_sql(monkeypatch):

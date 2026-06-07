@@ -3935,39 +3935,29 @@ def _resolve_semantic_doc_hits(
     return ordered[offset:offset + limit], total
 
 
-@app.get("/api/documents/search", tags=["documents"], dependencies=[Depends(verify_api_key)])
-async def search_documents_endpoint(
-    q: str = Query("", max_length=500),
-    matter: str = Query("", max_length=500, description="Comma-separated matter slugs"),
-    doc_type: str = Query("", max_length=500, description="Comma-separated document types"),
-    source: str = Query("", max_length=200, description="Comma-separated sources"),
-    sort: str = Query("relevance", max_length=20),
-    offset: int = Query(0, ge=0),
-    limit: int = Query(20, ge=1, le=100),
-):
-    """
-    DOCUMENTS-REDESIGN-1: Search documents with filters.
-    - If q provided: Qdrant semantic search, then enrich from PostgreSQL
-    - If only filters: PostgreSQL query with WHERE clauses
+def search_documents_core(
+    q: str = "",
+    matter: str = "",
+    doc_type: str = "",
+    source: str = "",
+    sort: str = "relevance",
+    offset: int = 0,
+    limit: int = 20,
+) -> dict:
+    """CLERK_SEARCH_BACKEND_FAILSILENT_FIX_1 (C): the in-process document
+    retrieval shared by GET /api/documents/search AND clerk's baker_search
+    (orchestrator/clerk_runtime.py). Semantic (Qdrant) -> PostgreSQL `documents`
+    enrich -> ILIKE/filter PostgreSQL fallback — the path proven to return the
+    real hits (e.g. 43 for "Peter Storer"), unlike SentinelRetriever's
+    Qdrant-collection path which returned 0.
 
-    Response includes a `mode` field (INGEST_SEARCH_DURABILITY_FOLLOWUPS_1 A1):
-      - "semantic"       — Qdrant semantic path served the results.
-      - "ilike_fallback" — had query text but fell back to PG keyword match
-                           (Qdrant/Voyage raised → logged at ERROR; or no hit
-                           above threshold → logged at INFO).
-      - "filter_only"    — no query text; PG WHERE-clause path by design.
-    A silent regression to keyword search (the original Bug A) is now visible
-    in both the response and the logs.
-
-    Pagination bound (B4): on the semantic path the response also carries
-    `total_is_windowed: true` — `total` counts only documents within the
-    ≤300-chunk over-fetch window (`qdrant_limit`), not the true corpus, so deep
-    `offset`s past the window return a shifting/under-count total. Callers should
-    treat semantic `total` as a windowed estimate; the ILIKE/filter_only paths
-    return an exact `COUNT(*)` and omit the flag. The semantic path also carries
-    `enrichment_failed` (B5.3) to distinguish a genuinely-empty result from a PG
-    enrichment failure (both otherwise look like `total: 0`).
+    Fail-loud (B): raises memory.retriever.SearchBackendUnavailable when the PG
+    path has no connection, so callers surface "search backend unavailable —
+    retry" instead of a false-empty. Fully synchronous (no awaits) so sync
+    callers (clerk) can reuse it directly. Returns the same dict the endpoint
+    returns: {results, total, offset, mode[, total_is_windowed, enrichment_failed]}.
     """
+    from memory.retriever import SearchBackendUnavailable
     try:
         store = _get_store()
 
@@ -4086,7 +4076,8 @@ async def search_documents_endpoint(
         if use_ilike:
             conn = store._get_conn()
             if not conn:
-                raise HTTPException(status_code=503, detail="Database unavailable")
+                # Fail loud (B): no PG conn is a backend outage, NOT empty data.
+                raise SearchBackendUnavailable("documents search: PostgreSQL connection unavailable")
             try:
                 import psycopg2.extras
                 cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
@@ -4146,15 +4137,15 @@ async def search_documents_endpoint(
                         "score": None,
                     })
                 cur.close()
-            except HTTPException:
+            except SearchBackendUnavailable:
                 raise
             except Exception as ilike_err:
                 try:
                     conn.rollback()
                 except Exception:
                     pass
-                logger.error(f"GET /api/documents/search ILIKE path failed: {ilike_err}")
-                raise HTTPException(status_code=500, detail=str(ilike_err))
+                logger.error(f"documents search ILIKE path failed: {ilike_err}")
+                raise
             finally:
                 store._put_conn(conn)
 
@@ -4167,8 +4158,36 @@ async def search_documents_endpoint(
             # B5.3: surface enrichment failure so it isn't mistaken for an empty result.
             response["enrichment_failed"] = enrichment_failed
         return response
-    except HTTPException:
+    except SearchBackendUnavailable:
         raise
+    except Exception as e:
+        logger.error(f"search_documents_core failed: {e}")
+        raise
+
+
+@app.get("/api/documents/search", tags=["documents"], dependencies=[Depends(verify_api_key)])
+async def search_documents_endpoint(
+    q: str = Query("", max_length=500),
+    matter: str = Query("", max_length=500, description="Comma-separated matter slugs"),
+    doc_type: str = Query("", max_length=500, description="Comma-separated document types"),
+    source: str = Query("", max_length=200, description="Comma-separated sources"),
+    sort: str = Query("relevance", max_length=20),
+    offset: int = Query(0, ge=0),
+    limit: int = Query(20, ge=1, le=100),
+):
+    """DOCUMENTS-REDESIGN-1: thin HTTP wrapper over search_documents_core().
+    Maps SearchBackendUnavailable -> 503 (fail loud) and other failures -> 500.
+    See search_documents_core for the retrieval contract + mode/enrichment_failed.
+    CLERK_SEARCH_BACKEND_FAILSILENT_FIX_1: clerk's baker_search reuses the same
+    core in-process, so the dashboard and clerk can never silently diverge."""
+    from memory.retriever import SearchBackendUnavailable
+    try:
+        return search_documents_core(
+            q=q, matter=matter, doc_type=doc_type, source=source,
+            sort=sort, offset=offset, limit=limit,
+        )
+    except SearchBackendUnavailable:
+        raise HTTPException(status_code=503, detail="Database unavailable")
     except Exception as e:
         logger.error(f"GET /api/documents/search failed: {e}")
         raise HTTPException(status_code=500, detail=str(e))
@@ -10165,10 +10184,15 @@ async def unified_search(
 ):
     """D6: Search across all stored content from one endpoint.
     Returns merged, relevance-ranked results across emails, meetings, docs, WhatsApp, conversations."""
-    from memory.retriever import SentinelRetriever
+    from memory.retriever import SentinelRetriever, SearchBackendUnavailable
 
     retriever = _get_retriever()
     all_results = []
+    # CLERK_SEARCH_BACKEND_FAILSILENT_FIX_1 (B): track sources whose backend was
+    # UNREACHABLE (vs legitimately empty) so a partial/degraded search is not
+    # mistaken for "no results found". Surfaced in the response as
+    # `backend_unavailable`; callers (e.g. MCP baker_search) can fail loud.
+    backend_errors = []
 
     # Parse source filter (default: all)
     allowed = set()
@@ -10188,6 +10212,9 @@ async def unified_search(
                     "metadata": r.metadata,
                     "token_estimate": r.token_estimate,
                 })
+        except SearchBackendUnavailable as e:
+            logger.error(f"Unified search: {source_name} backend unavailable: {e}")
+            backend_errors.append(source_name)
         except Exception as e:
             logger.warning(f"Unified search: {source_name} failed: {e}")
 
@@ -10239,12 +10266,17 @@ async def unified_search(
             seen_prefixes.add(prefix)
             deduped.append(r)
 
-    return {
+    resp = {
         "query": q,
         "results": deduped[:limit],
         "total": len(deduped),
         "sources_searched": list(allowed) if allowed else ["emails", "meetings", "whatsapp", "documents", "conversations"],
     }
+    # B (fail loud): if any source's backend was unreachable, say so — an empty
+    # result with backend_unavailable set is NOT "no data", it's a degraded search.
+    if backend_errors:
+        resp["backend_unavailable"] = sorted(set(backend_errors))
+    return resp
 
 
 # --- Semantic Search (legacy Qdrant-only) ---
