@@ -265,6 +265,84 @@ def test_email_search_keeps_explicit_gmail_provider_selectable(monkeypatch):
     assert calls == [("baker_gmail_search", {"query": "from:peter", "max_results": 10})]
 
 
+def test_email_search_rewrites_fabricated_from_address_to_all_name_search(monkeypatch, caplog):
+    registry = ClerkToolRegistry()
+    calls = []
+
+    def fake_graph_search(query, max_results):
+        calls.append(("graph", query, max_results))
+        return json.dumps({"provider": "graph", "match_count": 0, "matches": []})
+
+    def fake_store_search(query, max_results):
+        calls.append(("store", query, max_results))
+        return json.dumps({"channel": "email_store", "count": 1, "results": [{"sender": "pestorer@nvidia.com"}]})
+
+    def fake_dispatch(tool_name, payload):
+        calls.append(("gmail", tool_name, payload))
+        return json.dumps({"messages": []})
+
+    monkeypatch.setattr(registry, "_graph_email_search", fake_graph_search)
+    monkeypatch.setattr(registry, "_email_store_search", fake_store_search)
+    monkeypatch.setitem(sys.modules, "tools.gmail", SimpleNamespace(dispatch_gmail=fake_dispatch))
+    caplog.set_level("INFO", logger="baker.clerk_runtime")
+
+    result = json.loads(registry.execute(
+        "email_search",
+        {"provider": "graph", "query": "private-extra from:peter.storer@example.com", "max_results": 1},
+    ))
+
+    assert result["provider"] == "all"
+    assert result["query"] == "peter storer"
+    assert result["query_guard"]["reason"] == "fabricated_placeholder_address"
+    assert result["query_guard"]["original_provider"] == "graph"
+    serialized = json.dumps(result) + json.dumps(calls) + caplog.text
+    assert "example.com" not in serialized
+    assert "private-extra" not in serialized
+    assert calls == [
+        ("graph", "peter storer", 10),
+        ("gmail", "baker_gmail_search", {"query": "peter storer", "max_results": 10}),
+        ("store", "peter storer", 10),
+    ]
+
+
+def test_email_search_placeholder_without_name_does_not_broaden_to_recent_mail(monkeypatch):
+    registry = ClerkToolRegistry()
+    calls = []
+
+    monkeypatch.setattr(registry, "_graph_email_search", lambda *args: calls.append(("graph", args)) or "{}")
+    monkeypatch.setattr(registry, "_email_store_search", lambda *args: calls.append(("store", args)) or "{}")
+    monkeypatch.setitem(
+        sys.modules,
+        "tools.gmail",
+        SimpleNamespace(dispatch_gmail=lambda *args: calls.append(("gmail", args)) or "{}"),
+    )
+
+    result = json.loads(registry.execute(
+        "email_search",
+        {"provider": "graph", "query": "from:foo@bar", "max_results": 1},
+    ))
+
+    assert result["status"] == "blocked"
+    assert result["match_count"] == 0
+    assert result["query_guard"]["status"] == "blocked"
+    assert "query" not in result
+    assert calls == []
+
+
+def test_email_search_prompt_and_description_forbid_synthesized_addresses():
+    registry = ClerkToolRegistry()
+    search_tool = next(tool for tool in registry.tools if tool["name"] == "email_search")
+    description = search_tool["description"]
+    prompt = " ".join(_CLERK_SYSTEM_PROMPT.split())
+
+    assert "person's name" in description
+    assert "Default provider is all" in description
+    assert "Do not synthesize or guess an address" in description
+    assert "search by the name itself" in prompt
+    assert "Never invent, guess, or fabricate email addresses" in prompt
+    assert "example.com" in prompt
+
+
 def test_baker_search_reuses_existing_sentinel_retriever(monkeypatch):
     calls = []
 
