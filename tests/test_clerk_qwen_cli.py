@@ -169,6 +169,54 @@ def test_chat_prints_blocked_reason_inline(monkeypatch, capsys):
     assert "Qwen3-Coder | ctx n/a/n/a (n/a) | n/a tok | $n/a" in out
 
 
+def test_chat_prints_escalation_reason_and_answer(monkeypatch, capsys):
+    calls = []
+    inputs = iter(["summarize difficult document", "exit"])
+
+    def fake_input(prompt):
+        assert prompt == "clerk> "
+        return next(inputs)
+
+    def fake_urlopen(req, timeout):
+        calls.append(req)
+        url = req.full_url
+        if url == "https://baker.test/api/clerk/run":
+            return _FakeResponse({"session_id": "sess-escalated", "status": "running"})
+        if url == "https://baker.test/api/clerk/session/sess-escalated":
+            return _FakeResponse({
+                "session_id": "sess-escalated",
+                "status": "ready",
+                "result": {
+                    "status": "ready",
+                    "escalated": True,
+                    "reason": "repeated schema/tool failure: tool arguments were malformed JSON",
+                    "answer": "Ready: escalated",
+                },
+            })
+        raise AssertionError(f"unexpected URL {url}")
+
+    monkeypatch.setattr("builtins.input", fake_input)
+    monkeypatch.setattr(urllib.request, "urlopen", fake_urlopen)
+
+    code = clerk_qwen.main([
+        "chat",
+        "--base-url",
+        "https://baker.test",
+        "--api-key",
+        "test-key",
+        "--interval-s",
+        "0",
+    ])
+
+    out = capsys.readouterr().out
+    assert code == 0
+    assert len(calls) == 2
+    assert "Escalated: repeated schema/tool failure: tool arguments were malformed JSON" in out
+    assert "Ready: escalated" in out
+    assert out.index("Escalated: repeated schema/tool failure") < out.index("Ready: escalated")
+    assert "Status: ready" in out
+
+
 def test_chat_draft_preview_truncates_to_readable_size(capsys):
     long_text = "x" * 650
     session = {

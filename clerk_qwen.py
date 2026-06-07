@@ -188,7 +188,11 @@ def _print_chat_result(session: dict[str, Any]) -> None:
     draft_content = session.get("draft_content")
     draft_path = session.get("draft_path")
 
-    if status == "blocked" and reason:
+    if (result.get("escalated") is True or status == "escalated") and reason:
+        print(f"Escalated: {reason}")
+        if answer:
+            print(answer)
+    elif status == "blocked" and reason:
         print(f"Blocked: {reason}")
     elif status == "pending_approval" and reason:
         print(f"Pending approval: {reason}")
