@@ -401,7 +401,9 @@ def _context_bar(pct: int | None) -> str:
     return CONTEXT_BAR_FULL * filled + CONTEXT_BAR_EMPTY * (CONTEXT_BAR_CELLS - filled)
 
 
-def _telemetry_footer(session: dict[str, Any]) -> str:
+def _telemetry_line(session: dict[str, Any]) -> str:
+    """One compact line: 'Model │ ▓▓░░ 23% │ $0.0042'. Shared by the inline
+    fallback footer and the prompt_toolkit bottom bar."""
     usage = session.get("usage") if isinstance(session.get("usage"), dict) else {}
     used = session.get("context_window_used", usage.get("context_window_used"))
     max_ctx = session.get("context_window_max", usage.get("context_window_max"))
@@ -409,8 +411,54 @@ def _telemetry_footer(session: dict[str, Any]) -> str:
 
     pct = _context_pct(used, max_ctx)
     pct_text = f"{pct}%" if pct is not None else "--%"
-    line_1 = f"{_model_label(_session_model(session, usage))} │ {_context_bar(pct)} {pct_text} │ ${_cost_text(cost)}"
-    return f"{line_1}\n{CLERK_STATUS_LINE}"
+    return f"{_model_label(_session_model(session, usage))} │ {_context_bar(pct)} {pct_text} │ ${_cost_text(cost)}"
+
+
+def _telemetry_footer(session: dict[str, Any]) -> str:
+    # Inline fallback footer (non-TTY / no prompt_toolkit): telemetry + reach hint.
+    return f"{_telemetry_line(session)}\n{CLERK_STATUS_LINE}"
+
+
+# CLERK_REPL_FOOTER_BOTTOMBAR_1: Director wants a Claude-Code-style layout — the
+# telemetry footer pinned at the very BOTTOM (below the input cursor), dim/compact,
+# with the answer above the cursor. prompt_toolkit's bottom_toolbar gives exactly a
+# persistent bar pinned below the input line. The reach hint is folded into the bar.
+# Honesty: a terminal cannot render a literally smaller FONT (that's the Terminal
+# profile's); dim/muted styling is the ceiling, which is what the bar uses.
+_BOTTOM_BAR_HINT = "⏵⏵ read-only · guardrails on · 'help' for reach · 'open'/'show' last result"
+
+
+def _bottom_toolbar_text(session: dict[str, Any] | None) -> str:
+    """Single compact line for the prompt_toolkit bottom bar: telemetry (or a
+    neutral placeholder before the first turn) + the folded reach hint."""
+    telemetry = _telemetry_line(session) if session else _telemetry_line({})
+    return f" {telemetry}  ·  {_BOTTOM_BAR_HINT} "
+
+
+def _make_chat_prompt_session(state: dict[str, Any]) -> Any | None:
+    """Return a prompt_toolkit PromptSession whose bottom bar renders the latest
+    turn's telemetry, or None when prompt_toolkit is unavailable or stdio is not a
+    TTY (piped / non-interactive) — in which case cmd_chat falls back to input()
+    plus the inline footer, preserving the prior behavior exactly."""
+    try:
+        if not (sys.stdin.isatty() and sys.stdout.isatty()):
+            return None
+    except (ValueError, OSError):
+        return None
+    try:
+        from prompt_toolkit import PromptSession
+        from prompt_toolkit.styles import Style
+    except Exception:
+        return None
+    # Dim/muted + flat (noreverse) so the bar reads "smaller", not a loud reverse block.
+    style = Style.from_dict({"bottom-toolbar": "fg:#999999 bg:#1c1c1c noreverse"})
+    try:
+        return PromptSession(
+            style=style,
+            bottom_toolbar=lambda: _bottom_toolbar_text(state.get("session")),
+        )
+    except Exception:
+        return None
 
 
 def cmd_run(args: argparse.Namespace) -> int:
@@ -485,9 +533,19 @@ def cmd_chat(args: argparse.Namespace) -> int:
     client = ClerkQwenClient(args.base_url, resolve_api_key(args.api_key))
     print(CHAT_INTRO)
     last_session_id = ""
+    # CLERK_REPL_FOOTER_BOTTOMBAR_1: in a TTY with prompt_toolkit, the telemetry
+    # lives in a pinned dim bottom bar (state["session"] feeds it); otherwise we
+    # fall back to input() + the inline footer below. `state` is the live handle
+    # the bottom-bar callable reads each render.
+    state: dict[str, Any] = {"session": None}
+    pt_session = _make_chat_prompt_session(state)
+    bottom_bar_mode = pt_session is not None
     while True:
         try:
-            task = input("clerk> ").strip()
+            if bottom_bar_mode:
+                task = pt_session.prompt("clerk> ").strip()
+            else:
+                task = input("clerk> ").strip()
         except EOFError:
             print("")
             return 0
@@ -530,12 +588,23 @@ def cmd_chat(args: argparse.Namespace) -> int:
             return 0
         try:
             session = _run_task_and_wait(client, task, args.timeout_s, args.interval_s)
+            # Per-turn order: answer -> trailer -> (open-hint above the cursor) ->
+            # blank -> next 'clerk>' prompt. In bottom-bar mode the telemetry is NOT
+            # printed inline (it's pinned in the dim bottom bar); in fallback mode the
+            # inline footer prints below the trailer, preserving prior behavior.
             _print_chat_result(session)
             _print_chat_trailer(session, args.base_url)
-            _print_turn_footer(session)
-            if session.get("session_id"):
-                last_session_id = str(session["session_id"])
-                print(OPEN_HINT)
+            if bottom_bar_mode:
+                state["session"] = session
+                if session.get("session_id"):
+                    last_session_id = str(session["session_id"])
+                    print(OPEN_HINT)
+                print("")
+            else:
+                _print_turn_footer(session)
+                if session.get("session_id"):
+                    last_session_id = str(session["session_id"])
+                    print(OPEN_HINT)
         except ClerkQwenError as e:
             print(f"ERROR: {e}")
         except KeyboardInterrupt:
