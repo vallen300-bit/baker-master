@@ -60,8 +60,10 @@ def _cfg(max_steps=12, timeout=180):
 
 @pytest.mark.parametrize("name", [
     "baker_search", "email_search", "document_fetch", "transcripts_by_matter",
-    "format_convert", "file_save", "baker_deadlines", "baker_raw_query",
+    "format_convert", "file_save", "baker_deadlines",
     "baker_grok_web_search", "baker_inbox_post",
+    # ClaimsMax READS stay ALLOW (only investigate is gated)
+    "baker_claimsmax_search", "baker_claimsmax_check_investigation", "baker_claimsmax_get_document",
 ])
 def test_classify_allow(name):
     assert _classify_tool(name) == CLERK_ALLOW
@@ -70,6 +72,8 @@ def test_classify_allow(name):
 @pytest.mark.parametrize("name", [
     "baker_vault_write", "baker_raw_write", "baker_ingest_text", "baker_store_decision",
     "baker_add_deadline", "baker_upsert_vip", "baker_upsert_matter",
+    # G2 M2: fire-and-forget multi-step run = cost + side effect -> approval
+    "baker_claimsmax_investigate",
 ])
 def test_classify_approval(name):
     assert _classify_tool(name) == CLERK_APPROVAL
@@ -78,6 +82,8 @@ def test_classify_approval(name):
 @pytest.mark.parametrize("name", [
     "baker_gmail_send", "gmail_send", "email_send", "whatsapp_send", "slack_send",
     "baker_payment", "baker_wire", "some_payout_tool", "wire_funds",
+    # G2 H1: raw SQL is not safely read-only (writable CTE + autocommit) -> hard DENY
+    "baker_raw_query",
 ])
 def test_classify_deny(name):
     assert _classify_tool(name) == CLERK_DENY
@@ -175,4 +181,32 @@ def test_unknown_tool_denied_fail_closed():
     result = agent.run("do the thing")
     assert result["status"] == "blocked"
     assert result["denied_tool"] == "frobnicate_files"
+    assert result["tool_calls"] == []
+
+
+def test_raw_query_writable_cte_is_denied_not_executed():
+    # G2 H1: raw_query is hard-DENY, so even a writable-CTE that the MCP startswith
+    # read-guard would wave through (WITH x AS (DELETE...RETURNING...) SELECT...) is
+    # refused at the capability gate and never reaches execution.
+    cte = "WITH d AS (DELETE FROM deals RETURNING id) SELECT * FROM d"
+    client = _FakeClient([
+        _ToolResponse([_ToolUseBlock("q1", "baker_raw_query", {"sql": cte})], "tool_use", 10, 5),
+    ])
+    agent = ClerkAgent(model_client=client, registry=ClerkToolRegistry(), cfg=_cfg())
+    result = agent.run("read the deals table")
+    assert result["status"] == "blocked"
+    assert result["denied_tool"] == "baker_raw_query"
+    assert result["tool_calls"] == []
+    assert len(client.messages.calls) == 1
+
+
+def test_claimsmax_investigate_returns_pending_not_executed():
+    # G2 M2: fire-and-forget multi-step investigation = real cost + side effect.
+    client = _FakeClient([
+        _ToolResponse([_ToolUseBlock("i1", "baker_claimsmax_investigate", {"query": "x"})], "tool_use", 10, 5),
+    ])
+    agent = ClerkAgent(model_client=client, registry=ClerkToolRegistry(), cfg=_cfg())
+    result = agent.run("investigate trade x")
+    assert result["status"] == "pending_approval"
+    assert result["pending_tool"] == "baker_claimsmax_investigate"
     assert result["tool_calls"] == []

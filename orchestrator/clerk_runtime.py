@@ -89,14 +89,12 @@ _CLERK_TOOL_POLICY: dict[str, str] = {
     "baker_gmail_search": CLERK_ALLOW,
     "baker_gmail_read_message": CLERK_ALLOW,
     "baker_gmail_attachment_read": CLERK_ALLOW,
-    "baker_raw_query": CLERK_ALLOW,  # READ-only SQL
     "baker_health": CLERK_ALLOW,
     "baker_scan": CLERK_ALLOW,
-    # ALLOW — ClaimsMax reads / analysis
+    # ALLOW — ClaimsMax reads
     "baker_claimsmax_search": CLERK_ALLOW,
     "baker_claimsmax_check_investigation": CLERK_ALLOW,
     "baker_claimsmax_get_document": CLERK_ALLOW,
-    "baker_claimsmax_investigate": CLERK_ALLOW,
     # ALLOW — live web search
     "baker_grok_ask": CLERK_ALLOW,
     "baker_grok_web_search": CLERK_ALLOW,
@@ -120,6 +118,14 @@ _CLERK_TOOL_POLICY: dict[str, str] = {
     "baker_claimsmax_save_investigation": CLERK_APPROVAL,
     "baker_claimsmax_convert_to_html": CLERK_APPROVAL,
     "baker_claimsmax_convert_to_pdf": CLERK_APPROVAL,
+    # APPROVAL — fire-and-forget multi-step run = real cost + side effect (G2 M2)
+    "baker_claimsmax_investigate": CLERK_APPROVAL,
+    # DENY — raw SQL is NOT safely read-only: the MCP read guard is a startswith
+    # keyword check that a writable CTE (WITH x AS (DELETE ... RETURNING ...) SELECT
+    # ...) slips past, and _query autocommits — so a cheap model is one prompt from a
+    # mutate/DELETE. Hard-DENY (not APPROVAL: even an approved call could write) until
+    # the MCP layer is structurally SELECT-only / readonly-role (separate follow-up). (G2 H1)
+    "baker_raw_query": CLERK_DENY,
     # DENY — money/payment + external-to-human sends (never executable, even approved)
     "baker_gmail_send": CLERK_DENY,
     "gmail_send": CLERK_DENY,
