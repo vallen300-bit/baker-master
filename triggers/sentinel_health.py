@@ -32,6 +32,22 @@ logger = logging.getLogger("sentinel.health")
 # Single control point: add/remove a source here and every surface follows.
 RETIRED_SOURCES = frozenset({"exchange", "exchange_sent", "exchange_calendar"})
 
+# Watermark source names differ from sentinel source names: the `exchange`
+# sentinel advances the `exchange_poll` row in trigger_watermarks. Map each
+# retired sentinel to the watermark source(s) it owns so check_stale_watermarks()
+# skips them too — otherwise a retired source keeps firing a permanent
+# "STALE DATA" alert even after it is correctly dropped from the /health degraded
+# count (G3/codex M1 on PR #315). Same control point: add a source to
+# RETIRED_SOURCES + its watermark mapping and every surface follows.
+_RETIRED_WATERMARK_MAP = {
+    "exchange": ("exchange_poll",),        # INBOX poll watermark (WATERMARK_KEY)
+    "exchange_sent": ("exchange_poll_sent",),  # Sent poll watermark (WATERMARK_KEY_SENT)
+    "exchange_calendar": (),               # EWS calendar poll keeps no watermark
+}
+RETIRED_WATERMARK_SOURCES = frozenset(
+    wm for src in RETIRED_SOURCES for wm in _RETIRED_WATERMARK_MAP.get(src, ())
+)
+
 
 def _apply_retirement(rows: list) -> list:
     """Normalize retired sentinels' status to 'disabled' on the health surface.
@@ -433,6 +449,10 @@ def check_stale_watermarks():
 
         # Check named sources
         for source, max_hours in _WATERMARK_MAX_AGE.items():
+            if source in RETIRED_WATERMARK_SOURCES:
+                # RETIRE_DEAD_EVOK_SENTINELS_1: retired Evok watermark — the host
+                # is decommissioned, so a stale gap is expected, not an alert.
+                continue
             cur.execute(
                 "SELECT last_seen, updated_at FROM trigger_watermarks WHERE source = %s",
                 (source,),
