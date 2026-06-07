@@ -1,0 +1,164 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Brisen Lab — Board Layout v2 (compact columns)</title>
+<style>
+  :root{
+    --bg:#0d1117; --panel:#11161d; --card:#161b22; --card-hover:#1c2330;
+    --line:#262d38; --line-soft:#1d242e; --text:#e6edf3; --muted:#8b949e; --faint:#5b636e;
+    --accent:#388bfd; --mono:ui-monospace,SFMono-Regular,Menlo,monospace;
+    --amber:#d29922; --red:#bd5a47;
+    --card-w:248px;        /* shorter cards — floored by "Codex Deputy" (244px) */
+    --card-w-matter:264px; /* floored by "Origination Desk" (261px) */
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--text);
+    font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Helvetica,Arial,sans-serif;font-size:15px}
+  .topbar{display:flex;align-items:center;gap:14px;padding:13px 26px;border-bottom:1px solid var(--line-soft)}
+  .brand{font-weight:700;font-size:16px}
+  .pillbtn{font-size:12px;color:var(--muted);border:1px solid var(--line);border-radius:6px;padding:5px 9px}
+  .topbar .right{margin-left:auto;display:flex;align-items:center;gap:12px}
+  .live{color:#3fb950;font-size:13px;font-weight:600}
+  .shell{display:flex}
+  .side{width:178px;flex:0 0 auto;border-right:1px solid var(--line-soft);padding:18px 14px;min-height:90vh}
+  .side a{display:block;color:var(--muted);font-size:13.5px;padding:8px 10px;border-radius:7px;text-decoration:none;margin-bottom:2px}
+  .side a.active{background:rgba(56,139,253,.12);color:var(--accent);border:1px solid rgba(56,139,253,.35)}
+  .main{flex:1 1 auto;padding:22px 30px 50px}
+
+  .section-h{font-size:12px;font-weight:700;letter-spacing:.14em;text-transform:uppercase;color:var(--muted);margin:0 0 2px}
+  .section-sub{font-size:12px;color:var(--faint);margin:0 0 14px}
+
+  /* card — Option C tactile button face (LOCKED). Depth on dark = lit top edge
+     (inset top highlight) + dark bottom lip (inset bottom shadow) + convex gradient.
+     A cast drop-shadow alone is invisible on near-black, so the bevel carries it. */
+  .card{background:linear-gradient(180deg,#28323f,#141922);border:1px solid #36414f;border-radius:8px;height:46px;
+    width:var(--card-w);padding:0 10px 0 12px;display:flex;align-items:center;gap:9px;cursor:pointer;
+    box-shadow:inset 0 1.5px 0 rgba(255,255,255,.14), inset 0 -3px 4px rgba(0,0,0,.5), 0 5px 12px rgba(0,0,0,.6);
+    transition:background .12s,border-color .12s,box-shadow .14s,transform .14s;overflow:hidden}
+  .card:hover{border-color:#424e5e;transform:translateY(-1px);
+    box-shadow:inset 0 1.5px 0 rgba(255,255,255,.16), inset 0 -3px 4px rgba(0,0,0,.5), 0 8px 18px rgba(0,0,0,.66)}
+  .card:active{transform:translateY(1px);
+    box-shadow:inset 0 2px 4px rgba(0,0,0,.55), inset 0 1px 0 rgba(255,255,255,.06)}
+  .dot{width:8px;height:8px;border-radius:50%;background:#39414d;flex:0 0 auto}
+  .agpill{font:700 13px/1 var(--mono);color:var(--accent);background:rgba(56,139,253,.12);
+    border:1px solid rgba(56,139,253,.45);border-radius:5px;padding:3px 6px;flex:0 0 auto;letter-spacing:.02em}
+  .nm{font-size:14px;font-weight:600;color:var(--text);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;min-width:0}
+  .dots{margin-left:auto;color:var(--faint);font-size:17px;line-height:1;letter-spacing:1px;
+    flex:0 0 auto;text-decoration:none;padding:3px 6px;border-radius:5px}
+  .dots:hover{color:var(--text);background:#1b2230}
+
+  /* ---- FLEET: 3 vertical columns ---- */
+  .columns{display:flex;gap:26px;align-items:flex-start;margin-bottom:8px}
+  /* graceful collapse: below ~1030px the 3 fixed columns wrap 3→2→1 instead of overflowing */
+  @media(max-width:1030px){.columns{flex-wrap:wrap;row-gap:18px}}
+  .col{display:flex;flex-direction:column;gap:9px}
+  .col-h{font-size:11px;font-weight:700;letter-spacing:.1em;text-transform:uppercase;color:var(--muted);
+    margin:0 0 3px;padding-bottom:5px;border-bottom:1px solid var(--line-soft);width:var(--card-w)}
+  .sub-h{font-size:10.5px;font-weight:600;letter-spacing:.07em;text-transform:uppercase;color:var(--faint);margin:9px 0 1px}
+  .sub-h:first-of-type{margin-top:2px}
+
+  /* ---- horizontal rows (CM workers, matters) ---- */
+  .row-h{font-size:11px;font-weight:700;letter-spacing:.1em;text-transform:uppercase;color:var(--muted);margin:22px 0 8px}
+  .rowwrap{display:flex;flex-wrap:wrap;gap:10px}
+
+  /* ---- matter desks: COLOURED like live production ---- */
+  .desks{margin-top:26px}
+  .desk{border-radius:11px;padding:13px 15px;margin-top:12px}
+  .desk.amber{border:1px solid #5a4a1e;background:linear-gradient(180deg,#16130b,#11151c)}
+  .desk.red{border:1px solid #4a2a22;background:linear-gradient(180deg,#160f0c,#11151c)}
+  .desk-h{font:700 11px/1 var(--mono);letter-spacing:.1em;text-transform:uppercase;margin:0 0 10px}
+  .desk.amber .desk-h{color:var(--amber)}
+  .desk.red .desk-h{color:var(--red)}
+  .desk .card{width:var(--card-w-matter)}
+</style>
+</head>
+<body>
+
+<div class="topbar">
+  <span class="brand">Brisen Lab</span>
+  <span class="pillbtn">Baker Master ↗</span>
+  <div class="right"><span class="pillbtn">Autonomous wakes: …</span><span class="live">live</span></div>
+</div>
+
+<div class="shell">
+  <nav class="side">
+    <a class="active" href="#">Production &amp; Lab</a>
+    <a href="#">Business</a>
+    <a href="#">Templates Gallery ↗</a>
+  </nav>
+
+  <main class="main">
+    <h2 class="section-h">Fleet</h2>
+    <p class="section-sub">shared services</p>
+
+    <!-- ROW 1 of columns -->
+    <div class="columns">
+      <div class="col">
+        <div class="col-h">Orchestrators</div>
+        <a class="card"><span class="dot"></span><span class="agpill">AG-001</span><span class="nm">Lead</span><span class="dots">···</span></a>
+        <a class="card"><span class="dot"></span><span class="agpill">AG-002</span><span class="nm">Cowork AH1</span><span class="dots">···</span></a>
+        <a class="card"><span class="dot"></span><span class="agpill">AG-003</span><span class="nm">Deputy</span><span class="dots">···</span></a>
+        <a class="card"><span class="dot"></span><span class="agpill">AG-004</span><span class="nm">Codex Deputy</span><span class="dots">···</span></a>
+      </div>
+      <div class="col">
+        <div class="col-h">Builders</div>
+        <a class="card"><span class="dot"></span><span class="agpill">AG-101</span><span class="nm">B1</span><span class="dots">···</span></a>
+        <a class="card"><span class="dot"></span><span class="agpill">AG-102</span><span class="nm">B2</span><span class="dots">···</span></a>
+        <a class="card"><span class="dot"></span><span class="agpill">AG-103</span><span class="nm">B3</span><span class="dots">···</span></a>
+        <a class="card"><span class="dot"></span><span class="agpill">AG-104</span><span class="nm">B4</span><span class="dots">···</span></a>
+      </div>
+      <div class="col">
+        <div class="col-h">Special Agents</div>
+        <a class="card"><span class="dot"></span><span class="agpill">AG-202</span><span class="nm">Codex RT</span><span class="dots">···</span></a>
+        <a class="card"><span class="dot"></span><span class="agpill">AG-203</span><span class="nm">Codex ARCH</span><span class="dots">···</span></a>
+        <a class="card"><span class="dot"></span><span class="agpill">AG-205</span><span class="nm">Clerk Haiku</span><span class="dots">···</span></a>
+        <a class="card"><span class="dot"></span><span class="agpill">AG-204</span><span class="nm">Clerk QWEN</span><span class="dots">···</span></a>
+      </div>
+    </div>
+
+    <!-- ROW 2 of columns -->
+    <div class="columns" style="margin-top:18px">
+      <div class="col">
+        <div class="col-h">Research &amp; Advisors</div>
+        <a class="card"><span class="dot"></span><span class="agpill">AG-201</span><span class="nm">Researcher</span><span class="dots">···</span></a>
+        <a class="card"><span class="dot"></span><span class="agpill">AG-006</span><span class="nm">AID T</span><span class="dots">···</span></a>
+      </div>
+      <div class="col">
+        <div class="col-h">ClaimsMax Workers</div>
+        <a class="card"><span class="dot"></span><span class="agpill">AG-401</span><span class="nm">CM-1</span><span class="dots">···</span></a>
+        <a class="card"><span class="dot"></span><span class="agpill">AG-402</span><span class="nm">CM-2</span><span class="dots">···</span></a>
+        <a class="card"><span class="dot"></span><span class="agpill">AG-403</span><span class="nm">CM-3</span><span class="dots">···</span></a>
+        <a class="card"><span class="dot"></span><span class="agpill">AG-404</span><span class="nm">CM-4</span><span class="dots">···</span></a>
+      </div>
+      <div class="col">
+        <div class="col-h">Core Engine</div>
+        <a class="card"><span class="dot"></span><span class="agpill">AG-005</span><span class="nm">Cortex</span><span class="dots">···</span></a>
+      </div>
+    </div>
+
+    <!-- matters: coloured -->
+    <div class="desks">
+      <h2 class="section-h">Matter Desks</h2>
+      <p class="section-sub">each panel = one matter</p>
+      <div class="desk amber">
+        <div class="desk-h">Hagenauer</div>
+        <div class="rowwrap">
+          <a class="card"><span class="dot"></span><span class="agpill">AG-301</span><span class="nm">Hag Desk</span><span class="dots">···</span></a>
+          <a class="card"><span class="dot"></span><span class="agpill">AG-405</span><span class="nm">Hag Filer</span><span class="dots">···</span></a>
+        </div>
+      </div>
+      <div class="desk red">
+        <div class="desk-h">Origination</div>
+        <div class="rowwrap">
+          <a class="card"><span class="dot"></span><span class="agpill">AG-302</span><span class="nm">Origination Desk</span><span class="dots">···</span></a>
+        </div>
+      </div>
+    </div>
+
+  </main>
+</div>
+
+</body>
+</html>
