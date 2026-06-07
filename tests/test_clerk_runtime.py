@@ -341,6 +341,114 @@ def test_email_search_prompt_and_description_forbid_synthesized_addresses():
     assert "search by the name itself" in prompt
     assert "Never invent, guess, or fabricate email addresses" in prompt
     assert "example.com" in prompt
+    assert "plain text only" in prompt
+    assert "Do not use markdown syntax" in prompt
+
+
+def test_email_store_search_fuzzy_fallback_resolves_name_typo(monkeypatch):
+    class FakeRetriever:
+        def get_email_messages(self, query, limit):
+            assert query == "Petzer Storer"
+            assert limit == 10
+            return []
+
+    class FakeSentinelRetriever:
+        @staticmethod
+        def _get_global_instance():
+            return FakeRetriever()
+
+    registry = ClerkToolRegistry()
+    query_calls = []
+
+    def fake_query_rows(sql, params):
+        query_calls.append((sql, params))
+        return [{
+            "message_id": "msg-1",
+            "thread_id": "thread-1",
+            "sender_name": "Peter Storer",
+            "sender_email": "pestorer@nvidia.com",
+            "subject": "NVIDIA status",
+            "body_preview": "Latest note",
+            "received_date": "2026-06-06T10:00:00Z",
+            "priority": None,
+            "ingested_at": "2026-06-06T10:01:00Z",
+        }]
+
+    monkeypatch.setitem(sys.modules, "memory.retriever", SimpleNamespace(SentinelRetriever=FakeSentinelRetriever))
+    monkeypatch.setattr(registry, "_query_rows", fake_query_rows)
+
+    result = json.loads(registry.execute("email_search", {"provider": "store", "query": "Petzer Storer"}))
+
+    assert result["channel"] == "email_store"
+    assert result["count"] == 1
+    assert result["results"][0]["sender_email"] == "pestorer@nvidia.com"
+    assert result["fuzzy"]["triggered"] is True
+    assert result["fuzzy"]["interpreted"] == {"Petzer": "Peter"}
+    assert "interpreted 'Petzer' as 'Peter'" in result["fuzzy"]["note"]
+    assert query_calls
+    assert query_calls[0][1] == (8000, 1000)
+
+
+def test_email_store_fuzzy_query_uses_real_email_message_columns(monkeypatch):
+    registry = ClerkToolRegistry()
+    captured = {}
+
+    def fake_query_rows(sql, params):
+        captured["sql"] = sql
+        captured["params"] = params
+        return []
+
+    monkeypatch.setattr(registry, "_query_rows", fake_query_rows)
+
+    result = json.loads(registry._email_store_fuzzy_search("Petzer Storer", 10))
+
+    assert result == {"channel": "email_store", "count": 0, "results": []}
+    assert "body_preview" not in captured["sql"].split("FROM email_messages", 1)[1]
+    assert "LEFT(full_body, %s) AS body_preview" in captured["sql"]
+    assert "WHERE sender_name IS NOT NULL OR sender_email IS NOT NULL" in " ".join(captured["sql"].split())
+    assert captured["params"] == (8000, 1000)
+
+
+def test_email_store_fuzzy_person_single_token_does_not_match_subject_substring(monkeypatch):
+    registry = ClerkToolRegistry()
+
+    monkeypatch.setattr(registry, "_query_rows", lambda *args: [{
+        "message_id": "msg-annual",
+        "thread_id": "thread-annual",
+        "sender_name": "Finance Bot",
+        "sender_email": "finance@example.com",
+        "subject": "Annual budget update",
+        "body_preview": "Annual plan",
+        "received_date": "2026-06-06T10:00:00Z",
+        "priority": None,
+        "ingested_at": "2026-06-06T10:01:00Z",
+    }])
+
+    result = json.loads(registry._email_store_fuzzy_search("person:Ann", 10))
+
+    assert result == {"channel": "email_store", "count": 0, "results": []}
+
+
+def test_email_store_fuzzy_fallback_does_not_fire_for_single_keyword(monkeypatch):
+    class FakeRetriever:
+        def get_email_messages(self, query, limit):
+            return []
+
+    class FakeSentinelRetriever:
+        @staticmethod
+        def _get_global_instance():
+            return FakeRetriever()
+
+    registry = ClerkToolRegistry()
+    query_calls = []
+
+    monkeypatch.setitem(sys.modules, "memory.retriever", SimpleNamespace(SentinelRetriever=FakeSentinelRetriever))
+    monkeypatch.setattr(registry, "_query_rows", lambda *args: query_calls.append(args) or [])
+
+    result = json.loads(registry.execute("email_search", {"provider": "store", "query": "NVIDIA"}))
+
+    assert result == {"channel": "email_store", "count": 0, "results": []}
+    assert query_calls == []
 
 
 def test_baker_search_reuses_existing_sentinel_retriever(monkeypatch):

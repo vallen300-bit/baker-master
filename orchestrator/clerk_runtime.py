@@ -14,6 +14,7 @@ import re
 import socket
 import tempfile
 import time
+import unicodedata
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -518,6 +519,7 @@ class ClerkToolRegistry:
                     "Search Gmail, Outlook/Graph, and Baker's stored email index. "
                     "Query may be a person's name, subject keywords, or a real known email address. "
                     "Default provider is all (Gmail + Outlook/Graph + store merged). "
+                    "Name/person searches that return zero store matches retry with bounded fuzzy matching. "
                     "Do not synthesize or guess an address; when only a name is known, search the name itself "
                     "across provider all instead of a made-up from: filter."
                 ),
@@ -685,6 +687,103 @@ class ClerkToolRegistry:
             if isinstance(val, list):
                 return len(val)
         return 0
+
+    @staticmethod
+    def _normalized_word(value: str) -> str:
+        folded = unicodedata.normalize("NFKD", value or "")
+        ascii_text = folded.encode("ascii", "ignore").decode("ascii")
+        return re.sub(r"[^a-z0-9]", "", ascii_text.lower())
+
+    @classmethod
+    def _word_display_map(cls, text: str) -> dict[str, str]:
+        out: dict[str, str] = {}
+        for token in re.findall(r"[A-Za-z0-9][A-Za-z0-9._%+-]{1,}", text or ""):
+            normalized = cls._normalized_word(token)
+            if normalized and len(normalized) >= 3 and normalized not in out:
+                out[normalized] = token.strip("._%+-")
+        return out
+
+    @classmethod
+    def _name_search_tokens(cls, query: str) -> list[str]:
+        if "@" in query:
+            return []
+        has_person_operator = bool(re.search(r"\b(from|sender|name|person):", query, flags=re.I))
+        cleaned = re.sub(r"\b(from|sender|name|person):", " ", query, flags=re.I)
+        tokens = [
+            cls._normalized_word(token)
+            for token in re.findall(r"[A-Za-z][A-Za-z'._-]{1,}", cleaned)
+        ]
+        tokens = [
+            token
+            for token in tokens
+            if len(token) >= 3 and token not in {"from", "sender", "name", "person", "email", "mail"}
+        ]
+        return tokens if ((has_person_operator and tokens) or len(tokens) >= 2) and len(tokens) <= 5 else []
+
+    @staticmethod
+    def _distance_at_most(left: str, right: str, max_distance: int = 2) -> bool:
+        if left == right:
+            return True
+        if abs(len(left) - len(right)) > max_distance:
+            return False
+        previous = list(range(len(right) + 1))
+        for i, lc in enumerate(left, 1):
+            current = [i]
+            row_min = i
+            for j, rc in enumerate(right, 1):
+                cost = 0 if lc == rc else 1
+                val = min(
+                    previous[j] + 1,
+                    current[j - 1] + 1,
+                    previous[j - 1] + cost,
+                )
+                current.append(val)
+                row_min = min(row_min, val)
+            if row_min > max_distance:
+                return False
+            previous = current
+        return previous[-1] <= max_distance
+
+    @classmethod
+    def _candidate_words(cls, row: dict[str, Any]) -> list[str]:
+        text = " ".join(
+            str(row.get(key) or "")
+            for key in ("sender_name", "sender_email")
+        )
+        return [
+            normalized
+            for token in re.findall(r"[A-Za-z0-9][A-Za-z0-9._%+-]{1,}", text)
+            if (normalized := cls._normalized_word(token)) and len(normalized) >= 3
+        ]
+
+    @classmethod
+    def _fuzzy_token_matches(cls, query_tokens: list[str], candidate_tokens: list[str]) -> tuple[bool, dict[str, str]]:
+        interpreted: dict[str, str] = {}
+        for query_token in query_tokens:
+            best = ""
+            for candidate_token in candidate_tokens:
+                if query_token == candidate_token:
+                    best = candidate_token
+                    break
+                max_distance = 1 if len(query_tokens) == 1 or len(query_token) <= 4 else 2
+                if (
+                    query_token[0] == candidate_token[0]
+                    and cls._distance_at_most(query_token, candidate_token, max_distance=max_distance)
+                ):
+                    best = candidate_token
+                    break
+            if not best:
+                return False, {}
+            if best != query_token:
+                interpreted[query_token] = best
+        return True, interpreted
+
+    @staticmethod
+    def _fuzzy_note(interpreted: dict[str, str]) -> str:
+        if not interpreted:
+            return "Fuzzy fallback used."
+        pairs = ", ".join(f"'{src}' as '{dst}'" for src, dst in interpreted.items())
+        return f"Fuzzy fallback used: interpreted {pairs}."
 
     @staticmethod
     def _is_placeholder_email(local: str, domain: str) -> bool:
@@ -929,7 +1028,70 @@ class ClerkToolRegistry:
 
         retriever = SentinelRetriever._get_global_instance()
         contexts = retriever.get_email_messages(query, limit=max_results) if query else retriever.get_recent_emails(limit=max_results)
-        return self._contexts_json("email_store", contexts, max_results)
+        raw = self._contexts_json("email_store", contexts, max_results)
+        if query:
+            payload = self._parse_tool_json(raw)
+            if isinstance(payload, dict) and self._payload_count(payload) == 0:
+                fuzzy = self._email_store_fuzzy_search(query, max_results)
+                fuzzy_payload = self._parse_tool_json(fuzzy)
+                if isinstance(fuzzy_payload, dict) and self._payload_count(fuzzy_payload) > 0:
+                    return fuzzy
+        return raw
+
+    def _email_store_fuzzy_search(self, query: str, max_results: int) -> str:
+        query_tokens = self._name_search_tokens(query)
+        if not query_tokens:
+            return _safe_json({"channel": "email_store", "count": 0, "results": []})
+
+        # Bounded candidate scan: this does not widen returned results. Rows are
+        # emitted only when every requested name token fuzzy-matches a candidate token.
+        candidate_limit = min(max(max_results * 100, 250), 1000)
+        rows = self._query_rows(
+            """
+            SELECT message_id, thread_id, sender_name, sender_email, subject,
+                   LEFT(full_body, %s) AS body_preview, received_date, priority, ingested_at
+            FROM email_messages
+            WHERE sender_name IS NOT NULL OR sender_email IS NOT NULL
+            ORDER BY received_date DESC NULLS LAST, ingested_at DESC NULLS LAST
+            LIMIT %s
+            """,
+            (_TOOL_TEXT_LIMIT, candidate_limit),
+        )
+
+        query_display = self._word_display_map(query)
+        results: list[dict[str, Any]] = []
+        interpreted_display: dict[str, str] = {}
+        for row in rows:
+            candidate_tokens = self._candidate_words(row)
+            matched, interpreted = self._fuzzy_token_matches(query_tokens, candidate_tokens)
+            if not matched:
+                continue
+            candidate_display = self._word_display_map(" ".join(
+                str(row.get(key) or "")
+                for key in ("sender_name", "sender_email")
+            ))
+            for src, dst in interpreted.items():
+                interpreted_display.setdefault(
+                    query_display.get(src, src),
+                    candidate_display.get(dst, dst),
+                )
+            results.append(row)
+            if len(results) >= max_results:
+                break
+
+        if not results:
+            return _safe_json({"channel": "email_store", "count": 0, "results": []})
+        note = self._fuzzy_note(interpreted_display)
+        return _safe_json({
+            "channel": "email_store",
+            "count": len(results),
+            "results": results,
+            "fuzzy": {
+                "triggered": True,
+                "note": note,
+                "interpreted": interpreted_display,
+            },
+        })
 
     def _email_store_download(self, message_id: str) -> str:
         rows = self._query_rows(
@@ -1338,12 +1500,19 @@ When the user gives a person's name without an email address, search by the name
 itself across provider="all" with max_results at least 10. Never invent, guess,
 or fabricate email addresses or placeholder domains such as example.com or test.com;
 if only a name is known, query the name itself, not a made-up from: filter.
+If a name/person search comes back empty, use the fuzzy fallback exposed by email_search
+instead of declaring not found; report any interpretation, e.g. interpreted a misspelled
+first name as the matched name.
 Never execute money/payment actions, impersonate the Director, change code/production systems,
 create matter slugs, or restructure vault/folders. Posting to the internal Brisen agent bus
 (lead, deputy, clerk, b1-b4, and other fleet agents) is internal coordination: allowed, not
 an external send, and not Director impersonation. External send means email/WhatsApp/Slack or
 other messages to humans outside the agent fleet. Delete/move/archive/mark-email, external send,
 and irreversible actions require explicit Director approval and otherwise become draft/pending outputs.
+Answer in plain text only. Do not use markdown syntax: no bold markers, markdown headers,
+backticks, markdown tables, or fenced code blocks. Lead with the answer in one short line,
+then add only the support needed. Use short labeled lines or simple numbered points when helpful.
+Be terse, plain English, and avoid filler.
 Return concise status with Ready: <path> / Source: <source> when complete."""
 
 

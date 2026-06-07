@@ -16,6 +16,12 @@ from typing import Any
 DEFAULT_BASE_URL = "https://baker-master.onrender.com"
 RUNNING_STATUSES = {"running"}
 DRAFT_PREVIEW_CHARS = 600
+CHAT_INTRO = 'Clerk Qwen3 (Brisen doc clerk) - type a task; "help" for reach/limits; exit to quit.'
+CHAT_HELP_LINES = (
+    "Reach: Gmail, Outlook/Graph, WhatsApp, Slack, transcripts, calendar, Dropbox/documents, sent mail, RSS/Substack, Baker search, internal bus.",
+    "Limits: no money, no external sends, no production changes; risky acts return drafts or pending_approval.",
+    "Usage: type a task. Empty line, Ctrl-D, exit, or quit ends the session.",
+)
 
 
 class ClerkQwenError(RuntimeError):
@@ -353,10 +359,7 @@ def cmd_url(args: argparse.Namespace) -> int:
 
 def cmd_chat(args: argparse.Namespace) -> int:
     client = ClerkQwenClient(args.base_url, resolve_api_key(args.api_key))
-    print("Clerk Qwen3 - Brisen document clerk")
-    print("Reach: Gmail, Outlook/Graph, WhatsApp, Slack, transcripts, calendar, Dropbox/documents, sent mail, RSS/Substack, Baker search, internal bus.")
-    print("Limits: no money, no external sends, no production changes; risky acts return drafts or pending_approval.")
-    print("Type a task. Empty line, Ctrl-D, exit, or quit ends the session.")
+    print(CHAT_INTRO)
     while True:
         try:
             task = input("clerk> ").strip()
@@ -366,6 +369,10 @@ def cmd_chat(args: argparse.Namespace) -> int:
         except KeyboardInterrupt:
             print("")
             return 0
+        if task.lower() == "help":
+            for line in CHAT_HELP_LINES:
+                print(line)
+            continue
         if not task or task.lower() in {"exit", "quit"}:
             return 0
         try:
