@@ -359,7 +359,10 @@ class _QwenMessages:
         openai_tools = _openai_tools_from_anthropic(tools)
         if openai_tools:
             payload["tools"] = openai_tools
-            payload["tool_choice"] = "auto"
+            # CLERK_QWEN3_TOOL_USE_ENFORCEMENT_1: default "auto"; the agent loop
+            # passes tool_choice="required" on the forced-search retry to compel a
+            # tool call when the model tried to answer a lookup without searching.
+            payload["tool_choice"] = kwargs.get("tool_choice") or "auto"
 
         headers = {"Content-Type": "application/json"}
         if self._owner.api_key:
@@ -1564,7 +1567,52 @@ Answer in plain text only. Do not use markdown syntax: no bold markers, markdown
 backticks, markdown tables, or fenced code blocks. Lead with the answer in one short line,
 then add only the support needed. Use short labeled lines or simple numbered points when helpful.
 Be terse, plain English, and avoid filler.
-Return concise status with Ready: <path> / Source: <source> when complete."""
+Return concise status with Ready: <path> / Source: <source> when complete.
+MANDATORY TOOL USE FOR LOOKUPS (CLERK_QWEN3_TOOL_USE_ENFORCEMENT_1): for ANY request
+to find, search, look up, count, list, or report what exists in Baker's data
+(documents, emails, messages, transcripts, contacts, deals), you MUST call a search
+tool (baker_search, email_search, channel_search, or transcripts_by_matter) BEFORE
+answering. NEVER claim you searched, report a count, or say "no documents/results/
+matches found" unless you actually called a search tool in this turn. If you have
+not searched yet, call the tool now instead of answering from memory."""
+
+
+# CLERK_QWEN3_TOOL_USE_ENFORCEMENT_1 — structural backstop for the system-prompt
+# mandate above. Qwen3 on tool_choice="auto" sometimes answers a lookup WITHOUT
+# calling a search tool and fabricates a "searched, found nothing" reply (observed:
+# "No documents found", tool_calls=[], iterations=1). The agent loop detects that
+# shape and forces ONE search retry; if a tool still doesn't fire it returns a clear
+# non-answer — never the fabricated empty.
+_FORCE_SEARCH_NUDGE = (
+    "You answered without calling any search tool. That is not allowed for a lookup. "
+    "Call the appropriate search tool now (baker_search / email_search / "
+    "channel_search / transcripts_by_matter) with the query, then answer ONLY from "
+    "the tool result. Do not claim a result you did not retrieve."
+)
+_CLERK_SEARCH_FAILLOUD_MSG = (
+    "I couldn't run the search this turn — please retry. "
+    "(I won't report results I didn't actually retrieve.)"
+)
+# Fires only on answers that ASSERT a search happened / report a count / assert
+# absence of Baker data — NOT on capability descriptions ("I can search documents")
+# or chit-chat, so it does not over-trigger on non-lookup turns.
+_LOOKUP_ASSERTION_RE = re.compile(
+    r"\bno\s+(?:documents?|results?|matches|emails?|messages?|records?|hits?|transcripts?)\b"
+    r"|\bfound\s+(?:no|nothing|none|\d+)\b"
+    r"|\bnothing\s+(?:found|came\s+back)\b"
+    r"|\b(?:could\s*n[o']?t|cannot|can[o']?t|did\s*n[o']?t)\s+find\b"
+    r"|\b(?:do|does)\s*n[o']?t\s+(?:have|find)\s+any\b"
+    r"|\b\d+\s+(?:documents?|emails?|results?|matches|messages?|transcripts?|records?)\b"
+    r"|\bI\s+(?:searched|looked|checked)\b"
+    r"|\bsearch(?:ed)?\s+(?:returned|came\s+back|found|yielded)\b",
+    re.IGNORECASE,
+)
+
+
+def _asserts_unsubstantiated_lookup(answer: str) -> bool:
+    """True if the answer claims a search outcome (count / 'no results' / 'I
+    searched') — used only when ZERO tool calls were made, to catch fabrication."""
+    return bool(_LOOKUP_ASSERTION_RE.search(answer or ""))
 
 
 class ClerkAgent:
@@ -1604,6 +1652,9 @@ class ClerkAgent:
         usage_totals = self._new_usage_totals()
         schema_failures = 0
         client = self._client()
+        # CLERK_QWEN3_TOOL_USE_ENFORCEMENT_1: one bounded forced-search retry.
+        forced_retry_used = False
+        force_tool_choice = False
 
         for step in range(max_steps):
             remaining_s = timeout_s - (self.clock() - started)
@@ -1618,6 +1669,8 @@ class ClerkAgent:
                     messages=messages,
                     tools=self.registry.tools,
                     timeout=max(0.001, remaining_s),
+                    # "required" only on the forced retry — compels a real tool call.
+                    tool_choice=("required" if force_tool_choice else "auto"),
                 )
             except Exception as e:
                 logger.warning("Clerk model call failed: %s", type(e).__name__)
@@ -1627,15 +1680,43 @@ class ClerkAgent:
                     "error_type": type(e).__name__,
                     "tool_calls": tool_log,
                 }
+            force_tool_choice = False  # consumed by the call above
             in_tok, out_tok = self._usage(response)
             self._record_usage(usage_totals, response)
             self._log_cost(self.cfg.model, in_tok, out_tok)
 
             if response.stop_reason == "end_turn":
+                answer = _text_from_blocks(response.content)
+                # CLERK_QWEN3_TOOL_USE_ENFORCEMENT_1 guard: the model tried to answer
+                # a lookup WITHOUT calling any search tool, yet asserts a search
+                # outcome (count / "no results" / "I searched"). Do not trust it.
+                if (not tool_log) and _asserts_unsubstantiated_lookup(answer):
+                    if not forced_retry_used:
+                        forced_retry_used = True
+                        force_tool_choice = True
+                        logger.warning(
+                            "Clerk: lookup answer with zero tool calls — forcing one search retry"
+                        )
+                        messages.append({"role": "user", "content": _FORCE_SEARCH_NUDGE})
+                        continue
+                    # Bounded: forced retry already used and STILL no tool call (e.g.
+                    # backend ignored tool_choice='required'). Fail loud — never
+                    # surface the fabricated empty/count.
+                    logger.error(
+                        "Clerk: forced search retry produced no tool call — failing loud"
+                    )
+                    return {
+                        "status": "needs_retry",
+                        "answer": _CLERK_SEARCH_FAILLOUD_MSG,
+                        "iterations": step + 1,
+                        "tool_calls": tool_log,
+                        "usage": self._usage_payload(usage_totals),
+                        "tool_enforcement": "forced_retry_no_tool_call",
+                    }
                 usage_payload = self._usage_payload(usage_totals)
                 return {
                     "status": "ready",
-                    "answer": _text_from_blocks(response.content),
+                    "answer": answer,
                     "iterations": step + 1,
                     "tool_calls": tool_log,
                     "usage": usage_payload,
