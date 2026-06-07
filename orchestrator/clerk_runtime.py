@@ -178,6 +178,17 @@ _CLERK_CLAIMSMAX_READ_TOOLS = (
     "baker_claimsmax_get_document",
 )
 
+# CLERK_FULL_CAPABILITY_POLICY_1 PR 2d-1 — internal agent bus, routed through the same
+# governed baker_mcp._dispatch (inbox_* hit the brisen-lab HTTP daemon). ALLOW =
+# internal coordination per the system prompt (NOT an external-to-human send; those
+# are DENY). post/ack are bus coordination, not Baker-data lookups, so they are NOT
+# grounding tools.
+_CLERK_BUS_TOOLS = (
+    "baker_inbox_read",
+    "baker_inbox_post",
+    "baker_inbox_ack",
+)
+
 
 def _pick_tool_schemas(tools: list[Any], wanted: frozenset[str]) -> list[dict[str, Any]]:
     """Convert source MCP Tool objects (.name/.description/.inputSchema) into Clerk's
@@ -858,9 +869,9 @@ class ClerkToolRegistry:
         out: list[dict[str, Any]] = []
         try:
             from baker_mcp.baker_mcp_server import TOOLS as _MCP_TOOLS
-            out += _pick_tool_schemas(_MCP_TOOLS, frozenset(_CLERK_BAKER_READ_TOOLS))
+            out += _pick_tool_schemas(_MCP_TOOLS, frozenset(_CLERK_BAKER_READ_TOOLS + _CLERK_BUS_TOOLS))
         except Exception:
-            logger.warning("Clerk: baker_mcp TOOLS import failed — baker reads unavailable")
+            logger.warning("Clerk: baker_mcp TOOLS import failed — baker reads/bus unavailable")
         try:
             from tools.gmail import GMAIL_TOOLS
             out += _pick_tool_schemas(GMAIL_TOOLS, frozenset(_CLERK_GMAIL_READ_TOOLS))
@@ -893,7 +904,7 @@ class ClerkToolRegistry:
                 return self._file_save(args)
             if name in ("baker_grok_web_search", "baker_grok_x_search", "baker_grok_ask"):
                 return self._grok_dispatch(name, args)
-            if name in _CLERK_BAKER_READ_TOOLS:
+            if name in _CLERK_BAKER_READ_TOOLS or name in _CLERK_BUS_TOOLS:
                 return self._baker_mcp_read(name, args)
             if name in _CLERK_GMAIL_READ_TOOLS:
                 return self._gmail_dispatch(name, args)
@@ -1801,11 +1812,12 @@ class ClerkToolRegistry:
 
     # ── CLERK_FULL_CAPABILITY_POLICY_1 PR 2b — Baker MCP reads via governed _dispatch ──
     def _baker_mcp_read(self, name: str, args: dict[str, Any]) -> str:
-        """Route a pure-SELECT Baker read through baker_mcp.baker_mcp_server._dispatch
-        — the SAME sync entrypoint the MCP server's call_tool uses. Only ALLOW-class
-        read tool names reach here (the policy gate blocks writes before execute), and
-        _dispatch for these names is SELECT-only. Returns _dispatch's text result;
-        the outer execute() try/except renders any failure as a clean error."""
+        """Route a Baker MCP tool through baker_mcp.baker_mcp_server._dispatch — the
+        SAME sync entrypoint the MCP server's call_tool uses. Serves the PG SELECT
+        reads (PR 2b) AND the internal-bus inbox_read/post/ack (PR 2d-1, ALLOW =
+        internal coordination). Only ALLOW-class names reach here (the policy gate
+        blocks DENY/APPROVAL before execute); external sends are DENY and never wired.
+        Returns _dispatch's text; the outer execute() try/except renders failures cleanly."""
         from baker_mcp.baker_mcp_server import _dispatch
         return _dispatch(name, args if isinstance(args, dict) else {})
 
