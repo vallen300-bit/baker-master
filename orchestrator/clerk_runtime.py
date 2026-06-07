@@ -1593,31 +1593,62 @@ _CLERK_SEARCH_FAILLOUD_MSG = (
     "I couldn't run the search this turn — please retry. "
     "(I won't report results I didn't actually retrieve.)"
 )
-# Fires only on answers that ASSERT a search happened / report a count / assert
-# absence of Baker data — NOT on capability descriptions ("I can search documents")
-# or chit-chat, so it does not over-trigger on non-lookup turns.
-# CLERK_QWEN3_GUARD_COVERAGE_1: widened to cover absence phrasings the first cut
-# missed (codex FAIL-M1): "could not LOCATE", "do not SEE any", "do not APPEAR to
-# be", "unable to find/locate". Negation verbs broadened to find/locate/see/spot/
-# identify and to appear/seem; contraction variants (couldn't/don't/doesn't/can't)
-# covered by `n[o']?t`. Still bounded alternations (no ReDoS), and keyed on result-
-# ASSERTIONS not the words search/documents, so chit-chat + capability text stays
-# untriggered.
+# CLERK_QWEN3_GUARD_COVERAGE_1 (re-architected per lead #2264 + codex G3): the
+# PRIMARY trigger is STRUCTURAL — fire when the USER TASK is lookup-shaped AND zero
+# search tools fired this turn. That catches a fabricated empty REGARDLESS of how
+# the answer is phrased, ending the phrasing whack-a-mole. The answer-phrasing regex
+# below is the SECONDARY safety net (for lookup tasks the classifier missed),
+# tightened to require a data object so it stops over-triggering on chit-chat.
+
+# A real search ran iff one of these tools is in the tool log.
+_SEARCH_TOOLS = frozenset({"baker_search", "email_search", "channel_search", "transcripts_by_matter"})
+
+# Lookup INTENT in the user task (verbs/phrases that demand a retrieval).
+_LOOKUP_INTENT_RE = re.compile(
+    r"\b(?:find|search|look\s*up|look\s+for|how\s+many|count|list|pull|retrieve|"
+    r"show\s+me|do\s+we\s+have|do\s+you\s+have|is\s+there|are\s+there|"
+    r"who\s+(?:is|are|sent|wrote|mentioned)|what\s+about|mentions?)\b",
+    re.IGNORECASE,
+)
+# Baker DATA-context nouns in the user task (broad — what the lookup is over).
+_DATA_CONTEXT_RE = re.compile(
+    r"\b(?:documents?|docs?|emails?|e-mails?|mail|messages?|transcripts?|files?|records?|"
+    r"results?|contacts?|deals?|meetings?|notes?|memos?|threads?|attachments?|correspondence|"
+    r"whatsapp|slack|gmail|outlook|inbox|calendar|events?)\b",
+    re.IGNORECASE,
+)
+
+
+def _task_is_lookup_shaped(task: str) -> bool:
+    """PRIMARY (structural): the user asked to find/count/list ... over Baker data.
+    Lookup intent AND a data-context noun — phrasing-independent, so a fabricated
+    empty is caught by (lookup-task AND no-search-tool) no matter how it's worded."""
+    t = task or ""
+    return bool(_LOOKUP_INTENT_RE.search(t)) and bool(_DATA_CONTEXT_RE.search(t))
+
+
 # Negated modals: couldn't/could not, cannot/can not/can't, don't/do not,
 # doesn't/does not, didn't/did not. ("can't" = can+'t, so it needs its own arm.)
 _NEG = r"(?:could\s*n[o']?t|can\s*n[o']?t|can[o']?t|do\s*n[o']?t|does\s*n[o']?t|did\s*n[o']?t)"
-# Baker-data nouns — the "<NEG> see/have ... any <X>" arm is constrained to these
-# so "I don't have any questions/updates/preference" (chit-chat) does NOT trip it
-# (CLERK_QWEN3_GUARD_COVERAGE_1, codex anti-over-trigger FAIL-M1).
+# Answer-side Baker-data nouns (tight) + an optional determiner/adjective run so
+# "no relevant documents" / "any matching emails" / "the file" all resolve.
 _DATA_NOUN = r"(?:documents?|results?|matches|emails?|messages?|records?|hits?|transcripts?|files?)"
+_OBJ = rf"(?:any\s+|a\s+|an\s+|the\s+|relevant\s+|matching\s+|related\s+|such\s+|other\s+)*{_DATA_NOUN}"
+
+# SECONDARY safety net. Tightened per codex G3: every verb arm REQUIRES a data
+# object, so "I did not find that funny" / "I did not appear at the meeting" /
+# "This does not appear to be a lookup request" / "I don't have any questions" all
+# stay False. Curly apostrophes are normalized to ASCII before matching. Bounded
+# alternations only (no ReDoS).
 _LOOKUP_ASSERTION_RE = re.compile(
-    rf"\bno\s+{_DATA_NOUN}\b"
+    rf"\bno\s+(?:relevant\s+|matching\s+|related\s+|such\s+|other\s+)*{_DATA_NOUN}\b"
+    rf"|\bzero\s+{_DATA_NOUN}\b"
     r"|\bfound\s+(?:no|nothing|none|\d+)\b"
     r"|\bnothing\s+(?:found|came\s+back|turned\s+up)\b"
-    rf"|\b{_NEG}\s+(?:find|locate|spot|identify)\b"
-    rf"|\b{_NEG}\s+(?:see|have|find|locate|spot)\s+any\s+{_DATA_NOUN}\b"
-    r"|\b(?:do|does|did)\s*n[o']?t\s+(?:appear|seem)\b"
-    r"|\bunable\s+to\s+(?:find|locate|see|identify|retrieve)\b"
+    r"|\b(?:came\s+up\s+empty|turned\s+up\s+(?:nothing|empty))\b"
+    rf"|\b{_NEG}\s+(?:find|locate|spot|identify|see|have)\s+{_OBJ}\b"
+    rf"|\b(?:do|does|did)\s*n[o']?t\s+(?:appear|seem)s?\s+to\s+(?:be\s+|exist\s+|contain\s+|have\s+|show\s+|include\s+)?{_OBJ}\b"
+    rf"|\bunable\s+to\s+(?:find|locate|see|identify|retrieve)\s+{_OBJ}\b"
     rf"|\b\d+\s+{_DATA_NOUN}\b"
     r"|\bI\s+(?:searched|looked|checked)\b"
     r"|\bsearch(?:ed)?\s+(?:returned|came\s+back|found|yielded)\b",
@@ -1626,9 +1657,10 @@ _LOOKUP_ASSERTION_RE = re.compile(
 
 
 def _asserts_unsubstantiated_lookup(answer: str) -> bool:
-    """True if the answer claims a search outcome (count / 'no results' / 'I
-    searched') — used only when ZERO tool calls were made, to catch fabrication."""
-    return bool(_LOOKUP_ASSERTION_RE.search(answer or ""))
+    """SECONDARY: the answer claims a search outcome (count / 'no <data>' / 'I
+    searched') with a data object — backup for lookup tasks the classifier missed."""
+    normalized = (answer or "").replace("’", "'")  # curly -> ASCII apostrophe
+    return bool(_LOOKUP_ASSERTION_RE.search(normalized))
 
 
 class ClerkAgent:
@@ -1703,10 +1735,15 @@ class ClerkAgent:
 
             if response.stop_reason == "end_turn":
                 answer = _text_from_blocks(response.content)
-                # CLERK_QWEN3_TOOL_USE_ENFORCEMENT_1 guard: the model tried to answer
-                # a lookup WITHOUT calling any search tool, yet asserts a search
-                # outcome (count / "no results" / "I searched"). Do not trust it.
-                if (not tool_log) and _asserts_unsubstantiated_lookup(answer):
+                # CLERK_QWEN3_TOOL_USE_ENFORCEMENT_1 / _GUARD_COVERAGE_1 guard.
+                # PRIMARY (structural, phrasing-independent): a lookup-shaped TASK
+                # answered with NO search tool call cannot be trusted. SECONDARY net:
+                # the answer asserts a search outcome with a data object. Either, when
+                # no search tool fired, forces one retry then fails loud.
+                search_fired = any(c.get("name") in _SEARCH_TOOLS for c in tool_log)
+                if (not search_fired) and (
+                    _task_is_lookup_shaped(task) or _asserts_unsubstantiated_lookup(answer)
+                ):
                     if not forced_retry_used:
                         forced_retry_used = True
                         force_tool_choice = True

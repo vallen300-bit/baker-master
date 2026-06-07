@@ -29,6 +29,7 @@ from orchestrator.clerk_runtime import (
     _ToolUseBlock,
     _CLERK_SEARCH_FAILLOUD_MSG,
     _asserts_unsubstantiated_lookup,
+    _task_is_lookup_shaped,
 )
 
 
@@ -82,6 +83,13 @@ def _cfg(max_steps=12, timeout=180):
     "does not appear to be any transcripts",
     "No files found",
     "I do not have any documents about Peter Storer",  # have+any+data-noun still fires
+    # CLERK_QWEN3_GUARD_COVERAGE_1 re-arch — codex empty-result idioms + curly apostrophe
+    "The search came up empty.",
+    "It turned up nothing.",
+    "no relevant documents",
+    "no matching emails",
+    "zero documents",
+    "I don’t see any messages",  # U+2019 curly apostrophe normalized
 ])
 def test_lookup_assertion_detected(text):
     assert _asserts_unsubstantiated_lookup(text) is True
@@ -104,9 +112,60 @@ def test_lookup_assertion_detected(text):
     "I do not have any questions",
     "I don't have any updates yet",
     "I don't have any preference",
+    # CLERK_QWEN3_GUARD_COVERAGE_1 re-arch — codex G3 verb-without-data-object FPs
+    "I did not appear at the meeting",
+    "I did not find that funny",
+    "This does not appear to be a lookup request",
 ])
 def test_non_lookup_text_not_flagged(text):
     assert _asserts_unsubstantiated_lookup(text) is False
+
+
+# ── PRIMARY (structural): lookup-task + no-search-tool, phrasing-independent ──
+
+@pytest.mark.parametrize("task,expected", [
+    ("How many documents mention Peter Storer?", True),
+    ("find emails from Storer", True),
+    ("do we have any files on the Hagenauer matter", True),
+    ("list the meeting transcripts about RG7", True),
+    ("hi, what can you do?", False),
+    ("draft an email to Storer", False),
+    ("save this note to my folder", False),
+    ("convert this file to pdf", False),
+    ("thanks!", False),
+])
+def test_task_lookup_shape_classifier(task, expected):
+    assert _task_is_lookup_shaped(task) is expected
+
+
+def test_structural_primary_fires_regardless_of_answer_phrasing():
+    # A lookup-shaped task answered with ZERO search tools must trip the guard even
+    # when the answer is neutrally phrased (no fabrication regex match) — this is the
+    # phrasing-independent primary that ends the whack-a-mole.
+    neutral = "Peter Storer is a counterparty contact."  # NOT a fabrication phrasing
+    assert _asserts_unsubstantiated_lookup(neutral) is False  # secondary would miss it
+    client = _FakeClient([
+        _ToolResponse([_TextBlock(neutral)], "end_turn", 10, 5),
+        _ToolResponse([_TextBlock(neutral)], "end_turn", 9, 4),  # forced retry, still no tool
+    ])
+    agent = ClerkAgent(model_client=client, registry=ClerkToolRegistry(), cfg=_cfg())
+    result = agent.run("how many documents mention Peter Storer")
+    assert result["status"] == "needs_retry"
+    assert result["answer"] == _CLERK_SEARCH_FAILLOUD_MSG
+    assert client.messages.calls[1].get("tool_choice") == "required"
+    assert len(client.messages.calls) == 2  # bounded to one forced retry
+
+
+def test_structural_primary_not_fired_on_chitchat():
+    # Non-lookup task + neutral answer + no tool = normal ready, no forced retry.
+    client = _FakeClient([
+        _ToolResponse([_TextBlock("Hello! I can help search Baker's documents and emails.")], "end_turn", 6, 3),
+    ])
+    agent = ClerkAgent(model_client=client, registry=ClerkToolRegistry(), cfg=_cfg())
+    result = agent.run("hi, what can you do?")
+    assert result["status"] == "ready"
+    assert len(client.messages.calls) == 1
+    assert client.messages.calls[0].get("tool_choice") == "auto"
 
 
 @pytest.mark.parametrize("fabrication", [
