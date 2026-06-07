@@ -106,8 +106,8 @@ def test_tool_round_trip_with_mock_qwen_client():
 def test_malformed_tool_output_retries_once_then_escalates():
     registry = _FakeRegistry()
     qwen = _FakeClient([
-        _ToolResponse([_ToolUseBlock("bad_1", "file_save", {"__malformed_json": "{"})], "tool_use"),
-        _ToolResponse([_ToolUseBlock("bad_2", "file_save", {"__malformed_json": "{"})], "tool_use"),
+        _ToolResponse([_ToolUseBlock("bad_1", "file_save", {"__malformed_json": "{"})], "tool_use", 11, 5, cost=0.001),
+        _ToolResponse([_ToolUseBlock("bad_2", "file_save", {"__malformed_json": "{"})], "tool_use", 13, 7, cost=0.002),
     ])
     gemini = _FakeClient([
         _ToolResponse([_TextBlock("Ready: escalated")], "end_turn", 3, 2)
@@ -125,6 +125,36 @@ def test_malformed_tool_output_retries_once_then_escalates():
     assert "repeated schema/tool failure" in result["reason"]
     assert len(qwen.messages.calls) == 2
     assert len(gemini.messages.calls) == 1
+    assert result["usage"]["prompt_tokens"] == 24
+    assert result["usage"]["completion_tokens"] == 12
+    assert result["usage"]["total_tokens"] == 36
+    assert result["usage"]["context_window_used"] == 13
+    assert result["usage"]["session_cost_usd"] == pytest.approx(0.003)
+
+
+def test_tool_input_guardrail_preserves_usage_before_approval_exit():
+    registry = _FakeRegistry()
+    client = _FakeClient([
+        _ToolResponse(
+            [_ToolUseBlock("call_1", "file_save", {"content": "delete this email", "filename": "out.md"})],
+            "tool_use",
+            17,
+            6,
+            total_tokens=25,
+            cost=0.0042,
+        )
+    ])
+
+    result = ClerkAgent(model_client=client, registry=registry, cfg=_cfg()).run("save the note")
+
+    assert result["status"] == "pending_approval"
+    assert result["denylist_item"] == 5
+    assert registry.calls == []
+    assert result["usage"]["prompt_tokens"] == 17
+    assert result["usage"]["completion_tokens"] == 6
+    assert result["usage"]["total_tokens"] == 25
+    assert result["usage"]["context_window_used"] == 17
+    assert result["usage"]["session_cost_usd"] == pytest.approx(0.0042)
 
 
 @pytest.mark.parametrize(

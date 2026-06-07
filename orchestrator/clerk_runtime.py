@@ -826,6 +826,7 @@ class ClerkAgent:
                             messages,
                             tool_log,
                             f"repeated schema/tool failure: {validation_error}",
+                            usage_totals=usage_totals,
                             timeout_s=max(0.001, remaining_s),
                         )
                     tool_results.append({
@@ -838,7 +839,7 @@ class ClerkAgent:
 
                 guard = self.guardrails.check(_safe_json(tool_use.input))
                 if not guard.allowed:
-                    return self._guardrail_result(guard, tool_log=tool_log)
+                    return self._guardrail_result(guard, tool_log=tool_log, usage_totals=usage_totals)
 
                 t0 = self.clock()
                 result = self.registry.execute(tool_use.name, tool_use.input)
@@ -860,8 +861,10 @@ class ClerkAgent:
         messages: list[dict[str, Any]],
         tool_log: list[dict[str, Any]],
         reason: str,
+        usage_totals: dict[str, Any] | None = None,
         timeout_s: float | None = None,
     ) -> dict[str, Any]:
+        usage_payload = self._usage_payload(usage_totals) if usage_totals is not None else None
         client = self.escalation_client
         if client is None:
             from orchestrator.gemini_client import GeminiToolClient
@@ -882,6 +885,7 @@ class ClerkAgent:
                 "reason": "escalation model call failed",
                 "error_type": type(e).__name__,
                 "tool_calls": tool_log,
+                **({"usage": usage_payload} if usage_payload is not None else {}),
             }
         in_tok, out_tok = self._usage(response)
         self._log_cost(config.gemini.pro_model, in_tok, out_tok)
@@ -894,17 +898,25 @@ class ClerkAgent:
                     continue
                 guard = self.guardrails.check(_safe_json(tool_use.input))
                 if not guard.allowed:
-                    return self._guardrail_result(guard, tool_log=tool_log)
+                    return self._guardrail_result(guard, tool_log=tool_log, usage_totals=usage_totals)
                 result = self.registry.execute(tool_use.name, tool_use.input)
                 tool_log.append({"name": tool_use.name, "input": tool_use.input, "duration_ms": 0, "escalated": True})
                 results.append({"tool": tool_use.name, "result": result})
-            return {"status": "ready", "answer": _safe_json(results), "escalated": True, "reason": reason, "tool_calls": tool_log}
+            return {
+                "status": "ready",
+                "answer": _safe_json(results),
+                "escalated": True,
+                "reason": reason,
+                "tool_calls": tool_log,
+                **({"usage": usage_payload} if usage_payload is not None else {}),
+            }
         return {
             "status": "ready",
             "answer": _text_from_blocks(response.content),
             "escalated": True,
             "reason": reason,
             "tool_calls": tool_log,
+            **({"usage": usage_payload} if usage_payload is not None else {}),
         }
 
     @staticmethod
@@ -1023,13 +1035,20 @@ class ClerkAgent:
             pass
 
     @staticmethod
-    def _guardrail_result(decision: GuardrailDecision, tool_log: list[dict[str, Any]] | None = None) -> dict[str, Any]:
-        return {
+    def _guardrail_result(
+        decision: GuardrailDecision,
+        tool_log: list[dict[str, Any]] | None = None,
+        usage_totals: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        result = {
             "status": decision.status,
             "reason": decision.reason,
             "denylist_item": decision.item,
             "tool_calls": tool_log or [],
         }
+        if usage_totals is not None:
+            result["usage"] = ClerkAgent._usage_payload(usage_totals)
+        return result
 
 
 def run_clerk_task(task: str) -> dict[str, Any]:
