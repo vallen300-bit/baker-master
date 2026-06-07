@@ -5,6 +5,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import re
 import subprocess
 import sys
 import time
@@ -25,6 +26,17 @@ CHAT_HELP_LINES = (
 )
 NO_SESSION_MSG = "No session yet — run a Clerk task first, then use open."
 OPEN_HINT = "  (type open to view in browser)"
+# Session-id shapes: server sessions are UUIDs (dashboard.py uses str(uuid4()));
+# bus sessions are "bus-<message_id>" (clerk_bus_worker.py). Used to decide
+# whether `open <token>` is a local open-session command or a natural-language
+# task like "open latest Peter email" that must pass through to Clerk.
+_SESSION_ID_RE = re.compile(
+    r"^(?:[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}|bus-\d+)$"
+)
+
+
+def _is_session_id(token: str) -> bool:
+    return bool(_SESSION_ID_RE.match(token.strip()))
 CONTEXT_BAR_CELLS = 10
 CONTEXT_BAR_FULL = "▓"
 CONTEXT_BAR_EMPTY = "░"
@@ -462,13 +474,16 @@ def cmd_chat(args: argparse.Namespace) -> int:
             for line in CHAT_HELP_LINES:
                 print(line)
             continue
-        if task.lower() == "open" or task.lower().startswith("open "):
-            target = task.split(maxsplit=1)
-            session_id = target[1].strip() if len(target) > 1 else last_session_id
-            if not session_id:
+        if task.lower() == "open":
+            if not last_session_id:
                 print(NO_SESSION_MSG)
             else:
-                _open_session(args.base_url, session_id)
+                _open_session(args.base_url, last_session_id)
+            continue
+        if task.lower().startswith("open ") and _is_session_id(task.split(maxsplit=1)[1]):
+            # "open <session-id>" — local open. Natural tasks like
+            # "open latest Peter email" fall through to Clerk below.
+            _open_session(args.base_url, task.split(maxsplit=1)[1].strip())
             continue
         if not task or task.lower() in {"exit", "quit"}:
             return 0
