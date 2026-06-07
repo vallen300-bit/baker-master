@@ -81,6 +81,14 @@ def test_perplexity_schema_reused_from_source():
     assert schema["required"] == ["prompt"]
 
 
+def test_perplexity_schema_model_is_enum_allowlist():
+    # G2 #2454 M1: schema must constrain model to the priced allowlist.
+    from tools.perplexity import PERPLEXITY_MODELS
+    tools = {t["name"]: t for t in ClerkToolRegistry().tools}
+    enum = tools["baker_perplexity_ask"]["input_schema"]["properties"]["model"]["enum"]
+    assert enum == list(PERPLEXITY_MODELS) == ["sonar", "sonar-pro", "sonar-reasoning-pro"]
+
+
 # ── handler routes through dispatch_perplexity (breaker + logging) ────────────
 
 def test_perplexity_ask_routes_and_returns_payload(fake_pplx):
@@ -114,6 +122,15 @@ def test_perplexity_logs_cost_with_source(monkeypatch):
     assert logged["model"] == "sonar"
     assert logged["input_tokens"] == 12 and logged["output_tokens"] == 34
     assert logged["matter_slug"] == "movie"
+
+
+def test_perplexity_unsupported_model_rejected_pre_client(fake_pplx):
+    # G2 #2454 M1: an unpriced model is rejected BEFORE the client call, so it can
+    # never be silently underpriced by the fallback and skew the cost breaker.
+    res = ClerkToolRegistry().execute(
+        "baker_perplexity_ask", {"prompt": "x", "model": "sonar-deep-research"})
+    assert res.startswith("Error: unsupported Perplexity model")
+    assert fake_pplx.calls == []  # never reached the client / cost path
 
 
 def test_perplexity_forwards_exact_cost_as_override(monkeypatch):

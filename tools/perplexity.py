@@ -83,6 +83,21 @@ def reset_client_cache() -> None:
 _reset_client_for_tests = reset_client_cache
 
 
+# ─────────────────────────── model allowlist ───────────────────────────
+
+
+# Canonical Perplexity model allowlist (G2 #2454 M1 — lessons #68 cost-governor
+# invariant). ``model`` is a free-form caller string; an unknown/pricier model
+# (e.g. sonar-deep-research) would hit the token-rate fallback
+# rates.get(model, "sonar") and be SILENTLY UNDERPRICED, so the cost breaker would
+# see the wrong total. We pin the set of priced models and reject anything else at
+# BOTH boundaries: the MCP schema enum (below) AND the dispatcher (pre-client), so
+# an unsupported model never reaches api.perplexity.ai or the cost path. Keep this
+# in lockstep with cost_monitor.MODEL_COSTS + perplexity_client rate table.
+PERPLEXITY_MODELS: tuple[str, ...] = ("sonar", "sonar-pro", "sonar-reasoning-pro")
+PERPLEXITY_ALLOWED_MODELS: frozenset[str] = frozenset(PERPLEXITY_MODELS)
+
+
 # ─────────────────────────── tool catalog ───────────────────────────
 
 
@@ -107,6 +122,7 @@ PERPLEXITY_TOOLS: list[Tool] = [
                 },
                 "model": {
                     "type": "string",
+                    "enum": list(PERPLEXITY_MODELS),
                     "description": "Override model id (default sonar; sonar-pro / sonar-reasoning-pro available).",
                 },
                 "max_tokens": {
@@ -184,9 +200,18 @@ def dispatch_perplexity(name: str, args: dict[str, Any]) -> str:
 
     try:
         if name == "baker_perplexity_ask":
+            # Model allowlist (G2 #2454 M1): reject any unpriced model BEFORE the
+            # client call so an unknown/pricier variant can never be silently
+            # underpriced by the token-rate fallback and skew the cost breaker.
+            model = args.get("model") or "sonar"
+            if model not in PERPLEXITY_ALLOWED_MODELS:
+                return (
+                    f"Error: unsupported Perplexity model {model!r}; "
+                    f"allowed: {', '.join(PERPLEXITY_MODELS)}"
+                )
             payload = _get_client().ask(
                 prompt=args["prompt"],
-                model=args.get("model") or "sonar",
+                model=model,
                 max_tokens=int(args.get("max_tokens", 4000)),
                 search_domain_filter=args.get("search_domain_filter"),
                 instructions=args.get("instructions"),
