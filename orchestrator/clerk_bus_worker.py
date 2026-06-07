@@ -12,13 +12,11 @@ import json
 import logging
 import os
 import posixpath
-import re
 import threading
 from concurrent.futures import ThreadPoolExecutor
 from contextlib import AbstractContextManager
 from dataclasses import dataclass
 from datetime import datetime, timezone
-from pathlib import Path
 from typing import Any, Callable, Protocol
 
 import httpx
@@ -29,7 +27,6 @@ logger = logging.getLogger("baker.clerk_bus_worker")
 
 _CLERK_SLUG = "clerk"
 _CLERK_PICKER_PATH_DEFAULT = "/Users/dimitry/bm-clerk"
-_CLERK_WORKING_PREFIX = "/Baker-Feed/Clerk-Workbench"
 _TERMINAL_STATUSES = {"ready", "pending_approval", "blocked", "timeout", "error", "saved"}
 _TASK_STATE_TIMEOUT_S = 3.0
 _TASK_STATE_EXECUTOR = ThreadPoolExecutor(max_workers=1, thread_name_prefix="clerk-task-state")
@@ -668,27 +665,28 @@ def _normalize_dropbox_path(path: str) -> str:
 
 
 def _extract_draft(result: dict[str, Any]) -> tuple[str, str | None]:
+    # CLERK_READY_PATH_CONTRADICTION_FIX_1: the Director-visible Ready/draft path
+    # comes ONLY from clerk_runtime's verified saved_paths (the real Dropbox metadata
+    # path from a status:"ready" file_save). The two prior ungrounded sources are
+    # removed: (a) the free-text `Ready:\s*(/path)` regex scrape of the model answer
+    # — the exact hallucination route (model advertised /Baker-Project/... with no
+    # real save), and (b) the unverified file_save INPUT-arg path, which could echo
+    # a path that _file_save then BLOCKED. No verified save -> no draft path.
     content = ""
-    path: str | None = None
     for call in result.get("tool_calls") or []:
         if not isinstance(call, dict) or call.get("name") != "file_save":
             continue
         args = call.get("input") or {}
-        if not isinstance(args, dict):
-            continue
-        if isinstance(args.get("content"), str):
+        if isinstance(args, dict) and isinstance(args.get("content"), str):
             content = args["content"]
-        raw_path = args.get("dropbox_path")
-        if isinstance(raw_path, str) and raw_path.strip():
-            path = _normalize_dropbox_path(raw_path)
-        elif isinstance(args.get("filename"), str):
-            filename = Path(args["filename"]).name or "clerk-output.md"
-            path = f"{_CLERK_WORKING_PREFIX}/{filename}"
-    if not path:
-        answer = str(result.get("answer") or "")
-        match = re.search(r"Ready:\s*(/[^\s]+)", answer)
-        if match:
-            path = _normalize_dropbox_path(match.group(1))
+    path: str | None = None
+    saved = result.get("saved_paths")
+    if isinstance(saved, list):
+        for candidate in saved:
+            if isinstance(candidate, str) and candidate.strip():
+                normalized = _normalize_dropbox_path(candidate)
+                if normalized:
+                    path = normalized  # last verified save wins
     if not content:
         content = str(result.get("answer") or result.get("reason") or result.get("error") or "")
     return content, path or None
