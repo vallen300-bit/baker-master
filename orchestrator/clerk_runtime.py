@@ -72,9 +72,26 @@ class _ToolUseBlock:
 
 
 class _Usage:
-    def __init__(self, input_tokens: int = 0, output_tokens: int = 0):
-        self.input_tokens = input_tokens
-        self.output_tokens = output_tokens
+    def __init__(
+        self,
+        input_tokens: int | None = 0,
+        output_tokens: int | None = 0,
+        total_tokens: int | None = None,
+        cost: float | None = None,
+        prompt_tokens: int | None = None,
+        completion_tokens: int | None = None,
+        usage_known: bool = True,
+    ):
+        if usage_known:
+            self.prompt_tokens = prompt_tokens if prompt_tokens is not None else input_tokens
+            self.completion_tokens = completion_tokens if completion_tokens is not None else output_tokens
+        else:
+            self.prompt_tokens = prompt_tokens
+            self.completion_tokens = completion_tokens
+        self.total_tokens = total_tokens
+        self.cost = cost
+        self.input_tokens = int(self.prompt_tokens or 0)
+        self.output_tokens = int(self.completion_tokens or 0)
 
 
 class _ToolResponse:
@@ -84,10 +101,41 @@ class _ToolResponse:
         stop_reason: str,
         input_tokens: int = 0,
         output_tokens: int = 0,
+        total_tokens: int | None = None,
+        cost: float | None = None,
+        prompt_tokens: int | None = None,
+        completion_tokens: int | None = None,
+        usage_known: bool = True,
     ):
         self.content = content
         self.stop_reason = stop_reason
-        self.usage = _Usage(input_tokens, output_tokens)
+        self.usage = _Usage(
+            input_tokens,
+            output_tokens,
+            total_tokens=total_tokens,
+            cost=cost,
+            prompt_tokens=prompt_tokens,
+            completion_tokens=completion_tokens,
+            usage_known=usage_known,
+        )
+
+
+def _int_or_none(value: Any) -> int | None:
+    if value is None:
+        return None
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return None
+
+
+def _float_or_none(value: Any) -> float | None:
+    if value is None:
+        return None
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return None
 
 
 def _safe_json(data: Any) -> str:
@@ -316,13 +364,26 @@ class _QwenMessages:
                 input=args if isinstance(args, dict) else {"value": args},
             ))
 
-        usage = data.get("usage") or {}
+        raw_usage = data.get("usage")
+        usage = raw_usage if isinstance(raw_usage, dict) else {}
+        usage_known = bool(usage)
+        prompt_tokens = _int_or_none(usage.get("prompt_tokens")) if isinstance(usage, dict) else None
+        completion_tokens = _int_or_none(usage.get("completion_tokens")) if isinstance(usage, dict) else None
+        total_tokens = _int_or_none(usage.get("total_tokens")) if isinstance(usage, dict) else None
+        if total_tokens is None and prompt_tokens is not None and completion_tokens is not None:
+            total_tokens = prompt_tokens + completion_tokens
+        cost = _float_or_none(usage.get("cost")) if isinstance(usage, dict) else None
         stop_reason = "tool_use" if _tool_uses(content) else "end_turn"
         return _ToolResponse(
             content=content,
             stop_reason=stop_reason,
-            input_tokens=int(usage.get("prompt_tokens") or 0),
-            output_tokens=int(usage.get("completion_tokens") or 0),
+            input_tokens=prompt_tokens or 0,
+            output_tokens=completion_tokens or 0,
+            total_tokens=total_tokens,
+            cost=cost,
+            prompt_tokens=prompt_tokens,
+            completion_tokens=completion_tokens,
+            usage_known=usage_known,
         )
 
 
@@ -701,8 +762,7 @@ class ClerkAgent:
         max_steps = max(int(self.cfg.max_steps or 12), 1)
         messages: list[dict[str, Any]] = [{"role": "user", "content": task}]
         tool_log: list[dict[str, Any]] = []
-        total_in = 0
-        total_out = 0
+        usage_totals = self._new_usage_totals()
         schema_failures = 0
         client = self._client()
 
@@ -729,22 +789,26 @@ class ClerkAgent:
                     "tool_calls": tool_log,
                 }
             in_tok, out_tok = self._usage(response)
-            total_in += in_tok
-            total_out += out_tok
+            self._record_usage(usage_totals, response)
             self._log_cost(self.cfg.model, in_tok, out_tok)
 
             if response.stop_reason == "end_turn":
+                usage_payload = self._usage_payload(usage_totals)
                 return {
                     "status": "ready",
                     "answer": _text_from_blocks(response.content),
                     "iterations": step + 1,
                     "tool_calls": tool_log,
-                    "usage": {"input_tokens": total_in, "output_tokens": total_out},
+                    "usage": usage_payload,
                 }
 
             uses = _tool_uses(response.content)
             if not uses:
-                return {"status": "blocked", "reason": f"unexpected stop_reason={response.stop_reason}"}
+                return {
+                    "status": "blocked",
+                    "reason": f"unexpected stop_reason={response.stop_reason}",
+                    "usage": self._usage_payload(usage_totals),
+                }
 
             assistant_content = self._assistant_content(response.content)
             messages.append({"role": "assistant", "content": assistant_content})
@@ -784,7 +848,12 @@ class ClerkAgent:
 
             messages.append({"role": "user", "content": tool_results})
 
-        return {"status": "blocked", "reason": "max_steps exceeded", "tool_calls": tool_log}
+        return {
+            "status": "blocked",
+            "reason": "max_steps exceeded",
+            "tool_calls": tool_log,
+            "usage": self._usage_payload(usage_totals),
+        }
 
     def _escalate(
         self,
@@ -870,6 +939,80 @@ class ClerkAgent:
     def _usage(response: Any) -> tuple[int, int]:
         usage = getattr(response, "usage", None)
         return int(getattr(usage, "input_tokens", 0) or 0), int(getattr(usage, "output_tokens", 0) or 0)
+
+    def _new_usage_totals(self) -> dict[str, Any]:
+        context_max = int(getattr(self.cfg, "context_window_max", 0) or 0) or None
+        return {
+            "prompt_tokens": 0,
+            "completion_tokens": 0,
+            "total_tokens": 0,
+            "context_window_used": None,
+            "context_window_max": context_max,
+            "session_cost_usd": None,
+            "has_token_data": False,
+        }
+
+    def _record_usage(self, totals: dict[str, Any], response: Any) -> None:
+        usage = getattr(response, "usage", None)
+        prompt_tokens = _int_or_none(getattr(usage, "prompt_tokens", None))
+        completion_tokens = _int_or_none(getattr(usage, "completion_tokens", None))
+        total_tokens = _int_or_none(getattr(usage, "total_tokens", None))
+        cost = _float_or_none(getattr(usage, "cost", None))
+
+        if total_tokens is None and prompt_tokens is not None and completion_tokens is not None:
+            total_tokens = prompt_tokens + completion_tokens
+
+        if prompt_tokens is not None:
+            totals["prompt_tokens"] += prompt_tokens
+            totals["context_window_used"] = max(totals["context_window_used"] or 0, prompt_tokens)
+            totals["has_token_data"] = True
+        if completion_tokens is not None:
+            totals["completion_tokens"] += completion_tokens
+            totals["has_token_data"] = True
+        if total_tokens is not None:
+            totals["total_tokens"] += total_tokens
+            totals["has_token_data"] = True
+        elif prompt_tokens is not None or completion_tokens is not None:
+            totals["total_tokens"] += (prompt_tokens or 0) + (completion_tokens or 0)
+
+        if cost is None:
+            cost = self._configured_usage_cost(prompt_tokens, completion_tokens)
+        if cost is not None:
+            totals["session_cost_usd"] = float(totals["session_cost_usd"] or 0.0) + cost
+
+    def _configured_usage_cost(self, prompt_tokens: int | None, completion_tokens: int | None) -> float | None:
+        prompt_price = float(getattr(self.cfg, "prompt_price_per_m", 0.0) or 0.0)
+        completion_price = float(getattr(self.cfg, "completion_price_per_m", 0.0) or 0.0)
+        if prompt_price <= 0 or completion_price <= 0:
+            return None
+        if prompt_tokens is None or completion_tokens is None:
+            return None
+        return (prompt_tokens / 1_000_000.0) * prompt_price + (completion_tokens / 1_000_000.0) * completion_price
+
+    @staticmethod
+    def _usage_payload(totals: dict[str, Any]) -> dict[str, Any]:
+        if totals.get("has_token_data"):
+            input_tokens = int(totals["prompt_tokens"])
+            output_tokens = int(totals["completion_tokens"])
+            total_tokens = int(totals["total_tokens"])
+            prompt_tokens: int | None = input_tokens
+            completion_tokens: int | None = output_tokens
+        else:
+            input_tokens = 0
+            output_tokens = 0
+            total_tokens = None
+            prompt_tokens = None
+            completion_tokens = None
+        return {
+            "input_tokens": input_tokens,
+            "output_tokens": output_tokens,
+            "prompt_tokens": prompt_tokens,
+            "completion_tokens": completion_tokens,
+            "total_tokens": total_tokens,
+            "context_window_used": totals.get("context_window_used"),
+            "context_window_max": totals.get("context_window_max"),
+            "session_cost_usd": totals.get("session_cost_usd"),
+        }
 
     @staticmethod
     def _log_cost(model: str, input_tokens: int, output_tokens: int) -> None:

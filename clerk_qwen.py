@@ -185,12 +185,67 @@ def _wait_for_terminal(
     return last
 
 
+def _run_task_and_wait(
+    client: ClerkQwenClient,
+    task: str,
+    timeout_s: float,
+    interval_s: float,
+) -> dict[str, Any]:
+    session = client.run(task)
+    if session.get("session_id"):
+        return _wait_for_terminal(client, str(session["session_id"]), timeout_s, interval_s)
+    return session
+
+
+def _number_or_none(value: Any) -> float | None:
+    if value is None:
+        return None
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return None
+
+
+def _int_text(value: Any) -> str:
+    num = _number_or_none(value)
+    if num is None:
+        return "n/a"
+    return str(int(num))
+
+
+def _cost_text(value: Any) -> str:
+    num = _number_or_none(value)
+    if num is None:
+        return "n/a"
+    return f"{num:.6f}".rstrip("0").rstrip(".")
+
+
+def _telemetry_footer(session: dict[str, Any]) -> str:
+    usage = session.get("usage") if isinstance(session.get("usage"), dict) else {}
+    used = session.get("context_window_used", usage.get("context_window_used"))
+    max_ctx = session.get("context_window_max", usage.get("context_window_max"))
+    total = session.get("total_tokens", usage.get("total_tokens"))
+    cost = session.get("session_cost_usd", usage.get("session_cost_usd"))
+
+    used_num = _number_or_none(used)
+    max_num = _number_or_none(max_ctx)
+    if used_num is not None and max_num and max_num > 0:
+        pct = f"{(used_num / max_num) * 100:.1f}%"
+    else:
+        pct = "n/a"
+    return (
+        f"Qwen3-Coder | ctx {_int_text(used)}/{_int_text(max_ctx)} ({pct}) | "
+        f"{_int_text(total)} tok | ${_cost_text(cost)}"
+    )
+
+
 def cmd_run(args: argparse.Namespace) -> int:
     client = ClerkQwenClient(args.base_url, resolve_api_key(args.api_key))
     task = " ".join(args.task).strip()
-    session = client.run(task)
-    if args.wait and session.get("session_id"):
-        session = _wait_for_terminal(client, str(session["session_id"]), args.timeout_s, args.interval_s)
+    if args.wait:
+        session = _run_task_and_wait(client, task, args.timeout_s, args.interval_s)
+    else:
+        session = client.run(task)
     if args.json:
         print(json.dumps(session, ensure_ascii=False, indent=2, sort_keys=True))
     else:
@@ -223,6 +278,34 @@ def cmd_url(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_chat(args: argparse.Namespace) -> int:
+    client = ClerkQwenClient(args.base_url, resolve_api_key(args.api_key))
+    print("Clerk Qwen3 - Brisen document clerk")
+    print("Reach: Gmail, Outlook/Graph, Dropbox, Baker Clerk workbench, internal bus.")
+    print("Limits: no money, no external sends, no production changes; risky acts return drafts or pending_approval.")
+    print("Type a task. Empty line, Ctrl-D, exit, or quit ends the session.")
+    while True:
+        try:
+            task = input("clerk> ").strip()
+        except EOFError:
+            print("")
+            return 0
+        except KeyboardInterrupt:
+            print("")
+            return 0
+        if not task or task.lower() in {"exit", "quit"}:
+            return 0
+        try:
+            session = _run_task_and_wait(client, task, args.timeout_s, args.interval_s)
+            _print_session(session, args.base_url)
+            print(_telemetry_footer(session))
+        except ClerkQwenError as e:
+            print(f"ERROR: {e}")
+        except KeyboardInterrupt:
+            print("")
+            return 0
+
+
 def build_parser() -> argparse.ArgumentParser:
     common = argparse.ArgumentParser(add_help=False)
     common.add_argument(
@@ -243,6 +326,11 @@ def build_parser() -> argparse.ArgumentParser:
     run.add_argument("--interval-s", type=float, default=2.0, help="Polling interval for --wait")
     run.set_defaults(func=cmd_run)
 
+    chat = sub.add_parser("chat", parents=[common], help="Open an interactive Clerk prompt")
+    chat.add_argument("--timeout-s", type=float, default=180.0, help="Maximum wait time for each task")
+    chat.add_argument("--interval-s", type=float, default=2.0, help="Polling interval for each task")
+    chat.set_defaults(func=cmd_chat)
+
     status = sub.add_parser("status", parents=[common], help="Fetch one Clerk session")
     status.add_argument("session_id")
     status.set_defaults(func=cmd_status)
@@ -258,6 +346,10 @@ def build_parser() -> argparse.ArgumentParser:
 
 
 def main(argv: list[str] | None = None) -> int:
+    if argv is None:
+        argv = sys.argv[1:]
+    if not argv:
+        argv = ["chat"]
     parser = build_parser()
     args = parser.parse_args(argv)
     try:

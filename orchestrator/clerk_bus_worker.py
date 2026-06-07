@@ -99,6 +99,43 @@ def _bounded_float(name: str, default: float, minimum: float, maximum: float) ->
     return max(minimum, min(maximum, value))
 
 
+def _int_or_none(value: Any) -> int | None:
+    if value is None:
+        return None
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return None
+
+
+def _float_or_none(value: Any) -> float | None:
+    if value is None:
+        return None
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return None
+
+
+def _usage_update_fields(result: dict[str, Any]) -> dict[str, Any]:
+    usage = result.get("usage")
+    if not isinstance(usage, dict):
+        return {}
+    fields: dict[str, Any] = {}
+    for key in (
+        "prompt_tokens",
+        "completion_tokens",
+        "total_tokens",
+        "context_window_used",
+        "context_window_max",
+    ):
+        if key in usage:
+            fields[key] = _int_or_none(usage.get(key))
+    if "session_cost_usd" in usage:
+        fields["session_cost_usd"] = _float_or_none(usage.get("session_cost_usd"))
+    return fields
+
+
 def _terminal_key_from_env() -> str:
     return (
         os.getenv("BRISEN_LAB_TERMINAL_KEY_clerk")
@@ -160,7 +197,10 @@ class DirectClerkSessionStore:
                 cur.execute(
                     """
                     SELECT session_id, task, status, result_json, draft_content,
-                           draft_path, source_meta, error, created_at, updated_at
+                           draft_path, source_meta, error, prompt_tokens,
+                           completion_tokens, total_tokens, context_window_used,
+                           context_window_max, session_cost_usd, created_at,
+                           updated_at
                     FROM clerk_sessions
                     WHERE session_id = %s
                     LIMIT 1
@@ -194,7 +234,20 @@ class DirectClerkSessionStore:
     def update_session(self, session_id: str, **fields: Any) -> None:
         if not fields:
             return
-        allowed = {"status", "result_json", "draft_content", "draft_path", "source_meta", "error"}
+        allowed = {
+            "status",
+            "result_json",
+            "draft_content",
+            "draft_path",
+            "source_meta",
+            "error",
+            "prompt_tokens",
+            "completion_tokens",
+            "total_tokens",
+            "context_window_used",
+            "context_window_max",
+            "session_cost_usd",
+        }
         unknown = set(fields) - allowed
         if unknown:
             raise ValueError(f"unsupported clerk session fields: {sorted(unknown)}")
@@ -465,6 +518,7 @@ class ClerkBusWorker:
                 status = str(result.get("status") or "error")
                 draft_content, draft_path = _extract_draft(result)
                 error = str(result.get("reason") or result.get("error") or "") or None
+                usage_fields = _usage_update_fields(result)
                 self.store.update_session(
                     session_id,
                     status=status,
@@ -472,6 +526,7 @@ class ClerkBusWorker:
                     draft_content=draft_content,
                     draft_path=draft_path,
                     error=error,
+                    **usage_fields,
                 )
 
             reply_body = self._format_reply(

@@ -178,6 +178,14 @@ def test_ready_message_replies_then_acks_and_records_reply_id():
     result = {
         "status": "ready",
         "answer": "Ready: /Baker-Feed/Clerk-Workbench/out.md / Source: test",
+        "usage": {
+            "prompt_tokens": 12,
+            "completion_tokens": 3,
+            "total_tokens": 15,
+            "context_window_used": 12,
+            "context_window_max": 1000,
+            "session_cost_usd": 0.000009,
+        },
         "tool_calls": [{"name": "file_save", "input": {"content": "draft", "filename": "out.md"}}],
     }
     worker = ClerkBusWorker(
@@ -218,6 +226,12 @@ def test_ready_message_replies_then_acks_and_records_reply_id():
     assert "Edit: https://baker.test/clerk/edit/bus-101" in reply_payload["body"]
     assert "Draft preview:\ndraft" in reply_payload["body"]
     assert store.sessions["bus-101"]["status"] == "ready"
+    assert store.sessions["bus-101"]["prompt_tokens"] == 12
+    assert store.sessions["bus-101"]["completion_tokens"] == 3
+    assert store.sessions["bus-101"]["total_tokens"] == 15
+    assert store.sessions["bus-101"]["context_window_used"] == 12
+    assert store.sessions["bus-101"]["context_window_max"] == 1000
+    assert store.sessions["bus-101"]["session_cost_usd"] == 0.000009
     assert store.sessions["bus-101"]["result_json"]["bus_reply_message_id"] == 9001
 
 

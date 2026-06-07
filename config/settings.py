@@ -18,6 +18,20 @@ _ENV_PATH = Path(__file__).parent / ".env"
 load_dotenv(_ENV_PATH, override=True)
 
 
+def _env_int(name: str, default: int = 0) -> int:
+    try:
+        return int(os.getenv(name, str(default)) or default)
+    except (TypeError, ValueError):
+        return default
+
+
+def _env_float(name: str, default: float = 0.0) -> float:
+    try:
+        return float(os.getenv(name, str(default)) or default)
+    except (TypeError, ValueError):
+        return default
+
+
 @dataclass
 class QdrantConfig:
     url: str = os.getenv("QDRANT_URL", "")
@@ -79,6 +93,9 @@ class Qwen3Config:
     backend: str = os.getenv("CLERK_MODEL_BACKEND", "qwen3_hosted")
     max_steps: int = int(os.getenv("CLERK_MAX_STEPS", "12"))
     task_timeout_s: int = int(os.getenv("CLERK_TASK_TIMEOUT_S", "180"))
+    context_window_max: int = _env_int("CLERK_QWEN_CONTEXT_WINDOW_MAX", 0)
+    prompt_price_per_m: float = _env_float("CLERK_QWEN_PROMPT_PRICE_PER_M", 0.0)
+    completion_price_per_m: float = _env_float("CLERK_QWEN_COMPLETION_PRICE_PER_M", 0.0)
 
     @property
     def enabled(self) -> bool:
