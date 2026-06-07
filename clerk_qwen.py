@@ -22,7 +22,7 @@ CHAT_INTRO = 'Clerk Qwen3 (Brisen doc clerk) - type a task; "help" for reach/lim
 CHAT_HELP_LINES = (
     "Reach: Gmail, Outlook/Graph, WhatsApp, Slack, transcripts, calendar, Dropbox/documents, sent mail, RSS/Substack, Baker search, internal bus.",
     "Limits: no money, no external sends, no production changes; risky acts return drafts or pending_approval.",
-    "Usage: type a task. 'open' views the last result in your browser; 'open <id>' views a specific session. Empty line, Ctrl-D, exit, or quit ends the session.",
+    "Usage: type a task. 'open' views the last result in your browser, 'show' prints it inline; add '<id>' for a specific session. Empty line, Ctrl-D, exit, or quit ends the session.",
 )
 NO_SESSION_MSG = "No session yet — run a Clerk task first, then use open."
 OPEN_HINT = "  (type open to view in browser)"
@@ -274,6 +274,14 @@ def _print_chat_trailer(session: dict[str, Any], base_url: str) -> None:
         print(f"Edit URL: {edit_url(base_url, session_id)}")
 
 
+def _show_session(client: ClerkQwenClient, session_id: str, base_url: str) -> None:
+    """Fetch a session and print its result content inline in the terminal
+    (answer + draft preview + ready-path), no browser. May raise ClerkQwenError."""
+    session = client.status(session_id)
+    _print_chat_result(session)
+    _print_chat_trailer(session, base_url)
+
+
 def _print_turn_footer(session: dict[str, Any]) -> None:
     footer = _telemetry_footer(session)
     print("-" * max(len(line) for line in footer.splitlines()))
@@ -457,6 +465,22 @@ def cmd_open(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_show(args: argparse.Namespace) -> int:
+    client = ClerkQwenClient(args.base_url, resolve_api_key(args.api_key))
+    session_id = (args.session_id or "").strip()
+    if not session_id:
+        sessions = client.list_sessions(1).get("sessions") or []
+        session_id = str(sessions[0].get("session_id") or "") if sessions else ""
+        if not session_id:
+            print(NO_SESSION_MSG)
+            return 0
+    if args.json:
+        print(json.dumps(client.status(session_id), ensure_ascii=False, indent=2, sort_keys=True))
+    else:
+        _show_session(client, session_id, args.base_url)
+    return 0
+
+
 def cmd_chat(args: argparse.Namespace) -> int:
     client = ClerkQwenClient(args.base_url, resolve_api_key(args.api_key))
     print(CHAT_INTRO)
@@ -484,6 +508,23 @@ def cmd_chat(args: argparse.Namespace) -> int:
             # "open <session-id>" — local open. Natural tasks like
             # "open latest Peter email" fall through to Clerk below.
             _open_session(args.base_url, task.split(maxsplit=1)[1].strip())
+            continue
+        if task.lower() == "show":
+            if not last_session_id:
+                print(NO_SESSION_MSG)
+            else:
+                try:
+                    _show_session(client, last_session_id, args.base_url)
+                except ClerkQwenError as e:
+                    print(f"ERROR: {e}")
+            continue
+        if task.lower().startswith("show ") and _is_session_id(task.split(maxsplit=1)[1]):
+            # "show <session-id>" — local inline print. Natural tasks like
+            # "show me the nvidia docs" fall through to Clerk below.
+            try:
+                _show_session(client, task.split(maxsplit=1)[1].strip(), args.base_url)
+            except ClerkQwenError as e:
+                print(f"ERROR: {e}")
             continue
         if not task or task.lower() in {"exit", "quit"}:
             return 0
@@ -546,6 +587,14 @@ def build_parser() -> argparse.ArgumentParser:
         help="Session id to open; defaults to the most recent session",
     )
     open_cmd.set_defaults(func=cmd_open)
+
+    show_cmd = sub.add_parser("show", parents=[common], help="Print a session's result inline in the terminal")
+    show_cmd.add_argument(
+        "session_id",
+        nargs="?",
+        help="Session id to show; defaults to the most recent session",
+    )
+    show_cmd.set_defaults(func=cmd_show)
     return parser
 
 
