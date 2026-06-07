@@ -88,6 +88,49 @@ def test_remaining_after_counts_embeddable_not_total():
     tail = ep[ep.index("remaining_after = None"):]
     block = tail[: tail.index("return {")]
     assert "_REINGEST_MISSING_QDRANT_PREDICATE" in block and "_HAS_EXTRACTED_TEXT" in block
+    # OVERSIZED_DOC_GUARD: remaining_after MUST also carry the size cap, else oversized
+    # rows keep it permanently above zero and the resume loop never converges.
+    assert "_WITHIN_SIZE_CAP" in block, "remaining_after must mirror the size cap for convergence"
+
+
+# ─── OVERSIZED_DOC_GUARD source-level guards (DOC_BACKFILL_RUN_1) ──────────────
+
+
+def test_oversized_guard_constant_and_predicate_defined():
+    """The per-doc size cap constant + its SQL predicate must exist."""
+    src = Path("outputs/dashboard.py").read_text()
+    assert "_REINGEST_MAX_TEXT_CHARS = 500_000" in src, "size cap must be 500K chars"
+    assert "_WITHIN_SIZE_CAP" in src
+    assert "length(d.full_text) <= " in src, "predicate must cap on full_text length"
+
+
+def test_repair_selector_and_counts_carry_size_cap():
+    """The candidate selector AND the embeddable_missing count must exclude oversized
+    rows so the loop processes (and converges on) only within-cap docs."""
+    src = Path("outputs/dashboard.py").read_text()
+    # counts helper: embeddable_missing count carries the cap.
+    counts = src[src.index("def _reingest_missing_counts("):]
+    counts = counts[: counts.index("\n\n\n")]
+    assert counts.count("_WITHIN_SIZE_CAP") >= 2, (
+        "counts helper must apply the cap to embeddable_missing AND surface an oversized count"
+    )
+    assert "oversized_skipped_total" in counts
+    # endpoint candidate SELECT carries the cap.
+    ep = src[src.index("async def documents_reingest_missing("):]
+    ep = ep[: ep.index("\n@app.", 1)] if "\n@app." in ep else ep
+    sel = ep[ep.index("Repair selector"):]
+    sel = sel[: sel.index("candidates = [dict(r)")]
+    assert "_WITHIN_SIZE_CAP" in sel, "candidate selector must exclude oversized rows"
+
+
+def test_embed_batch_has_defensive_oversized_guard():
+    """_reingest_embed_batch must skip + count oversized rows (defense-in-depth), never
+    embed them — one huge spreadsheet must not poison the sequential loop."""
+    src = Path("outputs/dashboard.py").read_text()
+    helper = src[src.index("def _reingest_embed_batch("):]
+    helper = helper[: helper.index("\n@app.")] if "\n@app." in helper else helper
+    assert "_REINGEST_MAX_TEXT_CHARS" in helper, "embed loop must guard on the size cap"
+    assert "oversized_skipped" in helper
 
 
 # ─── Live handler tests (py3.10+ where dashboard imports) ─────────────────────
@@ -126,6 +169,9 @@ class _FakeCursor:
                 val = self.state["total_missing"]
             elif "NOT (d.full_text" in sql:
                 val = self.state["skipped_empty_total"]
+            elif "NOT (length(d.full_text" in sql:
+                # OVERSIZED_DOC_GUARD: over-the-size-cap count (dict cursor, counts helper)
+                val = self.state.get("oversized_skipped_total", 0)
             elif self.dict_mode:
                 val = self.state["embeddable_missing"]
             else:
@@ -135,6 +181,10 @@ class _FakeCursor:
         return None
 
     def fetchall(self):
+        # OVERSIZED_DOC_GUARD: the oversized-id diagnostic SELECT orders by length DESC;
+        # the candidate SELECT orders by ingested_at DESC.
+        if "ORDER BY length(d.full_text) DESC" in self.last_sql:
+            return [dict(r) for r in self.state.get("oversized_rows", [])]
         return [dict(r) for r in self.state["candidates"]]
 
     def close(self):
@@ -486,3 +536,70 @@ def test_reingest_lock_held_returns_backfill_in_progress(monkeypatch):
     assert r.status_code == 200
     assert r.json().get("error") == "backfill_in_progress"
     assert calls == [], "no embed must run while another batch holds the lock"
+
+
+# ─── OVERSIZED_DOC_GUARD live handler tests (DOC_BACKFILL_RUN_1) ───────────────
+
+
+def test_oversized_dry_run_surfaces_count_and_ids(monkeypatch):
+    """dry_run surfaces oversized_skipped_total + oversized_doc_ids, writes nothing."""
+    state = {
+        "total_missing": 6, "embeddable_missing": 3, "skipped_empty_total": 1,
+        "oversized_skipped_total": 2, "oversized_rows": [{"id": 8618}, {"id": 85}],
+        "candidates": [_row(1), _row(2), _row(3)],
+    }
+    client, calls = _client(monkeypatch, state)
+    r = client.post("/api/documents/reingest-missing?dry_run=true&limit=50", headers=_HDR)
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert body["oversized_skipped_total"] == 2
+    assert body["oversized_doc_ids"] == [8618, 85]
+    assert body["embeddable_missing"] == 3  # excludes the 2 oversized
+    assert calls == []
+
+
+def test_oversized_candidate_skipped_not_embedded(monkeypatch):
+    """Defense-in-depth: an oversized row that reaches the loop is counted
+    oversized_skipped and never embedded; the rest of the batch still embeds."""
+    import outputs.dashboard as dash
+    cap = dash._REINGEST_MAX_TEXT_CHARS
+    big_row = _row(8618, text="x" * (cap + 1), fname="260217_Projection Completion.xlsx")
+    state = {
+        "total_missing": 4, "embeddable_missing": 2, "skipped_empty_total": 0,
+        "oversized_skipped_total": 1, "oversized_rows": [{"id": 8618}],
+        "candidates": [_row(1), big_row, _row(3)], "remaining_after": 0,
+    }
+    client, calls = _client(monkeypatch, state)
+    r = client.post("/api/documents/reingest-missing?dry_run=false&limit=50", headers=_HDR)
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert body["embedded"] == 2          # ids 1 and 3
+    assert body["oversized_skipped"] == 1  # big_row skipped in the loop
+    assert body["oversized_skipped_total"] == 1
+    assert body["oversized_doc_ids"] == [8618]
+    embedded_ids = {kw["document_id"] for kw in calls}
+    assert 8618 not in embedded_ids, "oversized doc must not be embedded"
+
+
+def test_embed_batch_skips_oversized_full_text(monkeypatch):
+    """Unit: _reingest_embed_batch never passes an over-the-cap full_text to ingest_text."""
+    import outputs.dashboard as dash
+    cap = dash._REINGEST_MAX_TEXT_CHARS
+    seen = []
+
+    def _fake_ingest(**kw):
+        seen.append(kw["document_id"])
+        return SimpleNamespace(skipped=False, skip_reason=None)
+
+    monkeypatch.setattr("tools.ingest.pipeline.ingest_text", _fake_ingest)
+    candidates = [
+        {"id": 1, "filename": "a", "source_path": "a", "file_hash": "h1",
+         "matter_slug": None, "full_text": "small"},
+        {"id": 8618, "filename": "big.xlsx", "source_path": "b", "file_hash": "h2",
+         "matter_slug": None, "full_text": "x" * (cap + 1)},
+    ]
+    stats = dash._reingest_embed_batch(candidates)
+    assert stats["attempted"] == 2
+    assert stats["embedded"] == 1
+    assert stats["oversized_skipped"] == 1
+    assert 8618 not in seen, "oversized doc must never reach ingest_text"

@@ -2636,6 +2636,19 @@ _REINGEST_MISSING_QDRANT_PREDICATE = (
 # rows are blank, only 460 embeddable). The repair selector filters them at SQL.
 _HAS_EXTRACTED_TEXT = "d.full_text IS NOT NULL AND btrim(d.full_text) <> ''"
 
+# OVERSIZED_DOC_GUARD (DOC_BACKFILL_RUN_1, b1 diagnosis 2026-06-07): per-doc text
+# length cap on the reingest selector. A handful of huge spreadsheet exports (live: an
+# 8.6M-char .xlsx => ~4,800 chunks at ~500 tokens/chunk; ~11h to embed at the 25s
+# INGEST_EMBED_DELAY Voyage rate-limit) sort FIRST under `ORDER BY ingested_at DESC`
+# and, because the embed loop is sequential in one worker thread, block the WHOLE
+# backfill: the call exceeds --max-time, the client gets an empty body, and nothing
+# commits for the normal docs queued behind them. Skip + report rather than embed —
+# spreadsheets are poor semantic targets and keyword search already finds them.
+# Threshold 500K chars cleanly excludes the 3 live offenders (8.6M / 2.15M / 737K);
+# p95 of the normal embeddable set is ~65K, so zero false positives.
+_REINGEST_MAX_TEXT_CHARS = 500_000
+_WITHIN_SIZE_CAP = f"length(d.full_text) <= {_REINGEST_MAX_TEXT_CHARS}"
+
 
 def _documents_missing_qdrant(limit: int = 50):
     """A3 (INGEST_SEARCH_DURABILITY_FOLLOWUPS_1): cross-store reconciliation.
@@ -2726,19 +2739,23 @@ async def documents_reconciliation(limit: int = Query(50, ge=1, le=500)):
 
 
 def _reingest_missing_counts(cur):
-    """Compute the three repair-progress counts off a live cursor.
+    """Compute the repair-progress counts off a live cursor.
 
     - total_missing: filename-level legacy view (matches /api/documents/reconciliation).
-    - embeddable_missing: row-level-missing AND has non-blank text — the set the
-      repair actually processes; remaining_after re-reads THIS so the loop converges.
+    - embeddable_missing: row-level-missing AND non-blank text AND within the size cap
+      — the set the repair actually processes; remaining_after re-reads THIS so the
+      loop converges. MUST exclude oversized rows or the loop never reaches zero.
     - skipped_empty_total: row-level-missing but blank/NULL text — never embeddable,
       reported for visibility, deliberately excluded from the repair selector.
+    - oversized_skipped_total: row-level-missing, non-blank, but over the size cap —
+      deliberately excluded from the repair selector (see _REINGEST_MAX_TEXT_CHARS).
     """
     cur.execute(f"SELECT COUNT(*) AS c FROM documents d WHERE {_RECON_MISSING_QDRANT_PREDICATE}")
     total_missing = cur.fetchone()["c"]
     cur.execute(
         f"SELECT COUNT(*) AS c FROM documents d "
-        f"WHERE {_REINGEST_MISSING_QDRANT_PREDICATE} AND {_HAS_EXTRACTED_TEXT}"
+        f"WHERE {_REINGEST_MISSING_QDRANT_PREDICATE} AND {_HAS_EXTRACTED_TEXT} "
+        f"AND {_WITHIN_SIZE_CAP}"
     )
     embeddable_missing = cur.fetchone()["c"]
     cur.execute(
@@ -2746,7 +2763,13 @@ def _reingest_missing_counts(cur):
         f"WHERE {_REINGEST_MISSING_QDRANT_PREDICATE} AND NOT ({_HAS_EXTRACTED_TEXT})"
     )
     skipped_empty_total = cur.fetchone()["c"]
-    return total_missing, embeddable_missing, skipped_empty_total
+    cur.execute(
+        f"SELECT COUNT(*) AS c FROM documents d "
+        f"WHERE {_REINGEST_MISSING_QDRANT_PREDICATE} AND {_HAS_EXTRACTED_TEXT} "
+        f"AND NOT ({_WITHIN_SIZE_CAP})"
+    )
+    oversized_skipped_total = cur.fetchone()["c"]
+    return total_missing, embeddable_missing, skipped_empty_total, oversized_skipped_total
 
 
 # REINGEST_ASYNC_OFFLOAD_1: run the blocking embed loop in a worker thread so the
@@ -2756,7 +2779,7 @@ def _reingest_embed_batch(candidates: list) -> dict:
     no DB connection held. One failure must NOT abort the batch. Runs in a thread via
     asyncio.to_thread."""
     from tools.ingest.pipeline import ingest_text
-    attempted = embedded = skipped_empty = skipped_dedup = 0
+    attempted = embedded = skipped_empty = skipped_dedup = oversized_skipped = 0
     failed = []
     for c in candidates:
         attempted += 1
@@ -2764,6 +2787,16 @@ def _reingest_embed_batch(candidates: list) -> dict:
         full_text = c.get("full_text") or ""
         if not full_text.strip():
             skipped_empty += 1
+            continue
+        # Defense-in-depth: the SQL selector already excludes oversized rows, but guard
+        # here too so a hand-built candidate list can't poison the sequential embed loop
+        # with a huge spreadsheet export (see _REINGEST_MAX_TEXT_CHARS).
+        if len(full_text) > _REINGEST_MAX_TEXT_CHARS:
+            logger.warning(
+                f"reingest-missing id={doc_id} skipped oversized: {len(full_text)} chars "
+                f"> cap {_REINGEST_MAX_TEXT_CHARS}"
+            )
+            oversized_skipped += 1
             continue
         try:
             result = ingest_text(
@@ -2792,6 +2825,7 @@ def _reingest_embed_batch(candidates: list) -> dict:
         "embedded": embedded,
         "skipped_empty": skipped_empty,
         "skipped_dedup": skipped_dedup,
+        "oversized_skipped": oversized_skipped,
         "failed": failed,
     }
 
@@ -2831,16 +2865,28 @@ async def documents_reingest_missing(
     try:
         import psycopg2.extras
         cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
-        total_missing, embeddable_missing, skipped_empty_total = _reingest_missing_counts(cur)
-        # Repair selector: row-level-missing AND embeddable, capped at limit.
+        (total_missing, embeddable_missing, skipped_empty_total,
+         oversized_skipped_total) = _reingest_missing_counts(cur)
+        # Repair selector: row-level-missing AND embeddable AND within the size cap,
+        # capped at limit. The size cap keeps oversized spreadsheet exports out of the
+        # sequential embed loop so they cannot block the backfill (_REINGEST_MAX_TEXT_CHARS).
         cur.execute(
             f"SELECT d.id, d.filename, d.source_path, d.matter_slug, d.file_hash, d.full_text "
             f"FROM documents d "
             f"WHERE {_REINGEST_MISSING_QDRANT_PREDICATE} AND {_HAS_EXTRACTED_TEXT} "
+            f"AND {_WITHIN_SIZE_CAP} "
             f"ORDER BY d.ingested_at DESC NULLS LAST LIMIT %s",
             (limit,),
         )
         candidates = [dict(r) for r in cur.fetchall()]
+        # Oversized doc IDs for operator reporting (bounded, diagnostic only).
+        cur.execute(
+            f"SELECT d.id FROM documents d "
+            f"WHERE {_REINGEST_MISSING_QDRANT_PREDICATE} AND {_HAS_EXTRACTED_TEXT} "
+            f"AND NOT ({_WITHIN_SIZE_CAP}) "
+            f"ORDER BY length(d.full_text) DESC LIMIT 100"
+        )
+        oversized_doc_ids = [r["id"] for r in cur.fetchall()]
         cur.close()
     except Exception as sel_err:
         try:
@@ -2862,6 +2908,8 @@ async def documents_reingest_missing(
             "total_missing": total_missing,
             "embeddable_missing": embeddable_missing,
             "skipped_empty_total": skipped_empty_total,
+            "oversized_skipped_total": oversized_skipped_total,
+            "oversized_doc_ids": oversized_doc_ids,
             "limit": limit,
             "would_process": [
                 {
@@ -2918,7 +2966,8 @@ async def documents_reingest_missing(
     except Exception as embed_err:
         logger.error(f"reingest-missing embed batch failed: {embed_err}")
         stats = {"attempted": 0, "embedded": 0, "skipped_empty": 0,
-                 "skipped_dedup": 0, "failed": [{"id": None, "reason": str(embed_err)}]}
+                 "skipped_dedup": 0, "oversized_skipped": 0,
+                 "failed": [{"id": None, "reason": str(embed_err)}]}
     finally:
         if got_lock:
             try:
@@ -2938,6 +2987,7 @@ async def documents_reingest_missing(
     embedded = stats["embedded"]
     skipped_empty = stats["skipped_empty"]
     skipped_dedup = stats["skipped_dedup"]
+    oversized_skipped = stats["oversized_skipped"]
     failed = stats["failed"]
 
     # remaining_after: re-count remaining EMBEDDABLE rows post-batch so the caller
@@ -2947,9 +2997,13 @@ async def documents_reingest_missing(
     if conn2:
         try:
             cur2 = conn2.cursor()
+            # MUST mirror embeddable_missing's predicate (incl. the size cap) so the
+            # resume loop converges to 0 — oversized rows are never embedded and would
+            # otherwise keep remaining_after permanently above zero.
             cur2.execute(
                 f"SELECT COUNT(*) FROM documents d "
-                f"WHERE {_REINGEST_MISSING_QDRANT_PREDICATE} AND {_HAS_EXTRACTED_TEXT}"
+                f"WHERE {_REINGEST_MISSING_QDRANT_PREDICATE} AND {_HAS_EXTRACTED_TEXT} "
+                f"AND {_WITHIN_SIZE_CAP}"
             )
             remaining_after = cur2.fetchone()[0]
             cur2.close()
@@ -2968,10 +3022,13 @@ async def documents_reingest_missing(
         "total_missing": total_missing,
         "embeddable_missing": embeddable_missing,
         "skipped_empty_total": skipped_empty_total,
+        "oversized_skipped_total": oversized_skipped_total,
+        "oversized_doc_ids": oversized_doc_ids,
         "attempted": attempted,
         "embedded": embedded,
         "skipped_empty": skipped_empty,
         "skipped_dedup": skipped_dedup,
+        "oversized_skipped": oversized_skipped,
         "failed": failed,
         "remaining_after": remaining_after,
     }
