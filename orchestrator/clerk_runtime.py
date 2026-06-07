@@ -599,10 +599,8 @@ class ClerkToolRegistry:
         self,
         dropbox_client: Any | None = None,
         approved_save_paths: set[str] | tuple[str, ...] | None = None,
-        grok_client: Any | None = None,
     ):
         self._dropbox_client = dropbox_client
-        self._grok_client = grok_client  # CLERK ... PR 2a: injectable for tests
         self._approved_save_paths = frozenset(
             normalized
             for normalized in (_normalize_dropbox_path(str(path)) for path in (approved_save_paths or ()))
@@ -809,12 +807,8 @@ class ClerkToolRegistry:
                 return self._format_convert(args)
             if name == "file_save":
                 return self._file_save(args)
-            if name == "baker_grok_web_search":
-                return self._grok_web_search(args)
-            if name == "baker_grok_x_search":
-                return self._grok_x_search(args)
-            if name == "baker_grok_ask":
-                return self._grok_ask(args)
+            if name in ("baker_grok_web_search", "baker_grok_x_search", "baker_grok_ask"):
+                return self._grok_dispatch(name, args)
             return _safe_json({"error": f"unknown tool: {name}"})
         except BaseException as e:
             # CLERK_SEARCH_BACKEND_FAILSILENT_FIX_1 (B): a backend OUTAGE must
@@ -1716,69 +1710,13 @@ class ClerkToolRegistry:
         return _safe_json({"status": "ready", "path": meta.get("path_display", dropbox_path), "metadata": meta})
 
     # ── CLERK_FULL_CAPABILITY_POLICY_1 PR 2a — live web/X search via Grok (xAI) ──
-    def _get_grok(self) -> Any:
-        if self._grok_client is not None:
-            return self._grok_client
-        from kbl.grok_client import GrokClient
-        return GrokClient()
-
-    @staticmethod
-    def _str_list(value: Any) -> list[str] | None:
-        if isinstance(value, list):
-            items = [str(v).strip() for v in value if isinstance(v, (str, int, float)) and str(v).strip()]
-            return items or None
-        return None
-
-    def _grok_web_search(self, args: dict[str, Any]) -> str:
-        query = str(args.get("query", "")).strip()
-        if not query:
-            return _safe_json({"error": "query is required"})
-        result = self._get_grok().web_search(
-            query,
-            allowed_domains=self._str_list(args.get("allowed_domains")),
-            excluded_domains=self._str_list(args.get("excluded_domains")),
-        )
-        return _safe_json({
-            "source": "grok_web",
-            "summary": result.get("summary"),
-            "citations": result.get("citations", []),
-            "model": result.get("model"),
-        })
-
-    def _grok_x_search(self, args: dict[str, Any]) -> str:
-        query = str(args.get("query", "")).strip()
-        if not query:
-            return _safe_json({"error": "query is required"})
-        from_date = args.get("from_date")
-        to_date = args.get("to_date")
-        result = self._get_grok().x_search(
-            query,
-            from_date=str(from_date).strip() if isinstance(from_date, str) and from_date.strip() else None,
-            to_date=str(to_date).strip() if isinstance(to_date, str) and to_date.strip() else None,
-            allowed_x_handles=self._str_list(args.get("allowed_x_handles")),
-            excluded_x_handles=self._str_list(args.get("excluded_x_handles")),
-        )
-        return _safe_json({
-            "source": "grok_x",
-            "summary": result.get("summary"),
-            "tweets": result.get("tweets", []),
-            "model": result.get("model"),
-        })
-
-    def _grok_ask(self, args: dict[str, Any]) -> str:
-        prompt = str(args.get("prompt", "")).strip()
-        if not prompt:
-            return _safe_json({"error": "prompt is required"})
-        instructions = args.get("instructions")
-        result = self._get_grok().ask(
-            prompt,
-            instructions=str(instructions).strip() if isinstance(instructions, str) and instructions.strip() else None,
-        )
-        return _safe_json({
-            "source": "grok_ask",
-            "text": result.get("text"),
-            "model": result.get("model"),
-        })
+    def _grok_dispatch(self, name: str, args: dict[str, Any]) -> str:
+        """Route Clerk's Grok tools through tools.grok.dispatch_grok so they inherit
+        the SAME cost circuit-breaker + usage logging (source=grok_realtime) +
+        timeout validation as every other Grok caller. Calling GrokClient directly
+        would be an unmetered live-xAI path for an autonomous model (G0 #2391)."""
+        from tools.grok import dispatch_grok
+        return dispatch_grok(name, args)
 
 
 _CLERK_SYSTEM_PROMPT = """You are Clerk, Brisen's document clerk.
