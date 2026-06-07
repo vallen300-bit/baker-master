@@ -643,6 +643,168 @@ def test_chat_open_without_prior_session_prints_no_session(monkeypatch, capsys):
     assert clerk_qwen.NO_SESSION_MSG in out
 
 
+def test_show_cli_shows_given_session_inline(monkeypatch, capsys):
+    sid = "12345678-1234-1234-1234-123456789abc"
+
+    def fake_urlopen(req, timeout):
+        assert req.full_url == f"https://baker.test/api/clerk/session/{sid}"
+        return _FakeResponse({
+            "session_id": sid,
+            "status": "ready",
+            "result": {"answer": "Ready: /Baker-Feed/Clerk-Workbench/nvidia.md"},
+        })
+
+    monkeypatch.setattr(urllib.request, "urlopen", fake_urlopen)
+
+    code = clerk_qwen.main([
+        "show", "--base-url", "https://baker.test", "--api-key", "test-key", sid,
+    ])
+
+    out = capsys.readouterr().out
+    assert code == 0
+    assert "Ready: /Baker-Feed/Clerk-Workbench/nvidia.md" in out
+    assert "Status: ready" in out
+
+
+def test_show_cli_no_arg_shows_most_recent_session(monkeypatch, capsys):
+    def fake_urlopen(req, timeout):
+        url = req.full_url
+        if url == "https://baker.test/api/clerk/sessions?limit=1":
+            return _FakeResponse({"sessions": [{"session_id": "sess-recent", "status": "ready"}]})
+        if url == "https://baker.test/api/clerk/session/sess-recent":
+            return _FakeResponse({
+                "session_id": "sess-recent",
+                "status": "ready",
+                "result": {"answer": "Ready: /Baker-Feed/Clerk-Workbench/last.md"},
+            })
+        raise AssertionError(f"unexpected URL {url}")
+
+    monkeypatch.setattr(urllib.request, "urlopen", fake_urlopen)
+
+    code = clerk_qwen.main([
+        "show", "--base-url", "https://baker.test", "--api-key", "test-key",
+    ])
+
+    out = capsys.readouterr().out
+    assert code == 0
+    assert "Ready: /Baker-Feed/Clerk-Workbench/last.md" in out
+
+
+def test_show_cli_no_sessions_prints_clean_message(monkeypatch, capsys):
+    def fake_urlopen(req, timeout):
+        assert req.full_url == "https://baker.test/api/clerk/sessions?limit=1"
+        return _FakeResponse({"sessions": []})
+
+    monkeypatch.setattr(urllib.request, "urlopen", fake_urlopen)
+
+    code = clerk_qwen.main([
+        "show", "--base-url", "https://baker.test", "--api-key", "test-key",
+    ])
+
+    out = capsys.readouterr().out
+    assert code == 0
+    assert clerk_qwen.NO_SESSION_MSG in out
+
+
+def test_chat_show_with_uuid_prints_inline(monkeypatch, capsys):
+    sid = "abcdef12-3456-7890-abcd-ef1234567890"
+    inputs = iter([f"show {sid}", "exit"])
+    monkeypatch.setattr("builtins.input", lambda prompt: next(inputs))
+
+    def fake_urlopen(req, timeout):
+        assert req.full_url == f"https://baker.test/api/clerk/session/{sid}"
+        return _FakeResponse({
+            "session_id": sid,
+            "status": "ready",
+            "result": {"answer": "Ready: /Baker-Feed/Clerk-Workbench/doc.md"},
+        })
+
+    monkeypatch.setattr(urllib.request, "urlopen", fake_urlopen)
+
+    code = clerk_qwen.main([
+        "chat", "--base-url", "https://baker.test", "--api-key", "test-key",
+    ])
+
+    out = capsys.readouterr().out
+    assert code == 0
+    assert "Ready: /Baker-Feed/Clerk-Workbench/doc.md" in out
+
+
+def test_chat_show_bare_uses_last_session(monkeypatch, capsys):
+    inputs = iter(["find the nvidia docs", "show", "exit"])
+    monkeypatch.setattr("builtins.input", lambda prompt: next(inputs))
+    status_calls = []
+
+    def fake_urlopen(req, timeout):
+        url = req.full_url
+        if url == "https://baker.test/api/clerk/run":
+            return _FakeResponse({"session_id": "sess-last", "status": "running"})
+        if url == "https://baker.test/api/clerk/session/sess-last":
+            status_calls.append(url)
+            return _FakeResponse({
+                "session_id": "sess-last",
+                "status": "ready",
+                "result": {"answer": "Ready: /Baker-Feed/Clerk-Workbench/nv.md"},
+            })
+        raise AssertionError(f"unexpected URL {url}")
+
+    monkeypatch.setattr(urllib.request, "urlopen", fake_urlopen)
+
+    code = clerk_qwen.main([
+        "chat", "--base-url", "https://baker.test", "--api-key", "test-key", "--interval-s", "0",
+    ])
+
+    out = capsys.readouterr().out
+    assert code == 0
+    # status hit twice: once during run --wait, once for bare `show`
+    assert len(status_calls) == 2
+    assert out.count("Ready: /Baker-Feed/Clerk-Workbench/nv.md") == 2
+
+
+def test_chat_show_natural_task_passes_through_to_clerk(monkeypatch, capsys):
+    # "show me the nvidia docs" is a natural task, NOT the local show command.
+    inputs = iter(["show me the nvidia docs", "exit"])
+    monkeypatch.setattr("builtins.input", lambda prompt: next(inputs))
+    calls = []
+
+    def fake_urlopen(req, timeout):
+        calls.append(req)
+        url = req.full_url
+        if url == "https://baker.test/api/clerk/run":
+            assert json.loads(req.data.decode("utf-8")) == {"task": "show me the nvidia docs"}
+            return _FakeResponse({"session_id": "sess-nv", "status": "running"})
+        if url == "https://baker.test/api/clerk/session/sess-nv":
+            return _FakeResponse({"session_id": "sess-nv", "status": "ready", "result": {"answer": "ok"}})
+        raise AssertionError(f"unexpected URL {url}")
+
+    monkeypatch.setattr(urllib.request, "urlopen", fake_urlopen)
+
+    code = clerk_qwen.main([
+        "chat", "--base-url", "https://baker.test", "--api-key", "test-key", "--interval-s", "0",
+    ])
+
+    assert code == 0
+    assert len(calls) == 2  # task went to Clerk (run + status), not intercepted as show
+
+
+def test_chat_show_without_prior_session_prints_no_session(monkeypatch, capsys):
+    inputs = iter(["show", "exit"])
+    monkeypatch.setattr("builtins.input", lambda prompt: next(inputs))
+
+    def fail_urlopen(*args, **kwargs):
+        raise AssertionError("show before any task must not hit the network")
+
+    monkeypatch.setattr(urllib.request, "urlopen", fail_urlopen)
+
+    code = clerk_qwen.main([
+        "chat", "--base-url", "https://baker.test", "--api-key", "test-key",
+    ])
+
+    out = capsys.readouterr().out
+    assert code == 0
+    assert clerk_qwen.NO_SESSION_MSG in out
+
+
 def test_http_error_message_is_clean(monkeypatch, capsys):
     def fake_urlopen(req, timeout):
         body = json.dumps({"detail": {"status": "pending_approval", "reason": "target path requires Director approval"}}).encode()
