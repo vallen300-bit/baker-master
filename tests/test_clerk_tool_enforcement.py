@@ -29,6 +29,7 @@ from orchestrator.clerk_runtime import (
     _ToolUseBlock,
     _CLERK_SEARCH_FAILLOUD_MSG,
     _asserts_unsubstantiated_lookup,
+    _task_is_lookup_shaped,
 )
 
 
@@ -70,6 +71,30 @@ def _cfg(max_steps=12, timeout=180):
     "found nothing",
     "couldn't find any emails",
     "Search returned no matches.",
+    # CLERK_QWEN3_GUARD_COVERAGE_1 — codex FAIL-M1 proven gaps (must now be True):
+    "I could not locate any documents about Peter Storer",
+    "I do not see any documents about Peter Storer",
+    "There do not appear to be documents about Peter Storer",
+    # + siblings
+    "I couldn't locate any emails",
+    "I can't see any results",
+    "cannot find any matches",
+    "unable to find any records",
+    "does not appear to be any transcripts",
+    "No files found",
+    "I do not have any documents about Peter Storer",  # have+any+data-noun still fires
+    # CLERK_QWEN3_GUARD_COVERAGE_1 re-arch — codex empty-result idioms + curly apostrophe
+    "The search came up empty.",
+    "It turned up nothing.",
+    "no relevant documents",
+    "no matching emails",
+    "zero documents",
+    "I don’t see any messages",  # U+2019 curly apostrophe normalized
+    # #2270 (3) bias-toward-firing absence idioms WITHOUT a hard data noun
+    "I don't see anything on Peter Storer",
+    "nothing on Peter Storer",
+    "no relevant results",
+    "I do not see anything",
 ])
 def test_lookup_assertion_detected(text):
     assert _asserts_unsubstantiated_lookup(text) is True
@@ -81,9 +106,120 @@ def test_lookup_assertion_detected(text):
     "Here is the draft you asked for.",
     "I'm Clerk, Brisen's document clerk.",
     "",
+    # CLERK_QWEN3_GUARD_COVERAGE_1 — anti-over-trigger: idiomatic "see"/"no"
+    # phrases that are NOT lookup outcomes must stay False.
+    "There is no need to worry.",
+    "I do not see why not, here is the plan.",
+    "I do not see how that helps.",
+    "I can't wait to help!",
+    # CLERK_QWEN3_GUARD_COVERAGE_1 codex anti-over-trigger FAIL-M1: "have any X"
+    # where X is NOT a Baker-data noun is chit-chat, must stay False.
+    "I do not have any questions",
+    "I don't have any updates yet",
+    "I don't have any preference",
+    # CLERK_QWEN3_GUARD_COVERAGE_1 re-arch — codex G3 verb-without-data-object FPs
+    "I did not appear at the meeting",
+    "I did not find that funny",
+    "This does not appear to be a lookup request",
 ])
 def test_non_lookup_text_not_flagged(text):
     assert _asserts_unsubstantiated_lookup(text) is False
+
+
+# ── PRIMARY (structural): lookup-task + no-search-tool, phrasing-independent ──
+
+@pytest.mark.parametrize("task,expected", [
+    ("How many documents mention Peter Storer?", True),
+    ("find emails from Storer", True),
+    ("do we have any files on the Hagenauer matter", True),
+    ("list the meeting transcripts about RG7", True),
+    # CLERK_QWEN3_GUARD_COVERAGE_1 codex G3 Finding A: terse forms must qualify.
+    ("what do we have on Peter Storer", True),
+    ("Peter Storer emails", True),
+    ("Peter Storer docs", True),
+    ("anything on Storer", True),
+    ("info on Peter Storer", True),
+    ("details about the RG7 matter", True),
+    ("something on Storer", True),
+    ("hi, what can you do?", False),
+    ("draft an email to Storer", False),       # data noun + action verb -> not lookup
+    ("save this note to my folder", False),
+    ("convert this file to pdf", False),
+    ("reply to this email", False),
+    ("summarize this document", False),
+    ("thanks!", False),
+])
+def test_task_lookup_shape_classifier(task, expected):
+    assert _task_is_lookup_shaped(task) is expected
+
+
+def test_document_fetch_satisfies_grounding_no_forced_retry(monkeypatch):
+    # CLERK_QWEN3_GUARD_COVERAGE_1 codex G3 Finding B: a successful document_fetch
+    # (or email_download) retrieves real Baker data and must NOT be forced into a
+    # search retry just because no SEARCH tool ran.
+    reg = ClerkToolRegistry()
+    monkeypatch.setattr(reg, "_document_fetch",
+                        lambda args: json.dumps({"status": "ok", "path": args.get("path")}))
+    client = _FakeClient([
+        _ToolResponse([_ToolUseBlock("d1", "document_fetch", {"path": "/foo.pdf"})], "tool_use", 10, 5),
+        _ToolResponse([_TextBlock("Ready: /foo.pdf / Source: dropbox")], "end_turn", 8, 4),
+    ])
+    agent = ClerkAgent(model_client=client, registry=reg, cfg=_cfg())
+    result = agent.run("retrieve the file /foo.pdf")
+    assert result["status"] == "ready"
+    assert any(c["name"] == "document_fetch" for c in result["tool_calls"])
+    assert len(client.messages.calls) == 2  # no forced retry
+
+
+def test_structural_primary_fires_regardless_of_answer_phrasing():
+    # A lookup-shaped task answered with ZERO search tools must trip the guard even
+    # when the answer is neutrally phrased (no fabrication regex match) — this is the
+    # phrasing-independent primary that ends the whack-a-mole.
+    neutral = "Peter Storer is a counterparty contact."  # NOT a fabrication phrasing
+    assert _asserts_unsubstantiated_lookup(neutral) is False  # secondary would miss it
+    client = _FakeClient([
+        _ToolResponse([_TextBlock(neutral)], "end_turn", 10, 5),
+        _ToolResponse([_TextBlock(neutral)], "end_turn", 9, 4),  # forced retry, still no tool
+    ])
+    agent = ClerkAgent(model_client=client, registry=ClerkToolRegistry(), cfg=_cfg())
+    result = agent.run("how many documents mention Peter Storer")
+    assert result["status"] == "needs_retry"
+    assert result["answer"] == _CLERK_SEARCH_FAILLOUD_MSG
+    assert client.messages.calls[1].get("tool_choice") == "required"
+    assert len(client.messages.calls) == 2  # bounded to one forced retry
+
+
+def test_structural_primary_not_fired_on_chitchat():
+    # Non-lookup task + neutral answer + no tool = normal ready, no forced retry.
+    client = _FakeClient([
+        _ToolResponse([_TextBlock("Hello! I can help search Baker's documents and emails.")], "end_turn", 6, 3),
+    ])
+    agent = ClerkAgent(model_client=client, registry=ClerkToolRegistry(), cfg=_cfg())
+    result = agent.run("hi, what can you do?")
+    assert result["status"] == "ready"
+    assert len(client.messages.calls) == 1
+    assert client.messages.calls[0].get("tool_choice") == "auto"
+
+
+@pytest.mark.parametrize("fabrication", [
+    "I could not locate any documents about Peter Storer.",
+    "I do not see any documents about Peter Storer.",
+    "There do not appear to be documents about Peter Storer.",
+])
+def test_widened_absence_phrasings_trigger_forced_retry(fabrication):
+    # CLERK_QWEN3_GUARD_COVERAGE_1: each codex-proven phrasing, emitted with ZERO
+    # tool calls, must now trip the guard. With no tool on the forced retry, that
+    # is the fail-loud non-answer (never the fabricated absence).
+    client = _FakeClient([
+        _ToolResponse([_TextBlock(fabrication)], "end_turn", 10, 5),
+        _ToolResponse([_TextBlock(fabrication)], "end_turn", 9, 4),  # forced retry, still no tool
+    ])
+    agent = ClerkAgent(model_client=client, registry=ClerkToolRegistry(), cfg=_cfg())
+    result = agent.run("find documents about Peter Storer")
+    assert result["status"] == "needs_retry"
+    assert result["answer"] == _CLERK_SEARCH_FAILLOUD_MSG
+    assert len(client.messages.calls) == 2  # one forced retry, bounded
+    assert client.messages.calls[1].get("tool_choice") == "required"
 
 
 # ── (1)+(2) guard forces a search retry; (1) tool fires on retry ─────────────
