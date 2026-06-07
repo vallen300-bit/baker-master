@@ -189,6 +189,19 @@ _CLERK_BUS_TOOLS = (
     "baker_inbox_ack",
 )
 
+# G2 H1 HIGH (#2431): the MCP baker_inbox_post schema's `kind` enum includes the
+# authority-bearing ratify_required / ratify_decision kinds. The generic /msg POST
+# route does NOT enforce the human-confirmation + tier checks that the dedicated
+# ratify path does — so a cheap autonomous Clerk posting kind=ratify_decision could
+# FORGE a Director ratification on the bus. Clerk may post ONLY plain coordination
+# kinds. Enforced two ways: a Clerk-specific inbox_post schema that narrows the enum
+# (so the model is never even offered ratify_*), AND a hard fail-closed pre-dispatch
+# reject in _clerk_bus_post_guard (the real enforcement — reject, NOT approval).
+_CLERK_BUS_POST_ALLOWED_KINDS = ("dispatch", "broadcast")
+# Ratify-only authority fields stripped from Clerk's narrowed schema (parent_id is
+# kept — it also serves benign reply-thread linkage).
+_CLERK_BUS_POST_RATIFY_ONLY_FIELDS = ("tier_required", "human_confirmation_token")
+
 
 def _pick_tool_schemas(tools: list[Any], wanted: frozenset[str]) -> list[dict[str, Any]]:
     """Convert source MCP Tool objects (.name/.description/.inputSchema) into Clerk's
@@ -203,6 +216,52 @@ def _pick_tool_schemas(tools: list[Any], wanted: frozenset[str]) -> list[dict[st
                 "input_schema": getattr(tool, "inputSchema", None) or {"type": "object", "properties": {}},
             })
     return out
+
+
+def _clerk_bus_post_schema(base: dict[str, Any]) -> dict[str, Any]:
+    """Return a Clerk-restricted copy of the MCP inbox_post schema (G2 H1 HIGH #2431):
+    the `kind` enum is narrowed to the safe coordination kinds and the ratify-only
+    authority fields are dropped, so the authority-bearing ratify_required /
+    ratify_decision kinds are never offered to the model. Defence-in-depth — the hard
+    reject in _clerk_bus_post_guard is the real enforcement; this just keeps the model
+    from attempting an authority post in the first place."""
+    import copy
+    schema = copy.deepcopy(base) if isinstance(base, dict) else {"type": "object", "properties": {}}
+    props = schema.get("properties")
+    if isinstance(props, dict):
+        if isinstance(props.get("kind"), dict):
+            props["kind"] = {
+                **props["kind"],
+                "enum": list(_CLERK_BUS_POST_ALLOWED_KINDS),
+                "description": "Coordination kind — Clerk is restricted to dispatch / broadcast.",
+            }
+        for ratify_only in _CLERK_BUS_POST_RATIFY_ONLY_FIELDS:
+            props.pop(ratify_only, None)
+    return schema
+
+
+def _clerk_bus_post_guard(args: dict[str, Any]) -> str | None:
+    """Hard pre-dispatch reject for Clerk bus posts (G2 H1 HIGH #2431). Clerk may post
+    ONLY the safe coordination kinds. Any authority-bearing kind — ratify_decision,
+    ratify_required, or anything starting 'ratify' — is REJECTED before _dispatch
+    (reject, NOT approval): a cheap autonomous model must never be able to forge a
+    Director ratification on the bus. Fail-closed — a missing/unknown kind that is not
+    in the allowed coordination set is also rejected. Returns an error string to surface
+    as the tool result, or None to let the post through to _dispatch."""
+    kind = args.get("kind") if isinstance(args, dict) else None
+    norm = kind.strip().lower() if isinstance(kind, str) else ""
+    if norm.startswith("ratify"):
+        return (
+            f"Error: Clerk is not permitted to post authority-bearing bus messages "
+            f"(kind={kind!r}). Ratification requires the human-confirmation path and is "
+            f"blocked for autonomous agents."
+        )
+    if norm not in _CLERK_BUS_POST_ALLOWED_KINDS:
+        return (
+            f"Error: Clerk may only post coordination kinds "
+            f"{list(_CLERK_BUS_POST_ALLOWED_KINDS)} (got kind={kind!r})."
+        )
+    return None
 
 
 # Name-fragment fail-closed catch for money/external-send shapes not explicitly
@@ -869,7 +928,13 @@ class ClerkToolRegistry:
         out: list[dict[str, Any]] = []
         try:
             from baker_mcp.baker_mcp_server import TOOLS as _MCP_TOOLS
-            out += _pick_tool_schemas(_MCP_TOOLS, frozenset(_CLERK_BAKER_READ_TOOLS + _CLERK_BUS_TOOLS))
+            picked = _pick_tool_schemas(_MCP_TOOLS, frozenset(_CLERK_BAKER_READ_TOOLS + _CLERK_BUS_TOOLS))
+            # G2 H1 HIGH (#2431): never offer the model the authority-bearing ratify_*
+            # kinds — narrow the inbox_post schema to safe coordination kinds.
+            for entry in picked:
+                if entry["name"] == "baker_inbox_post":
+                    entry["input_schema"] = _clerk_bus_post_schema(entry["input_schema"])
+            out += picked
         except Exception:
             logger.warning("Clerk: baker_mcp TOOLS import failed — baker reads/bus unavailable")
         try:
@@ -1819,7 +1884,14 @@ class ClerkToolRegistry:
         blocks DENY/APPROVAL before execute); external sends are DENY and never wired.
         Returns _dispatch's text; the outer execute() try/except renders failures cleanly."""
         from baker_mcp.baker_mcp_server import _dispatch
-        return _dispatch(name, args if isinstance(args, dict) else {})
+        args = args if isinstance(args, dict) else {}
+        # G2 H1 HIGH (#2431): hard-reject authority-bearing bus posts BEFORE _dispatch.
+        # A cheap autonomous Clerk must never forge a Director ratification (kind=ratify_*).
+        if name == "baker_inbox_post":
+            rejection = _clerk_bus_post_guard(args)
+            if rejection is not None:
+                return rejection
+        return _dispatch(name, args)
 
     # ── CLERK_FULL_CAPABILITY_POLICY_1 PR 2c — gmail + claimsmax reads via dispatchers ──
     def _gmail_dispatch(self, name: str, args: dict[str, Any]) -> str:

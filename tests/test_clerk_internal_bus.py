@@ -18,7 +18,10 @@ from orchestrator.clerk_runtime import (
     _TextBlock,
     _ToolUseBlock,
     _classify_tool,
+    _clerk_bus_post_guard,
+    _clerk_bus_post_schema,
     _CLERK_BUS_TOOLS,
+    _CLERK_BUS_POST_ALLOWED_KINDS,
     _GROUNDING_TOOLS,
     CLERK_ALLOW,
     CLERK_DENY,
@@ -54,10 +57,11 @@ def test_external_sends_still_denied_not_confused_with_bus():
 
 # ── routing through the governed _dispatch ───────────────────────────────────
 
+# Args mirror the real MCP wire shape (to/kind/body, msg_id) — not synthetic names.
 @pytest.mark.parametrize("name,args", [
     ("baker_inbox_read", {"terminal": "clerk"}),
-    ("baker_inbox_post", {"recipient": "lead", "body": "hi", "topic": "x"}),
-    ("baker_inbox_ack", {"message_id": 123}),
+    ("baker_inbox_post", {"to": "lead", "kind": "dispatch", "body": "hi", "topic": "x"}),
+    ("baker_inbox_ack", {"msg_id": 123}),
 ])
 def test_bus_tool_routes_through_dispatch(monkeypatch, name, args):
     seen = {}
@@ -72,7 +76,7 @@ def test_bus_dispatch_failure_is_fault_tolerant(monkeypatch):
     def boom(n, a):
         raise RuntimeError("bus daemon down")
     monkeypatch.setattr("baker_mcp.baker_mcp_server._dispatch", boom)
-    out = ClerkToolRegistry().execute("baker_inbox_post", {"recipient": "lead", "body": "x"})
+    out = ClerkToolRegistry().execute("baker_inbox_post", {"to": "lead", "kind": "dispatch", "body": "x"})
     assert "error" in out.lower() or out.startswith("Error")
 
 
@@ -101,10 +105,90 @@ def test_inbox_post_runs_through_policy_gate(monkeypatch):
                         lambda n, a: '{"message_id": 999, "posted": true}')
     client = _FakeClient([
         _ToolResponse([_ToolUseBlock("p1", "baker_inbox_post",
-                      {"recipient": "lead", "body": "status", "topic": "fyi"})], "tool_use", 10, 5),
+                      {"to": "lead", "kind": "dispatch", "body": "status", "topic": "fyi"})], "tool_use", 10, 5),
         _ToolResponse([_TextBlock("Posted to lead.")], "end_turn", 8, 4),
     ])
     agent = ClerkAgent(model_client=client, registry=ClerkToolRegistry(), cfg=_cfg())
     result = agent.run("post a status note to lead on the bus")
     assert result["status"] == "ready"
     assert any(c["name"] == "baker_inbox_post" for c in result["tool_calls"])
+
+
+# ── G2 H1 HIGH (#2431): forged-ratification reject ───────────────────────────
+
+@pytest.mark.parametrize("kind", ["ratify_decision", "ratify_required", "RATIFY_DECISION",
+                                  " ratify_decision ", "ratify_anything"])
+def test_bus_post_guard_rejects_ratify_kinds(kind):
+    # A cheap autonomous Clerk must never forge a Director ratification on the bus.
+    msg = _clerk_bus_post_guard({"to": "director", "kind": kind, "body": "approved"})
+    assert msg is not None and msg.startswith("Error:")
+
+
+@pytest.mark.parametrize("kind", list(_CLERK_BUS_POST_ALLOWED_KINDS))
+def test_bus_post_guard_allows_coordination_kinds(kind):
+    assert _clerk_bus_post_guard({"to": "lead", "kind": kind, "body": "hi"}) is None
+
+
+@pytest.mark.parametrize("kind", [None, "", "approve", "decision", "unknown_kind"])
+def test_bus_post_guard_fails_closed_on_unknown_kind(kind):
+    # Missing/unknown kinds (not in the allowed coordination set) are rejected.
+    msg = _clerk_bus_post_guard({"to": "lead", "kind": kind, "body": "x"})
+    assert msg is not None and msg.startswith("Error:")
+
+
+def test_ratify_post_blocked_before_dispatch(monkeypatch):
+    # The hard reject fires BEFORE _dispatch — zero bus calls for a forged ratification.
+    hit = {"v": False}
+    monkeypatch.setattr("baker_mcp.baker_mcp_server._dispatch",
+                        lambda n, a: hit.__setitem__("v", True) or "should-not-run")
+    out = ClerkToolRegistry().execute(
+        "baker_inbox_post",
+        {"to": "director", "kind": "ratify_decision", "body": "I hereby ratify", "parent_id": 1},
+    )
+    assert out.startswith("Error:")
+    assert hit["v"] is False  # never reached the daemon
+
+
+def test_coordination_post_still_dispatches(monkeypatch):
+    # A normal coordination post is unaffected by the guard.
+    seen = {}
+    monkeypatch.setattr("baker_mcp.baker_mcp_server._dispatch",
+                        lambda n, a: seen.update({"n": n, "a": a}) or "BUS OK")
+    out = ClerkToolRegistry().execute(
+        "baker_inbox_post", {"to": "lead", "kind": "dispatch", "body": "status"})
+    assert out == "BUS OK"
+    assert seen["n"] == "baker_inbox_post"
+
+
+def test_clerk_inbox_post_schema_narrows_kind_enum():
+    # The schema offered to the model must NOT include the authority-bearing kinds,
+    # and the ratify-only authority fields must be stripped.
+    base = {
+        "type": "object",
+        "properties": {
+            "to": {"type": "string"},
+            "kind": {"type": "string",
+                     "enum": ["dispatch", "broadcast", "ratify_required", "ratify_decision"]},
+            "body": {"type": "string"},
+            "tier_required": {"type": "string"},
+            "human_confirmation_token": {"type": "string"},
+            "parent_id": {"type": "integer"},
+        },
+        "required": ["to", "kind", "body"],
+    }
+    narrowed = _clerk_bus_post_schema(base)
+    assert narrowed["properties"]["kind"]["enum"] == list(_CLERK_BUS_POST_ALLOWED_KINDS)
+    assert "ratify_decision" not in narrowed["properties"]["kind"]["enum"]
+    assert "tier_required" not in narrowed["properties"]
+    assert "human_confirmation_token" not in narrowed["properties"]
+    assert "parent_id" in narrowed["properties"]  # benign reply-linkage, kept
+    # original schema not mutated (deepcopy)
+    assert "ratify_decision" in base["properties"]["kind"]["enum"]
+
+
+def test_registered_inbox_post_schema_is_narrowed():
+    # End-to-end: the live registry must expose the narrowed enum to the model.
+    tools = {t["name"]: t for t in ClerkToolRegistry().tools}
+    kind = tools["baker_inbox_post"]["input_schema"]["properties"]["kind"]
+    assert "ratify_decision" not in kind["enum"]
+    assert "ratify_required" not in kind["enum"]
