@@ -26,6 +26,7 @@ apscheduler>=3.10.0        # Trigger scheduling
 python-dotenv>=1.0.0       # .env file loading
 httpx>=0.27.0              # HTTP client for API calls
 tenacity>=9.0.0            # Retry logic
+prompt_toolkit>=3.0.0      # CLERK_REPL_FOOTER_BOTTOMBAR_1: clerkqwen chat bottom-toolbar (pinned telemetry footer); CLI-only, lazy-imported with graceful input() fallback
 PyYAML>=6.0                # YAML parsing (slug registry, baker-vault config)
 python-dateutil>=2.8.0     # AMEX_RECURRING_DEADLINE_1: relativedelta for monthly/quarterly/annual recurrence
 cryptography>=42.0         # BRISEN_LAB_V2_BRIDGE_1 (V0.3.7): ed25519 keygen + sign for UserPromptSubmit auth chain

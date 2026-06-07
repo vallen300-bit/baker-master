@@ -817,3 +817,103 @@ def test_http_error_message_is_clean(monkeypatch, capsys):
     err = capsys.readouterr().err
     assert code == 2
     assert "target path requires Director approval" in err
+
+
+# ── CLERK_REPL_FOOTER_BOTTOMBAR_1: pinned bottom-bar telemetry + graceful fallback ──
+
+def test_bottom_toolbar_text_renders_telemetry_and_reach_hint():
+    bar = clerk_qwen._bottom_toolbar_text({
+        "context_window_used": 23000,
+        "context_window_max": 100000,
+        "session_cost_usd": 0.0042,
+        "model": "qwen/qwen3-coder",
+    })
+    assert "Qwen3 Coder" in bar
+    assert "23%" in bar
+    assert "$0.0042" in bar
+    assert "⏵⏵" in bar              # reach hint folded into the bar
+    assert "help" in bar
+
+
+def test_bottom_toolbar_text_neutral_before_first_turn():
+    bar = clerk_qwen._bottom_toolbar_text(None)
+    assert "--%" in bar             # no telemetry yet
+    assert "$n/a" in bar
+    assert "⏵⏵" in bar
+
+
+def test_telemetry_footer_unchanged_two_line_shape():
+    # Regression: the inline fallback footer must keep its exact two-line shape.
+    assert clerk_qwen._telemetry_footer({"status": "ready"}) == (
+        "Qwen3 Coder │ ░░░░░░░░░░ --% │ $n/a\n"
+        '  ⏵⏵ read-only clerk · action-guardrails on · "help" for reach'
+    )
+
+
+def test_make_chat_prompt_session_none_when_not_a_tty(monkeypatch):
+    # Non-interactive (piped) stdio -> no bottom bar -> input() + inline footer path.
+    monkeypatch.setattr(clerk_qwen.sys.stdin, "isatty", lambda: False, raising=False)
+    monkeypatch.setattr(clerk_qwen.sys.stdout, "isatty", lambda: True, raising=False)
+    assert clerk_qwen._make_chat_prompt_session({"session": None}) is None
+
+
+def test_make_chat_prompt_session_builds_when_tty_and_prompt_toolkit(monkeypatch):
+    import pytest
+    pytest.importorskip("prompt_toolkit")
+    monkeypatch.setattr(clerk_qwen.sys.stdin, "isatty", lambda: True, raising=False)
+    monkeypatch.setattr(clerk_qwen.sys.stdout, "isatty", lambda: True, raising=False)
+    ps = clerk_qwen._make_chat_prompt_session({"session": None})
+    assert ps is not None
+    assert hasattr(ps, "prompt")
+
+
+class _FakePromptSession:
+    """Stand-in for prompt_toolkit.PromptSession in bottom-bar-mode tests."""
+    def __init__(self, lines):
+        self._lines = iter(lines)
+
+    def prompt(self, message):
+        assert message == "clerk> "
+        return next(self._lines)
+
+
+def test_chat_bottom_bar_mode_omits_inline_footer(monkeypatch, capsys):
+    # In bottom-bar mode the telemetry moves to the pinned bar — it must NOT print
+    # inline between the answer and the next prompt. Answer + trailer + open-hint
+    # still print; ordering is answer -> trailer -> open-hint.
+    monkeypatch.setattr(
+        clerk_qwen, "_make_chat_prompt_session",
+        lambda state: _FakePromptSession(["find emails from Peter", "exit"]),
+    )
+
+    def fake_urlopen(req, timeout):
+        url = req.full_url
+        if url == "https://baker.test/api/clerk/run":
+            return _FakeResponse({"session_id": "sess-bar", "status": "running"})
+        if url == "https://baker.test/api/clerk/session/sess-bar":
+            return _FakeResponse({
+                "session_id": "sess-bar",
+                "status": "ready",
+                "result": {"status": "ready", "answer": "Found 3 emails from Peter."},
+                "context_window_used": 12000,
+                "context_window_max": 1000000,
+                "session_cost_usd": 0.0042,
+                "model": "qwen/qwen3-coder-plus",
+            })
+        raise AssertionError(f"unexpected URL {url}")
+
+    monkeypatch.setattr(urllib.request, "urlopen", fake_urlopen)
+
+    code = clerk_qwen.main([
+        "chat", "--base-url", "https://baker.test", "--api-key", "test-key", "--interval-s", "0",
+    ])
+    out = capsys.readouterr().out
+    assert code == 0
+    assert "Found 3 emails from Peter." in out          # answer printed
+    assert "Status: ready" in out                        # trailer printed
+    assert clerk_qwen.OPEN_HINT.strip() in out           # open-hint above the cursor
+    # telemetry is in the bar, NOT inline:
+    assert "Qwen3 Plus │" not in out
+    assert '  ⏵⏵ read-only clerk · action-guardrails on · "help" for reach' not in out
+    # ordering: answer before trailer
+    assert out.index("Found 3 emails from Peter.") < out.index("Status: ready")
