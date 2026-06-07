@@ -481,26 +481,29 @@ def _clerk_update_session(session_id: str, **fields: Any) -> None:
 
 
 def _clerk_extract_draft(result: dict[str, Any]) -> tuple[str, str | None]:
+    # CLERK_READY_PATH_CONTRADICTION_FIX_2 (Director-visible dashboard /clerk surface;
+    # twin of orchestrator/clerk_bus_worker._extract_draft fixed in FIX_1 #326): the
+    # draft path comes ONLY from clerk_runtime's verified saved_paths (the real Dropbox
+    # metadata path from a status:"ready" file_save). The two prior ungrounded sources
+    # are removed: the free-text `Ready:\s*(/path)` regex scrape of the model answer
+    # (the exact /Baker-Project hallucination route) and the unverified file_save
+    # INPUT-arg path (which could echo a path _file_save then BLOCKED). No verified
+    # save -> no draft path. Draft preview CONTENT still comes from the save attempt.
     content = ""
-    path = None
     for call in result.get("tool_calls") or []:
-        if call.get("name") != "file_save":
+        if not isinstance(call, dict) or call.get("name") != "file_save":
             continue
         args = call.get("input") or {}
-        if isinstance(args, dict):
-            if isinstance(args.get("content"), str):
-                content = args["content"]
-            raw_path = args.get("dropbox_path")
-            if isinstance(raw_path, str) and raw_path.strip():
-                path = _clerk_normalize_dropbox_path(raw_path)
-            elif isinstance(args.get("filename"), str):
-                filename = Path(args["filename"]).name or "clerk-output.md"
-                path = f"{_CLERK_WORKING_PREFIX}/{filename}"
-    if not path:
-        answer = str(result.get("answer") or "")
-        match = re.search(r"Ready:\s*(/[^\s]+)", answer)
-        if match:
-            path = _clerk_normalize_dropbox_path(match.group(1))
+        if isinstance(args, dict) and isinstance(args.get("content"), str):
+            content = args["content"]
+    path: str | None = None
+    saved = result.get("saved_paths")
+    if isinstance(saved, list):
+        for candidate in saved:
+            if isinstance(candidate, str) and candidate.strip():
+                normalized = _clerk_normalize_dropbox_path(candidate)
+                if normalized:
+                    path = normalized  # last verified save wins
     if not content:
         content = str(result.get("answer") or result.get("reason") or "")
     return content, path or None
