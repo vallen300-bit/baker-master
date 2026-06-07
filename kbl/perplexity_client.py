@@ -24,7 +24,15 @@ Error surface (mirrors kbl.grok_client):
     - All HTTP calls wrapped try/except per repo hard rule.
 
 Default model: ``sonar`` — Perplexity's lightweight web-grounded model. ``sonar-pro``
-and ``sonar-reasoning`` are reachable via the ``model`` parameter.
+and ``sonar-reasoning-pro`` are reachable via the ``model`` parameter (the older
+``sonar-reasoning`` was deprecated by Perplexity 2025-12-15).
+
+Cost: Perplexity Sonar billing is token cost PLUS a per-request search fee, so the
+response carries an authoritative ``usage.cost`` block (``total_cost`` /
+``request_cost``). ``ask`` surfaces the exact ``total_cost`` as ``cost_usd`` (with
+``cost_is_external = True``); when the block is absent it falls back to a token-rate
+estimate plus any reported ``request_cost``. The governed dispatcher records that
+exact USD figure so the daily total + circuit breaker do not undercount (G0 #2443).
 
 Key rotation: ``PerplexityClient.__init__`` reads ``PERPLEXITY_API_KEY`` once at
 construction. After rotating the key on Render, call
@@ -219,7 +227,10 @@ class PerplexityClient:
         """POST /chat/completions — a single Sonar call.
 
         Returns ``{text, citations: [...], model, status, tokens_in, tokens_out,
-        total_tokens, cost_usd, raw_id}``. ``text`` is ``choices[0].message.content``;
+        total_tokens, cost_usd, cost_is_external, raw_id}``. ``cost_usd`` is the
+        provider's exact billed total when ``cost_is_external`` is True, else a
+        token-rate estimate plus any reported request fee. ``text`` is
+        ``choices[0].message.content``;
         ``citations`` is the merged + de-duplicated list of cited web sources
         (``{url, title, date, snippet}``).
 
@@ -285,15 +296,17 @@ def _shape_ask_response(payload: dict, model: str) -> dict:
     tokens_in = int(usage.get("prompt_tokens") or 0)
     tokens_out = int(usage.get("completion_tokens") or 0)
     total = int(usage.get("total_tokens") or (tokens_in + tokens_out))
+    resolved_model = payload.get("model") or model
     return {
         "text": text,
         "citations": _merge_citations(payload),
-        "model": payload.get("model") or model,
+        "model": resolved_model,
         "status": (choices[0].get("finish_reason") if choices and isinstance(choices[0], dict) else "") or "",
         "tokens_in": tokens_in,
         "tokens_out": tokens_out,
         "total_tokens": total,
-        "cost_usd": _cost_usd_from_usage(usage, payload.get("model") or model),
+        "cost_usd": _cost_usd_from_usage(usage, resolved_model),
+        "cost_is_external": _external_cost_usd(usage) is not None,
         "raw_id": payload.get("id") or "",
     }
 
@@ -336,20 +349,54 @@ def _shape_citation(citation: Any) -> dict[str, Any]:
     }
 
 
-def _cost_usd_from_usage(usage: dict[str, Any], model: str) -> float:
-    """Derive USD cost from the Perplexity usage block at the documented Sonar rate.
+def _external_cost_usd(usage: dict[str, Any]) -> Optional[float]:
+    """Exact USD cost Perplexity reports in ``usage.cost.total_cost``, or ``None``.
 
-    Token-based estimate only — the per-request search fee is not token-
-    attributable and is excluded (the authoritative attribution is via
-    cost_monitor.log_api_cost in the dispatcher; this field is a convenience).
+    Perplexity Sonar's billed total = token cost + per-request search fee, and the
+    API returns that authoritative figure here. ``None`` (block absent or non-
+    numeric) signals the caller to fall back to the token-rate estimate.
+    """
+    cost = usage.get("cost")
+    if isinstance(cost, dict):
+        total = cost.get("total_cost")
+        if isinstance(total, (int, float)) and not isinstance(total, bool):
+            return float(total)
+    return None
+
+
+def _request_fee_usd(usage: dict[str, Any]) -> float:
+    """Per-request search fee Perplexity reports in ``usage.cost.request_cost``.
+
+    Used only in the token-estimate fallback (when ``total_cost`` is absent) so the
+    estimate still includes the non-token request fee. Returns 0.0 when unreported.
+    """
+    cost = usage.get("cost")
+    if isinstance(cost, dict):
+        fee = cost.get("request_cost")
+        if isinstance(fee, (int, float)) and not isinstance(fee, bool):
+            return float(fee)
+    return 0.0
+
+
+def _cost_usd_from_usage(usage: dict[str, Any], model: str) -> float:
+    """Best-available USD cost for a Perplexity call.
+
+    Prefers the EXACT external total Perplexity bills (``usage.cost.total_cost``),
+    which already folds in the per-request search fee. When that block is absent,
+    falls back to a token-rate estimate PLUS any reported ``request_cost`` so the
+    fee is not silently dropped (G0 #2443 H1 — the governor must not undercount).
     Returns 0.0 if usage is empty.
     """
+    external = _external_cost_usd(usage)
+    if external is not None:
+        return round(external, 8)
     rates = {
         "sonar": (1.00, 1.00),
         "sonar-pro": (3.00, 15.00),
-        "sonar-reasoning": (1.00, 5.00),
+        "sonar-reasoning-pro": (2.00, 8.00),
     }
     rate_in, rate_out = rates.get(model, rates["sonar"])
     tokens_in = float(usage.get("prompt_tokens") or 0)
     tokens_out = float(usage.get("completion_tokens") or 0)
-    return round((tokens_in * rate_in + tokens_out * rate_out) / 1_000_000.0, 8)
+    token_cost = (tokens_in * rate_in + tokens_out * rate_out) / 1_000_000.0
+    return round(token_cost + _request_fee_usd(usage), 8)

@@ -96,7 +96,7 @@ PERPLEXITY_TOOLS: list[Tool] = [
             "baker_grok_web_search — both stay live; prefer Perplexity for a single "
             "synthesized cited answer, Grok when the query needs combined X + web "
             "signal or tweet metadata. Default model 'sonar'; pass model='sonar-pro' "
-            "for the deeper variant or 'sonar-reasoning' for chain-of-thought."
+            "for the deeper variant or 'sonar-reasoning-pro' for chain-of-thought."
         ),
         inputSchema={
             "type": "object",
@@ -107,7 +107,7 @@ PERPLEXITY_TOOLS: list[Tool] = [
                 },
                 "model": {
                     "type": "string",
-                    "description": "Override model id (default sonar; sonar-pro / sonar-reasoning available).",
+                    "description": "Override model id (default sonar; sonar-pro / sonar-reasoning-pro available).",
                 },
                 "max_tokens": {
                     "type": "integer",
@@ -233,12 +233,19 @@ def _validate_timeout_seconds(value: Any) -> tuple[Optional[float], Optional[str
 
 
 def _log_perplexity_cost(payload: dict, matter_slug: Optional[str]) -> None:
-    """Attribute the Perplexity call's token usage via cost_monitor.
+    """Attribute the Perplexity call's real spend via cost_monitor.
 
     Wrapped so a logging failure never blocks the caller from seeing the payload.
-    ``payload`` is the dict returned by PerplexityClient.ask — ``model`` keys the
-    cost_monitor MODEL_COSTS table (sonar / sonar-pro / sonar-reasoning added in
-    PR 2d-2; unknown models fall back to the default rate there).
+    ``payload`` is the dict returned by PerplexityClient.ask.
+
+    Cost accuracy (G0 #2443 H1): Perplexity Sonar bills token cost PLUS a per-request
+    search fee, so a token-rate estimate undercounts. ``ask`` surfaces the API's
+    authoritative ``usage.cost.total_cost`` as ``cost_usd`` (falling back to a
+    token-estimate + request-fee when the block is absent); we pass it as
+    ``cost_usd_override`` so the recorded EUR — and therefore the daily total + the
+    cost circuit breaker — reflect the EXACT external spend, not an undercount. The
+    ``model`` (sonar / sonar-pro / sonar-reasoning-pro) is still logged for audit
+    and keys the MODEL_COSTS fallback if no override is present.
     """
     try:
         from orchestrator.cost_monitor import log_api_cost
@@ -248,6 +255,7 @@ def _log_perplexity_cost(payload: dict, matter_slug: Optional[str]) -> None:
             output_tokens=int(payload.get("tokens_out") or 0),
             source="perplexity_realtime",
             matter_slug=matter_slug,
+            cost_usd_override=payload.get("cost_usd"),
         )
     except Exception:
         logger.exception("dispatch_perplexity: cost_monitor.log_api_cost failed (non-fatal)")

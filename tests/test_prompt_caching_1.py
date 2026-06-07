@@ -176,6 +176,45 @@ def test_log_api_cost_passes_cache_kwargs_to_calc(monkeypatch):
     assert captured == {"create": 42, "read": 999}
 
 
+def test_log_api_cost_override_uses_exact_usd_not_token_estimate(monkeypatch):
+    """G0 #2443 H1: cost_usd_override bypasses the token-rate calc and records the
+    provider's exact USD (converted to EUR), so metered spend is not undercounted."""
+    from orchestrator import cost_monitor
+
+    # If the calc were used, this would blow up — proving the override path is taken.
+    monkeypatch.setattr(cost_monitor, "calculate_cost_eur",
+                        lambda *a, **kw: (_ for _ in ()).throw(AssertionError("calc must not run")))
+    fake_store_mod = MagicMock()
+    fake_store_mod.SentinelStoreBack._get_global_instance.return_value = None
+    monkeypatch.setitem(__import__("sys").modules, "memory.store_back", fake_store_mod)
+
+    out = cost_monitor.log_api_cost(
+        "sonar", 1, 1, source="perplexity_realtime", cost_usd_override=0.005,
+    )
+    assert out == round(0.005 * cost_monitor.USD_TO_EUR, 6)
+
+
+def test_log_api_cost_override_ignores_bad_value_falls_back(monkeypatch):
+    """A non-finite / negative override is ignored — falls back to the token calc."""
+    from orchestrator import cost_monitor
+
+    monkeypatch.setattr(cost_monitor, "calculate_cost_eur", lambda *a, **kw: 0.99)
+    fake_store_mod = MagicMock()
+    fake_store_mod.SentinelStoreBack._get_global_instance.return_value = None
+    monkeypatch.setitem(__import__("sys").modules, "memory.store_back", fake_store_mod)
+
+    assert cost_monitor.log_api_cost("sonar", 1, 1, source="s", cost_usd_override=float("nan")) == 0.99
+    assert cost_monitor.log_api_cost("sonar", 1, 1, source="s", cost_usd_override=-1.0) == 0.99
+    assert cost_monitor.log_api_cost("sonar", 1, 1, source="s", cost_usd_override=None) == 0.99
+
+
+def test_sonar_reasoning_pro_replaces_deprecated_variant():
+    """M2: sonar-reasoning (deprecated 2025-12-15) gone; sonar-reasoning-pro at 2/8."""
+    from orchestrator.cost_monitor import MODEL_COSTS
+    assert "sonar-reasoning" not in MODEL_COSTS
+    assert MODEL_COSTS["sonar-reasoning-pro"] == {"input": 2.00, "output": 8.00}
+
+
 # -----------------------------------------------------------------------------
 # Gate-4 fold regressions (H1 + M1 + M2)
 # -----------------------------------------------------------------------------

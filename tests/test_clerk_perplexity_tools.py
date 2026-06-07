@@ -116,6 +116,26 @@ def test_perplexity_logs_cost_with_source(monkeypatch):
     assert logged["matter_slug"] == "movie"
 
 
+def test_perplexity_forwards_exact_cost_as_override(monkeypatch):
+    # G0 #2443 H1: the client's authoritative cost_usd (Perplexity's billed total,
+    # token cost + request fee) must reach log_api_cost as cost_usd_override so the
+    # governor records real spend, not the token-only undercount.
+    class _CostingFake(_FakePerplexity):
+        def ask(self, prompt, **kw):
+            super().ask(prompt, **kw)
+            return {"text": "a", "citations": [], "model": "sonar",
+                    "tokens_in": 1, "tokens_out": 1,
+                    "cost_usd": 0.005, "cost_is_external": True}
+
+    monkeypatch.setattr("tools.perplexity._get_client", lambda: _CostingFake())
+    monkeypatch.setattr("orchestrator.cost_monitor.check_circuit_breaker", lambda: (True, 0.0))
+    logged = {}
+    monkeypatch.setattr("orchestrator.cost_monitor.log_api_cost",
+                        lambda **k: logged.update(k), raising=False)
+    ClerkToolRegistry().execute("baker_perplexity_ask", {"prompt": "x"})
+    assert logged["cost_usd_override"] == 0.005
+
+
 # ── G0 #2391 regression: cost breaker tripped -> ZERO HTTP, blocked ───────────
 
 def test_perplexity_breaker_tripped_makes_zero_calls(monkeypatch):

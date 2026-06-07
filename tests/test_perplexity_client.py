@@ -183,7 +183,47 @@ def test_cost_usd_from_usage_by_model():
     usage = {"prompt_tokens": 1_000_000, "completion_tokens": 1_000_000}
     assert _cost_usd_from_usage(usage, "sonar") == round(2.00, 8)
     assert _cost_usd_from_usage(usage, "sonar-pro") == round(18.00, 8)
+    # sonar-reasoning-pro (replaces deprecated sonar-reasoning): 2/8 per M-token
+    assert _cost_usd_from_usage(usage, "sonar-reasoning-pro") == round(10.00, 8)
     assert _cost_usd_from_usage({}, "sonar") == 0.0
+
+
+def test_cost_usd_prefers_exact_external_total_cost():
+    # G0 #2443 H1: when Perplexity reports usage.cost.total_cost, use it EXACTLY —
+    # the token-rate estimate (here 0.002) would undercount the real 0.005 billed.
+    usage = {
+        "prompt_tokens": 1000, "completion_tokens": 1000,
+        "cost": {"request_cost": 0.005, "total_cost": 0.005},
+    }
+    assert _cost_usd_from_usage(usage, "sonar") == round(0.005, 8)
+
+
+def test_cost_usd_fallback_adds_request_fee_when_total_absent():
+    # No total_cost -> token estimate PLUS the reported per-request fee (not dropped).
+    usage = {
+        "prompt_tokens": 1_000_000, "completion_tokens": 0,
+        "cost": {"request_cost": 0.005},
+    }
+    # sonar token cost = 1.00 + fee 0.005
+    assert _cost_usd_from_usage(usage, "sonar") == round(1.005, 8)
+
+
+def test_external_cost_helper_rejects_bool_and_missing():
+    from kbl.perplexity_client import _external_cost_usd
+    assert _external_cost_usd({"cost": {"total_cost": 0.01}}) == 0.01
+    assert _external_cost_usd({"cost": {"total_cost": True}}) is None  # bool != number
+    assert _external_cost_usd({"cost": {}}) is None
+    assert _external_cost_usd({}) is None
+
+
+def test_shape_ask_response_sets_cost_is_external():
+    body = _completion_body(cost={"total_cost": 0.005})
+    out = _shape_ask_response(body, "sonar")
+    assert out["cost_is_external"] is True
+    assert out["cost_usd"] == round(0.005, 8)
+    # absent cost block -> estimate, flag False
+    out2 = _shape_ask_response(_completion_body(), "sonar")
+    assert out2["cost_is_external"] is False
 
 
 def test_shape_ask_response_tolerates_empty_choices():
