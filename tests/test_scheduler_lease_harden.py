@@ -27,9 +27,11 @@ import triggers.scheduler_lease as lease
 def _reset_lease_state():
     """Reset module globals so tests never leak held-conn / stand-down state."""
     lease._held_conn = None
+    lease._held_pid = None  # SCHEDULER_STALL_CODEFIX_1 — tracked holder PID
     lease._standdown_requested = False
     yield
     lease._held_conn = None
+    lease._held_pid = None
     lease._standdown_requested = False
 
 
@@ -193,9 +195,16 @@ def test_reacquire_transient_on_connect_failure_no_standdown(monkeypatch):
 
 
 def test_reacquire_closes_stale_held_conn_first(monkeypatch):
-    """The presumed-dead _held_conn is closed before the reconnect attempt."""
+    """A GENUINELY-dead _held_conn is closed before the reconnect attempt.
+
+    SCHEDULER_STALL_CODEFIX_1: reacquire now probes SELECT 1 first and only
+    closes+reconnects when that probe FAILS (a live conn is kept — see
+    test_reacquire_false_positive_keeps_live_conn). Here the stale conn's probe
+    raises, so the dead-conn close+reconnect path still runs as before.
+    """
     _direct_host(monkeypatch)
     stale = MagicMock()
+    stale.cursor.return_value.execute.side_effect = RuntimeError("socket dead")  # SELECT 1 fails
     lease._held_conn = stale
     fake_conn = _mock_lock_conn(lock_granted=True)
     with patch.object(lease.psycopg2, "connect", return_value=fake_conn):

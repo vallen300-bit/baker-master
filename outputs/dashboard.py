@@ -174,6 +174,16 @@ _watchdog_last_check = 0
 _watchdog_last_alert_ts = 0
 _watchdog_alert_cooldown_s = 300  # min seconds between WA alerts
 _watchdog_consecutive_stale = 0  # FALSE_POSITIVE_FIX_1: count of consecutive stale reads
+# SCHEDULER_STALL_CODEFIX_1 — consecutive WATCHDOG restarts that still left
+# job_count==0. When the singleton lock is held by an orphaned-but-alive backend
+# that the in-process eviction can't reach, restart_scheduler() loops forever with
+# zero jobs (the #2508 permanent stall). After _WATCHDOG_EXIT_THRESHOLD such
+# restarts we os._exit(1): Render restarts the dyno, SIGTERM closes the lock socket
+# at the OS level, the lock auto-releases, and start_scheduler() acquires cleanly.
+# Counter advances ONLY on the watchdog restart path (not the 30s lease retry
+# thread) and resets the instant job_count>0, so it can't fire mid-normal-acquire.
+_watchdog_restart_failed_streak = 0
+_WATCHDOG_EXIT_THRESHOLD = 3  # lead-ratified 2026-06-08 (#2517): conservative for os._exit
 
 @app.middleware("http")
 async def scheduler_watchdog_middleware(request, call_next):
@@ -202,7 +212,7 @@ def _check_scheduler_heartbeat():
     RCA closes and crash-loop frequency is back to <1 event/day. Dashboard
     + server logs still capture every restart.
     """
-    global _watchdog_last_alert_ts, _watchdog_consecutive_stale
+    global _watchdog_last_alert_ts, _watchdog_consecutive_stale, _watchdog_restart_failed_streak
     # SCHEDULER_NEON_IDLE_HARDEN_1: consume a stand-down request FIRST, on this
     # request thread (NOT the heartbeat job thread — a thread cannot join itself).
     # The heartbeat sets the flag when reacquire finds another container now holds
@@ -238,9 +248,35 @@ def _check_scheduler_heartbeat():
                 f"SCHEDULER-WATCHDOG-1: Heartbeat stale ({age_seconds:.0f}s) "
                 f"for 2 consecutive reads. Restarting..."
             )
-            from triggers.embedded_scheduler import restart_scheduler
+            from triggers.embedded_scheduler import restart_scheduler, get_scheduler_status
             restart_scheduler(reason=f"heartbeat_stale_{age_seconds:.0f}s")
             _watchdog_consecutive_stale = 0
+            # SCHEDULER_STALL_CODEFIX_1 — os._exit backstop. start_scheduler() registers
+            # all jobs synchronously when it wins the lock, so an immediate job_count==0
+            # means the acquire failed (lock held by an orphan the in-process eviction
+            # couldn't reach). After _WATCHDOG_EXIT_THRESHOLD consecutive such restarts,
+            # exit so Render cycles the dyno (SIGTERM frees the lock) — turning a
+            # permanent stall into a ~1-min self-heal.
+            try:
+                _jc = get_scheduler_status().get("job_count", 0)
+            except Exception:
+                _jc = 0
+            if _jc == 0:
+                _watchdog_restart_failed_streak += 1
+                logger.error(
+                    f"SCHEDULER-WATCHDOG-1: restart left job_count=0 "
+                    f"(failed-restart streak {_watchdog_restart_failed_streak}/"
+                    f"{_WATCHDOG_EXIT_THRESHOLD}) — likely an orphaned singleton-lock holder."
+                )
+                if _watchdog_restart_failed_streak >= _WATCHDOG_EXIT_THRESHOLD:
+                    logger.critical(
+                        f"SCHEDULER-WATCHDOG-1: {_watchdog_restart_failed_streak} consecutive "
+                        f"restarts failed to register jobs — os._exit(1) for a clean Render "
+                        f"dyno restart (SIGTERM releases singleton lock 8800100)."
+                    )
+                    os._exit(1)
+            else:
+                _watchdog_restart_failed_streak = 0
             # Throttle log frequency (replaces the WA push, same cooldown)
             now_ts = time.time()
             if now_ts - _watchdog_last_alert_ts > _watchdog_alert_cooldown_s:
@@ -250,8 +286,11 @@ def _check_scheduler_heartbeat():
                     f"Auto-restart fired. WA push disabled pending CRASHLOOP_RCA_2."
                 )
         else:
-            # Fresh heartbeat → reset counter (single fresh read is enough).
+            # Fresh heartbeat → reset counters (single fresh read is enough). A healthy
+            # heartbeat means the scheduler is firing, so the os._exit backstop streak
+            # clears too — it must only count CONSECUTIVE failed restarts.
             _watchdog_consecutive_stale = 0
+            _watchdog_restart_failed_streak = 0
     except Exception as e:
         logger.debug(f"Scheduler watchdog check failed (non-fatal): {e}")
 
@@ -2589,6 +2628,7 @@ async def scheduler_heartbeat_health():
     """SCHEDULER-WATCHDOG-1: Public endpoint for frontend heartbeat polling."""
     try:
         from triggers.state import trigger_state
+        from triggers.state import get_watermark_failure_count
         hb = trigger_state.get_watermark("scheduler_heartbeat")
         age = (datetime.now(timezone.utc) - hb).total_seconds()
         status = get_scheduler_status()
@@ -2597,6 +2637,9 @@ async def scheduler_heartbeat_health():
             "heartbeat_age_seconds": int(age),
             "scheduler_running": status.get("running", False),
             "job_count": status.get("job_count", 0),
+            # SCHEDULER_STALL_CODEFIX_1 — surface silent watermark-write failures so a
+            # frozen heartbeat is visible before it trips the 12-min watchdog.
+            "watermark_set_failures": get_watermark_failure_count(),
         }
     except Exception as e:
         return {"alive": False, "error": str(e)}

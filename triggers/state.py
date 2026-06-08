@@ -10,6 +10,18 @@ from typing import Optional
 
 logger = logging.getLogger("sentinel.trigger_state")
 
+# SCHEDULER_STALL_CODEFIX_1 — cumulative count of set_watermark write failures this
+# process. A frozen watermark (notably scheduler_heartbeat) lets the heartbeat job
+# still return normally, so APScheduler logs status=executed while liveness is in fact
+# stale (the #2508 stall began exactly here). Surfacing this counter in
+# /api/health/scheduler makes the freeze visible BEFORE the 12-min watchdog trips.
+_watermark_set_failures = 0
+
+
+def get_watermark_failure_count() -> int:
+    """Return cumulative set_watermark write failures this process (observability)."""
+    return _watermark_set_failures
+
 
 class TriggerState:
     """Manages watermarks and state via PostgreSQL.
@@ -239,10 +251,28 @@ class TriggerState:
                 conn.commit()
                 cur.close()
                 logger.info(f"Watermark updated for {source}: {timestamp.isoformat()}")
+            except Exception:
+                # SCHEDULER_STALL_CODEFIX_1 — roll back the poisoned conn BEFORE it
+                # returns to the pool. A failed INSERT leaves the session in an aborted
+                # transaction; without rollback the next borrower of this pooled conn
+                # hits "current transaction is aborted" on its first query (the
+                # conn-poisoning the #2508 RCA flagged). Mandatory per
+                # .claude/rules/python-backend.md. Re-raise so the outer handler counts
+                # + logs the failure loudly.
+                try:
+                    conn.rollback()
+                except Exception:
+                    pass
+                raise
             finally:
                 store._put_conn(conn)
         except Exception as e:
-            logger.error(f"Failed to set watermark for {source}: {e}")
+            global _watermark_set_failures
+            _watermark_set_failures += 1
+            logger.error(
+                f"Failed to set watermark for {source}: {e} "
+                f"(cumulative set_watermark failures this process: {_watermark_set_failures})"
+            )
 
     # -------------------------------------------------------
     # Cursor Storage (opaque strings — Dropbox, etc.)
