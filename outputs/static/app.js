@@ -10327,7 +10327,7 @@ function _cortexPendingFetchUrl() {
 // so it can never break loadCortexFeed's render.
 async function _updateSchedulerPill() {
     var pill = document.getElementById('cortexSchedulerPill');
-    if (!pill) return;
+    if (!pill) return false;
     try {
         var res = await bakerFetch('/api/health/scheduler');
         var data = await res.json();
@@ -10344,6 +10344,7 @@ async function _updateSchedulerPill() {
         pill.textContent = 'Scheduler status unknown';
         pill.className = 'scheduler-pill unknown';
     }
+    return true;
 }
 
 async function loadCortexFeed() {
@@ -10378,16 +10379,16 @@ async function loadCortexFeed() {
         var total = (_cortexData.events.length || 0);
         var lintOpen = (_cortexData.lint.length || 0);
         var pendingN = (_cortexData.pending.length || 0);
-        if (total > 0 || lintOpen > 0 || pendingN > 0) {
+        // Fix 4: update before the empty-state branch so scheduler liveness can
+        // keep the Cortex card visible even when there are zero events/lint/pending.
+        var schedulerVisible = await _updateSchedulerPill();
+        if (total > 0 || lintOpen > 0 || pendingN > 0 || schedulerVisible) {
             card.hidden = false;
             var parts = [];
             if (total > 0) parts.push(total + ' events');
             if (lintOpen > 0) parts.push(lintOpen + ' lint');
             if (pendingN > 0) parts.push(pendingN + ' pending');
             document.getElementById('cortexCount').textContent = parts.join(', ');
-            // Fix 4: surface scheduler liveness in the (now-visible) card header.
-            // Fire-and-forget; self-contained try/catch never breaks the feed.
-            _updateSchedulerPill();
         } else {
             card.hidden = true;
             return;
