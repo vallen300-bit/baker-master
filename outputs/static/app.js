@@ -10075,7 +10075,11 @@ function _renderAODashboard(data) {
         h += '<div class="ao-status-bar">';
         h += '<span class="ao-status-pill ' + gapClass + '">Gap: ' + esc(gapLabel) + '</span>';
         h += '<span style="color:var(--text3);">Last contact: ' + esc(lastContactLabel) + '</span>';
-        h += '<span style="font-weight:600;">' + esc(rs.investment_total || '') + '</span>';
+        h += '<span style="font-weight:600;">' + esc(rs.investment_total || '');
+        if (rs.investment_total_as_of) {
+            h += '<span style="font-weight:400;color:var(--text3);font-size:11px;margin-left:6px;">as of ' + esc(rs.investment_total_as_of) + '</span>';
+        }
+        h += '</span>';
         h += '</div>';
 
         if (rs.comms_gap_days > 10) {
@@ -10120,7 +10124,11 @@ function _renderAOStatusCell(rs) {
     h += '<div style="padding:8px 4px;">';
     h += '<div style="display:flex;justify-content:space-between;margin-bottom:10px;">';
     h += '<span style="font-size:12px;color:var(--text3);">Investment Total</span>';
-    h += '<span style="font-size:14px;font-weight:700;color:var(--text);">' + esc(rs.investment_total || '') + '</span>';
+    h += '<span style="font-size:14px;font-weight:700;color:var(--text);">' + esc(rs.investment_total || '');
+    if (rs.investment_total_as_of) {
+        h += '<span style="font-size:11px;font-weight:400;color:var(--text3);margin-left:6px;">as of ' + esc(rs.investment_total_as_of) + '</span>';
+    }
+    h += '</span>';
     h += '</div>';
     h += '<div style="display:flex;justify-content:space-between;margin-bottom:10px;">';
     h += '<span style="font-size:12px;color:var(--text3);">Last Contact</span>';
@@ -10313,6 +10321,31 @@ function _cortexPendingFetchUrl() {
         (_cortexPendingIncludeSmoke ? 'true' : 'false');
 }
 
+// DASHBOARD_COCKPIT_WAVE1_QUICKWINS_1 Fix 4: scheduler-liveness pill in the
+// Cortex card header. Reads the existing public /api/health/scheduler. Fully
+// fail-safe — a health-check error shows an "unknown" pill and never throws,
+// so it can never break loadCortexFeed's render.
+async function _updateSchedulerPill() {
+    var pill = document.getElementById('cortexSchedulerPill');
+    if (!pill) return;
+    try {
+        var res = await bakerFetch('/api/health/scheduler');
+        var data = await res.json();
+        var age = (typeof data.heartbeat_age_seconds === 'number')
+            ? Math.round(data.heartbeat_age_seconds) + 's ago' : '';
+        if (data.alive) {
+            pill.textContent = 'Scheduler alive' + (age ? ' (' + age + ')' : '');
+            pill.className = 'scheduler-pill alive';
+        } else {
+            pill.textContent = 'Scheduler STALE' + (age ? ' — ' + age : '');
+            pill.className = 'scheduler-pill stale';
+        }
+    } catch (e) {
+        pill.textContent = 'Scheduler status unknown';
+        pill.className = 'scheduler-pill unknown';
+    }
+}
+
 async function loadCortexFeed() {
     try {
         var [eventsRes, lintRes, pendingRes, statsRes] = await Promise.all([
@@ -10352,6 +10385,9 @@ async function loadCortexFeed() {
             if (lintOpen > 0) parts.push(lintOpen + ' lint');
             if (pendingN > 0) parts.push(pendingN + ' pending');
             document.getElementById('cortexCount').textContent = parts.join(', ');
+            // Fix 4: surface scheduler liveness in the (now-visible) card header.
+            // Fire-and-forget; self-contained try/catch never breaks the feed.
+            _updateSchedulerPill();
         } else {
             card.hidden = true;
             return;
@@ -11136,7 +11172,7 @@ async function loadPMThreads(pmSlug) {
     _pmThreadsClear(panel);
     panel.appendChild(_pmThreadsTextDiv('pm-threads-loading', 'Loading threads…'));
     try {
-        var res = await fetch('/api/pm/threads/' + encodeURIComponent(pmSlug));
+        var res = await bakerFetch('/api/pm/threads/' + encodeURIComponent(pmSlug));
         if (!res.ok) throw new Error('http_' + res.status);
         var data = await res.json();
         renderPMThreadList(panel, data.threads || [], pmSlug);
@@ -11170,7 +11206,7 @@ async function openPMThreadReplay(pmSlug, threadId) {
     var replayBox = document.getElementById('pm-thread-replay');
     if (!replayBox) return;
     try {
-        var res = await fetch('/api/pm/threads/' + encodeURIComponent(pmSlug) +
+        var res = await bakerFetch('/api/pm/threads/' + encodeURIComponent(pmSlug) +
                               '/' + encodeURIComponent(threadId) + '/turns');
         if (!res.ok) return;
         var data = await res.json();
