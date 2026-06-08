@@ -2089,13 +2089,12 @@ async function submitQuickAdd(e) {
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ title: title }),
         });
-        if (resp.ok) {
-            input.value = '';
-            document.getElementById('quickAddForm').style.display = 'none';
-            loadFires();  // refresh list
-        }
+        if (!resp.ok) throw new Error('http_' + resp.status);
+        input.value = '';
+        document.getElementById('quickAddForm').style.display = 'none';
+        loadFires();  // refresh list
     } catch (err) {
-        console.error('Quick add failed:', err);
+        _showToast('Could not add — try again.', 'error');
     } finally {
         btn.disabled = false;
         btn.textContent = 'Add';
@@ -2286,7 +2285,7 @@ async function bulkDismissSelected() {
         _buildFiresToolbar(_firesAllAlerts);
         _renderFiresFiltered();
         refreshFiresBadge();
-    } catch (e) { console.error('bulkDismissSelected failed:', e); }
+    } catch (e) { _showToast('Bulk dismiss failed — try again.', 'error'); }
 }
 
 async function bulkDismissByTier(tier) {
@@ -2303,7 +2302,7 @@ async function bulkDismissByTier(tier) {
         _buildFiresToolbar(_firesAllAlerts);
         _renderFiresFiltered();
         refreshFiresBadge();
-    } catch (e) { console.error('bulkDismissByTier failed:', e); }
+    } catch (e) { _showToast('Bulk dismiss failed — try again.', 'error'); }
 }
 
 // ═══ DEADLINES TAB ═══
@@ -3657,7 +3656,7 @@ async function _dismissCoolingContact(name, action, row) {
         row.style.padding = '0';
         setTimeout(function() { row.remove(); }, 300);
     } catch (e) {
-        console.error('Dismiss cooling contact failed:', e);
+        _showToast('Dismiss failed — try again.', 'error');
     }
 }
 
@@ -5916,17 +5915,18 @@ async function loadTagItems(tag) {
 async function assignAlert(alertId, matterSlug) {
     if (!matterSlug) return;
     try {
-        await bakerFetch('/api/alerts/' + alertId + '/assign', {
+        var resp = await bakerFetch('/api/alerts/' + alertId + '/assign', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ matter_slug: matterSlug }),
         });
+        if (!resp.ok) throw new Error('http_' + resp.status);
         // Reload current view to reflect change
         if (currentTab === 'fires') loadFires();
         else if (currentTab === 'matters') loadMattersTab();
         else if (currentTab === 'morning-brief') loadMorningBrief();
     } catch (e) {
-        console.error('assignAlert failed:', e);
+        _showToast('Could not assign — try again.', 'error');
     }
 }
 
@@ -6428,32 +6428,29 @@ function _undoTriageAction() {
     if (!_triageUndo) return;
     var undo = _triageUndo;
 
-    // Revert API change. Local view restores immediately (below); _mutate shows
-    // a red error toast if the server-side revert fails so it is not silent.
-    if (undo.action === 'dismiss') {
-        _mutate('/api/deadlines/' + undo.item.id, {
-            method: 'PATCH',
-            headers: {'Content-Type': 'application/json'},
-            body: JSON.stringify({status: 'active'})
-        });
-    } else if (undo.action === 'escalate') {
-        _mutate('/api/deadlines/' + undo.item.id, {
-            method: 'PATCH',
-            headers: {'Content-Type': 'application/json'},
-            body: JSON.stringify({priority: undo.previousState.priority || 'normal'})
-        });
-    } else if (undo.action === 'done') {
-        _mutate('/api/deadlines/' + undo.item.id, {
-            method: 'PATCH',
-            headers: {'Content-Type': 'application/json'},
-            body: JSON.stringify({status: 'active'})
-        });
+    function _restore() {
+        _triageIndex = undo.index;
+        _triageUndo = null;
+        document.getElementById('triageUndo').style.display = 'none';
+        _renderTriageCard();
     }
 
-    _triageIndex = undo.index;
-    _triageUndo = null;
-    document.getElementById('triageUndo').style.display = 'none';
-    _renderTriageCard();
+    var patch = null;
+    if (undo.action === 'dismiss') patch = {status: 'active'};
+    else if (undo.action === 'escalate') patch = {priority: undo.previousState.priority || 'normal'};
+    else if (undo.action === 'done') patch = {status: 'active'};
+
+    // 'keep' (or any no-API action) has nothing to revert server-side.
+    if (!patch) { _restore(); return; }
+
+    // Only restore the UI once the server confirms the revert. On failure _mutate
+    // shows a red error toast and we keep current state + the Undo control so the
+    // Director can retry, rather than falsely showing the item restored.
+    _mutate('/api/deadlines/' + undo.item.id, {
+        method: 'PATCH',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify(patch)
+    }, function() { _restore(); });
 }
 
 // ═══ TRAVEL TAB ═══
@@ -9489,9 +9486,10 @@ async function updateTripField(tripId, value, field) {
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify(body),
         });
-        if (resp.ok) showTripView(tripId);  // Refresh
+        if (!resp.ok) throw new Error('http_' + resp.status);
+        showTripView(tripId);  // Refresh
     } catch (e) {
-        console.error('Failed to update trip:', e);
+        _showToast('Could not save change — try again.', 'error');
     }
 }
 
@@ -9505,12 +9503,11 @@ async function addTripNote(event, tripId) {
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ text: input.value.trim() }),
         });
-        if (resp.ok) {
-            input.value = '';
-            showTripView(tripId);  // Refresh
-        }
+        if (!resp.ok) throw new Error('http_' + resp.status);
+        input.value = '';
+        showTripView(tripId);  // Refresh
     } catch (e) {
-        console.error('Failed to add note:', e);
+        _showToast('Could not add note — try again.', 'error');
     }
 }
 
@@ -9527,9 +9524,10 @@ async function editTripObjective(tripId) {
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ strategic_objective: newVal }),
         });
-        if (resp.ok) showTripView(tripId);
+        if (!resp.ok) throw new Error('http_' + resp.status);
+        showTripView(tripId);
     } catch (e) {
-        console.error('Failed to update objective:', e);
+        _showToast('Could not save objective — try again.', 'error');
     }
 }
 
@@ -9879,7 +9877,7 @@ async function showAddTripPerson() {
             alert('Failed to add contact.');
         }
     } catch (e) {
-        console.error('showAddTripPerson failed:', e);
+        _showToast('Could not add contact — try again.', 'error');
     }
 }
 
@@ -11349,10 +11347,14 @@ function _sentinelMakeSnoozeButton(alertRow) {
         var go = document.createElement('button');
         go.className = 'sentinel-btn sentinel-btn-snooze-confirm';
         go.textContent = 'OK';
-        go.addEventListener('click', function() {
+        go.addEventListener('click', async function() {
             var hours = Math.max(1, Math.min(720, parseInt(input.value || '24', 10)));
-            sendSentinelFeedback(alertRow, 'snooze', { snooze_hours: hours });
-            input.remove(); go.remove();
+            go.disabled = true;
+            var ok = await sendSentinelFeedback(alertRow, 'snooze', { snooze_hours: hours });
+            // Only tear down the inline control once the snooze is confirmed; on
+            // failure keep it (error toast already shown) so the Director can retry.
+            if (ok) { input.remove(); go.remove(); }
+            else { go.disabled = false; }
         });
         wrap.appendChild(input);
         wrap.appendChild(go);
@@ -11400,6 +11402,9 @@ function _sentinelHandleReject(alertRow) {
         { director_comment: comment, learned_rule: rule });
 }
 
+// Returns true only on a confirmed-ok feedback write, false on any failure
+// (non-ok, business error, or network). Callers that remove an inline control
+// (e.g. the snooze input) MUST gate that removal on a true return.
 async function sendSentinelFeedback(alertRow, verdict, extra) {
     var body = Object.assign({ alert_id: alertRow.id, verdict: verdict }, extra || {});
     try {
@@ -11409,10 +11414,14 @@ async function sendSentinelFeedback(alertRow, verdict, extra) {
             body: JSON.stringify(body),
         });
         if (!res.ok) {
-            console.warn('sentinel feedback failed', res.status);
-            return;
+            _showToast('Could not save feedback — try again.', 'error');
+            return false;
         }
         var data = await res.json();
+        if (data && data.error) {
+            _showToast(data.error, 'error');
+            return false;
+        }
 
         if (verdict === 'dismiss'
             && extra && extra.dismiss_reason === 'wrong_thread'
@@ -11427,8 +11436,10 @@ async function sendSentinelFeedback(alertRow, verdict, extra) {
         } else if (el) {
             el.classList.add('sentinel-alert-snoozed');
         }
+        return true;
     } catch (e) {
-        console.warn('sentinel feedback network error', e);
+        _showToast('Could not save feedback — try again.', 'error');
+        return false;
     }
 }
 
