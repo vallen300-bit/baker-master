@@ -931,8 +931,10 @@ function _completePriority(id, itemEl) {
                         _renderPrioritiesWidget(d.priorities || []);
                     });
                 }
-            }).catch(function(err) {
-                console.error('Save priority failed:', err);
+                // Non-ok: surface it instead of silently leaving the form open.
+                _showToast('Could not save priority — try again.', 'error');
+            }).catch(function() {
+                _showToast('Could not save priority — try again.', 'error');
             }).finally(function() {
                 saveBtn.disabled = false;
                 saveBtn.textContent = 'Save';
@@ -2087,13 +2089,12 @@ async function submitQuickAdd(e) {
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ title: title }),
         });
-        if (resp.ok) {
-            input.value = '';
-            document.getElementById('quickAddForm').style.display = 'none';
-            loadFires();  // refresh list
-        }
+        if (!resp.ok) throw new Error('http_' + resp.status);
+        input.value = '';
+        document.getElementById('quickAddForm').style.display = 'none';
+        loadFires();  // refresh list
     } catch (err) {
-        console.error('Quick add failed:', err);
+        _showToast('Could not add — try again.', 'error');
     } finally {
         btn.disabled = false;
         btn.textContent = 'Add';
@@ -2284,7 +2285,7 @@ async function bulkDismissSelected() {
         _buildFiresToolbar(_firesAllAlerts);
         _renderFiresFiltered();
         refreshFiresBadge();
-    } catch (e) { console.error('bulkDismissSelected failed:', e); }
+    } catch (e) { _showToast('Bulk dismiss failed — try again.', 'error'); }
 }
 
 async function bulkDismissByTier(tier) {
@@ -2301,7 +2302,7 @@ async function bulkDismissByTier(tier) {
         _buildFiresToolbar(_firesAllAlerts);
         _renderFiresFiltered();
         refreshFiresBadge();
-    } catch (e) { console.error('bulkDismissByTier failed:', e); }
+    } catch (e) { _showToast('Bulk dismiss failed — try again.', 'error'); }
 }
 
 // ═══ DEADLINES TAB ═══
@@ -3410,10 +3411,12 @@ function _meetingQuickAdd() {
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ text: desc }),
         }).then(function(r) { return r.json(); }).then(function(d) {
-            if (d.error) { _showToast(d.error); }
-            else { _showToast('Meeting added: ' + (d.title || desc).substring(0, 40)); loadMorningBrief(); }
-            row.remove();
-        }).catch(function() { addBtn.disabled = false; addBtn.textContent = 'Add'; });
+            if (d.error) { _showToast(d.error, 'error'); addBtn.disabled = false; addBtn.textContent = 'Add'; }
+            else { _showToast('Meeting added: ' + (d.title || desc).substring(0, 40)); loadMorningBrief(); row.remove(); }
+        }).catch(function() {
+            addBtn.disabled = false; addBtn.textContent = 'Add';
+            _showToast('Add failed — try again.', 'error');
+        });
     });
     input.addEventListener('keydown', function(e) { if (e.key === 'Enter') addBtn.click(); if (e.key === 'Escape') row.remove(); });
     row.appendChild(input);
@@ -3475,9 +3478,11 @@ function _criticalQuickAdd() {
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ description: desc }),
         }).then(function(r) { return r.json(); }).then(function(d) {
-            if (d.error) { _showToast(d.error); }
-            else { _showToast('\u26A1 Added: ' + desc.substring(0, 40)); loadMorningBrief(); }
-            row.remove();
+            if (d.error) { _showToast(d.error, 'error'); }
+            else { _showToast('\u26A1 Added: ' + desc.substring(0, 40)); loadMorningBrief(); row.remove(); }
+        }).catch(function() {
+            // Keep the row so the Director can retry rather than losing the text.
+            _showToast('Add failed \u2014 try again.', 'error');
         });
     });
     input.addEventListener('keydown', function(e) { if (e.key === 'Enter') addBtn.click(); if (e.key === 'Escape') row.remove(); });
@@ -3651,7 +3656,7 @@ async function _dismissCoolingContact(name, action, row) {
         row.style.padding = '0';
         setTimeout(function() { row.remove(); }, 300);
     } catch (e) {
-        console.error('Dismiss cooling contact failed:', e);
+        _showToast('Dismiss failed — try again.', 'error');
     }
 }
 
@@ -3981,7 +3986,8 @@ function downloadResultAsWord(btn) {
         throw new Error('Generation failed');
     }).then(function(data) {
         if (data.download_url) window.open(data.download_url, '_blank');
-    }).catch(function(e) { console.error('Word download failed:', e); });
+        else _showToast('Word download failed — try again.', 'error');
+    }).catch(function() { _showToast('Word download failed — try again.', 'error'); });
 }
 
 function emailResult(btn) {
@@ -5909,17 +5915,18 @@ async function loadTagItems(tag) {
 async function assignAlert(alertId, matterSlug) {
     if (!matterSlug) return;
     try {
-        await bakerFetch('/api/alerts/' + alertId + '/assign', {
+        var resp = await bakerFetch('/api/alerts/' + alertId + '/assign', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ matter_slug: matterSlug }),
         });
+        if (!resp.ok) throw new Error('http_' + resp.status);
         // Reload current view to reflect change
         if (currentTab === 'fires') loadFires();
         else if (currentTab === 'matters') loadMattersTab();
         else if (currentTab === 'morning-brief') loadMorningBrief();
     } catch (e) {
-        console.error('assignAlert failed:', e);
+        _showToast('Could not assign — try again.', 'error');
     }
 }
 
@@ -6389,65 +6396,61 @@ function _triageAction(action) {
     var item = _triageItems[_triageIndex];
     var previousState = {priority: item.priority, status: item.status};
 
-    // Save undo state
-    _triageUndo = {index: _triageIndex, item: item, previousState: previousState, action: action};
-    document.getElementById('triageUndo').style.display = '';
-
-    // API call based on action
-    if (action === 'dismiss') {
-        bakerFetch('/api/deadlines/' + item.id, {
-            method: 'PATCH',
-            headers: {'Content-Type': 'application/json'},
-            body: JSON.stringify({status: 'dismissed'})
-        }).catch(function(e) { console.error('Triage dismiss failed:', e); });
-    } else if (action === 'escalate') {
-        bakerFetch('/api/deadlines/' + item.id, {
-            method: 'PATCH',
-            headers: {'Content-Type': 'application/json'},
-            body: JSON.stringify({priority: 'high'})
-        }).catch(function(e) { console.error('Triage escalate failed:', e); });
-    } else if (action === 'done') {
-        bakerFetch('/api/deadlines/' + item.id, {
-            method: 'PATCH',
-            headers: {'Content-Type': 'application/json'},
-            body: JSON.stringify({status: 'completed'})
-        }).catch(function(e) { console.error('Triage complete failed:', e); });
+    function _advance() {
+        // Save undo state + advance only after the change is confirmed (or for
+        // the no-op 'keep'). Prevents a false "done"/"dismissed" on a failed PATCH.
+        _triageUndo = {index: _triageIndex, item: item, previousState: previousState, action: action};
+        document.getElementById('triageUndo').style.display = '';
+        _triageIndex++;
+        _renderTriageCard();
     }
-    // 'keep' = no API call, just advance
 
-    _triageIndex++;
-    _renderTriageCard();
+    // 'keep' = no API call, just advance
+    if (action === 'keep') { _advance(); return; }
+
+    var patch = null;
+    if (action === 'dismiss') patch = {status: 'dismissed'};
+    else if (action === 'escalate') patch = {priority: 'high'};
+    else if (action === 'done') patch = {status: 'completed'};
+    if (!patch) { _advance(); return; }
+
+    // Gate the advance on a confirmed-ok PATCH. _mutate shows a red error toast
+    // on any failure (non-ok status OR network error) and we do NOT advance, so
+    // the card stays put rather than silently appearing handled.
+    _mutate('/api/deadlines/' + item.id, {
+        method: 'PATCH',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify(patch)
+    }, function() { _advance(); });
 }
 
 function _undoTriageAction() {
     if (!_triageUndo) return;
     var undo = _triageUndo;
 
-    // Revert API change
-    if (undo.action === 'dismiss') {
-        bakerFetch('/api/deadlines/' + undo.item.id, {
-            method: 'PATCH',
-            headers: {'Content-Type': 'application/json'},
-            body: JSON.stringify({status: 'active'})
-        }).catch(function(e) { console.error('Triage undo dismiss failed:', e); });
-    } else if (undo.action === 'escalate') {
-        bakerFetch('/api/deadlines/' + undo.item.id, {
-            method: 'PATCH',
-            headers: {'Content-Type': 'application/json'},
-            body: JSON.stringify({priority: undo.previousState.priority || 'normal'})
-        }).catch(function(e) { console.error('Triage undo escalate failed:', e); });
-    } else if (undo.action === 'done') {
-        bakerFetch('/api/deadlines/' + undo.item.id, {
-            method: 'PATCH',
-            headers: {'Content-Type': 'application/json'},
-            body: JSON.stringify({status: 'active'})
-        }).catch(function(e) { console.error('Triage undo complete failed:', e); });
+    function _restore() {
+        _triageIndex = undo.index;
+        _triageUndo = null;
+        document.getElementById('triageUndo').style.display = 'none';
+        _renderTriageCard();
     }
 
-    _triageIndex = undo.index;
-    _triageUndo = null;
-    document.getElementById('triageUndo').style.display = 'none';
-    _renderTriageCard();
+    var patch = null;
+    if (undo.action === 'dismiss') patch = {status: 'active'};
+    else if (undo.action === 'escalate') patch = {priority: undo.previousState.priority || 'normal'};
+    else if (undo.action === 'done') patch = {status: 'active'};
+
+    // 'keep' (or any no-API action) has nothing to revert server-side.
+    if (!patch) { _restore(); return; }
+
+    // Only restore the UI once the server confirms the revert. On failure _mutate
+    // shows a red error toast and we keep current state + the Undo control so the
+    // Director can retry, rather than falsely showing the item restored.
+    _mutate('/api/deadlines/' + undo.item.id, {
+        method: 'PATCH',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify(patch)
+    }, function() { _restore(); });
 }
 
 // ═══ TRAVEL TAB ═══
@@ -6967,6 +6970,9 @@ async function sendSpecialistMessage(question) {
             }).then(function(r) {
                 if (r.ok) { saveBtn.textContent = 'Saved'; saveBtn.disabled = true; }
                 else { saveBtn.textContent = 'Failed'; }
+            }).catch(function() {
+                saveBtn.textContent = 'Failed';
+                _showToast('Save to memory failed — try again.', 'error');
             });
         });
         toolbar.appendChild(saveBtn);
@@ -8118,11 +8124,12 @@ function _addIdeaTriageButtons(triage, idea, card) {
     dismissBtn.title = 'Dismiss';
     dismissBtn.style.cssText = 'margin-left:auto;border:none;color:var(--text4);';
     dismissBtn.addEventListener('click', function() {
-        bakerFetch('/api/ideas/' + idea.id, {
+        _mutate('/api/ideas/' + idea.id, {
             method: 'PATCH',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ status: 'dismissed' }),
-        }).then(function() {
+        }, function() {
+            // Only remove the card once the dismiss is confirmed-ok.
             card.style.opacity = '0.3';
             setTimeout(function() { card.remove(); }, 500);
             loadIdeasSidebar();
@@ -8383,8 +8390,10 @@ function _addDocActionBtn(container, label, doc) {
     } else if (label === 'Open in Dropbox') {
         btn.addEventListener('click', function(e) {
             e.stopPropagation();
-            // Build Dropbox web URL from source_path
+            // Guard: without a source_path the URL collapses to the bare Dropbox
+            // root (a dead-end). Surface that instead of opening a blank tab.
             var path = (doc.source_path || '').replace(/^\//, '');
+            if (!path) { _showToast('Source link unavailable for this document.', 'error'); return; }
             var url = 'https://www.dropbox.com/home/' + encodeURIComponent(path).replace(/%2F/g, '/');
             window.open(url, '_blank');
         });
@@ -9012,19 +9021,85 @@ function _openPresentationViewer(url, title) {
 
     if (!viewer || !frame) { window.open(url, '_blank'); return; }
 
+    // Loading/error overlay (created once, reused). Covers the cold-start / down
+    // brisen-docs case where the iframe would otherwise be a blank white page.
+    var status = document.getElementById('presentationFrameStatus');
+    if (!status) {
+        status = document.createElement('div');
+        status.id = 'presentationFrameStatus';
+        status.style.cssText = 'position:absolute;inset:0;display:none;flex-direction:column;align-items:center;justify-content:center;gap:10px;background:var(--bg);color:var(--text2);font-size:14px;text-align:center;padding:24px;z-index:2;';
+        if (getComputedStyle(viewer).position === 'static') viewer.style.position = 'relative';
+        viewer.appendChild(status);
+    }
+
+    var loadTimer = null;
+    function _clearTimer() { if (loadTimer) { clearTimeout(loadTimer); loadTimer = null; } }
+    function _showLoading() {
+        _clearTimer();
+        status.textContent = '';
+        status.style.display = 'flex';
+        var msg = document.createElement('div');
+        msg.textContent = 'Loading presentation…';
+        status.appendChild(msg);
+    }
+    function _showError() {
+        _clearTimer();
+        status.textContent = '';
+        status.style.display = 'flex';
+        var msg = document.createElement('div');
+        msg.textContent = 'Presentations service is waking up or unavailable.';
+        var sub = document.createElement('div');
+        sub.style.cssText = 'font-size:12px;color:var(--text3);';
+        sub.textContent = 'It can take a few seconds to start on first use.';
+        var btnRow = document.createElement('div');
+        btnRow.style.cssText = 'display:flex;gap:8px;margin-top:4px;';
+        var retry = document.createElement('button');
+        retry.className = 'dossier-btn';
+        retry.textContent = 'Retry';
+        retry.onclick = function() { _load(); };
+        var newTab = document.createElement('button');
+        newTab.className = 'dossier-btn';
+        newTab.textContent = 'Open in new tab';
+        newTab.onclick = function() { window.open(url, '_blank'); };
+        btnRow.appendChild(retry);
+        btnRow.appendChild(newTab);
+        status.appendChild(msg);
+        status.appendChild(sub);
+        status.appendChild(btnRow);
+    }
+    function _hide() { _clearTimer(); status.style.display = 'none'; }
+
+    function _load() {
+        _showLoading();
+        // about:blank reset forces a fresh load even on a Retry of the same URL.
+        frame.src = 'about:blank';
+        frame.src = url;
+        loadTimer = setTimeout(_showError, 8000);
+    }
+
+    frame.onload = function() {
+        // Ignore the about:blank reset; only clear once the real URL loads.
+        if (frame.getAttribute('src') !== 'about:blank') _hide();
+    };
+    frame.onerror = function() { _showError(); };
+
     // Switch to viewer mode
     container.style.display = 'none';
     viewer.hidden = false;
-    frame.src = url;
     if (newTabBtn) newTabBtn.href = url;
 
     if (backBtn) {
         backBtn.onclick = function() {
+            frame.onload = null;
+            frame.onerror = null;
+            _hide();
             frame.src = '';
             viewer.hidden = true;
             container.style.display = '';
         };
     }
+
+    _load();
 }
 
 async function loadBrowserTab() {
@@ -9162,18 +9237,20 @@ async function submitFeedback(taskId, feedback, barEl) {
     if (comment) body.comment = comment;
 
     try {
-        await bakerFetch('/api/tasks/' + taskId + '/feedback', {
+        var resp = await bakerFetch('/api/tasks/' + taskId + '/feedback', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify(body),
         });
+        if (!resp.ok) throw new Error('http_' + resp.status);
         barEl.textContent = '';
         var done = document.createElement('span');
         done.textContent = 'Feedback recorded: ' + feedback;
         done.style.cssText = 'font-size:13px;color:#4caf50;';
         barEl.appendChild(done);
     } catch (e) {
-        console.warn('Feedback submission failed:', e);
+        // Surface the failure instead of silently showing "recorded".
+        _showToast('Feedback not saved — try again.', 'error');
     }
 }
 
@@ -9409,9 +9486,10 @@ async function updateTripField(tripId, value, field) {
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify(body),
         });
-        if (resp.ok) showTripView(tripId);  // Refresh
+        if (!resp.ok) throw new Error('http_' + resp.status);
+        showTripView(tripId);  // Refresh
     } catch (e) {
-        console.error('Failed to update trip:', e);
+        _showToast('Could not save change — try again.', 'error');
     }
 }
 
@@ -9425,12 +9503,11 @@ async function addTripNote(event, tripId) {
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ text: input.value.trim() }),
         });
-        if (resp.ok) {
-            input.value = '';
-            showTripView(tripId);  // Refresh
-        }
+        if (!resp.ok) throw new Error('http_' + resp.status);
+        input.value = '';
+        showTripView(tripId);  // Refresh
     } catch (e) {
-        console.error('Failed to add note:', e);
+        _showToast('Could not add note — try again.', 'error');
     }
 }
 
@@ -9447,9 +9524,10 @@ async function editTripObjective(tripId) {
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ strategic_objective: newVal }),
         });
-        if (resp.ok) showTripView(tripId);
+        if (!resp.ok) throw new Error('http_' + resp.status);
+        showTripView(tripId);
     } catch (e) {
-        console.error('Failed to update objective:', e);
+        _showToast('Could not save objective — try again.', 'error');
     }
 }
 
@@ -9799,7 +9877,7 @@ async function showAddTripPerson() {
             alert('Failed to add contact.');
         }
     } catch (e) {
-        console.error('showAddTripPerson failed:', e);
+        _showToast('Could not add contact — try again.', 'error');
     }
 }
 
@@ -11306,10 +11384,14 @@ function _sentinelMakeSnoozeButton(alertRow) {
         var go = document.createElement('button');
         go.className = 'sentinel-btn sentinel-btn-snooze-confirm';
         go.textContent = 'OK';
-        go.addEventListener('click', function() {
+        go.addEventListener('click', async function() {
             var hours = Math.max(1, Math.min(720, parseInt(input.value || '24', 10)));
-            sendSentinelFeedback(alertRow, 'snooze', { snooze_hours: hours });
-            input.remove(); go.remove();
+            go.disabled = true;
+            var ok = await sendSentinelFeedback(alertRow, 'snooze', { snooze_hours: hours });
+            // Only tear down the inline control once the snooze is confirmed; on
+            // failure keep it (error toast already shown) so the Director can retry.
+            if (ok) { input.remove(); go.remove(); }
+            else { go.disabled = false; }
         });
         wrap.appendChild(input);
         wrap.appendChild(go);
@@ -11357,6 +11439,9 @@ function _sentinelHandleReject(alertRow) {
         { director_comment: comment, learned_rule: rule });
 }
 
+// Returns true only on a confirmed-ok feedback write, false on any failure
+// (non-ok, business error, or network). Callers that remove an inline control
+// (e.g. the snooze input) MUST gate that removal on a true return.
 async function sendSentinelFeedback(alertRow, verdict, extra) {
     var body = Object.assign({ alert_id: alertRow.id, verdict: verdict }, extra || {});
     try {
@@ -11366,10 +11451,14 @@ async function sendSentinelFeedback(alertRow, verdict, extra) {
             body: JSON.stringify(body),
         });
         if (!res.ok) {
-            console.warn('sentinel feedback failed', res.status);
-            return;
+            _showToast('Could not save feedback — try again.', 'error');
+            return false;
         }
         var data = await res.json();
+        if (data && data.error) {
+            _showToast(data.error, 'error');
+            return false;
+        }
 
         if (verdict === 'dismiss'
             && extra && extra.dismiss_reason === 'wrong_thread'
@@ -11384,8 +11473,10 @@ async function sendSentinelFeedback(alertRow, verdict, extra) {
         } else if (el) {
             el.classList.add('sentinel-alert-snoozed');
         }
+        return true;
     } catch (e) {
-        console.warn('sentinel feedback network error', e);
+        _showToast('Could not save feedback — try again.', 'error');
+        return false;
     }
 }
 
@@ -11403,14 +11494,14 @@ function _sentinelOpenRethreadFor(hint) {
         ''
     );
     // Phase 2 endpoint is auth-gated (PR #57 fix-back). bakerFetch adds header.
-    bakerFetch('/api/pm/threads/re-thread', {
+    _mutate('/api/pm/threads/re-thread', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
             turn_id: hint.turn_id_hint,
             new_thread_id: newThreadId || null,
         }),
-    }).catch(function(e) { console.warn('rethread network error', e); });
+    }, function() { _showToast('Thread moved ✓'); });
 }
 
 function _sentinelToggleKebab(alertId) {
