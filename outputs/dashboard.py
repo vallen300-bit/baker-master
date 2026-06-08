@@ -14699,6 +14699,14 @@ def _get_ao_orbit_names() -> list:
     ]
 
 
+# AO investment headline — STATIC figure, owned by AO Desk. Update both the
+# value and the date together. Source: AO Desk confirmation (DASHBOARD_COCKPIT_
+# WAVE1_QUICKWINS_1 Fix 3). This constant only dates/sources the presentation;
+# the numeric value itself is an AO-Desk decision flagged separately to Director.
+AO_INVESTMENT_TOTAL = "EUR 66.5M"
+AO_INVESTMENT_TOTAL_AS_OF = "2026-06-01"  # date this figure was last confirmed
+
+
 @app.get("/api/dashboard/ao")
 async def get_ao_dashboard():
     """Aggregated AO relationship dashboard data."""
@@ -14862,7 +14870,8 @@ async def get_ao_dashboard():
 
     return {
         "relationship_status": {
-            "investment_total": "EUR 66.5M",
+            "investment_total": AO_INVESTMENT_TOTAL,
+            "investment_total_as_of": AO_INVESTMENT_TOTAL_AS_OF,
             "last_contact_at": last_contact_at.isoformat() if last_contact_at and hasattr(last_contact_at, "isoformat") else None,
             "comms_gap_days": comms_gap_days,
             "gap_status": gap_status,
