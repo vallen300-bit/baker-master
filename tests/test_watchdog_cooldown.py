@@ -10,6 +10,23 @@ from __future__ import annotations
 from datetime import datetime, timedelta, timezone
 from unittest.mock import MagicMock, patch
 
+import pytest
+
+
+@pytest.fixture(autouse=True)
+def _reset_watchdog_state():
+    """Keep all watchdog module globals hermetic per test.
+
+    SCHEDULER_STALL_CODEFIX_1 added ``_watchdog_restart_failed_streak`` (drives the
+    os._exit backstop). Reset it too so a leaked streak from a prior test can never
+    push these 2-restart tests over the exit threshold and kill the runner.
+    """
+    import outputs.dashboard as dash
+    dash._watchdog_last_alert_ts = 0
+    dash._watchdog_consecutive_stale = 0
+    dash._watchdog_restart_failed_streak = 0
+    yield
+
 
 def _stale_hb(seconds_old: int) -> datetime:
     return datetime.now(timezone.utc) - timedelta(seconds=seconds_old)
