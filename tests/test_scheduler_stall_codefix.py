@@ -129,8 +129,15 @@ def test_terminate_lock_holder_is_pid_reuse_safe(monkeypatch):
     cur.fetchone.return_value = None  # join matched nothing → pid not a holder
     killed = lease._terminate_lock_holder(cur, 343)
     assert killed is False
-    sql = str(cur.execute.call_args.args[0])
-    assert "pg_locks" in sql and str(lease.SCHEDULER_LOCK_KEY) or True  # key bound as param
+    # codex G3 #2533 — the guard MUST pin the single-bigint lock identity, not just
+    # objid (a two-int lock with the same objid would otherwise falsely match). Assert
+    # the SQL shape carries objsubid=1 + the reconstructed 64-bit key. (No trailing
+    # 'or True' — the prior version was vacuous and never checked the SQL.)
+    sql = " ".join(str(cur.execute.call_args.args[0]).split())
+    assert "pg_locks" in sql
+    assert "objsubid = 1" in sql      # single-key form only (excludes two-int objsubid=2)
+    assert "classid = 0" in sql       # high 32 bits zero — pins our small bigint key
+    assert "objid = %s" in sql
     assert cur.execute.call_args.args[1] == (lease.SCHEDULER_LOCK_KEY, 343)
 
 
@@ -285,3 +292,74 @@ def test_set_watermark_success_no_rollback_no_count():
     conn.rollback.assert_not_called()
     store._put_conn.assert_called_once_with(conn)
     assert state_mod.get_watermark_failure_count() == before
+
+
+# ============================================================
+# Fix 1 (live-PG) — codex G3 #2533: the terminate guard must match ONLY the
+# single-bigint scheduler lock, never a two-int lock sharing the same objid.
+# Auto-skips without TEST_DATABASE_URL / ephemeral Neon.
+# ============================================================
+
+
+def _pg_backend_pid(conn) -> int:
+    c = conn.cursor()
+    c.execute("SELECT pg_backend_pid()")
+    pid = c.fetchone()[0]
+    c.close()
+    return pid
+
+
+def test_terminate_guard_ignores_two_int_lock_with_same_objid(needs_live_pg):
+    """A two-int advisory lock pg_advisory_lock(X, 8800100) has objsubid=2 and the
+    SAME objid as our single-key lock — it MUST NOT be matched/terminated (the codex
+    G3 #2533 S2 innocent-backend-kill regression)."""
+    import psycopg2
+    dsn = needs_live_pg
+    victim = psycopg2.connect(dsn); victim.autocommit = True
+    checker = psycopg2.connect(dsn); checker.autocommit = True
+    try:
+        vcur = victim.cursor()
+        # two-int form → classid=12345, objid=SCHEDULER_LOCK_KEY, objsubid=2
+        vcur.execute("SELECT pg_advisory_lock(%s, %s)", (12345, lease.SCHEDULER_LOCK_KEY))
+        vcur.fetchone()
+        victim_pid = _pg_backend_pid(victim)
+
+        ccur = checker.cursor()
+        killed = lease._terminate_lock_holder(ccur, victim_pid)
+        ccur.close()
+
+        assert killed is False, "two-int lock must NOT match the single-bigint guard"
+        vcur.execute("SELECT 1")          # victim still alive (not terminated)
+        assert vcur.fetchone()[0] == 1
+    finally:
+        for c in (victim, checker):
+            try:
+                c.close()
+            except Exception:
+                pass
+
+
+def test_terminate_guard_matches_single_bigint_lock(needs_live_pg):
+    """Positive: a real single-bigint pg_try_advisory_lock(8800100) holder IS matched
+    + terminated — proves the objsubid/reconstructed-key guard isn't over-tightened."""
+    import psycopg2
+    dsn = needs_live_pg
+    victim = psycopg2.connect(dsn); victim.autocommit = True
+    checker = psycopg2.connect(dsn); checker.autocommit = True
+    try:
+        vcur = victim.cursor()
+        vcur.execute("SELECT pg_try_advisory_lock(%s)", (lease.SCHEDULER_LOCK_KEY,))
+        assert vcur.fetchone()[0] is True
+        victim_pid = _pg_backend_pid(victim)
+
+        ccur = checker.cursor()
+        killed = lease._terminate_lock_holder(ccur, victim_pid)
+        ccur.close()
+
+        assert killed is True, "single-bigint lock holder should be matched + terminated"
+    finally:
+        for c in (victim, checker):
+            try:
+                c.close()
+            except Exception:
+                pass

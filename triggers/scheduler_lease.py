@@ -144,13 +144,33 @@ def _terminate_lock_holder(cur, pid: int) -> bool:
     kill an innocent reused backend. Gating on "this exact PID still holds OUR lock"
     makes the terminate safe against PID reuse. Returns True iff a backend was
     actually terminated (i.e. ``pid`` still held the lock).
+
+    The lock is taken via the SINGLE-bigint form ``pg_try_advisory_lock(8800100)``.
+    In ``pg_locks`` that is uniquely identified by ``objsubid = 1`` (single-key form),
+    ``classid = high 32 bits of the key`` and ``objid = low 32 bits``. Because
+    SCHEDULER_LOCK_KEY (8800100) is well under 2**32, its high 32 bits are always 0,
+    so the lock is exactly ``classid = 0 AND objid = 8800100 AND objsubid = 1``.
+
+    Matching on ``objid`` ALONE is unsafe (codex G3 #2533 S2): a TWO-int lock
+    ``pg_advisory_lock(X, 8800100)`` has ``objsubid = 2`` and the same ``objid`` —
+    or a high-bit single key with the same low 32 bits — would falsely match and
+    terminate an innocent backend. We match on the explicit (classid, objid,
+    objsubid) triple rather than reconstructing ``(classid<<32)|objid`` on purpose:
+    classid is an ``oid`` (0..2**32-1), and a two-int lock with a negative first key
+    stores classid=4294967295, whose ``<<32`` overflows bigint and would error the
+    whole query. The component form below cannot overflow and matches ONLY our lock.
     """
     cur.execute(
         """
         SELECT pg_terminate_backend(a.pid)
         FROM pg_locks l
         JOIN pg_stat_activity a ON a.pid = l.pid
-        WHERE l.locktype = 'advisory' AND l.objid = %s AND l.pid = %s AND l.granted
+        WHERE l.locktype = 'advisory'
+          AND l.objsubid = 1
+          AND l.classid = 0
+          AND l.objid = %s
+          AND l.pid = %s
+          AND l.granted
         """,
         (SCHEDULER_LOCK_KEY, pid),
     )
