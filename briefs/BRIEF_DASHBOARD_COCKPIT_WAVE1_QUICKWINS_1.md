@@ -1,5 +1,17 @@
 # BRIEF: DASHBOARD_COCKPIT_WAVE1_QUICKWINS_1 — Plug AO auth hole, fix silent PM-threads panel, de-fake the AO headline, surface scheduler liveness
 
+> **⚠️ G0-REVISE CORRECTION 2026-06-08 (codex #2484) — READ FIRST, OVERRIDES BODY BELOW:**
+> 1. **Fixes 2/3/4 ONLY. Fix 1 (AO auth) is PARKED. G2 /security-review NOT required.**
+>    Ignore any stranded "Fix 1" / "auth hole" / "G2 mandatory" text below (Context L4,
+>    Files-Modified, Do-NOT-Touch, Quality-Checkpoints #3/#5, Verification-curl auth lines,
+>    Gate-instructions). Do NOT touch get_ao_dashboard's decorator/auth.
+> 2. **Fix 4 visibility:** cortexFeedCard is hidden unless events/lint/pending exist
+>    (app.js ~10348-10356) — place the scheduler pill somewhere ALWAYS visible, or keep the
+>    card rendered whenever scheduler status is known.
+> 3. **Live anchors drifted** (grep to confirm): AO literal dashboard.py:14865; AO render
+>    app.js:10078/:10123; PM raw fetch app.js:11139/:11173.
+
+
 ## Context
 The Baker Cockpit was tuned-up-audited 2026-06-01 (read-only 7-dimension workflow audit, 39 findings, saved to `tasks/dashboard-tuneup-audit.md`). This brief is **Wave 1** — the four highest impact-per-effort fixes, all small and surgical. One of them is a **live auth hole**, so this brief is security-sensitive: G2 `/security-review` is mandatory before merge.
 

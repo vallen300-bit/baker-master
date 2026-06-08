@@ -1,5 +1,16 @@
 # BRIEF: DASHBOARD_COCKPIT_WAVE2A_FRONTEND_HEALTH_1 — Stop silent-fail mutations + dead-end document/presentation surfaces
 
+> **⚠️ G0-REVISE CORRECTION 2026-06-08 (codex #2484) — READ FIRST, OVERRIDES BODY BELOW:**
+> 1. **Fix 2 DOWNGRADED to defensive-only:** the "Open in Dropbox" button is only added
+>    when doc.source_path EXISTS (app.js ~8315-8318), so the bare-root dead-end is NOT
+>    reachable. Add a defensive guard on the click handler (~8383-8390) only; do not build
+>    UI for an unreachable missing-path case. Note defensive-only in the ship report.
+> 2. **Fix 1: REUSE existing helpers** — _mutate (app.js:37-60) + _showToast
+>    (app.js:3032-3038). Do NOT add a new error helper. Still enumerate the full mutation
+>    set + report count + line numbers.
+> 3. Fix 3 premise confirmed valid — proceed as briefed.
+
+
 ## Context
 The Baker Cockpit tune-up audit (2026-06-01, `tasks/dashboard-tuneup-audit.md`) found
 that the Director's daily-use cockpit has several surfaces that **fail silently** — a
