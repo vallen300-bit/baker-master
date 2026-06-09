@@ -205,6 +205,43 @@ class TriggerState:
 
         return datetime.now(timezone.utc) - timedelta(hours=24)
 
+    def seconds_since_last_scheduler_execution(self) -> Optional[float]:
+        """Age in seconds of the most recent scheduler_executions.fired_at, ANY job.
+
+        SCHEDULER_WATCHDOG_HARDEN_1 — a truer liveness signal than the lone
+        scheduler_heartbeat watermark. The heartbeat watermark can freeze while the
+        scheduler is provably alive (every other job still firing + writing
+        scheduler_executions); the request-time watchdog uses this to suppress a
+        spurious restart of a live scheduler (observed 2026-06-09: heartbeat
+        watermark frozen 08:22→08:36 while 13 other jobs executed every cycle, yet
+        the watchdog restarted a healthy scheduler at the 720s mark).
+
+        FAIL-SAFE direction: returns None on no rows OR any error. The watchdog
+        treats None as "no fresh-execution evidence" → does NOT suppress → falls
+        back to the existing stale-watermark restart. A DB read failure can never
+        silently disable the watchdog.
+        """
+        try:
+            store = self._get_store()
+            conn = store._get_conn()
+            if not conn:
+                return None
+            try:
+                cur = conn.cursor()
+                cur.execute(
+                    "SELECT EXTRACT(EPOCH FROM (NOW() - MAX(fired_at))) "
+                    "FROM scheduler_executions"
+                )
+                row = cur.fetchone()
+                cur.close()
+                if row and row[0] is not None:
+                    return float(row[0])
+            finally:
+                store._put_conn(conn)
+        except Exception as e:
+            logger.warning(f"Could not read scheduler_executions recency from DB: {e}")
+        return None
+
     def watermark_exists(self, source: str) -> bool:
         """Return True if a watermark row exists in DB for this source."""
         try:
