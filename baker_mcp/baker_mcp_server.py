@@ -1036,8 +1036,24 @@ async def call_tool(name: str, arguments: dict) -> list[TextContent]:
 # ---------------------------------------------------------------------------
 
 def _internal_base_url() -> str:
-    """Loopback URL for in-process MCP calls; override via BAKER_INTERNAL_URL env."""
-    return os.getenv("BAKER_INTERNAL_URL", "http://localhost:8080")
+    """Base URL for HTTP-backed MCP calls (scan / search / ingest / health).
+
+    Resolution order (BAKER_SEARCH_MCP_LOOPBACK_DIAGNOSE_1):
+      1. BAKER_INTERNAL_URL — explicit loopback override; prod sets this to
+         http://localhost:8080 so the colocated MCP server stays on the fast
+         in-host path (no external round-trip).
+      2. BAKER_API_URL — shared prod-URL env (same name baker-wealth-mcp uses).
+      3. https://baker-master.onrender.com — prod default, so a NON-colocated
+         session (B-code / AH / codex clone) reaches the live dashboard instead
+         of an unreachable localhost (Errno 111).
+
+    Auth is unchanged: BAKER_API_KEY -> X-Baker-Key (see _internal_api_key).
+    """
+    return (
+        os.getenv("BAKER_INTERNAL_URL")
+        or os.getenv("BAKER_API_URL")
+        or "https://baker-master.onrender.com"
+    )
 
 
 def _internal_api_key() -> str:
