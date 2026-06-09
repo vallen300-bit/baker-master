@@ -209,3 +209,26 @@ def test_recency_helper_none_on_db_error():
 
     assert age is None
     store._put_conn.assert_called_once_with(conn)
+
+
+# ============================================================
+# set_watermark no-conn miss is now COUNTED (deputy-codex root-cause fold)
+# ============================================================
+
+
+def test_set_watermark_counts_pool_exhausted_miss():
+    """store._get_conn() → None (pool exhausted) is a COUNTED failure now, not a
+    silent early return — the blind spot that hid the 2026-06-09 heartbeat freeze
+    (watermark_set_failures stayed 0 while the gauge froze)."""
+    import triggers.state as state_mod
+
+    store = MagicMock()
+    store._get_conn.return_value = None  # pool exhausted → no connection
+    ts = state_mod.TriggerState.__new__(state_mod.TriggerState)
+    before = state_mod.get_watermark_failure_count()
+
+    with patch.object(ts, "_get_store", return_value=store):
+        ts.set_watermark("scheduler_heartbeat", datetime.now(timezone.utc))
+
+    assert state_mod.get_watermark_failure_count() == before + 1
+    store._put_conn.assert_not_called()  # no conn was borrowed

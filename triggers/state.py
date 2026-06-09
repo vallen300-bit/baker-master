@@ -266,13 +266,26 @@ class TriggerState:
 
     def set_watermark(self, source: str, timestamp: datetime = None):
         """Update watermark after successful processing (PostgreSQL upsert)."""
+        global _watermark_set_failures
         if timestamp is None:
             timestamp = datetime.now(timezone.utc)
         try:
             store = self._get_store()
             conn = store._get_conn()
             if not conn:
-                logger.warning(f"No DB connection — could not update {source} watermark")
+                # SCHEDULER_WATCHDOG_HARDEN_1 (deputy-codex root-cause, 2026-06-09) —
+                # COUNT the no-conn miss, don't swallow it. The frozen scheduler_heartbeat
+                # watermark (08:22→08:36) was pool exhaustion: store._get_conn() returned
+                # None during the 5-min job pile-up (pool maxconn=5), so this branch hit
+                # and returned silently while watermark_set_failures stayed 0 — the very
+                # blind spot that hid the freeze. Counting it here surfaces the miss in
+                # /api/health/scheduler exactly like the exception path below.
+                _watermark_set_failures += 1
+                logger.warning(
+                    f"No DB connection (pool exhausted?) — could not update {source} "
+                    f"watermark (cumulative set_watermark failures this process: "
+                    f"{_watermark_set_failures})"
+                )
                 return
             try:
                 cur = conn.cursor()
@@ -304,7 +317,6 @@ class TriggerState:
             finally:
                 store._put_conn(conn)
         except Exception as e:
-            global _watermark_set_failures
             _watermark_set_failures += 1
             logger.error(
                 f"Failed to set watermark for {source}: {e} "
