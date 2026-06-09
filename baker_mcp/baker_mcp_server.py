@@ -1003,6 +1003,19 @@ except Exception as _gmail_import_err:  # pragma: no cover — defensive import
         return f"Error: Gmail tools failed to load: {_gmail_import_err}"
 
 
+# Email merged-store surface (M365_MAIL_BLINDSPOT_DIAGNOSE_FIX_1) — the surface
+# that sees Director's brisengroup.com / Outlook / M365 mail. Defensive import.
+try:
+    from tools.email import EMAIL_TOOLS, EMAIL_TOOL_NAMES, dispatch_email
+    TOOLS.extend(EMAIL_TOOLS)
+except Exception as _email_import_err:  # pragma: no cover — defensive import
+    logger.warning("Email tools unavailable: %s", _email_import_err)
+    EMAIL_TOOL_NAMES = frozenset()
+
+    def dispatch_email(name: str, args: dict) -> str:  # type: ignore[no-redef]
+        return f"Error: Email tools failed to load: {_email_import_err}"
+
+
 @app.list_tools()
 async def list_tools() -> list[Tool]:
     return TOOLS
@@ -2195,6 +2208,9 @@ def _dispatch(name: str, args: dict) -> str:
 
     elif name in GMAIL_TOOL_NAMES:
         return dispatch_gmail(name, args)
+
+    elif name in EMAIL_TOOL_NAMES:
+        return dispatch_email(name, args)
 
     else:
         return f"Unknown tool: {name}"

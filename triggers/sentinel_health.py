@@ -420,6 +420,12 @@ _WATERMARK_MAX_AGE = {
     "slack": 2,              # polls every 5 min
     "whatsapp_resync": 12,   # WAHA-HEALTH-FIXES-1: re-syncs every 6h, 12h max tolerable
     "exchange_poll": 2,      # EXCHANGE-IMAP-POLL-1: polls every 5 min, 2h max tolerable
+    # M365_MAIL_BLINDSPOT_DIAGNOSE_FIX_1: graph_mail is now the production path for
+    # Director's brisengroup.com mail (post-2026-06-03 M365 migration). It polls
+    # frequently but mail can be quiet, so 6h is the max tolerable silent gap before
+    # we flag a likely ingestion death (no more silent blindspot). The watchdog
+    # skips this source entirely if it has no watermark row (BAKER_USE_GRAPH off).
+    "graph_mail_poll": 6,
 }
 
 # ClickUp workspaces — all should advance within 2 hours

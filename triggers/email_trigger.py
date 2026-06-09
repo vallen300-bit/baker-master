@@ -354,6 +354,7 @@ def _process_baker_labeled_threads(service):
                     full_body=email_text,
                     received_date=metadata.get("received_date"),
                     priority="high",
+                    source=metadata.get("source"),  # M365_MAIL_BLINDSPOT
                 )
             except Exception:
                 pass
@@ -848,6 +849,7 @@ def _process_email_threads(new_threads: list):
                 full_body=thread["text"],
                 received_date=metadata.get("received_date"),
                 priority=None,  # set after classification
+                source=metadata.get("source"),  # graph|email|exchange (M365_MAIL_BLINDSPOT)
             )
         except Exception as _e:
             logger.warning(f"Failed to store email {message_id} to PostgreSQL (non-fatal): {_e}")
@@ -1275,6 +1277,7 @@ def backfill_emails(days: int = 14):
                 subject=metadata.get("subject"),
                 full_body=formatted["text"],
                 received_date=metadata.get("received_date"),
+                source=metadata.get("source"),  # M365_MAIL_BLINDSPOT
             )
             if success:
                 stored += 1
