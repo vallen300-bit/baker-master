@@ -1,83 +1,71 @@
 ---
 status: PENDING
-brief_id: M365_QDRANT_EMBED_GAP_DIAGNOSE_1
-dispatch: M365_QDRANT_EMBED_GAP_DIAGNOSE_1
+brief_id: BAKER_SEARCH_MCP_LOOPBACK_DIAGNOSE_1
+dispatch: BAKER_SEARCH_MCP_LOOPBACK_DIAGNOSE_1
 to: b3
 dispatched_by: lead
-priority: HIGH
-Harness-V2: applies (production ingestion/embedding pipeline) — Context Contract + task class + done rubric + gate plan below
+priority: MEDIUM
+supersedes: M365_QDRANT_EMBED_GAP_DIAGNOSE_1 (COMPLETE — PRIMARY env fix shipped + verified PASS 2026-06-09, bus #2668)
+Harness-V2: applies (MCP tool surface) — Context Contract + task class + done rubric + gate plan below
 ---
 
-# M365_QDRANT_EMBED_GAP_DIAGNOSE_1 — post-migration M365 mail not in Qdrant; semantic search + Cortex blind
+# BAKER_SEARCH_MCP_LOOPBACK_DIAGNOSE_1 — baker_search/health/scan MCP tools unreachable from non-colocated sessions
 
 ## Context (Context Contract)
 
-Sibling to `M365_MAIL_BLINDSPOT_DIAGNOSE_FIX_1` (b2, in flight). b2 + Codex Reviewer both confirmed: M365/Outlook mail IS ingested into Postgres `email_messages` (Spanyi 6 Jun present, ~200 rows since 2026-06-03), but is **absent from Qdrant semantic search**. Evidence: prod `/api/search` (unified semantic) at threshold 0.0 returns ZERO for the Spanyi hearing email; the freshest email/conversation content in Qdrant is Feb–Mar 2026. b2's note: `_process_email_threads` runs `pipeline.run()` (embed) + `store_email_message` (Postgres) — the Postgres mirror works, but the Qdrant side looks like it's missing all post-migration mail.
+Surfaced during the M365 arc (your PRIMARY + deputy's #343 verification, both 2026-06-09). The Baker MCP tools `baker_search`, `baker_health`, `baker_scan` return `[Errno 111] Connection refused` from any Claude Code session NOT colocated with the running prod dashboard — reproduced by b2 (Phase 1 #2623), codex (#2627: "handler loopbacks to localhost:8080"), AND lead's own session today. Other MCP tools (Postgres-backed: baker_raw_query, baker_email_search, etc.) reach prod fine. So this is specific to the handlers that call back to `localhost:8080` instead of the configured baker-master URL.
 
-**Why it matters (broader than the tool bug):** any semantic-search-dependent surface — `baker_search` / `/api/search/unified`, Cortex Phase 1 sense, dashboard scans — is silently blind to post-6/3 mail. b2's PR fixes the MCP tool surface (Postgres read); this brief fixes the embedding pipeline so semantic surfaces see recent mail again.
+**Impact:** agents (AH1, AH2, B-codes) calling `baker_search` for semantic fact-finding get a hard Errno 111, not results. Director's own surfaces (dashboard Cockpit, Clerk, in-prod agents) are colocated and unaffected — this is an agent-tooling gap, not a Director-facing outage. Pre-existing (predates today's PRs); NOT introduced by #342/#343.
 
 ## Problem
 
-Post-migration M365 mail reaches Postgres `email_messages` but does not land in Qdrant, so semantic search / Cortex cannot retrieve it. Diagnose why, then fix.
+The `baker_search` / `baker_health` / `baker_scan` MCP tool handlers target `localhost:8080`, which only resolves when the MCP server runs on the same host as the dashboard. From a remote/local Claude Code session the dashboard isn't on localhost → connection refused. Make these tools reach the live baker-master surface like the other HTTP-backed tools do.
 
 ## Phase 1 — DIAGNOSIS (read-only, NO code changes, report first)
 
-Trace the embedding path for a graph_mail-sourced thread and find where it drops:
+1. Confirm the exact loopback: in `baker_mcp/baker_mcp_server.py`, find the `baker_search` / `baker_health` / `baker_scan` handlers and confirm they call `http://localhost:8080/...` (or `127.0.0.1:8080`) rather than a configured base URL. Cite file:line.
+2. Compare with a WORKING HTTP-backed MCP tool (e.g. how `baker_email_search` or any tool that reaches prod resolves its base URL) — what config/env does the working path use (BAKER_API_URL / baker-master.onrender.com + X-Baker-Key)?
+3. Confirm the prod endpoints these tools need actually exist + work (you already proved `/api/search` + `/api/search/unified` live today): so the fix is purely pointing the handler at the right base URL + auth, not building an endpoint.
+4. Identify every handler with the localhost:8080 assumption (don't fix only the 3 named ones if others share it).
 
-1. `_process_email_threads` (`triggers/email_trigger.py` ~838-850) calls both `pipeline.run()` (embed → Qdrant) and `store_email_message` (Postgres). Confirm the actual code path: does `pipeline.run()` actually execute + embed for graph_mail-sourced threads, or is there an early-return / branch / exception that skips embedding while the Postgres mirror still writes?
-2. Compare a Gmail-sourced thread (pre-6/3, IS in Qdrant) vs a Graph-sourced thread (post-6/3, NOT in Qdrant) through the same path — what differs (payload shape, source field, classification gate, dedup, an exception swallowed)?
-3. Check Qdrant directly: are there ANY points for post-6/3 email content? What collection, what filter. Is the embed call failing silently (caught exception, rolled back) or never invoked?
-4. Confirm scope: is this email-only, or are other post-migration sources (e.g. graph-sourced anything) also missing from Qdrant?
-
-**STOP after Phase 1.** Bus-post `lead` findings + smallest fix plan (and whether a backfill of the ~200 post-6/3 rows into Qdrant is needed once the forward path is fixed). Do NOT implement until lead greenlights. Coordinate with b2 on the bus if your code paths touch (`_process_email_threads` is shared).
+**STOP after Phase 1.** Bus-post `lead` the file:line list + the smallest fix (point handlers at the configured base URL + key, with localhost as a fallback only when colocated). Do NOT implement until lead greenlights.
 
 ## Current State
 
-To be established by Phase 1 — diagnosis-first. Do not assume; reproduce the Qdrant absence (prod `/api/search` for the Spanyi email) before forming the fix.
+Established by Phase 1 — diagnosis-first. Reproduce the Errno 111, then locate the hardcoded localhost.
 
 ## Phase 2 — FIX (only on lead greenlight)
 
-Scope set by Phase 1. Likely: repair the embed path for graph-sourced mail (forward fix) + a one-time backfill of post-6/3 `email_messages` into Qdrant. Tests first (reproduce the gap with a failing test). Backfill must be Postgres-read → embed in bounded batches (no OOM — see lessons.md startup-backfill OOM anti-pattern); run once, not on every deploy.
+Point the affected handlers at the configured baker-master base URL (env-driven, e.g. BAKER_API_URL / the same source the working HTTP tools use) + X-Baker-Key, falling back to localhost only when genuinely colocated. Tests first (mock the base-URL resolution; assert no hardcoded localhost). Keep behavior identical when colocated (prod must not regress).
 
-## Files Modified (Phase 2, expected — confirm in Phase 1)
+## Files to touch (Phase 2, expected — confirm in Phase 1)
 
-- `triggers/email_trigger.py` — `_process_email_threads` embed path
-- `kbl/` / `memory/` — pipeline.run() / retriever embedding wiring
-- possibly a one-shot backfill script under `scripts/`
+- `baker_mcp/baker_mcp_server.py` — the search/health/scan handlers + base-URL resolution
 
 ## Do NOT Touch
 
-- The Postgres `email_messages` write path — it works; do not destabilize it.
-- b2's MCP tool-surface PR (`baker_email_search`) — separate PR, separate lane.
-- Outbound/send paths — read/ingestion only.
+- The Postgres-backed MCP tools that already reach prod — they work; don't refactor them.
+- The dashboard endpoints themselves — they're live; this is client-side base-URL wiring only.
 
-## Verification (done rubric — task class: cross-layer production bugfix)
+## Verification (done rubric — task class: MCP tooling bugfix)
 
 NOT "tests pass". Done =
-1. Prod `/api/search` (semantic) returns the Spanyi 6 Jun email after the fix + backfill.
-2. A NEW M365 email becomes semantically searchable within one ingestion cycle (forward path proven, not just backfill).
-3. Qdrant point count for post-6/3 email content > 0 and tracks `email_messages`.
-4. POST_DEPLOY_AC_VERDICT v1 posted with live evidence.
+1. `baker_search` from a NON-colocated session (a B-code / AH session) returns results for a known query (e.g. Spanyi), not Errno 111.
+2. `baker_health` + `baker_scan` likewise reachable.
+3. Colocated/prod path unchanged (no regression).
+4. POST_DEPLOY_AC_VERDICT v1 with a live non-colocated `baker_search` result pasted.
 
 ## Quality Checkpoints
 
-1. AC1: Phase 1 findings on bus `lead` with command outputs (no "by inspection").
-2. AC2: Spanyi email semantically findable post-fix (live prod evidence).
-3. AC3: forward embed path proven on new mail (not just backfill).
-4. AC4: backfill bounded-batch, run-once, no deploy-time OOM.
-
-## Verification SQL / probes
-
-```sql
--- Postgres side (works): post-6/3 graph mail present
-SELECT COUNT(*), MAX(received_at) FROM email_messages WHERE received_at > '2026-06-03' LIMIT 1;
-```
-Qdrant side: probe the collection for any post-6/3 email points (confirm collection name in Phase 1).
+1. AC1: Phase 1 file:line diagnosis on bus with the localhost evidence.
+2. AC2: live non-colocated baker_search returns results post-fix.
+3. AC3: no hardcoded localhost remains in the affected handlers (test asserts).
+4. AC4: prod colocated behavior unchanged.
 
 ## Gate plan
 
-G0 codex on diagnosis + fix plan → lead reviews Phase 1 → G2 /security-review on the Phase 2 diff → G3 codex on implementation → lead merges → POST_DEPLOY_AC live-verified (semantic Spanyi find).
+G0 codex on diagnosis + fix plan → lead reviews Phase 1 → G2 /security-review (touches the MCP surface + auth/base-URL) → G3 codex on diff → lead merges → POST_DEPLOY_AC live-verified from a non-colocated session.
 
 ## Escalation
 
-- If the root cause is shared with b2's path and the two fixes must land together → flag to lead for sequencing; do not merge conflicting edits to `_process_email_threads` independently.
+- If the base URL / key the MCP tools should use isn't already in env → prepare the exact env addition + flag to lead (Tier-B).
