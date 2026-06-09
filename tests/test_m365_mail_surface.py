@@ -86,15 +86,41 @@ def test_email_search_tokenizes_multiterm():
 
 
 def test_email_search_normalizes_pasted_gmail_operators():
-    """A caller who pastes a Gmail-syntax query must still hit (codex #2639):
-    from:/after: are normalized, not matched literally."""
-    from tools.email import _tokenize
+    """A caller who pastes a Gmail-syntax query must still hit (lead #2640):
+    from:/to: -> bare value, after:/before: -> received_date bounds."""
+    from tools.email import _tokenize, _parse_query
 
-    # value-operator keeps its value; date-operator is dropped entirely.
+    # value-operator keeps its value; date-operator becomes a bound, not a token.
     assert _tokenize("from:M.Spanyi@eh.at after:2026/06/05") == ["M.Spanyi@eh.at"]
     assert _tokenize('subject:"hearing" before:2026/06/10') == ["hearing"]
     # plain multi-term queries are untouched.
     assert _tokenize("Spanyi hearing 10 June") == ["Spanyi", "hearing", "10", "June"]
+
+    # after:/before: are translated to ISO date bounds.
+    tokens, after, before = _parse_query("from:M.Spanyi@eh.at after:2026/06/05")
+    assert tokens == ["M.Spanyi@eh.at"]
+    assert after == "2026-06-05"
+    assert before is None
+
+
+def test_email_search_gmail_syntax_query_finds_spanyi_end_to_end():
+    """The EXACT old failing shape now returns the Spanyi rows (lead #2640 S2)."""
+    from tools.email import dispatch_email, _build_email_search_sql
+
+    # The built SQL: 1 token clause (the address) + a received_date >= bound.
+    sql, params = _build_email_search_sql("from:M.Spanyi@eh.at after:2026/06/05", None, 10)
+    assert "received_date >= %s" in sql
+    assert "2026-06-05" in params
+    assert "%M.Spanyi@eh.at%" in params
+
+    with patch("tools.email._run_email_query", return_value=[_spanyi_row()]) as run:
+        out = json.loads(dispatch_email(
+            "baker_email_search",
+            {"query": "from:M.Spanyi@eh.at after:2026/06/05", "provider": "store"},
+        ))
+    assert out["match_count"] >= 1
+    assert "spanyi" in json.dumps(out).lower()
+    run.assert_called_once()
 
 
 def test_email_search_source_filter_applied():

@@ -21,6 +21,12 @@ UPDATE email_messages
  WHERE source IS NULL
    AND (message_id LIKE 'AAQk%' OR message_id LIKE 'AAMk%');
 
+-- Gmail / legacy mail: short 16-hex Gmail ids or RFC message-ids ('<id>@domain').
+UPDATE email_messages
+   SET source = 'email'
+ WHERE source IS NULL
+   AND (message_id ~ '^[0-9a-f]{16}$' OR message_id LIKE '%@%');
+
 -- Helper index for source-filtered, recency-ordered reads from baker_email_search.
 CREATE INDEX IF NOT EXISTS idx_email_messages_source_received
     ON email_messages (source, received_date DESC);

@@ -31,6 +31,7 @@ from __future__ import annotations
 
 import json
 import logging
+import re
 from typing import Any
 
 from mcp.types import Tool  # type: ignore[import-not-found]
@@ -141,54 +142,97 @@ def _clamp_max(value: Any, default: int = 10) -> int:
 
 
 # Gmail search operators a caller may paste in by habit (this is a plain-text
-# store, NOT Gmail). VALUE operators keep their value (from:x@y -> x@y); DATE /
-# BOOLEAN operators are dropped — they don't belong in an ILIKE and an undropped
-# 'after:2026/06/05' token would AND-match nothing, re-creating a false-empty
-# (codex #2639: pasted 'from:M.Spanyi@eh.at after:2026/06/05' matched 0 rows).
+# store, NOT Gmail). VALUE operators keep their value (from:x@y -> x@y); DATE
+# operators (after:/before:) are TRANSLATED into received_date bounds; other
+# boolean operators are dropped — none of them belong in an ILIKE, and an
+# unhandled 'after:2026/06/05' token would AND-match nothing, re-creating the
+# false-empty (lead #2640 / codex #2639: pasted Gmail syntax matched 0 rows).
 _GMAIL_VALUE_OPS = ("from:", "to:", "cc:", "bcc:", "subject:", "label:")
-_GMAIL_DROP_OPS = (
-    "after:", "before:", "older:", "newer:", "older_than:", "newer_than:",
-    "has:", "is:", "in:", "category:", "filename:",
-)
+_GMAIL_AFTER_OPS = ("after:", "newer:")
+_GMAIL_BEFORE_OPS = ("before:", "older:")
+_GMAIL_DROP_OPS = ("older_than:", "newer_than:", "has:", "is:", "in:",
+                   "category:", "filename:")
+
+_DATE_RE = re.compile(r"^(\d{4})[/-](\d{1,2})[/-](\d{1,2})$")
 
 
-def _tokenize(query: str) -> list[str]:
-    """Split a query into match terms, normalizing pasted Gmail operators.
+def _parse_date(value: str) -> str | None:
+    """Parse a Gmail-style YYYY/MM/DD (or YYYY-MM-DD) date to an ISO string."""
+    m = _DATE_RE.match((value or "").strip())
+    if not m:
+        return None
+    y, mo, d = (int(g) for g in m.groups())
+    if not (1 <= mo <= 12 and 1 <= d <= 31):
+        return None
+    return f"{y:04d}-{mo:02d}-{d:02d}"
 
-    Whole-query ILIKE is the blindspot we are fixing (lead #2631) — each term
-    matches independently. Gmail operators are normalized so a caller who copies
-    a Gmail-syntax query still hits (codex #2639)."""
-    out: list[str] = []
+
+def _parse_query(query: str) -> tuple[list[str], str | None, str | None]:
+    """Normalize a query into (text_tokens, after_date, before_date).
+
+    Each text token matches independently (AND across tokens); after/before are
+    translated into received_date bounds. Pasted Gmail operators are handled so a
+    copied Gmail-syntax query still hits (lead #2640)."""
+    tokens: list[str] = []
+    after: str | None = None
+    before: str | None = None
     for raw in (query or "").split():
         tok = raw.strip().strip('"').strip("'")
         if not tok:
             continue
         low = tok.lower()
+        matched_date = False
+        for op in _GMAIL_AFTER_OPS:
+            if low.startswith(op):
+                after = _parse_date(tok.split(":", 1)[1]) or after
+                matched_date = True
+                break
+        if matched_date:
+            continue
+        for op in _GMAIL_BEFORE_OPS:
+            if low.startswith(op):
+                before = _parse_date(tok.split(":", 1)[1]) or before
+                matched_date = True
+                break
+        if matched_date:
+            continue
         if any(low.startswith(op) for op in _GMAIL_DROP_OPS):
-            continue  # date/boolean operator — not a text term
+            continue  # boolean operator — not a text term
         for op in _GMAIL_VALUE_OPS:
             if low.startswith(op):
                 tok = tok[len(op):].strip().strip('"').strip("'")
                 break
         if tok:
-            out.append(tok)
-    return out
+            tokens.append(tok)
+    return tokens, after, before
+
+
+def _tokenize(query: str) -> list[str]:
+    """Text match-terms only (Gmail operators normalized). See _parse_query."""
+    return _parse_query(query)[0]
 
 
 def _build_email_search_sql(query: str, source: str | None, limit: int) -> tuple[str, list[Any]]:
     """Build a TOKENIZED, field-aware query over email_messages.
 
     Each token must match (AND across tokens) at least one of subject / sender_name
-    / sender_email / full_body (OR within a token). Optional exact source filter.
-    Returns (sql, params). Pure — unit-testable without a DB.
+    / sender_email / full_body (OR within a token). after:/before: become
+    received_date bounds. Optional exact source filter. Returns (sql, params).
+    Pure — unit-testable without a DB.
     """
-    tokens = _tokenize(query)
+    tokens, after, before = _parse_query(query)
     where: list[str] = []
     params: list[Any] = []
     for tok in tokens:
         ors = " OR ".join(f"{f} ILIKE %s" for f in _MATCH_FIELDS)
         where.append(f"({ors})")
         params.extend([f"%{tok}%"] * len(_MATCH_FIELDS))
+    if after:
+        where.append("received_date >= %s")
+        params.append(after)
+    if before:
+        where.append("received_date < %s")
+        params.append(before)
     if source:
         where.append("source = %s")
         params.append(source)
