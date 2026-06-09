@@ -195,12 +195,15 @@ def test_recency_helper_none_on_empty_table():
 
 def test_recency_helper_none_on_db_error():
     """Any DB error → None, never an exception (a read failure must not disable
-    the watchdog by raising into it)."""
+    the watchdog by raising into it). And the poisoned conn is ROLLED BACK BEFORE
+    it is returned to the pool (codex G0 S1 — .claude/rules/python-backend.md:9;
+    a SELECT that errors leaves an aborted txn that poisons the next borrower)."""
     import triggers.state as state_mod
 
-    conn = MagicMock()
+    manager = MagicMock()  # parent to assert call ORDER across conn + store
+    conn = manager.conn
+    store = manager.store
     conn.cursor.return_value.execute.side_effect = RuntimeError("conn dropped")
-    store = MagicMock()
     store._get_conn.return_value = conn
 
     ts = state_mod.TriggerState.__new__(state_mod.TriggerState)
@@ -208,7 +211,12 @@ def test_recency_helper_none_on_db_error():
         age = ts.seconds_since_last_scheduler_execution()
 
     assert age is None
+    conn.rollback.assert_called_once()
     store._put_conn.assert_called_once_with(conn)
+    # rollback MUST precede put_conn — else the poisoned conn is already in the pool.
+    order = [c for c in manager.mock_calls
+             if c[0] in ("conn.rollback", "store._put_conn")]
+    assert order[0][0] == "conn.rollback", f"rollback must precede put_conn; got {order}"
 
 
 # ============================================================

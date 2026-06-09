@@ -236,6 +236,18 @@ class TriggerState:
                 cur.close()
                 if row and row[0] is not None:
                     return float(row[0])
+            except Exception:
+                # Roll back the poisoned conn BEFORE finally returns it to the pool.
+                # A failed SELECT/fetch leaves the session in an aborted transaction;
+                # without rollback the next borrower hits "current transaction is
+                # aborted" on its first query — the exact conn-poisoning class this
+                # PR hardens against (.claude/rules/python-backend.md:9; mirrors the
+                # set_watermark precedent below). Re-raise so the outer handler logs.
+                try:
+                    conn.rollback()
+                except Exception:
+                    pass
+                raise
             finally:
                 store._put_conn(conn)
         except Exception as e:
