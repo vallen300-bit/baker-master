@@ -10,6 +10,17 @@ BEGIN;
 
 ALTER TABLE email_messages ADD COLUMN IF NOT EXISTS source TEXT;
 
+-- Backfill existing rows (codex #2639: the column is forward-only otherwise —
+-- email_trigger dedups already-processed thread_ids, so old Graph mail would
+-- never get source filled and a source='graph' filter would miss all 200+
+-- historical M365 rows). Microsoft Graph immutable IDs are long base64url that
+-- begin with 'AAQk'/'AAMk'; Gmail IDs are short hex / RFC message-ids. This
+-- prefix heuristic labels the existing Graph mail; new mail is labelled at write.
+UPDATE email_messages
+   SET source = 'graph'
+ WHERE source IS NULL
+   AND (message_id LIKE 'AAQk%' OR message_id LIKE 'AAMk%');
+
 -- Helper index for source-filtered, recency-ordered reads from baker_email_search.
 CREATE INDEX IF NOT EXISTS idx_email_messages_source_received
     ON email_messages (source, received_date DESC);

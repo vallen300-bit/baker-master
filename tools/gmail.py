@@ -37,7 +37,8 @@ _M365_POINTER = (
     "Director's brisengroup.com mail migrated to Microsoft 365 / Outlook "
     "~2026-06-03 and is NOT on this Gmail surface. For dvallen@brisengroup.com / "
     "Outlook / M365 mail use baker_email_search (provider=store or all), NOT "
-    "baker_gmail_search."
+    "baker_gmail_search. baker_email_search takes PLAIN terms (e.g. the email "
+    "address or a name like 'Spanyi'), not Gmail from:/after: syntax."
 )
 
 

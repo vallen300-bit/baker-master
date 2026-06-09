@@ -85,6 +85,18 @@ def test_email_search_tokenizes_multiterm():
     ]
 
 
+def test_email_search_normalizes_pasted_gmail_operators():
+    """A caller who pastes a Gmail-syntax query must still hit (codex #2639):
+    from:/after: are normalized, not matched literally."""
+    from tools.email import _tokenize
+
+    # value-operator keeps its value; date-operator is dropped entirely.
+    assert _tokenize("from:M.Spanyi@eh.at after:2026/06/05") == ["M.Spanyi@eh.at"]
+    assert _tokenize('subject:"hearing" before:2026/06/10') == ["hearing"]
+    # plain multi-term queries are untouched.
+    assert _tokenize("Spanyi hearing 10 June") == ["Spanyi", "hearing", "10", "June"]
+
+
 def test_email_search_source_filter_applied():
     """provider=store with source='graph' filters to Outlook/M365 mail."""
     from tools.email import _build_email_search_sql

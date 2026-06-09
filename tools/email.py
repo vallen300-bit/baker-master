@@ -140,10 +140,39 @@ def _clamp_max(value: Any, default: int = 10) -> int:
     return min(value, _MAX_RESULTS_HARD_CAP)
 
 
+# Gmail search operators a caller may paste in by habit (this is a plain-text
+# store, NOT Gmail). VALUE operators keep their value (from:x@y -> x@y); DATE /
+# BOOLEAN operators are dropped — they don't belong in an ILIKE and an undropped
+# 'after:2026/06/05' token would AND-match nothing, re-creating a false-empty
+# (codex #2639: pasted 'from:M.Spanyi@eh.at after:2026/06/05' matched 0 rows).
+_GMAIL_VALUE_OPS = ("from:", "to:", "cc:", "bcc:", "subject:", "label:")
+_GMAIL_DROP_OPS = (
+    "after:", "before:", "older:", "newer:", "older_than:", "newer_than:",
+    "has:", "is:", "in:", "category:", "filename:",
+)
+
+
 def _tokenize(query: str) -> list[str]:
-    """Split a query into match terms. Whole-query ILIKE is the blindspot we
-    are fixing (lead #2631) — each term matches independently."""
-    return [t for t in (query or "").split() if t.strip()]
+    """Split a query into match terms, normalizing pasted Gmail operators.
+
+    Whole-query ILIKE is the blindspot we are fixing (lead #2631) — each term
+    matches independently. Gmail operators are normalized so a caller who copies
+    a Gmail-syntax query still hits (codex #2639)."""
+    out: list[str] = []
+    for raw in (query or "").split():
+        tok = raw.strip().strip('"').strip("'")
+        if not tok:
+            continue
+        low = tok.lower()
+        if any(low.startswith(op) for op in _GMAIL_DROP_OPS):
+            continue  # date/boolean operator — not a text term
+        for op in _GMAIL_VALUE_OPS:
+            if low.startswith(op):
+                tok = tok[len(op):].strip().strip('"').strip("'")
+                break
+        if tok:
+            out.append(tok)
+    return out
 
 
 def _build_email_search_sql(query: str, source: str | None, limit: int) -> tuple[str, list[Any]]:
