@@ -216,15 +216,22 @@ def _register_jobs(scheduler: BackgroundScheduler):
     # Fireflies scanning — every 15 minutes, fires immediately on startup
     # Fireflies scanning — regular interval (DEPLOY-FIX-1: removed next_run_time=now;
     # backfill thread handles startup catch-up, no need for immediate duplicate run)
-    from triggers.fireflies_trigger import check_new_transcripts
-    scheduler.add_job(
-        check_new_transcripts,
-        IntervalTrigger(seconds=config.triggers.fireflies_scan_interval),
-        id="fireflies_scan", name="Fireflies scanning",
-        coalesce=True, max_instances=1, replace_existing=True,
-    )
-    register_expected_job("fireflies_scan", config.triggers.fireflies_scan_interval)
-    logger.info(f"Registered: fireflies_scan (every {config.triggers.fireflies_scan_interval}s)")
+    # FIREFLIES_SCAN_GATE_1: gated behind FIREFLIES_SCAN_ENABLED (default true).
+    # Director switched to Plaud-only 2026-06-09; prod sets the env false so the
+    # job (and its expected-job watchdog entry) are skipped, mirroring Plaud below.
+    # check_new_transcripts stays importable/callable for on-demand use either way.
+    if config.triggers.fireflies_scan_enabled:
+        from triggers.fireflies_trigger import check_new_transcripts
+        scheduler.add_job(
+            check_new_transcripts,
+            IntervalTrigger(seconds=config.triggers.fireflies_scan_interval),
+            id="fireflies_scan", name="Fireflies scanning",
+            coalesce=True, max_instances=1, replace_existing=True,
+        )
+        register_expected_job("fireflies_scan", config.triggers.fireflies_scan_interval)
+        logger.info(f"Registered: fireflies_scan (every {config.triggers.fireflies_scan_interval}s)")
+    else:
+        logger.info("fireflies_scan disabled via FIREFLIES_SCAN_ENABLED — skipping registration")
 
     # Plaud Note Pro scanning — every 15 minutes
     if config.plaud.api_token:

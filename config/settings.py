@@ -451,6 +451,10 @@ class WebPushConfig:
 class TriggerConfig:
     # Fireflies scanning interval (seconds)
     fireflies_scan_interval: int = 900  # 15 minutes (was 7200; FIREFLIES-FIX-1)
+    # Fireflies auto-ingest scan toggle (FIREFLIES_SCAN_GATE_1). Default TRUE in
+    # code to preserve behavior + tests; prod disable is via env
+    # FIREFLIES_SCAN_ENABLED=false (Director switched to Plaud-only 2026-06-09).
+    fireflies_scan_enabled: bool = os.getenv("FIREFLIES_SCAN_ENABLED", "true").lower() == "true"
     # Email check interval
     email_check_interval: int = 300  # 5 minutes
     # M365_GRAPH_MAIL_POLL_2: Microsoft Graph inbound mail poll interval
