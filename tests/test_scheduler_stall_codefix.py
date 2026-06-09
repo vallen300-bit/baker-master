@@ -193,6 +193,10 @@ def test_watchdog_osexit_after_threshold():
 
     fake_state = MagicMock()
     fake_state.get_watermark.return_value = _stale_hb(900)  # 15 min stale
+    # SCHEDULER_WATCHDOG_HARDEN_1: a truly dead scheduler writes NO executions, so
+    # the recency probe is stale (>180s window) → the restart is NOT suppressed and
+    # the os._exit backstop path stays exercised.
+    fake_state.seconds_since_last_scheduler_execution.return_value = 900.0
 
     with patch("triggers.state.trigger_state", fake_state), \
          patch("triggers.embedded_scheduler.restart_scheduler"), \
@@ -217,6 +221,9 @@ def test_watchdog_no_exit_when_jobs_register():
 
     fake_state = MagicMock()
     fake_state.get_watermark.return_value = _stale_hb(900)
+    # SCHEDULER_WATCHDOG_HARDEN_1: stale executions too → restart is not suppressed,
+    # so this still exercises the job_count>0 streak-reset path on each restart.
+    fake_state.seconds_since_last_scheduler_execution.return_value = 900.0
 
     with patch("triggers.state.trigger_state", fake_state), \
          patch("triggers.embedded_scheduler.restart_scheduler"), \

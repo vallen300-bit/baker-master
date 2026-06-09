@@ -47,6 +47,8 @@ def test_watchdog_alert_throttled():
 
     fake_state = MagicMock()
     fake_state.get_watermark.return_value = _stale_hb(900)  # 15 min stale
+    # HARDEN_1: stale executions too → real stall, restart not suppressed.
+    fake_state.seconds_since_last_scheduler_execution.return_value = 900.0
 
     with patch("triggers.state.trigger_state", fake_state), \
          patch("triggers.embedded_scheduler.restart_scheduler"), \
@@ -79,6 +81,8 @@ def test_watchdog_alert_fires_again_after_cooldown():
 
     fake_state = MagicMock()
     fake_state.get_watermark.return_value = _stale_hb(900)
+    # HARDEN_1: stale executions too → real stall, restart not suppressed.
+    fake_state.seconds_since_last_scheduler_execution.return_value = 900.0
 
     with patch("triggers.state.trigger_state", fake_state), \
          patch("triggers.embedded_scheduler.restart_scheduler"), \
@@ -154,6 +158,8 @@ def test_two_consecutive_stale_restart():
 
     fake_state = MagicMock()
     fake_state.get_watermark.return_value = _stale_hb(900)
+    # HARDEN_1: stale executions too → real stall, restart not suppressed.
+    fake_state.seconds_since_last_scheduler_execution.return_value = 900.0
     fake_restart = MagicMock()
 
     with patch("triggers.state.trigger_state", fake_state), \

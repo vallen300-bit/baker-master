@@ -184,6 +184,13 @@ _watchdog_consecutive_stale = 0  # FALSE_POSITIVE_FIX_1: count of consecutive st
 # thread) and resets the instant job_count>0, so it can't fire mid-normal-acquire.
 _watchdog_restart_failed_streak = 0
 _WATCHDOG_EXIT_THRESHOLD = 3  # lead-ratified 2026-06-08 (#2517): conservative for os._exit
+# SCHEDULER_WATCHDOG_HARDEN_1 (lead #2566, 2026-06-09) — a fresh scheduler_executions
+# row within this window means the scheduler thread is provably alive, so a stale
+# heartbeat WATERMARK is a gauge failure (the set_watermark write), NOT a dead
+# scheduler. The watchdog suppresses the restart in that case. 180s < the 5-min
+# heartbeat interval and the 720s stale threshold, so a live scheduler (jobs firing
+# every 60s) always lands inside it while a truly dead one (zero executions) never does.
+_WATCHDOG_EXEC_FRESH_WINDOW_S = 180
 
 @app.middleware("http")
 async def scheduler_watchdog_middleware(request, call_next):
@@ -244,9 +251,40 @@ def _check_scheduler_heartbeat():
                     f"on read #{_watchdog_consecutive_stale}/2. Waiting one more tick."
                 )
                 return
+            # SCHEDULER_WATCHDOG_HARDEN_1 (lead #2566) — do NOT restart a scheduler
+            # that is provably executing. The heartbeat WATERMARK can freeze while
+            # the scheduler thread is alive and every other job keeps firing
+            # (observed 2026-06-09: heartbeat watermark frozen 08:22→08:36 while 13
+            # jobs executed each cycle, yet the watchdog restarted a healthy
+            # scheduler at the 720s mark). A fresh scheduler_executions row is a
+            # truer liveness signal than the lone heartbeat watermark write. None
+            # (no rows / DB error) is fail-safe → falls through to restart.
+            try:
+                exec_age = trigger_state.seconds_since_last_scheduler_execution()
+            except Exception:
+                exec_age = None
+            if exec_age is not None and exec_age < _WATCHDOG_EXEC_FRESH_WINDOW_S:
+                # Gauge stale but scheduler live → suppress restart, surface the
+                # divergence. Re-arm the 2-read gate and clear the os._exit streak:
+                # the scheduler is provably healthy, so neither counter may persist.
+                _watchdog_consecutive_stale = 0
+                _watchdog_restart_failed_streak = 0
+                now_ts = time.time()
+                if now_ts - _watchdog_last_alert_ts > _watchdog_alert_cooldown_s:
+                    _watchdog_last_alert_ts = now_ts
+                    logger.warning(
+                        f"SCHEDULER-WATCHDOG-1: heartbeat-gauge-stale "
+                        f"({age_seconds:.0f}s) BUT scheduler-live (last job execution "
+                        f"{exec_age:.0f}s ago) — restart suppressed. The "
+                        f"scheduler_heartbeat watermark write is failing while the "
+                        f"scheduler thread is healthy; investigate the heartbeat "
+                        f"set_watermark path, not the scheduler."
+                    )
+                return
             logger.error(
                 f"SCHEDULER-WATCHDOG-1: Heartbeat stale ({age_seconds:.0f}s) "
-                f"for 2 consecutive reads. Restarting..."
+                f"for 2 consecutive reads, no job executed in last "
+                f"{_WATCHDOG_EXEC_FRESH_WINDOW_S}s. Restarting..."
             )
             from triggers.embedded_scheduler import restart_scheduler, get_scheduler_status
             restart_scheduler(reason=f"heartbeat_stale_{age_seconds:.0f}s")
@@ -2632,6 +2670,13 @@ async def scheduler_heartbeat_health():
         hb = trigger_state.get_watermark("scheduler_heartbeat")
         age = (datetime.now(timezone.utc) - hb).total_seconds()
         status = get_scheduler_status()
+        # SCHEDULER_WATCHDOG_HARDEN_1 (lead #2566) — DB-derived liveness signal that
+        # SURVIVES restarts (unlike the per-process watermark_set_failures counter,
+        # which resets to 0 on the spurious restart it was meant to expose). When the
+        # heartbeat watermark freezes while the scheduler is live, heartbeat_age_seconds
+        # climbs but last_job_execution_age_seconds stays small — the divergence makes
+        # the gauge failure observable without Render stderr.
+        exec_age = trigger_state.seconds_since_last_scheduler_execution()
         return {
             "alive": age < 720,
             "heartbeat_age_seconds": int(age),
@@ -2640,6 +2685,12 @@ async def scheduler_heartbeat_health():
             # SCHEDULER_STALL_CODEFIX_1 — surface silent watermark-write failures so a
             # frozen heartbeat is visible before it trips the 12-min watchdog.
             "watermark_set_failures": get_watermark_failure_count(),
+            # SCHEDULER_WATCHDOG_HARDEN_1 — None when scheduler_executions is empty or
+            # unreadable; a small value alongside a large heartbeat_age_seconds means
+            # "gauge stale, scheduler live" (watchdog will suppress the restart).
+            "last_job_execution_age_seconds": (
+                int(exec_age) if exec_age is not None else None
+            ),
         }
     except Exception as e:
         return {"alive": False, "error": str(e)}

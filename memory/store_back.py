@@ -870,6 +870,17 @@ class SentinelStoreBack:
                 "CREATE INDEX IF NOT EXISTS idx_scheduler_executions_job_fired "
                 "ON scheduler_executions(job_id, fired_at DESC)"
             )
+            # SCHEDULER_WATCHDOG_HARDEN_1 — a single-column fired_at index serves the
+            # global liveness probe (MAX(fired_at), ANY job) used by the watchdog
+            # recency gate + /api/health/scheduler. The composite (job_id, fired_at)
+            # index above can't answer a job_id-less MAX without scanning every
+            # partition, so the unindexed query seq-scanned the whole audit table
+            # (~234k rows, ~47ms and growing — codex G0 #2581). With this index MAX
+            # is an O(1) index scan. IF NOT EXISTS → idempotent one-time build.
+            cur.execute(
+                "CREATE INDEX IF NOT EXISTS idx_scheduler_executions_fired "
+                "ON scheduler_executions(fired_at DESC)"
+            )
             conn.commit()
             cur.close()
         except Exception as e:
