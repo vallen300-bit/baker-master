@@ -1654,6 +1654,11 @@ class SentinelStoreBack:
                     ingested_at TIMESTAMPTZ DEFAULT NOW()
                 )
             """)
+            # M365_MAIL_BLINDSPOT_DIAGNOSE_FIX_1: source/provider of the ingested
+            # mail (graph|email|exchange) so the merged store + baker_email_search
+            # are source-aware. Self-heals the live table (CREATE TABLE IF NOT
+            # EXISTS is a no-op on an existing table). Mirrors migration 20260609.
+            cur.execute("ALTER TABLE email_messages ADD COLUMN IF NOT EXISTS source TEXT")
             conn.commit()
             cur.close()
             logger.info("email_messages table verified")
@@ -1665,8 +1670,13 @@ class SentinelStoreBack:
     def store_email_message(self, message_id: str, thread_id: str = None,
                             sender_name: str = None, sender_email: str = None,
                             subject: str = None, full_body: str = None,
-                            received_date: str = None, priority: str = None) -> bool:
-        """Upsert a full email message. Returns True on success."""
+                            received_date: str = None, priority: str = None,
+                            source: str = None) -> bool:
+        """Upsert a full email message. Returns True on success.
+
+        `source` (graph|email|exchange) records the ingest provider so the merged
+        store is source-aware (M365_MAIL_BLINDSPOT_DIAGNOSE_FIX_1).
+        """
         conn = self._get_conn()
         if not conn:
             return False
@@ -1675,16 +1685,17 @@ class SentinelStoreBack:
             cur.execute("""
                 INSERT INTO email_messages
                     (message_id, thread_id, sender_name, sender_email,
-                     subject, full_body, received_date, priority)
-                VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
+                     subject, full_body, received_date, priority, source)
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
                 ON CONFLICT (message_id) DO UPDATE SET
                     full_body = EXCLUDED.full_body,
                     sender_name = COALESCE(EXCLUDED.sender_name, email_messages.sender_name),
                     sender_email = COALESCE(EXCLUDED.sender_email, email_messages.sender_email),
                     subject = COALESCE(EXCLUDED.subject, email_messages.subject),
+                    source = COALESCE(EXCLUDED.source, email_messages.source),
                     ingested_at = NOW()
             """, (message_id, thread_id, sender_name, sender_email,
-                  subject, full_body, received_date, priority))
+                  subject, full_body, received_date, priority, source))
             conn.commit()
             cur.close()
             return True

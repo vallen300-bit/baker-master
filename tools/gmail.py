@@ -26,6 +26,26 @@ from mcp.types import Tool  # type: ignore[import-not-found]
 
 logger = logging.getLogger("baker.tools.gmail")
 
+# M365_MAIL_BLINDSPOT_DIAGNOSE_FIX_1: baker_gmail_* is Gmail-OAuth-only and is
+# STRUCTURALLY BLIND to Director's brisengroup.com mail, which migrated to
+# Microsoft 365 / Outlook ~2026-06-03. A silent empty here is the failure mode
+# that hid a legal-deadline email. Any brisengroup-scoped query, and ANY
+# zero-result, now carries a LOUD pointer to baker_email_search so callers never
+# read "no Gmail match" as "no mail".
+_M365_MIGRATED_DOMAINS = ("brisengroup.com",)
+_M365_POINTER = (
+    "Director's brisengroup.com mail migrated to Microsoft 365 / Outlook "
+    "~2026-06-03 and is NOT on this Gmail surface. For dvallen@brisengroup.com / "
+    "Outlook / M365 mail use baker_email_search (provider=store or all), NOT "
+    "baker_gmail_search. baker_email_search takes PLAIN terms (e.g. the email "
+    "address or a name like 'Spanyi'), not Gmail from:/after: syntax."
+)
+
+
+def _is_brisengroup_scoped(query: str) -> bool:
+    q = (query or "").lower()
+    return any(dom in q for dom in _M365_MIGRATED_DOMAINS)
+
 
 GMAIL_TOOLS: list[Tool] = [
     Tool(
@@ -83,7 +103,11 @@ GMAIL_TOOLS: list[Tool] = [
     Tool(
         name="baker_gmail_search",
         description=(
-            "Search Gmail with full Gmail query syntax. Returns a list of "
+            "Search GMAIL ONLY (vallen300@gmail.com personal account) with full "
+            "Gmail query syntax. NOT Outlook/Microsoft 365 — Director's "
+            "dvallen@brisengroup.com mail migrated to M365 ~2026-06-03 and is NOT "
+            "reachable here; for brisengroup / Outlook / M365 mail use "
+            "baker_email_search instead. Returns a list of "
             "matching messages with id, threadId, snippet, From, Subject, and "
             "Date. Reuses baker's existing OAuth session (no new credential "
             "surface). Use to find specific emails by sender/subject/date/"
@@ -131,8 +155,9 @@ GMAIL_TOOLS: list[Tool] = [
     Tool(
         name="baker_gmail_read_message",
         description=(
-            "Read a single Gmail message body + headers + attachment metadata "
-            "by message_id. Returns from/to/cc/subject/date/snippet/body_text "
+            "Read a single GMAIL ONLY message body + headers + attachment metadata "
+            "by message_id. NOT Outlook/M365 — for brisengroup mail use "
+            "baker_email_read. Returns from/to/cc/subject/date/snippet/body_text "
             "plus attachments list ({filename, mime_type, size}). Body extracted "
             "via baker's existing extract_body_text helper (text/plain preferred, "
             "text/html stripped as fallback). Body text capped at 50,000 chars "
@@ -383,12 +408,19 @@ def _search(args: dict) -> str:
 
     result: dict[str, Any] = {
         "query": query,
+        "surface": "gmail_oauth_only",
         "match_count": len(matches),
         "result_size_estimate": result_size_estimate,
         "matches": matches,
     }
     if next_page_token:
         result["next_page_token"] = next_page_token
+
+    # M365_MAIL_BLINDSPOT_DIAGNOSE_FIX_1: never fail silent on brisengroup/M365
+    # mail. A brisengroup-scoped query is M365 territory regardless of hit count;
+    # and any zero-result here is suspect (this surface can't see M365 mail).
+    if _is_brisengroup_scoped(query) or len(matches) == 0:
+        result["m365_warning"] = _M365_POINTER
 
     return json.dumps(result)
 
