@@ -10284,6 +10284,61 @@ async def get_contact(name: str):
 
 # --- D6: Unified Knowledge Base Search ---
 
+_UNIFIED_QDRANT_SOURCE_ALIASES = {
+    "documents": {"baker-documents", "sentinel-documents"},
+    "conversations": {"baker-conversations"},
+}
+
+
+def _configured_unified_qdrant_collections(allowed_sources: Optional[set[str]] = None) -> list[str]:
+    """Return configured Qdrant collections for /api/search/unified.
+
+    Unfiltered unified search must track the same source of truth as
+    /api/search: config.qdrant.collections / BAKER_COLLECTIONS. Explicit legacy
+    source filters remain narrow, so sources=documents does not unexpectedly
+    fan out across mail, ClickUp, Slack, etc.
+    """
+    configured = []
+    seen = set()
+    for raw in config.qdrant.collections:
+        collection = str(raw).strip()
+        if collection and collection not in seen:
+            configured.append(collection)
+            seen.add(collection)
+
+    if not allowed_sources:
+        return configured
+
+    allowed = {s.strip().lower() for s in allowed_sources if s and s.strip()}
+    selected = []
+    for collection in configured:
+        collection_key = collection.lower()
+        source_key = collection_key
+        for prefix in ("baker-", "sentinel-"):
+            if source_key.startswith(prefix):
+                source_key = source_key[len(prefix):]
+                break
+
+        if collection_key in allowed or source_key in allowed:
+            selected.append(collection)
+            continue
+
+        for source, aliases in _UNIFIED_QDRANT_SOURCE_ALIASES.items():
+            if source in allowed and collection in aliases:
+                selected.append(collection)
+                break
+
+    return selected
+
+
+def _unified_qdrant_source(collection: str, result_source: Optional[str]) -> str:
+    if collection == "baker-documents":
+        return "document"
+    if collection == "baker-conversations":
+        return "conversation"
+    return result_source or collection.replace("baker-", "").replace("sentinel-", "")
+
+
 @app.get("/api/search/unified", tags=["search"], dependencies=[Depends(verify_api_key)])
 async def unified_search(
     q: str = Query(..., min_length=2, max_length=500),
@@ -10292,7 +10347,7 @@ async def unified_search(
 ):
     """D6: Search across all stored content from one endpoint.
     Returns merged, relevance-ranked results across emails, meetings, docs, WhatsApp, conversations."""
-    from memory.retriever import SentinelRetriever, SearchBackendUnavailable
+    from memory.retriever import SearchBackendUnavailable
 
     retriever = _get_retriever()
     all_results = []
@@ -10332,35 +10387,32 @@ async def unified_search(
     _search_source(retriever.get_meeting_transcripts, "meetings", per_source)
     _search_source(retriever.get_whatsapp_messages, "whatsapp", per_source)
 
-    # Documents: use Qdrant vector search
-    if not allowed or "documents" in allowed:
+    # Qdrant semantic search: config-driven, matching /api/search's collection
+    # source of truth while preserving unified's existing raw-score response.
+    qdrant_collections = _configured_unified_qdrant_collections(allowed or None)
+    if qdrant_collections:
         try:
-            docs = retriever.search("baker-documents", q, limit=per_source)
-            for r in docs:
-                all_results.append({
-                    "source": "document",
-                    "content": r.content[:500],
-                    "score": round(r.score, 3),
-                    "metadata": r.metadata,
-                    "token_estimate": r.token_estimate,
-                })
+            query_vector = retriever._embed_query(q)
+            for collection in qdrant_collections:
+                try:
+                    hits = retriever.search_collection(
+                        query_vector=query_vector,
+                        collection=collection,
+                        limit=per_source,
+                        score_threshold=0.3,
+                    )
+                    for r in hits:
+                        all_results.append({
+                            "source": _unified_qdrant_source(collection, r.source),
+                            "content": r.content[:500],
+                            "score": round(r.score, 3),
+                            "metadata": r.metadata,
+                            "token_estimate": r.token_estimate,
+                        })
+                except Exception as e:
+                    logger.warning(f"Unified search: Qdrant collection {collection} failed: {e}")
         except Exception as e:
-            logger.warning(f"Unified search: documents failed: {e}")
-
-    # Conversations: Qdrant baker-conversations
-    if not allowed or "conversations" in allowed:
-        try:
-            convos = retriever.search("baker-conversations", q, limit=per_source)
-            for r in convos:
-                all_results.append({
-                    "source": "conversation",
-                    "content": r.content[:500],
-                    "score": round(r.score, 3),
-                    "metadata": r.metadata,
-                    "token_estimate": r.token_estimate,
-                })
-        except Exception as e:
-            logger.warning(f"Unified search: conversations failed: {e}")
+            logger.warning(f"Unified search: Qdrant embedding failed: {e}")
 
     # Sort by score descending, deduplicate by content prefix
     all_results.sort(key=lambda x: x["score"], reverse=True)
@@ -10379,6 +10431,7 @@ async def unified_search(
         "results": deduped[:limit],
         "total": len(deduped),
         "sources_searched": list(allowed) if allowed else ["emails", "meetings", "whatsapp", "documents", "conversations"],
+        "qdrant_collections_searched": qdrant_collections,
     }
     # B (fail loud): if any source's backend was unreachable, say so — an empty
     # result with backend_unavailable set is NOT "no data", it's a degraded search.
