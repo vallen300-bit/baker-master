@@ -1448,18 +1448,29 @@ async def startup():
         if config.plaud.api_token:
             from triggers.plaud_trigger import backfill_plaud
             plaud_fn = backfill_plaud
+        # FIREFLIES_SCAN_GATE_1: the boot backfill is a SECOND Fireflies ingest
+        # path (distinct from the recurring fireflies_scan job). Gate it on the
+        # same flag, else FIREFLIES_SCAN_ENABLED=false would still re-ingest the
+        # last 30 days on every restart. Leaving fireflies_fn=None makes
+        # run_boot_backfill_chain skip the 'fireflies' branch (same as a missing
+        # module/api_key). Plaud's boot backfill is untouched.
         fireflies_fn = None
-        try:
-            from triggers.fireflies_trigger import backfill_fireflies
-            fireflies_fn = backfill_fireflies
-        except Exception:
-            # Widened from ImportError 2026-05-08 (Gate 4 finding): non-ImportError
-            # module-level failures (AttributeError from missing config, NameError,
-            # etc.) used to propagate and silently kill this boot daemon thread,
-            # so Fireflies would never fire and no sentinel alarm would surface.
-            logger.warning(
-                "fireflies_trigger import failed — Fireflies backfill skipped",
-                exc_info=True,
+        if config.triggers.fireflies_scan_enabled:
+            try:
+                from triggers.fireflies_trigger import backfill_fireflies
+                fireflies_fn = backfill_fireflies
+            except Exception:
+                # Widened from ImportError 2026-05-08 (Gate 4 finding): non-ImportError
+                # module-level failures (AttributeError from missing config, NameError,
+                # etc.) used to propagate and silently kill this boot daemon thread,
+                # so Fireflies would never fire and no sentinel alarm would surface.
+                logger.warning(
+                    "fireflies_trigger import failed — Fireflies backfill skipped",
+                    exc_info=True,
+                )
+        else:
+            logger.info(
+                "Fireflies boot-backfill disabled via FIREFLIES_SCAN_ENABLED — skipping"
             )
 
         invoked = run_boot_backfill_chain(
