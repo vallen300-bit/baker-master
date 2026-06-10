@@ -186,10 +186,24 @@ class TestDedup:
         conn.cursor.return_value.__enter__.return_value.rowcount = 0
         assert bg._insert_message(conn, _msg("m1")) is False
 
-    def test_insert_failure_rolls_back_and_returns_false(self):
+    def test_insert_db_error_retries_then_raises(self):
+        """DB error ≠ dup (bus #2775): bounded retry, rollback each time, then
+        loud RuntimeError carrying the message id — never a silent False."""
         conn = _fake_conn()
         conn.cursor.return_value.__enter__.return_value.execute.side_effect = Exception("boom")
-        assert bg._insert_message(conn, _msg("m1")) is False
+        with patch.object(bg.time, "sleep"):
+            with pytest.raises(RuntimeError, match="message_id=m1"):
+                bg._insert_message(conn, _msg("m1"))
+        assert conn.rollback.call_count == bg.STORE_RETRIES
+
+    def test_insert_db_error_recovers_on_retry(self):
+        """Transient failure on attempt 1, success on attempt 2 — no raise."""
+        conn = _fake_conn()
+        cur = conn.cursor.return_value.__enter__.return_value
+        cur.execute.side_effect = [Exception("blip"), None]
+        cur.rowcount = 1
+        with patch.object(bg.time, "sleep"):
+            assert bg._insert_message(conn, _msg("m1")) is True
         conn.rollback.assert_called_once()
 
 
@@ -248,3 +262,66 @@ class TestAttachments:
         _att_store_stub.insert_attachment.assert_not_called()
         _att_store_stub.insert_attachment_meta.assert_called_once_with(
             "m1", "graph", "fwd msg", "message/rfc822", 99, meta_key="a2")
+
+    def test_store_none_retries_then_raises(self):
+        """bus #2775 class: store returning None must NOT count as stored —
+        bounded retry, then loud RuntimeError with the message id."""
+        client = _fake_client()
+        import base64 as b64
+        page = {"value": [{
+            "@odata.type": "#microsoft.graph.fileAttachment",
+            "id": "a1", "name": "doc.pdf", "contentType": "application/pdf",
+            "size": 5, "contentBytes": b64.b64encode(b"hello").decode(),
+        }]}
+        _att_store_stub.insert_attachment.reset_mock()
+        _att_store_stub.insert_attachment.return_value = None
+        try:
+            with patch.object(bg, "_graph_get", return_value=page), \
+                 patch.object(bg.time, "sleep"):
+                with pytest.raises(RuntimeError, match="m1"):
+                    bg._process_attachments(client, "u@x.com", "m1")
+            assert _att_store_stub.insert_attachment.call_count == bg.STORE_RETRIES
+        finally:
+            _att_store_stub.insert_attachment.return_value = 1
+
+    def test_store_none_recovers_on_retry(self):
+        client = _fake_client()
+        import base64 as b64
+        page = {"value": [{
+            "@odata.type": "#microsoft.graph.fileAttachment",
+            "id": "a1", "name": "doc.pdf", "contentType": "application/pdf",
+            "size": 5, "contentBytes": b64.b64encode(b"hello").decode(),
+        }]}
+        _att_store_stub.insert_attachment.reset_mock()
+        _att_store_stub.insert_attachment.side_effect = [None, 7]
+        try:
+            with patch.object(bg, "_graph_get", return_value=page), \
+                 patch.object(bg.time, "sleep"):
+                n = bg._process_attachments(client, "u@x.com", "m1")
+            assert n == 1
+        finally:
+            _att_store_stub.insert_attachment.side_effect = None
+            _att_store_stub.insert_attachment.return_value = 1
+
+    def test_store_failure_blocks_cursor_advance(self):
+        """End-to-end (bus #2775): a store failure inside a page must abort
+        backfill_folder BEFORE _set_progress persists that page's nextLink."""
+        client = _fake_client()
+        conn = _fake_conn()
+        page = {"value": [_msg("m1", has_att=True)],
+                "@odata.nextLink": "https://graph.microsoft.com/v1.0/next-page-2"}
+        with patch.object(bg, "_graph_get", return_value=page), \
+             patch.object(bg, "_get_progress", return_value=(None, 0)), \
+             patch.object(bg, "_set_progress") as sp, \
+             patch.object(bg, "_folder_total", return_value=1), \
+             patch.object(bg, "_insert_message", return_value=True), \
+             patch.object(bg, "_process_attachments",
+                          side_effect=RuntimeError("attachment store failure: m1")), \
+             patch.object(bg.time, "sleep"):
+            with pytest.raises(RuntimeError, match="m1"):
+                bg.backfill_folder(conn, client, "Inbox")
+        # only the fresh-start progress row was written — the failed page's
+        # cursor was never persisted
+        cursors = [c.args[2] for c in sp.call_args_list]
+        assert "https://graph.microsoft.com/v1.0/next-page-2" not in cursors
+        assert bg.DONE_SENTINEL not in cursors

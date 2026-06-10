@@ -62,6 +62,7 @@ GRAPH_HOST = "graph.microsoft.com"
 PAGE_SIZE = 100
 PAGE_SLEEP = 0.3            # seconds between pages (brief-locked throttle)
 MAX_RETRIES = 6
+STORE_RETRIES = 3           # bounded retry on store-layer failure (bus #2775)
 BODY_CAP = 10000            # mirror triggers/graph_mail_trigger._html_to_text cap
 SELECT_FIELDS = (
     "id,conversationId,subject,from,receivedDateTime,body,isDraft,hasAttachments"
@@ -180,34 +181,71 @@ def _insert_message(conn, m: dict) -> bool:
 
     priority=NULL (no LLM on historical rows), source='graph'. DO NOTHING (not
     upsert) so rows already ingested by the live poller are never clobbered.
-    Returns True when a NEW row was inserted.
+    Returns True when a NEW row was inserted, False on conflict (dup).
+
+    A DB ERROR is NOT a dup (bus #2775 class): bounded retry, then RAISE so the
+    page cursor is never advanced past a message that was silently dropped —
+    counting a transient failure as "skipped" would lose the row permanently.
     """
     sender = (m.get("from") or {}).get("emailAddress") or {}
     body = (m.get("body") or {})
-    try:
-        with conn.cursor() as cur:
-            cur.execute("""
-                INSERT INTO email_messages
-                    (message_id, thread_id, sender_name, sender_email,
-                     subject, full_body, received_date, priority, source)
-                VALUES (%s, %s, %s, %s, %s, %s, %s, NULL, 'graph')
-                ON CONFLICT (message_id) DO NOTHING
-            """, (
-                m.get("id"),
-                m.get("conversationId") or m.get("id"),
-                sender.get("name", ""),
-                sender.get("address", ""),
-                m.get("subject", ""),
-                _html_to_text(body.get("content", "")),
-                m.get("receivedDateTime") or None,
-            ))
-            inserted = cur.rowcount == 1
-        conn.commit()
-        return inserted
-    except Exception as e:
-        conn.rollback()
-        logger.error("insert_message failed for %s: %s", m.get("id"), type(e).__name__)
-        return False
+    last_err: Exception | None = None
+    for attempt in range(STORE_RETRIES):
+        try:
+            with conn.cursor() as cur:
+                cur.execute("""
+                    INSERT INTO email_messages
+                        (message_id, thread_id, sender_name, sender_email,
+                         subject, full_body, received_date, priority, source)
+                    VALUES (%s, %s, %s, %s, %s, %s, %s, NULL, 'graph')
+                    ON CONFLICT (message_id) DO NOTHING
+                """, (
+                    m.get("id"),
+                    m.get("conversationId") or m.get("id"),
+                    sender.get("name", ""),
+                    sender.get("address", ""),
+                    m.get("subject", ""),
+                    _html_to_text(body.get("content", "")),
+                    m.get("receivedDateTime") or None,
+                ))
+                inserted = cur.rowcount == 1
+            conn.commit()
+            return inserted
+        except Exception as e:
+            conn.rollback()
+            last_err = e
+            logger.warning("insert_message attempt %d/%d failed for %s: %s",
+                           attempt + 1, STORE_RETRIES, m.get("id"),
+                           type(e).__name__)
+            time.sleep(1 + attempt)
+    raise RuntimeError(
+        f"message store failure after {STORE_RETRIES} attempts: "
+        f"message_id={m.get('id')} ({type(last_err).__name__})"
+    )
+
+
+def _store_with_retry(fn, *args, desc: str, **kwargs) -> int:
+    """Call a b3 attachment-store function with bounded retry (bus #2775).
+
+    The locked store API never raises and returns None on failure — a None must
+    NOT count as stored. Retry STORE_RETRIES times, then raise loudly with the
+    message id so backfill_folder aborts BEFORE advancing the page cursor
+    (message dedup blocks re-walk, so a skipped attachment is otherwise lost
+    permanently).
+    """
+    for attempt in range(STORE_RETRIES):
+        try:
+            result = fn(*args, **kwargs)
+        except Exception as e:                  # defensive — API contract is no-raise
+            result = None
+            logger.warning("%s raised %s (attempt %d/%d)", desc,
+                           type(e).__name__, attempt + 1, STORE_RETRIES)
+        if result is not None:
+            return result
+        logger.warning("%s returned None (attempt %d/%d)", desc,
+                       attempt + 1, STORE_RETRIES)
+        time.sleep(1 + attempt)
+    raise RuntimeError(f"attachment store failure after {STORE_RETRIES} attempts: {desc}")
 
 
 # ------------------------------------------------------------- backfill core
@@ -242,28 +280,24 @@ def _process_attachments(client: GraphClient, mail_user: str,
                 except Exception:
                     logger.error("base64 decode failed on %s — skipped", message_id)
                     continue
-                try:
-                    insert_attachment(
-                        message_id, "graph", att.get("name"),
-                        att.get("contentType"), payload,
-                    )
-                    stored += 1
-                except Exception as e:
-                    logger.error("insert_attachment failed for %s: %s",
-                                 message_id, type(e).__name__)
+                _store_with_retry(
+                    insert_attachment,
+                    message_id, "graph", att.get("name"),
+                    att.get("contentType"), payload,
+                    desc=f"insert_attachment {message_id}/{att.get('name')}",
+                )
+                stored += 1
             else:
                 # itemAttachment / referenceAttachment → metadata_only row via
                 # b3's API (lead-ratified bus #2765; meta_key = Graph att id).
-                try:
-                    insert_attachment_meta(
-                        message_id, "graph", att.get("name"),
-                        att.get("contentType"), att.get("size"),
-                        meta_key=att.get("id"),
-                    )
-                    stored += 1
-                except Exception as e:
-                    logger.error("insert_attachment_meta failed for %s: %s",
-                                 message_id, type(e).__name__)
+                _store_with_retry(
+                    insert_attachment_meta,
+                    message_id, "graph", att.get("name"),
+                    att.get("contentType"), att.get("size"),
+                    meta_key=att.get("id"),
+                    desc=f"insert_attachment_meta {message_id}/{att.get('id')}",
+                )
+                stored += 1
         url = page.get("@odata.nextLink")
     return stored
 
@@ -354,7 +388,15 @@ def main(argv: list[str] | None = None) -> int:
         _ensure_progress_table(conn)
         grand = {"inserted": 0, "skipped": 0, "attachments": 0}
         for folder in [f.strip() for f in args.folders.split(",") if f.strip()]:
-            stats = backfill_folder(conn, client, folder, limit=args.limit)
+            try:
+                stats = backfill_folder(conn, client, folder, limit=args.limit)
+            except Exception as e:
+                # Loud abort (bus #2775): cursor for the failed page was NOT
+                # advanced — re-run resumes exactly there. Message id is in
+                # the exception text.
+                logger.error("ABORT in folder %s: %s — cursor NOT advanced, "
+                             "re-run to resume", folder, e)
+                return 2
             for k in grand:
                 grand[k] += stats[k]
         logger.info("BACKFILL COMPLETE: %d inserted, %d dup-skipped, %d attachments",
