@@ -31,7 +31,6 @@ from __future__ import annotations
 
 import argparse
 import base64
-import hashlib
 import logging
 import os
 import re
@@ -47,7 +46,10 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from config.settings import GraphConfig                  # noqa: E402
 from kbl.graph_client import GraphClient                 # noqa: E402
-from kbl.attachment_store import insert_attachment       # noqa: E402
+from kbl.attachment_store import (                       # noqa: E402
+    insert_attachment,
+    insert_attachment_meta,
+)
 
 logging.basicConfig(
     level=logging.INFO,
@@ -208,42 +210,9 @@ def _insert_message(conn, m: dict) -> bool:
         return False
 
 
-def _insert_item_attachment_metadata(conn, message_id: str, att: dict) -> None:
-    """itemAttachment (nested message/event) = metadata_only row, locked schema.
-
-    b3's insert_attachment() API has no metadata-only entry point (it derives
-    metadata_only from payload size), so itemAttachments insert directly against
-    the locked email_attachments DDL. sha256 over (message_id, att id, name)
-    keeps the UNIQUE (message_id, content_sha256) dedup meaningful.
-    """
-    sha = hashlib.sha256(
-        f"{message_id}/{att.get('id','')}/{att.get('name','')}".encode()
-    ).hexdigest()
-    try:
-        with conn.cursor() as cur:
-            cur.execute("""
-                INSERT INTO email_attachments
-                    (message_id, source, filename, mime_type, size_bytes,
-                     content_sha256, storage, data)
-                VALUES (%s, 'graph', %s, %s, %s, %s, 'metadata_only', NULL)
-                ON CONFLICT (message_id, content_sha256) DO NOTHING
-            """, (
-                message_id,
-                att.get("name"),
-                att.get("contentType"),
-                att.get("size"),
-                sha,
-            ))
-        conn.commit()
-    except Exception as e:
-        conn.rollback()
-        logger.error("itemAttachment metadata insert failed for %s: %s",
-                     message_id, type(e).__name__)
-
-
 # ------------------------------------------------------------- backfill core
 
-def _process_attachments(conn, client: GraphClient, mail_user: str,
+def _process_attachments(client: GraphClient, mail_user: str,
                          message_id: str) -> int:
     """Fetch + persist all attachments for one message. Returns count stored."""
     url = (f"{client.cfg.base_url}/users/{mail_user}/messages/{message_id}"
@@ -283,9 +252,18 @@ def _process_attachments(conn, client: GraphClient, mail_user: str,
                     logger.error("insert_attachment failed for %s: %s",
                                  message_id, type(e).__name__)
             else:
-                # itemAttachment / referenceAttachment → metadata_only row.
-                _insert_item_attachment_metadata(conn, message_id, att)
-                stored += 1
+                # itemAttachment / referenceAttachment → metadata_only row via
+                # b3's API (lead-ratified bus #2765; meta_key = Graph att id).
+                try:
+                    insert_attachment_meta(
+                        message_id, "graph", att.get("name"),
+                        att.get("contentType"), att.get("size"),
+                        meta_key=att.get("id"),
+                    )
+                    stored += 1
+                except Exception as e:
+                    logger.error("insert_attachment_meta failed for %s: %s",
+                                 message_id, type(e).__name__)
         url = page.get("@odata.nextLink")
     return stored
 
@@ -339,7 +317,7 @@ def backfill_folder(conn, client: GraphClient, folder: str,
                 stats["skipped"] += 1
             if m.get("hasAttachments"):
                 stats["attachments"] += _process_attachments(
-                    conn, client, mail_user, m.get("id")
+                    client, mail_user, m.get("id")
                 )
         done += len(batch)
         next_link = page.get("@odata.nextLink")

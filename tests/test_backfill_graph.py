@@ -15,6 +15,7 @@ import pytest
 # --- stub kbl.attachment_store before the module under test imports it ------
 _att_store_stub = types.ModuleType("kbl.attachment_store")
 _att_store_stub.insert_attachment = MagicMock(return_value=1)
+_att_store_stub.insert_attachment_meta = MagicMock(return_value=1)
 sys.modules.setdefault("kbl.attachment_store", _att_store_stub)
 
 from scripts import backfill_graph as bg  # noqa: E402
@@ -218,7 +219,6 @@ class TestThrottle:
 class TestAttachments:
     def test_file_attachment_decoded_and_stored(self):
         client = _fake_client()
-        conn = _fake_conn()
         import base64 as b64
         page = {"value": [{
             "@odata.type": "#microsoft.graph.fileAttachment",
@@ -227,23 +227,24 @@ class TestAttachments:
         }]}
         _att_store_stub.insert_attachment.reset_mock()
         with patch.object(bg, "_graph_get", return_value=page):
-            n = bg._process_attachments(conn, client, "u@x.com", "m1")
+            n = bg._process_attachments(client, "u@x.com", "m1")
         assert n == 1
         _att_store_stub.insert_attachment.assert_called_once_with(
             "m1", "graph", "doc.pdf", "application/pdf", b"hello")
 
-    def test_item_attachment_metadata_only(self):
+    def test_item_attachment_metadata_only_via_api(self):
+        """itemAttachment routes to b3's insert_attachment_meta (bus #2765),
+        meta_key = the Graph attachment id; insert_attachment untouched."""
         client = _fake_client()
-        conn = _fake_conn()
         page = {"value": [{
             "@odata.type": "#microsoft.graph.itemAttachment",
             "id": "a2", "name": "fwd msg", "contentType": "message/rfc822", "size": 99,
         }]}
         _att_store_stub.insert_attachment.reset_mock()
+        _att_store_stub.insert_attachment_meta.reset_mock()
         with patch.object(bg, "_graph_get", return_value=page):
-            n = bg._process_attachments(conn, client, "u@x.com", "m1")
+            n = bg._process_attachments(client, "u@x.com", "m1")
         assert n == 1
         _att_store_stub.insert_attachment.assert_not_called()
-        sql = conn.cursor.return_value.__enter__.return_value.execute.call_args.args[0]
-        assert "'metadata_only'" in sql
-        assert "ON CONFLICT (message_id, content_sha256) DO NOTHING" in sql
+        _att_store_stub.insert_attachment_meta.assert_called_once_with(
+            "m1", "graph", "fwd msg", "message/rfc822", 99, meta_key="a2")
