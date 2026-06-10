@@ -856,3 +856,28 @@ the real round-trip ran.
 - RULE: bypass mechanisms must leave an audit trace. Env-var bypasses are acceptable only for
   surfaces where a commit-msg trailer is impossible; never for formal briefs. (Hardened in
   baker-master 58e0b03 + vault PR #132.)
+
+## Lesson #99 — Render applies env-var changes at DEPLOY time, not on a plain restart (2026-06-09)
+M365_QDRANT_EMBED_GAP_DIAGNOSE_1 PRIMARY fix: appended `sentinel-interactions` to prod
+`BAKER_COLLECTIONS` via `safe_env_put` (merge-mode, verified before/after). Then triggered a
+Render `POST /v1/services/{id}/restart` to pick it up. The live `/api/search` STILL returned
+`interactions: 0` across 7 polls over ~90s — identical to pre-fix. The running process never
+saw the new value.
+- ROOT: Render injects env vars into the container at DEPLOY time. A plain `restart` re-launches
+  the existing deploy's container using that deploy's captured env snapshot — it does NOT re-read
+  the service's current env. The live deploy predated the env PUT, so restart kept the old list.
+  `config = SentinelConfig()` (config/settings.py:556) reads `os.getenv("BAKER_COLLECTIONS")` once
+  at import, so the stale snapshot was frozen into the process for that deploy's lifetime.
+- FIX: trigger a fresh deploy — `POST /v1/services/{id}/deploys` `{"clearCache":"do_not_clear"}`.
+  That deploy captures the CURRENT env. After it went live (dep-d8k4ehmk1jcs73f1hc6g, commit
+  a70f4205, ~5.5 min), `/api/search` returned the Spanyi email as top hit (score 0.92,
+  source=interactions). PASS.
+- RULE: after any Render env-var write that a running process must observe, DEPLOY, don't restart.
+  A 200 from /restart + a healthy /health does NOT mean the new env is live. The only proof is the
+  behavioral check (the value's downstream effect), not the API status or the env GET — the GET
+  shows the service config, not what the running process loaded.
+- COROLLARY (extends #97 RULE 3): zero-downtime means the OLD instance serves until the new deploy
+  is healthy — the first post-deploy probe can hit the draining old instance and false-fail. Poll
+  until the behavioral signal is stable across ≥2 reads (saw attempt-1 still 0, attempts 2-5 = 20+).
+- DURABILITY: env vars are service-level, so the slug persists across all future deploys (a later
+  new_commit redeploy still carried it). Reversible: remove the slug to roll back.
