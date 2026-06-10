@@ -316,13 +316,34 @@ class SentinelStoreBack:
                 f"BAKER_STOREBACK_MAXCONN={raw_maxconn!r} is not an int — falling back to 15"
             )
             maxconn = 15
+        # DEPLOY_DB_LOAD_DECOUPLE_1: legacy inline ensure DDL must never sit
+        # behind a production write lock long enough to hold deploy startup.
+        raw_lock_timeout = os.getenv("BAKER_STOREBACK_LOCK_TIMEOUT_MS", "2000")
+        try:
+            lock_timeout_ms = max(0, int(raw_lock_timeout))
+        except ValueError:
+            logger.warning(
+                f"BAKER_STOREBACK_LOCK_TIMEOUT_MS={raw_lock_timeout!r} is not an int — falling back to 2000"
+            )
+            lock_timeout_ms = 2000
+        dsn_params = dict(config.postgres.dsn_params)
+        lock_timeout_option = f"-c lock_timeout={lock_timeout_ms}ms"
+        existing_options = str(dsn_params.get("options") or "").strip()
+        dsn_params["options"] = (
+            f"{existing_options} {lock_timeout_option}".strip()
+            if existing_options
+            else lock_timeout_option
+        )
         try:
             self._pool = psycopg2.pool.ThreadedConnectionPool(
                 minconn=1,
                 maxconn=maxconn,
-                **config.postgres.dsn_params,
+                **dsn_params,
             )
-            logger.info(f"PostgreSQL connection pool initialized (maxconn={maxconn})")
+            logger.info(
+                f"PostgreSQL connection pool initialized "
+                f"(maxconn={maxconn}, lock_timeout={lock_timeout_ms}ms)"
+            )
         except Exception as e:
             logger.warning(f"PostgreSQL pool init failed (non-fatal): {e}")
             self._pool = None

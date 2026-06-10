@@ -342,6 +342,9 @@ _retriever = None
 _clickup_client = None
 _static_dir = Path(__file__).parent / "static"
 _briefing_dir = Path(__file__).resolve().parent.parent.parent / "04_outputs" / "briefings"
+_store_bootstrap_lock = threading.Lock()
+_store_bootstrap_started = False
+_store_bootstrap_thread: threading.Thread | None = None
 
 
 def _get_store():
@@ -1266,6 +1269,26 @@ def _serialize(obj: dict) -> dict:
 # ============================================================
 
 def _init_store() -> None:
+    """Start legacy store bootstrap without blocking FastAPI startup."""
+    global _store_bootstrap_started, _store_bootstrap_thread
+
+    with _store_bootstrap_lock:
+        if _store_bootstrap_started:
+            logger.info("PostgreSQL store bootstrap already started")
+            return
+        _store_bootstrap_started = True
+        thread = threading.Thread(
+            target=_init_store_sync,
+            name="store-back-bootstrap",
+            daemon=True,
+        )
+        _store_bootstrap_thread = thread
+
+    thread.start()
+    logger.info("PostgreSQL store bootstrap scheduled")
+
+
+def _init_store_sync() -> None:
     """Pre-warm the PostgreSQL store and apply the legacy inline DDL block.
 
     Warn-and-continue semantics on cold-start failure: a flaky PG cold start
