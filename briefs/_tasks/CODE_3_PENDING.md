@@ -1,72 +1,47 @@
 ---
 status: PENDING
-brief_id: EMAIL_ATTACHMENT_STORE_1
+brief_id: EMAIL_STORE_NEON_SSL_RCA_1
 to: b3
 from: lead
 dispatched_by: lead
 dispatched_at: 2026-06-10
 reply_target: lead (bus)
-task_class: backend feature — new table + store module + read endpoint
-gate_plan: G1 pytest literal -> G3 codex code gate (lead posts ask) -> lead merge -> POST_DEPLOY_AC after deploy
-arc: EMAIL_HISTORY_BACKFILL (5 lanes; this lane ships FIRST — b1/b2/deputy-codex build against this schema)
+task_class: ambiguous production bug — diagnose FIRST, fix only if root cause proven
+gate_plan: G1 diagnosis verdict to lead -> fix (if any) gets its own gate
+Harness-V2: N/A — diagnose-first lane; any code fix returns for a fresh brief w/ full blocks
 ---
 
-# EMAIL_ATTACHMENT_STORE_1 — attachment persistence (schema + store + read endpoint)
+# EMAIL_STORE_NEON_SSL_RCA_1 — intermittent "SSL connection has been closed unexpectedly" on email store
 
 ## Context
 
-Director-ratified 2026-06-10: historical backfill of bluewin + brisengroup mailboxes INCLUDING attachments. No attachment persistence exists today (tools/gmail.py reads live via API only). This lane builds the shared layer; b1 (IMAP backfill), b2 (Graph backfill), deputy-codex (forward parity) consume it. Schema LOCKED by lead — objections via bus, do not redesign.
+(Your EMAIL_ATTACHMENT_STORE_1 shipped + merged — good work, mailbox repurposed.) Deputy reproduced backend_unavailable=true on baker_email_search provider=store ~08:35Z + retries (Neon PG SSL closed). Director-impacting: blocked his Spanyi hearing-prep email pull. Lead re-tested 09:55Z: store WORKS (Spanyi 6 Jun returned). So intermittent. Same signature as the 2026-06-01 degradation arc (bus #1500/#1503 — Neon SSL flood). NOTE: bluewin backfill (pid on Mac, started 09:24Z) + b2 graph dry-runs (~09:38Z) hammer the same Neon DB but POST-date the 08:35Z repro — they are suspects for FUTURE pressure, not the original trigger.
 
 ## Problem
 
-email_messages stores bodies only. Attachments need a durable, deduped, size-capped store with an authenticated retrieval path.
+Why does the dashboard's email-store path intermittently lose Neon SSL connections, and does the running backfill make it worse?
 
 ## Files Modified
 
-- migrations/<next-number>_email_attachments.sql — NEW (follow existing numbering)
-- kbl/attachment_store.py — NEW
-- outputs/dashboard.py — ONE endpoint GET /api/attachments/{id} (X-Baker-Key auth; bytes + mime; 404 metadata_only/missing; 401 unauth). SURGICAL — grep an existing simple GET route and mirror; never page the file.
-- tests/test_attachment_store.py — NEW
-
-## Locked schema
-
-CREATE TABLE IF NOT EXISTS email_attachments (
-  id BIGSERIAL PRIMARY KEY,
-  message_id TEXT NOT NULL,
-  source TEXT NOT NULL,                -- 'bluewin' | 'graph' | 'email'
-  filename TEXT, mime_type TEXT, size_bytes BIGINT,
-  content_sha256 TEXT NOT NULL,
-  storage TEXT NOT NULL DEFAULT 'db',  -- 'db' | 'metadata_only' (>5MB)
-  data BYTEA,                          -- NULL when metadata_only
-  created_at TIMESTAMPTZ DEFAULT now(),
-  UNIQUE (message_id, content_sha256)
-);
-CREATE INDEX IF NOT EXISTS idx_email_attachments_message ON email_attachments (message_id);
-CREATE TABLE IF NOT EXISTS email_backfill_progress (
-  source TEXT PRIMARY KEY, cursor TEXT,
-  done_count BIGINT DEFAULT 0, total_estimate BIGINT,
-  updated_at TIMESTAMPTZ DEFAULT now()
-);
-
-Store API (exact): insert_attachment(message_id, source, filename, mime_type, payload_bytes) -> int|None (sha256 computed; >5MB -> metadata_only, data=NULL; ON CONFLICT DO NOTHING -> existing id) · get_attachment(att_id) -> dict|None · attachment_exists(message_id, sha256) -> bool. All DB calls try/except. Plain functions + existing pool helper (mirror kbl/ pattern, no new singletons).
+None expected this lane. Diagnosis only; fix briefs follow separately.
 
 ## Verification
 
-pytest tests/test_attachment_store.py -v literal green (TEST_DATABASE_URL live-PG; auto-skip intact). Round-trip: insert 2 (one >5MB synthetic -> metadata_only), endpoint fetch with auth, 401 without.
+- Render logs (baker-master srv-d6dgsbctgctc73f55730) around 08:30-09:00Z + last 2h: grep SSL/connection-closed/pool errors; correlate timestamps with email_messages ingested_at bursts.
+- Conn-pool config: how does dashboard.py acquire PG conns for email search (pool size, keepalive, stale-conn recycle)? Neon idle-timeout vs our keepalive.
+- Live watch: 3 store searches spaced 10 min while backfill runs; record pass/fail.
+- Check 2026-06-01 arc notes (bus #1500/#1503) for what fixed/was left open.
 
 ## Acceptance criteria
 
-- AC1: migration applies clean (IF NOT EXISTS) on fresh + existing DB.
-- AC2: dedup proven by test (same payload twice -> one row).
-- AC3: endpoint bytes + content-type correct; 404 metadata_only; 401 unauth.
-- AC4: literal pytest output in ship report.
+- AC1: verdict — root cause named with log evidence OR explicitly "not reproducible, monitoring plan".
+- AC2: backfill-pressure answer: does pid-4177 load correlate with store failures? yes/no with data.
+- AC3: if fix needed: proposed fix as bus note to lead (no code this lane).
 
-## Done rubric / done-state class
+## Quality Checkpoints
 
-Done = PR open + G3 codex pass + literal pytest green + ship report on bus to lead carrying done-state class ("merged-pending-deploy" vs "deployed"). NOT done at "code written".
+Diagnosis verdict on bus to lead; deputy live-verifies with his Spanyi AC after any fix.
 
-## Context-economy rules (HARD — no auto-compaction exists)
+## Context-economy rules (HARD)
 
-- Read ONLY files named above + one mirrored route. Never page dashboard.py.
-- Command output to /tmp files; read tails only. No log dumps in context.
-- If context >70%: commit, push branch, bus handoff to lead, STOP.
+Render logs via API filtered greps only — never dump full logs into context. /tmp for anything bulky. Context >70%: post findings-so-far + stop.
