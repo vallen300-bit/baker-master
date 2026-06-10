@@ -46,18 +46,28 @@ if [ -f "$COMMIT_MSG_FILE" ]; then
         exit 0
     fi
 fi
-# Env-var bypass for `-m`/`-F` flows where COMMIT_EDITMSG isn't yet written
-# (matches render-env-guard Part 4 pattern for the same constraint).
-if [ "${BAKER_BRIEF_SOP_BYPASS:-}" = "1" ]; then
-    echo "INFO [brief-sop-check]: bypass env BAKER_BRIEF_SOP_BYPASS=1 set; allowing." >&2
-    exit 0
-fi
-
 # Detect staged formal-brief files (additions + modifications; no rename/delete).
 STAGED_BRIEFS="$(git diff --cached --name-only --diff-filter=AM \
     | grep -E '(^|/)(_ops/)?briefs/BRIEF_[^/]+\.md$' \
     | grep -vE '/_reports/|/_tasks/CODE_[1-5]_(PENDING|COMPLETE|DROPPED|RETURN|PARKED)' \
     || true)"
+
+# Env-var bypass for `-m`/`-F` flows where COMMIT_EDITMSG isn't yet written
+# (matches render-env-guard Part 4 pattern for the same constraint).
+# HARDENED 2026-06-10 (HARNESS_V2_ADOPTION_AUDIT — silent-bypass drift on PR
+# #337): env bypass leaves NO audit trace, so it is REFUSED when formal
+# BRIEF_*.md files are staged. Those must use the audit-permanent
+# `Brief-SOP-bypass: <reason>` commit-msg trailer (modern git >= 2.36 writes
+# COMMIT_EDITMSG before pre-commit even on -m/-F, so the trailer path works).
+if [ "${BAKER_BRIEF_SOP_BYPASS:-}" = "1" ]; then
+    if [ -n "$STAGED_BRIEFS" ]; then
+        echo "WARN [brief-sop-check]: BAKER_BRIEF_SOP_BYPASS=1 IGNORED — formal BRIEF_*.md staged; env bypass leaves no audit trace. Use commit-msg trailer: Brief-SOP-bypass: <reason>" >&2
+        # fall through to the section checks below
+    else
+        echo "INFO [brief-sop-check]: bypass env BAKER_BRIEF_SOP_BYPASS=1 set (no formal briefs staged); allowing." >&2
+        exit 0
+    fi
+fi
 
 [ -z "$STAGED_BRIEFS" ] && exit 0
 
@@ -122,8 +132,8 @@ Harness V2 essentials for production implementation briefs (Director-ratified 20
 Run \`/write-brief\` to regenerate, or add the missing sections.
 
 Bypass for legitimate cases (corrections to historical briefs, archival edits):
-  - Commit-msg trailer: \`Brief-SOP-bypass: <reason>\` (audit-permanent in git log)
-  - Env (for \`-m\`/\`-F\` flows): \`BAKER_BRIEF_SOP_BYPASS=1 git commit -m "..."\`
+  - Commit-msg trailer: \`Brief-SOP-bypass: <reason>\` (audit-permanent in git log) — the ONLY bypass for formal BRIEF_*.md
+  - Env \`BAKER_BRIEF_SOP_BYPASS=1\` is honored only when NO formal brief is staged (hardened 2026-06-10)
 
 Skill: ~/.claude/skills/write-brief/SKILL.md
 Director directive 2026-05-23 evening.
