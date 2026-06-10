@@ -325,3 +325,23 @@ class TestAttachments:
         cursors = [c.args[2] for c in sp.call_args_list]
         assert "https://graph.microsoft.com/v1.0/next-page-2" not in cursors
         assert bg.DONE_SENTINEL not in cursors
+
+    def test_message_db_error_blocks_cursor_advance(self):
+        """End-to-end S1a (codex G3 #2781): a message-store DB error must abort
+        backfill_folder BEFORE _set_progress persists that page's nextLink."""
+        client = _fake_client()
+        conn = _fake_conn()
+        page = {"value": [_msg("m1")],
+                "@odata.nextLink": "https://graph.microsoft.com/v1.0/next-page-2"}
+        with patch.object(bg, "_graph_get", return_value=page), \
+             patch.object(bg, "_get_progress", return_value=(None, 0)), \
+             patch.object(bg, "_set_progress") as sp, \
+             patch.object(bg, "_folder_total", return_value=1), \
+             patch.object(bg, "_insert_message",
+                          side_effect=RuntimeError("message store failure: message_id=m1")), \
+             patch.object(bg.time, "sleep"):
+            with pytest.raises(RuntimeError, match="message_id=m1"):
+                bg.backfill_folder(conn, client, "Inbox")
+        cursors = [c.args[2] for c in sp.call_args_list]
+        assert "https://graph.microsoft.com/v1.0/next-page-2" not in cursors
+        assert bg.DONE_SENTINEL not in cursors
