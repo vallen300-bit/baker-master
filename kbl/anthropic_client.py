@@ -63,10 +63,19 @@ _API_KEY_ENV = "ANTHROPIC_API_KEY"
 # operators can still tune rates via the same env-var family). These are
 # EUR-treated-as-USD per §9.2 reconciliation — single-currency accounting
 # for Phase 1. Phase 2 introduces proper multi-ccy handling.
-# Opus 4.7/4.8 pricing, 2026-05-28 (was $15/$75 for legacy Opus 4.x);
-# OPUS_4_8_UPGRADE_1 amendment (bus #1429).
-_PRICE_OPUS_INPUT_PER_M = float(os.getenv("PRICE_OPUS4_IN", "5.00"))
-_PRICE_OPUS_OUTPUT_PER_M = float(os.getenv("PRICE_OPUS4_OUT", "25.00"))
+# FABLE_5_MIGRATION_1 (2026-06-10): price by the active model family.
+# Fable 5 = $10/$50 per MTok (GA 2026-06-09); Opus 4.x = $5/$25.
+# Constant names stay for _compute_cost_usd; mixed Step-5-only overrides
+# are deliberately out of scope because production runs one model fleet-wide.
+_FABLE_ACTIVE = "fable" in _DEFAULT_MODEL
+_PRICE_OPUS_INPUT_PER_M = (
+    float(os.getenv("PRICE_FABLE5_IN", "10.00")) if _FABLE_ACTIVE
+    else float(os.getenv("PRICE_OPUS4_IN", "5.00"))
+)
+_PRICE_OPUS_OUTPUT_PER_M = (
+    float(os.getenv("PRICE_FABLE5_OUT", "50.00")) if _FABLE_ACTIVE
+    else float(os.getenv("PRICE_OPUS4_OUT", "25.00"))
+)
 # Prompt-caching multipliers (Anthropic public pricing).
 # Cache writes: 1.25x base input for 5-min TTL, 2.00x base input for 1-hour TTL.
 # Baker uses 1-hour TTL on all hot sites (PR #176, 2026-05-08), so the write
