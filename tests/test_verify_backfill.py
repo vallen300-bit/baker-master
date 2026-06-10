@@ -12,6 +12,7 @@ from scripts.verify_backfill import (
     deterministic_order_key,
     evaluate_attachment_checks,
     evaluate_message_checks,
+    pick_imap_allowlist,
 )
 
 
@@ -47,6 +48,48 @@ def test_compare_counts_store_exceeding_mailbox_passes():
     # Store can hold more than the mailbox (forward poller rows) — still a pass.
     res = compare_counts({"INBOX": 50}, store_count=60)
     assert res["ok"] is True
+
+
+# ------------------------------------------------------- folder allowlists
+
+def test_allowlist_restricts_tolerance_to_named_folders():
+    # Lead bus #2756: Drafts/Spam noise must not false-FAIL the backfill lanes.
+    folders = {"INBOX": 100, "Sent": 50, "Drafts": 30, "Spam": 400}
+    res = compare_counts(folders, store_count=148, allowlist=["INBOX", "Sent"])
+    assert res["mailbox_total"] == 150          # allowlisted only
+    assert res["counted_folders"] == {"INBOX": 100, "Sent": 50}
+    assert res["folders"] == folders            # all-folder numbers kept as info
+    assert res["ok"] is True                    # 148/150 >= 0.98
+
+
+def test_allowlist_match_is_space_and_case_insensitive():
+    # Graph default 'SentItems' must match displayName 'Sent Items'.
+    res = compare_counts({"Inbox": 10, "Sent Items": 5}, store_count=15,
+                         allowlist=["inbox", "SentItems"])
+    assert res["counted_folders"] == {"Inbox": 10, "Sent Items": 5}
+    assert res["ok"] is True
+
+
+def test_allowlist_missing_folder_fails_loud():
+    res = compare_counts({"INBOX": 100}, store_count=100,
+                         allowlist=["INBOX", "Sent"])
+    assert res["ok"] is False
+    assert res["allowlist_missing"] == ["Sent"]
+
+
+def test_pick_imap_allowlist_prefers_special_use_flag():
+    counts = {"INBOX": 1, "Gesendet": 1, "Sent": 1}
+    flags = {"Gesendet": "\\HasNoChildren \\Sent"}
+    assert pick_imap_allowlist(counts, flags) == ["INBOX", "Gesendet"]
+
+
+def test_pick_imap_allowlist_name_fallback():
+    counts = {"INBOX": 1, "Sent Items": 1, "Drafts": 1}
+    assert pick_imap_allowlist(counts, {}) == ["INBOX", "Sent Items"]
+
+
+def test_pick_imap_allowlist_inbox_only_when_no_sent_detectable():
+    assert pick_imap_allowlist({"INBOX": 1, "Misc": 1}, {}) == ["INBOX"]
 
 
 # ---------------------------------------------------------------- sampling
@@ -222,6 +265,26 @@ def test_verdict_lists_explicit_numbers_and_ids():
     assert "mailbox_total=100 store_count=99" in out
     assert "PASS m1" in out                              # AC2 named message ids
     assert "sha=" in out                                 # AC2 named attachment hashes
+
+
+def test_verdict_prints_allowlist_and_info_only_tags():
+    results = _passing_results()
+    results["bluewin"]["counts"] = compare_counts(
+        {"INBOX": 100, "Drafts": 7}, 99, allowlist=["INBOX"])
+    out = build_verdict(results, commit="abc1234")
+    assert "allowlist: INBOX" in out
+    assert "mailbox folder 'INBOX': 100 [counted]" in out
+    assert "mailbox folder 'Drafts': 7 [info-only]" in out
+    assert "ac_result: PASS" in out             # Drafts noise excluded from tolerance
+
+
+def test_verdict_missing_allowlist_folder_listed_loud():
+    results = _passing_results()
+    results["bluewin"]["counts"] = compare_counts(
+        {"INBOX": 100}, 100, allowlist=["INBOX", "Sent"])
+    out = build_verdict(results, commit="abc1234")
+    assert "FAIL allowlist folder 'Sent' not found on mailbox" in out
+    assert "ac_result: FAIL" in out
 
 
 def test_verdict_failures_listed_loud():

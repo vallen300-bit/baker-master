@@ -42,6 +42,13 @@ ATT_SAMPLE_N = 5          # random attachments per source (brief, locked)
 DEFAULT_SEED = "backfill-verify-1"
 SOURCES = ("bluewin", "graph")
 
+# Lead review (bus #2756): tolerance runs against an ALLOWLISTED folder subset —
+# b1/b2 lanes cover INBOX + sent only; all-folder totals would false-FAIL on
+# Drafts/Spam/archive noise. All-folder numbers stay printed as info lines.
+DEFAULT_GRAPH_FOLDERS = ("Inbox", "SentItems")   # matched space/case-insensitively
+SENT_NAME_CANDIDATES = ("sent", "sentitems", "sentmessages",
+                        "inbox.sent", "inbox.sentitems", "inbox.sentmessages")
+
 BLUEWIN_IMAP_HOST = os.getenv("BLUEWIN_IMAP_HOST", "imaps.bluewin.ch")
 
 
@@ -49,23 +56,62 @@ BLUEWIN_IMAP_HOST = os.getenv("BLUEWIN_IMAP_HOST", "imaps.bluewin.ch")
 # Pure logic (unit-tested in tests/test_verify_backfill.py)
 # --------------------------------------------------------------------------
 
+def _norm_folder(name: str) -> str:
+    """Space/case-insensitive folder matching: 'SentItems' == 'Sent Items'."""
+    return name.replace(" ", "").lower()
+
+
+def pick_imap_allowlist(folder_counts: dict, flags_map: dict) -> list:
+    """Default IMAP allowlist: INBOX + detected sent folder (lead, bus #2756).
+
+    Sent detection: SPECIAL-USE \\Sent flag first, common-name fallback second.
+    If no sent folder is detectable, INBOX alone — visible in the verdict's
+    allowlist line, never silent."""
+    allow = [f for f in folder_counts if f.upper() == "INBOX"] or ["INBOX"]
+    for name in folder_counts:
+        if "\\sent" in (flags_map.get(name) or "").lower():
+            allow.append(name)
+            return allow
+    for name in folder_counts:
+        if _norm_folder(name) in SENT_NAME_CANDIDATES:
+            allow.append(name)
+            return allow
+    return allow
+
+
 def compare_counts(folder_counts: dict, store_count: int,
-                   tolerance: float = TOLERANCE) -> dict:
+                   tolerance: float = TOLERANCE, allowlist: list | None = None) -> dict:
     """Compare mailbox-side per-folder counts vs store-side total for one source.
 
-    Returns explicit numbers (AC1): every folder count, mailbox total, store
-    count, ratio, threshold, ok flag. Zero-mailbox is a FAIL (a backfill that
-    found nothing to verify is not a pass).
-    """
-    mailbox_total = sum(folder_counts.values())
+    Tolerance runs against the ALLOWLISTED folders' total (all folders when
+    allowlist is None); every folder count is still returned for info printing.
+    Returns explicit numbers (AC1). Zero-mailbox is a FAIL (a backfill that
+    found nothing to verify is not a pass), as is an allowlist entry that
+    matches no mailbox folder (can't verify what we can't count)."""
+    if allowlist:
+        norm_map = {_norm_folder(k): k for k in folder_counts}
+        counted, missing = {}, []
+        for entry in allowlist:
+            real = norm_map.get(_norm_folder(entry))
+            if real is None:
+                missing.append(entry)
+            else:
+                counted[real] = folder_counts[real]
+    else:
+        counted, missing = dict(folder_counts), []
+    mailbox_total = sum(counted.values())
     ratio = (store_count / mailbox_total) if mailbox_total else 0.0
     return {
         "folders": dict(folder_counts),
+        "counted_folders": counted,
+        "allowlist": list(allowlist) if allowlist else None,
+        "allowlist_missing": missing,
         "mailbox_total": mailbox_total,
         "store_count": store_count,
         "ratio": round(ratio, 4),
         "tolerance": tolerance,
-        "ok": mailbox_total > 0 and store_count >= mailbox_total * tolerance,
+        "ok": (mailbox_total > 0 and not missing
+               and store_count >= mailbox_total * tolerance),
     }
 
 
@@ -138,8 +184,14 @@ def build_verdict(results: dict, commit: str, brief: str = "BACKFILL_VERIFY_1") 
         src_ok = counts["ok"] and msgs["ok"] and atts["ok"]
         all_ok = all_ok and src_ok
         lines.append(f"== source={source} ==")
+        counted = counts.get("counted_folders", counts["folders"])
+        if counts.get("allowlist"):
+            lines.append(f"  allowlist: {', '.join(counts['allowlist'])}")
         for folder, n in sorted(counts["folders"].items()):
-            lines.append(f"  mailbox folder {folder!r}: {n}")
+            tag = "counted" if folder in counted else "info-only"
+            lines.append(f"  mailbox folder {folder!r}: {n} [{tag}]")
+        for miss in counts.get("allowlist_missing", []):
+            lines.append(f"  FAIL allowlist folder {miss!r} not found on mailbox")
         lines.append(
             f"  mailbox_total={counts['mailbox_total']} store_count={counts['store_count']} "
             f"ratio={counts['ratio']} (tolerance {counts['tolerance']}) -> "
@@ -217,14 +269,17 @@ def store_count(conn, source: str) -> int:
         raise RuntimeError(f"store_count({source}) failed: {e}") from e
 
 
-def imap_folder_counts() -> dict:
-    """EXAMINE (readonly) every folder on the bluewin mailbox; return {folder: count}."""
+def imap_folder_counts() -> tuple:
+    """EXAMINE (readonly) every folder on the bluewin mailbox.
+
+    Returns ({folder: count}, {folder: LIST-flags-string}) — flags feed the
+    default-allowlist sent-folder detection."""
     import imaplib
     user = os.getenv("BLUEWIN_USER", "dvallen@bluewin.ch")
     password = os.getenv("BLUEWIN_PASS", "")
     if not password:
         raise RuntimeError("BLUEWIN_PASS not set")
-    counts = {}
+    counts, flags_map = {}, {}
     imap = imaplib.IMAP4_SSL(BLUEWIN_IMAP_HOST)
     try:
         imap.login(user, password)
@@ -240,6 +295,7 @@ def imap_folder_counts() -> dict:
             # LIST line: (flags) "delim" folder-name (possibly quoted)
             name = decoded.rsplit(' "', 1)[-1].strip('"') if ' "' in decoded \
                 else decoded.split()[-1].strip('"')
+            flags_map[name] = decoded.split(")", 1)[0].lstrip("(") if ")" in decoded else ""
             typ, data = imap.select(f'"{name}"', readonly=True)  # EXAMINE
             if typ == "OK":
                 counts[name] = int(data[0])
@@ -250,7 +306,7 @@ def imap_folder_counts() -> dict:
             imap.logout()
         except Exception:
             pass
-    return counts
+    return counts, flags_map
 
 
 def graph_folder_counts() -> dict:
@@ -344,20 +400,30 @@ def spot_check_attachments(conn, source: str, n: int, seed: str) -> list:
 # Orchestration
 # --------------------------------------------------------------------------
 
-def run_verification(sources: tuple, seed: str) -> dict:
+def run_verification(sources: tuple, seed: str, imap_folders: list | None = None,
+                     graph_folders: list | None = None) -> dict:
     """Collect everything for the requested sources. A collector failure is a
-    loud per-source error entry, never a silent skip."""
+    loud per-source error entry, never a silent skip.
+
+    imap_folders None -> auto allowlist (INBOX + detected sent folder);
+    graph_folders None -> DEFAULT_GRAPH_FOLDERS."""
     conn = _db_conn()
     results = {}
     try:
         for source in sources:
             try:
-                folders = imap_folder_counts() if source == "bluewin" else graph_folder_counts()
+                if source == "bluewin":
+                    folders, flags_map = imap_folder_counts()
+                    allowlist = imap_folders or pick_imap_allowlist(folders, flags_map)
+                else:
+                    folders = graph_folder_counts()
+                    allowlist = graph_folders or list(DEFAULT_GRAPH_FOLDERS)
             except Exception as e:
-                folders = {}
                 results[source] = {
-                    "counts": {"folders": {}, "mailbox_total": 0, "store_count": -1,
-                               "ratio": 0.0, "tolerance": TOLERANCE, "ok": False},
+                    "counts": {"folders": {}, "counted_folders": {}, "allowlist": None,
+                               "allowlist_missing": [], "mailbox_total": 0,
+                               "store_count": -1, "ratio": 0.0,
+                               "tolerance": TOLERANCE, "ok": False},
                     "messages": {"checked": 0, "passed": [], "notes": [],
                                  "failures": [f"mailbox count collection failed: {e}"],
                                  "ok": False},
@@ -366,7 +432,8 @@ def run_verification(sources: tuple, seed: str) -> dict:
                 }
                 continue
             results[source] = {
-                "counts": compare_counts(folders, store_count(conn, source)),
+                "counts": compare_counts(folders, store_count(conn, source),
+                                         allowlist=allowlist),
                 "messages": evaluate_message_checks(
                     spot_check_messages(conn, source, MSG_SAMPLE_N, seed)),
                 "attachments": evaluate_attachment_checks(
@@ -403,13 +470,24 @@ def main() -> int:
     ap.add_argument("--source", choices=SOURCES, help="verify one source only")
     ap.add_argument("--seed", default=DEFAULT_SEED,
                     help="sampling seed (same seed -> same spot-check ids)")
+    ap.add_argument("--imap-folders", default=None,
+                    help="comma-separated IMAP folder allowlist for the tolerance "
+                         "check (default: INBOX + detected sent folder)")
+    ap.add_argument("--graph-folders", default=",".join(DEFAULT_GRAPH_FOLDERS),
+                    help="comma-separated Graph folder allowlist "
+                         "(space/case-insensitive match on displayName)")
     ap.add_argument("--post", action="store_true",
                     help="bus-post the verdict to lead,deputy (the only write)")
     ap.add_argument("--json", action="store_true", help="also dump raw results JSON")
     args = ap.parse_args()
 
     sources = (args.source,) if args.source else SOURCES
-    results = run_verification(sources, args.seed)
+    imap_allow = [f.strip() for f in args.imap_folders.split(",") if f.strip()] \
+        if args.imap_folders else None
+    graph_allow = [f.strip() for f in args.graph_folders.split(",") if f.strip()] \
+        or list(DEFAULT_GRAPH_FOLDERS)
+    results = run_verification(sources, args.seed,
+                               imap_folders=imap_allow, graph_folders=graph_allow)
     out = build_verdict(results, _git_head())
     print(f"seed: {args.seed}")
     print(out)
