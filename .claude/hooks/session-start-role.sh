@@ -23,7 +23,7 @@ if [ -z "$ROLE" ]; then
   case "$REPO_ROOT" in
     */bm-aihead1-cowork|*/bm-aihead1-cowork/.claude/worktrees/*) ROLE="cowork-ah1" ;;
     */bm-aihead1|*/bm-aihead1/.claude/worktrees/*) ROLE="aihead1" ;;
-    */bm-aihead2|*/bm-aihead2/.claude/worktrees/*) ROLE="aihead2" ;;
+    */bm-aihead2|*/bm-aihead2/.claude/worktrees/*) ROLE="deputy" ;;
     */bm-b1|*/bm-b1/.claude/worktrees/*) ROLE="b1" ;;
     */bm-b2|*/bm-b2/.claude/worktrees/*) ROLE="b2" ;;
     */bm-b3|*/bm-b3/.claude/worktrees/*) ROLE="b3" ;;
@@ -51,7 +51,7 @@ print(json.dumps({"hookSpecificOutput": {"hookEventName": "SessionStart", "addit
 if [ -z "$ROLE" ]; then
   _emit <<'EOF'
 [role-onboard] BAKER_ROLE env var not set and cwd not under bm-b<N>. Cannot auto-onboard role.
-Director: set BAKER_ROLE in this terminal profile (Terminal → Settings → Profiles → "Run command: export BAKER_ROLE=<role>"). Valid values: aihead1, aihead2, b1, b2, b3, b4, b5 (case-insensitive; file lookup is lowercased).
+Director: set BAKER_ROLE in this terminal profile (Terminal → Settings → Profiles → "Run command: export BAKER_ROLE=<role>"). Valid values: aihead1, deputy (alias aihead2), b1, b2, b3, b4, b5 (case-insensitive; file lookup is lowercased).
 Until set, paste the role identity manually as before.
 EOF
   exit 0
