@@ -98,7 +98,7 @@ def _capture_graph_attachments(client: GraphClient, m: dict) -> int:
         if page is None:
             logger.warning("Graph attachment fetch returned None (non-fatal)")
             return 0
-        message_id = m.get("conversationId") or m.get("id")
+        message_id = m.get("id")
         stored = 0
         for att in page.get("value", []):
             if att.get("isInline"):

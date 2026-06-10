@@ -65,7 +65,7 @@ def test_graph_live_poll_captures_file_attachment(monkeypatch):
     assert stored == 1
     client.get.assert_called_once()
     assert calls == [{
-        "message_id": "graph-thread-1",
+        "message_id": "graph-message-1",
         "filename": "memo.pdf",
         "mime_type": "application/pdf",
         "payload_bytes": b"memo-bytes",
