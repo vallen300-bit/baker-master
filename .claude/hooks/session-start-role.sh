@@ -23,7 +23,7 @@ if [ -z "$ROLE" ]; then
   case "$REPO_ROOT" in
     */bm-aihead1-cowork|*/bm-aihead1-cowork/.claude/worktrees/*) ROLE="cowork-ah1" ;;
     */bm-aihead1|*/bm-aihead1/.claude/worktrees/*) ROLE="aihead1" ;;
-    */bm-aihead2|*/bm-aihead2/.claude/worktrees/*) ROLE="deputy" ;;
+    */bm-aihead2|*/bm-aihead2/.claude/worktrees/*) ROLE="aihead2" ;;
     */bm-b1|*/bm-b1/.claude/worktrees/*) ROLE="b1" ;;
     */bm-b2|*/bm-b2/.claude/worktrees/*) ROLE="b2" ;;
     */bm-b3|*/bm-b3/.claude/worktrees/*) ROLE="b3" ;;
@@ -51,7 +51,7 @@ print(json.dumps({"hookSpecificOutput": {"hookEventName": "SessionStart", "addit
 if [ -z "$ROLE" ]; then
   _emit <<'EOF'
 [role-onboard] BAKER_ROLE env var not set and cwd not under bm-b<N>. Cannot auto-onboard role.
-Director: set BAKER_ROLE in this terminal profile (Terminal → Settings → Profiles → "Run command: export BAKER_ROLE=<role>"). Valid values: aihead1, deputy (alias aihead2), b1, b2, b3, b4, b5 (case-insensitive; file lookup is lowercased).
+Director: set BAKER_ROLE in this terminal profile (Terminal → Settings → Profiles → "Run command: export BAKER_ROLE=<role>"). Valid values: aihead1, aihead2, b1, b2, b3, b4, b5 (case-insensitive; file lookup is lowercased).
 Until set, paste the role identity manually as before.
 EOF
   exit 0
@@ -65,6 +65,21 @@ if [ ! -f "$CTX_FILE" ]; then
     | _emit
   exit 0
 fi
+
+# Director-facing roles also get the laconic register appended at injection time
+# (AH2_LACONIC_TIER0_RETIRE_1, 2026-06-10 — retires the Tier-0 Read of
+# ~/.claude/skills/laconic/SKILL.md, ~5k tokens/session). Mirrors lead's pattern
+# in bm-aihead1 where role-context/lead.md IS a symlink to the register; here
+# deputy.md carries role identity, so the register is concatenated after it.
+LACONIC_FILE="$HOME/baker-vault/_ops/role-contexts/laconic-default.md"
+case "$ROLE_LC" in
+  deputy|aihead2)
+    if [ -f "$LACONIC_FILE" ]; then
+      cat "$CTX_FILE" "$LACONIC_FILE" | _emit
+      exit 0
+    fi
+    ;;
+esac
 
 _emit < "$CTX_FILE"
 exit 0
