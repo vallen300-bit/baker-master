@@ -256,6 +256,46 @@ def test_scan_internal_url_override_propagates(patch_httpx, monkeypatch):
 
 
 # ==========================================================================
+# 2b. _internal_base_url resolution (BAKER_SEARCH_MCP_LOOPBACK_DIAGNOSE_1)
+# ==========================================================================
+
+
+def test_base_url_defaults_to_prod_not_localhost(monkeypatch):
+    """Non-colocated default must be the live dashboard, never hardcoded localhost.
+
+    Regression guard for the Errno-111 loopback: a session with neither
+    BAKER_INTERNAL_URL nor BAKER_API_URL set must resolve to the prod URL.
+    """
+    monkeypatch.delenv("BAKER_INTERNAL_URL", raising=False)
+    monkeypatch.delenv("BAKER_API_URL", raising=False)
+    url = srv._internal_base_url()
+    assert url == "https://baker-master.onrender.com"
+    assert "localhost" not in url
+    assert "127.0.0.1" not in url
+
+
+def test_base_url_honors_internal_url_override_when_colocated(monkeypatch):
+    """Prod sets BAKER_INTERNAL_URL=localhost:8080 -> colocated path preserved."""
+    monkeypatch.setenv("BAKER_INTERNAL_URL", "http://localhost:8080")
+    monkeypatch.delenv("BAKER_API_URL", raising=False)
+    assert srv._internal_base_url() == "http://localhost:8080"
+
+
+def test_base_url_falls_back_to_api_url_when_internal_unset(monkeypatch):
+    """BAKER_API_URL (the baker-wealth-mcp env name) is honored when set."""
+    monkeypatch.delenv("BAKER_INTERNAL_URL", raising=False)
+    monkeypatch.setenv("BAKER_API_URL", "https://staging.example.com")
+    assert srv._internal_base_url() == "https://staging.example.com"
+
+
+def test_base_url_internal_takes_precedence_over_api_url(monkeypatch):
+    """BAKER_INTERNAL_URL wins over BAKER_API_URL when both are set."""
+    monkeypatch.setenv("BAKER_INTERNAL_URL", "http://localhost:8080")
+    monkeypatch.setenv("BAKER_API_URL", "https://staging.example.com")
+    assert srv._internal_base_url() == "http://localhost:8080"
+
+
+# ==========================================================================
 # 3. baker_search
 # ==========================================================================
 
