@@ -25,6 +25,7 @@ _GAP_ALERT_COOLDOWN = 24 * 3600  # 24 hours between gap alerts
 # Gmail 429 backoff: skip polls until this timestamp (epoch seconds)
 _gmail_retry_after: float = 0.0
 _gmail_backoff_seconds: float = 0.0  # exponential backoff tracker
+_attachment_store_missing_logged: bool = False
 
 # Sentinel health monitoring
 from triggers.sentinel_health import report_success as _health_success, report_failure as _health_failure
@@ -217,6 +218,97 @@ def _get_gmail_service():
     from googleapiclient.discovery import build
     creds = authenticate()
     return build("gmail", "v1", credentials=creds)
+
+
+def _insert_live_attachment(
+    *,
+    message_id: str,
+    source: str,
+    filename: str,
+    mime_type: str,
+    payload_bytes: bytes,
+):
+    """Best-effort attachment persistence; one bad attachment never breaks ingest."""
+    global _attachment_store_missing_logged
+    if not payload_bytes:
+        return None
+    try:
+        from kbl.attachment_store import insert_attachment
+    except (ImportError, ModuleNotFoundError) as e:
+        if not _attachment_store_missing_logged:
+            logger.warning("Email attachment store unavailable (non-fatal): %s", type(e).__name__)
+            _attachment_store_missing_logged = True
+        return None
+    try:
+        return insert_attachment(
+            message_id=message_id,
+            source=source,
+            filename=filename,
+            mime_type=mime_type,
+            payload_bytes=payload_bytes,
+        )
+    except Exception as e:
+        logger.warning("Email attachment persist failed (non-fatal): %s", type(e).__name__)
+        return None
+
+
+def _capture_gmail_thread_attachments(service, threads: list) -> int:
+    """Store raw Gmail attachment bytes for formatted live-poll threads."""
+    import base64
+    import json
+
+    try:
+        from scripts.extract_gmail import _collect_attachment_parts
+        from tools.gmail import _attachment_read
+    except Exception as e:
+        logger.warning("Gmail attachment helpers unavailable (non-fatal): %s", type(e).__name__)
+        return 0
+
+    stored = 0
+    for thread in threads or []:
+        metadata = thread.get("metadata", {})
+        row_message_id = metadata.get("thread_id") or metadata.get("message_id")
+        message_ids = metadata.get("all_message_ids") or [metadata.get("message_id")]
+        for mid in [m for m in message_ids if m]:
+            try:
+                message = service.users().messages().get(
+                    userId="me", id=mid, format="full",
+                ).execute()
+                parts = _collect_attachment_parts(message.get("payload", {}))
+            except Exception as e:
+                logger.warning("Gmail attachment enumerate failed (non-fatal): %s", type(e).__name__)
+                continue
+
+            per_name_counts: dict[str, int] = {}
+            for part in parts:
+                filename = part.get("filename") or ""
+                if not filename:
+                    continue
+                per_name_counts[filename] = per_name_counts.get(filename, 0) + 1
+                try:
+                    raw = _attachment_read({
+                        "message_id": mid,
+                        "filename": filename,
+                        "attachment_index": per_name_counts[filename],
+                        "include_bytes": True,
+                    })
+                    parsed = json.loads(raw)
+                    payload_b64 = parsed.get("bytes_base64")
+                    if not payload_b64:
+                        continue
+                    payload = base64.b64decode(payload_b64)
+                    att_id = _insert_live_attachment(
+                        message_id=row_message_id or mid,
+                        source="email",
+                        filename=parsed.get("filename") or filename,
+                        mime_type=parsed.get("mime_type") or part.get("mimeType") or "application/octet-stream",
+                        payload_bytes=payload,
+                    )
+                    if att_id:
+                        stored += 1
+                except Exception as e:
+                    logger.warning("Gmail attachment capture failed (non-fatal): %s", type(e).__name__)
+    return stored
 
 
 # -------------------------------------------------------
@@ -440,7 +532,9 @@ def poll_gmail() -> list:
     service = _get_gmail_service()
     # ARCH-6: Set Gmail service so format_thread() can extract attachments
     extract_gmail._gmail_service = service
-    return extract_gmail.extract_poll(service)
+    threads = extract_gmail.extract_poll(service)
+    _capture_gmail_thread_attachments(service, threads)
+    return threads
 
 
 # -------------------------------------------------------
