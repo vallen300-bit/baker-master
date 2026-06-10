@@ -6,6 +6,7 @@ import hashlib
 
 import pytest
 
+import scripts.verify_backfill as vb
 from scripts.verify_backfill import (
     build_verdict,
     compare_counts,
@@ -13,6 +14,8 @@ from scripts.verify_backfill import (
     evaluate_attachment_checks,
     evaluate_message_checks,
     pick_imap_allowlist,
+    run_verification,
+    source_ok,
 )
 
 
@@ -294,3 +297,88 @@ def test_verdict_failures_listed_loud():
     out = build_verdict(results, commit="abc1234")
     assert "FAIL g9: empty body" in out                  # AC4 loud, named failure
     assert "ac_result: FAIL" in out
+
+
+# ----------------------------------------- never-raise contract (G3 S1, #2772)
+
+class _DummyConn:
+    def close(self):
+        pass
+
+
+def _patch_happy_collectors(monkeypatch):
+    monkeypatch.setattr(vb, "_db_conn", lambda: _DummyConn())
+    monkeypatch.setattr(vb, "imap_folder_counts", lambda: ({"INBOX": 10}, {}))
+    monkeypatch.setattr(vb, "store_count", lambda conn, source: 10)
+    monkeypatch.setattr(
+        vb, "spot_check_messages",
+        lambda *a, **k: [{"message_id": "m1", "body_len": 5, "searchable": True}])
+    monkeypatch.setattr(
+        vb, "spot_check_attachments", lambda *a, **k: [_att_row(b"x")])
+
+
+def test_run_verification_emits_verdict_when_store_count_raises(monkeypatch):
+    _patch_happy_collectors(monkeypatch)
+
+    def boom(conn, source):
+        raise RuntimeError("store down")
+    monkeypatch.setattr(vb, "store_count", boom)
+
+    results = run_verification(("bluewin",), "seed")     # must NOT raise
+    res = results["bluewin"]
+    assert any("store count failed" in e for e in res["collector_failures"])
+    assert res["counts"]["folders"] == {"INBOX": 10}     # mailbox numbers preserved
+    assert res["counts"]["store_count"] == -1            # gap marked, not hidden
+    assert source_ok(res) is False
+    out = build_verdict(results, commit="abc1234")       # full verdict still emitted
+    assert "POST_DEPLOY_AC_VERDICT v1" in out
+    assert "FAIL collector: store count failed: store down" in out
+    assert "ac_result: FAIL" in out
+    assert "done_state: NOT_DONE" in out
+    assert "collector_failures 1" in out                 # surfaced in evidence line
+
+
+def test_run_verification_emits_verdict_when_db_connect_raises(monkeypatch):
+    _patch_happy_collectors(monkeypatch)
+
+    def no_db():
+        raise RuntimeError("DATABASE_URL not set")
+    monkeypatch.setattr(vb, "_db_conn", no_db)
+
+    results = run_verification(("bluewin",), "seed")     # must NOT raise
+    res = results["bluewin"]
+    assert any("db connection failed" in e for e in res["collector_failures"])
+    out = build_verdict(results, commit="abc1234")
+    assert "POST_DEPLOY_AC_VERDICT v1" in out
+    assert "ac_result: FAIL" in out
+
+
+def test_run_verification_emits_verdict_when_sampler_raises(monkeypatch):
+    _patch_happy_collectors(monkeypatch)
+
+    def boom(*a, **k):
+        raise RuntimeError("attachment table missing")
+    monkeypatch.setattr(vb, "spot_check_attachments", boom)
+
+    results = run_verification(("bluewin",), "seed")     # must NOT raise
+    res = results["bluewin"]
+    assert any("attachment spot-check failed" in e for e in res["collector_failures"])
+    assert res["counts"]["ok"] is True                   # healthy sections kept
+    assert res["messages"]["ok"] is True
+    assert source_ok(res) is False                       # but source still FAILs
+    assert "ac_result: FAIL" in build_verdict(results, commit="abc1234")
+
+
+def test_run_verification_all_collectors_healthy_passes(monkeypatch):
+    _patch_happy_collectors(monkeypatch)
+    results = run_verification(("bluewin",), "seed")
+    res = results["bluewin"]
+    assert res["collector_failures"] == []
+    assert source_ok(res) is True
+    assert "ac_result: PASS" in build_verdict(results, commit="abc1234")
+
+
+def test_source_ok_false_on_collector_failures():
+    res = _passing_results()["bluewin"]
+    res["collector_failures"] = ["mailbox count collection failed: boom"]
+    assert source_ok(res) is False

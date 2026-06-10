@@ -181,9 +181,11 @@ def build_verdict(results: dict, commit: str, brief: str = "BACKFILL_VERIFY_1") 
         counts = res["counts"]
         msgs = res["messages"]
         atts = res["attachments"]
-        src_ok = counts["ok"] and msgs["ok"] and atts["ok"]
+        src_ok = source_ok(res)
         all_ok = all_ok and src_ok
         lines.append(f"== source={source} ==")
+        for err in res.get("collector_failures", []):
+            lines.append(f"  FAIL collector: {err}")
         counted = counts.get("counted_folders", counts["folders"])
         if counts.get("allowlist"):
             lines.append(f"  allowlist: {', '.join(counts['allowlist'])}")
@@ -215,11 +217,15 @@ def build_verdict(results: dict, commit: str, brief: str = "BACKFILL_VERIFY_1") 
             lines.append(f"    PASS {p}")
         for f in atts["failures"]:
             lines.append(f"    FAIL {f}")
-        evidence_bits.append(
+        bit = (
             f"{source}: store {counts['store_count']}/{counts['mailbox_total']} "
             f"(ratio {counts['ratio']}), msgs {len(msgs['passed'])}/{msgs['checked']}, "
             f"atts {len(atts['passed'])}/{atts['checked']}"
         )
+        n_collector_fails = len(res.get("collector_failures", []))
+        if n_collector_fails:
+            bit += f", collector_failures {n_collector_fails}"
+        evidence_bits.append(bit)
 
     ac_result = "PASS" if all_ok else "FAIL"
     done_state = "DONE" if all_ok else "NOT_DONE"
@@ -400,17 +406,43 @@ def spot_check_attachments(conn, source: str, n: int, seed: str) -> list:
 # Orchestration
 # --------------------------------------------------------------------------
 
+def _empty_counts() -> dict:
+    return {"folders": {}, "counted_folders": {}, "allowlist": None,
+            "allowlist_missing": [], "mailbox_total": 0, "store_count": -1,
+            "ratio": 0.0, "tolerance": TOLERANCE, "ok": False}
+
+
+def _empty_checks() -> dict:
+    return {"checked": 0, "passed": [], "failures": [], "notes": [], "ok": False}
+
+
+def source_ok(res: dict) -> bool:
+    """A source passes only if every section passed AND no collector failed."""
+    return (res["counts"]["ok"] and res["messages"]["ok"]
+            and res["attachments"]["ok"] and not res.get("collector_failures"))
+
+
 def run_verification(sources: tuple, seed: str, imap_folders: list | None = None,
                      graph_folders: list | None = None) -> dict:
-    """Collect everything for the requested sources. A collector failure is a
-    loud per-source error entry, never a silent skip.
+    """Collect everything for the requested sources. NEVER raises (G3 S1, bus
+    #2772): every collector — DB connect, mailbox counts, store count, both
+    samplers — is individually wrapped; a failure becomes a loud per-source
+    `collector_failures` entry and the verdict is still emitted in full.
 
     imap_folders None -> auto allowlist (INBOX + detected sent folder);
     graph_folders None -> DEFAULT_GRAPH_FOLDERS."""
-    conn = _db_conn()
     results = {}
+    conn = None
+    db_error = None
+    try:
+        conn = _db_conn()
+    except Exception as e:
+        db_error = f"db connection failed: {e}"
     try:
         for source in sources:
+            errors = []
+            counts, messages, attachments = _empty_counts(), _empty_checks(), _empty_checks()
+            folders, allowlist = None, None
             try:
                 if source == "bluewin":
                     folders, flags_map = imap_folder_counts()
@@ -419,28 +451,37 @@ def run_verification(sources: tuple, seed: str, imap_folders: list | None = None
                     folders = graph_folder_counts()
                     allowlist = graph_folders or list(DEFAULT_GRAPH_FOLDERS)
             except Exception as e:
-                results[source] = {
-                    "counts": {"folders": {}, "counted_folders": {}, "allowlist": None,
-                               "allowlist_missing": [], "mailbox_total": 0,
-                               "store_count": -1, "ratio": 0.0,
-                               "tolerance": TOLERANCE, "ok": False},
-                    "messages": {"checked": 0, "passed": [], "notes": [],
-                                 "failures": [f"mailbox count collection failed: {e}"],
-                                 "ok": False},
-                    "attachments": {"checked": 0, "passed": [],
-                                    "failures": [], "ok": False},
-                }
-                continue
-            results[source] = {
-                "counts": compare_counts(folders, store_count(conn, source),
-                                         allowlist=allowlist),
-                "messages": evaluate_message_checks(
-                    spot_check_messages(conn, source, MSG_SAMPLE_N, seed)),
-                "attachments": evaluate_attachment_checks(
-                    spot_check_attachments(conn, source, ATT_SAMPLE_N, seed)),
-            }
+                errors.append(f"mailbox count collection failed: {e}")
+            if db_error:
+                errors.append(db_error)
+            else:
+                if folders is not None:
+                    try:
+                        counts = compare_counts(folders, store_count(conn, source),
+                                                allowlist=allowlist)
+                    except Exception as e:
+                        errors.append(f"store count failed: {e}")
+                        # keep the mailbox-side numbers; store_count=-1 marks the gap
+                        counts = compare_counts(folders, -1, allowlist=allowlist)
+                try:
+                    messages = evaluate_message_checks(
+                        spot_check_messages(conn, source, MSG_SAMPLE_N, seed))
+                except Exception as e:
+                    errors.append(f"message spot-check failed: {e}")
+                try:
+                    attachments = evaluate_attachment_checks(
+                        spot_check_attachments(conn, source, ATT_SAMPLE_N, seed))
+                except Exception as e:
+                    errors.append(f"attachment spot-check failed: {e}")
+            results[source] = {"counts": counts, "messages": messages,
+                               "attachments": attachments,
+                               "collector_failures": errors}
     finally:
-        conn.close()
+        if conn is not None:
+            try:
+                conn.close()
+            except Exception:
+                pass
     return results
 
 
@@ -497,10 +538,7 @@ def main() -> int:
     if args.post:
         verdict_block = out.split("POST_DEPLOY_AC_VERDICT v1", 1)
         post_verdict("POST_DEPLOY_AC_VERDICT v1" + verdict_block[1])
-    return 0 if all(
-        r["counts"]["ok"] and r["messages"]["ok"] and r["attachments"]["ok"]
-        for r in results.values()
-    ) else 1
+    return 0 if results and all(source_ok(r) for r in results.values()) else 1
 
 
 if __name__ == "__main__":
