@@ -11,6 +11,7 @@
 - [Perplexity Ask API](~/baker-vault/_ops/how-to/perplexity-api.md) — cited synthesis via MCP, ~$0.01-0.05/query, replaces 3-5 chained WebSearch+WebFetch calls. Wired in Researcher + AID-T pickers; others escalate via cross-agent dispatch.
 - [Chrome debug port 9222 recovery](.claude/how-to/chrome-debug-recovery.md) — auto-starts at login; if dead, `launchctl kickstart -k gui/$(id -u)/com.baker.chrome-debug`
 - [Cheap OCR for desks](~/baker-vault/_ops/how-to/cheap-ocr-desk.md) — `desk-ocr <image>` = free on-device Apple Vision OCR for number-in-image docs. Never feed flat PNGs/charts to Opus vision just to read digits.
+- [Bluewin private email read](.claude/how-to/bluewin-read-via-mail-app.md) — Director's dvallen@bluewin.ch via Mail.app AppleScript; Director-request only, never auto-ingest; Baker cloud tools blind to it
 
 ## Adding a new how-to
 
