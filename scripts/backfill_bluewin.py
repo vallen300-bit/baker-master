@@ -339,6 +339,73 @@ def _load_attachment_writer(skip_attachments: bool):
         sys.exit(3)
 
 
+class AttachmentStoreFailure(RuntimeError):
+    """An attachment insert failed (None return or exception from the store).
+
+    G3-S1 (codex): insert_attachment -> None is the locked FAILURE semantics.
+    Swallowing it and advancing the cursor loses the attachment FOREVER on
+    resume, because message-id dedup blocks a re-walk of that message. The
+    batch must roll back and retry; after MAX_BATCH_ATTEMPTS, abort loud.
+    """
+
+    def __init__(self, folder: str, uid: int, filename: str, cause: Exception | None = None):
+        self.folder, self.uid, self.filename, self.cause = folder, uid, filename, cause
+        detail = f" ({cause})" if cause else " (store returned None)"
+        super().__init__(f"attachment store failed: {folder} uid={uid} file={filename!r}{detail}")
+
+
+MAX_BATCH_ATTEMPTS = 3
+
+
+def _process_batch(imap, db_conn, folder: str, uidvalidity: int, batch: list[int],
+                   insert_attachment) -> tuple[int, int, int]:
+    """One ATTEMPT at a batch; returns (processed, inserted, att_count).
+
+    Raises AttachmentStoreFailure on any attachment-store failure — caller
+    rolls back (message inserts of this attempt included) and the cursor is
+    NOT advanced, so the whole batch replays cleanly on retry/resume.
+    """
+    processed = inserted = att_count = 0
+    with db_conn.cursor() as cur:
+        for uid in batch:
+            typ, fdata = imap.uid("fetch", str(uid), "(RFC822 INTERNALDATE)")
+            if typ != "OK" or not fdata or fdata[0] is None:
+                logger.warning("%s uid=%d: fetch failed — skipping", folder, uid)
+                continue
+            raw = None
+            internaldate_raw = None
+            for item in fdata:
+                if isinstance(item, tuple) and len(item) >= 2:
+                    raw = item[1]
+                    internaldate_raw = item[0]
+                elif isinstance(item, bytes) and b"INTERNALDATE" in item:
+                    internaldate_raw = item
+            if not raw:
+                logger.warning("%s uid=%d: empty RFC822 — skipping", folder, uid)
+                continue
+            try:
+                parsed, attachments = parse_message(
+                    raw, folder, uidvalidity, uid, internaldate_raw
+                )
+            except Exception as e:  # noqa: BLE001 — one bad msg must not kill the run
+                logger.warning("%s uid=%d: parse failed: %s — skipping", folder, uid, e)
+                continue
+            inserted += insert_message_row(cur, parsed)
+            if insert_attachment is not None:
+                for fname, mime, payload in attachments:
+                    try:
+                        att_id = insert_attachment(parsed["message_id"], SOURCE,
+                                                   fname, mime, payload)
+                    except Exception as e:  # noqa: BLE001 — same failure class as None
+                        raise AttachmentStoreFailure(folder, uid, fname, e) from e
+                    if att_id is None:
+                        raise AttachmentStoreFailure(folder, uid, fname)
+                    att_count += 1
+            processed += 1
+    db_conn.commit()
+    return processed, inserted, att_count
+
+
 def backfill_folder(imap, db_conn, folder: str, insert_attachment, limit: int | None,
                     batch_size: int = BATCH_SIZE) -> tuple[int, int, int]:
     """Backfill one folder oldest->newest. Returns (processed, inserted, attachments)."""
@@ -376,57 +443,39 @@ def backfill_folder(imap, db_conn, folder: str, insert_attachment, limit: int | 
 
     processed = inserted = att_count = 0
     for batch in chunks(uids, batch_size):
-        batch_inserted = 0
-        try:
-            with db_conn.cursor() as cur:
-                for uid in batch:
-                    typ, fdata = imap.uid("fetch", str(uid), "(RFC822 INTERNALDATE)")
-                    if typ != "OK" or not fdata or fdata[0] is None:
-                        logger.warning("%s uid=%d: fetch failed — skipping", folder, uid)
-                        continue
-                    raw = None
-                    internaldate_raw = None
-                    for item in fdata:
-                        if isinstance(item, tuple) and len(item) >= 2:
-                            raw = item[1]
-                            internaldate_raw = item[0]
-                        elif isinstance(item, bytes) and b"INTERNALDATE" in item:
-                            internaldate_raw = item
-                    if not raw:
-                        logger.warning("%s uid=%d: empty RFC822 — skipping", folder, uid)
-                        continue
-                    try:
-                        parsed, attachments = parse_message(
-                            raw, folder, uidvalidity, uid, internaldate_raw
-                        )
-                    except Exception as e:  # noqa: BLE001 — one bad msg must not kill the run
-                        logger.warning("%s uid=%d: parse failed: %s — skipping", folder, uid, e)
-                        continue
-                    batch_inserted += insert_message_row(cur, parsed)
-                    if insert_attachment is not None:
-                        for fname, mime, payload in attachments:
-                            try:
-                                if insert_attachment(parsed["message_id"], SOURCE,
-                                                     fname, mime, payload) is not None:
-                                    att_count += 1
-                            except Exception as e:  # noqa: BLE001
-                                logger.warning(
-                                    "%s uid=%d att %r: store failed: %s",
-                                    folder, uid, fname, e,
-                                )
-                    processed += 1
-            db_conn.commit()
-        except Exception as e:  # noqa: BLE001
-            db_conn.rollback()
-            logger.error("%s: batch failed, rolled back (cursor NOT advanced): %s", folder, e)
-            raise
-        inserted += batch_inserted
+        for attempt in range(1, MAX_BATCH_ATTEMPTS + 1):
+            try:
+                b_processed, b_inserted, b_atts = _process_batch(
+                    imap, db_conn, folder, uidvalidity, batch, insert_attachment
+                )
+                break
+            except AttachmentStoreFailure as e:
+                db_conn.rollback()
+                if attempt == MAX_BATCH_ATTEMPTS:
+                    logger.error(
+                        "%s: batch uid %d..%d ABORTED after %d attachment-store "
+                        "failures (cursor NOT advanced — resume replays this batch): %s",
+                        folder, batch[0], batch[-1], MAX_BATCH_ATTEMPTS, e,
+                    )
+                    raise
+                logger.warning(
+                    "%s: attempt %d/%d rolled back (%s) — retrying batch",
+                    folder, attempt, MAX_BATCH_ATTEMPTS, e,
+                )
+                time.sleep(2 * attempt)
+            except Exception as e:  # noqa: BLE001
+                db_conn.rollback()
+                logger.error("%s: batch failed, rolled back (cursor NOT advanced): %s", folder, e)
+                raise
+        processed += b_processed
+        inserted += b_inserted
+        att_count += b_atts
         if not dry_run:
             write_progress(db_conn, folder, format_cursor(uidvalidity, batch[-1]),
-                           batch_inserted, total_estimate=msg_count)
+                           b_inserted, total_estimate=msg_count)
         logger.info(
             "%s: batch -> uid %d | processed %d/%d | inserted %d (+%d) | attachments %d",
-            folder, batch[-1], processed, len(uids), inserted, batch_inserted, att_count,
+            folder, batch[-1], processed, len(uids), inserted, b_inserted, att_count,
         )
         time.sleep(BATCH_SLEEP_S)
     return processed, inserted, att_count

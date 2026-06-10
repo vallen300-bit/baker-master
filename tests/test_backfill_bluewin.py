@@ -176,3 +176,104 @@ def test_quote_folder():
     assert _quote_folder("INBOX") == '"INBOX"'
     assert _quote_folder("Sent Messages") == '"Sent Messages"'
     assert _quote_folder('"Sent"') == '"Sent"'  # already quoted -> unchanged
+
+# ── G3-S1: attachment-store failure must NOT advance the cursor ─────────
+
+
+class FakeIMAP:
+    """Minimal IMAP stub: one folder, two messages with one attachment each."""
+
+    def __init__(self):
+        self.raw = _mime_with_attachment()
+
+    def status(self, mailbox, items):
+        return "OK", [b'"INBOX" (UIDVALIDITY 7 MESSAGES 2)']
+
+    def select(self, mailbox, readonly=False):
+        return "OK", [b"2"]
+
+    def uid(self, cmd, *args):
+        if cmd == "search":
+            return "OK", [b"1 2"]
+        # fetch
+        return "OK", [(b'1 (INTERNALDATE "12-Apr-2021 10:30:00 +0200" RFC822 {1}', self.raw)]
+
+
+class FakeDBConn:
+    def __init__(self):
+        self.cur = FakeCursor()
+        self.commits = 0
+        self.rollbacks = 0
+
+    def cursor(self):
+        conn = self
+
+        class _Ctx:
+            def __enter__(self_inner):
+                return conn.cur
+
+            def __exit__(self_inner, *a):
+                return False
+
+        return _Ctx()
+
+    def commit(self):
+        self.commits += 1
+
+    def rollback(self):
+        self.rollbacks += 1
+
+
+def _progress_writes(fake_conn):
+    """Cursor-advance INSERTs only (read_progress SELECT doesn't count)."""
+    return [c for c in fake_conn.cur.calls if "INSERT INTO email_backfill_progress" in c[0]]
+
+
+def test_attachment_store_none_blocks_cursor(monkeypatch):
+    """G3-S1: insert_attachment -> None => batch aborts loud, cursor NOT advanced."""
+    import scripts.backfill_bluewin as bb
+
+    monkeypatch.setattr(bb.time, "sleep", lambda s: None)  # no retry/batch waits
+    fake_db = FakeDBConn()
+    fake_db.cur.fetchone = lambda: None  # read_progress: no cursor yet
+
+    with pytest.raises(bb.AttachmentStoreFailure):
+        bb.backfill_folder(FakeIMAP(), fake_db, "INBOX",
+                           lambda *a: None,  # store FAILURE semantics (None)
+                           limit=None, batch_size=10)
+
+    assert _progress_writes(fake_db) == []          # cursor never advanced
+    assert fake_db.commits == 0                     # no partial batch committed
+    assert fake_db.rollbacks == bb.MAX_BATCH_ATTEMPTS  # bounded retries, all rolled back
+
+
+def test_attachment_store_exception_blocks_cursor(monkeypatch):
+    """Same failure class: store raising must also roll back, not advance."""
+    import scripts.backfill_bluewin as bb
+
+    monkeypatch.setattr(bb.time, "sleep", lambda s: None)
+    fake_db = FakeDBConn()
+    fake_db.cur.fetchone = lambda: None
+
+    def boom(*a):
+        raise ConnectionError("pool exhausted")
+
+    with pytest.raises(bb.AttachmentStoreFailure):
+        bb.backfill_folder(FakeIMAP(), fake_db, "INBOX", boom, limit=None, batch_size=10)
+    assert _progress_writes(fake_db) == []
+
+
+def test_attachment_store_success_advances_cursor(monkeypatch):
+    """Positive path: successful store => batch commits + cursor advances."""
+    import scripts.backfill_bluewin as bb
+
+    monkeypatch.setattr(bb.time, "sleep", lambda s: None)
+    fake_db = FakeDBConn()
+    fake_db.cur.fetchone = lambda: None
+
+    p, i, a = bb.backfill_folder(FakeIMAP(), fake_db, "INBOX",
+                                 lambda *args: 1,  # store returns row id
+                                 limit=None, batch_size=10)
+    assert p == 2 and a == 2
+    assert len(_progress_writes(fake_db)) == 1      # cursor advanced once (one batch)
+    assert fake_db.commits == 2                     # batch commit + write_progress commit
