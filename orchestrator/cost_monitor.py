@@ -29,6 +29,7 @@ MODEL_COSTS = {
     "claude-opus-4-8": {"input": 5.00, "output": 25.00},
     "claude-opus-4-7": {"input": 5.00, "output": 25.00},
     "claude-opus-4-6": {"input": 15.00, "output": 75.00},  # legacy generation
+    "claude-fable-5": {"input": 10.00, "output": 50.00},  # FABLE_5_MIGRATION_1, GA 2026-06-09
     "claude-sonnet-4-6": {"input": 3.00, "output": 15.00},
     "claude-haiku-4-5-20251001": {"input": 0.80, "output": 4.00},
     # Gemini

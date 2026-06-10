@@ -45,6 +45,11 @@ PRICING: dict[str, dict[str, float]] = {
         "input": float(os.getenv("PRICE_HAIKU4_IN", "0.80")),
         "output": float(os.getenv("PRICE_HAIKU4_OUT", "4.00")),
     },
+    "claude-fable-5": {
+        # Fable 5 (Mythos-class) GA 2026-06-09: $10/$50 per MTok. FABLE_5_MIGRATION_1.
+        "input": float(os.getenv("PRICE_FABLE5_IN", "10.00")),
+        "output": float(os.getenv("PRICE_FABLE5_OUT", "50.00")),
+    },
     "gemma4:latest": {"input": 0.0, "output": 0.0},
     "qwen2.5:14b": {"input": 0.0, "output": 0.0},
 }
@@ -63,6 +68,8 @@ def _model_key(full_id: str) -> str:
         return "claude-sonnet-4"
     if "haiku" in full_id:
         return "claude-haiku-4"
+    if "fable" in full_id:
+        return "claude-fable-5"
     if full_id in PRICING:
         return full_id
     raise ValueError(
