@@ -128,6 +128,7 @@ def _init_pool_capture(monkeypatch, env_value):
     def fake_pool(minconn, maxconn, **kw):
         captured["minconn"] = minconn
         captured["maxconn"] = maxconn
+        captured["kwargs"] = kw
         return mock.MagicMock()
 
     monkeypatch.setattr(sb.psycopg2.pool, "ThreadedConnectionPool", fake_pool)
@@ -159,6 +160,26 @@ def test_pool_maxconn_malformed_env_falls_back_to_default(monkeypatch, caplog):
 def test_pool_maxconn_clamped_to_minimum_one(monkeypatch):
     captured = _init_pool_capture(monkeypatch, "0")
     assert captured["maxconn"] == 1
+
+
+def test_pool_sets_default_lock_timeout(monkeypatch):
+    monkeypatch.delenv("BAKER_STOREBACK_LOCK_TIMEOUT_MS", raising=False)
+    captured = _init_pool_capture(monkeypatch, None)
+    assert "lock_timeout=2000ms" in captured["kwargs"]["options"]
+
+
+def test_pool_lock_timeout_env_override(monkeypatch):
+    monkeypatch.setenv("BAKER_STOREBACK_LOCK_TIMEOUT_MS", "750")
+    captured = _init_pool_capture(monkeypatch, None)
+    assert "lock_timeout=750ms" in captured["kwargs"]["options"]
+
+
+def test_pool_lock_timeout_malformed_env_falls_back_to_default(monkeypatch, caplog):
+    monkeypatch.setenv("BAKER_STOREBACK_LOCK_TIMEOUT_MS", "bad-timeout")
+    with caplog.at_level(logging.WARNING, logger="sentinel.store_back"):
+        captured = _init_pool_capture(monkeypatch, None)
+    assert "lock_timeout=2000ms" in captured["kwargs"]["options"]
+    assert "BAKER_STOREBACK_LOCK_TIMEOUT_MS" in " ".join(r.message for r in caplog.records)
 
 
 # ----------------------------------------------------------------------

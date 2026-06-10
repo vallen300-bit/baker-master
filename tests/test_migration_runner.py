@@ -22,6 +22,8 @@ import hashlib
 import os
 import pathlib
 import re
+import threading
+import time
 import tempfile
 from contextlib import contextmanager
 from pathlib import Path
@@ -272,6 +274,39 @@ def test_startup_call_order():
     assert manager.mock_calls == [
         call.init(), call.migrate(), call.vault(), call.start(),
     ]
+
+
+def test_init_store_schedules_legacy_bootstrap_without_blocking(monkeypatch):
+    """Legacy store DDL warmup must not hold FastAPI startup hostage."""
+    import outputs.dashboard as dashboard
+
+    started = threading.Event()
+    release = threading.Event()
+    finished = threading.Event()
+
+    class _StoreWithoutConn:
+        def _get_conn(self):
+            return None
+
+    def slow_get_store():
+        started.set()
+        release.wait(timeout=0.25)
+        finished.set()
+        return _StoreWithoutConn()
+
+    monkeypatch.setattr(dashboard, "_get_store", slow_get_store)
+    monkeypatch.setattr(dashboard, "_store_bootstrap_started", False, raising=False)
+    monkeypatch.setattr(dashboard, "_store_bootstrap_thread", None, raising=False)
+
+    start = time.monotonic()
+    try:
+        dashboard._init_store()
+        elapsed = time.monotonic() - start
+        assert elapsed < 0.10, "_init_store must schedule warmup, not wait for it"
+        assert started.wait(timeout=0.20), "background store warmup did not start"
+    finally:
+        release.set()
+        finished.wait(timeout=0.50)
 
 
 # ===========================================================================
