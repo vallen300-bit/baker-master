@@ -11,6 +11,7 @@ All writes use parameterized queries — no SQL injection risk.
 """
 import json
 import logging
+import os
 import re
 import uuid
 from datetime import datetime, timezone
@@ -303,12 +304,16 @@ class SentinelStoreBack:
         cycle threads. SimpleConnectionPool is documented single-thread-only.
         """
         try:
+            # EMAIL_STORE_CONN_HARDEN_1: 5 was exhausted at every 5-min poll
+            # tick once the bluewin/graph lanes ran concurrently (RCA bus
+            # #2813). Env-overridable for ops tuning without a deploy.
+            maxconn = int(os.getenv("BAKER_STOREBACK_MAXCONN", "15"))
             self._pool = psycopg2.pool.ThreadedConnectionPool(
                 minconn=1,
-                maxconn=5,
+                maxconn=maxconn,
                 **config.postgres.dsn_params,
             )
-            logger.info("PostgreSQL connection pool initialized")
+            logger.info(f"PostgreSQL connection pool initialized (maxconn={maxconn})")
         except Exception as e:
             logger.warning(f"PostgreSQL pool init failed (non-fatal): {e}")
             self._pool = None

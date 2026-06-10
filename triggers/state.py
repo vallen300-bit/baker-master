@@ -464,8 +464,18 @@ class TriggerState:
             store = self._get_store()
             conn = store._get_conn()
             if not conn:
-                logger.warning("No pooled DB connection — assuming not processed")
-                return False
+                # EMAIL_STORE_CONN_HARDEN_1: fail CLOSED. Returning False here
+                # ("assume not processed") caused duplicate processing +
+                # duplicate LLM spend at every pool-exhaustion window (RCA bus
+                # #2813). Returning True skips the item this tick; it is NOT
+                # marked processed in trigger_log, so it is retried when the
+                # source re-surfaces it. NOTE: watermark-cursor pollers can
+                # advance past a skipped item within a mixed batch — rare loss
+                # window, flagged to lead in the ship report.
+                logger.warning(
+                    f"No pooled DB connection — failing CLOSED, skipping {source}:{source_id} this tick"
+                )
+                return True
             try:
                 cur = conn.cursor()
                 cur.execute(

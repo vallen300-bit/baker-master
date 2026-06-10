@@ -678,9 +678,27 @@ class SentinelRetriever:
     # ----------------------------------------------------------------
 
     def _get_pg_conn(self):
-        """Lazy-init PostgreSQL connection."""
+        """Lazy-init PostgreSQL connection, validated on checkout.
+
+        EMAIL_STORE_CONN_HARDEN_1: this is a single cached connection shared
+        by every retriever read AND the email-store search path. Neon's pooler
+        idle-kills it, so the first caller after an idle gap used to eat one
+        "SSL connection has been closed unexpectedly" failure (RCA bus #2813).
+        A cheap SELECT 1 ping on checkout turns that into a transparent
+        reconnect (retry-once). If the fresh reconnect also fails, the error
+        surfaces to the caller exactly as before.
+        """
+        import psycopg2
+        if self._pg_pool is not None:
+            try:
+                cur = self._pg_pool.cursor()
+                cur.execute("SELECT 1")
+                cur.fetchone()
+                cur.close()
+            except Exception as e:
+                logger.info(f"Cached PG connection stale ({e!r:.80}) — reconnecting")
+                self._reset_pg_conn()
         if self._pg_pool is None:
-            import psycopg2
             self._pg_pool = psycopg2.connect(**config.postgres.dsn_params)
         return self._pg_pool
 
