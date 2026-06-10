@@ -42,30 +42,30 @@ print(json.dumps({"hookSpecificOutput": {"hookEventName": "SessionStart", "addit
 
 # BEGIN GENERATED AGENT IDENTITY ROLE MAP
 # Generated from /Users/dimitry/baker-vault/_ops/registries/agent_registry.yml
-# SHA256: 851feca2101e2324f4bfdddd0db0bc5f3be0ec1163195e52de922f2c0f1a732d
+# SHA256: 05eb7887dcd94be3689435c7c78d8596bad089c398ef2763f09c358d45768819
 case "${BAKER_ROLE:-}" in
-    lead|LEAD|AH1|aihead1|AIHEAD1) SLUG=lead ;;
-    cowork-ah1|COWORK-AH1|cowork_ah1|COWORK_AH1|AH1-APP) SLUG=cowork-ah1 ;;
-    deputy|DEPUTY|AH2|aihead2|AIHEAD2) SLUG=deputy ;;
-    deputy-codex|DEPUTY-CODEX|deputy_codex|DEPUTY_CODEX) SLUG=deputy-codex ;;
-    cortex|CORTEX) SLUG=cortex ;;
-    aid|AID|ai-dennis|AI-DENNIS) SLUG=aid ;;
-    b1|B1) SLUG=b1 ;;
-    b2|B2) SLUG=b2 ;;
-    b3|B3) SLUG=b3 ;;
-    b4|B4) SLUG=b4 ;;
-    researcher|RESEARCHER|research-agent|RESEARCH-AGENT) SLUG=researcher ;;
-    codex|CODEX) SLUG=codex ;;
-    codex-arch|CODEX-ARCH|codex_arch|CODEX_ARCH) SLUG=codex-arch ;;
-    clerk|CLERK) SLUG=clerk ;;
-    clerk-haiku|CLERK-HAIKU|clerk_haiku|CLERK_HAIKU) SLUG=clerk-haiku ;;
-    hag-desk|HAG-DESK|hag_desk|HAG_DESK|hagenauer-desk|HAGENAUER-DESK) SLUG=hag-desk ;;
-    origination-desk|ORIGINATION-DESK|origination_desk|ORIGINATION_DESK) SLUG=origination-desk ;;
-    CM-1|CM_1|cm-1) SLUG=CM-1 ;;
-    CM-2|CM_2|cm-2) SLUG=CM-2 ;;
-    CM-3|CM_3|cm-3) SLUG=CM-3 ;;
-    CM-4|CM_4|cm-4) SLUG=CM-4 ;;
-    hag-filer|HAG-FILER|hag_filer|HAG_FILER) SLUG=hag-filer ;;
+    AG-001|ag-001|lead|LEAD|AH1|aihead1|AIHEAD1) SLUG=lead ;;
+    AG-002|ag-002|cowork-ah1|COWORK-AH1|cowork_ah1|COWORK_AH1|AH1-APP) SLUG=cowork-ah1 ;;
+    AG-003|ag-003|deputy|DEPUTY|AH2|aihead2|AIHEAD2) SLUG=deputy ;;
+    AG-004|ag-004|deputy-codex|DEPUTY-CODEX|deputy_codex|DEPUTY_CODEX) SLUG=deputy-codex ;;
+    AG-005|ag-005|cortex|CORTEX) SLUG=cortex ;;
+    AG-006|ag-006|aid|AID|ai-dennis|AI-DENNIS) SLUG=aid ;;
+    AG-101|ag-101|b1|B1) SLUG=b1 ;;
+    AG-102|ag-102|b2|B2) SLUG=b2 ;;
+    AG-103|ag-103|b3|B3) SLUG=b3 ;;
+    AG-104|ag-104|b4|B4) SLUG=b4 ;;
+    AG-201|ag-201|researcher|RESEARCHER|research-agent|RESEARCH-AGENT) SLUG=researcher ;;
+    AG-202|ag-202|codex|CODEX) SLUG=codex ;;
+    AG-203|ag-203|codex-arch|CODEX-ARCH|codex_arch|CODEX_ARCH) SLUG=codex-arch ;;
+    AG-204|ag-204|clerk|CLERK) SLUG=clerk ;;
+    AG-205|ag-205|clerk-haiku|CLERK-HAIKU|clerk_haiku|CLERK_HAIKU) SLUG=clerk-haiku ;;
+    AG-301|ag-301|hag-desk|HAG-DESK|hag_desk|HAG_DESK|hagenauer-desk|HAGENAUER-DESK) SLUG=hag-desk ;;
+    AG-302|ag-302|origination-desk|ORIGINATION-DESK|origination_desk|ORIGINATION_DESK) SLUG=origination-desk ;;
+    AG-401|ag-401|CM-1|CM_1|cm-1) SLUG=CM-1 ;;
+    AG-402|ag-402|CM-2|CM_2|cm-2) SLUG=CM-2 ;;
+    AG-403|ag-403|CM-3|CM_3|cm-3) SLUG=CM-3 ;;
+    AG-404|ag-404|CM-4|CM_4|cm-4) SLUG=CM-4 ;;
+    AG-405|ag-405|hag-filer|HAG-FILER|hag_filer|HAG_FILER) SLUG=hag-filer ;;
     *)
         # No BAKER_ROLE → silent no-op. Cwd-based fallback intentionally NOT
         # mirrored here to avoid auto-draining for sessions not meant to be on

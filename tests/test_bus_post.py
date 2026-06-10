@@ -321,3 +321,29 @@ def test_16_clerk_haiku_recipient_and_sender(stub_daemon, fake_op_path):
     assert r.returncode == 0, r.stderr
     assert captured[0]["path"] == "/msg/clerk-haiku"
     assert captured[0]["payload"]["to"] == ["clerk-haiku"]
+
+
+def test_17_sh_agent_id_recipient_and_sender(stub_daemon, fake_op_path):
+    """sh: AG-id sender/recipient inputs canonicalize to bus slugs."""
+    url, captured = stub_daemon
+    r = _run_sh(
+        ["AG-203", "hello architect", "dispatch/ag-id-smoke"],
+        _env_with({"BAKER_ROLE": "AG-001", "BRISEN_LAB_DAEMON_URL": url},
+                  fake_op_dir=fake_op_path),
+    )
+    assert r.returncode == 0, r.stderr
+    assert captured[0]["path"] == "/msg/codex-arch"
+    assert captured[0]["payload"]["to"] == ["codex-arch"]
+
+
+def test_18_py_agent_id_recipients(stub_daemon, fake_op_path):
+    """py: AG-id recipients canonicalize before path and payload are built."""
+    url, captured = stub_daemon
+    r = _run_py(
+        ["--to", "AG-203,AG-004", "--body", "hello ids"],
+        _env_with({"BAKER_ROLE": "AG-001", "BRISEN_LAB_DAEMON_URL": url},
+                  fake_op_dir=fake_op_path),
+    )
+    assert r.returncode == 0, r.stderr
+    assert captured[0]["path"] == "/msg/codex-arch"
+    assert captured[0]["payload"]["to"] == ["codex-arch", "deputy-codex"]

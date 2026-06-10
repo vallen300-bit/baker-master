@@ -3,7 +3,7 @@
 
 Usage:
     bus_post.py --to lead --body "..." [--topic ...] [--parent-id N] [--kind dispatch] [--tier B]
-    bus_post.py --to lead,deputy --body "..."  # multiple recipients
+    bus_post.py --to AG-203,deputy --body "..."  # IDs / slugs, multiple recipients
     BAKER_ROLE=aid bus_post.py --to lead --body "..."  # AID-Terminal sender
 
 Companion to scripts/bus_post.sh. Use the .sh for one-liner dispatches; the
@@ -43,6 +43,12 @@ def _resolve_sender() -> str:
             f"{', '.join(sorted(set(ROLE_TO_SLUG.values())))} plus aliases"
         )
     return ROLE_TO_SLUG[role]
+
+
+def _resolve_recipient(value: str) -> str | None:
+    if value in VALID_SLUGS:
+        return value
+    return ROLE_TO_SLUG.get(value)
 
 
 def _fetch_key(sender: str) -> str:
@@ -85,7 +91,7 @@ def _post(recipient: str, payload: dict, key: str) -> dict:
 
 def main() -> None:
     ap = argparse.ArgumentParser(description=__doc__)
-    ap.add_argument("--to", required=True, help="comma-separated recipient slug(s)")
+    ap.add_argument("--to", required=True, help="comma-separated recipient slug(s), alias(es), or AG id(s)")
     ap.add_argument("--body", required=True, help="message body")
     ap.add_argument("--topic", default=None)
     ap.add_argument("--parent-id", type=int, default=None)
@@ -97,12 +103,19 @@ def main() -> None:
     ap.add_argument("--tier", default="B", choices=["B", "A", "director_only"])
     args = ap.parse_args()
 
-    recipients = [r.strip() for r in args.to.split(",") if r.strip()]
+    recipient_inputs = [r.strip() for r in args.to.split(",") if r.strip()]
     # F2-FU-1: director-recipient is daemon-gated (BRISEN_LAB_DIRECTOR_RECIPIENT_BLOCKED).
     # Single control point — script passes through; daemon enforces.
-    bad = [r for r in recipients if r not in VALID_SLUGS]
+    recipients: list[str] = []
+    bad: list[str] = []
+    for recipient_input in recipient_inputs:
+        recipient = _resolve_recipient(recipient_input)
+        if recipient is None:
+            bad.append(recipient_input)
+        else:
+            recipients.append(recipient)
     if bad:
-        sys.exit(f"ERROR: unknown slug(s): {bad}. Valid: {sorted(VALID_SLUGS)}")
+        sys.exit(f"ERROR: unknown slug, alias, or agent id(s): {bad}. Valid slugs: {sorted(VALID_SLUGS)}")
 
     sender = _resolve_sender()
     key = _fetch_key(sender)

@@ -19,6 +19,7 @@ REGISTRY = Path("/Users/dimitry/baker-vault/_ops/registries/agent_registry.yml")
 def test_identity_label_disambiguates_codex_variants():
     assert identity_label("codex") == "AG-202 Codex Reviewer [codex]"
     assert identity_label("codex-arch") == "AG-203 Codex Architect [codex-arch]"
+    assert identity_label("AG-203") == "AG-203 Codex Architect [codex-arch]"
 
 
 def test_aliases_resolve_to_canonical_slugs():
@@ -26,6 +27,15 @@ def test_aliases_resolve_to_canonical_slugs():
     assert resolve_agent("research-agent").slug == "researcher"
     assert resolve_agent("ai-dennis").slug == "aid"
     assert resolve_agent("CM_1").slug == "CM-1"
+
+
+def test_agent_ids_resolve_to_canonical_slugs():
+    assert resolve_agent("AG-203").slug == "codex-arch"
+    assert resolve_agent("ag-203").slug == "codex-arch"
+    assert resolve_agent("AG-004").slug == "deputy-codex"
+    assert resolve_agent("AG-003").slug == "deputy"
+    assert identity_label("AG-004") == "AG-004 Deputy Codex [deputy-codex]"
+    assert identity_label("AG-003") == "AG-003 Deputy Claude [deputy]"
 
 
 def test_bus_sets_include_clerk_haiku_and_exclude_reserved_or_legacy_architect():

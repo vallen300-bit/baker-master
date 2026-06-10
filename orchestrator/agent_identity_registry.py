@@ -52,6 +52,9 @@ def _role_map_for(agents: Iterable[AgentIdentity]) -> dict[str, str]:
     role_map: dict[str, str] = {}
     for agent in agents:
         variants = {
+            agent.agent_id,
+            agent.agent_id.upper(),
+            agent.agent_id.lower(),
             agent.slug,
             agent.slug.upper(),
             agent.slug.replace("-", "_"),
@@ -65,7 +68,7 @@ def _role_map_for(agents: Iterable[AgentIdentity]) -> dict[str, str]:
 
 
 def resolve_agent(value: str, registry_path: str | Path | None = None) -> AgentIdentity:
-    """Resolve a slug or alias into one canonical agent identity."""
+    """Resolve an agent ID, slug, or alias into one canonical agent identity."""
     raw = (value or "").strip()
     if not raw:
         raise ValueError("agent value is empty")

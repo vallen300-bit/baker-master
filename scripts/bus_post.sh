@@ -3,7 +3,7 @@
 # Director ratified 2026-05-06 OPTION A + policy (ii): op-fetch sender key on demand.
 #
 # Usage:
-#   bus_post.sh <recipient_slug> <body> [topic]
+#   bus_post.sh <recipient_slug_or_id> <body> [topic]
 #
 # Env:
 #   BAKER_ROLE              — required. Maps to sender slug.
@@ -26,7 +26,7 @@ if [ "${1:-}" = "" ] || [ "${2:-}" = "" ]; then
     exit 2
 fi
 
-RECIPIENT="$1"
+RECIPIENT_INPUT="$1"
 BODY="$2"
 TOPIC="${3:-}"
 
@@ -37,10 +37,14 @@ TOPIC="${3:-}"
 # BRISEN_LAB_DIRECTOR_RECIPIENT_BLOCKED. Single control point — flipping the
 # daemon flag is now the only kill-switch (no script-layer drift).
 
-# Validate against generated registry slugs plus fixed system endpoints.
-if ! agent_identity_is_valid_slug "$RECIPIENT"; then
-    echo "ERROR: unknown slug: $RECIPIENT" >&2
-    echo "  Valid: ${AGENT_IDENTITY_VALID_SLUGS[*]}" >&2
+# Resolve agent IDs / aliases to canonical slugs; system endpoints pass through.
+if agent_identity_is_valid_slug "$RECIPIENT_INPUT"; then
+    RECIPIENT="$RECIPIENT_INPUT"
+elif RESOLVED_RECIPIENT="$(agent_identity_resolve_role "$RECIPIENT_INPUT" 2>/dev/null)"; then
+    RECIPIENT="$RESOLVED_RECIPIENT"
+else
+    echo "ERROR: unknown slug, alias, or agent id: $RECIPIENT_INPUT" >&2
+    echo "  Valid slugs: ${AGENT_IDENTITY_VALID_SLUGS[*]}" >&2
     exit 1
 fi
 

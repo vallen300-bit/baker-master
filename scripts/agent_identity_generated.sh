@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Generated agent identity data. Do not edit by hand.
 # Source: /Users/dimitry/baker-vault/_ops/registries/agent_registry.yml
-# SHA256: 851feca2101e2324f4bfdddd0db0bc5f3be0ec1163195e52de922f2c0f1a732d
+# SHA256: 05eb7887dcd94be3689435c7c78d8596bad089c398ef2763f09c358d45768819
 # Regenerate with: python3 scripts/generate_agent_identity_artifacts.py --write
 
 AGENT_IDENTITY_SYSTEM_RECIPIENT_SLUGS=(director daemon)
@@ -18,28 +18,28 @@ agent_identity_is_valid_slug() {
 
 agent_identity_resolve_role() {
   case "${1:-}" in
-    lead|LEAD|AH1|aihead1|AIHEAD1) printf '%s\n' lead ;;
-    cowork-ah1|COWORK-AH1|cowork_ah1|COWORK_AH1|AH1-APP) printf '%s\n' cowork-ah1 ;;
-    deputy|DEPUTY|AH2|aihead2|AIHEAD2) printf '%s\n' deputy ;;
-    deputy-codex|DEPUTY-CODEX|deputy_codex|DEPUTY_CODEX) printf '%s\n' deputy-codex ;;
-    cortex|CORTEX) printf '%s\n' cortex ;;
-    aid|AID|ai-dennis|AI-DENNIS) printf '%s\n' aid ;;
-    b1|B1) printf '%s\n' b1 ;;
-    b2|B2) printf '%s\n' b2 ;;
-    b3|B3) printf '%s\n' b3 ;;
-    b4|B4) printf '%s\n' b4 ;;
-    researcher|RESEARCHER|research-agent|RESEARCH-AGENT) printf '%s\n' researcher ;;
-    codex|CODEX) printf '%s\n' codex ;;
-    codex-arch|CODEX-ARCH|codex_arch|CODEX_ARCH) printf '%s\n' codex-arch ;;
-    clerk|CLERK) printf '%s\n' clerk ;;
-    clerk-haiku|CLERK-HAIKU|clerk_haiku|CLERK_HAIKU) printf '%s\n' clerk-haiku ;;
-    hag-desk|HAG-DESK|hag_desk|HAG_DESK|hagenauer-desk|HAGENAUER-DESK) printf '%s\n' hag-desk ;;
-    origination-desk|ORIGINATION-DESK|origination_desk|ORIGINATION_DESK) printf '%s\n' origination-desk ;;
-    CM-1|CM_1|cm-1) printf '%s\n' CM-1 ;;
-    CM-2|CM_2|cm-2) printf '%s\n' CM-2 ;;
-    CM-3|CM_3|cm-3) printf '%s\n' CM-3 ;;
-    CM-4|CM_4|cm-4) printf '%s\n' CM-4 ;;
-    hag-filer|HAG-FILER|hag_filer|HAG_FILER) printf '%s\n' hag-filer ;;
+    AG-001|ag-001|lead|LEAD|AH1|aihead1|AIHEAD1) printf '%s\n' lead ;;
+    AG-002|ag-002|cowork-ah1|COWORK-AH1|cowork_ah1|COWORK_AH1|AH1-APP) printf '%s\n' cowork-ah1 ;;
+    AG-003|ag-003|deputy|DEPUTY|AH2|aihead2|AIHEAD2) printf '%s\n' deputy ;;
+    AG-004|ag-004|deputy-codex|DEPUTY-CODEX|deputy_codex|DEPUTY_CODEX) printf '%s\n' deputy-codex ;;
+    AG-005|ag-005|cortex|CORTEX) printf '%s\n' cortex ;;
+    AG-006|ag-006|aid|AID|ai-dennis|AI-DENNIS) printf '%s\n' aid ;;
+    AG-101|ag-101|b1|B1) printf '%s\n' b1 ;;
+    AG-102|ag-102|b2|B2) printf '%s\n' b2 ;;
+    AG-103|ag-103|b3|B3) printf '%s\n' b3 ;;
+    AG-104|ag-104|b4|B4) printf '%s\n' b4 ;;
+    AG-201|ag-201|researcher|RESEARCHER|research-agent|RESEARCH-AGENT) printf '%s\n' researcher ;;
+    AG-202|ag-202|codex|CODEX) printf '%s\n' codex ;;
+    AG-203|ag-203|codex-arch|CODEX-ARCH|codex_arch|CODEX_ARCH) printf '%s\n' codex-arch ;;
+    AG-204|ag-204|clerk|CLERK) printf '%s\n' clerk ;;
+    AG-205|ag-205|clerk-haiku|CLERK-HAIKU|clerk_haiku|CLERK_HAIKU) printf '%s\n' clerk-haiku ;;
+    AG-301|ag-301|hag-desk|HAG-DESK|hag_desk|HAG_DESK|hagenauer-desk|HAGENAUER-DESK) printf '%s\n' hag-desk ;;
+    AG-302|ag-302|origination-desk|ORIGINATION-DESK|origination_desk|ORIGINATION_DESK) printf '%s\n' origination-desk ;;
+    AG-401|ag-401|CM-1|CM_1|cm-1) printf '%s\n' CM-1 ;;
+    AG-402|ag-402|CM-2|CM_2|cm-2) printf '%s\n' CM-2 ;;
+    AG-403|ag-403|CM-3|CM_3|cm-3) printf '%s\n' CM-3 ;;
+    AG-404|ag-404|CM-4|CM_4|cm-4) printf '%s\n' CM-4 ;;
+    AG-405|ag-405|hag-filer|HAG-FILER|hag_filer|HAG_FILER) printf '%s\n' hag-filer ;;
     *) return 1 ;;
   esac
 }

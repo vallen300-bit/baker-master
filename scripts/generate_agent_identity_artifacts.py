@@ -41,9 +41,9 @@ def _bus_agents(registry: dict[str, Any]) -> list[dict[str, Any]]:
 def _role_patterns(agent: dict[str, Any]) -> list[str]:
     """Return accepted BAKER_ROLE inputs for one agent.
 
-    Registry aliases are authoritative. We add common shell/operator variants
-    from the canonical slug so existing pickers keep working without separate
-    hand-maintained cases.
+    Registry aliases and agent IDs are authoritative inputs. We add common
+    shell/operator variants from the canonical slug so existing pickers keep
+    working without separate hand-maintained cases.
     """
     values: list[str] = []
 
@@ -51,6 +51,11 @@ def _role_patterns(agent: dict[str, Any]) -> list[str]:
         text = str(value).strip()
         if text and text not in values:
             values.append(text)
+
+    agent_id = str(agent["agent_id"])
+    add(agent_id)
+    add(agent_id.upper())
+    add(agent_id.lower())
 
     slug = str(agent["slug"])
     add(slug)
