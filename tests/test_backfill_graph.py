@@ -180,6 +180,18 @@ class TestDedup:
         assert "NULL, 'graph'" in sql
         assert len(params) == 7          # priority/source are literals, not params
 
+    def test_nul_bytes_stripped(self):
+        """psycopg2 ValueError on 0x00 — hit live on historical Outlook HTML
+        (dry-run 2026-06-10). All text params must be NUL-free."""
+        conn = _fake_conn()
+        m = _msg("m1")
+        m["subject"] = "bad\x00subject"
+        m["body"]["content"] = "<p>nul\x00body</p>"
+        m["from"]["emailAddress"]["name"] = "Na\x00me"
+        bg._insert_message(conn, m)
+        params = conn.cursor.return_value.__enter__.return_value.execute.call_args.args[1]
+        assert not any("\x00" in p for p in params if isinstance(p, str))
+
     def test_duplicate_returns_false(self):
         """rowcount 0 (conflict hit) reported as not-inserted."""
         conn = _fake_conn()

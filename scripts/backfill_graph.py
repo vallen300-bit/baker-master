@@ -170,8 +170,14 @@ def _set_progress(conn, source: str, cursor: str | None, done_count: int,
         raise
 
 
+def _clean(s: str | None) -> str:
+    """Strip NUL bytes — psycopg2 raises ValueError on 0x00 in string literals
+    (hit live on historical Outlook HTML bodies, dry-run 2026-06-10)."""
+    return (s or "").replace("\x00", "")
+
+
 def _html_to_text(html: str) -> str:
-    text = re.sub(r"<[^>]+>", " ", html or "")
+    text = re.sub(r"<[^>]+>", " ", _clean(html))
     text = re.sub(r"\s+", " ", text).strip()
     return text[:BODY_CAP]
 
@@ -202,9 +208,9 @@ def _insert_message(conn, m: dict) -> bool:
                 """, (
                     m.get("id"),
                     m.get("conversationId") or m.get("id"),
-                    sender.get("name", ""),
-                    sender.get("address", ""),
-                    m.get("subject", ""),
+                    _clean(sender.get("name", "")),
+                    _clean(sender.get("address", "")),
+                    _clean(m.get("subject", "")),
                     _html_to_text(body.get("content", "")),
                     m.get("receivedDateTime") or None,
                 ))
