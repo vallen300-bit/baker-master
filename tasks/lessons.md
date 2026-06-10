@@ -829,3 +829,17 @@ the real round-trip ran.
   cost a full diagnostic cycle; echo resp.status_code + Dropbox error_summary in the tool error dict.
 - RULE 3: after a Render env-var swap, the OLD instance serves during roll-over — a post-deploy AC can hit
   the pre-swap instance and false-fail. Retry after the deploy reaches "live" + old instance drains.
+
+## 2026-06-10 — "Closed" requires live-verify on the REAL surface, not a convenience path (done-state discipline)
+- INCIDENT: M365 mail-blindness arc declared "closed + verified" 2026-06-09. It was NOT. PR #344's
+  POST_DEPLOY_AC (b3 #2686 PASS) tested only the non-colocated path (BAKER_INTERNAL_URL unset → prod
+  default). The actual prod env had BAKER_INTERNAL_URL=http://localhost:8080 SET; uvicorn binds Render
+  $PORT(=10000), nothing on 8080 → baker_health/baker_search/baker_scan return [Errno 111] through the
+  registered MCP. codex G3 FAIL #2694 caught it and sat UNACKED while the arc was called done.
+- RULE: a POST_DEPLOY_AC must exercise the SAME surface real users/agents hit (here: the registered
+  remote MCP under prod env), not a clone with the failing var unset. A PASS on a path that bypasses the
+  bug is not a PASS.
+- RULE: an unacked G3 FAIL on the bus blocks "closed." Drain + reconcile every gate verdict before
+  declaring an arc done. Per Harness V2 done-rubrics-stop-gate: shipped/merged/deployed ≠ done.
+- RULE: do not repeat a state-file's "closed" claim into a Director-facing status without a live re-probe
+  (composes with feedback_state_file_cross_check_before_trust).
