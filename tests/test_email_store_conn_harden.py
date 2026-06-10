@@ -148,6 +148,19 @@ def test_pool_maxconn_env_override(monkeypatch):
     assert captured["maxconn"] == 7
 
 
+def test_pool_maxconn_malformed_env_falls_back_to_default(monkeypatch, caplog):
+    """G3 fix (bus #2818): a typoed tuning knob must never kill the pool."""
+    with caplog.at_level(logging.WARNING, logger="sentinel.store_back"):
+        captured = _init_pool_capture(monkeypatch, "not-an-int")
+    assert captured["maxconn"] == 15, "malformed env must degrade to default"
+    assert "BAKER_STOREBACK_MAXCONN" in " ".join(r.message for r in caplog.records)
+
+
+def test_pool_maxconn_clamped_to_minimum_one(monkeypatch):
+    captured = _init_pool_capture(monkeypatch, "0")
+    assert captured["maxconn"] == 1
+
+
 # ----------------------------------------------------------------------
 # AC4 — is_processed fails CLOSED on pool exhaustion
 # ----------------------------------------------------------------------
