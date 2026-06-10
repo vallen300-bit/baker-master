@@ -328,6 +328,16 @@ class PostgresConfig:
             "dbname": self.database,
             "user": self.user,
             "password": self.password,
+            # EMAIL_STORE_CONN_HARDEN_1: mirror the SCHEDULER_NEON_IDLE_HARDEN_1
+            # keepalives (below, direct_dsn_params) onto the pooled path. The
+            # pooled path had none, so Neon idle-killed cached connections
+            # (retriever shared conn + store_back pool) and the first caller
+            # after an idle gap ate "SSL connection has been closed
+            # unexpectedly" — ~2/hr, Director-visible (RCA bus #2813).
+            "keepalives": 1,
+            "keepalives_idle": 30,
+            "keepalives_interval": 10,
+            "keepalives_count": 5,
         }
         if self.sslmode and self.sslmode != "disable":
             params["sslmode"] = self.sslmode
