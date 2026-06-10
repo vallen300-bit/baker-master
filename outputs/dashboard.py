@@ -1813,6 +1813,36 @@ async def get_transcripts_by_matter(
     }
 
 
+@app.get(
+    "/api/attachments/{att_id}",
+    tags=["emails"],
+    dependencies=[Depends(verify_api_key)],
+)
+async def get_email_attachment(att_id: int):
+    """Return stored email attachment bytes (EMAIL_ATTACHMENT_STORE_1).
+
+    - 200: raw bytes with the stored mime_type (octet-stream fallback).
+    - 404: no such id, or row is metadata_only (>5MB payload not stored).
+    - 401: handled by verify_api_key (X-Baker-Key header).
+    """
+    import asyncio
+    from fastapi import Response
+    from kbl.attachment_store import get_attachment
+
+    att = await asyncio.to_thread(get_attachment, att_id)
+    if att is None:
+        raise HTTPException(status_code=404, detail="attachment not found")
+    if att.get("storage") != "db" or att.get("data") is None:
+        raise HTTPException(
+            status_code=404,
+            detail="attachment is metadata_only — payload not stored (>5MB cap)",
+        )
+    return Response(
+        content=att["data"],
+        media_type=att.get("mime_type") or "application/octet-stream",
+    )
+
+
 @app.post("/api/fireflies/backfill", tags=["fireflies"], dependencies=[Depends(verify_api_key)])
 async def fireflies_backfill_endpoint():
     """Trigger a one-time Fireflies transcript backfill to PostgreSQL."""
