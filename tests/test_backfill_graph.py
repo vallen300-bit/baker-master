@@ -1,24 +1,17 @@
 """BACKFILL_GRAPH_1 unit tests — paging + dedup. Mock Graph; no live creds in CI.
 
-kbl.attachment_store (b3 EMAIL_ATTACHMENT_STORE_1) may not be importable until
-b3's lane merges — it is stubbed into sys.modules BEFORE importing the script,
-so these tests are independent of merge order.
+kbl.attachment_store (b3 EMAIL_ATTACHMENT_STORE_1) is on main — imported for
+real; insert_attachment / insert_attachment_meta are monkeypatched per-test
+(no sys.modules stub, so other test files see the genuine module — codex
+re-gate #2807).
 """
 from __future__ import annotations
 
-import sys
-import types
 from unittest.mock import MagicMock, patch
 
 import pytest
 
-# --- stub kbl.attachment_store before the module under test imports it ------
-_att_store_stub = types.ModuleType("kbl.attachment_store")
-_att_store_stub.insert_attachment = MagicMock(return_value=1)
-_att_store_stub.insert_attachment_meta = MagicMock(return_value=1)
-sys.modules.setdefault("kbl.attachment_store", _att_store_stub)
-
-from scripts import backfill_graph as bg  # noqa: E402
+from scripts import backfill_graph as bg
 
 
 # ------------------------------------------------------------------ fixtures
@@ -251,11 +244,12 @@ class TestAttachments:
             "id": "a1", "name": "doc.pdf", "contentType": "application/pdf",
             "size": 5, "contentBytes": b64.b64encode(b"hello").decode(),
         }]}
-        _att_store_stub.insert_attachment.reset_mock()
-        with patch.object(bg, "_graph_get", return_value=page):
+        ins = MagicMock(return_value=1)
+        with patch.object(bg, "_graph_get", return_value=page), \
+             patch.object(bg, "insert_attachment", ins):
             n = bg._process_attachments(client, "u@x.com", "m1")
         assert n == 1
-        _att_store_stub.insert_attachment.assert_called_once_with(
+        ins.assert_called_once_with(
             "m1", "graph", "doc.pdf", "application/pdf", b"hello")
 
     def test_item_attachment_metadata_only_via_api(self):
@@ -266,13 +260,15 @@ class TestAttachments:
             "@odata.type": "#microsoft.graph.itemAttachment",
             "id": "a2", "name": "fwd msg", "contentType": "message/rfc822", "size": 99,
         }]}
-        _att_store_stub.insert_attachment.reset_mock()
-        _att_store_stub.insert_attachment_meta.reset_mock()
-        with patch.object(bg, "_graph_get", return_value=page):
+        ins = MagicMock(return_value=1)
+        ins_meta = MagicMock(return_value=1)
+        with patch.object(bg, "_graph_get", return_value=page), \
+             patch.object(bg, "insert_attachment", ins), \
+             patch.object(bg, "insert_attachment_meta", ins_meta):
             n = bg._process_attachments(client, "u@x.com", "m1")
         assert n == 1
-        _att_store_stub.insert_attachment.assert_not_called()
-        _att_store_stub.insert_attachment_meta.assert_called_once_with(
+        ins.assert_not_called()
+        ins_meta.assert_called_once_with(
             "m1", "graph", "fwd msg", "message/rfc822", 99, meta_key="a2")
 
     def test_store_none_retries_then_raises(self):
@@ -285,16 +281,13 @@ class TestAttachments:
             "id": "a1", "name": "doc.pdf", "contentType": "application/pdf",
             "size": 5, "contentBytes": b64.b64encode(b"hello").decode(),
         }]}
-        _att_store_stub.insert_attachment.reset_mock()
-        _att_store_stub.insert_attachment.return_value = None
-        try:
-            with patch.object(bg, "_graph_get", return_value=page), \
-                 patch.object(bg.time, "sleep"):
-                with pytest.raises(RuntimeError, match="m1"):
-                    bg._process_attachments(client, "u@x.com", "m1")
-            assert _att_store_stub.insert_attachment.call_count == bg.STORE_RETRIES
-        finally:
-            _att_store_stub.insert_attachment.return_value = 1
+        ins = MagicMock(return_value=None)
+        with patch.object(bg, "_graph_get", return_value=page), \
+             patch.object(bg, "insert_attachment", ins), \
+             patch.object(bg.time, "sleep"):
+            with pytest.raises(RuntimeError, match="m1"):
+                bg._process_attachments(client, "u@x.com", "m1")
+        assert ins.call_count == bg.STORE_RETRIES
 
     def test_store_none_recovers_on_retry(self):
         client = _fake_client()
@@ -304,16 +297,12 @@ class TestAttachments:
             "id": "a1", "name": "doc.pdf", "contentType": "application/pdf",
             "size": 5, "contentBytes": b64.b64encode(b"hello").decode(),
         }]}
-        _att_store_stub.insert_attachment.reset_mock()
-        _att_store_stub.insert_attachment.side_effect = [None, 7]
-        try:
-            with patch.object(bg, "_graph_get", return_value=page), \
-                 patch.object(bg.time, "sleep"):
-                n = bg._process_attachments(client, "u@x.com", "m1")
-            assert n == 1
-        finally:
-            _att_store_stub.insert_attachment.side_effect = None
-            _att_store_stub.insert_attachment.return_value = 1
+        ins = MagicMock(side_effect=[None, 7])
+        with patch.object(bg, "_graph_get", return_value=page), \
+             patch.object(bg, "insert_attachment", ins), \
+             patch.object(bg.time, "sleep"):
+            n = bg._process_attachments(client, "u@x.com", "m1")
+        assert n == 1
 
     def test_store_failure_blocks_cursor_advance(self):
         """End-to-end (bus #2775): a store failure inside a page must abort
