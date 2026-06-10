@@ -1,0 +1,33 @@
+# Worker Rollover Runtime Notes
+
+Canonical process: `baker-vault/_ops/processes/worker-checkpoint-respawn.md`.
+
+## Stop Hook
+
+`.claude/hooks/context-threshold-check.sh` reads the Stop-event `transcript_path`, estimates tokens as `bytes / 4`, and compares that estimate with a per-picker window:
+
+1. `ROLLOVER_WINDOW_TOKENS`
+2. `.claude/settings.json` key `rollover_window_tokens`
+3. `.claude/settings.json` key `rollover.window_tokens`
+
+The hook is silent below 70%, emits a checkpoint reminder at 70%, and emits a hard checkpoint-now instruction at 85%.
+
+Install or refresh settings with:
+
+```bash
+python3 scripts/install-rollover-stop-hook.py --settings .claude/settings.json --window-tokens 1000000
+```
+
+Use each picker's real engine window. Do not hardcode model window sizes into the hook.
+
+## Respawn Request
+
+After writing and pushing `briefs/_checkpoints/<BRIEF_ID>.checkpoint.md`, post a respawn request to the dispatcher and self:
+
+```bash
+BAKER_ROLE=b2 scripts/respawn-request.sh lead BRIEF_ID briefs/_checkpoints/BRIEF_ID.checkpoint.md 1 b2/branch-name "state summary"
+```
+
+The helper posts topic `rollover/<BRIEF_ID>` and body `RESPAWN_REQUEST ...`.
+
+Claim is the checkpoint `attempt:` bump commit, not bus ack. A fresh session must increment `attempt:`, commit, and push before resuming. If another session already bumped the counter, stand down.
