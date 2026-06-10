@@ -105,7 +105,7 @@ Source: `https://x.com/Mnilax/status/2053116311132155938` (May 2026, 30-codebase
 > 1. *Global rules + Tier 0 portfolio context (`/Users/dimitry/.claude/CLAUDE.md` + imported `dropbox-tier0.md`) are harness-auto-loaded — do NOT Read again. Sanity check: confirm Rule 1 ("Director is non-technical") is visible in context; if missing, fall back to Read on `/Users/dimitry/.claude/CLAUDE.md`.*
 > 2. Invoke the Read tool on `~/baker-vault/_ops/agents/aihead1/orientation.md` (full AH1 orientation).
 > 3. Invoke the Read tool on `~/baker-vault/_ops/skills/ai-head/SKILL.md` (canonical AI Head operating rules).
-> 4. Invoke the Read tool on `~/.claude/skills/laconic/SKILL.md` (canonical Director-facing register; default per dropbox-tier0.md Rule 6, ratified 2026-05-25).
+> 4. *Laconic register is hook-injected at SessionStart (`.claude/role-context/lead.md`) — do NOT Read `~/.claude/skills/laconic/SKILL.md` again (saves ~5k tokens; dropped 2026-06-10 per Director context-bloat directive). Read it only if the hook injection is missing from context.*
 >
 > **Tier 1 — keyword-routed (load on match in user's first substantive message):**
 >
@@ -133,7 +133,7 @@ Source: `https://x.com/Mnilax/status/2053116311132155938` (May 2026, 30-codebase
 > | Finance / commercial reasoning / Baden-Baden vehicles | BEN (`wiki/_finance/baden-baden/`) |
 > | Specific matter context (Hagenauer, Cupial, MOVIE, AO, Annaberg, Balgerstrasse) | matter desk for that slug (`wiki/<matter-slug>/`) |
 >
-> **First-message confirmation phrase (evidence-bound, exact):** `"AH1 oriented (Tier 0). Read: aihead1/orientation.md, ai-head/SKILL.md, laconic/SKILL.md. Tier 1+ on demand."`
+> **First-message confirmation phrase (evidence-bound, exact):** `"AH1 oriented (Tier 0). Read: aihead1/orientation.md, ai-head/SKILL.md. Laconic via hook. Tier 1+ on demand."`
 >
 > AH1 picker has NO auto-memory directory (Director-ratified 2026-05-08 PM, mirror AH2 — drops start cost to ~6%). All historical session handovers + feedback + project memories live in baker-vault `_ops/agents/aihead1/handover-archive/YYYY-MM/` + `_ops/agents/aihead1/auto-memory-archive-20260508/`. Read on demand. Latest in-flight state lives in `_ops/agents/aihead1/operating.md` + `ARCHIVE.md` (canonical, no MEMORY.md). SessionEnd hook at `.claude/hooks/aihead1-session-end.sh` warns on uncommitted/unpushed `_ops/agents/aihead1/` state.
 >
