@@ -843,3 +843,16 @@ the real round-trip ran.
   declaring an arc done. Per Harness V2 done-rubrics-stop-gate: shipped/merged/deployed ≠ done.
 - RULE: do not repeat a state-file's "closed" claim into a Director-facing status without a live re-probe
   (composes with feedback_state_file_cross_check_before_trust).
+
+## Lesson #98 — a guard that isn't installed everywhere is a guard that doesn't exist (2026-06-10)
+
+- INCIDENT: deputy HARNESS_V2 audit (bus #2744) caught PR #337's formal brief shipping with all 4
+  V2 blocks missing. Root cause: `core.hooksPath` was UNSET in the lead AND cowork-ah1 checkouts —
+  brief_sop_check.sh silently never ran for commits from those lanes. Separately, the
+  BAKER_BRIEF_SOP_BYPASS=1 env path allowed a traceless skip by design.
+- RULE: any repo-local enforcement hook ships with an installation check across ALL active checkouts
+  (lead, cowork, b1-b4, aihead2), not just the authoring one. `git config core.hooksPath` survey is
+  10 seconds; do it whenever adding or hardening a .githooks/* guard.
+- RULE: bypass mechanisms must leave an audit trace. Env-var bypasses are acceptable only for
+  surfaces where a commit-msg trailer is impossible; never for formal briefs. (Hardened in
+  baker-master 58e0b03 + vault PR #132.)
