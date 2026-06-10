@@ -83,6 +83,62 @@ def insert_attachment(
         return None
 
 
+def insert_attachment_meta(
+    message_id: str,
+    source: str,
+    filename: str | None,
+    mime_type: str | None,
+    size_bytes: int | None,
+    meta_key: str,
+):
+    """Persist a metadata-only attachment row (no payload available/stored).
+
+    For consumers that know an attachment exists but don't fetch bytes
+    (e.g. b2's Graph lane skipping oversize/remote payloads). ``meta_key``
+    is the provider's attachment id; dedup key is
+    sha256("meta:" + meta_key) so re-inserts on the same provider id hit
+    the same (message_id, content_sha256) ON CONFLICT path as payload
+    inserts. Returns the row id (int) or None on failure.
+    """
+    if not message_id or not source or not meta_key:
+        logger.warning("insert_attachment_meta: missing message_id/source/meta_key")
+        return None
+    sha256 = hashlib.sha256(("meta:" + meta_key).encode("utf-8")).hexdigest()
+    try:
+        with get_conn() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    """
+                    INSERT INTO email_attachments
+                        (message_id, source, filename, mime_type, size_bytes,
+                         content_sha256, storage, data)
+                    VALUES (%s, %s, %s, %s, %s, %s, 'metadata_only', NULL)
+                    ON CONFLICT (message_id, content_sha256) DO NOTHING
+                    RETURNING id
+                    """,
+                    (message_id, source, filename, mime_type, size_bytes, sha256),
+                )
+                row = cur.fetchone()
+                if row is not None:
+                    conn.commit()
+                    return row[0]
+                # Conflict path — fetch the existing row's id.
+                cur.execute(
+                    """
+                    SELECT id FROM email_attachments
+                     WHERE message_id = %s AND content_sha256 = %s
+                     LIMIT 1
+                    """,
+                    (message_id, sha256),
+                )
+                existing = cur.fetchone()
+                conn.commit()
+                return existing[0] if existing else None
+    except Exception as e:
+        logger.error("insert_attachment_meta failed for %s: %s", message_id, e)
+        return None
+
+
 def get_attachment(att_id: int):
     """Return the attachment row as a dict, or None if missing / on failure.
 

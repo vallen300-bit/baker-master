@@ -161,6 +161,34 @@ def test_oversize_payload_metadata_only(attachment_pg):
     assert row["content_sha256"] == hashlib.sha256(payload).hexdigest()
 
 
+def test_insert_attachment_meta_and_dedup(attachment_pg):
+    """L6 — explicit metadata-only entry point: insert + dedup on same meta_key
+    (lead request-changes, bus #2764)."""
+    import hashlib as _hl
+
+    from kbl.attachment_store import get_attachment, insert_attachment_meta
+
+    msg_id = f"test-att-{uuid.uuid4()}"
+    attachment_pg.append(msg_id)
+    meta_key = "AAMkProviderAttachmentId123"
+
+    id1 = insert_attachment_meta(msg_id, "graph", "big.bin", "application/octet-stream",
+                                 42_000_000, meta_key)
+    assert isinstance(id1, int)
+
+    row = get_attachment(id1)
+    assert row is not None
+    assert row["storage"] == "metadata_only"
+    assert row["data"] is None
+    assert row["size_bytes"] == 42_000_000
+    assert row["content_sha256"] == _hl.sha256(b"meta:" + meta_key.encode()).hexdigest()
+
+    # Dedup: same meta_key again → same id.
+    id2 = insert_attachment_meta(msg_id, "graph", "big.bin", "application/octet-stream",
+                                 42_000_000, meta_key)
+    assert id2 == id1
+
+
 def test_attachment_exists(attachment_pg):
     """L5 — exists true for stored (message_id, sha); false for unknown."""
     from kbl.attachment_store import attachment_exists, insert_attachment
