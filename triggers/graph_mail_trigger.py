@@ -6,6 +6,7 @@ Dormant unless BAKER_USE_GRAPH=true (GraphClient.is_ready() is the single gate).
 Never raises to the scheduler; one failure must not affect other pollers.
 """
 from __future__ import annotations
+import base64
 import logging
 from datetime import datetime, timezone
 
@@ -18,7 +19,9 @@ logger = logging.getLogger(__name__)
 
 _SOURCE = "graph_mail_poll"          # watermark/cursor key
 _FOLDER = "Inbox"
-_SELECT = "id,conversationId,subject,from,receivedDateTime,body,isDraft"
+_SELECT = "id,conversationId,subject,from,receivedDateTime,body,isDraft,hasAttachments"
+_ATTACHMENT_SELECT = "id,name,contentType,size,contentBytes,isInline"
+_attachment_store_missing_logged = False
 
 
 def _html_to_text(html: str) -> str:
@@ -50,6 +53,76 @@ def _to_thread(m: dict) -> dict | None:
             "received_date": m.get("receivedDateTime", ""),
         },
     }
+
+
+def _insert_live_attachment(
+    *,
+    message_id: str,
+    filename: str,
+    mime_type: str,
+    payload_bytes: bytes,
+):
+    """Best-effort live attachment persistence; never breaks Graph ingest."""
+    global _attachment_store_missing_logged
+    if not payload_bytes:
+        return None
+    try:
+        from kbl.attachment_store import insert_attachment
+    except (ImportError, ModuleNotFoundError) as e:
+        if not _attachment_store_missing_logged:
+            logger.warning("Graph attachment store unavailable (non-fatal): %s", type(e).__name__)
+            _attachment_store_missing_logged = True
+        return None
+    try:
+        return insert_attachment(
+            message_id=message_id,
+            source="graph",
+            filename=filename,
+            mime_type=mime_type,
+            payload_bytes=payload_bytes,
+        )
+    except Exception as e:
+        logger.warning("Graph attachment persist failed (non-fatal): %s", type(e).__name__)
+        return None
+
+
+def _capture_graph_attachments(client: GraphClient, m: dict) -> int:
+    """Store Graph file attachments for a live message, non-fatally."""
+    if not m.get("hasAttachments") or not m.get("id"):
+        return 0
+    try:
+        page = client.get(
+            f"/users/{client.cfg.mail_user}/messages/{m['id']}/attachments",
+            params={"$select": _ATTACHMENT_SELECT, "$top": 50},
+        )
+        if page is None:
+            logger.warning("Graph attachment fetch returned None (non-fatal)")
+            return 0
+        message_id = m.get("id")
+        stored = 0
+        for att in page.get("value", []):
+            if att.get("isInline"):
+                continue
+            encoded = att.get("contentBytes")
+            if not encoded:
+                continue
+            try:
+                payload = base64.b64decode(encoded)
+            except Exception as e:
+                logger.warning("Graph attachment decode failed (non-fatal): %s", type(e).__name__)
+                continue
+            att_id = _insert_live_attachment(
+                message_id=message_id,
+                filename=att.get("name", ""),
+                mime_type=att.get("contentType") or "application/octet-stream",
+                payload_bytes=payload,
+            )
+            if att_id:
+                stored += 1
+        return stored
+    except Exception as e:
+        logger.warning("Graph attachment capture failed (non-fatal): %s", type(e).__name__)
+        return 0
 
 
 def poll_graph_mail() -> list:
@@ -85,6 +158,7 @@ def poll_graph_mail() -> list:
                 continue
             t = _to_thread(m)
             if t:
+                _capture_graph_attachments(client, m)
                 results.append(t)
         nxt = page.get("@odata.nextLink")
         delta = page.get("@odata.deltaLink")

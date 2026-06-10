@@ -26,6 +26,8 @@ SOURCE_TYPE = "bluewin"
 # Max emails per poll cycle (safety)
 MAX_FETCH = 50
 
+_attachment_store_missing_logged = False
+
 
 def _decode_header_value(raw: str) -> str:
     """Decode RFC 2047 encoded header values."""
@@ -78,6 +80,62 @@ def _extract_sender(msg) -> tuple:
         name = ""
         addr = from_header.strip()
     return name, addr
+
+
+def _insert_live_attachment(
+    *,
+    message_id: str,
+    filename: str,
+    mime_type: str,
+    payload_bytes: bytes,
+):
+    """Best-effort live attachment persistence; never breaks mail ingest."""
+    global _attachment_store_missing_logged
+    if not payload_bytes:
+        return None
+    try:
+        from kbl.attachment_store import insert_attachment
+    except (ImportError, ModuleNotFoundError) as e:
+        if not _attachment_store_missing_logged:
+            logger.warning("Bluewin attachment store unavailable (non-fatal): %s", type(e).__name__)
+            _attachment_store_missing_logged = True
+        return None
+    try:
+        return insert_attachment(
+            message_id=message_id,
+            source="bluewin",
+            filename=filename,
+            mime_type=mime_type,
+            payload_bytes=payload_bytes,
+        )
+    except Exception as e:
+        logger.warning("Bluewin attachment persist failed (non-fatal): %s", type(e).__name__)
+        return None
+
+
+def _capture_bluewin_attachments(msg, message_id: str) -> int:
+    """Store Bluewin MIME attachments for the already-deduped live message."""
+    stored = 0
+    clean_message_id = (message_id or "").strip("<>") or message_id
+    for part in msg.walk():
+        filename = part.get_filename()
+        if not filename:
+            continue
+        try:
+            payload = part.get_payload(decode=True)
+            if not payload:
+                continue
+            att_id = _insert_live_attachment(
+                message_id=clean_message_id,
+                filename=_decode_header_value(filename),
+                mime_type=part.get_content_type() or "application/octet-stream",
+                payload_bytes=payload,
+            )
+            if att_id:
+                stored += 1
+        except Exception as e:
+            logger.warning("Bluewin attachment capture failed (non-fatal): %s", type(e).__name__)
+    return stored
 
 
 def poll_bluewin() -> list:
@@ -155,6 +213,8 @@ def poll_bluewin() -> list:
                 dedup_key = message_id.strip("<>")
                 if state.is_processed(SOURCE_TYPE, dedup_key):
                     continue
+
+                _capture_bluewin_attachments(msg, dedup_key)
 
                 # Track latest date for watermark
                 if latest_date is None or received_dt > latest_date:
