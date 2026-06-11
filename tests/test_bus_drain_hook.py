@@ -278,6 +278,11 @@ def test_happy_path_renders_and_writes_state(stubs_dir, base_env, tmp_path):
     leftover_tmps = list(tmp_path.glob(".brisen-lab-bus-last-seen-tmp-*"))
     assert leftover_tmps == [], f"leftover tmp files: {leftover_tmps}"
 
+    # V0.3: rendered-ID ledger holds exactly the rendered ids (ack-only-what-renders).
+    ledger_file = tmp_path / ".brisen-lab-bus-rendered-b2.txt"
+    assert ledger_file.exists(), "rendered-ID ledger should have been written"
+    assert ledger_file.read_text().splitlines() == ["100", "101"]
+
 
 # ---------------------------------------------------------------------------
 # Happy path 2: state file from previous run is consumed as `since` cursor
@@ -358,6 +363,13 @@ def test_overflow_cursor_advances_to_rendered_max(stubs_dir, base_env, tmp_path)
     # Negative guard: cursor must NOT be msgs[39] (full slice's max — would
     # silently lose messages 30-39 on next drain).
     assert cursor != "2026-05-11T01:39:00Z"
+
+    # V0.3: ledger holds ONLY the 30 rendered ids — elided 30-39 must NOT be
+    # eligible for turn-end auto-ack (they were never seen).
+    ledger_file = tmp_path / ".brisen-lab-bus-rendered-b2.txt"
+    assert ledger_file.exists(), "rendered-ID ledger should have been written"
+    ledger_ids = ledger_file.read_text().splitlines()
+    assert ledger_ids == [str(i) for i in range(30)], ledger_ids
 
 
 # ---------------------------------------------------------------------------
