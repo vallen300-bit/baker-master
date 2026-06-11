@@ -23,6 +23,13 @@
 #   B2 — atomic state-file write via tempfile.mkstemp + os.replace.
 #   B4 — curl --max-time 4 (worst-case ~7s vs 15s hook timeout).
 #   Token-budget — curl limit=50 + RENDER_CAP=30 in python3 block.
+#
+# V0.3 — rendered-ID ledger (ack-only-what-renders, 2026-06-11):
+#   Every message actually RENDERED into additionalContext gets its id appended
+#   to ~/.brisen-lab-bus-rendered-<slug>.txt. The turn-end Stop hook
+#   (stop-bus-ack.sh) acks ONLY ids present in that ledger — never messages the
+#   agent has not seen. Anchor: 2026-06-10 incident — 6 ship reports auto-acked
+#   without rendering (PINNED §OPEN-2).
 
 # Drain stdin (Claude passes JSON; we don't consume it).
 cat >/dev/null 2>&1 || true
@@ -86,6 +93,7 @@ fi
 # --- read last_seen state, default to 24h ago on first boot ---
 
 STATE_FILE="${HOME}/.brisen-lab-bus-last-seen-${SLUG}.txt"
+LEDGER_FILE="${HOME}/.brisen-lab-bus-rendered-${SLUG}.txt"
 SINCE=""
 if [ -f "$STATE_FILE" ]; then
     SINCE="$(cat "$STATE_FILE" 2>/dev/null | tr -d '\n\r ')"
@@ -114,7 +122,7 @@ RESP="$(curl -sS --max-time 4 -G -H "X-Terminal-Key: ${KEY}" \
 # Parse + render via python3 with env vars on the python3 invocation itself.
 # B1 fold: env vars on python3, not on _emit pipe-tail (that's a separate subprocess).
 # RESP plumbed via env-var instead of stdin so stdout flows cleanly into _emit.
-RENDERED="$(RESP="$RESP" SLUG="$SLUG" STATE_FILE="$STATE_FILE" \
+RENDERED="$(RESP="$RESP" SLUG="$SLUG" STATE_FILE="$STATE_FILE" LEDGER_FILE="$LEDGER_FILE" \
             DAEMON_URL="$DAEMON_URL" BAKER_ROLE="${BAKER_ROLE:-}" SINCE="$SINCE" \
             python3 -c '
 import json, os, sys, tempfile
@@ -189,6 +197,18 @@ except OSError:
 if write_failed:
     lines.append("")
     lines.append("[bus-drain] state-file atomic write failed — re-drain next session.")
+
+# V0.3 — rendered-ID ledger append. Only ids in `shown` (actually emitted into
+# additionalContext) are eligible for turn-end auto-ack by stop-bus-ack.sh.
+# Append-only; the Stop hook prunes acked ids. On failure: messages stay
+# unacked (badge stays loud) — strictly safer than over-acking.
+ledger_file = os.environ["LEDGER_FILE"]
+try:
+    with open(ledger_file, "a") as f:
+        f.write("".join("{}\n".format(m["id"]) for m in shown))
+except OSError:
+    lines.append("")
+    lines.append("[bus-drain] rendered-ledger append failed — turn-end auto-ack will skip these; ack manually.")
 
 print("\n".join(lines))
 ')"
