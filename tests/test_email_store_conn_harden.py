@@ -162,24 +162,98 @@ def test_pool_maxconn_clamped_to_minimum_one(monkeypatch):
     assert captured["maxconn"] == 1
 
 
-def test_pool_sets_default_lock_timeout(monkeypatch):
-    monkeypatch.delenv("BAKER_STOREBACK_LOCK_TIMEOUT_MS", raising=False)
-    captured = _init_pool_capture(monkeypatch, None)
-    assert "lock_timeout=2000ms" in captured["kwargs"]["options"]
-
-
-def test_pool_lock_timeout_env_override(monkeypatch):
+def test_pool_dsn_params_do_not_include_options(monkeypatch):
     monkeypatch.setenv("BAKER_STOREBACK_LOCK_TIMEOUT_MS", "750")
     captured = _init_pool_capture(monkeypatch, None)
-    assert "lock_timeout=750ms" in captured["kwargs"]["options"]
+    assert "options" not in captured["kwargs"]
+
+
+def test_pool_strips_existing_dsn_options(monkeypatch):
+    from memory import store_back as sb
+
+    pooled = dict(sb.config.postgres.dsn_params)
+    pooled["options"] = "-c lock_timeout=2000ms"
+    with mock.patch.object(
+        type(sb.config.postgres),
+        "dsn_params",
+        new_callable=mock.PropertyMock,
+        return_value=pooled,
+    ):
+        captured = _init_pool_capture(monkeypatch, None)
+    assert "options" not in captured["kwargs"]
+
+
+class _BootstrapConn:
+    def __init__(self):
+        self.executed = []
+        self.rollbacks = 0
+
+    def cursor(self):
+        return self
+
+    def execute(self, sql, params=None):
+        self.executed.append((sql, params))
+
+    def close(self):
+        pass
+
+    def rollback(self):
+        self.rollbacks += 1
+
+
+class _BootstrapPool:
+    def __init__(self, conn):
+        self.conn = conn
+        self.put_back = []
+
+    def getconn(self):
+        return self.conn
+
+    def putconn(self, conn):
+        self.put_back.append(conn)
+
+
+def test_bootstrap_conn_sets_local_lock_timeout(monkeypatch):
+    monkeypatch.setenv("BAKER_STOREBACK_LOCK_TIMEOUT_MS", "750")
+    from memory import store_back as sb
+
+    store = sb.SentinelStoreBack.__new__(sb.SentinelStoreBack)
+    conn = _BootstrapConn()
+    store._pool = _BootstrapPool(conn)
+    store._bootstrap_lock_timeout_ms = store._parse_bootstrap_lock_timeout_ms()
+    store._bootstrap_lock_timeout_enabled = True
+
+    assert store._get_conn() is conn
+    assert conn.executed == [
+        ("SET LOCAL lock_timeout = %s", ("750ms",))
+    ]
 
 
 def test_pool_lock_timeout_malformed_env_falls_back_to_default(monkeypatch, caplog):
     monkeypatch.setenv("BAKER_STOREBACK_LOCK_TIMEOUT_MS", "bad-timeout")
     with caplog.at_level(logging.WARNING, logger="sentinel.store_back"):
-        captured = _init_pool_capture(monkeypatch, None)
-    assert "lock_timeout=2000ms" in captured["kwargs"]["options"]
+        from memory import store_back as sb
+        store = sb.SentinelStoreBack.__new__(sb.SentinelStoreBack)
+        parsed = store._parse_bootstrap_lock_timeout_ms()
+    assert parsed == 2000
     assert "BAKER_STOREBACK_LOCK_TIMEOUT_MS" in " ".join(r.message for r in caplog.records)
+
+
+def test_pool_init_failure_logs_error(monkeypatch, caplog):
+    from memory import store_back as sb
+
+    def boom(*args, **kwargs):
+        raise RuntimeError("unsupported startup parameter")
+
+    monkeypatch.setattr(sb.psycopg2.pool, "ThreadedConnectionPool", boom)
+    store = sb.SentinelStoreBack.__new__(sb.SentinelStoreBack)
+    store._pool = None
+
+    with caplog.at_level(logging.ERROR, logger="sentinel.store_back"):
+        store._init_pool()
+
+    assert store._pool is None
+    assert any("PostgreSQL pool init failed" in r.message for r in caplog.records)
 
 
 # ----------------------------------------------------------------------

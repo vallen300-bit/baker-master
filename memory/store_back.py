@@ -129,6 +129,12 @@ class SentinelStoreBack:
         # PostgreSQL connection pool
         self._pool = None
         self._init_pool()
+        # DEPLOY_DB_LOAD_DECOUPLE_1 / STORE_POOL_LOCKTIMEOUT_FIX_1:
+        # keep DDL lock timeout transaction-scoped. Neon pgbouncer rejects
+        # lock_timeout in startup `options`, so bootstrap applies SET LOCAL
+        # after a pooled connection is checked out.
+        self._bootstrap_lock_timeout_ms = self._parse_bootstrap_lock_timeout_ms()
+        self._bootstrap_lock_timeout_enabled = True
 
         # Ensure ClickUp tables exist
         self._ensure_clickup_tables()
@@ -291,6 +297,7 @@ class SentinelStoreBack:
         # BRIEF_CORTEX_3T_FORMALIZE_1A: Cortex Stage 2 V1 cycle + phase output tables
         self._ensure_cortex_cycles_table()
         self._ensure_cortex_phase_outputs_table()
+        self._bootstrap_lock_timeout_enabled = False
 
     # -------------------------------------------------------
     # Connection pool management
@@ -316,24 +323,8 @@ class SentinelStoreBack:
                 f"BAKER_STOREBACK_MAXCONN={raw_maxconn!r} is not an int — falling back to 15"
             )
             maxconn = 15
-        # DEPLOY_DB_LOAD_DECOUPLE_1: legacy inline ensure DDL must never sit
-        # behind a production write lock long enough to hold deploy startup.
-        raw_lock_timeout = os.getenv("BAKER_STOREBACK_LOCK_TIMEOUT_MS", "2000")
-        try:
-            lock_timeout_ms = max(0, int(raw_lock_timeout))
-        except ValueError:
-            logger.warning(
-                f"BAKER_STOREBACK_LOCK_TIMEOUT_MS={raw_lock_timeout!r} is not an int — falling back to 2000"
-            )
-            lock_timeout_ms = 2000
         dsn_params = dict(config.postgres.dsn_params)
-        lock_timeout_option = f"-c lock_timeout={lock_timeout_ms}ms"
-        existing_options = str(dsn_params.get("options") or "").strip()
-        dsn_params["options"] = (
-            f"{existing_options} {lock_timeout_option}".strip()
-            if existing_options
-            else lock_timeout_option
-        )
+        dsn_params.pop("options", None)
         try:
             self._pool = psycopg2.pool.ThreadedConnectionPool(
                 minconn=1,
@@ -342,11 +333,36 @@ class SentinelStoreBack:
             )
             logger.info(
                 f"PostgreSQL connection pool initialized "
-                f"(maxconn={maxconn}, lock_timeout={lock_timeout_ms}ms)"
+                f"(maxconn={maxconn})"
             )
         except Exception as e:
-            logger.warning(f"PostgreSQL pool init failed (non-fatal): {e}")
+            logger.error(f"PostgreSQL pool init failed: {e}")
             self._pool = None
+
+    def _parse_bootstrap_lock_timeout_ms(self) -> int:
+        """Return the transaction-scoped lock timeout for bootstrap DDL."""
+        raw_lock_timeout = os.getenv("BAKER_STOREBACK_LOCK_TIMEOUT_MS", "2000")
+        try:
+            return max(0, int(raw_lock_timeout))
+        except ValueError:
+            logger.warning(
+                f"BAKER_STOREBACK_LOCK_TIMEOUT_MS={raw_lock_timeout!r} is not an int — falling back to 2000"
+            )
+            return 2000
+
+    def _apply_bootstrap_lock_timeout(self, conn):
+        """Apply a pooler-safe transaction-scoped lock timeout for bootstrap DDL."""
+        if not getattr(self, "_bootstrap_lock_timeout_enabled", False):
+            return
+        lock_timeout_ms = getattr(self, "_bootstrap_lock_timeout_ms", 2000)
+        cur = conn.cursor()
+        try:
+            cur.execute("SET LOCAL lock_timeout = %s", (f"{lock_timeout_ms}ms",))
+        finally:
+            try:
+                cur.close()
+            except Exception:
+                pass
 
     def _get_conn(self):
         """Get a connection from pool. Returns None if pool unavailable."""
@@ -355,7 +371,14 @@ class SentinelStoreBack:
         if self._pool is None:
             return None
         try:
-            return self._pool.getconn()
+            conn = self._pool.getconn()
+            try:
+                self._apply_bootstrap_lock_timeout(conn)
+            except Exception as e:
+                logger.error(f"Failed to apply bootstrap lock_timeout: {e}")
+                self._put_conn(conn)
+                return None
+            return conn
         except Exception as e:
             logger.warning(f"Failed to get PostgreSQL connection: {e}")
             return None
