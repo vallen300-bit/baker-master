@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "updated_at": "2026-05-27",
+  "updated_at": "2026-06-11",
   "folders": [
     {
       "name": "TEMPLATES",
@@ -31,6 +31,13 @@
       "name": "ARCHITECTURE",
       "slug": "architecture",
       "presentations": [
+        {
+          "title": "/whiteboarding Skill \u2014 Presentation (2 pages)",
+          "file": "architecture/whiteboarding-skill.html",
+          "created": "2026-06-11",
+          "matter": "baker",
+          "live": true
+        },
         {
           "title": "\u2605 Cortex Roadmap (LIVE)",
           "file": "cortex-roadmap-current.html",
