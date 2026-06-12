@@ -52,6 +52,10 @@ def _llm_call(model: str, messages: list, max_tokens: int = 2000, system: str = 
 from orchestrator.scan_prompt import SCAN_SYSTEM_PROMPT
 from orchestrator import action_handler as _ah
 from orchestrator.cortex_runner import maybe_run_cycle
+from kbl.ingestion_surfaces import (
+    build_ingestion_surfaces_prompt_block,
+    load_ingestion_surfaces,
+)
 from kbl.cache_telemetry import log_cache_usage
 from kbl.priorities_registry import (
     get_all as get_all_priorities,
@@ -98,6 +102,18 @@ from kbl.citations import (
 )
 
 logger = logging.getLogger("sentinel.dashboard")
+
+
+def _scan_prompt_with_ingestion_surfaces() -> str:
+    """SCAN prompt plus the current vault-backed ingestion surface checklist."""
+    try:
+        block = build_ingestion_surfaces_prompt_block()
+    except Exception as e:  # noqa: BLE001 - scan must not break on loader drift.
+        logger.warning("scan ingestion-surface prompt block failed: %s", e)
+        block = ""
+    if not block:
+        return SCAN_SYSTEM_PROMPT
+    return f"{SCAN_SYSTEM_PROMPT}\n\n{block}"
 
 # ============================================================
 # Authentication
@@ -4561,6 +4577,30 @@ async def api_health():
         "deadline_feedback": deadline_feedback_stats,
         "checked_at": datetime.now(timezone.utc).isoformat(),
     }
+
+
+@app.get("/api/ingestion-surfaces", tags=["dashboard-v3"], dependencies=[Depends(verify_api_key)])
+async def get_ingestion_surfaces(refresh: bool = Query(False)):
+    """Return the canonical baker-vault ingestion surface checklist."""
+    try:
+        snapshot = load_ingestion_surfaces(force_refresh=refresh)
+        status = "degraded" if snapshot.get("error") else "ok"
+        return {"status": status, **snapshot}
+    except Exception as e:  # noqa: BLE001 - dashboard read surface degrades.
+        logger.error(f"GET /api/ingestion-surfaces failed: {e}")
+        return {
+            "status": "degraded",
+            "version": None,
+            "ratified": None,
+            "owner": None,
+            "purpose": None,
+            "source_path": "_ops/processes/ingestion-surfaces.md",
+            "source_last_commit_sha": None,
+            "source_sha256": None,
+            "row_count": 0,
+            "surfaces": [],
+            "error": str(e),
+        }
 
 
 @app.get("/", include_in_schema=False)
@@ -11361,7 +11401,7 @@ def _scan_chat_deep(req, start: float, task_id: int = None, complexity: str = No
     COMPLEXITY-ROUTER-1: Fast-classified questions use Haiku with fewer iterations.
     """
     from orchestrator.agent import run_agent_loop_streaming
-    from orchestrator.scan_prompt import SCAN_SYSTEM_PROMPT, build_mode_aware_prompt
+    from orchestrator.scan_prompt import build_mode_aware_prompt
 
     now = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
 
@@ -11538,8 +11578,9 @@ def _scan_chat_deep(req, start: float, task_id: int = None, complexity: str = No
             logger.warning(f"Scan citations adapter failed (non-fatal): {_cite_e}")
 
         # Build system prompt: base + pre-stuffed context + preferences
+        base_scan_prompt = _scan_prompt_with_ingestion_surfaces()
         system_prompt = (
-            f"{SCAN_SYSTEM_PROMPT}\n\n"
+            f"{base_scan_prompt}\n\n"
             f"## CURRENT TIME\n{now}\n\n"
             f"{pre_stuffed}"
         )
@@ -11689,8 +11730,9 @@ def _build_scan_system_prompt(deadline_only: bool = False, contexts=None,
 
     if deadline_only:
         # Agentic mode: no pre-fetched context, tools provide context
+        base_scan_prompt = _scan_prompt_with_ingestion_surfaces()
         return (
-            f"{SCAN_SYSTEM_PROMPT}\n"
+            f"{base_scan_prompt}\n"
             f"## CURRENT TIME\n{now}\n"
             f"{domain_context}"
             f"{deadline_block}"
@@ -11698,8 +11740,9 @@ def _build_scan_system_prompt(deadline_only: bool = False, contexts=None,
     else:
         # Legacy mode: context stuffed into prompt
         context_block = _format_scan_context(contexts)
+        base_scan_prompt = _scan_prompt_with_ingestion_surfaces()
         return (
-            f"{SCAN_SYSTEM_PROMPT}\n"
+            f"{base_scan_prompt}\n"
             f"## CURRENT TIME\n{now}\n\n"
             f"{domain_context}"
             f"## RETRIEVED CONTEXT\n{context_block}"

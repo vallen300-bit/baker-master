@@ -4856,17 +4856,120 @@ function setupCommandBar() {
 
 // ═══ BAKER DATA TAB ═══
 
+async function renderIngestionSurfacesWidget(container) {
+    var section = document.createElement('div');
+    section.className = 'surfaces-widget';
+
+    var header = document.createElement('div');
+    header.className = 'surfaces-header';
+
+    var title = document.createElement('div');
+    title.className = 'surfaces-title';
+    title.textContent = 'INGESTION SURFACES';
+    header.appendChild(title);
+
+    var refreshBtn = document.createElement('button');
+    refreshBtn.className = 'surfaces-refresh';
+    refreshBtn.type = 'button';
+    refreshBtn.textContent = 'Refresh';
+    refreshBtn.addEventListener('click', function() {
+        _loadIngestionSurfacesBody(body);
+    });
+    header.appendChild(refreshBtn);
+    section.appendChild(header);
+
+    var body = document.createElement('div');
+    body.className = 'surfaces-body';
+    section.appendChild(body);
+
+    container.appendChild(section);
+    await _loadIngestionSurfacesBody(body);
+}
+
+async function _loadIngestionSurfacesBody(body) {
+    body.className = 'surfaces-body';
+    showLoading(body, 'Loading ingestion surfaces');
+
+    try {
+        var resp = await bakerFetch('/api/ingestion-surfaces?refresh=1', { timeout: 15000 });
+        if (!resp.ok) throw new Error('http_' + resp.status);
+        var data = await resp.json();
+
+        body.textContent = '';
+        if (data.error) {
+            var err = document.createElement('div');
+            err.className = 'kbl-error';
+            err.textContent = 'Vault mirror unavailable: ' + data.error;
+            body.appendChild(err);
+            return;
+        }
+
+        var meta = document.createElement('div');
+        meta.className = 'surfaces-meta';
+        meta.textContent = 'Version ' + (data.version || '?') +
+            ' | Ratified ' + (data.ratified || '?') +
+            ' | Rows ' + (data.row_count || 0);
+        body.appendChild(meta);
+
+        var tableWrap = document.createElement('div');
+        tableWrap.className = 'surfaces-table-wrap';
+        var table = document.createElement('table');
+        table.className = 'kbl-table surfaces-table';
+
+        var thead = document.createElement('thead');
+        var headRow = document.createElement('tr');
+        ['#', 'Surface', 'What is inside', 'Access', 'Sweep'].forEach(function(label) {
+            var th = document.createElement('th');
+            th.textContent = label;
+            headRow.appendChild(th);
+        });
+        thead.appendChild(headRow);
+        table.appendChild(thead);
+
+        var tbody = document.createElement('tbody');
+        (data.surfaces || []).forEach(function(row) {
+            var tr = document.createElement('tr');
+            [row.number, row.surface, row.contents, row.access, row.sweep].forEach(function(value) {
+                var td = document.createElement('td');
+                td.textContent = value == null ? '' : String(value);
+                tr.appendChild(td);
+            });
+            tbody.appendChild(tr);
+        });
+        table.appendChild(tbody);
+        tableWrap.appendChild(table);
+        body.appendChild(tableWrap);
+
+        if (data.source_last_commit_sha) {
+            var source = document.createElement('div');
+            source.className = 'surfaces-source';
+            source.textContent = data.source_path + ' @ ' + data.source_last_commit_sha.slice(0, 12);
+            body.appendChild(source);
+        }
+    } catch (e) {
+        body.textContent = 'Failed to load ingestion surfaces.';
+        body.className = 'surfaces-body kbl-error';
+    }
+}
+
 async function loadBakerData() {
     var container = document.getElementById('bakerDataContent');
     if (!container) return;
     showLoading(container, 'Loading Baker Data');
 
+    container.textContent = '';
+    await renderIngestionSurfacesWidget(container);
+
     try {
         var resp = await bakerFetch('/api/dashboard/morning-brief', { timeout: 20000 });
-        if (!resp.ok) { container.textContent = 'Failed to load.'; return; }
+        if (!resp.ok) {
+            var err = document.createElement('div');
+            err.className = 'kbl-error';
+            err.textContent = 'Failed to load Baker Data.';
+            container.appendChild(err);
+            return;
+        }
         var data = await resp.json();
-
-        container.textContent = '';
 
         // THREE-TIER-MEMORY: Memory Health widget
         try {
@@ -5012,7 +5115,10 @@ async function loadBakerData() {
         ]);
 
     } catch (e) {
-        container.textContent = 'Failed to load Baker Data.';
+        var err = document.createElement('div');
+        err.className = 'kbl-error';
+        err.textContent = 'Failed to load Baker Data.';
+        container.appendChild(err);
     }
 }
 
