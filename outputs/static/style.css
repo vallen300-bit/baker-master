@@ -1879,6 +1879,68 @@ body {
 .kbl-hb-red { background: var(--fire, #c75050); }
 .kbl-hb-text { color: var(--text1); }
 
+.surfaces-widget {
+    background: var(--card);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    padding: 12px;
+    margin-bottom: 20px;
+}
+.surfaces-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 12px;
+    margin-bottom: 8px;
+}
+.surfaces-title {
+    font-size: 11px;
+    font-weight: 700;
+    color: var(--text3);
+    font-family: var(--mono);
+    letter-spacing: 0.3px;
+}
+.surfaces-refresh {
+    padding: 5px 10px;
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    background: var(--bg);
+    color: var(--text2);
+    font-size: 11px;
+    font-weight: 600;
+    cursor: pointer;
+}
+.surfaces-refresh:hover {
+    border-color: var(--blue);
+    color: var(--blue);
+}
+.surfaces-body {
+    font-size: 12px;
+    color: var(--text1);
+}
+.surfaces-meta {
+    color: var(--text3);
+    font-size: 11px;
+    margin-bottom: 8px;
+}
+.surfaces-table-wrap {
+    overflow-x: auto;
+}
+.surfaces-table {
+    min-width: 900px;
+}
+.surfaces-table td:nth-child(3),
+.surfaces-table td:nth-child(4) {
+    white-space: normal;
+    min-width: 180px;
+}
+.surfaces-source {
+    color: var(--text4);
+    font-family: var(--mono);
+    font-size: 10px;
+    margin-top: 8px;
+}
+
 /* Mobile viewport — table wraps into scrollable container */
 @media (max-width: 480px) {
     .kbl-widget { padding: 10px; }
