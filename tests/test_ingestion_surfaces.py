@@ -58,6 +58,34 @@ def test_parse_ingestion_surfaces_markdown_returns_15_rows():
     assert snapshot["surfaces"][10]["sweep"] == "topic"
 
 
+def test_parse_frontmatter_only_markdown_is_degraded():
+    malformed = """---
+type: process
+name: ingestion-surfaces
+version: v1
+ratified: 2026-06-13 (Director)
+---
+
+# no table here
+"""
+
+    snapshot = parse_ingestion_surfaces_markdown(malformed)
+
+    assert snapshot["version"] == "v1"
+    assert snapshot["row_count"] == 0
+    assert snapshot["surfaces"] == []
+    assert snapshot["error"] == "no_rows_parsed"
+
+
+def test_parse_missing_required_metadata_is_degraded():
+    missing_metadata = SAMPLE_MARKDOWN.replace("version: v1\n", "")
+
+    snapshot = parse_ingestion_surfaces_markdown(missing_metadata)
+
+    assert snapshot["row_count"] == 15
+    assert snapshot["error"] == "missing_metadata:version"
+
+
 def test_prompt_block_includes_current_surface_list():
     with patch(
         "kbl.ingestion_surfaces.load_ingestion_surfaces",
@@ -103,6 +131,26 @@ def test_ingestion_surfaces_endpoint_returns_snapshot():
     assert body["status"] == "ok"
     assert body["row_count"] == 15
     assert body["surfaces"][6]["surface"] == "Fireflies direct"
+
+
+def test_ingestion_surfaces_endpoint_reports_degraded_snapshot():
+    from outputs.dashboard import app, verify_api_key
+
+    app.dependency_overrides[verify_api_key] = lambda: None
+    try:
+        with patch(
+            "outputs.dashboard.load_ingestion_surfaces",
+            return_value=parse_ingestion_surfaces_markdown("---\nversion: v1\nratified: x\n---\n"),
+        ):
+            resp = TestClient(app).get("/api/ingestion-surfaces")
+    finally:
+        app.dependency_overrides.pop(verify_api_key, None)
+
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["status"] == "degraded"
+    assert body["row_count"] == 0
+    assert body["error"] == "no_rows_parsed"
 
 
 def test_scan_system_prompt_includes_ingestion_surfaces():

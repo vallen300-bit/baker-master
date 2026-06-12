@@ -15,6 +15,7 @@ from typing import Any
 logger = logging.getLogger(__name__)
 
 INGESTION_SURFACES_PATH = "_ops/processes/ingestion-surfaces.md"
+REQUIRED_METADATA_KEYS = ("version", "ratified")
 _CACHE_TTL_SECONDS = 300
 _CACHE: dict[str, Any] = {"expires_at": 0.0, "snapshot": None}
 
@@ -88,6 +89,13 @@ def parse_ingestion_surfaces_markdown(
     """Parse the canonical vault markdown into the API shape."""
     meta, body = _parse_frontmatter(markdown or "")
     rows = _parse_table_rows(body)
+    errors: list[str] = []
+    missing_meta = [key for key in REQUIRED_METADATA_KEYS if not meta.get(key)]
+    if missing_meta:
+        errors.append("missing_metadata:" + ",".join(missing_meta))
+    if not rows:
+        errors.append("no_rows_parsed")
+
     return {
         "version": meta.get("version"),
         "ratified": meta.get("ratified"),
@@ -98,7 +106,7 @@ def parse_ingestion_surfaces_markdown(
         "source_sha256": sha256,
         "row_count": len(rows),
         "surfaces": rows,
-        "error": None,
+        "error": ";".join(errors) if errors else None,
     }
 
 
@@ -151,6 +159,11 @@ def build_ingestion_surfaces_prompt_block() -> str:
     snapshot = load_ingestion_surfaces()
     rows = snapshot.get("surfaces") or []
     if not rows:
+        if snapshot.get("error"):
+            logger.warning(
+                "ingestion surfaces prompt block unavailable: %s",
+                snapshot.get("error"),
+            )
         return ""
 
     header = (
