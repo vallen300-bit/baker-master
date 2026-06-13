@@ -7,6 +7,9 @@
 # Director-ratified 2026-05-29 codex install Phase 1 fold (INSTALL.md §Fold 4).
 
 set -euo pipefail
+SCRIPT_DIR="$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)"
+# shellcheck source=scripts/brisen_lab_terminal_key.sh
+. "$SCRIPT_DIR/brisen_lab_terminal_key.sh"
 
 if [[ $# -lt 1 ]]; then
   echo "Usage: $0 <message-id>" >&2
@@ -20,19 +23,11 @@ if ! [[ "$MSG_ID" =~ ^[0-9]+$ ]]; then
   exit 1
 fi
 
-KEY="${BRISEN_LAB_TERMINAL_KEY:-}"
-if [[ -z "$KEY" ]] && [[ -r "$HOME/.codex/runtime-env" ]]; then
-  # shellcheck disable=SC1091
-  source "$HOME/.codex/runtime-env"
-  KEY="${BRISEN_LAB_TERMINAL_KEY:-}"
-fi
-if [[ -z "$KEY" ]] && command -v op >/dev/null 2>&1; then
-  KEY="$(op read 'op://Baker API Keys/BRISEN_LAB_TERMINAL_KEY_codex/credential' 2>/dev/null || true)"
-fi
+KEY="$(brisen_lab_read_terminal_key "codex" "${BRISEN_LAB_TERMINAL_KEY:-}" 2>/dev/null || true)"
 
 if [[ -z "$KEY" ]]; then
-  echo "ERROR: BRISEN_LAB_TERMINAL_KEY_codex not in env and 1P unreachable." >&2
-  echo "       Relaunch via 'cdx' (it pre-fetches) or run 'op signin'." >&2
+  echo "ERROR: BRISEN_LAB_TERMINAL_KEY_codex not in env/cache and 1P unreachable." >&2
+  echo "       Seed ~/.brisen-lab/keys/codex, relaunch via 'cdx', or run 'op signin'." >&2
   exit 2
 fi
 

@@ -155,35 +155,106 @@ def _worker_slug() -> str:
     return role or "cowork"
 
 
-def _resolve_terminal_key(val: str) -> str:
-    """Resolve a terminal-key env value to its literal key.
+def _is_literal_terminal_key(val: str | None) -> bool:
+    return bool(val) and not val.startswith("op://")
 
-    If `val` starts with `op://`, resolve via 1Password CLI (`op read`) at
-    runtime. Otherwise treat `val` as a literal key already.
 
-    Background: Cowork-App's `settings.local.json` `env` block does NOT
-    auto-resolve `op://` references — values arrive in `os.environ` as the
-    literal 63-char ref string. Without this helper, the hook would send the
-    ref as `X-Terminal-Key` header → daemon 401 `bad_terminal_key` → silent
-    drain failure (AH1-App diagnosis 2026-05-06, Stage 2 burn-in blocker).
+def _terminal_key_cache_path(slug: str) -> str:
+    return os.path.join(os.path.expanduser("~"), ".brisen-lab", "keys", slug)
 
-    Returns empty string on any failure (op CLI absent, unauthenticated,
-    timeout) — preserves the caller's fail-open contract.
-    """
-    if not val:
+
+def _read_cached_terminal_key(slug: str) -> str:
+    try:
+        with open(_terminal_key_cache_path(slug), "r", encoding="utf-8") as f:
+            key = f.read().strip()
+    except Exception:
         return ""
-    if not val.startswith("op://"):
-        return val
+    return key if _is_literal_terminal_key(key) else ""
+
+
+def _write_cached_terminal_key(slug: str, key: str) -> None:
+    """Best-effort cache seed. Never raises and never logs key material."""
+    if not _is_literal_terminal_key(key):
+        return
+    if not slug or "/" in slug or "\\" in slug:
+        return
+    try:
+        cache_dir = os.path.join(os.path.expanduser("~"), ".brisen-lab", "keys")
+        os.makedirs(cache_dir, mode=0o700, exist_ok=True)
+        try:
+            os.chmod(os.path.dirname(cache_dir), 0o700)
+            os.chmod(cache_dir, 0o700)
+        except Exception:
+            pass
+        path = _terminal_key_cache_path(slug)
+        tmp = os.path.join(cache_dir, f".{slug}.tmp.{os.getpid()}.{uuid.uuid4().hex}")
+        fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+        with os.fdopen(fd, "w", encoding="utf-8") as f:
+            f.write(key)
+            f.write("\n")
+        os.replace(tmp, path)
+        try:
+            os.chmod(path, 0o600)
+        except Exception:
+            pass
+    except Exception:
+        try:
+            if "tmp" in locals():
+                os.unlink(tmp)
+        except Exception:
+            pass
+
+
+def _op_read_terminal_key(op_ref: str, cache_slug: str) -> str:
     try:
         import subprocess
         out = subprocess.run(
-            ["op", "read", val],
+            ["op", "read", op_ref],
             capture_output=True, text=True, timeout=5,
         )
-        if out.returncode == 0:
-            return out.stdout.strip()
+        if out.returncode != 0:
+            return ""
+        key = out.stdout.strip()
     except Exception:
-        pass
+        return ""
+    if _is_literal_terminal_key(key):
+        _write_cached_terminal_key(cache_slug, key)
+        return key
+    return ""
+
+
+def _resolve_terminal_key_for_slug(slug: str, *env_values: str, fallback_op_ref: str | None = None) -> str:
+    """Resolve terminal key with precedence: literal env → cache → op fallback.
+
+    Background: Cowork-App's `settings.local.json` `env` block does NOT
+    auto-resolve `op://` references — values arrive in `os.environ` as literal
+    refs. Those refs now check the seeded cache before spawning 1Password CLI,
+    avoiding GUI authorization prompts on hot prompt-submit paths.
+
+    Returns empty string on any failure (cache miss, op CLI absent,
+    unauthenticated, timeout) — preserves the caller's fail-open contract.
+    """
+    for val in env_values:
+        if _is_literal_terminal_key(val):
+            return val
+
+    cached = _read_cached_terminal_key(slug)
+    if cached:
+        return cached
+
+    op_refs: list[str] = []
+    for val in env_values:
+        if val.startswith("op://") and val not in op_refs:
+            op_refs.append(val)
+    if fallback_op_ref and fallback_op_ref not in op_refs:
+        op_refs.append(fallback_op_ref)
+    if not op_refs:
+        op_refs.append(f"op://Baker API Keys/BRISEN_LAB_TERMINAL_KEY_{slug}/credential")
+
+    for op_ref in op_refs:
+        key = _op_read_terminal_key(op_ref, slug)
+        if key:
+            return key
     return ""
 
 
@@ -194,11 +265,13 @@ def _terminal_key() -> str:
     `op://` refs in Cowork-App's settings env block are resolved at hook-runtime
     rather than sent literally to the daemon.
     """
-    slug_key = f"BRISEN_LAB_TERMINAL_KEY_{_worker_slug()}"
-    val = _resolve_terminal_key(os.environ.get(slug_key, "").strip())
-    if val:
-        return val
-    return _resolve_terminal_key(os.environ.get("BRISEN_LAB_TERMINAL_KEY", "").strip())
+    slug = _worker_slug()
+    slug_key = f"BRISEN_LAB_TERMINAL_KEY_{slug}"
+    return _resolve_terminal_key_for_slug(
+        slug,
+        os.environ.get(slug_key, "").strip(),
+        os.environ.get("BRISEN_LAB_TERMINAL_KEY", "").strip(),
+    )
 
 
 def _brisen_lab_url() -> str:
@@ -254,12 +327,11 @@ def _fetch_director_key() -> str | None:
     Returns None on miss — caller fail-opens silent (no Director-inbox drain
     that prompt). Hook discipline: never block startup on Director-inbox flow.
     """
-    val = _resolve_terminal_key(
-        os.environ.get("BRISEN_LAB_TERMINAL_KEY_director", "").strip()
+    val = _resolve_terminal_key_for_slug(
+        "director",
+        os.environ.get("BRISEN_LAB_TERMINAL_KEY_director", "").strip(),
+        fallback_op_ref=_DIRECTOR_KEY_OP_REF,
     )
-    if val:
-        return val
-    val = _resolve_terminal_key(_DIRECTOR_KEY_OP_REF)
     return val or None
 
 

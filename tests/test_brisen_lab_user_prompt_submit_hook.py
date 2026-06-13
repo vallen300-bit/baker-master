@@ -391,6 +391,66 @@ def test_no_terminal_key_silent_exit(hook_mod, monkeypatch, capsys):
     assert capsys.readouterr().out.strip() == ""
 
 
+def test_prompt_submit_cache_key_skips_op_ref(hook_mod, monkeypatch, patch_httpx, tmp_path, capsys):
+    """If env holds op:// but cache is populated, prompt-submit never spawns op."""
+    cache_dir = tmp_path / ".brisen-lab" / "keys"
+    cache_dir.mkdir(parents=True)
+    (cache_dir / "lead").write_text("cache-key\n")
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir()
+    op_sentinel = tmp_path / "op-called"
+    op = bin_dir / "op"
+    op.write_text(f"#!/usr/bin/env bash\ntouch {op_sentinel}\nexit 99\n")
+    op.chmod(0o755)
+
+    monkeypatch.setenv("HOME", str(tmp_path))
+    monkeypatch.setenv("PATH", f"{bin_dir}:{os.environ.get('PATH', '')}")
+    monkeypatch.setenv(
+        "BRISEN_LAB_TERMINAL_KEY",
+        "op://Baker API Keys/BRISEN_LAB_TERMINAL_KEY_lead/credential",
+    )
+    monkeypatch.setenv("BAKER_ROLE", "lead")
+    captured_headers: list[dict] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        url = str(request.url)
+        if url.endswith("/auth/register-session-pubkey"):
+            captured_headers.append(dict(request.headers))
+            return httpx.Response(200, json={"session_id": "sess-cache"})
+        if url.endswith("/auth/human-confirmation"):
+            return httpx.Response(200, json={"token": "JWT.cache"})
+        if "/msg/" in url:
+            return httpx.Response(200, json=[])
+        return httpx.Response(404)
+
+    patch_httpx(handler)
+    with patch.object(sys, "stdin", _stdin_with({"prompt": "cache proof"})):
+        with pytest.raises(SystemExit) as exc:
+            hook_mod.main()
+
+    assert exc.value.code == 0
+    assert json.loads(capsys.readouterr().out)["hookSpecificOutput"]["additionalContext"]
+    assert captured_headers[0].get("x-terminal-key") == "cache-key"
+    assert not op_sentinel.exists(), "op must not run when cache is populated"
+
+
+def test_prompt_submit_op_fallback_seeds_cache(hook_mod, monkeypatch, tmp_path):
+    monkeypatch.setenv("HOME", str(tmp_path))
+    op_ref = "op://Baker API Keys/BRISEN_LAB_TERMINAL_KEY_lead/credential"
+    with patch("subprocess.run") as run:
+        run.return_value = subprocess.CompletedProcess(
+            ["op", "read", op_ref],
+            0,
+            stdout="op-key\n",
+            stderr="",
+        )
+        key = hook_mod._resolve_terminal_key_for_slug("lead", op_ref)
+
+    assert key == "op-key"
+    cache_file = tmp_path / ".brisen-lab" / "keys" / "lead"
+    assert cache_file.read_text().strip() == "op-key"
+
+
 def test_garbage_stdin_silent_exit(hook_mod, monkeypatch, patch_httpx):
     """Hook must drain stdin even when the JSON is malformed."""
     def handler(request):

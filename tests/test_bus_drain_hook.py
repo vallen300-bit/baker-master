@@ -117,6 +117,41 @@ def test_op_fetch_failure_emits_status(stubs_dir, base_env, tmp_path):
     assert "slug=b2" in ctx
 
 
+def test_cache_key_skips_op_fetch(stubs_dir, base_env, tmp_path):
+    """Populated ~/.brisen-lab/keys/<slug> means SessionStart never calls op."""
+    cache_dir = tmp_path / ".brisen-lab" / "keys"
+    cache_dir.mkdir(parents=True)
+    (cache_dir / "b2").write_text("cache-key\n")
+    op_sentinel = tmp_path / "op-called"
+    curl_sentinel = tmp_path / "curl-called"
+    _make_stub(stubs_dir / "op", f"#!/bin/bash\ntouch {op_sentinel}\nexit 99\n")
+    _make_stub(
+        stubs_dir / "curl",
+        f"#!/bin/bash\ntouch {curl_sentinel}\necho '{{\"messages\": []}}'\nexit 0\n",
+    )
+
+    env = dict(base_env, BAKER_ROLE="b2")
+    result = _run_hook(env, tmp_path)
+
+    assert result.returncode == 0, result.stderr
+    assert result.stdout == ""
+    assert curl_sentinel.exists(), "daemon fetch should still run with cached key"
+    assert not op_sentinel.exists(), "op must not run when cache is populated"
+
+
+def test_op_fallback_seeds_key_cache(stubs_dir, base_env, tmp_path):
+    """Successful last-resort op read writes ~/.brisen-lab/keys/<slug>."""
+    _make_stub(stubs_dir / "op", "#!/bin/bash\necho 'op-key-1234'\n")
+    _make_stub(stubs_dir / "curl", '#!/bin/bash\necho \'{"messages": []}\'\nexit 0\n')
+
+    env = dict(base_env, BAKER_ROLE="b2")
+    result = _run_hook(env, tmp_path)
+
+    assert result.returncode == 0, result.stderr
+    cache_file = tmp_path / ".brisen-lab" / "keys" / "b2"
+    assert cache_file.read_text().strip() == "op-key-1234"
+
+
 # ---------------------------------------------------------------------------
 # Failure path 3: Daemon unreachable (curl non-zero exit)
 # ---------------------------------------------------------------------------

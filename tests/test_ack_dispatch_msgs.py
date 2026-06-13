@@ -218,9 +218,11 @@ def test_key_fetch_failure_exit_2(tmp_path):
 
     full_env = os.environ.copy()
     full_env["PATH"] = f"{bin_dir}:{full_env.get('PATH', '')}"
+    full_env["HOME"] = str(tmp_path)
     full_env["BAKER_ROLE"] = "b3"
     # Belt + suspenders: clear any inherited override.
     full_env.pop("BRISEN_LAB_TERMINAL_KEY_OVERRIDE", None)
+    full_env.pop("BRISEN_LAB_TERMINAL_KEY", None)
 
     result = subprocess.run(
         ["bash", str(_SCRIPT), "--brief-slug", "ZOMBIE_TEST_1"],
