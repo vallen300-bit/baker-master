@@ -11,29 +11,22 @@
 set -euo pipefail
 
 LIMIT="${1:-10}"
+SCRIPT_DIR="$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)"
+# shellcheck source=scripts/brisen_lab_terminal_key.sh
+. "$SCRIPT_DIR/brisen_lab_terminal_key.sh"
 
-# Tier 1: env var (set by cdx() picker; works in AH1's shell). Codex bash sandbox
-# strips parent env in some configurations, so Tier 2: disk file at ~/.codex/
-# runtime-env (also written by cdx()). Tier 3: live op read (AH1 interactive only).
-KEY="${BRISEN_LAB_TERMINAL_KEY:-}"
-if [[ -z "$KEY" ]] && [[ -r "$HOME/.codex/runtime-env" ]]; then
-  # shellcheck disable=SC1091
-  source "$HOME/.codex/runtime-env"
-  KEY="${BRISEN_LAB_TERMINAL_KEY:-}"
-fi
-if [[ -z "$KEY" ]] && command -v op >/dev/null 2>&1; then
-  KEY="$(op read 'op://Baker API Keys/BRISEN_LAB_TERMINAL_KEY_codex/credential' 2>/dev/null || true)"
-fi
+# Precedence: literal env → ~/.brisen-lab/keys/codex cache → op fallback.
+KEY="$(brisen_lab_read_terminal_key "codex" "${BRISEN_LAB_TERMINAL_KEY:-}" 2>/dev/null || true)"
 
 if [[ -z "$KEY" ]]; then
   # Emit on stdout AND stderr — codex's bash-tool UI sometimes hides stderr,
   # causing the symptom "exited 1, no output". stdout guarantees the diagnostic
   # surfaces in codex's transcript regardless of stderr handling.
-  echo "ERROR: BRISEN_LAB_TERMINAL_KEY_codex not in env and 1P unreachable."
-  echo "  Diagnostic: BRISEN_LAB_TERMINAL_KEY env var is empty, and 'op read' returned nothing."
+  echo "ERROR: BRISEN_LAB_TERMINAL_KEY_codex not in env/cache and 1P unreachable."
+  echo "  Diagnostic: BRISEN_LAB_TERMINAL_KEY env var is empty/non-literal, cache miss, and 'op read' returned nothing."
   echo "  Fix: relaunch codex via the cdx() shell function (Shell -> New Window -> codex), which pre-fetches"
   echo "       the credential from 1Password in AH1's authenticated shell and exports it to codex's env."
-  echo "ERROR: BRISEN_LAB_TERMINAL_KEY_codex not in env and 1P unreachable." >&2
+  echo "ERROR: BRISEN_LAB_TERMINAL_KEY_codex not in env/cache and 1P unreachable." >&2
   exit 2
 fi
 

@@ -151,6 +151,23 @@ def test_acks_only_rendered_ids(tmp_path, stubs_dir, daemon):
     assert 12 not in handler.acked, "unseen ship report must stay unacked"
 
 
+def test_cache_key_skips_op_fetch(tmp_path, stubs_dir, daemon):
+    """Populated ~/.brisen-lab/keys/<slug> means Stop hook never calls op."""
+    url, handler = daemon
+    handler.inbox = [_msg(13)]
+    (tmp_path / ".brisen-lab" / "keys").mkdir(parents=True)
+    (tmp_path / ".brisen-lab" / "keys" / "lead").write_text("cache-key\n")
+    (tmp_path / ".brisen-lab-bus-rendered-lead.txt").write_text("13\n")
+    op_sentinel = tmp_path / "op-called"
+    _make_stub(stubs_dir / "op", f"#!/bin/bash\ntouch {op_sentinel}\nexit 99\n")
+
+    result = _run_hook(tmp_path, stubs_dir, url)
+
+    assert result.returncode == 0, result.stderr
+    assert handler.acked == [13]
+    assert not op_sentinel.exists(), "op must not run when cache is populated"
+
+
 def test_ledger_pruned_after_acks(tmp_path, stubs_dir, daemon):
     """Acked ids + ids already acked elsewhere drop out of the ledger."""
     url, handler = daemon

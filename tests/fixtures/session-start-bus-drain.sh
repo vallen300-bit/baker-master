@@ -11,8 +11,10 @@
 # Contract: never block session start. Exit 0 on every path. Errors emit a
 # short status line as additionalContext so Director sees the gap.
 #
-# Auth: fetches per-terminal key from 1Password via `op read`. Auto-resolves
-# slug from BAKER_ROLE (matches scripts/bus_post.sh ROLE_TO_SLUG mapping).
+# Auth: resolves per-terminal key by literal env, then
+# ~/.brisen-lab/keys/<slug>, then last-resort 1Password `op read`.
+# Auto-resolves slug from BAKER_ROLE (matches scripts/bus_post.sh ROLE_TO_SLUG
+# mapping).
 #
 # State: ~/.brisen-lab-bus-last-seen-<slug>.txt holds the ISO-8601 timestamp
 # of the newest message drained on the previous SessionStart. First run uses
@@ -82,9 +84,87 @@ case "${BAKER_ROLE:-}" in
 esac
 # END GENERATED AGENT IDENTITY ROLE MAP
 
-# --- fetch terminal key from 1Password ---
+# --- fetch terminal key: literal env → cache → 1Password fallback ---
 
-KEY="$(op read "op://Baker API Keys/BRISEN_LAB_TERMINAL_KEY_${SLUG}/credential" 2>/dev/null)"
+_is_literal_terminal_key() {
+  local value="${1:-}"
+  [[ -n "$value" && "$value" != op://* ]]
+}
+
+_terminal_key_cache_file() {
+  local slug="$1"
+  printf '%s/.brisen-lab/keys/%s\n' "$HOME" "$slug"
+}
+
+_read_cached_terminal_key() {
+  local slug="$1"
+  local cache_file key
+  cache_file="$(_terminal_key_cache_file "$slug")"
+  [ -r "$cache_file" ] || return 1
+  key="$(tr -d '\r\n' < "$cache_file" 2>/dev/null || true)"
+  _is_literal_terminal_key "$key" || return 1
+  printf '%s\n' "$key"
+}
+
+_write_cached_terminal_key() {
+  local slug="$1"
+  local key="$2"
+  _is_literal_terminal_key "$key" || return 1
+  [[ "$slug" =~ ^[A-Za-z0-9._-]+$ ]] || return 1
+
+  local cache_dir cache_file tmp
+  cache_dir="$HOME/.brisen-lab/keys"
+  cache_file="$(_terminal_key_cache_file "$slug")"
+  mkdir -p "$cache_dir" 2>/dev/null || return 1
+  chmod 700 "$HOME/.brisen-lab" "$cache_dir" 2>/dev/null || true
+
+  tmp="$(mktemp "${cache_dir}/.${slug}.tmp.XXXXXX" 2>/dev/null)" || return 1
+  if printf '%s\n' "$key" > "$tmp" 2>/dev/null; then
+    chmod 600 "$tmp" 2>/dev/null || true
+    mv "$tmp" "$cache_file" 2>/dev/null || {
+      rm -f "$tmp" 2>/dev/null || true
+      return 1
+    }
+    chmod 600 "$cache_file" 2>/dev/null || true
+    return 0
+  fi
+
+  rm -f "$tmp" 2>/dev/null || true
+  return 1
+}
+
+_read_terminal_key() {
+  local slug="$1"
+  local env_value="${2:-}"
+
+  if _is_literal_terminal_key "$env_value"; then
+    printf '%s\n' "$env_value"
+    return 0
+  fi
+
+  local cached
+  cached="$(_read_cached_terminal_key "$slug" 2>/dev/null || true)"
+  if _is_literal_terminal_key "$cached"; then
+    printf '%s\n' "$cached"
+    return 0
+  fi
+
+  command -v op >/dev/null 2>&1 || return 1
+
+  local op_ref key
+  if [[ "$env_value" == op://* ]]; then
+    op_ref="$env_value"
+  else
+    op_ref="op://Baker API Keys/BRISEN_LAB_TERMINAL_KEY_${slug}/credential"
+  fi
+
+  key="$(op read "$op_ref" 2>/dev/null || true)"
+  _is_literal_terminal_key "$key" || return 1
+  _write_cached_terminal_key "$slug" "$key" >/dev/null 2>&1 || true
+  printf '%s\n' "$key"
+}
+
+KEY="$(_read_terminal_key "$SLUG" "${BRISEN_LAB_TERMINAL_KEY:-}" 2>/dev/null || true)"
 if [ -z "$KEY" ]; then
     printf '[bus-drain] 1Password fetch failed for slug=%s — skipping bus drain this session.\n' "$SLUG" | _emit
     exit 0

@@ -18,6 +18,8 @@ DAEMON_URL="${BRISEN_LAB_DAEMON_URL:-https://brisen-lab.onrender.com}"
 SCRIPT_DIR="$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)"
 # shellcheck source=scripts/agent_identity_generated.sh
 . "$SCRIPT_DIR/agent_identity_generated.sh"
+# shellcheck source=scripts/brisen_lab_terminal_key.sh
+. "$SCRIPT_DIR/brisen_lab_terminal_key.sh"
 
 # --- arg parsing ---
 
@@ -57,21 +59,12 @@ if ! SENDER="$(agent_identity_resolve_role "${BAKER_ROLE:-}")"; then
 fi
 
 # --- credential fetch ---
-# Prefer pre-fetched env var (set by picker functions like cdx() to avoid
-# requiring 1P access inside sandboxed sub-agent shells); fall back to 1P.
+# Precedence: literal env → ~/.brisen-lab/keys/<slug> cache → op fallback.
 
-KEY="${BRISEN_LAB_TERMINAL_KEY:-}"
-if [ -z "$KEY" ] && [ -r "$HOME/.codex/runtime-env" ] && [ "$SENDER" = "codex" ]; then
-    # shellcheck disable=SC1091
-    . "$HOME/.codex/runtime-env"
-    KEY="${BRISEN_LAB_TERMINAL_KEY:-}"
-fi
-if [ -z "$KEY" ] && command -v op >/dev/null 2>&1; then
-    KEY="$(op read "op://Baker API Keys/BRISEN_LAB_TERMINAL_KEY_${SENDER}/credential" 2>/dev/null || true)"
-fi
+KEY="$(brisen_lab_read_terminal_key "$SENDER" "${BRISEN_LAB_TERMINAL_KEY:-}" 2>/dev/null || true)"
 
 if [ -z "$KEY" ]; then
-    echo "ERROR: terminal key empty for sender=${SENDER} (no env, no 1P)" >&2
+    echo "ERROR: terminal key empty for sender=${SENDER} (no env, no cache, no 1P)" >&2
     exit 1
 fi
 

@@ -281,6 +281,7 @@ def test_03_director_key_missing_fail_open_silent(stub_daemon, tmp_path):
     env = _base_env(
         {"BAKER_ROLE": "lead",
          "BRISEN_LAB_APP_AUTOPOLL_ENABLED": "true",
+         "HOME": str(tmp_path),
          "BRISEN_LAB_URL": url,
          "PATH": "/nonexistent-bin"},  # no op CLI on PATH
         tmpdir=tmp_path,
@@ -473,3 +474,38 @@ def test_11_director_key_op_ref_in_env_resolves(stub_daemon, fake_op_dir, tmp_pa
     # Must have hit /msg/director with the resolved key (fake_op returns
     # 'op-fake-director-key'); pre-fix this would not have appeared.
     assert "/msg/director" in _get_paths(captured), captured
+
+
+def test_12_director_key_cache_beats_op_ref_env(stub_daemon, tmp_path):
+    """Director op-ref env checks ~/.brisen-lab/keys/director before op."""
+    url, captured = stub_daemon
+    _DrainStubHandler._director_rows = [DIRECTOR_ROW_DISPATCH]
+    _DrainStubHandler._full_bodies = {102: "drained via director cache"}
+    cache_dir = tmp_path / ".brisen-lab" / "keys"
+    cache_dir.mkdir(parents=True)
+    (cache_dir / "director").write_text("director-cache-key\n")
+
+    fake_op = tmp_path / "bin"
+    fake_op.mkdir()
+    op_sentinel = tmp_path / "op-called"
+    op = fake_op / "op"
+    op.write_text(f"#!/usr/bin/env bash\ntouch {op_sentinel}\nexit 99\n")
+    op.chmod(0o755)
+
+    env = _base_env(
+        {"HOME": str(tmp_path),
+         "BAKER_ROLE": "lead",
+         "BRISEN_LAB_APP_AUTOPOLL_ENABLED": "true",
+         "BRISEN_LAB_TERMINAL_KEY": "lead-env-key",
+         "BRISEN_LAB_TERMINAL_KEY_director":
+             "op://Baker API Keys/BRISEN_LAB_TERMINAL_KEY_director/credential",
+         "BRISEN_LAB_URL": url},
+        fake_op=fake_op, tmpdir=tmp_path,
+    )
+    r = _run_hook(env)
+    assert r.returncode == 0
+    ctx = _hook_context(r.stdout)
+    assert "Director inbox" in ctx, ctx
+    assert "drained via director cache" in ctx, ctx
+    assert "/msg/director" in _get_paths(captured), captured
+    assert not op_sentinel.exists(), "op must not run when director cache is populated"

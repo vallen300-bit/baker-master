@@ -51,8 +51,60 @@ def _resolve_recipient(value: str) -> str | None:
     return ROLE_TO_SLUG.get(value)
 
 
+def _is_literal_terminal_key(value: str | None) -> bool:
+    return bool(value) and not value.startswith("op://")
+
+
+def _terminal_key_cache_path(sender: str) -> Path:
+    return Path.home() / ".brisen-lab" / "keys" / sender
+
+
+def _read_cached_key(sender: str) -> str:
+    try:
+        key = _terminal_key_cache_path(sender).read_text(encoding="utf-8").strip()
+    except OSError:
+        return ""
+    return key if _is_literal_terminal_key(key) else ""
+
+
+def _write_cached_key(sender: str, key: str) -> None:
+    if not _is_literal_terminal_key(key):
+        return
+    if not sender or "/" in sender or "\\" in sender:
+        return
+    try:
+        cache_dir = Path.home() / ".brisen-lab" / "keys"
+        cache_dir.mkdir(parents=True, exist_ok=True, mode=0o700)
+        try:
+            (Path.home() / ".brisen-lab").chmod(0o700)
+            cache_dir.chmod(0o700)
+        except OSError:
+            pass
+        path = _terminal_key_cache_path(sender)
+        tmp = cache_dir / f".{sender}.tmp.{os.getpid()}"
+        tmp.write_text(f"{key}\n", encoding="utf-8")
+        tmp.chmod(0o600)
+        tmp.replace(path)
+        try:
+            path.chmod(0o600)
+        except OSError:
+            pass
+    except OSError:
+        pass
+
+
 def _fetch_key(sender: str) -> str:
+    env_key = os.environ.get("BRISEN_LAB_TERMINAL_KEY", "").strip()
+    if _is_literal_terminal_key(env_key):
+        return env_key
+
+    cached = _read_cached_key(sender)
+    if cached:
+        return cached
+
     ref = f"op://Baker API Keys/BRISEN_LAB_TERMINAL_KEY_{sender}/credential"
+    if env_key.startswith("op://"):
+        ref = env_key
     try:
         out = subprocess.run(
             ["op", "read", ref],
@@ -68,6 +120,7 @@ def _fetch_key(sender: str) -> str:
     key = out.stdout.strip()
     if not key:
         sys.exit(f"ERROR: 1Password returned empty key for {sender}")
+    _write_cached_key(sender, key)
     return key
 
 

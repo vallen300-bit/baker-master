@@ -347,3 +347,67 @@ def test_18_py_agent_id_recipients(stub_daemon, fake_op_path):
     assert r.returncode == 0, r.stderr
     assert captured[0]["path"] == "/msg/codex-arch"
     assert captured[0]["payload"]["to"] == ["codex-arch", "deputy-codex"]
+
+
+def test_19_sh_cache_key_beats_op_ref(stub_daemon, tmp_path):
+    """sh: op:// env + populated cache must POST without invoking op."""
+    url, captured = stub_daemon
+    cache_dir = tmp_path / ".brisen-lab" / "keys"
+    cache_dir.mkdir(parents=True)
+    (cache_dir / "lead").write_text("cache-key\n")
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir()
+    op_sentinel = tmp_path / "op-called"
+    op = bin_dir / "op"
+    op.write_text(f"#!/usr/bin/env bash\ntouch {op_sentinel}\nexit 99\n")
+    op.chmod(0o755)
+
+    r = _run_sh(
+        ["b2", "hello from cache"],
+        _env_with(
+            {
+                "HOME": str(tmp_path),
+                "BAKER_ROLE": "AH1",
+                "BRISEN_LAB_DAEMON_URL": url,
+                "BRISEN_LAB_TERMINAL_KEY":
+                    "op://Baker API Keys/BRISEN_LAB_TERMINAL_KEY_lead/credential",
+            },
+            fake_op_dir=bin_dir,
+        ),
+    )
+
+    assert r.returncode == 0, r.stderr
+    assert captured[0]["headers"].get("X-Terminal-Key") == "cache-key"
+    assert not op_sentinel.exists(), "op must not run when cache is populated"
+
+
+def test_20_py_cache_key_beats_op_ref(stub_daemon, tmp_path):
+    """py: op:// env + populated cache must POST without invoking op."""
+    url, captured = stub_daemon
+    cache_dir = tmp_path / ".brisen-lab" / "keys"
+    cache_dir.mkdir(parents=True)
+    (cache_dir / "lead").write_text("cache-key\n")
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir()
+    op_sentinel = tmp_path / "op-called"
+    op = bin_dir / "op"
+    op.write_text(f"#!/usr/bin/env bash\ntouch {op_sentinel}\nexit 99\n")
+    op.chmod(0o755)
+
+    r = _run_py(
+        ["--to", "b2", "--body", "hello from cache"],
+        _env_with(
+            {
+                "HOME": str(tmp_path),
+                "BAKER_ROLE": "AH1",
+                "BRISEN_LAB_DAEMON_URL": url,
+                "BRISEN_LAB_TERMINAL_KEY":
+                    "op://Baker API Keys/BRISEN_LAB_TERMINAL_KEY_lead/credential",
+            },
+            fake_op_dir=bin_dir,
+        ),
+    )
+
+    assert r.returncode == 0, r.stderr
+    assert captured[0]["headers"].get("X-Terminal-Key") == "cache-key"
+    assert not op_sentinel.exists(), "op must not run when cache is populated"

@@ -33,6 +33,9 @@ set -o pipefail
 
 DAEMON_URL="${BRISEN_LAB_DAEMON_URL:-https://brisen-lab.onrender.com}"
 BRIEF_SLUG=""
+SCRIPT_DIR="$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)"
+# shellcheck source=scripts/brisen_lab_terminal_key.sh
+. "$SCRIPT_DIR/brisen_lab_terminal_key.sh"
 
 while [[ $# -gt 0 ]]; do
     case "$1" in
@@ -80,16 +83,10 @@ case "$ROLE" in
         ;;
 esac
 
-# Allow tests to inject the key directly (skips the 1Password round-trip).
-KEY="${BRISEN_LAB_TERMINAL_KEY_OVERRIDE:-}"
+# Allow tests to inject the key directly (skips cache/1Password).
+KEY="$(brisen_lab_read_terminal_key "$SENDER" "${BRISEN_LAB_TERMINAL_KEY_OVERRIDE:-${BRISEN_LAB_TERMINAL_KEY:-}}" 2>/dev/null || true)"
 if [[ -z "$KEY" ]]; then
-    KEY="$(op read "op://Baker API Keys/BRISEN_LAB_TERMINAL_KEY_${SENDER}/credential" 2>/dev/null)" || {
-        echo "[ack] 1Password fetch failed for sender=${SENDER}" >&2
-        exit 2
-    }
-fi
-if [[ -z "$KEY" ]]; then
-    echo "[ack] empty terminal key for sender=${SENDER}" >&2
+    echo "[ack] 1Password fetch failed for sender=${SENDER} (no env/cache key and op fallback returned empty)" >&2
     exit 2
 fi
 
