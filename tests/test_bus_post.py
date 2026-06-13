@@ -14,9 +14,11 @@ a deterministic key string.
 """
 from __future__ import annotations
 
+import importlib.util
 import json
 import os
 import socket
+import stat
 import subprocess
 import sys
 import threading
@@ -133,6 +135,14 @@ def _run_py(args: list[str], env: dict) -> subprocess.CompletedProcess:
         [sys.executable, str(BUS_POST_PY), *args],
         env=env, capture_output=True, text=True, timeout=15,
     )
+
+
+def _load_bus_post_module():
+    spec = importlib.util.spec_from_file_location("bus_post_under_test", BUS_POST_PY)
+    mod = importlib.util.module_from_spec(spec)
+    assert spec.loader is not None
+    spec.loader.exec_module(mod)  # type: ignore[union-attr]
+    return mod
 
 
 # ---------- tests ----------
@@ -411,3 +421,36 @@ def test_20_py_cache_key_beats_op_ref(stub_daemon, tmp_path):
     assert r.returncode == 0, r.stderr
     assert captured[0]["headers"].get("X-Terminal-Key") == "cache-key"
     assert not op_sentinel.exists(), "op must not run when cache is populated"
+
+
+def test_21_py_op_fallback_cache_seed_uses_0600_create_mode(monkeypatch, tmp_path):
+    """py: op fallback must create the temp key file as 0600, not chmod after."""
+    mod = _load_bus_post_module()
+    monkeypatch.setenv("HOME", str(tmp_path))
+    monkeypatch.delenv("BRISEN_LAB_TERMINAL_KEY", raising=False)
+
+    monkeypatch.setattr(
+        mod.subprocess,
+        "run",
+        lambda *_, **__: subprocess.CompletedProcess(
+            ["op", "read", "op://Baker API Keys/BRISEN_LAB_TERMINAL_KEY_lead/credential"],
+            0,
+            stdout="op-key\n",
+            stderr="",
+        ),
+    )
+
+    real_open = os.open
+    create_modes: list[int] = []
+
+    def recording_open(path, flags, mode=0o777, *args, **kwargs):
+        create_modes.append(mode)
+        return real_open(path, flags, mode, *args, **kwargs)
+
+    monkeypatch.setattr(mod.os, "open", recording_open)
+
+    assert mod._fetch_key("lead") == "op-key"
+    assert create_modes == [0o600]
+    cache_file = tmp_path / ".brisen-lab" / "keys" / "lead"
+    assert cache_file.read_text().strip() == "op-key"
+    assert stat.S_IMODE(cache_file.stat().st_mode) == 0o600

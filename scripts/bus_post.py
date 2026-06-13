@@ -21,6 +21,7 @@ import subprocess
 import sys
 import urllib.error
 import urllib.request
+import uuid
 from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
@@ -81,9 +82,11 @@ def _write_cached_key(sender: str, key: str) -> None:
         except OSError:
             pass
         path = _terminal_key_cache_path(sender)
-        tmp = cache_dir / f".{sender}.tmp.{os.getpid()}"
-        tmp.write_text(f"{key}\n", encoding="utf-8")
-        tmp.chmod(0o600)
+        tmp = cache_dir / f".{sender}.tmp.{os.getpid()}.{uuid.uuid4().hex}"
+        fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+        with os.fdopen(fd, "w", encoding="utf-8") as f:
+            f.write(key)
+            f.write("\n")
         tmp.replace(path)
         try:
             path.chmod(0o600)
