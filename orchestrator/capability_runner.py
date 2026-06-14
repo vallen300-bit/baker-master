@@ -1393,23 +1393,25 @@ class CapabilityRunner:
             # Embed current question for similarity search
             q_vector = store._embed(question[:500])
             from qdrant_client.models import Filter, FieldCondition, MatchValue
-            results = store.qdrant.search(
+            response = store.qdrant.query_points(
                 collection_name="baker-task-examples",
-                query_vector=q_vector,
+                query=q_vector,
                 query_filter=Filter(must=[
                     FieldCondition(key="capability_slug", match=MatchValue(value=slug)),
                 ]),
                 limit=limit,
                 score_threshold=0.5,
             )
+            results = response.points
             if not results:
                 # Fallback: search without capability filter
-                results = store.qdrant.search(
+                response = store.qdrant.query_points(
                     collection_name="baker-task-examples",
-                    query_vector=q_vector,
+                    query=q_vector,
                     limit=limit,
                     score_threshold=0.6,
                 )
+                results = response.points
             if not results:
                 return ""
             parts = [

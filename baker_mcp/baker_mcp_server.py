@@ -1223,12 +1223,13 @@ def _baker_substack_search(args: dict) -> str:
         return f"Error: Voyage embed failed: {e}"
 
     try:
-        hits = qdrant.search(
+        response = qdrant.query_points(
             collection_name=collection_name,
-            query_vector=query_vec,
+            query=query_vec,
             limit=limit,
             with_payload=True,
         )
+        hits = response.points
     except Exception as e:
         return f"Error: Qdrant search failed: {e}"
 
