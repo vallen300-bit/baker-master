@@ -18,30 +18,32 @@
   .banner .meta { margin-top: 6px; font-size: 10.5px; color: #5a6470; display: flex; gap: 18px; }
   .banner .meta b { color: var(--navy); }
   h2 { font-size: 12px; letter-spacing: 2px; text-transform: uppercase; color: var(--navy); border-left: 5px solid var(--marker); padding-left: 8px; margin: 16px 0 8px; }
-  .box { border: 1.5px solid var(--line); border-radius: 4px; background: #fff; padding: 10px 12px; margin-bottom: 10px; }
-  .box.lead { background: var(--soft); border-color: var(--navy); }
-  .box .tag { font-size: 9.5px; font-weight: 700; letter-spacing: 1.5px; text-transform: uppercase; color: var(--marker); display: block; margin-bottom: 4px; }
   .options { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; margin-bottom: 10px; }
-  .options.two { grid-template-columns: repeat(2, 1fr); }
-  .options.four { grid-template-columns: repeat(4, 1fr); }
   .opt { border: 1.5px solid var(--navy); border-radius: 4px; background: #fff; padding: 10px; }
   .opt h3 { font-size: 12px; color: var(--navy); margin-bottom: 6px; text-transform: uppercase; letter-spacing: 1px; }
   .opt ul { list-style: none; }
   .opt li { padding: 3px 0 3px 14px; position: relative; font-size: 12px; }
   .opt li::before { content: "—"; position: absolute; left: 0; color: var(--marker); }
-  .stepmap { display: flex; flex-wrap: wrap; gap: 6px; align-items: stretch; margin-bottom: 10px; }
-  .step { flex: 1 1 100px; border: 1.5px solid var(--line); border-top: 4px solid var(--navy); border-radius: 4px; background: #fff; padding: 8px; min-width: 100px; }
-  .step.you { border-top-color: var(--marker); background: #fff8f2; }
-  .step .n { font-size: 15px; font-weight: 800; color: var(--marker); }
-  .step .what { font-size: 11px; font-weight: 600; margin: 2px 0; }
-  .step .who { font-size: 9.5px; color: #5a6470; }
-  .arrow { align-self: center; color: var(--navy); font-size: 16px; font-weight: 800; }
+  .phasemap { display: grid; grid-template-columns: repeat(7, 1fr); gap: 6px; margin-bottom: 10px; }
+  .phase-box { border: 1.5px solid var(--line); border-top: 4px solid var(--navy); border-radius: 4px; background: #fff; padding: 7px 6px; }
+  .phase-box.you { border-top-color: var(--marker); background: #fff8f2; }
+  .phase-box .pn { font-size: 9px; font-weight: 800; letter-spacing: 1.2px; color: var(--marker); text-transform: uppercase; }
+  .phase-box .what { font-size: 11.5px; font-weight: 700; color: var(--navy); margin: 2px 0; }
+  .phase-box .who { font-size: 9px; color: #5a6470; }
   .legend { font-size: 10px; color: #5a6470; margin: -4px 0 10px; }
   .legend .dot-a { color: var(--marker); font-weight: 800; }
   .legend .dot-b { color: var(--navy); font-weight: 800; }
-  table.facts { width: 100%; border-collapse: collapse; margin-bottom: 10px; background: #fff; }
-  table.facts th { text-align: left; font-size: 10px; letter-spacing: 1.5px; text-transform: uppercase; color: var(--navy); border-bottom: 2px solid var(--navy); padding: 5px 8px; }
-  table.facts td { border-bottom: 1px solid var(--line); padding: 5px 8px; vertical-align: top; font-size: 12px; }
+  table.steps { width: 100%; border-collapse: collapse; margin-bottom: 10px; background: #fff; }
+  table.steps th { text-align: left; font-size: 9.5px; letter-spacing: 1.5px; text-transform: uppercase; color: var(--navy); border-bottom: 2px solid var(--navy); padding: 5px 7px; }
+  table.steps td { border-bottom: 1px solid var(--line); padding: 5px 7px; vertical-align: top; font-size: 11px; }
+  table.steps td.n { font-weight: 800; color: var(--marker); font-size: 12.5px; }
+  table.steps td.phase { font-weight: 700; color: var(--navy); text-transform: uppercase; letter-spacing: .8px; font-size: 9.5px; border-right: 1px solid var(--line); background: var(--soft); }
+  table.steps td.step { font-weight: 600; }
+  table.steps td.doer { font-weight: 700; white-space: nowrap; }
+  table.steps td.doer.you { color: var(--marker); }
+  table.steps td.doer.agent { color: var(--navy); }
+  table.steps tr.yourow td { background: #fff8f2; }
+  table.steps tr.yourow td.phase { background: var(--soft); }
   .decision { border: 2px solid var(--navy); border-radius: 4px; background: var(--soft); padding: 10px 12px; margin-top: 14px; }
   .decision .tag { font-size: 10px; font-weight: 800; letter-spacing: 2px; color: var(--navy); }
   .decision .ask { font-size: 13.5px; font-weight: 700; margin-top: 3px; }
@@ -54,96 +56,141 @@
 <div class="page">
   <div class="banner">
     <span class="kicker">Brisen Whiteboard · The Skill Itself · Internal</span>
-    <h1>/WHITEBOARDING — from named issue to ratified step plan</h1>
+    <h1>/WHITEBOARDING — named issue → ratified step plan</h1>
     <div class="meta">
-      <span>Version <b>v1.1</b></span><span>Ratified <b>11.06.2026</b></span>
+      <span>Skill <b>v1.2</b></span><span>Page <b>v5</b></span><span>Date <b>13.06.2026</b></span>
       <span>Available to <b>all agents</b></span><span>Command <b>/whiteboarding</b></span>
     </div>
   </div>
 
-  <h2>What it does</h2>
-  <div class="box lead">
-    <span class="tag">In one sentence</span>
-    You name an issue or goal; the agent builds the context, analyses it with <b>Sacca</b>, and produces
-    1–3 page whiteboard documents for your human discussion group to verify, amend and correct —
-    then carries the ratified step plan forward with a daily progress email.
+  <h2>Phase map — 7 phases, 17 steps, 4 gates</h2>
+  <div class="phasemap">
+    <div class="phase-box you"><div class="pn">Phase 0</div><div class="what">Intake</div><div class="who">steps 1–2 · gate 1</div></div>
+    <div class="phase-box"><div class="pn">Phase 1</div><div class="what">Context</div><div class="who">steps 3–7</div></div>
+    <div class="phase-box you"><div class="pn">Phase 2</div><div class="what">Plan</div><div class="who">steps 8–9 · gate 2</div></div>
+    <div class="phase-box"><div class="pn">Phase 3</div><div class="what">Output V1</div><div class="who">step 10</div></div>
+    <div class="phase-box"><div class="pn">Phase 4</div><div class="what">Research</div><div class="who">steps 11–12</div></div>
+    <div class="phase-box you"><div class="pn">Phase 5</div><div class="what">V2 round</div><div class="who">steps 13–14 · gates 3+4</div></div>
+    <div class="phase-box"><div class="pn">Phase 6</div><div class="what">Aftercare</div><div class="who">steps 15–17</div></div>
   </div>
+  <div class="legend"><span class="dot-a">▮</span> orange = you act &nbsp;&nbsp; <span class="dot-b">▮</span> navy = agent acts alone &nbsp;&nbsp; phases run left to right</div>
 
-  <h2>How a run starts — the opening sequence</h2>
-  <div class="stepmap">
-    <div class="step you"><div class="n">1</div><div class="what">"What is the issue?"</div><div class="who">one sentence · YOU answer</div></div>
-    <div class="arrow">→</div>
-    <div class="step you"><div class="n">2</div><div class="what">"Who discusses, via which channel?"</div><div class="who">group + delivery + comments · YOU answer</div></div>
-    <div class="arrow">→</div>
-    <div class="step you"><div class="n">3</div><div class="what">"Deadline or discussion date?"</div><div class="who">YOU answer · size decided later, in Triaga V1</div></div>
-    <div class="arrow">→</div>
-    <div class="step"><div class="n">4</div><div class="what">Lock card proposed</div><div class="who">agent fills the rest · YOU say "locked"</div></div>
-  </div>
-  <div class="legend"><span class="dot-a">▮</span> orange = you act &nbsp;&nbsp; <span class="dot-b">▮</span> navy = agent acts alone</div>
+  <h2>Steps 1–9 — intake to plan</h2>
+  <table class="steps">
+    <tr><th style="width:4%">#</th><th style="width:12%">Phase</th><th style="width:16%">Step</th><th style="width:42%">Description</th><th style="width:11%">Doer</th><th style="width:15%">Output</th></tr>
+    <tr class="yourow">
+      <td class="n">1</td><td class="phase" rowspan="2">Phase 0 · Intake</td><td class="step">Frame the issue</td>
+      <td>You indicate it; agent offers 2–3 candidate banners; you pick one. It then locks verbatim.</td>
+      <td class="doer you">You + agent</td><td>Issue banner</td>
+    </tr>
+    <tr class="yourow">
+      <td class="n">2</td><td class="step">Group + lock</td>
+      <td>Agent proposes the full lock card; you amend every field in one chat pass; you say "locked".</td>
+      <td class="doer you">You + agent</td><td>Lock card · <b>gate 1</b></td>
+    </tr>
+    <tr>
+      <td class="n">3</td><td class="phase" rowspan="5">Phase 1 · Context</td><td class="step">Sweep all sources</td>
+      <td>Helper agents sweep all 15 master-list surfaces — incl. Dropbox, Fireflies, Plaud. Every row logged.</td>
+      <td class="doer agent">Agent</td><td>Coverage log</td>
+    </tr>
+    <tr>
+      <td class="n">4</td><td class="step">Allocate desk</td>
+      <td>Covering desk owns by default. No desk? Agent proposes one — never a bare question. New desk = your order.</td>
+      <td class="doer agent">Agent</td><td>Named owner</td>
+    </tr>
+    <tr>
+      <td class="n">5</td><td class="step">File into room</td>
+      <td>Sweep results filed into the existing project room. Duplicates resolved.</td>
+      <td class="doer agent">Agent</td><td>Filled room</td>
+    </tr>
+    <tr>
+      <td class="n">6</td><td class="step">Or create room</td>
+      <td>No room? 7-folder room scaffolded. No drafting until clean.</td>
+      <td class="doer agent">Agent</td><td>New room</td>
+    </tr>
+    <tr>
+      <td class="n">7</td><td class="step">Confirm context</td>
+      <td>Filled surface table: swept, filed, gaps named. It rides into Triaga V1 for your sign-off.</td>
+      <td class="doer agent">Agent</td><td>Context report</td>
+    </tr>
+    <tr>
+      <td class="n">8</td><td class="phase" rowspan="2">Phase 2 · Plan</td><td class="step">Strategic Overview</td>
+      <td>Problem + opportunity frames. Every line: known / assumed / needs-research.</td>
+      <td class="doer agent">Agent</td><td>Draft plan</td>
+    </tr>
+    <tr class="yourow">
+      <td class="n">9</td><td class="step">Triaga V1 — two parts</td>
+      <td>Part A: ratify the conclusions, each with options. Part B: plan, size, output types, research angles.</td>
+      <td class="doer you">You</td><td>Ratified plan · <b>gate 2</b></td>
+    </tr>
+  </table>
 
-  <h2>Your 4 touchpoints — everything else runs without you</h2>
-  <div class="options four">
-    <div class="opt"><h3>1 · Lock</h3><ul><li>Ratify the lock card</li><li>Issue, group, owner, channels</li></ul></div>
-    <div class="opt"><h3>2 · Triaga V1</h3><ul><li>Ratify the plan</li><li>Pick pager size 1/2/3 + output types</li></ul></div>
-    <div class="opt"><h3>3 · Triaga V2</h3><ul><li>Ratify the revised plan</li><li>After research + comments</li></ul></div>
-    <div class="opt"><h3>4 · Final</h3><ul><li>Ratify Output V2 + step plan</li><li>Plan goes live only then</li></ul></div>
-  </div>
-
-  <div class="decision">
-    <span class="tag">WHAT THE GROUP GETS</span>
-    <div class="ask">1–3 page whiteboard pagers (HTML + PDF) to discuss, plus a Word copy with track changes —
-    their written amendments flow back into the next version automatically.</div>
-  </div>
-  <div class="foot"><span>Brisen internal — skill presentation, /whiteboarding v1.1</span><span>Page 1</span></div>
+  <div class="foot"><span>Brisen internal — /whiteboarding skill v1.2 · page v5 · 13.06.2026</span><span>Page 1 of 2</span></div>
 </div>
 
 <!-- PAGE 2 -->
 <div class="page">
   <div class="banner">
-    <span class="kicker">Brisen Whiteboard · /whiteboarding v1.1</span>
-    <h1>The full pipeline — your 17 steps, 7 phases</h1>
+    <span class="kicker">Brisen Whiteboard · /whiteboarding · skill v1.2 · page v5</span>
+    <h1>Steps 10–17 — output to aftercare</h1>
   </div>
 
-  <h2>Phase map</h2>
-  <div class="stepmap">
-    <div class="step you"><div class="n">0</div><div class="what">Intake + lock</div><div class="who">steps 1–2 · touchpoint 1</div></div>
-    <div class="arrow">→</div>
-    <div class="step"><div class="n">1</div><div class="what">Context build</div><div class="who">steps 3–7 · sweep all sources, project room</div></div>
-    <div class="arrow">→</div>
-    <div class="step you"><div class="n">2</div><div class="what">Sacca + plan</div><div class="who">steps 8–9 · touchpoint 2 (Triaga V1)</div></div>
-    <div class="arrow">→</div>
-    <div class="step"><div class="n">3</div><div class="what">Output V1 to group</div><div class="who">step 10 · pagers + Word</div></div>
-  </div>
-  <div class="stepmap">
-    <div class="step"><div class="n">4</div><div class="what">Research + synthesis</div><div class="who">steps 11–12 · people, matters, business + comments</div></div>
-    <div class="arrow">→</div>
-    <div class="step you"><div class="n">5</div><div class="what">V2 round</div><div class="who">steps 13–14 · touchpoints 3 + 4</div></div>
-    <div class="arrow">→</div>
-    <div class="step"><div class="n">6</div><div class="what">Vault + aftercare</div><div class="who">steps 15–17 · step plan, daily digest, room updates</div></div>
-  </div>
-
-  <h2>What happens inside the agent-only phases</h2>
-  <table class="facts">
-    <tr><th style="width:22%">Phase</th><th>What the agent does, alone</th></tr>
-    <tr><td><b>1 · Context</b></td><td>Sweeps EVERY Brisen source — email, WhatsApp, meeting transcripts, vault, ClaimsMax, news feeds, tasks, calendar — logs what each returned, files it all into the project room, names the gaps.</td></tr>
-    <tr><td><b>2 · Sacca</b></td><td>Runs both frames: problem (what / origin / good state / path) and opportunity (today / resources / tomorrow / path). Every line labeled known, assumed, or needs-research.</td></tr>
-    <tr><td><b>4 · Research</b></td><td>Parallel research on the needs-research list; ingests the group's track-change comments; synthesizes everything into one memo — conflicts decided, never averaged.</td></tr>
-    <tr><td><b>6 · Aftercare</b></td><td>One daily rollup email across ALL active step plans: done / due today / overdue / blocked. Whoever opens the matter next also reports drift. Room never freezes.</td></tr>
+  <table class="steps">
+    <tr><th style="width:4%">#</th><th style="width:12%">Phase</th><th style="width:16%">Step</th><th style="width:42%">Description</th><th style="width:11%">Doer</th><th style="width:15%">Output</th></tr>
+    <tr>
+      <td class="n">10</td><td class="phase">Phase 3 · Output V1</td><td class="step">Pagers to group</td>
+      <td>You see the finished set first (30-sec release check). Then HTML + PDF + Word; externals you press Send.</td>
+      <td class="doer you">Agent → You</td><td>Output V1</td>
+    </tr>
+    <tr>
+      <td class="n">11</td><td class="phase" rowspan="2">Phase 4 · Research</td><td class="step">Full research</td>
+      <td>Each item against its ratified angle. People, matters, opportunities, business. Citations verified.</td>
+      <td class="doer agent">Agent</td><td>Findings</td>
+    </tr>
+    <tr>
+      <td class="n">12</td><td class="step">Synthesis</td>
+      <td>Delta re-sweep first, then room + research + comments → one memo. Conflicts decided, never averaged.</td>
+      <td class="doer agent">Agent</td><td>Synthesis memo</td>
+    </tr>
+    <tr class="yourow">
+      <td class="n">13</td><td class="phase" rowspan="2">Phase 5 · V2 round</td><td class="step">Triaga V2</td>
+      <td>You ratify changes since V1: amended plan, new choices.</td>
+      <td class="doer you">You</td><td>Ratified V2 · <b>gate 3</b></td>
+    </tr>
+    <tr class="yourow">
+      <td class="n">14</td><td class="step">Output V2</td>
+      <td>Revised pager. Your final OK before delivery and plan activation.</td>
+      <td class="doer you">Agent → You</td><td>Final pager · <b>gate 4</b></td>
+    </tr>
+    <tr>
+      <td class="n">15</td><td class="phase" rowspan="3">Phase 6 · Aftercare</td><td class="step">Vault save</td>
+      <td>All artifacts filed in the project room.</td>
+      <td class="doer agent">Agent</td><td>Archived run</td>
+    </tr>
+    <tr>
+      <td class="n">16</td><td class="step">Step plan + digest</td>
+      <td>Plan goes active. One daily email: done / due / overdue / blocked.</td>
+      <td class="doer agent">Agent</td><td>Active plan + daily email</td>
+    </tr>
+    <tr>
+      <td class="n">17</td><td class="step">Room stays live</td>
+      <td>Digest flags new signals; desk owner files them. Never frozen.</td>
+      <td class="doer agent">Agent</td><td>Updated room</td>
+    </tr>
   </table>
 
-  <h2>Built-in safety rules</h2>
+  <h2>Safety rules</h2>
   <div class="options">
-    <div class="opt"><h3>No skipped gates</h3><ul><li>No output before its Triaga</li><li>Plan live only after final OK</li></ul></div>
-    <div class="opt"><h3>No silent agents</h3><ul><li>New desk head only on your order</li><li>No desk = open question to you</li></ul></div>
-    <div class="opt"><h3>No auto-send outside</h3><ul><li>Externals: you always press Send</li><li>Internal auto-send only if you authorize</li></ul></div>
+    <div class="opt"><h3>No skipped gates</h3><ul><li>No output before its Triaga</li><li>Plan live only after gate 4</li></ul></div>
+    <div class="opt"><h3>No silent agents</h3><ul><li>New desk only on your order</li><li>No desk = question to you</li></ul></div>
+    <div class="opt"><h3>No auto-send outside</h3><ul><li>Externals: you press Send</li><li>Internal auto-send only if authorized</li></ul></div>
   </div>
 
   <div class="decision">
     <span class="tag">TO START A RUN</span>
-    <div class="ask">Say "/whiteboarding" — the agent asks its first question. Example pilot:
-    "What is the strategy and goals for the NVIDIA + Mandarin + Brisen cooperation project."</div>
+    <div class="ask">Say "/whiteboarding". The agent asks its first question.</div>
   </div>
-  <div class="foot"><span>Brisen internal — skill presentation, /whiteboarding v1.1</span><span>Page 2</span></div>
+  <div class="foot"><span>Brisen internal — /whiteboarding skill v1.2 · page v5 · 13.06.2026</span><span>Page 2 of 2</span></div>
 </div>
 
 </body>
