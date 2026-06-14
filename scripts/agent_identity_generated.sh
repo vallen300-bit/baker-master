@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Generated agent identity data. Do not edit by hand.
 # Source: /Users/dimitry/baker-vault/_ops/registries/agent_registry.yml
-# SHA256: 05eb7887dcd94be3689435c7c78d8596bad089c398ef2763f09c358d45768819
+# SHA256: 7fdcdd86c164b3da34446b816ff44d301f0b09a7115937f341f594cb68873061
 # Regenerate with: python3 scripts/generate_agent_identity_artifacts.py --write
 
 AGENT_IDENTITY_SYSTEM_RECIPIENT_SLUGS=(director daemon)

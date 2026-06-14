@@ -51,7 +51,7 @@ print(json.dumps({"hookSpecificOutput": {"hookEventName": "SessionStart", "addit
 
 # BEGIN GENERATED AGENT IDENTITY ROLE MAP
 # Generated from /Users/dimitry/baker-vault/_ops/registries/agent_registry.yml
-# SHA256: 05eb7887dcd94be3689435c7c78d8596bad089c398ef2763f09c358d45768819
+# SHA256: 7fdcdd86c164b3da34446b816ff44d301f0b09a7115937f341f594cb68873061
 case "${BAKER_ROLE:-}" in
     AG-001|ag-001|lead|LEAD|AH1|aihead1|AIHEAD1) SLUG=lead ;;
     AG-002|ag-002|cowork-ah1|COWORK-AH1|cowork_ah1|COWORK_AH1|AH1-APP) SLUG=cowork-ah1 ;;
