@@ -1,17 +1,17 @@
 #!/usr/bin/env bash
 # Generated agent identity data. Do not edit by hand.
 # Source: /Users/dimitry/baker-vault/_ops/registries/agent_registry.yml
-# SHA256: 29575622a837de3289160b58d4446bea756e74095c0dc1622eedae0b87a88796
+# SHA256: ba913f2cf2fbdd1585572da6e2a210f547dd58005ccfb90993abc82476cb8f03
 # Regenerate with: python3 scripts/generate_agent_identity_artifacts.py --write
 
 AGENT_IDENTITY_SYSTEM_RECIPIENT_SLUGS=(director daemon)
-AGENT_IDENTITY_BUS_AGENT_SLUGS=(lead cowork-ah1 deputy deputy-codex cortex aid b1 b2 b3 b4 researcher codex codex-arch clerk clerk-haiku russo-it hag-desk origination-desk ao-desk CM-1 CM-2 CM-3 CM-4 hag-filer)
-AGENT_IDENTITY_VALID_SLUGS=(director daemon lead cowork-ah1 deputy deputy-codex cortex aid b1 b2 b3 b4 researcher codex codex-arch clerk clerk-haiku russo-it hag-desk origination-desk ao-desk CM-1 CM-2 CM-3 CM-4 hag-filer)
-AGENT_IDENTITY_SNAPSHOT_TERMINALS=(lead:/Users/dimitry/bm-aihead1 cowork-ah1:/Users/dimitry/bm-aihead1 deputy:/Users/dimitry/bm-aihead2 deputy-codex:/Users/dimitry/bm-aihead2 aid:/Users/dimitry/baker-vault b1:/Users/dimitry/bm-b1,/Users/dimitry/bm-b1-brisen-lab b2:/Users/dimitry/bm-b2,/Users/dimitry/bm-b2-brisen-lab b3:/Users/dimitry/bm-b3,/Users/dimitry/bm-b3-brisen-lab b4:/Users/dimitry/bm-b4,/Users/dimitry/bm-b4-brisen-lab researcher:/Users/dimitry/baker-vault codex:/Users/dimitry/baker-vault codex-arch:/Users/dimitry/baker-vault clerk:/Users/dimitry/bm-clerk clerk-haiku:/Users/dimitry/bm-clerk russo-it:/Users/dimitry/baker-vault hag-desk:/Users/dimitry/baker-vault origination-desk:/Users/dimitry/baker-vault ao-desk:/Users/dimitry/baker-vault CM-1:/Users/dimitry/baker-vault CM-2:/Users/dimitry/baker-vault CM-3:/Users/dimitry/baker-vault CM-4:/Users/dimitry/baker-vault hag-filer:/Users/dimitry/baker-vault)
+AGENT_IDENTITY_BUS_AGENT_SLUGS=(lead cowork-ah1 deputy deputy-codex cortex aid b1 b2 b3 b4 researcher codex codex-arch clerk clerk-haiku russo-ai hag-desk origination-desk ao-desk CM-1 CM-2 CM-3 CM-4 hag-filer)
+AGENT_IDENTITY_VALID_SLUGS=(director daemon lead cowork-ah1 deputy deputy-codex cortex aid b1 b2 b3 b4 researcher codex codex-arch clerk clerk-haiku russo-ai hag-desk origination-desk ao-desk CM-1 CM-2 CM-3 CM-4 hag-filer)
+AGENT_IDENTITY_SNAPSHOT_TERMINALS=(lead:/Users/dimitry/bm-aihead1 cowork-ah1:/Users/dimitry/bm-aihead1 deputy:/Users/dimitry/bm-aihead2 deputy-codex:/Users/dimitry/bm-aihead2 aid:/Users/dimitry/baker-vault b1:/Users/dimitry/bm-b1,/Users/dimitry/bm-b1-brisen-lab b2:/Users/dimitry/bm-b2,/Users/dimitry/bm-b2-brisen-lab b3:/Users/dimitry/bm-b3,/Users/dimitry/bm-b3-brisen-lab b4:/Users/dimitry/bm-b4,/Users/dimitry/bm-b4-brisen-lab researcher:/Users/dimitry/baker-vault codex:/Users/dimitry/baker-vault codex-arch:/Users/dimitry/baker-vault clerk:/Users/dimitry/bm-clerk clerk-haiku:/Users/dimitry/bm-clerk russo-ai:/Users/dimitry/baker-vault hag-desk:/Users/dimitry/baker-vault origination-desk:/Users/dimitry/baker-vault ao-desk:/Users/dimitry/baker-vault CM-1:/Users/dimitry/baker-vault CM-2:/Users/dimitry/baker-vault CM-3:/Users/dimitry/baker-vault CM-4:/Users/dimitry/baker-vault hag-filer:/Users/dimitry/baker-vault)
 
 agent_identity_is_valid_slug() {
   case "${1:-}" in
-    director|daemon|lead|cowork-ah1|deputy|deputy-codex|cortex|aid|b1|b2|b3|b4|researcher|codex|codex-arch|clerk|clerk-haiku|russo-it|hag-desk|origination-desk|ao-desk|CM-1|CM-2|CM-3|CM-4|hag-filer) return 0 ;;
+    director|daemon|lead|cowork-ah1|deputy|deputy-codex|cortex|aid|b1|b2|b3|b4|researcher|codex|codex-arch|clerk|clerk-haiku|russo-ai|hag-desk|origination-desk|ao-desk|CM-1|CM-2|CM-3|CM-4|hag-filer) return 0 ;;
     *) return 1 ;;
   esac
 }
@@ -33,7 +33,7 @@ agent_identity_resolve_role() {
     AG-203|ag-203|codex-arch|CODEX-ARCH|codex_arch|CODEX_ARCH) printf '%s\n' codex-arch ;;
     AG-204|ag-204|clerk|CLERK) printf '%s\n' clerk ;;
     AG-205|ag-205|clerk-haiku|CLERK-HAIKU|clerk_haiku|CLERK_HAIKU) printf '%s\n' clerk-haiku ;;
-    AG-206|ag-206|russo-it|RUSSO-IT|russo_it|RUSSO_IT) printf '%s\n' russo-it ;;
+    AG-206|ag-206|russo-ai|RUSSO-AI|russo_ai|RUSSO_AI) printf '%s\n' russo-ai ;;
     AG-301|ag-301|hag-desk|HAG-DESK|hag_desk|HAG_DESK|hagenauer-desk|HAGENAUER-DESK) printf '%s\n' hag-desk ;;
     AG-302|ag-302|origination-desk|ORIGINATION-DESK|origination_desk|ORIGINATION_DESK) printf '%s\n' origination-desk ;;
     AG-303|ag-303|ao-desk|AO-DESK|ao_desk|AO_DESK) printf '%s\n' ao-desk ;;

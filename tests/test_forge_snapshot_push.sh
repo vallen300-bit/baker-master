@@ -732,35 +732,35 @@ CASE_L2_MBRIEF="$(extract_payload_field "$CASE_L2_OUT" "ao-desk" "mailbox_brief_
 echo "PASS: Case L2 — ao-desk non-b-code single-clone slug — mailbox stays n/a."
 
 # ─────────────────────────────────────────────────────────────────────────────
-# Case L3 — RUSSO_IT_ON_BUS_1: shared-specialist single-clone slug. Russo IT's
+# Case L3 — RUSSO_AI_ON_BUS_1: shared-specialist single-clone slug. Russo AI's
 # picker dir is provisioned by lead as Tier-B; production snapshot wiring points
 # at ~/baker-vault until that local lane exists. The alias must still be accepted
 # and mailbox fields stay n/a, matching non-b-code agents.
 # ─────────────────────────────────────────────────────────────────────────────
-CASE_L3_REPO="$TMP/case-l3-russo-it"
+CASE_L3_REPO="$TMP/case-l3-russo-ai"
 mkdir -p "$CASE_L3_REPO"
 (
   cd "$CASE_L3_REPO"
   git init -q
   git config user.email "test@test"
   git config user.name "test"
-  echo "russo-it-vault-content" > README.md
+  echo "russo-ai-vault-content" > README.md
   git add README.md
-  git commit -qm "case-l3: russo-it vault clone init"
+  git commit -qm "case-l3: russo-ai vault clone init"
 )
 
 CASE_L3_OUT="$TMP/case-l3.out"
-run_daemon "case-l3" "russo-it:$CASE_L3_REPO" > "$CASE_L3_OUT"
+run_daemon "case-l3" "russo-ai:$CASE_L3_REPO" > "$CASE_L3_OUT"
 assert_no_prod_aliases "$CASE_L3_OUT"
 
-CASE_L3_ALIAS="$(extract_payload_field "$CASE_L3_OUT" "russo-it" "terminal_alias")"
-CASE_L3_MSTATUS="$(extract_payload_field "$CASE_L3_OUT" "russo-it" "mailbox_status")"
-CASE_L3_MBRIEF="$(extract_payload_field "$CASE_L3_OUT" "russo-it" "mailbox_brief_name")"
+CASE_L3_ALIAS="$(extract_payload_field "$CASE_L3_OUT" "russo-ai" "terminal_alias")"
+CASE_L3_MSTATUS="$(extract_payload_field "$CASE_L3_OUT" "russo-ai" "mailbox_status")"
+CASE_L3_MBRIEF="$(extract_payload_field "$CASE_L3_OUT" "russo-ai" "mailbox_brief_name")"
 
-[[ "$CASE_L3_ALIAS" == "russo-it" ]]   || { echo "FAIL Case L3: terminal_alias='$CASE_L3_ALIAS'" >&2; exit 1; }
+[[ "$CASE_L3_ALIAS" == "russo-ai" ]]   || { echo "FAIL Case L3: terminal_alias='$CASE_L3_ALIAS'" >&2; exit 1; }
 [[ "$CASE_L3_MSTATUS" == "n/a" ]]      || { echo "FAIL Case L3: mailbox_status='$CASE_L3_MSTATUS'" >&2; exit 1; }
 [[ -z "$CASE_L3_MBRIEF" ]]             || { echo "FAIL Case L3: mailbox_brief_name='$CASE_L3_MBRIEF' (expected empty)" >&2; exit 1; }
-echo "PASS: Case L3 — russo-it non-b-code single-clone slug — mailbox stays n/a."
+echo "PASS: Case L3 — russo-ai non-b-code single-clone slug — mailbox stays n/a."
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Case M — RESEARCHER_ON_BUS_1: non-b-code single-clone slug, Cowork-App-only
