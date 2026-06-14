@@ -701,6 +701,37 @@ CASE_L_MBRIEF="$(extract_payload_field "$CASE_L_OUT" "hag-desk" "mailbox_brief_n
 echo "PASS: Case L — non-b-code single-clone slug (desk pattern) — mailbox stays n/a."
 
 # ─────────────────────────────────────────────────────────────────────────────
+# Case L2 — AO_DESK_ON_BUS_1: non-b-code single-clone slug, same desk pattern
+# as origination-desk. AO Desk's picker is Dropbox-backed and has no .git, so
+# production snapshot wiring must point at ~/baker-vault; this fixture uses a
+# git tempdir to assert the desk alias itself is accepted and mailbox stays n/a.
+# ─────────────────────────────────────────────────────────────────────────────
+CASE_L2_REPO="$TMP/case-l2-ao-desk"
+mkdir -p "$CASE_L2_REPO"
+(
+  cd "$CASE_L2_REPO"
+  git init -q
+  git config user.email "test@test"
+  git config user.name "test"
+  echo "ao-desk-vault-content" > README.md
+  git add README.md
+  git commit -qm "case-l2: ao-desk vault clone init"
+)
+
+CASE_L2_OUT="$TMP/case-l2.out"
+run_daemon "case-l2" "ao-desk:$CASE_L2_REPO" > "$CASE_L2_OUT"
+assert_no_prod_aliases "$CASE_L2_OUT"
+
+CASE_L2_ALIAS="$(extract_payload_field "$CASE_L2_OUT" "ao-desk" "terminal_alias")"
+CASE_L2_MSTATUS="$(extract_payload_field "$CASE_L2_OUT" "ao-desk" "mailbox_status")"
+CASE_L2_MBRIEF="$(extract_payload_field "$CASE_L2_OUT" "ao-desk" "mailbox_brief_name")"
+
+[[ "$CASE_L2_ALIAS" == "ao-desk" ]]    || { echo "FAIL Case L2: terminal_alias='$CASE_L2_ALIAS'" >&2; exit 1; }
+[[ "$CASE_L2_MSTATUS" == "n/a" ]]      || { echo "FAIL Case L2: mailbox_status='$CASE_L2_MSTATUS'" >&2; exit 1; }
+[[ -z "$CASE_L2_MBRIEF" ]]             || { echo "FAIL Case L2: mailbox_brief_name='$CASE_L2_MBRIEF' (expected empty)" >&2; exit 1; }
+echo "PASS: Case L2 — ao-desk non-b-code single-clone slug — mailbox stays n/a."
+
+# ─────────────────────────────────────────────────────────────────────────────
 # Case M — RESEARCHER_ON_BUS_1: non-b-code single-clone slug, Cowork-App-only
 # variant (researcher). Same contract as Case L (mailbox stays n/a, brief
 # stays empty), but home-repo is the picker dir itself (~/bm-researcher),

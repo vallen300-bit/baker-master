@@ -70,6 +70,7 @@ case "${BAKER_ROLE:-}" in
     AG-205|ag-205|clerk-haiku|CLERK-HAIKU|clerk_haiku|CLERK_HAIKU) SLUG=clerk-haiku ;;
     AG-301|ag-301|hag-desk|HAG-DESK|hag_desk|HAG_DESK|hagenauer-desk|HAGENAUER-DESK) SLUG=hag-desk ;;
     AG-302|ag-302|origination-desk|ORIGINATION-DESK|origination_desk|ORIGINATION_DESK) SLUG=origination-desk ;;
+    AG-303|ag-303|ao-desk|AO-DESK|ao_desk|AO_DESK) SLUG=ao-desk ;;
     AG-401|ag-401|CM-1|CM_1|cm-1) SLUG=CM-1 ;;
     AG-402|ag-402|CM-2|CM_2|cm-2) SLUG=CM-2 ;;
     AG-403|ag-403|CM-3|CM_3|cm-3) SLUG=CM-3 ;;
