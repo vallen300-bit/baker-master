@@ -76,14 +76,14 @@ class _FakeQdrant:
             raise RuntimeError(f"collection not found: {collection_name}")
         return SimpleNamespace(name=collection_name)
 
-    def search(self, *, collection_name, query_vector, limit, with_payload):
+    def query_points(self, *, collection_name, query, limit, with_payload):
         self.last_search_kwargs = {
             "collection_name": collection_name,
-            "query_vector": query_vector,
+            "query": query,
             "limit": limit,
             "with_payload": with_payload,
         }
-        return self._collections.get(collection_name, [])[:limit]
+        return SimpleNamespace(points=self._collections.get(collection_name, [])[:limit])
 
 
 def _install_fakes(monkeypatch, *, qdrant: _FakeQdrant, embed_vec=None):

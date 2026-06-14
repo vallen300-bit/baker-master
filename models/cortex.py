@@ -89,15 +89,16 @@ def check_dedup(
 
         from qdrant_client.models import Filter, FieldCondition, MatchValue
 
-        results = qdrant.search(
+        response = qdrant.query_points(
             collection_name="cortex_obligations",
-            query_vector=embedding,
+            query=embedding,
             query_filter=Filter(
                 must=[FieldCondition(key="category", match=MatchValue(value=category))]
             ),
             score_threshold=0.85,  # Floor — below this, definitely new
             limit=3,
         )
+        results = response.points
 
         if not results:
             return ('new', None)
