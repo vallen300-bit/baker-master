@@ -143,3 +143,45 @@ def test_cli_exit_zero_on_real_register():
         capture_output=True, text=True,
     )
     assert proc.returncode == 0, proc.stderr
+
+
+# --------- (S1 codex G3) job_heartbeats migration: up-only auto-applies -------
+def _migration_text():
+    mig = REPO_ROOT / "migrations" / "20260615_job_heartbeats.sql"
+    assert mig.exists()
+    return mig.read_text()
+
+
+def test_migration_has_up_and_down_markers():
+    text = _migration_text()
+    assert "-- == migrate:up ==" in text
+    assert "-- == migrate:down ==" in text
+
+
+def test_migration_up_section_creates_both_tables():
+    text = _migration_text()
+    up = text.split("-- == migrate:down ==")[0]
+    assert "CREATE TABLE IF NOT EXISTS job_heartbeats" in up
+    assert "CREATE TABLE IF NOT EXISTS sentinel_cursor_seen" in up
+
+
+def test_migration_down_section_fully_commented():
+    """config/migration_runner._apply_one executes the WHOLE file raw, so the
+    down section MUST be commented or it would DROP the tables it just created
+    on first deploy (codex G3 S1). Assert no executable SQL after the marker."""
+    text = _migration_text()
+    down = text.split("-- == migrate:down ==", 1)[1]
+    offending = []
+    for line in down.splitlines():
+        stripped = line.strip()
+        if not stripped:
+            continue
+        if not stripped.startswith("--"):
+            offending.append(line)
+    assert offending == [], f"down section has executable SQL: {offending}"
+    # belt-and-suspenders: no active DROP anywhere outside a comment
+    for line in text.splitlines():
+        s = line.strip()
+        if s.startswith("--"):
+            continue
+        assert "DROP TABLE" not in s.upper(), f"active DROP TABLE found: {line}"

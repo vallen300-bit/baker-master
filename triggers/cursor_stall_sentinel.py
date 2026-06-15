@@ -243,6 +243,24 @@ def _resolve(entry: dict, dao) -> tuple | None:
         if not row:
             return None
         cursor_val, updated_at, total = row
+
+        # Completion source of truth = the job's own heartbeat state, when it
+        # has one (codex G3 S2). cursor>=total is unreliable: graph
+        # total_estimate can be NULL (folder-total read fail) and bluewin
+        # done_count is an inserted-delta (< processed count), so a cleanly
+        # finished backfill can look incomplete and false-alarm. Both backfills
+        # write state=DONE/FAILED on completion (AC5), so honor that first.
+        hb = dao.read_heartbeat(entry.get("job_id"))
+        if hb is not None:
+            _hb_cursor, hb_state, _hb_updated = hb
+            if hb_state in ("DONE", "FAILED", "PAUSED"):
+                # not actively running -> never alarm; done iff DONE
+                return (str(cursor_val), updated_at, False, hb_state == "DONE")
+            # hb_state == RUNNING: actively running -> stall-check the progress
+            # cursor's updated_at below (running=True, done=False).
+            return (str(cursor_val), updated_at, True, False)
+
+        # Fallback (no heartbeat row yet): cursor>=total only when total known.
         done = (total is not None and cursor_val is not None
                 and cursor_val >= total)
         running = not done

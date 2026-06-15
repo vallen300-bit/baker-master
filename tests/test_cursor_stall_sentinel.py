@@ -322,6 +322,83 @@ def test_restart_reapplies_cold_start_grace():
     assert posts == []
 
 
+# --------- (S2 codex G3) heartbeat state is completion source of truth ----
+def test_progress_table_null_total_with_heartbeat_done_no_alarm():
+    # graph total_estimate can be NULL (folder-total read fail). cursor>=total is
+    # then unreliable, but the backfill wrote state=DONE -> never alarm.
+    now = datetime(2026, 6, 15, 12, 0, tzinfo=UTC)
+    dao = FakeDAO()
+    dao.sources["graph:Inbox"] = {
+        "cursor": 270, "total": None,
+        "updated_at": now - timedelta(hours=48),
+    }
+    dao.sources["graph_inbox_backfill"] = {  # heartbeat row
+        "cursor": "270", "state": "DONE",
+        "updated_at": now - timedelta(hours=48),
+    }
+    posts, fn = _posts_collector()
+    summary = css.check_cursor_stalls(
+        register=[_entry()], dao=dao, now=now, bus_post_fn=fn)
+    assert summary["alarmed"] == []
+    assert posts == []
+
+
+def test_progress_table_cursor_below_total_with_heartbeat_done_no_alarm():
+    # bluewin done_count is an inserted-delta (< processed) so cursor<total even
+    # when finished. heartbeat state=DONE must suppress the false alarm.
+    now = datetime(2026, 6, 15, 12, 0, tzinfo=UTC)
+    dao = FakeDAO()
+    dao.sources["bluewin:INBOX"] = {
+        "cursor": 900, "total": 33686,  # delta < total, but job is done
+        "updated_at": now - timedelta(hours=48),
+    }
+    dao.sources["bluewin_inbox_backfill"] = {
+        "cursor": "900", "state": "DONE",
+        "updated_at": now - timedelta(hours=48),
+    }
+    posts, fn = _posts_collector()
+    e = _entry(job_id="bluewin_inbox_backfill", key_val="bluewin:INBOX")
+    summary = css.check_cursor_stalls(
+        register=[e], dao=dao, now=now, bus_post_fn=fn)
+    assert summary["alarmed"] == []
+    assert posts == []
+
+
+def test_progress_table_heartbeat_running_still_alarms_on_stall():
+    # heartbeat says RUNNING but the progress cursor has flat-lined past
+    # threshold -> this IS the stall we must catch.
+    now = datetime(2026, 6, 15, 12, 0, tzinfo=UTC)
+    dao = FakeDAO()
+    dao.sources["graph:Inbox"] = {
+        "cursor": 270, "total": 1000,
+        "updated_at": now - timedelta(hours=8),
+    }
+    dao.sources["graph_inbox_backfill"] = {
+        "cursor": "270", "state": "RUNNING",
+        "updated_at": now - timedelta(hours=8),
+    }
+    posts, fn = _posts_collector()
+    summary = css.check_cursor_stalls(
+        register=[_entry()], dao=dao, now=now, bus_post_fn=fn)
+    assert "graph_inbox_backfill" in summary["alarmed"]
+    assert len(posts) >= 1
+
+
+def test_progress_table_null_total_no_heartbeat_falls_back_and_alarms():
+    # No heartbeat row + NULL total + stale flat-line: cannot prove completion,
+    # so the fallback treats it as RUNNING and alarms (correct — unknown state).
+    now = datetime(2026, 6, 15, 12, 0, tzinfo=UTC)
+    dao = FakeDAO()
+    dao.sources["graph:Inbox"] = {
+        "cursor": 270, "total": None,
+        "updated_at": now - timedelta(hours=9),
+    }
+    posts, fn = _posts_collector()
+    summary = css.check_cursor_stalls(
+        register=[_entry()], dao=dao, now=now, bus_post_fn=fn)
+    assert "graph_inbox_backfill" in summary["alarmed"]
+
+
 # ---------------------------- self-heartbeat -----------------------------
 def test_sentinel_emits_self_heartbeat():
     now = datetime(2026, 6, 15, 12, 0, tzinfo=UTC)

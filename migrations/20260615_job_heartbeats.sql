@@ -31,6 +31,12 @@ CREATE TABLE IF NOT EXISTS sentinel_cursor_seen (
 );
 
 -- == migrate:down ==
-
-DROP TABLE IF EXISTS sentinel_cursor_seen;
-DROP TABLE IF EXISTS job_heartbeats;
+-- Disaster recovery only. Not auto-run — config/migration_runner._apply_one
+-- executes the whole file raw, so this section MUST stay commented or it would
+-- drop the tables it just created on first deploy (codex G3 S1). Paste into psql
+-- when a deliberate rollback is needed.
+--
+-- BEGIN;
+-- DROP TABLE IF EXISTS sentinel_cursor_seen;
+-- DROP TABLE IF EXISTS job_heartbeats;
+-- COMMIT;
