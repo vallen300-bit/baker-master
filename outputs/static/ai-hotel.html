@@ -346,8 +346,7 @@ function buildNav(){
 function renderHotel(main){
   main.appendChild(el('div','kicker','The vision'));
   main.appendChild(el('h1','sec','AI Hotel — what it could be'));
-  main.appendChild(el('p','thesis-lead','AI Hotel is a lighthouse project: NVIDIA proves the hospitality vertical, Mandarin Oriental protects luxury service at scale, and Brisen captures the platform / equity upside.'));
-  const ctx=el('div','context');
+  const ctx=el('div','thesis-lead');
   ctx.appendChild(document.createTextNode('Mandarin Oriental wants to scale from ~45 to 100+ hotels while preserving its hallmark of high-touch, human-led luxury. AI is the enabler. The partnership splits naturally: '));
   ctx.appendChild(el('b',null,'NVIDIA'));ctx.appendChild(document.createTextNode(' brings accelerated computing, simulation, digital twins and agentic AI; '));
   ctx.appendChild(el('b',null,'Brisen'));ctx.appendChild(document.createTextNode(' brings luxury asset development; '));
