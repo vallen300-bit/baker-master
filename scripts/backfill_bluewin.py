@@ -431,9 +431,16 @@ def backfill_folder(imap, db_conn, folder: str, insert_attachment, limit: int | 
                     batch_size: int = BATCH_SIZE) -> tuple[int, int, int]:
     """Backfill one folder oldest->newest. Returns (processed, inserted, attachments)."""
     dry_run = limit is not None
+    raw_cursor = read_progress(db_conn, folder)
+    # FIX 2: a completed folder stores cursor='DONE' (mirror backfill_graph.py:348).
+    # Skip it on re-run — both to stay idempotent and to avoid parse_cursor()
+    # treating 'DONE' as unparseable and restarting the folder from UID 0.
+    if raw_cursor == "DONE":
+        logger.info("%s: already complete (cursor=DONE) — skipping", folder)
+        return 0, 0, 0
     uidvalidity, msg_count = _folder_status(imap, folder)
 
-    cur_validity, last_uid = parse_cursor(read_progress(db_conn, folder))
+    cur_validity, last_uid = parse_cursor(raw_cursor)
     if cur_validity is not None and cur_validity != uidvalidity:
         logger.warning(
             "%s: UIDVALIDITY changed %s -> %s — restarting folder from UID 0 "
@@ -544,6 +551,20 @@ def main() -> int:
                     _hb(folder, None, "FAILED")
                     raise
                 if args.limit is None:
+                    # FIX 2: write a durable in-row DONE marker (cursor='DONE',
+                    # mirror graph) and refresh updated_at — done_delta=0 leaves
+                    # done_count untouched. This stops the cursor-stall sentinel
+                    # false-alarming on a finished folder whose done_count
+                    # (inserted-delta) never reaches total_estimate, and covers
+                    # the 0-to-process case whose updated_at would otherwise stay
+                    # stale forever. Non-fatal: a marker-write failure must not
+                    # fail the backfill.
+                    try:
+                        write_progress(db_conn, folder, "DONE", 0)
+                    except Exception as e:  # noqa: BLE001
+                        logger.warning(
+                            "%s: DONE-marker write failed (non-fatal): %s",
+                            folder, e)
                     _hb(folder, None, "DONE")  # clean completion (not a dry-run)
                 totals = [t + x for t, x in zip(totals, (p, i, a))]
         logger.info(

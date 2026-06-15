@@ -95,6 +95,32 @@ def test_progress_table_missing_subfield_fails():
     assert any("key_val" in e for e in errs)
 
 
+def test_done_marker_half_configured_fails():
+    # FIX 2: declaring only one of the marker pair silently no-ops -> reject.
+    bad = dict(_GOOD_ENTRY)
+    bad["cursor_source"] = dict(_GOOD_ENTRY["cursor_source"])
+    bad["cursor_source"]["done_marker_col"] = "cursor"  # value missing
+    errs = validate(_doc(bad))
+    assert any("done_marker" in e for e in errs)
+
+
+def test_done_marker_bad_identifier_fails():
+    bad = dict(_GOOD_ENTRY)
+    bad["cursor_source"] = dict(_GOOD_ENTRY["cursor_source"])
+    bad["cursor_source"]["done_marker_col"] = "cursor; DROP TABLE x"
+    bad["cursor_source"]["done_marker_value"] = "DONE"
+    errs = validate(_doc(bad))
+    assert any("done_marker_col" in e for e in errs)
+
+
+def test_done_marker_well_formed_passes():
+    good = dict(_GOOD_ENTRY)
+    good["cursor_source"] = dict(_GOOD_ENTRY["cursor_source"])
+    good["cursor_source"]["done_marker_col"] = "cursor"
+    good["cursor_source"]["done_marker_value"] = "DONE"
+    assert validate(_doc(good)) == []
+
+
 def test_bad_trigger_reason_fails():
     bad = dict(_GOOD_ENTRY)
     bad["trigger_reason"] = "because-i-said-so"

@@ -15,10 +15,15 @@ Usage:
 from __future__ import annotations
 
 import argparse
+import re
 import sys
 from pathlib import Path
 
 import yaml
+
+# SQL identifier whitelist — mirrors triggers.cursor_stall_sentinel._IDENT_RE so
+# a done_marker_col that the sentinel would reject at runtime is caught at commit.
+_IDENT_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
 
 _REPO_ROOT = Path(__file__).resolve().parent.parent
 _DEFAULT_REGISTER = _REPO_ROOT / "config" / "long_running_jobs.yml"
@@ -132,6 +137,22 @@ def _validate_entry(entry: dict, idx: int) -> list[str]:
                         f"{label}: cursor_source missing '{sub}' "
                         f"(required for kind '{kind}')"
                     )
+            # Optional durable DONE marker (FIX 2): if either is present BOTH must
+            # be — a half-configured marker silently no-ops, which is exactly the
+            # silent-failure class this register exists to prevent.
+            dmc = cs.get("done_marker_col")
+            dmv = cs.get("done_marker_value")
+            if (dmc is None) != (dmv is None):
+                errs.append(
+                    f"{label}: cursor_source done_marker_col and "
+                    f"done_marker_value must be set together (got "
+                    f"col={dmc!r}, value={dmv!r})"
+                )
+            if dmc is not None and not _IDENT_RE.match(str(dmc)):
+                errs.append(
+                    f"{label}: cursor_source done_marker_col '{dmc}' is not a "
+                    f"valid SQL identifier"
+                )
 
     return errs
 

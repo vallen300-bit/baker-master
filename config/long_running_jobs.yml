@@ -46,6 +46,8 @@ jobs:
       key_col: source
       key_val: "graph:Inbox"
       total_col: total_estimate
+      done_marker_col: cursor
+      done_marker_value: "DONE"
 
   - job_id: graph_sentitems_backfill
     description: "M365 Graph historical mail backfill — SentItems folder (brisengroup.com)"
@@ -63,6 +65,8 @@ jobs:
       key_col: source
       key_val: "graph:SentItems"
       total_col: total_estimate
+      done_marker_col: cursor
+      done_marker_value: "DONE"
 
   - job_id: bluewin_inbox_backfill
     description: "Bluewin IMAP historical mail backfill — INBOX (dvallen@bluewin.ch)"
@@ -80,6 +84,8 @@ jobs:
       key_col: source
       key_val: "bluewin:INBOX"
       total_col: total_estimate
+      done_marker_col: cursor
+      done_marker_value: "DONE"
 
   - job_id: bluewin_sentitems_backfill
     description: "Bluewin IMAP historical mail backfill — Sent Items (dvallen@bluewin.ch)"
@@ -97,3 +103,5 @@ jobs:
       key_col: source
       key_val: "bluewin:Sent Items"
       total_col: total_estimate
+      done_marker_col: cursor
+      done_marker_value: "DONE"
