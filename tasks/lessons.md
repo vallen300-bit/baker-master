@@ -881,3 +881,31 @@ saw the new value.
   until the behavioral signal is stable across ≥2 reads (saw attempt-1 still 0, attempts 2-5 = 20+).
 - DURABILITY: env vars are service-level, so the slug persists across all future deploys (a later
   new_commit redeploy still carried it). Reversible: remove the slug to roll back.
+
+## Lesson #100 — every long-running / async task needs a named owner AND a fail-loud stall alarm (2026-06-15)
+The graph (brisengroup.com) email backfill silently stalled for 4 days (06-11 → 06-15) at 27%
+complete (Inbox 34%, Sent 0.4%). Nobody noticed until the Director asked "is it done?".
+- ROOT 1 (the bug): `run_backfill_graph_with_retry.sh` referenced the M365 1Password item by NAME
+  (`op://Baker API Keys/M365 / Microsoft Graph — Baker app registration/...`). The embedded `/`
+  in the item name cannot be escaped in an `op://` reference, so every cred read failed → the
+  Graph client never authenticated → the wrapper retried-then-died. Fix: reference by item ID
+  (`wyeoa7ymygvfp5vmuqnjd5xkry`), matching the cert-doc pattern already used below it in the same
+  file (baker-master 565fa18). RULE: never put a `/` in a 1Password item name you reference via
+  `op://`; reference by item ID when the name has special chars.
+- ROOT 2 (the real lesson — why it went unnoticed): the task had NO standing owner and NO stall
+  detector. Forward live-polling kept ingesting today's mail, which MASKED the frozen historical
+  backfill — the dashboard looked alive. A finish-watcher existed (06-11 pattern) but it only
+  fired on COMPLETION, never on STALL, so a job that dies mid-run is invisible.
+- RULE 1 (ownership): every long-running / async / multi-session task (historical backfills,
+  embeddings rebuilds, migrations-in-flight, multi-hour recoveries) gets a NAMED responsible agent
+  recorded at launch — not "lead will keep an eye on it". Default owner = lead unless reassigned.
+- RULE 2 (fail-loud): ownership without an alarm repeats this. A deterministic stall detector must
+  post to the bus when any tracked job's progress cursor is unchanged > 6h while its target is
+  incomplete. Mnilax discipline: a stall is deterministic state → code detects it, not an agent's
+  memory. Live-polling health does NOT prove a historical backfill is alive — check the specific
+  cursor, not the aggregate.
+- RULE 3 (RACI register): track these in a long-running-task register (Responsible / Accountable /
+  Consulted / Informed) so the owner survives session rotation — no single chat session is the
+  system of record. Codify the launch-time discipline as a skill; enforce the stall-alarm as a
+  sentinel. Skill alone repeats (agents forget to invoke); the deterministic alarm is what actually
+  prevents recurrence.
