@@ -970,3 +970,18 @@ complete (Inbox 34%, Sent 0.4%). Nobody noticed until the Director asked "is it 
   do NOT chase them under this arc.
 - Also folded the graph DONE-skip self-heal (backfill_graph.py emits _hb DONE before the skip-return)
   so a completed graph folder heals its own heartbeat instead of needing a manual reconciliation beat.
+
+## Lesson #104 — a ModuleNotFoundError can MASK a downstream union bug; stub the dep and keep probing (2026-06-16)
+- CORRECTS Lesson #103's claim that the 4 `ModuleNotFoundError: No module named 'mcp'` collection
+  errors were "separate / out of scope". codex G3 on PR #369 caught that one of them masked a REAL
+  residual: baker_mcp/baker_mcp_server.py had the same py3.9 PEP-604 union bug (lines 115 dict|None,
+  167 int|None, 190-193 audit_id/payload/error : *|None) with no future-import. A plain import dies on
+  the missing `mcp` package BEFORE reaching line 115, so the union never gets a chance to throw — the
+  missing dep HID the bug. CI/3.12 also hides it (unions are legal there).
+- RULE: when sweeping an import-class bug, a ModuleNotFoundError is not a stopping point — STUB the
+  missing dependency into sys.modules (a fake package whose attributes return a permissive _Any) and
+  re-import, so the module's own body actually executes and any downstream bug surfaces. Only write a
+  module off once it imports cleanly WITH the dep stubbed. I dismissed it instead; codex had to.
+- Fix: added the future-import to baker_mcp_server.py + a STUBBED-mcp subprocess test case in
+  tests/test_py39_union_imports.py so this layer is exercised, not skipped. After stubbing mcp and
+  re-probing every source module, baker_mcp_server was the ONLY residual — sweep now actually complete.

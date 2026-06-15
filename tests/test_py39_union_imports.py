@@ -45,11 +45,48 @@ def test_module_imports_without_pep604_union_error(mod):
     assert r.returncode == 0, f"{mod} failed to import:\n{r.stderr[-800:]}"
 
 
+# Modules gated behind the optional `mcp` package. A plain import raises
+# ModuleNotFoundError before reaching their code, which can MASK a downstream
+# PEP 604 union bug (codex G3 caught exactly this on baker_mcp_server). We stub a
+# fake `mcp` package tree into sys.modules so the union line is actually exercised
+# under py3.9 — do NOT write these off as "mcp not installed".
+MCP_GATED_MODULES = [
+    "baker_mcp.baker_mcp_server",
+]
+
+_MCP_STUB_PREAMBLE = """
+import sys, types
+class _Any:
+    def __init__(self, *a, **k): pass
+    def __call__(self, *a, **k): return self
+    def __getattr__(self, n): return _Any()
+for _n in ("mcp", "mcp.server", "mcp.server.fastmcp", "mcp.server.stdio",
+           "mcp.types", "mcp.server.models"):
+    _m = types.ModuleType(_n)
+    _m.__path__ = []
+    _m.__getattr__ = lambda n: _Any()
+    sys.modules[_n] = _m
+"""
+
+
+@pytest.mark.parametrize("mod", MCP_GATED_MODULES)
+def test_mcp_gated_module_imports_without_union_error(mod):
+    code = _MCP_STUB_PREAMBLE + f"import {mod}\n"
+    r = subprocess.run(
+        [sys.executable, "-c", code], capture_output=True, text=True, timeout=120,
+    )
+    assert "unsupported operand type(s) for |" not in r.stderr, (
+        f"{mod} fails the PEP 604 union import on "
+        f"{sys.version_info.major}.{sys.version_info.minor} (mcp stubbed):\n{r.stderr[-600:]}"
+    )
+    assert r.returncode == 0, f"{mod} failed to import with mcp stubbed:\n{r.stderr[-800:]}"
+
+
 def test_swept_modules_have_future_annotations():
     # Belt-and-suspenders: the source files must carry the future-import so a
     # future edit can't silently reintroduce the runtime-eval'd union.
     import importlib.util
-    for mod in SWEPT_MODULES:
+    for mod in SWEPT_MODULES + MCP_GATED_MODULES:
         spec = importlib.util.find_spec(mod)
         assert spec and spec.origin, f"cannot locate {mod}"
         with open(spec.origin, "r", encoding="utf-8") as fh:

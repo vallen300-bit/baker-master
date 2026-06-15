@@ -21,6 +21,10 @@ Usage:
   python baker_mcp_server.py              # stdio transport (default)
   python baker_mcp_server.py --sse 8765   # SSE transport on port 8765
 """
+# PEP 563: lazy annotations so PEP 604 unions (dict|None, int|None) don't eval
+# at import time on Python 3.9 (PY39_UNION_IMPORT_SWEEP_1).
+from __future__ import annotations
+
 import json
 import logging
 import os
