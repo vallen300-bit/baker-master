@@ -22,6 +22,14 @@ SH_DATA_PATH = REPO_ROOT / "scripts" / "agent_identity_generated.sh"
 DRAIN_HOOK_PATH = REPO_ROOT / "tests" / "fixtures" / "session-start-bus-drain.sh"
 
 SYSTEM_RECIPIENT_SLUGS = ("director", "daemon")
+# System slugs that are NOT fleet agents (no picker / RACI, so not in the
+# registry) but ARE allowed to SEND on the bus. `daemon` is the server-side
+# sentinel/scheduler sender (e.g. cursor_stall_sentinel posts job-stall alerts as
+# daemon). `director` is deliberately EXCLUDED — Director must never auto-send.
+# These are emitted into the role-resolution maps (Python ROLE_TO_SLUG, shell
+# agent_identity_resolve_role, drain-hook case) so bus_post.sh BAKER_ROLE=daemon
+# resolves instead of exiting 1. (codex G3 follow-up FIX 1.)
+SYSTEM_SENDER_SLUGS = ("daemon",)
 GENERATED_BLOCK_BEGIN = "# BEGIN GENERATED AGENT IDENTITY ROLE MAP"
 GENERATED_BLOCK_END = "# END GENERATED AGENT IDENTITY ROLE MAP"
 
@@ -68,11 +76,28 @@ def _role_patterns(agent: dict[str, Any]) -> list[str]:
     return values
 
 
+def _system_sender_patterns(slug: str) -> list[str]:
+    """Accepted BAKER_ROLE inputs for a non-agent system sender (e.g. daemon)."""
+    out: list[str] = []
+    for value in (slug, slug.upper(), slug.replace("-", "_"),
+                  slug.replace("-", "_").upper()):
+        if value not in out:
+            out.append(value)
+    return out
+
+
 def _role_to_slug(bus_agents: list[dict[str, Any]]) -> dict[str, str]:
     out: dict[str, str] = {}
     for agent in bus_agents:
         slug = str(agent["slug"])
         for pattern in _role_patterns(agent):
+            existing = out.get(pattern)
+            if existing is not None and existing != slug:
+                raise SystemExit(f"BAKER_ROLE pattern {pattern!r} maps to both {existing!r} and {slug!r}")
+            out[pattern] = slug
+    # System senders (daemon) — not agents, but resolvable as bus senders.
+    for slug in SYSTEM_SENDER_SLUGS:
+        for pattern in _system_sender_patterns(slug):
             existing = out.get(pattern)
             if existing is not None and existing != slug:
                 raise SystemExit(f"BAKER_ROLE pattern {pattern!r} maps to both {existing!r} and {slug!r}")
@@ -156,6 +181,7 @@ def render_python_data(registry: dict[str, Any], registry_path: Path, registry_s
         f"REGISTRY_UPDATED_AT = {updated_at!r}\n"
         f"DISPLAY_FORMAT = {display_format!r}\n"
         f"SYSTEM_RECIPIENT_SLUGS = {_py_literal(SYSTEM_RECIPIENT_SLUGS)}\n"
+        f"SYSTEM_SENDER_SLUGS = {_py_literal(SYSTEM_SENDER_SLUGS)}\n"
         f"AGENTS = {_py_literal(agents)}\n"
         f"BUS_AGENT_SLUGS = {_py_literal(bus_slugs)}\n"
         f"VALID_BUS_SLUGS = {_py_literal(valid_slugs)}\n"
@@ -203,6 +229,8 @@ def render_shell_data(registry: dict[str, Any], registry_path: Path, registry_sh
     ]
     for agent in bus_agents:
         lines.append(f"    {_case_pattern(_role_patterns(agent))}) printf '%s\\n' {shlex.quote(str(agent['slug']))} ;;")
+    for slug in SYSTEM_SENDER_SLUGS:
+        lines.append(f"    {_case_pattern(_system_sender_patterns(slug))}) printf '%s\\n' {shlex.quote(slug)} ;;")
     lines.extend(
         [
             "    *) return 1 ;;",
@@ -223,6 +251,8 @@ def render_drain_role_block(registry: dict[str, Any], registry_path: Path, regis
     ]
     for agent in _bus_agents(registry):
         lines.append(f"    {_case_pattern(_role_patterns(agent))}) SLUG={shlex.quote(str(agent['slug']))} ;;")
+    for slug in SYSTEM_SENDER_SLUGS:
+        lines.append(f"    {_case_pattern(_system_sender_patterns(slug))}) SLUG={shlex.quote(slug)} ;;")
     lines.extend(
         [
             "    *)",
