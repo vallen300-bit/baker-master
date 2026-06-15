@@ -3,6 +3,10 @@ Sentinel AI — Todoist API Client
 Read-only access to Todoist API v1 (unified endpoint).
 Polls projects, tasks (active + completed), sections, labels, comments.
 """
+# PEP 563: lazy annotations so PEP 604 unions (X | None) in signatures don't
+# evaluate at import time on Python 3.9 (PY39_UNION_IMPORT_SWEEP_1).
+from __future__ import annotations
+
 import logging
 import os
 import time

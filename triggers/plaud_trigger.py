@@ -3,6 +3,10 @@ Sentinel Trigger — Plaud Note Pro (Meeting Recordings)
 PLAUD-INGESTION-1: Polls Plaud web API for new transcripts and runs
 the same pipeline as Fireflies.
 """
+# PEP 563: lazy annotations so PEP 604 unions (X | None) in signatures don't
+# evaluate at import time on Python 3.9 (PY39_UNION_IMPORT_SWEEP_1).
+from __future__ import annotations
+
 import logging
 import sys
 from contextlib import ExitStack, contextmanager

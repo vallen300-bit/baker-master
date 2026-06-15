@@ -2,6 +2,10 @@
 Baker — YouTube Transcript Ingestion
 YOUTUBE-GEMMA-INGEST-1: Fetch transcript, summarize with Gemma 4, store in meeting_transcripts.
 """
+# PEP 563: lazy annotations so PEP 604 unions (X | None) in signatures don't
+# evaluate at import time on Python 3.9 (PY39_UNION_IMPORT_SWEEP_1).
+from __future__ import annotations
+
 import logging
 import re
 import sys

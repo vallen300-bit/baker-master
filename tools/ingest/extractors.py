@@ -3,6 +3,10 @@
 Each extractor takes a file path and returns extracted text as a string.
 Supported: .txt, .md, .pdf, .csv, .xlsx, .json, .docx, .jpg, .jpeg, .png, .heic, .webp
 """
+# PEP 563: lazy annotations so PEP 604 unions (X | None) in signatures don't
+# evaluate at import time on Python 3.9 (PY39_UNION_IMPORT_SWEEP_1).
+from __future__ import annotations
+
 import base64
 import csv
 import io

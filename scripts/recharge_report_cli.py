@@ -8,6 +8,9 @@ Usage:
   python scripts/recharge_report_cli.py --tier routine --facts-file facts.txt \\
       --output report.html
 """
+# PEP 563: lazy annotations so PEP 604 unions don't eval at import on py3.9 (PY39_UNION_IMPORT_SWEEP_1).
+from __future__ import annotations
+
 import argparse
 import sys
 from pathlib import Path
