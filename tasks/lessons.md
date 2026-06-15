@@ -909,3 +909,28 @@ complete (Inbox 34%, Sent 0.4%). Nobody noticed until the Director asked "is it 
   system of record. Codify the launch-time discipline as a skill; enforce the stall-alarm as a
   sentinel. Skill alone repeats (agents forget to invoke); the deterministic alarm is what actually
   prevents recurrence.
+
+## Lesson #101 — PEP 604 unions (`X | None`) without `from __future__ import annotations` break on Python 3.9, and silently no-op anything that swallows the import (2026-06-16)
+- WHERE: BACKFILL_SENTINEL_HEARTBEAT_FIX_1 (follow-up to #100). The cursor-stall sentinel from
+  #100 worked — it fired 3 real alerts. But its companion heartbeat store was dead.
+- BUG 1 (heartbeat dead on 3.9): `memory/store_back.py:6241` declared `... -> int | None:` WITHOUT
+  `from __future__ import annotations`. On Python 3.9 the union evaluates at class-definition time →
+  `TypeError: unsupported operand type(s) for |: 'type' and 'NoneType'` → `import memory.store_back`
+  fails. `orchestrator.job_heartbeat._store()` catches the ImportError and returns None, so `beat()`
+  silently became a no-op → `job_heartbeats` had ZERO rows for the 4 backfill jobs. Render runs 3.11
+  so it looked fine in prod; the backfills run LOCALLY on the Mac's Python 3.9.6 where it failed.
+  Fix: add `from __future__ import annotations` (one line). RULE: any module that may import under
+  3.9 (anything a local script touches) must have the future-import if it uses PEP 604 unions in
+  runtime-evaluated positions (def signatures, defaults). At least 9 other modules in this repo have
+  the same latent bug (e.g. triggers/exchange_poller.py:237) — they only pass because CI is 3.11.
+- BUG 2 (counter-semantics false DONE): the sentinel's DONE-test was `done_count >= total_estimate`.
+  Bluewin's `done_count` is a NET-INSERTED counter (dupes don't increment) while `total_estimate` is
+  the folder message count — so a fully caught-up bluewin folder has done_count < total FOREVER →
+  perpetual "RUNNING" → false stall alarms. Graph avoided it only because its done_count crosses
+  total. RULE: don't infer completion from "progress counter >= estimate" when the counter and the
+  estimate measure different things. Use a durable, explicit completion marker. Fix: honor the
+  in-row `cursor == 'DONE'` marker first (graph already wrote it; made bluewin write it too on
+  completion + refresh updated_at on 0-to-process runs so a finished partition stops re-alarming).
+- META: a monitoring component is not "done" because it fires once. Verify its WRITE side too — the
+  heartbeat the sentinel was supposed to populate was empty the whole time and only surfaced when a
+  real backfill resume exercised the full path (#100 → POST_DEPLOY → this fix).

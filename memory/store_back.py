@@ -9,6 +9,13 @@ FastAPI thread, APScheduler workers, and boot-time daemon backfill threads,
 and SimpleConnectionPool is documented single-thread-only).
 All writes use parameterized queries — no SQL injection risk.
 """
+# PEP 563: keep annotations as strings so PEP 604 unions (`int | None`) in method
+# signatures don't evaluate at class-definition time. Without this the module
+# fails to import on Python 3.9 (`TypeError: unsupported operand type(s) for |`),
+# which silently disabled orchestrator.job_heartbeat.beat()
+# (BACKFILL_SENTINEL_HEARTBEAT_FIX_1 FIX 1).
+from __future__ import annotations
+
 import json
 import logging
 import os

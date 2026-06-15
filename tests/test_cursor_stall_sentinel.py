@@ -38,11 +38,16 @@ class FakeDAO:
 
     # --- source resolution ---
     def read_progress(self, table, cursor_col, updated_col, key_col, key_val,
-                      total_col):
+                      total_col, done_marker_col=None):
         s = self.sources.get(key_val)
         if s is None:
             return None
-        return (s["cursor"], s["updated_at"], s.get("total"))
+        base = (s["cursor"], s["updated_at"], s.get("total"))
+        # FIX 2: when the register declares a done_marker_col, the DAO also
+        # returns the literal marker column (the `cursor` column == 'DONE').
+        if done_marker_col:
+            return base + (s.get("done_marker"),)
+        return base
 
     def read_heartbeat(self, job_id):
         s = self.sources.get(job_id)
@@ -80,7 +85,7 @@ class FakeDAO:
 
 
 def _entry(job_id="graph_inbox_backfill", threshold=6, kind="progress_table",
-           key_val="graph:Inbox"):
+           key_val="graph:Inbox", done_marker=False):
     if kind == "progress_table":
         src = {
             "kind": "progress_table",
@@ -91,6 +96,9 @@ def _entry(job_id="graph_inbox_backfill", threshold=6, kind="progress_table",
             "key_val": key_val,
             "total_col": "total_estimate",
         }
+        if done_marker:
+            src["done_marker_col"] = "cursor"
+            src["done_marker_value"] = "DONE"
     else:
         src = {"kind": "heartbeat", "job_id": job_id}
     return {
@@ -449,6 +457,46 @@ def test_progress_table_null_total_no_heartbeat_falls_back_and_alarms():
     summary = css.check_cursor_stalls(
         register=[_entry()], dao=dao, now=now, bus_post_fn=fn)
     assert "graph_inbox_backfill" in summary["alarmed"]
+
+
+# ---- FIX 2 (BACKFILL_SENTINEL_HEARTBEAT_FIX_1): durable cursor=='DONE' marker ----
+def test_progress_table_cursor_done_marker_suppresses_alarm_no_heartbeat():
+    # The production false-positive: bluewin done_count (net-inserts) < total
+    # PERMANENTLY, NO heartbeat row (the py3.9 store_back failure silently killed
+    # beat()), updated_at 4d stale, cursor flat-lined. Pre-FIX this alarms via the
+    # cursor<total fallback. The durable in-row marker (`cursor` column == 'DONE',
+    # written by the backfill on completion) must suppress it.
+    now = datetime(2026, 6, 15, 12, 0, tzinfo=UTC)
+    dao = FakeDAO()
+    dao.sources["bluewin:Sent Items"] = {
+        "cursor": 5743, "total": 5836,            # done_count < total forever
+        "updated_at": now - timedelta(hours=100),  # 4d stale, flat-line
+        "done_marker": "DONE",                     # the literal `cursor` column
+    }
+    posts, fn = _posts_collector()
+    e = _entry(job_id="bluewin_sentitems_backfill",
+               key_val="bluewin:Sent Items", done_marker=True)
+    summary = css.check_cursor_stalls(register=[e], dao=dao, now=now, bus_post_fn=fn)
+    assert summary["alarmed"] == []
+    assert posts == []
+
+
+def test_progress_table_done_marker_absent_still_alarms_on_real_stall():
+    # Same dedup'd shape but the `cursor` column is a mid-run uid (NOT 'DONE') ->
+    # genuinely stalled -> must STILL alarm. The marker must not blanket-suppress.
+    now = datetime(2026, 6, 15, 12, 0, tzinfo=UTC)
+    dao = FakeDAO()
+    dao.sources["bluewin:INBOX"] = {
+        "cursor": 100, "total": 33701,
+        "updated_at": now - timedelta(hours=100),
+        "done_marker": "1376584583:50000",  # mid-run cursor, not DONE
+    }
+    posts, fn = _posts_collector()
+    e = _entry(job_id="bluewin_inbox_backfill",
+               key_val="bluewin:INBOX", done_marker=True)
+    summary = css.check_cursor_stalls(register=[e], dao=dao, now=now, bus_post_fn=fn)
+    assert "bluewin_inbox_backfill" in summary["alarmed"]
+    assert len(posts) >= 1
 
 
 # ---------------------------- self-heartbeat -----------------------------

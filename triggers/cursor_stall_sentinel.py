@@ -107,16 +107,21 @@ class _StoreBackDAO:
                     pass
 
     def read_progress(self, table, cursor_col, updated_col, key_col, key_val,
-                      total_col):
+                      total_col, done_marker_col=None):
         t, cc, uc, kc, tc = (_ident(table), _ident(cursor_col),
                              _ident(updated_col), _ident(key_col),
                              _ident(total_col))
+        # FIX 2: optionally also read a durable in-row completion marker (the
+        # literal `cursor` column, which holds 'DONE' on completion). Identifier
+        # whitelisted like the rest.
+        dmc = _ident(done_marker_col) if done_marker_col else None
+        cols = f"{cc}, {uc}, {tc}" + (f", {dmc}" if dmc else "")
 
         def _q(conn):
             with conn.cursor() as cur:
                 cur.execute("SET LOCAL statement_timeout = '15s'")
                 cur.execute(
-                    f"SELECT {cc}, {uc}, {tc} FROM {t} WHERE {kc} = %s LIMIT 1",
+                    f"SELECT {cols} FROM {t} WHERE {kc} = %s LIMIT 1",
                     (key_val,),
                 )
                 return cur.fetchone()
@@ -267,13 +272,28 @@ def _resolve(entry: dict, dao) -> tuple | None:
         return (cursor_text, updated_at, running, done)
 
     if kind == "progress_table":
+        done_marker_col = cs.get("done_marker_col")
         row = dao.read_progress(
             cs["table"], cs["cursor_col"], cs["updated_col"],
             cs["key_col"], cs["key_val"], cs["total_col"],
+            done_marker_col,
         )
         if not row:
             return None
-        cursor_val, updated_at, total = row
+        cursor_val, updated_at, total = row[0], row[1], row[2]
+        done_marker = row[3] if len(row) > 3 else None
+
+        # FIX 2 (BACKFILL_SENTINEL_HEARTBEAT_FIX_1): durable in-row DONE marker is
+        # the FIRST and most authoritative completion signal. The `cursor` column
+        # holds 'DONE' on completion (graph always; bluewin now too). Unlike the
+        # heartbeat table, this lives in the same row the sentinel already reads,
+        # so it survives a heartbeat outage (the py3.9 store_back failure that
+        # silently disabled beat()). Needed because bluewin done_count is an
+        # inserted-delta that can never reach total_estimate -> the cursor>=total
+        # fallback false-alarms on a cleanly finished partition. A DONE partition
+        # must never alarm.
+        if done_marker_col and done_marker == cs.get("done_marker_value", "DONE"):
+            return (str(cursor_val), updated_at, False, True)
 
         # Completion source of truth = the job's own heartbeat state, when it
         # has one (codex G3 S2). cursor>=total is unreliable: graph
