@@ -1,0 +1,176 @@
+<!DOCTYPE html>
+<!--
+Brisen McKinsey-style Director report — NVIDIA give/get precedents
+Register: mckinsey-report-html (Director-ratified 2026-05-25)
+Source research: wiki/research/2026-06-15-nvidia-give-get-precedents.md (bus #3041)
+-->
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>NVIDIA Give/Get Precedents — Director Report</title>
+<style>
+  @page { size: A4; margin: 18mm; }
+  html, body {
+    background: #fafaf7;
+    color: #1f2933;
+    font-family: "Helvetica Neue", "Arial", "Segoe UI", sans-serif;
+    font-size: 10pt;
+    line-height: 1.45;
+    margin: 0;
+    padding: 0;
+    -webkit-font-smoothing: antialiased;
+  }
+  .page { max-width: 174mm; margin: 0 auto; padding: 4mm 0 0 0; }
+  h1 { font-size: 18pt; color: #1a3a52; margin: 0 0 1.5mm 0; letter-spacing: -0.2pt; font-weight: 500; line-height: 1.2; }
+  .subhead { font-size: 9.5pt; color: #6a7280; margin: 0 0 6mm 0; border-bottom: 0.4pt solid #1a3a52; padding-bottom: 3mm; letter-spacing: 0.1pt; }
+  h2 { font-size: 8.5pt; color: #1a3a52; margin: 6mm 0 2mm 0; font-weight: 700; letter-spacing: 1.2pt; text-transform: uppercase; }
+  p { margin: 0 0 2.5mm 0; }
+  ul { margin: 0 0 3mm 4.5mm; padding: 0; }
+  li { margin-bottom: 1mm; }
+  .callout { background: #ffffff; border-left: 2.5pt solid #1a3a52; padding: 3.5mm 5mm; margin: 0 0 5mm 0; font-size: 10.5pt; }
+  .callout .bigfig { font-size: 16pt; color: #1a3a52; font-weight: 600; display: block; margin-bottom: 1.2mm; letter-spacing: -0.3pt; }
+  .callout .theory { color: #2d3748; font-size: 10pt; line-height: 1.4; }
+  table { width: 100%; border-collapse: collapse; margin: 2mm 0 4mm 0; font-size: 9pt; table-layout: fixed; }
+  th { text-align: left; background: transparent; color: #1a3a52; border-top: 0.6pt solid #1a3a52; border-bottom: 0.4pt solid #1a3a52; padding: 1.4mm 2mm 1.4mm 0; font-weight: 600; font-size: 8pt; text-transform: uppercase; letter-spacing: 0.5pt; }
+  td { border-bottom: 0.25pt solid #cfcfc4; padding: 1.7mm 2mm 1.7mm 0; vertical-align: top; }
+  td.num { text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
+  /* 5-case comparison table column proportions */
+  .cmp col.c-case { width: 16%; }
+  .cmp col.c-str  { width: 17%; }
+  .cmp col.c-gave { width: 22%; }
+  .cmp col.c-got  { width: 22%; }
+  .cmp col.c-les  { width: 23%; }
+  .cmp td:nth-child(1) { color: #1a3a52; font-weight: 600; }
+  /* give/get table */
+  .gg col.c-case { width: 18%; }
+  .gg col.c-gave { width: 41%; }
+  .gg col.c-got  { width: 41%; }
+  .gg td:nth-child(1) { color: #1a3a52; font-weight: 600; }
+  /* split table */
+  .split-table { table-layout: fixed; }
+  .split-table col.c-label { width: 62%; }
+  .split-table col.c-num   { width: 38%; }
+  .split-table td:first-child { padding-right: 4mm; }
+  .split-table td.num { padding-left: 4mm; padding-right: 0; }
+  .split-table tr.total td { border-top: 0.4pt solid #1a3a52; border-bottom: 0.6pt solid #1a3a52; padding-top: 1.8mm; padding-bottom: 1.8mm; }
+  .accept-block p { margin-bottom: 2mm; }
+  .accept-block strong { color: #1a3a52; }
+  .footer { margin-top: 6mm; padding-top: 2.5mm; border-top: 0.4pt solid #1a3a52; font-size: 7.8pt; color: #6a7280; letter-spacing: 0.2pt; }
+  .pagebreak { page-break-before: always; }
+  @media print { body { background: #ffffff; } }
+</style>
+</head>
+<body>
+<div class="page">
+
+<h1>NVIDIA Give/Get Precedents — Director Report</h1>
+<div class="subhead">Modelling what NVIDIA gives vs gets, for the NVIDIA &times; Mandarin Oriental &times; Brisen &ldquo;AI lighthouse hotel&rdquo; pitch (Santa Clara, to Pradeep Storer). Five verified precedents + synthesis. <em style="color:#6a7280; font-size:8.5pt; font-style:italic;">&middot; Researcher, 15 June 2026 &middot; bus #3041</em></div>
+
+<div class="callout">
+  <span class="bigfig">The smallest ask is the proven one</span>
+  <span class="theory">NVIDIA gives software, solution-engineers, co-marketing and named design-partner status; it gets a flagship reference deployment plus GPU pull-through. A named, co-branded &ldquo;lighthouse&rdquo; customer is exactly the shape NVIDIA has repeatedly said yes to. Lead there &mdash; not with a capital ask.</span>
+</div>
+
+<h2>Headline</h2>
+<p>Across automotive, enterprise software, retail and infrastructure, NVIDIA&rsquo;s give/get is consistent: it contributes <strong>platform/software access, solution-architect time, co-marketing/PR and design-partner status</strong>, and takes back a <strong>flagship reference deployment, vertical validation and GPU/CUDA pull-through</strong>. Cash and free GPUs are rare at the customer tier. NVIDIA <em>does</em> deploy capital aggressively &mdash; but almost only where the partner buys GPUs at scale (&ldquo;circular financing&rdquo;). A hotel is not that profile, so the realistic lever for MO is the lighthouse, not equity.</p>
+
+<h2>The five precedents</h2>
+<table class="cmp">
+  <colgroup><col class="c-case"><col class="c-str"><col class="c-gave"><col class="c-got"><col class="c-les"></colgroup>
+  <thead><tr><th>Partner / year</th><th>Structure</th><th>NVIDIA gave</th><th>NVIDIA got</th><th>Hospitality lesson</th></tr></thead>
+  <tbody>
+    <tr>
+      <td>Mercedes-Benz (2020)</td>
+      <td>Multi-year co-development partnership</td>
+      <td>DRIVE Orin + full AV software stack; joint engineering; co-brand</td>
+      <td>Premium-automotive flagship reference; platform lock-in; recurring-software pull-through</td>
+      <td>A luxury-brand co-brand is on-pattern; tie NVIDIA&rsquo;s upside to recurring revenue, not a one-off</td>
+    </tr>
+    <tr>
+      <td>AI Lighthouse &mdash; ServiceNow + Accenture (2023)</td>
+      <td>Three-way co-branded program, no equity</td>
+      <td>DGX / DGX Cloud compute + NeMo software; solution engineering; co-marketing</td>
+      <td>Reference GenAI deployments across verticals; pull-through; PR</td>
+      <td>This is our template &mdash; named lighthouse + an integrator builds; smallest proven ask</td>
+    </tr>
+    <tr>
+      <td>Lowe&rsquo;s (2022)</td>
+      <td>Customer reference + co-marketing, no equity</td>
+      <td>Omniverse Enterprise platform; AI simulation tooling; co-brand</td>
+      <td>First retail store-ops digital-twin reference; 600+ 3D assets contributed back; PR</td>
+      <td>A hotel is a physical venue full of ops + guests, like a store; the venue&rsquo;s data is part of the &ldquo;get&rdquo;</td>
+    </tr>
+    <tr>
+      <td>CoreWeave (2023&rarr;2025)</td>
+      <td>Equity + offtake backstop</td>
+      <td>Equity capital; $6.3B capacity backstop to 2032; supply</td>
+      <td>Massive GPU pull-through; NVIDIA-native cloud; CUDA lock-in</td>
+      <td>Capital appears only where the partner buys GPUs at scale &mdash; not a hotel</td>
+    </tr>
+    <tr>
+      <td>Intel (2025)</td>
+      <td>Equity + multi-gen co-development</td>
+      <td>$5B equity; co-engineering (NVLink, custom x86, RTX chiplets)</td>
+      <td>x86/CPU interoperability; strategic positioning; PR</td>
+      <td>Biggest checks are strategic-supply plays; shows NVIDIA <em>can</em> write equity, irrelevant to a hotel ask</td>
+    </tr>
+  </tbody>
+</table>
+
+<div class="pagebreak"></div>
+
+<h2>Give / get, per case</h2>
+<table class="gg">
+  <colgroup><col class="c-case"><col class="c-gave"><col class="c-got"></colgroup>
+  <thead><tr><th>Case</th><th>Gave (ranked)</th><th>Got (ranked)</th></tr></thead>
+  <tbody>
+    <tr><td>Mercedes-Benz</td><td>1) DRIVE Orin + AV software stack &nbsp; 2) Joint engineering &nbsp; 3) Co-brand/PR</td><td>1) Premium flagship reference &nbsp; 2) Platform lock-in &nbsp; 3) Recurring SW pull-through</td></tr>
+    <tr><td>AI Lighthouse</td><td>1) DGX/DGX Cloud + NeMo &nbsp; 2) Solution engineering &nbsp; 3) Co-marketing</td><td>1) Referenceable GenAI deployments &nbsp; 2) Pull-through &nbsp; 3) PR</td></tr>
+    <tr><td>Lowe&rsquo;s</td><td>1) Omniverse platform &nbsp; 2) AI simulation tooling &nbsp; 3) Co-brand/PR</td><td>1) Retail digital-twin reference &nbsp; 2) Ecosystem 3D assets &nbsp; 3) PR</td></tr>
+    <tr><td>CoreWeave</td><td>1) Equity capital &nbsp; 2) $6.3B offtake backstop &nbsp; 3) Supply/allocation</td><td>1) GPU pull-through &nbsp; 2) NVIDIA-native cloud &nbsp; 3) CUDA lock-in</td></tr>
+    <tr><td>Intel</td><td>1) $5B equity &nbsp; 2) Co-engineering (NVLink, x86, RTX chiplets)</td><td>1) CPU interoperability &nbsp; 2) Strategic positioning &nbsp; 3) PR</td></tr>
+  </tbody>
+</table>
+
+<h2>Does NVIDIA put in capital? Yes &mdash; but only at GPU scale</h2>
+<p>NVIDIA disclosed a ~$17.5B private-company / infrastructure portfolio by early 2025, scaling fast through 2025&ndash;26. Every large check tracks one variable: how many GPUs the partner buys or deploys.</p>
+<table class="split-table">
+  <colgroup><col class="c-label"><col class="c-num"></colgroup>
+  <tbody>
+    <tr><td>OpenAI &mdash; milestone-linked tranches (Sept 2025)</td><td class="num">up to $100B</td></tr>
+    <tr><td>Intel &mdash; common-stock equity (Sept 2025)</td><td class="num">$5B</td></tr>
+    <tr><td>xAI &mdash; equity within $20B round, via GPU-buying SPV (Oct 2025)</td><td class="num">up to $2B</td></tr>
+    <tr><td>CoreWeave &mdash; unsold-capacity offtake backstop to 2032</td><td class="num">$6.3B</td></tr>
+    <tr class="total"><td><strong>Disclosed private portfolio (early 2025)</strong></td><td class="num"><strong>~$17.5B</strong></td></tr>
+  </tbody>
+</table>
+<p>The through-line: NVIDIA finances demand for its own chips. A hotel that consumes modest compute is off-pattern for an equity ask &mdash; treat any NVIDIA capital as upside only, never the opening.</p>
+
+<h2>What we should steal</h2>
+<ul>
+  <li><strong>Frame MO as NVIDIA&rsquo;s first luxury-hospitality lighthouse</strong> &mdash; the smallest ask NVIDIA reliably grants; bring an integrator so NVIDIA only supplies software + solution-architects + PR.</li>
+  <li><strong>Offer the venue&rsquo;s data / 3D twin + a public reference back</strong> &mdash; that is the &ldquo;get&rdquo; NVIDIA values most (the Lowe&rsquo;s pattern).</li>
+  <li><strong>Tie NVIDIA&rsquo;s upside to recurring guest-tech revenue</strong>, not a one-off (the Mercedes-Benz model) &mdash; gives NVIDIA a long-horizon reason to invest engineering.</li>
+</ul>
+
+<h2>What we should not do</h2>
+<ul>
+  <li><strong>Don&rsquo;t lead with an equity / capital ask</strong> &mdash; off-pattern for a non-GPU-scale customer; signals we misread NVIDIA&rsquo;s model.</li>
+  <li><strong>Don&rsquo;t expect free GPUs or dedicated allocation</strong> in the opening &mdash; not disclosed in any customer-tier precedent.</li>
+  <li><strong>Don&rsquo;t overpromise GPU pull-through</strong> we can&rsquo;t deliver &mdash; inflated compute claims get discounted.</li>
+</ul>
+
+<h2>Open questions for the pitch team</h2>
+<div class="accept-block">
+  <p><strong>Name an integrator partner?</strong> An Accenture/Deloitte-type in the pitch would mirror the Lighthouse three-way structure and lower NVIDIA&rsquo;s lift. Recommendation: yes.</p>
+  <p><strong>Is MO willing to be a public co-branded reference + contribute property data / 3D-twin content?</strong> That is the core &ldquo;get&rdquo;; without it the ask weakens.</p>
+  <p><strong>Floor vs stretch ask.</strong> Floor = software + solution-architects + joint PR; stretch = GPU credits / priority allocation. Capital is not realistic &mdash; confirm we exclude it.</p>
+</div>
+
+<div class="footer">
+Report date: 15 June 2026. Source: Researcher multi-source study (bus #3041) &mdash; 3 Perplexity + 5 web-search + 5 live-page fetches; all five cases citation-verified against primary/secondary pages. Gap flagged: no public NVIDIA &times; Royal Caribbean partnership found (dropped, not padded). Mercedes-Benz NVIDIA/MB revenue split not public. Full markdown + citation table: wiki/research/2026-06-15-nvidia-give-get-precedents.md.
+</div>
+
+</div>
+</body>
+</html>
