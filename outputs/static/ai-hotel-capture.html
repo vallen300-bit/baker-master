@@ -1,0 +1,211 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="theme-color" content="#1a3a52">
+<title>AI Hotel — Field capture</title>
+<style>
+  :root{
+    --bg:#f7f6f2; --card:#ffffff; --line:#ddd8ce; --text:#171717; --text-2:#54524c;
+    --muted:#767168; --navy:#1a3a52; --navy-weak:rgba(26,58,82,.08); --navy-line:rgba(26,58,82,.3);
+    --green:#4c8f2f; --green-weak:rgba(76,143,47,.13); --amber:#b7791f;
+    --red:#b42318; --red-weak:rgba(180,35,24,.1);
+    --sans:-apple-system,BlinkMacSystemFont,"Segoe UI",Helvetica,Arial,sans-serif;
+    --mono:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--text);font-family:var(--sans);
+       font-size:16px;line-height:1.5;-webkit-font-smoothing:antialiased;
+       padding:env(safe-area-inset-top) 0 env(safe-area-inset-bottom)}
+  .wrap{max-width:520px;margin:0 auto;padding:24px 18px 60px}
+  .head{display:flex;align-items:center;gap:11px;margin-bottom:6px}
+  .mark{width:34px;height:34px;border-radius:9px;background:var(--navy);color:#fff;
+        display:grid;place-items:center;flex:0 0 auto}
+  .mark svg{width:19px;height:19px;stroke-width:1.8}
+  .title{font-weight:650;font-size:18px;letter-spacing:0}
+  .sub{font:600 11px/1 var(--mono);color:var(--muted);text-transform:uppercase;
+       letter-spacing:.12em;margin-top:3px}
+  .lead{color:var(--text-2);font-size:14px;margin:14px 0 22px}
+
+  .card{background:var(--card);border:1px solid var(--line);border-radius:12px;
+        padding:18px;margin-bottom:16px;box-shadow:0 8px 22px rgba(31,28,20,.06)}
+  label.fl{display:block;font:700 10px/1 var(--mono);letter-spacing:.12em;
+           text-transform:uppercase;color:var(--muted);margin-bottom:10px}
+
+  .camrow{display:flex;flex-direction:column;gap:12px}
+  .bigbtn{display:flex;align-items:center;justify-content:center;gap:10px;width:100%;
+          padding:18px;border-radius:11px;border:1.5px dashed var(--navy-line);
+          background:var(--navy-weak);color:var(--navy);font:600 16px/1 var(--sans);
+          cursor:pointer;-webkit-tap-highlight-color:transparent}
+  .bigbtn:active{transform:scale(.99)}
+  .bigbtn svg{width:22px;height:22px;stroke-width:1.8}
+  #fileInput{display:none}
+  .preview{margin-top:4px;display:none}
+  .preview.show{display:block}
+  .preview img{width:100%;max-height:240px;object-fit:cover;border-radius:10px;
+               border:1px solid var(--line)}
+  .preview .clearimg{margin-top:8px;background:none;border:none;color:var(--red);
+                     font:600 13px var(--sans);cursor:pointer;padding:4px 0}
+
+  textarea{width:100%;min-height:96px;padding:13px 14px;border:1px solid var(--line);
+           border-radius:11px;font:inherit;font-size:16px;background:var(--bg);
+           color:var(--text);resize:vertical;line-height:1.5}
+  textarea:focus{outline:none;border-color:var(--navy);box-shadow:0 0 0 3px var(--navy-weak)}
+  .hint{font-size:12.5px;color:var(--muted);margin-top:8px}
+
+  .send{width:100%;padding:16px;border:none;border-radius:12px;background:var(--navy);
+        color:#fff;font:650 16px/1 var(--sans);cursor:pointer;margin-top:4px;
+        -webkit-tap-highlight-color:transparent}
+  .send:active{transform:scale(.99)}
+  .send:disabled{background:#c9c4ba;cursor:not-allowed}
+
+  .result{margin-top:16px;padding:14px 16px;border-radius:11px;font-size:14px;display:none}
+  .result.show{display:block}
+  .result.ok{background:var(--green-weak);border:1px solid rgba(76,143,47,.3);color:#2f5c1e}
+  .result.err{background:var(--red-weak);border:1px solid rgba(180,35,24,.3);color:var(--red)}
+  .result .tag{display:inline-block;font:700 11px/1 var(--mono);text-transform:uppercase;
+               letter-spacing:.06em;background:var(--navy);color:#fff;padding:4px 8px;
+               border-radius:6px;margin-top:8px}
+  .result .smry{margin-top:8px;color:var(--text-2);font-size:13.5px}
+
+  .nokey{background:var(--red-weak);border:1px solid rgba(180,35,24,.3);color:var(--red);
+         border-radius:11px;padding:14px 16px;font-size:14px;margin-bottom:16px;display:none}
+  .nokey.show{display:block}
+  .foot{text-align:center;font:600 11px/1.5 var(--mono);color:var(--muted);
+        margin-top:26px;text-transform:uppercase;letter-spacing:.1em}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <div class="head">
+    <div class="mark"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="2" width="16" height="20" rx="1.5"/><path d="M9 22v-4h6v4"/><line x1="9" y1="6" x2="9" y2="6.01"/><line x1="15" y1="6" x2="15" y2="6.01"/><line x1="9" y1="10" x2="9" y2="10.01"/><line x1="15" y1="10" x2="15" y2="10.01"/></svg></div>
+    <div><div class="title">Field capture</div><div class="sub">ai hotel · hitec</div></div>
+  </div>
+  <div class="lead">Snap a booth photo or dictate a note. It's sorted automatically and lands in the AI Hotel dashboard's Field notes.</div>
+
+  <div class="nokey" id="nokey">Open this page with your access key in the link (<code>?key=…</code>). Sending is disabled until then.</div>
+
+  <div class="card">
+    <label class="fl" for="camBtn">Photo</label>
+    <div class="camrow">
+      <button type="button" class="bigbtn" id="camBtn">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round"><path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"/><circle cx="12" cy="13" r="4"/></svg>
+        Take or choose photo
+      </button>
+      <input type="file" id="fileInput" accept="image/*" capture="environment">
+      <div class="preview" id="preview"><img id="previewImg" alt="Selected photo preview"><button type="button" class="clearimg" id="clearImg">Remove photo</button></div>
+    </div>
+  </div>
+
+  <div class="card">
+    <label class="fl" for="noteInput">Note (tap mic on your keyboard to dictate)</label>
+    <textarea id="noteInput" placeholder="Dictate or type a quick note…" maxlength="4000" enterkeyhint="done"></textarea>
+    <div class="hint">A photo, a note, or both. The classifier decides where it goes.</div>
+  </div>
+
+  <button class="send" id="sendBtn" disabled>Send</button>
+
+  <div class="result" id="result"></div>
+
+  <div class="foot">Brisen · same-origin · key stays in your link</div>
+</div>
+
+<script>
+(function(){
+  var params=new URLSearchParams(location.search);
+  var KEY=params.get('key')||'';
+  var fileInput=document.getElementById('fileInput');
+  var camBtn=document.getElementById('camBtn');
+  var preview=document.getElementById('preview');
+  var previewImg=document.getElementById('previewImg');
+  var clearImg=document.getElementById('clearImg');
+  var noteInput=document.getElementById('noteInput');
+  var sendBtn=document.getElementById('sendBtn');
+  var result=document.getElementById('result');
+  var nokey=document.getElementById('nokey');
+  var selectedFile=null;
+
+  if(!KEY){ nokey.classList.add('show'); }
+
+  function refreshSend(){
+    var hasContent=(selectedFile!==null)||(noteInput.value.trim().length>0);
+    sendBtn.disabled=!(KEY && hasContent);
+  }
+
+  camBtn.addEventListener('click',function(){ fileInput.click(); });
+  fileInput.addEventListener('change',function(){
+    var f=fileInput.files&&fileInput.files[0];
+    if(!f){ return; }
+    selectedFile=f;
+    var url=URL.createObjectURL(f);
+    previewImg.src=url; preview.classList.add('show');
+    refreshSend();
+  });
+  clearImg.addEventListener('click',function(){
+    selectedFile=null; fileInput.value=''; preview.classList.remove('show'); previewImg.src='';
+    refreshSend();
+  });
+  noteInput.addEventListener('input',refreshSend);
+
+  function showResult(cls,buildFn){
+    result.className='result show '+cls;
+    while(result.firstChild) result.removeChild(result.firstChild);
+    buildFn(result);
+  }
+
+  sendBtn.addEventListener('click',function(){
+    if(sendBtn.disabled) return;
+    var note=noteInput.value.trim();
+    if(!KEY || (!selectedFile && !note)) return;
+    sendBtn.disabled=true; sendBtn.textContent='Sending…';
+    var fd=new FormData();
+    if(selectedFile) fd.append('image',selectedFile);
+    fd.append('note',note);
+    fetch('/api/ai-hotel/capture',{method:'POST',headers:{'X-Baker-Key':KEY},body:fd})
+      .then(function(r){
+        return r.json().then(function(j){ return {ok:r.ok,status:r.status,body:j}; })
+          .catch(function(){ return {ok:r.ok,status:r.status,body:{}}; });
+      })
+      .then(function(res){
+        if(!res.ok){
+          var msg=(res.body&&(res.body.detail||res.body.error))||('Error '+res.status);
+          showResult('err',function(root){
+            root.appendChild(document.createTextNode('Could not save: '+msg));
+          });
+          return;
+        }
+        var b=res.body||{};
+        showResult('ok',function(root){
+          root.appendChild(document.createTextNode('Saved.'));
+          var tag=document.createElement('div');
+          var label=(b.section_guess||'general');
+          if(b.related_area) label+=' · '+b.related_area;
+          tag.className='tag'; tag.textContent=label;
+          root.appendChild(tag);
+          if(b.summary){
+            var s=document.createElement('div'); s.className='smry'; s.textContent=b.summary;
+            root.appendChild(s);
+          }
+        });
+        // reset inputs for the next capture
+        selectedFile=null; fileInput.value=''; preview.classList.remove('show'); previewImg.src='';
+        noteInput.value='';
+      })
+      .catch(function(e){
+        showResult('err',function(root){
+          root.appendChild(document.createTextNode('Network error — try again. '+(e&&e.message?e.message:'')));
+        });
+      })
+      .finally(function(){
+        sendBtn.textContent='Send'; refreshSend();
+      });
+  });
+
+  refreshSend();
+})();
+</script>
+</body>
+</html>

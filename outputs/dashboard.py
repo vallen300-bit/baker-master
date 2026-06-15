@@ -9266,6 +9266,250 @@ async def scan_image(
         raise HTTPException(500, f"Image analysis failed: {e}")
 
 
+# ============================================================
+# AI_HOTEL_FIELD_CAPTURE_1 — one-tap mobile capture → LLM classify → Field notes
+# ============================================================
+
+_AI_HOTEL_SECTIONS = ("use_case", "stakeholder", "research", "comms", "general")
+
+_AI_HOTEL_CLASSIFY_PROMPT = (
+    "You are sorting a field note captured by Brisen's chairman at a "
+    "hospitality-tech exhibition into one section of the \"AI Hotel\" dashboard "
+    "(a NVIDIA × Mandarin Oriental × Brisen strategy map). Sections: "
+    "`use_case` (an AI hotel capability area: flagship, concierge/reservations, "
+    "staff training, operations/personalization, digital twins/design, "
+    "discovery/GEO, robotics), `stakeholder` (a party's give/get: NVIDIA, "
+    "Mandarin Oriental, Brisen, AI startups, investor/owner/lender, guests), "
+    "`research` (a study/source/competitor/market datapoint), `comms` "
+    "(something about outreach to NVIDIA or MOHG), `general` (anything else "
+    "worth keeping). Return STRICT JSON only: "
+    "{\"section_guess\":\"<one of the five>\",\"related_area\":\"<short tag or "
+    "null>\",\"summary\":\"<≤18-word plain-English summary>\"}. No prose."
+)
+
+
+# base64 inflates ~33%, so a 370KB raw target yields ~493KB encoded — under the
+# brief's ~500KB DB cap. Hard ceiling, not advisory (codex G3 S2): an image that
+# cannot be decoded OR cannot be brought under this size is REJECTED, never
+# stored raw.
+_AI_HOTEL_DB_RAW_CAP = 370_000
+
+
+def _ai_hotel_resize_for_db(image_bytes: bytes, content_type: str):
+    """Validate + resize an uploaded image to <= ~500KB base64 for Postgres.
+
+    Always re-encodes to JPEG so the stored row is a known-good, size-capped
+    image. Raises ``ValueError`` when the bytes are not a decodable image or
+    cannot be brought under ``_AI_HOTEL_DB_RAW_CAP`` — the caller converts that
+    to HTTP 400 (codex G3 S2: never persist undecodable/oversize raw bytes).
+    Returns ``(b64_text, "image/jpeg")``.
+    """
+    import base64
+    from io import BytesIO
+    from PIL import Image as PILImage
+
+    # Decode/validate up front — reject anything PIL cannot open (verify() then
+    # a fresh open, since verify() leaves the handle unusable for further ops).
+    try:
+        PILImage.open(BytesIO(image_bytes)).verify()
+        img = PILImage.open(BytesIO(image_bytes))
+        img.load()
+        if img.mode not in ("RGB", "L"):
+            img = img.convert("RGB")
+    except Exception as decode_err:
+        raise ValueError(f"undecodable image: {decode_err}")
+
+    # Dimension-cap first (bounds the first encode), then progressively shrink
+    # until raw JPEG bytes are under the DB cap or we hit the dimension floor.
+    img.thumbnail((2048, 2048), PILImage.LANCZOS)
+    max_dim = 2048
+    quality = 85
+    while True:
+        buf = BytesIO()
+        img.save(buf, format="JPEG", quality=quality, optimize=True)
+        data = buf.getvalue()
+        if len(data) <= _AI_HOTEL_DB_RAW_CAP or max_dim < 480:
+            break
+        max_dim = int(max_dim * 0.8)
+        img.thumbnail((max_dim, max_dim), PILImage.LANCZOS)
+        if quality > 55:
+            quality -= 5
+
+    if len(data) > _AI_HOTEL_DB_RAW_CAP:
+        raise ValueError(
+            f"image still {len(data)} bytes after resize (cap {_AI_HOTEL_DB_RAW_CAP})"
+        )
+
+    logger.info(f"ai_hotel image capped for DB: {len(data)} bytes")
+    b64 = base64.standard_b64encode(data).decode("utf-8")
+    return b64, "image/jpeg"
+
+
+@app.post("/api/ai-hotel/capture", tags=["ai-hotel"], dependencies=[Depends(verify_api_key)])
+async def ai_hotel_capture(image: UploadFile = File(None), note: str = Form("")):
+    """AI_HOTEL_FIELD_CAPTURE_1: accept a phone photo and/or dictated note,
+    classify it into one AI-Hotel dashboard section via Claude/Gemini Vision,
+    persist to Postgres (image as base64 — Render FS is ephemeral). Modeled on
+    scan_image's image-handling + LLM pattern.
+    """
+    note = (note or "").strip()
+    # Enforce the note cap server-side — the HTML maxlength=4000 is advisory
+    # only and trivially bypassed (codex G3 S3).
+    if len(note) > 4000:
+        raise HTTPException(400, "Note too long (max 4000 characters).")
+    has_image = image is not None and getattr(image, "filename", None)
+
+    if not has_image and not note:
+        raise HTTPException(400, "Provide a photo or a note (or both).")
+
+    b64 = None
+    image_media = None
+
+    if has_image:
+        # Validate file type (scan_image allowlist, verbatim).
+        content_type = image.content_type or ""
+        if not content_type.startswith("image/"):
+            ext = Path(image.filename or "").suffix.lower()
+            type_map = {".jpg": "image/jpeg", ".jpeg": "image/jpeg", ".png": "image/png",
+                        ".gif": "image/gif", ".webp": "image/webp"}
+            content_type = type_map.get(ext, "")
+        if content_type not in ("image/jpeg", "image/png", "image/gif", "image/webp"):
+            raise HTTPException(400, "Unsupported image type. Accepted: JPEG, PNG, GIF, WebP.")
+
+        image_bytes = await image.read()
+        if len(image_bytes) > 20 * 1024 * 1024:  # 20MB hard limit
+            raise HTTPException(400, "Image too large (max 20MB).")
+
+        try:
+            b64, image_media = _ai_hotel_resize_for_db(image_bytes, content_type)
+        except ValueError as ve:
+            logger.warning(f"ai_hotel_capture rejected image: {ve}")
+            raise HTTPException(400, "Unreadable image, or could not compress it under the size limit.")
+
+    source = "photo" if b64 else "note"
+    section_guess = "general"
+    related_area = None
+    summary = (note[:200] if note else "Photo capture")
+
+    # Classification — reuse scan_image's exact _llm_call / .text / .usage shape.
+    try:
+        content = []
+        if b64:
+            content.append({"type": "image",
+                            "source": {"type": "base64", "media_type": image_media, "data": b64}})
+        text_block = _AI_HOTEL_CLASSIFY_PROMPT
+        if note:
+            text_block += f"\n\nField note text (chairman dictation):\n{note}"
+        elif b64:
+            text_block += "\n\n(Photo only, no dictated text.)"
+        content.append({"type": "text", "text": text_block})
+
+        resp = _llm_call("gemini-2.5-flash", max_tokens=600,
+                         messages=[{"role": "user", "content": content}])
+        answer = (resp.text or "").strip()
+        from orchestrator.cost_monitor import log_api_cost
+        log_api_cost("gemini-2.5-flash", resp.usage.input_tokens, resp.usage.output_tokens,
+                     source="ai_hotel_capture")
+
+        # Defensive parse: strip code fences, json.loads, validate section.
+        raw = answer
+        if raw.startswith("```"):
+            raw = raw.split("```", 2)[1] if "```" in raw[3:] else raw.strip("`")
+            if raw.lstrip().lower().startswith("json"):
+                raw = raw.lstrip()[4:]
+        start, end = raw.find("{"), raw.rfind("}")
+        parsed = json.loads(raw[start:end + 1]) if start != -1 and end != -1 else {}
+        cand = str(parsed.get("section_guess", "")).strip().lower()
+        if cand in _AI_HOTEL_SECTIONS:
+            section_guess = cand
+            ra = parsed.get("related_area")
+            related_area = str(ra).strip()[:120] if ra and str(ra).strip().lower() != "null" else None
+            s = parsed.get("summary")
+            if s and str(s).strip():
+                summary = str(s).strip()[:400]
+    except Exception as classify_err:
+        logger.warning(f"ai_hotel_capture classification failed (fail-soft to general): {classify_err}")
+
+    # Persist (parameterized) — image as base64 text, never to disk.
+    try:
+        store = _get_store()
+        conn = store._get_conn()
+        if not conn:
+            raise HTTPException(503, "Database unavailable")
+        try:
+            cur = conn.cursor()
+            cur.execute(
+                """INSERT INTO ai_hotel_captures
+                       (source, note_text, image_b64, image_media,
+                        section_guess, related_area, summary)
+                   VALUES (%s, %s, %s, %s, %s, %s, %s) RETURNING id""",
+                (source, note or None, b64, image_media,
+                 section_guess, related_area, summary),
+            )
+            new_id = cur.fetchone()[0]
+            conn.commit()
+            cur.close()
+        except Exception:
+            conn.rollback()
+            raise
+        finally:
+            store._put_conn(conn)
+    except HTTPException:
+        raise
+    except Exception as e:
+        # Log the raw exception server-side; return a generic message so we
+        # never leak DB internals to the client (security-review LOW nit,
+        # mirrors the read endpoint's fail-soft pattern).
+        logger.error(f"POST /api/ai-hotel/capture insert failed: {e}")
+        raise HTTPException(500, "Could not save capture")
+
+    logger.info(f"ai_hotel_capture saved: id={new_id} source={source} section={section_guess}")
+    return {"id": new_id, "section_guess": section_guess,
+            "related_area": related_area, "summary": summary}
+
+
+@app.get("/api/ai-hotel/captures", tags=["ai-hotel"], dependencies=[Depends(verify_api_key)])
+async def ai_hotel_captures(limit: int = 100):
+    """AI_HOTEL_FIELD_CAPTURE_1: list field-note captures, newest first, for the
+    dashboard "Field notes" surface. Fail-soft empty list on any error."""
+    limit = max(1, min(limit, 200))
+    try:
+        store = _get_store()
+        import psycopg2.extras
+        conn = store._get_conn()
+        if not conn:
+            return {"captures": []}
+        try:
+            cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+            cur.execute(
+                """SELECT id, created_at, source, note_text, image_b64, image_media,
+                          section_guess, related_area, summary, status
+                     FROM ai_hotel_captures
+                    WHERE status <> 'dismissed'
+                    ORDER BY created_at DESC
+                    LIMIT %s""",
+                (limit,),
+            )
+            rows = cur.fetchall()
+            cur.close()
+        except Exception:
+            conn.rollback()
+            raise
+        finally:
+            store._put_conn(conn)
+        captures = []
+        for r in rows:
+            d = dict(r)
+            b64 = d.pop("image_b64", None)
+            media = d.get("image_media") or "image/jpeg"
+            d["image"] = f"data:{media};base64,{b64}" if b64 else None
+            captures.append(_serialize(d))
+        return {"captures": captures}
+    except Exception as e:
+        logger.error(f"GET /api/ai-hotel/captures failed: {e}")
+        return {"captures": []}
+
+
 @app.get("/api/scan/detect", tags=["dashboard-v3"], dependencies=[Depends(verify_api_key)])
 async def detect_capability(q: str = Query("", max_length=500)):
     """

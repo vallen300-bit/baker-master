@@ -159,6 +159,23 @@
   a.rlink .lic{display:flex} a.rlink .lic svg{width:13px;height:13px;stroke-width:2}
   .rsoon{font:600 11px/1 var(--mono);color:var(--faint);border:1px solid var(--line);padding:8px 12px;border-radius:8px}
 
+  /* Field notes (live captures from the phone) */
+  .ngrid{display:flex;flex-direction:column;gap:14px}
+  .ncard{background:var(--card);border:1px solid var(--line);border-radius:8px;padding:16px 18px;display:flex;gap:14px;box-shadow:var(--shadow);transition:border-color .14s,box-shadow .14s}
+  .ncard:hover{border-color:var(--id-blue-line);box-shadow:var(--shadow-hover)}
+  .nthumb{width:64px;height:64px;border-radius:8px;object-fit:cover;border:1px solid var(--line);flex:0 0 auto;background:var(--bg)}
+  .nbody{flex:1 1 auto;min-width:0}
+  .nsmry{font-size:14.5px;color:var(--text);line-height:1.5;margin-bottom:10px;word-wrap:break-word}
+  .nmeta{display:flex;align-items:center;gap:9px;flex-wrap:wrap}
+  .ntag{font:700 10px/1 var(--mono);letter-spacing:.04em;text-transform:uppercase;padding:4px 8px;border-radius:6px}
+  .ntag.use_case{background:var(--amber-weak);color:var(--amber);border:1px solid var(--amber-line)}
+  .ntag.stakeholder{background:var(--green-weak);color:var(--green);border:1px solid var(--green-line)}
+  .ntag.research{background:var(--id-blue-weak);color:var(--id-blue);border:1px solid var(--id-blue-line)}
+  .ntag.comms{background:var(--accent-weak);color:var(--accent);border:1px solid var(--accent-line)}
+  .ntag.general{background:var(--bg);color:var(--muted);border:1px solid var(--line)}
+  .nrel{font:600 11px/1 var(--mono);color:var(--text-2)}
+  .ntime{font:500 11px/1 var(--mono);color:var(--faint);margin-left:auto}
+  .nempty{background:var(--card);border:1px solid var(--line);border-radius:8px;padding:22px;text-align:center;color:var(--muted);font-size:14px;box-shadow:var(--shadow)}
   .dummy{}
   dialog{border:1px solid var(--line);border-radius:12px;padding:0;max-width:620px;width:92%;background:var(--card);color:var(--text);box-shadow:var(--shadow)}
   dialog::backdrop{background:var(--overlay)}
@@ -329,7 +346,8 @@ const NAV=[
   {id:'hotel',name:'AI Hotel',icon:'hotel'},
   {id:'stake',name:"Stakeholders' interests",icon:'users'},
   {id:'research',name:'Research',icon:'book'},
-  {id:'comms',name:'Communications to parties',icon:'mail'}
+  {id:'comms',name:'Communications to parties',icon:'mail'},
+  {id:'notes',name:'Field notes',icon:'message'}
 ];
 
 let current='hotel';
@@ -456,6 +474,51 @@ function renderLibrary(main,opts,arr){
   main.appendChild(grid);
 }
 
+/* ---- field notes (live captures from the phone) ---- */
+const NOTE_SECTION_LABELS={use_case:'Use case',stakeholder:'Stakeholder',research:'Research',comms:'Comms',general:'General'};
+function noteSection(s){return (s in NOTE_SECTION_LABELS)?s:'general';}
+function fmtNoteTime(iso){
+  if(!iso)return '';
+  const d=new Date(iso);if(isNaN(d.getTime()))return '';
+  try{return d.toLocaleString(undefined,{month:'short',day:'numeric',hour:'2-digit',minute:'2-digit'});}
+  catch(e){return String(iso).slice(0,16);}
+}
+function renderNotes(main){
+  main.appendChild(el('div','kicker','From the floor'));
+  main.appendChild(el('h1','sec','Field notes'));
+  main.appendChild(el('div','sec-sub','Photos and notes captured on the phone, sorted automatically. Newest first. Read-only here — capture happens from the phone bookmark.'));
+  const key=new URLSearchParams(location.search).get('key');
+  if(!key){
+    main.appendChild(el('div','nempty','Open this dashboard with your access key in the link (?key=…) to load field notes.'));
+    return;
+  }
+  const wrap=el('div','ngrid');main.appendChild(wrap);
+  wrap.appendChild(el('div','nempty','Loading field notes…'));
+  fetch('/api/ai-hotel/captures?limit=100',{headers:{'X-Baker-Key':key}})
+    .then(r=>r.json())
+    .then(data=>{
+      while(wrap.firstChild)wrap.removeChild(wrap.firstChild);
+      const caps=(data&&Array.isArray(data.captures))?data.captures:[];
+      if(!caps.length){wrap.appendChild(el('div','nempty','No field notes yet. Snap or dictate one from the capture page.'));return;}
+      caps.forEach(c=>{
+        const card=el('div','ncard');
+        if(c.image){const img=document.createElement('img');img.className='nthumb';img.src=c.image;img.alt='Field photo';img.loading='lazy';card.appendChild(img);}
+        const body=el('div','nbody');
+        body.appendChild(el('div','nsmry',c.summary||'(no summary)'));
+        const meta=el('div','nmeta');
+        const sec=noteSection(c.section_guess);
+        meta.appendChild(el('span','ntag '+sec,NOTE_SECTION_LABELS[sec]));
+        if(c.related_area)meta.appendChild(el('span','nrel',c.related_area));
+        meta.appendChild(el('span','ntime',fmtNoteTime(c.created_at)));
+        body.appendChild(meta);card.appendChild(body);wrap.appendChild(card);
+      });
+    })
+    .catch(()=>{
+      while(wrap.firstChild)wrap.removeChild(wrap.firstChild);
+      wrap.appendChild(el('div','nempty','Could not load field notes. Check your key and connection.'));
+    });
+}
+
 function show(id){
   current=id;closeMenu();window.scrollTo(0,0);buildNav();
   const main=document.getElementById('main');while(main.firstChild)main.removeChild(main.firstChild);
@@ -464,6 +527,7 @@ function show(id){
   else if(id==='stake')renderStake(main);
   else if(id==='research')renderLibrary(main,{kicker:'Library',title:'Research',sub:'Studies commissioned for this project. Each card opens its full report. More cards are added each session.'},RESEARCH);
   else if(id==='comms')renderLibrary(main,{kicker:'Outbound',title:'Communications to parties',sub:'Letters and messages to each party, built from this map. Each opens as a report once drafted.'},COMMS);
+  else if(id==='notes')renderNotes(main);
   else renderHotel(main);
 }
 
