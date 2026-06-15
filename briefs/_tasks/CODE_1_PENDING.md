@@ -68,17 +68,24 @@ first and follow its conventions (logger name `sentinel.<x>`, grace handling, re
   long-runtime | multi-session), and RACI fields `responsible` / `accountable` / `consulted` (list)
   / `informed` (list) — all role slugs validated against the repo's known slug set (reuse whatever
   slug list the codebase already exposes; if none, hardcode the current fleet slugs with a TODO).
-- Seed it with the two real jobs: `graph_email_backfill` and `bluewin_email_backfill`
-  (accountable: lead; responsible: b1; consulted: [aid]; informed: [director]; threshold 6;
-  cursor_source = progress_table on `email_backfill_progress`, keyed `graph:Inbox` / `bluewin:INBOX`).
+- Seed ONE entry PER PROGRESS PARTITION (deputy-codex pre-flight S1 #3035 — a stalled SentItems can
+  hide while Inbox advances). The live partitions are: `graph:Inbox`, `graph:SentItems`,
+  `bluewin:INBOX`, `bluewin:Sent Items` (verified against `email_backfill_progress` + `backfill_graph.py:327,383`
+  + `backfill_bluewin.py:68`). Four entries: `graph_inbox_backfill`, `graph_sentitems_backfill`,
+  `bluewin_inbox_backfill`, `bluewin_sentitems_backfill` (accountable: lead; responsible: b1;
+  consulted: [aid]; informed: [director]; threshold 6; cursor_source = progress_table on
+  `email_backfill_progress`, keyed by the exact `source` value above).
 - NEW `scripts/validate_long_running_jobs.py`: exits non-zero if any entry is missing a required
   field, names an unknown role slug, or has a non-positive threshold. Wire into the existing
   `.githooks` pre-commit chain (follow the existing hook pattern; do NOT duplicate a hook runner).
 
 **AC2 — heartbeat store.**
-- NEW migration `migrations/<date>_job_heartbeats.sql`: table `job_heartbeats(job_id TEXT PRIMARY
-  KEY, cursor_text TEXT, state TEXT NOT NULL DEFAULT 'RUNNING', updated_at TIMESTAMPTZ NOT NULL
-  DEFAULT now())`. `state` ∈ {RUNNING, DONE, FAILED, PAUSED}.
+- NEW migration `migrations/<date>_job_heartbeats.sql`: TWO tables —
+  `job_heartbeats(job_id TEXT PRIMARY KEY, cursor_text TEXT, state TEXT NOT NULL DEFAULT 'RUNNING',
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT now())`, `state` ∈ {RUNNING, DONE, FAILED, PAUSED};
+  AND `sentinel_cursor_seen(job_id TEXT PRIMARY KEY, observed_cursor TEXT, observed_at TIMESTAMPTZ
+  NOT NULL DEFAULT now(), last_alert_window_start TIMESTAMPTZ)` (separate table so the sentinel's own
+  writes never refresh the heartbeat timestamp it checks — deputy-codex S2 #3035).
 - NEW `orchestrator/job_heartbeat.py` with `beat(job_id, cursor, state='RUNNING')` (UPSERT, ON
   CONFLICT update cursor_text/state/updated_at) and `read(job_id)`. Every DB call in try/except WITH
   `conn.rollback()` in except; fault-tolerant (a heartbeat failure must NEVER crash the caller's real
@@ -86,24 +93,35 @@ first and follow its conventions (logger name `sentinel.<x>`, grace handling, re
 
 **AC3 — cursor-stall sentinel.**
 - NEW `triggers/cursor_stall_sentinel.py`, mirroring `scheduler_liveness_sentinel.py`.
-- For each register entry, resolve current cursor + `updated_at` from its `cursor_source`. Support two
-  kinds: (a) `heartbeat` → read `job_heartbeats`; (b) `progress_table` → declared
-  `{table, cursor_col, updated_col, key_col, key_val}` (this covers the existing
-  `email_backfill_progress` rows with no backfill rewrite). All SELECTs LIMITed.
-- ALARM when: `state == RUNNING` AND `now - updated_at > stall_threshold_hours` AND the cursor value
-  has NOT advanced since the previous sentinel observation (persist last-seen cursor per job — a
-  small `sentinel_cursor_seen` table or reuse `job_heartbeats` — so you detect a true flat-line, not
-  just an old timestamp). Respect a cold-start grace window like the liveness sentinel.
-- On alarm: bus-post via the repo's bus helper (`scripts/bus_post.sh <slug> <body> <topic>`,
-  header `X-Terminal-Key`) to the job's `accountable` slug AND `lead`; topic
-  `alert/job-stalled/<job_id>`; body = job_id + cursor value + hours-since-progress + owner. De-dupe:
-  no more than one alert per job per threshold window.
+- For each register entry, resolve current cursor + `updated_at` + RUNNING-ness from its
+  `cursor_source`. Support two kinds: (a) `heartbeat` → read `job_heartbeats` (`state` column is
+  authoritative); (b) `progress_table` → declared `{table, cursor_col, updated_col, key_col, key_val,
+  total_col}` over `email_backfill_progress` (no backfill rewrite). All SELECTs LIMITed.
+  **State for progress_table (deputy-codex S1 #3035 — that table has NO state column):** RUNNING ⇔
+  `cursor_col < total_col` (incomplete). When `cursor_col >= total_col`, treat as DONE → never alarm.
+- ALARM when: RUNNING (per above) AND `now - updated_at > stall_threshold_hours` AND the cursor value
+  has NOT advanced since the previous sentinel observation. **Persist last-seen in a SEPARATE table
+  `sentinel_cursor_seen(job_id PK, observed_cursor, observed_at, last_alert_window_start)` —
+  do NOT reuse `job_heartbeats` (deputy-codex S2 #3035: a heartbeat UPSERT refreshes `updated_at`,
+  which would mask the very staleness you're checking).** Respect a cold-start grace window like the
+  liveness sentinel.
+- On alarm: FIRST atomically claim the alert window before posting (deputy-codex S2 #3035 — dedupe
+  must be DB-atomic, `bus_post.sh` is a non-idempotent one-shot POST): `INSERT INTO sentinel_cursor_seen
+  ... ON CONFLICT (job_id) DO UPDATE SET last_alert_window_start = excluded... WHERE
+  sentinel_cursor_seen.last_alert_window_start IS DISTINCT FROM <this_window> RETURNING job_id` — only
+  post if a row is returned (claim won). THEN bus-post via `scripts/bus_post.sh <slug> <body> <topic>`
+  (header `X-Terminal-Key`) to the job's `accountable` slug AND `lead`; topic
+  `alert/job-stalled/<job_id>`; body = job_id + cursor value + hours-since-progress + owner.
 - Sentinel emits its OWN heartbeat (`beat('cursor_stall_sentinel', <run_ts>)`) each run.
 
 **AC4 — schedule + meta-watchdog.**
 - Register the sentinel in `triggers/embedded_scheduler.py` at a 30-min interval, following the
   existing `add_job(...)` + `register_expected_job(...)` pattern so the scheduler-liveness sentinel
   watches the watcher (this IS the meta-watchdog — no new infra).
+- **Also add a `reset_cold_start_anchor()` to the sentinel AND call it from `start_scheduler()`
+  alongside the existing `scheduler_liveness_sentinel.reset_cold_start_anchor()` call (deputy-codex
+  S2 #3035 — restart-safe grace only works because the reference sentinel's anchor is reset on
+  scheduler restart; mirror it). Test that an in-process restart re-applies the grace window.**
 
 **AC5 — real coverage now.**
 - Make `scripts/backfill_graph.py` + `scripts/backfill_bluewin.py` call `job_heartbeat.beat(...)`
@@ -112,8 +130,10 @@ first and follow its conventions (logger name `sentinel.<x>`, grace handling, re
 
 **AC6 — tests.**
 - `tests/test_cursor_stall_sentinel.py`: (a) flat-line cursor + RUNNING + past-threshold → alarm;
-  (b) advancing cursor → no alarm; (c) state=DONE → no alarm; (d) within grace → no alarm;
-  (e) re-alert de-dupe holds. Mock DB + bus (no live creds in CI).
+  (b) advancing cursor → no alarm; (c) DONE (`cursor >= total` for progress_table / state=DONE for
+  heartbeat) → no alarm; (d) within grace → no alarm; (e) re-alert de-dupe holds; (f) TWO concurrent
+  sentinel runs claim the same window → exactly ONE bus-post (atomic-claim test, deputy-codex S2);
+  (g) in-process restart re-applies cold-start grace. Mock DB + bus (no live creds in CI).
 - `tests/test_validate_long_running_jobs.py`: ownerless / unknown-slug / bad-threshold entries fail.
 
 ## Files to modify / create
