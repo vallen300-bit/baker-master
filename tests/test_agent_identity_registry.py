@@ -6,7 +6,9 @@ from pathlib import Path
 
 from orchestrator.agent_identity_data import (
     BUS_AGENT_SLUGS,
+    ROLE_TO_SLUG,
     SNAPSHOT_TERMINALS,
+    SYSTEM_SENDER_SLUGS,
     VALID_BUS_SLUGS,
 )
 from orchestrator.agent_identity_registry import identity_label, resolve_agent
@@ -61,6 +63,40 @@ def test_snapshot_terminals_include_generated_registry_agents():
     assert "ao-desk:/Users/dimitry/baker-vault" in SNAPSHOT_TERMINALS
     assert "russo-ai:/Users/dimitry/baker-vault" in SNAPSHOT_TERMINALS
     assert all(not item.startswith("cortex:") for item in SNAPSHOT_TERMINALS)
+
+
+def test_daemon_resolves_as_bus_sender_director_does_not():
+    # codex G3 follow-up FIX 1: daemon must resolve as a SENDER role (so
+    # bus_post.sh BAKER_ROLE=daemon posts instead of exiting 1), while director
+    # stays recipient-only (must never auto-send).
+    assert "daemon" in SYSTEM_SENDER_SLUGS
+    assert ROLE_TO_SLUG.get("daemon") == "daemon"
+    assert ROLE_TO_SLUG.get("DAEMON") == "daemon"
+    assert "director" not in SYSTEM_SENDER_SLUGS
+    assert "director" not in ROLE_TO_SLUG  # recipient-only, not a sender
+    # daemon remains a valid recipient; no duplication in VALID_BUS_SLUGS
+    assert "daemon" in VALID_BUS_SLUGS
+    assert list(VALID_BUS_SLUGS).count("daemon") == 1
+    # daemon is a system sender, NOT a fleet bus agent
+    assert "daemon" not in BUS_AGENT_SLUGS
+
+
+def test_shell_resolve_role_handles_daemon():
+    script = REPO_ROOT / "scripts" / "agent_identity_generated.sh"
+    out = subprocess.run(
+        ["bash", "-c",
+         f". {script}; agent_identity_resolve_role daemon"],
+        capture_output=True, text=True, timeout=10,
+    )
+    assert out.returncode == 0
+    assert out.stdout.strip() == "daemon"
+    # director must NOT resolve as a sender
+    out2 = subprocess.run(
+        ["bash", "-c",
+         f". {script}; agent_identity_resolve_role director"],
+        capture_output=True, text=True, timeout=10,
+    )
+    assert out2.returncode != 0
 
 
 def test_generated_artifacts_match_vault_registry():

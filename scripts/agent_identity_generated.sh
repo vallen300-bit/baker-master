@@ -42,6 +42,7 @@ agent_identity_resolve_role() {
     AG-403|ag-403|CM-3|CM_3|cm-3) printf '%s\n' CM-3 ;;
     AG-404|ag-404|CM-4|CM_4|cm-4) printf '%s\n' CM-4 ;;
     AG-405|ag-405|hag-filer|HAG-FILER|hag_filer|HAG_FILER) printf '%s\n' hag-filer ;;
+    daemon|DAEMON) printf '%s\n' daemon ;;
     *) return 1 ;;
   esac
 }
