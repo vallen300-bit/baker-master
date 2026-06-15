@@ -69,6 +69,24 @@ SELECT_FIELDS = (
 )
 DONE_SENTINEL = "DONE"
 
+# LONG_RUNNING_JOB_OWNERSHIP_1: map Graph folder -> ownership-register job_id so
+# this job's cursor is visible in job_heartbeats (read by cursor_stall_sentinel
+# as real coverage). Keep in sync with config/long_running_jobs.yml.
+_HEARTBEAT_JOB_ID = {
+    "Inbox": "graph_inbox_backfill",
+    "SentItems": "graph_sentitems_backfill",
+}
+
+
+def _hb(folder: str, cursor, state: str) -> None:
+    """Best-effort cursor heartbeat; never raises (monitoring must not crash)."""
+    try:
+        from orchestrator.job_heartbeat import beat as _beat
+        _beat(_HEARTBEAT_JOB_ID.get(folder, f"graph_{folder.lower()}_backfill"),
+              cursor, state)
+    except Exception:
+        pass
+
 
 # ---------------------------------------------------------------- HTTP layer
 
@@ -363,6 +381,7 @@ def backfill_folder(conn, client: GraphClient, folder: str,
         next_link = page.get("@odata.nextLink")
         # Persist cursor ONLY after the page's rows are committed — kill-safe.
         _set_progress(conn, source, next_link or DONE_SENTINEL, done)
+        _hb(folder, done, "DONE" if not next_link else "RUNNING")
         logger.info("[%s] page %d: %d msgs (+%d new, %d dup, %d att) done=%d",
                     folder, page_no, len(batch), stats["inserted"],
                     stats["skipped"], stats["attachments"], done)
@@ -402,6 +421,7 @@ def main(argv: list[str] | None = None) -> int:
                 # the exception text.
                 logger.error("ABORT in folder %s: %s — cursor NOT advanced, "
                              "re-run to resume", folder, e)
+                _hb(folder, None, "FAILED")
                 return 2
             for k in grand:
                 grand[k] += stats[k]

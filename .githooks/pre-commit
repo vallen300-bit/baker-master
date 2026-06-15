@@ -9,6 +9,8 @@
 #                                        (bypass via --no-verify only — 2026-05-17 wipe anchor)
 # Part 5: /write-brief SOP enforcement on staged briefs
 #                                        (bypass: Brief-SOP-bypass: <reason> trailer OR BAKER_BRIEF_SOP_BYPASS=1)
+# Part 6: long-running-jobs ownership register validation
+#                                        (NO BYPASS — fix the register entry)
 #
 # Activation (one-time per clone):
 #   git config core.hooksPath .githooks
@@ -108,6 +110,22 @@ fi
 # ---------------------------------------------------------------------------
 if [ -x "$REPO_ROOT/.githooks/brief_sop_check.sh" ]; then
     "$REPO_ROOT/.githooks/brief_sop_check.sh" || exit $?
+fi
+
+# ---------------------------------------------------------------------------
+# Part 6: long-running-jobs ownership register validation (NO BYPASS)
+# LONG_RUNNING_JOB_OWNERSHIP_1: when config/long_running_jobs.yml is staged,
+# reject ownerless / unknown-slug / bad-threshold / malformed entries before
+# they can be committed. Runs only when the register is touched (fast no-op
+# otherwise). Does NOT duplicate a hook runner — single inline check.
+# ---------------------------------------------------------------------------
+LRJ_STAGED="$(git diff --cached --name-only --diff-filter=ACMR | grep -E '^config/long_running_jobs\.yml$' || true)"
+if [ -n "$LRJ_STAGED" ]; then
+  if ! python3 scripts/validate_long_running_jobs.py >&2; then
+    echo "[pre-commit] BLOCKED (Part 6): config/long_running_jobs.yml failed validation (see errors above)." >&2
+    echo "[pre-commit] Fix the register entry (owner slug / threshold / cursor_source) and re-stage. NO BYPASS." >&2
+    exit 1
+  fi
 fi
 
 # ---------------------------------------------------------------------------

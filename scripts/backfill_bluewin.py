@@ -67,6 +67,27 @@ BATCH_SIZE = 200
 BATCH_SLEEP_S = 0.5
 PROGRESS_PREFIX = "bluewin:"  # email_backfill_progress.source = 'bluewin:<folder>'
 
+# LONG_RUNNING_JOB_OWNERSHIP_1: map IMAP folder -> ownership-register job_id so
+# this job's cursor is visible in job_heartbeats. Keep in sync with
+# config/long_running_jobs.yml.
+_HEARTBEAT_JOB_ID = {
+    "INBOX": "bluewin_inbox_backfill",
+    "Sent Items": "bluewin_sentitems_backfill",
+}
+
+
+def _hb(folder: str, cursor, state: str) -> None:
+    """Best-effort cursor heartbeat; never raises (monitoring must not crash)."""
+    try:
+        from orchestrator.job_heartbeat import beat as _beat
+        _beat(
+            _HEARTBEAT_JOB_ID.get(
+                folder, "bluewin_" + folder.lower().replace(" ", "") + "_backfill"),
+            cursor, state,
+        )
+    except Exception:
+        pass
+
 # Locked DDL from EMAIL_ATTACHMENT_STORE_1 (CODE_3_PENDING.md) — idempotent
 # self-heal so the cursor table exists even if this lane runs before b3's
 # migration is applied. Byte-for-byte the locked schema; no drift.
@@ -473,6 +494,7 @@ def backfill_folder(imap, db_conn, folder: str, insert_attachment, limit: int | 
         if not dry_run:
             write_progress(db_conn, folder, format_cursor(uidvalidity, batch[-1]),
                            b_inserted, total_estimate=msg_count)
+            _hb(folder, batch[-1], "RUNNING")
         logger.info(
             "%s: batch -> uid %d | processed %d/%d | inserted %d (+%d) | attachments %d",
             folder, batch[-1], processed, len(uids), inserted, b_inserted, att_count,
@@ -513,10 +535,16 @@ def main() -> int:
         with get_conn() as db_conn:
             _ensure_progress_table(db_conn)
             for folder in folders:
-                p, i, a = backfill_folder(
-                    imap, db_conn, folder, insert_attachment,
-                    args.limit, args.batch_size,
-                )
+                try:
+                    p, i, a = backfill_folder(
+                        imap, db_conn, folder, insert_attachment,
+                        args.limit, args.batch_size,
+                    )
+                except Exception:
+                    _hb(folder, None, "FAILED")
+                    raise
+                if args.limit is None:
+                    _hb(folder, None, "DONE")  # clean completion (not a dry-run)
                 totals = [t + x for t, x in zip(totals, (p, i, a))]
         logger.info(
             "DONE: processed=%d inserted=%d attachments=%d folders=%s%s",
