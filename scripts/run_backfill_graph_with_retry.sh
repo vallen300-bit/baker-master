@@ -6,9 +6,10 @@ set -u
 cd "$(dirname "$0")/.."
 export DATABASE_URL="$(op read 'op://Baker API Keys/DATABASE_URL/credential')"
 export BAKER_USE_GRAPH=true
-export M365_TENANT_ID="$(op read 'op://Baker API Keys/M365 \/ Microsoft Graph — Baker app registration/tenant_id')"
-export M365_CLIENT_ID="$(op read 'op://Baker API Keys/M365 \/ Microsoft Graph — Baker app registration/client_id')"
-export M365_CERT_THUMBPRINT="$(op read 'op://Baker API Keys/M365 \/ Microsoft Graph — Baker app registration/cert_thumbprint')"
+# Item name contains "/" — must reference by item ID (op:// cannot escape slashes).
+export M365_TENANT_ID="$(op read 'op://Baker API Keys/wyeoa7ymygvfp5vmuqnjd5xkry/tenant_id')"
+export M365_CLIENT_ID="$(op read 'op://Baker API Keys/wyeoa7ymygvfp5vmuqnjd5xkry/client_id')"
+export M365_CERT_THUMBPRINT="$(op read 'op://Baker API Keys/wyeoa7ymygvfp5vmuqnjd5xkry/cert_thumbprint')"
 KEYFILE="$(mktemp /tmp/graph-key.XXXXXX.pem)"
 chmod 600 "$KEYFILE"
 op document get "M365 Graph cert PRIVATE KEY (PEM, unlocked 2026-06-03)" --vault "Baker API Keys" --output "$KEYFILE" --force
