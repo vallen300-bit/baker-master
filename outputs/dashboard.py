@@ -9288,58 +9288,61 @@ _AI_HOTEL_CLASSIFY_PROMPT = (
 )
 
 
-def _ai_hotel_resize_for_db(image_bytes: bytes, content_type: str):
-    """Resize an uploaded image down to ~500KB base64 for Postgres storage.
+# base64 inflates ~33%, so a 370KB raw target yields ~493KB encoded — under the
+# brief's ~500KB DB cap. Hard ceiling, not advisory (codex G3 S2): an image that
+# cannot be decoded OR cannot be brought under this size is REJECTED, never
+# stored raw.
+_AI_HOTEL_DB_RAW_CAP = 370_000
 
-    Mirrors scan_image's progressive downscale, then applies a second, tighter
-    pass capping encoded size (~500KB) so DB rows stay small. Returns
-    (b64_text, media_type). Degrades gracefully — on any PIL failure the raw
-    bytes are encoded as-is.
+
+def _ai_hotel_resize_for_db(image_bytes: bytes, content_type: str):
+    """Validate + resize an uploaded image to <= ~500KB base64 for Postgres.
+
+    Always re-encodes to JPEG so the stored row is a known-good, size-capped
+    image. Raises ``ValueError`` when the bytes are not a decodable image or
+    cannot be brought under ``_AI_HOTEL_DB_RAW_CAP`` — the caller converts that
+    to HTTP 400 (codex G3 S2: never persist undecodable/oversize raw bytes).
+    Returns ``(b64_text, "image/jpeg")``.
     """
     import base64
     from io import BytesIO
+    from PIL import Image as PILImage
 
-    # First pass: scan_image's 3.5MB raw downscale (verbatim shape).
-    if len(image_bytes) > 3_500_000:
-        try:
-            from PIL import Image as PILImage
-            img = PILImage.open(BytesIO(image_bytes))
-            quality = 85
-            while len(image_bytes) > 3_500_000 and quality >= 30:
-                w, h = img.size
-                if w > 2048 or h > 2048:
-                    img.thumbnail((2048, 2048), PILImage.LANCZOS)
-                buf = BytesIO()
-                img.save(buf, format="JPEG", quality=quality, optimize=True)
-                image_bytes = buf.getvalue()
-                content_type = "image/jpeg"
-                quality -= 10
-        except Exception as resize_err:
-            logger.warning(f"ai_hotel image resize (pass 1) failed: {resize_err}")
+    # Decode/validate up front — reject anything PIL cannot open (verify() then
+    # a fresh open, since verify() leaves the handle unusable for further ops).
+    try:
+        PILImage.open(BytesIO(image_bytes)).verify()
+        img = PILImage.open(BytesIO(image_bytes))
+        img.load()
+        if img.mode not in ("RGB", "L"):
+            img = img.convert("RGB")
+    except Exception as decode_err:
+        raise ValueError(f"undecodable image: {decode_err}")
 
-    # Second pass: cap encoded base64 to ~500KB for DB. base64 inflates ~33%,
-    # so target ~370KB raw. Shrink max dimension until under, then settle.
-    if len(image_bytes) > 370_000:
-        try:
-            from PIL import Image as PILImage
-            img = PILImage.open(BytesIO(image_bytes))
-            max_dim = 1600
-            quality = 80
-            while len(image_bytes) > 370_000 and max_dim >= 480:
-                img.thumbnail((max_dim, max_dim), PILImage.LANCZOS)
-                buf = BytesIO()
-                img.save(buf, format="JPEG", quality=quality, optimize=True)
-                image_bytes = buf.getvalue()
-                content_type = "image/jpeg"
-                max_dim = int(max_dim * 0.8)
-                if quality > 55:
-                    quality -= 5
-            logger.info(f"ai_hotel image capped for DB: {len(image_bytes)} bytes")
-        except Exception as cap_err:
-            logger.warning(f"ai_hotel image resize (pass 2) failed: {cap_err}")
+    # Dimension-cap first (bounds the first encode), then progressively shrink
+    # until raw JPEG bytes are under the DB cap or we hit the dimension floor.
+    img.thumbnail((2048, 2048), PILImage.LANCZOS)
+    max_dim = 2048
+    quality = 85
+    while True:
+        buf = BytesIO()
+        img.save(buf, format="JPEG", quality=quality, optimize=True)
+        data = buf.getvalue()
+        if len(data) <= _AI_HOTEL_DB_RAW_CAP or max_dim < 480:
+            break
+        max_dim = int(max_dim * 0.8)
+        img.thumbnail((max_dim, max_dim), PILImage.LANCZOS)
+        if quality > 55:
+            quality -= 5
 
-    b64 = base64.standard_b64encode(image_bytes).decode("utf-8")
-    return b64, content_type
+    if len(data) > _AI_HOTEL_DB_RAW_CAP:
+        raise ValueError(
+            f"image still {len(data)} bytes after resize (cap {_AI_HOTEL_DB_RAW_CAP})"
+        )
+
+    logger.info(f"ai_hotel image capped for DB: {len(data)} bytes")
+    b64 = base64.standard_b64encode(data).decode("utf-8")
+    return b64, "image/jpeg"
 
 
 @app.post("/api/ai-hotel/capture", tags=["ai-hotel"], dependencies=[Depends(verify_api_key)])
@@ -9350,6 +9353,10 @@ async def ai_hotel_capture(image: UploadFile = File(None), note: str = Form(""))
     scan_image's image-handling + LLM pattern.
     """
     note = (note or "").strip()
+    # Enforce the note cap server-side — the HTML maxlength=4000 is advisory
+    # only and trivially bypassed (codex G3 S3).
+    if len(note) > 4000:
+        raise HTTPException(400, "Note too long (max 4000 characters).")
     has_image = image is not None and getattr(image, "filename", None)
 
     if not has_image and not note:
@@ -9373,7 +9380,11 @@ async def ai_hotel_capture(image: UploadFile = File(None), note: str = Form(""))
         if len(image_bytes) > 20 * 1024 * 1024:  # 20MB hard limit
             raise HTTPException(400, "Image too large (max 20MB).")
 
-        b64, image_media = _ai_hotel_resize_for_db(image_bytes, content_type)
+        try:
+            b64, image_media = _ai_hotel_resize_for_db(image_bytes, content_type)
+        except ValueError as ve:
+            logger.warning(f"ai_hotel_capture rejected image: {ve}")
+            raise HTTPException(400, "Unreadable image, or could not compress it under the size limit.")
 
     source = "photo" if b64 else "note"
     section_guess = "general"

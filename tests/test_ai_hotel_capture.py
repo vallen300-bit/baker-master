@@ -27,11 +27,15 @@ _skip_without_dashboard = pytest.mark.skipif(
     reason="outputs.dashboard unimportable (Python 3.9 PEP-604 chain — clears on 3.10+)",
 )
 
-# A tiny valid 1x1 JPEG so PIL/upload validation has real bytes to chew.
-_JPEG_1x1 = bytes.fromhex(
-    "ffd8ffe000104a46494600010100000100010000ffdb004300080606070605080707"
-    "07090908"  # truncated header is fine — content-type allowlist gates, not decode
-)
+def _make_jpeg(px: int = 2400) -> bytes:
+    """A real, high-entropy JPEG large enough to exercise the DB size cap."""
+    from io import BytesIO
+    from PIL import Image as PILImage
+    # effect_noise → incompressible grayscale; convert to RGB for a fat JPEG.
+    img = PILImage.effect_noise((px, px), 120).convert("RGB")
+    buf = BytesIO()
+    img.save(buf, format="JPEG", quality=95)
+    return buf.getvalue()
 
 
 # ─── Source-level checks (always run) ──────────────────────────────────────
@@ -243,6 +247,58 @@ def test_bad_image_type_rejected(monkeypatch):
         files={"image": ("note.txt", b"not an image", "text/plain")},
     )
     assert resp.status_code == 400
+
+
+@_skip_without_dashboard
+def test_undecodable_image_rejected_not_stored(monkeypatch):
+    """codex G3 S2: malformed bytes labelled image/jpeg must 400, never persist
+    raw bytes that bypass the size cap."""
+    client, stub = _client(monkeypatch)
+    junk = b"\xff" * 1_000_000  # 1MB of non-image bytes, claims to be a JPEG
+    resp = client.post(
+        "/api/ai-hotel/capture",
+        headers={"X-Baker-Key": "test-key"},
+        files={"image": ("booth.jpg", junk, "image/jpeg")},
+    )
+    assert resp.status_code == 400, resp.text
+    assert len(stub.rows) == 0  # nothing persisted
+
+
+@_skip_without_dashboard
+def test_valid_large_image_capped_under_500kb(monkeypatch):
+    """codex G3 S2: a real oversize photo is stored, but only after being
+    compressed under the ~500KB base64 DB cap."""
+    client, stub = _client(monkeypatch)
+    big = _make_jpeg(2400)
+    assert len(big) > 600_000, "test fixture should start well over the cap"
+    resp = client.post(
+        "/api/ai-hotel/capture",
+        headers={"X-Baker-Key": "test-key"},
+        files={"image": ("booth.jpg", big, "image/jpeg")},
+        data={"note": "booth shot"},
+    )
+    assert resp.status_code == 200, resp.text
+    assert len(stub.rows) == 1
+    row = stub.rows[0]
+    assert row["source"] == "photo"
+    assert row["image_media"] == "image/jpeg"
+    # base64 length stays under ~500KB (370KB raw * 4/3 ≈ 493K chars; allow slack).
+    assert row["image_b64"] is not None
+    assert len(row["image_b64"]) <= 520_000
+
+
+@_skip_without_dashboard
+def test_oversize_note_rejected(monkeypatch):
+    """codex G3 S3: note length is enforced server-side, not just by the HTML
+    maxlength attribute."""
+    client, stub = _client(monkeypatch)
+    resp = client.post(
+        "/api/ai-hotel/capture",
+        headers={"X-Baker-Key": "test-key"},
+        data={"note": "x" * 4001},
+    )
+    assert resp.status_code == 400, resp.text
+    assert len(stub.rows) == 0
 
 
 @_skip_without_dashboard
