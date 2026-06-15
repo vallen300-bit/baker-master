@@ -167,6 +167,33 @@ class _StoreBackDAO:
 
         return self._run(_q, default=False)
 
+    def get_alert_window(self, job_id):
+        def _q(conn):
+            with conn.cursor() as cur:
+                cur.execute(
+                    "SELECT last_alert_window_start FROM sentinel_cursor_seen "
+                    "WHERE job_id = %s LIMIT 1",
+                    (job_id,),
+                )
+                row = cur.fetchone()
+                return row[0] if row else None
+
+        return self._run(_q)
+
+    def release_alert_window(self, job_id, prior_window) -> bool:
+        """Reset last_alert_window_start to its prior value so a FAILED post does
+        not burn the dedupe window (codex G3 follow-up FIX 2)."""
+        def _q(conn):
+            with conn.cursor() as cur:
+                cur.execute(
+                    "UPDATE sentinel_cursor_seen SET last_alert_window_start = %s "
+                    "WHERE job_id = %s",
+                    (prior_window, job_id),
+                )
+            return True
+
+        return self._run(_q, default=False)
+
     def claim_alert_window(self, job_id, cursor, observed_at, window) -> bool:
         """Atomically claim the alert window. Returns True iff this caller won
         the claim (a row was inserted/updated). Concurrent runs with the same
@@ -201,12 +228,14 @@ class _StoreBackDAO:
             logger.warning("cursor_stall self-beat failed: %s", e)
 
 
-def _default_bus_post(recipient: str, body: str, topic: str) -> None:
+def _default_bus_post(recipient: str, body: str, topic: str) -> bool:
     """Post an alert to the Brisen Lab bus via scripts/bus_post.sh.
 
     Sender identity comes from the runtime's BAKER_ROLE + terminal key env (the
-    bus_post.sh credential precedence: literal env -> cache -> 1Password). Failure
-    is logged, never raised — a monitoring failure must not crash the scheduler.
+    bus_post.sh credential precedence: literal env -> cache -> 1Password). Returns
+    True on success, False on failure (logged, never raised — a monitoring failure
+    must not crash the scheduler). A False return triggers the caller to roll back
+    the alert-window claim so the alert retries next tick instead of going silent.
     """
     try:
         subprocess.run(
@@ -214,10 +243,12 @@ def _default_bus_post(recipient: str, body: str, topic: str) -> None:
             check=True, capture_output=True, text=True, timeout=40,
             cwd=str(_REPO_ROOT),
         )
+        return True
     except Exception as e:
         detail = getattr(e, "stderr", "") or ""
         logger.warning("cursor_stall bus-post to %s failed: %s %s",
                        recipient, e, detail)
+        return False
 
 
 def _resolve(entry: dict, dao) -> tuple | None:
@@ -344,6 +375,10 @@ def check_cursor_stalls(register=None, dao=None, now=None,
             if stale and not_advanced:
                 summary["alarmed"].append(job_id)
                 window = updated_at  # stable per stall episode -> dedupe key
+                # Capture the prior window BEFORE claiming so a failed post can
+                # be rolled back (FIX 2) — keep the atomic claim-before-post for
+                # race-safety, but never burn the dedupe window on a failed send.
+                prior_window = dao.get_alert_window(job_id)
                 if dao.claim_alert_window(job_id, cursor, now, window):
                     hours = (now - updated_at).total_seconds() / 3600.0
                     accountable = entry.get("accountable", "lead")
@@ -360,9 +395,23 @@ def check_cursor_stalls(register=None, dao=None, now=None,
                     topic = f"alert/job-stalled/{job_id}"
                     # post to accountable AND lead (deduped if identical)
                     targets = list(dict.fromkeys([accountable, "lead"]))
+                    post_ok = True
                     for t in targets:
-                        bus_post_fn(t, body, topic)
-                    summary["posted"].append(job_id)
+                        try:
+                            res = bus_post_fn(t, body, topic)
+                        except Exception as e:
+                            logger.warning("bus-post raised for %s->%s: %s",
+                                           job_id, t, e)
+                            res = False
+                        if res is False:
+                            post_ok = False
+                    if post_ok:
+                        summary["posted"].append(job_id)
+                    else:
+                        # Roll the claim back so this alert retries next tick
+                        # instead of going silent (fail-loud).
+                        dao.release_alert_window(job_id, prior_window)
+                        summary.setdefault("post_failed", []).append(job_id)
             else:
                 dao.record_observation(job_id, cursor, now)
 

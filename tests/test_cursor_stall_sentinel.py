@@ -57,6 +57,16 @@ class FakeDAO:
     def record_observation(self, job_id, cursor, observed_at):
         self.observations[job_id] = (str(cursor), observed_at)
 
+    def get_alert_window(self, job_id):
+        return self.windows.get(job_id)
+
+    def release_alert_window(self, job_id, prior_window) -> bool:
+        if prior_window is None:
+            self.windows.pop(job_id, None)
+        else:
+            self.windows[job_id] = prior_window
+        return True
+
     # --- ATOMIC claim (models the real ON CONFLICT WHERE DISTINCT RETURNING) ---
     def claim_alert_window(self, job_id, cursor, observed_at, window) -> bool:
         self.observations[job_id] = (str(cursor), observed_at)
@@ -294,6 +304,48 @@ def test_two_concurrent_runs_exactly_one_post():
     posts_for_job = [p for p in posts if "graph_inbox_backfill" in p["body"]
                      and p["recipient"] == "lead"]
     assert len(posts_for_job) == 1
+
+
+def test_post_failure_rolls_back_claim_and_retries_next_tick():
+    # FIX 2: a FAILED bus post must NOT burn the dedupe window — the claim is
+    # rolled back so the next tick re-posts (fail-loud, not silent).
+    now = datetime(2026, 6, 15, 12, 0, tzinfo=UTC)
+    dao = FakeDAO()
+    dao.sources["graph:Inbox"] = {
+        "cursor": 270, "total": 1000,
+        "updated_at": now - timedelta(hours=7),
+    }
+
+    def failing(recipient, body, topic):
+        raise RuntimeError("bus down")
+
+    s1 = css.check_cursor_stalls(register=[_entry()], dao=dao, now=now,
+                                 bus_post_fn=failing)
+    assert "graph_inbox_backfill" in s1["alarmed"]
+    assert s1["posted"] == []
+    assert "graph_inbox_backfill" in s1.get("post_failed", [])
+    # window rolled back -> not retained
+    assert dao.get_alert_window("graph_inbox_backfill") is None
+
+    # next tick with a working poster -> re-posts (would be silent without rollback)
+    posts, ok_fn = _posts_collector()
+    s2 = css.check_cursor_stalls(register=[_entry()], dao=dao,
+                                 now=now + timedelta(minutes=30), bus_post_fn=ok_fn)
+    assert "graph_inbox_backfill" in s2["posted"]
+    assert len(posts) >= 1
+
+
+def test_post_failure_via_false_return_also_rolls_back():
+    now = datetime(2026, 6, 15, 12, 0, tzinfo=UTC)
+    dao = FakeDAO()
+    dao.sources["graph:Inbox"] = {
+        "cursor": 270, "total": 1000,
+        "updated_at": now - timedelta(hours=7),
+    }
+    s1 = css.check_cursor_stalls(register=[_entry()], dao=dao, now=now,
+                                 bus_post_fn=lambda r, b, t: False)
+    assert s1["posted"] == []
+    assert dao.get_alert_window("graph_inbox_backfill") is None
 
 
 def test_claim_alert_window_contract():
