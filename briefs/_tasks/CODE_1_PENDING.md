@@ -1,63 +1,155 @@
 ---
 status: PENDING
-brief_id: BACKFILL_BLUEWIN_1
+brief_id: LONG_RUNNING_JOB_OWNERSHIP_1
 to: b1
 from: lead
 dispatched_by: lead
-dispatched_at: 2026-06-10
+dispatched_at: 2026-06-15
 reply_target: lead (bus)
-task_class: data backfill — standalone script + supervised run
-gate_plan: G1 pytest + dry-run 50 msgs -> G3 codex code gate -> lead merge -> RUN in batches -> b4 verify lane closes arc
-arc: EMAIL_HISTORY_BACKFILL (lane 2 of 5; depends on b3 EMAIL_ATTACHMENT_STORE_1 schema — build in parallel against the locked schema in b3's brief CODE_3_PENDING.md, rebase before merge)
+task_class: feature — ownership register + cursor-stall sentinel + heartbeat plumbing
+gate_plan: G1 pytest (+ synthetic-stall integration test) -> G3 codex code gate -> lead merge -> POST_DEPLOY_AC_VERDICT (sentinel fires on a real stalled job)
+arc: RELIABILITY_OWNERSHIP (anchor: Lesson #100 — 4-day silent graph-backfill stall)
+Harness-V2: in scope
 ---
 
-# BACKFILL_BLUEWIN_1 — historical IMAP backfill, dvallen@bluewin.ch (messages + attachments)
+# LONG_RUNNING_JOB_OWNERSHIP_1 — ownership register + cursor-stall sentinel
 
-## Context
+## Context (why)
 
-Director-ratified 2026-06-10: backfill full bluewin history (~33,686 INBOX msgs + sent folder) into email_messages + email_attachments. Live poller (triggers/bluewin_poller.py) already ingests forward from 2026-06-09; this lane fills everything BEFORE that. Credentials: BLUEWIN_USER/BLUEWIN_PASS — on Render env AND 1Password item "Bluewin IMAP" (vault "Baker API Keys", id ee5knghn2qax3rgxd237sjkn7a). imaps.bluewin.ch:993 verified working 2026-06-10.
+On 2026-06-11→06-15 the graph (brisengroup.com) email backfill silently stalled for 4 days at 27%
+complete. Nobody noticed because (a) no agent owned the job and (b) no alarm fired on a frozen
+progress cursor — forward live-polling kept ingesting today's mail, which MASKED the dead historical
+run. Root cause + rules captured in `tasks/lessons.md` Lesson #100. Prior-art survey:
+`baker-vault/wiki/research/2026-06-15-long-running-task-ownership-prior-art.md` (researcher, #3031).
 
-## Problem
+Industry answer is two pillars + one third trick, all confirmed in that survey:
+1. **Ownership** = no job runs without a named owner stored as machine-readable data pointing to a
+   stable **role slug** (never a person/session), Git-versioned + validated.
+2. **Liveness** = alert on the *absence* of an expected signal, not on an error.
+3. **Cursor-stall** = a job can be alive + health-green yet make zero forward progress. Alarm on
+   `cursor delta == 0 AND state == RUNNING` past a per-job threshold (Burrow STALLED rule). This is
+   exactly the alarm that was missing.
 
-Store holds 7 bluewin rows (since 2026-06-09 18:53Z). 33,679+ historical messages + all attachments missing.
+**Build the cheap version** — copy the schema + discipline, NOT the platforms (no Backstage / Temporal
+/ Airflow / Prometheus / Burrow). ~90% of the value at near-zero infra for a ~10-agent fleet.
 
-## Files Modified
+**Closest existing analog to MIRROR:** `triggers/scheduler_liveness_sentinel.py` — already a DB-driven
+liveness sentinel (reads `scheduler_executions`, alerts on stale `MAX(fired_at)`, has a cold-start
+grace anchor via `_MODULE_LOAD_TIME` / `reset_cold_start_anchor()`, registry built at startup). Your
+new sentinel is the SAME shape but keyed on a progress cursor instead of a fire-timestamp. Read it
+first and follow its conventions (logger name `sentinel.<x>`, grace handling, registry pattern).
 
-- scripts/backfill_bluewin.py — NEW standalone (DATABASE_URL + BLUEWIN_* from env)
-- tests/test_backfill_bluewin.py — NEW (parser + dedup unit tests; mock IMAP, no live creds in CI)
+**Verified facts (don't re-discover):**
+- Existing progress table `email_backfill_progress` columns: `source` (key), `cursor`, `done_count`,
+  `total_estimate`, `updated_at`. Use `done_count` as the cursor_col, `updated_at` as updated_col,
+  `source` as the key for the two backfill jobs.
+- Sentinels live in `triggers/`; scheduling happens in `triggers/embedded_scheduler.py` via
+  `add_job(...)` + `register_expected_job(...)`.
 
-## Design constraints (locked)
+## Director-ratified design decisions (do NOT re-litigate)
 
-- Reuse triggers/bluewin_poller.py parsing helpers via import — do NOT fork-copy logic; refactor-extract if needed (small PR-safe moves only).
-- Folders: INBOX + sent (detect Bluewin sent-folder name via LIST; include both).
-- NO LLM classification on historical rows: priority=NULL, skip _process_email_threads pipeline — direct INSERT to email_messages (dedup ON CONFLICT message_id) + insert_attachment() per part (b3's kbl/attachment_store.py).
-- Resumable: cursor = IMAP UID per folder in email_backfill_progress (source='bluewin:<folder>'); crash-safe re-run.
-- Batched: 200 msgs/batch, 0.5s sleep between batches (Swisscom throttle-safety), oldest -> newest.
-- Watermark table for the LIVE poller must NOT be touched — backfill is watermark-independent.
-
-## Run protocol (context economy — HARD)
-
-- Run as: nohup python3 scripts/backfill_bluewin.py >> /tmp/backfill_bluewin.log 2>&1 &
-- Progress: script writes one line per batch to the log + updates email_backfill_progress. Check with tail -3, NEVER cat the full log.
-- You do NOT babysit the run in-context: start it, verify first 2 batches sane (tail), bus a "run started" note to lead, end your session. b4's verify lane checks completion.
-
-## Verification
-
-- Dry-run mode (--limit 50) against live IMAP: 50 inserted, re-run inserts 0 (dedup proven). Literal output in ship report.
-- pytest literal green.
+- **Trigger criteria** — a job belongs in the register if it is ANY of: detached (runs in background
+  with no live session babysitting it), expected > ~6h wall-clock, OR genuinely spans 3+ sessions.
+  (NOT "any task over one session" — Director explicitly rejected that bar.)
+- **Owner = role slug** (`lead`, `researcher`, `hag-desk`, …), never a person or session.
+- **RACI per job:** Responsible (runs/babysits, e.g. the executing worker), Accountable (one neck —
+  default `lead`), Consulted (e.g. `aid` for infra/creds/Neon limits), Informed (`director`).
+- **Heartbeat transport:** DB table (`job_heartbeats`) for per-job cursor heartbeats; the sentinel
+  ALSO emits its own heartbeat so it is itself watchable (meta-watchdog). Bus is the alert channel.
+- **Threshold:** fixed per-job (column in the register), not learned. Default 6h if unset.
+- **Enforcement teeth:** FLAG now (bus alert), do not block dispatch yet. (Block-on-ownerless is a
+  later phase once the register is trusted.)
 
 ## Acceptance criteria
 
-- AC1: --limit 50 live dry-run: 50 rows + attachments in store; second run 0 new (dedup).
-- AC2: resumability proven: kill mid-batch, re-run continues from cursor (show progress rows).
-- AC3: live bluewin_poll watermark untouched (SELECT before/after identical).
-- AC4: full run STARTED in background with progress visible; not required finished to ship.
+**AC1 — ownership register (config-as-code).**
+- NEW `config/long_running_jobs.yml`: list of entries, each with `job_id`, `description`,
+  `cursor_source` (see AC3), `stall_threshold_hours` (int), `trigger_reason` (detached |
+  long-runtime | multi-session), and RACI fields `responsible` / `accountable` / `consulted` (list)
+  / `informed` (list) — all role slugs validated against the repo's known slug set (reuse whatever
+  slug list the codebase already exposes; if none, hardcode the current fleet slugs with a TODO).
+- Seed it with the two real jobs: `graph_email_backfill` and `bluewin_email_backfill`
+  (accountable: lead; responsible: b1; consulted: [aid]; informed: [director]; threshold 6;
+  cursor_source = progress_table on `email_backfill_progress`, keyed `graph:Inbox` / `bluewin:INBOX`).
+- NEW `scripts/validate_long_running_jobs.py`: exits non-zero if any entry is missing a required
+  field, names an unknown role slug, or has a non-positive threshold. Wire into the existing
+  `.githooks` pre-commit chain (follow the existing hook pattern; do NOT duplicate a hook runner).
 
-## Done rubric / done-state class
+**AC2 — heartbeat store.**
+- NEW migration `migrations/<date>_job_heartbeats.sql`: table `job_heartbeats(job_id TEXT PRIMARY
+  KEY, cursor_text TEXT, state TEXT NOT NULL DEFAULT 'RUNNING', updated_at TIMESTAMPTZ NOT NULL
+  DEFAULT now())`. `state` ∈ {RUNNING, DONE, FAILED, PAUSED}.
+- NEW `orchestrator/job_heartbeat.py` with `beat(job_id, cursor, state='RUNNING')` (UPSERT, ON
+  CONFLICT update cursor_text/state/updated_at) and `read(job_id)`. Every DB call in try/except WITH
+  `conn.rollback()` in except; fault-tolerant (a heartbeat failure must NEVER crash the caller's real
+  work — log + continue).
 
-Done = PR merged + G3 pass + dry-run ACs shown literal + full run started + "run-in-progress" done-state class on bus to lead. Arc-done (counts match) belongs to b4's verify lane, NOT you.
+**AC3 — cursor-stall sentinel.**
+- NEW `triggers/cursor_stall_sentinel.py`, mirroring `scheduler_liveness_sentinel.py`.
+- For each register entry, resolve current cursor + `updated_at` from its `cursor_source`. Support two
+  kinds: (a) `heartbeat` → read `job_heartbeats`; (b) `progress_table` → declared
+  `{table, cursor_col, updated_col, key_col, key_val}` (this covers the existing
+  `email_backfill_progress` rows with no backfill rewrite). All SELECTs LIMITed.
+- ALARM when: `state == RUNNING` AND `now - updated_at > stall_threshold_hours` AND the cursor value
+  has NOT advanced since the previous sentinel observation (persist last-seen cursor per job — a
+  small `sentinel_cursor_seen` table or reuse `job_heartbeats` — so you detect a true flat-line, not
+  just an old timestamp). Respect a cold-start grace window like the liveness sentinel.
+- On alarm: bus-post via the repo's bus helper (`scripts/bus_post.sh <slug> <body> <topic>`,
+  header `X-Terminal-Key`) to the job's `accountable` slug AND `lead`; topic
+  `alert/job-stalled/<job_id>`; body = job_id + cursor value + hours-since-progress + owner. De-dupe:
+  no more than one alert per job per threshold window.
+- Sentinel emits its OWN heartbeat (`beat('cursor_stall_sentinel', <run_ts>)`) each run.
 
-## Context-economy rules (HARD — no auto-compaction exists)
+**AC4 — schedule + meta-watchdog.**
+- Register the sentinel in `triggers/embedded_scheduler.py` at a 30-min interval, following the
+  existing `add_job(...)` + `register_expected_job(...)` pattern so the scheduler-liveness sentinel
+  watches the watcher (this IS the meta-watchdog — no new infra).
 
-- Read ONLY: triggers/bluewin_poller.py, b3's schema block in CODE_3_PENDING.md, kbl/attachment_store.py (when it lands), your own new files.
-- All run output to /tmp logs; tails only. If context >70%: commit, push, bus handoff, STOP.
+**AC5 — real coverage now.**
+- Make `scripts/backfill_graph.py` + `scripts/backfill_bluewin.py` call `job_heartbeat.beat(...)`
+  with their done_count cursor at each existing progress-commit point; set `state='DONE'` on clean
+  completion / `'FAILED'` on exhaustion. Surgical — one beat per existing commit point, no refactor.
+
+**AC6 — tests.**
+- `tests/test_cursor_stall_sentinel.py`: (a) flat-line cursor + RUNNING + past-threshold → alarm;
+  (b) advancing cursor → no alarm; (c) state=DONE → no alarm; (d) within grace → no alarm;
+  (e) re-alert de-dupe holds. Mock DB + bus (no live creds in CI).
+- `tests/test_validate_long_running_jobs.py`: ownerless / unknown-slug / bad-threshold entries fail.
+
+## Files to modify / create
+- NEW `config/long_running_jobs.yml`
+- NEW `scripts/validate_long_running_jobs.py`
+- NEW `migrations/<date>_job_heartbeats.sql`
+- NEW `orchestrator/job_heartbeat.py`
+- NEW `triggers/cursor_stall_sentinel.py`
+- NEW `tests/test_cursor_stall_sentinel.py`, `tests/test_validate_long_running_jobs.py`
+- EDIT `triggers/embedded_scheduler.py` (one add_job + register_expected_job)
+- EDIT `scripts/backfill_graph.py`, `scripts/backfill_bluewin.py` (heartbeat beats)
+- EDIT `.githooks` pre-commit chain (call the validator)
+
+## Do NOT touch
+- `triggers/scheduler_liveness_sentinel.py` (read-only reference — mirror, don't edit).
+- Backfill scripts' IMAP/Graph logic or cursor math — only add `beat()` calls.
+- Any other sentinel.
+
+## Out of scope (do NOT build)
+- Block-on-ownerless dispatch enforcement (later phase).
+- Any external SaaS (Healthchecks.io etc.), Prometheus, Temporal, Airflow, Backstage.
+- The `long-running-task-ownership` SKILL.md — **lead authors that** (SOP-codification rule). Don't
+  write it; leave the register + sentinel clean for the skill to reference.
+- Learned/adaptive thresholds.
+
+## Done rubric (answer these in the ship report, not "tests pass")
+1. A deliberately stalled job row (RUNNING, old updated_at, unchanged cursor) produces a bus alert to
+   its accountable owner within one sentinel interval — show the bus message id.
+2. `validate_long_running_jobs.py` rejects an ownerless entry — show the non-zero exit.
+3. `pytest tests/test_cursor_stall_sentinel.py tests/test_validate_long_running_jobs.py -v` literal
+   green output pasted.
+4. The real `graph_email_backfill` job appears in `job_heartbeats` with an advancing cursor.
+
+## Key constraints / lessons applied
+- Lesson #100: alert on cursor flat-line, not on errors; don't let aggregate health mask a dead job.
+- Fault-tolerant: every DB/bus call try/except + rollback; a monitoring failure must not crash work.
+- Tests-first: write the flat-line-alarm test, watch it fail, then build.
+- Render restart survival: register-driven, DB-backed — no in-memory state that dies on redeploy.
+- Reply on the bus to `lead` at each state change (dispatch ack, blocker, ship).
