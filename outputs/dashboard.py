@@ -9446,8 +9446,11 @@ async def ai_hotel_capture(image: UploadFile = File(None), note: str = Form(""))
     except HTTPException:
         raise
     except Exception as e:
+        # Log the raw exception server-side; return a generic message so we
+        # never leak DB internals to the client (security-review LOW nit,
+        # mirrors the read endpoint's fail-soft pattern).
         logger.error(f"POST /api/ai-hotel/capture insert failed: {e}")
-        raise HTTPException(500, f"Could not save capture: {e}")
+        raise HTTPException(500, "Could not save capture")
 
     logger.info(f"ai_hotel_capture saved: id={new_id} source={source} section={section_guess}")
     return {"id": new_id, "section_guess": section_guess,
