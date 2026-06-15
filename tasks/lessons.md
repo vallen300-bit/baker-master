@@ -934,3 +934,20 @@ complete (Inbox 34%, Sent 0.4%). Nobody noticed until the Director asked "is it 
 - META: a monitoring component is not "done" because it fires once. Verify its WRITE side too — the
   heartbeat the sentinel was supposed to populate was empty the whole time and only surfaced when a
   real backfill resume exercised the full path (#100 → POST_DEPLOY → this fix).
+
+## Lesson #102 — a liveness/monitoring write must not depend on a heavyweight subsystem (2026-06-16)
+- WHERE: HEARTBEAT_DECOUPLE_FROM_EMBEDDING_1 (follow-up to #101). After fixing the py3.9 import
+  (#101 FIX 1), `job_heartbeat.beat()` STILL no-op'd on local backfill runs: it reached the DB via
+  `SentinelStoreBack._get_global_instance()`, whose __init__ requires `VOYAGE_API_KEY` (the embedding
+  stack). Local runs have no Voyage key → `_store()` returned None → beat() no-op → job_heartbeats
+  stayed empty. The post-deploy log proved the layering: the error MOVED from "unsupported operand
+  type(s) for |" (#101) to "No API key provided (Voyage)" — fix one layer, see the next.
+- RULE: a heartbeat / liveness / health write is the thing that must work WHEN EVERYTHING ELSE IS
+  DEGRADED. Route it through the lightest possible dependency — a direct DB connection
+  (kbl.db.get_conn), never a full embedding/RAG store. Coupling monitoring to the heavy path means
+  monitoring dies exactly when you most need it. Fix: beat()/read() now take a direct conn; rejected
+  the alternative of injecting VOYAGE_API_KEY into the backfill wrappers (couples monitoring to
+  embeddings — wrong direction).
+- META (compounding with #101): peeling one silent-failure layer can expose another. Don't declare
+  the write side healthy until you SEE the row land in the real environment (local backfill, no
+  Voyage), not just until the import stops throwing.

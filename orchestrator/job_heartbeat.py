@@ -8,6 +8,13 @@ conn.rollback() and logs-then-returns on error.
 Used by:
   - scripts/backfill_graph.py + scripts/backfill_bluewin.py (real cursor beats)
   - triggers/cursor_stall_sentinel.py (its own meta-watchdog self-beat)
+
+Connection: a DIRECT db connection via kbl.db.get_conn — the same Voyage-free
+path the backfills use. It deliberately does NOT route through SentinelStoreBack:
+that singleton's __init__ requires VOYAGE_API_KEY (the embedding stack), so a
+local backfill with no Voyage key could not write a heartbeat at all — beat()
+silently no-op'd and job_heartbeats stayed empty (HEARTBEAT_DECOUPLE_FROM_EMBEDDING_1).
+A liveness heartbeat must never depend on an embedding key.
 """
 from __future__ import annotations
 
@@ -16,16 +23,6 @@ import logging
 logger = logging.getLogger("sentinel.job_heartbeat")
 
 _VALID_STATES = ("RUNNING", "DONE", "FAILED", "PAUSED")
-
-
-def _store():
-    """Return the global SentinelStoreBack instance, or None if unavailable."""
-    try:
-        from memory.store_back import SentinelStoreBack
-        return SentinelStoreBack._get_global_instance()
-    except Exception as e:  # pragma: no cover - import/singleton failure
-        logger.warning("job_heartbeat: store_back unreachable: %s", e)
-        return None
 
 
 def beat(job_id: str, cursor, state: str = "RUNNING") -> bool:
@@ -40,63 +37,50 @@ def beat(job_id: str, cursor, state: str = "RUNNING") -> bool:
                        state, job_id)
         state = "RUNNING"
 
-    store = _store()
-    if store is None:
-        return False
-    conn = None
     try:
-        conn = store._get_conn()
-        if not conn:
-            return False
-        with conn.cursor() as cur:
-            cur.execute(
-                """
-                INSERT INTO job_heartbeats (job_id, cursor_text, state, updated_at)
-                VALUES (%s, %s, %s, now())
-                ON CONFLICT (job_id) DO UPDATE SET
-                    cursor_text = EXCLUDED.cursor_text,
-                    state       = EXCLUDED.state,
-                    updated_at  = now()
-                """,
-                (job_id, None if cursor is None else str(cursor), state),
-            )
-        conn.commit()
+        from kbl.db import get_conn  # noqa: PLC0415 — Voyage-free pool, kbl pattern
+        with get_conn() as conn:
+            try:
+                with conn.cursor() as cur:
+                    cur.execute(
+                        """
+                        INSERT INTO job_heartbeats (job_id, cursor_text, state, updated_at)
+                        VALUES (%s, %s, %s, now())
+                        ON CONFLICT (job_id) DO UPDATE SET
+                            cursor_text = EXCLUDED.cursor_text,
+                            state       = EXCLUDED.state,
+                            updated_at  = now()
+                        """,
+                        (job_id, None if cursor is None else str(cursor), state),
+                    )
+                conn.commit()
+            except Exception:
+                conn.rollback()
+                raise
         return True
     except Exception as e:
         logger.warning("job_heartbeat.beat failed for %s: %s", job_id, e)
-        try:
-            if conn:
-                conn.rollback()
-        except Exception:
-            pass
         return False
-    finally:
-        if conn is not None:
-            try:
-                store._put_conn(conn)
-            except Exception:
-                pass
 
 
 def read(job_id: str) -> dict | None:
     """Return {job_id, cursor_text, state, updated_at} or None (never raises)."""
-    store = _store()
-    if store is None:
-        return None
-    conn = None
     try:
-        conn = store._get_conn()
-        if not conn:
-            return None
-        with conn.cursor() as cur:
-            cur.execute("SET LOCAL statement_timeout = '10s'")
-            cur.execute(
-                "SELECT job_id, cursor_text, state, updated_at "
-                "FROM job_heartbeats WHERE job_id = %s LIMIT 1",
-                (job_id,),
-            )
-            row = cur.fetchone()
-        conn.commit()
+        from kbl.db import get_conn  # noqa: PLC0415 — Voyage-free pool, kbl pattern
+        with get_conn() as conn:
+            try:
+                with conn.cursor() as cur:
+                    cur.execute("SET LOCAL statement_timeout = '10s'")
+                    cur.execute(
+                        "SELECT job_id, cursor_text, state, updated_at "
+                        "FROM job_heartbeats WHERE job_id = %s LIMIT 1",
+                        (job_id,),
+                    )
+                    row = cur.fetchone()
+                conn.commit()
+            except Exception:
+                conn.rollback()
+                raise
         if not row:
             return None
         return {
@@ -107,15 +91,4 @@ def read(job_id: str) -> dict | None:
         }
     except Exception as e:
         logger.warning("job_heartbeat.read failed for %s: %s", job_id, e)
-        try:
-            if conn:
-                conn.rollback()
-        except Exception:
-            pass
         return None
-    finally:
-        if conn is not None:
-            try:
-                store._put_conn(conn)
-            except Exception:
-                pass
