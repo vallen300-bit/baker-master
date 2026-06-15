@@ -5,6 +5,10 @@ Enforces: exact 7 H2 set in canonical order (with templated 'What happened with 
 rows, split-table with total, delta-conflict block), and total word range. Raises
 RechargeReportValidationError on any violation. Blocks save.
 """
+# PEP 563: lazy annotations so PEP 604 unions (X | None) in signatures don't
+# evaluate at import time on Python 3.9 (PY39_UNION_IMPORT_SWEEP_1).
+from __future__ import annotations
+
 import re
 from dataclasses import dataclass, field
 from html.parser import HTMLParser

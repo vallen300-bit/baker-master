@@ -5,6 +5,9 @@ Reads from PostgreSQL via existing store_back + retriever.
 Serves static frontend from outputs/static/.
 Includes /api/scan SSE endpoint for interactive Baker chat.
 """
+# PEP 563: lazy annotations so PEP 604 unions don't eval at import on py3.9 (PY39_UNION_IMPORT_SWEEP_1).
+from __future__ import annotations
+
 import asyncio
 import decimal as _decimal
 import hashlib

@@ -347,6 +347,10 @@ def backfill_folder(conn, client: GraphClient, folder: str,
 
     if cursor == DONE_SENTINEL:
         logger.info("[%s] already complete (%d done) — skipping", folder, done)
+        # Self-heal the heartbeat for an already-complete folder so it reflects
+        # DONE without a manual reconciliation beat (mirrors bluewin, which emits
+        # _hb DONE in main() even on a 0-to-process run). PY39_UNION_IMPORT_SWEEP_1.
+        _hb(folder, done, "DONE")
         return {"inserted": 0, "skipped": 0, "attachments": 0}
 
     if cursor:

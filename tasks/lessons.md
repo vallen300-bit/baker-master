@@ -951,3 +951,37 @@ complete (Inbox 34%, Sent 0.4%). Nobody noticed until the Director asked "is it 
 - META (compounding with #101): peeling one silent-failure layer can expose another. Don't declare
   the write side healthy until you SEE the row land in the real environment (local backfill, no
   Voyage), not just until the import stops throwing.
+
+## Lesson #103 — sweep the whole class, and expect layered discovery (2026-06-16)
+- WHERE: PY39_UNION_IMPORT_SWEEP_1 (closes the long-running-job-ownership hardening arc, #100-#102).
+  After store_back (#101) and job_heartbeat (#102), swept every module with PEP 604 unions lacking
+  `from __future__ import annotations`. Fixed 8 files: claimsmax/recharge_report/validator.py,
+  tools/ingest/extractors.py, triggers/{exchange_poller,plaud_trigger,todoist_client,youtube_ingest}.py,
+  outputs/dashboard.py, scripts/recharge_report_cli.py.
+- LAYERED DISCOVERY: the first import-probe found 6 roots; outputs/dashboard.py + recharge_report_cli.py
+  reported as transitive failures (they died on a dep first). After fixing the 6, those two surfaced
+  their OWN module-level unions. RULE: when remediating an import-class bug, re-probe AFTER each fix
+  round — a module that fails on a dependency hides its own copy of the same bug until the dep is fixed.
+- DISCOVERY GOTCHA: macOS has no `timeout` command — a bash probe loop using `timeout` silently
+  errored every iteration and reported 0 hits. Use a Python subprocess harness with `timeout=` instead.
+- VERIFY BY THE REAL SIGNAL: confirmed done when `pytest --collect-only` on py3.9 has ZERO union
+  collection errors (3613 tests collect). The 4 remaining collection errors are a SEPARATE cause
+  (`ModuleNotFoundError: No module named 'mcp'` — local env missing the package; CI installs it) —
+  do NOT chase them under this arc.
+- Also folded the graph DONE-skip self-heal (backfill_graph.py emits _hb DONE before the skip-return)
+  so a completed graph folder heals its own heartbeat instead of needing a manual reconciliation beat.
+
+## Lesson #104 — a ModuleNotFoundError can MASK a downstream union bug; stub the dep and keep probing (2026-06-16)
+- CORRECTS Lesson #103's claim that the 4 `ModuleNotFoundError: No module named 'mcp'` collection
+  errors were "separate / out of scope". codex G3 on PR #369 caught that one of them masked a REAL
+  residual: baker_mcp/baker_mcp_server.py had the same py3.9 PEP-604 union bug (lines 115 dict|None,
+  167 int|None, 190-193 audit_id/payload/error : *|None) with no future-import. A plain import dies on
+  the missing `mcp` package BEFORE reaching line 115, so the union never gets a chance to throw — the
+  missing dep HID the bug. CI/3.12 also hides it (unions are legal there).
+- RULE: when sweeping an import-class bug, a ModuleNotFoundError is not a stopping point — STUB the
+  missing dependency into sys.modules (a fake package whose attributes return a permissive _Any) and
+  re-import, so the module's own body actually executes and any downstream bug surfaces. Only write a
+  module off once it imports cleanly WITH the dep stubbed. I dismissed it instead; codex had to.
+- Fix: added the future-import to baker_mcp_server.py + a STUBBED-mcp subprocess test case in
+  tests/test_py39_union_imports.py so this layer is exercised, not skipped. After stubbing mcp and
+  re-probing every source module, baker_mcp_server was the ONLY residual — sweep now actually complete.

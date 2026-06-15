@@ -119,6 +119,20 @@ class TestPaging:
         gg.assert_not_called()
         assert stats == {"inserted": 0, "skipped": 0, "attachments": 0}
 
+    def test_done_sentinel_self_heals_heartbeat(self):
+        # PY39_UNION_IMPORT_SWEEP_1: a folder already at DONE_SENTINEL must still
+        # emit a DONE heartbeat on skip, so an already-complete folder self-heals
+        # job_heartbeats without a manual reconciliation beat (mirrors bluewin).
+        client = _fake_client()
+        conn = _fake_conn()
+        with patch.object(bg, "_graph_get") as gg, \
+             patch.object(bg, "_hb") as hb, \
+             patch.object(bg, "_get_progress", return_value=(bg.DONE_SENTINEL, 500)):
+            stats = bg.backfill_folder(conn, client, "Inbox")
+        gg.assert_not_called()
+        hb.assert_called_once_with("Inbox", 500, "DONE")
+        assert stats == {"inserted": 0, "skipped": 0, "attachments": 0}
+
     def test_limit_stops_with_cursor_saved(self):
         """--limit halts after the page that crosses it; cursor stays resumable."""
         client = _fake_client()

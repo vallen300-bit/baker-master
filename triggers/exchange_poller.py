@@ -4,6 +4,10 @@ Temporary measure until Microsoft 365 migration.
 Fetches new emails since last watermark, formats them identically to
 Gmail poller output, then feeds into the same processing pipeline.
 """
+# PEP 563: lazy annotations so PEP 604 unions (X | None) in signatures don't
+# evaluate at import time on Python 3.9 (PY39_UNION_IMPORT_SWEEP_1).
+from __future__ import annotations
+
 
 import imaplib
 import email
