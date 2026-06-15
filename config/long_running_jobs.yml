@@ -1,0 +1,99 @@
+# LONG_RUNNING_JOB_OWNERSHIP_1 — ownership register (config-as-code).
+#
+# A job belongs here if it is ANY of: detached (runs in background with no live
+# session babysitting it), expected > ~6h wall-clock, OR genuinely spans 3+
+# sessions. (Director-ratified trigger criteria — NOT "any task over one
+# session".)
+#
+# Every job names a STABLE ROLE SLUG owner (never a person/session). Slugs are
+# validated against orchestrator.agent_identity_data.VALID_BUS_SLUGS by
+# scripts/validate_long_running_jobs.py (wired into .githooks/pre-commit).
+#
+# RACI:
+#   responsible — runs/babysits the job (the executing worker)
+#   accountable — one neck; default `lead`
+#   consulted   — list; e.g. `aid` for infra/creds/Neon limits
+#   informed    — list; e.g. `director`
+#
+# cursor_source kinds:
+#   progress_table — read {table, cursor_col, updated_col, key_col, key_val,
+#                    total_col}. RUNNING <=> cursor_col < total_col; DONE when
+#                    cursor_col >= total_col (that table has no state column).
+#   heartbeat      — read orchestrator.job_heartbeat (state column authoritative).
+#
+# stall_threshold_hours — fixed per job (default 6 if unset). Alarm when RUNNING
+# AND now-updated_at > threshold AND cursor has not advanced.
+#
+# Seeded ONE entry PER PROGRESS PARTITION (a stalled SentItems can hide while
+# Inbox advances — deputy-codex pre-flight S1 #3035). Live partitions verified
+# against email_backfill_progress + backfill_graph.py:327,383 +
+# backfill_bluewin.py:68.
+
+jobs:
+  - job_id: graph_inbox_backfill
+    description: "M365 Graph historical mail backfill — Inbox folder (brisengroup.com)"
+    trigger_reason: detached
+    stall_threshold_hours: 6
+    responsible: b1
+    accountable: lead
+    consulted: [aid]
+    informed: [director]
+    cursor_source:
+      kind: progress_table
+      table: email_backfill_progress
+      cursor_col: done_count
+      updated_col: updated_at
+      key_col: source
+      key_val: "graph:Inbox"
+      total_col: total_estimate
+
+  - job_id: graph_sentitems_backfill
+    description: "M365 Graph historical mail backfill — SentItems folder (brisengroup.com)"
+    trigger_reason: detached
+    stall_threshold_hours: 6
+    responsible: b1
+    accountable: lead
+    consulted: [aid]
+    informed: [director]
+    cursor_source:
+      kind: progress_table
+      table: email_backfill_progress
+      cursor_col: done_count
+      updated_col: updated_at
+      key_col: source
+      key_val: "graph:SentItems"
+      total_col: total_estimate
+
+  - job_id: bluewin_inbox_backfill
+    description: "Bluewin IMAP historical mail backfill — INBOX (dvallen@bluewin.ch)"
+    trigger_reason: detached
+    stall_threshold_hours: 6
+    responsible: b1
+    accountable: lead
+    consulted: [aid]
+    informed: [director]
+    cursor_source:
+      kind: progress_table
+      table: email_backfill_progress
+      cursor_col: done_count
+      updated_col: updated_at
+      key_col: source
+      key_val: "bluewin:INBOX"
+      total_col: total_estimate
+
+  - job_id: bluewin_sentitems_backfill
+    description: "Bluewin IMAP historical mail backfill — Sent Items (dvallen@bluewin.ch)"
+    trigger_reason: detached
+    stall_threshold_hours: 6
+    responsible: b1
+    accountable: lead
+    consulted: [aid]
+    informed: [director]
+    cursor_source:
+      kind: progress_table
+      table: email_backfill_progress
+      cursor_col: done_count
+      updated_col: updated_at
+      key_col: source
+      key_val: "bluewin:Sent Items"
+      total_col: total_estimate

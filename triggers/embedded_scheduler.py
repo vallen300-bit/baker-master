@@ -671,6 +671,22 @@ def _register_jobs(scheduler: BackgroundScheduler):
     register_expected_job("scheduler_job_liveness", 10 * 60)
     logger.info("Registered: scheduler_job_liveness (every 10 minutes)")
 
+    # LONG_RUNNING_JOB_OWNERSHIP_1: cursor-stall sentinel. Reads the ownership
+    # register (config/long_running_jobs.yml) and alarms on any RUNNING job whose
+    # progress cursor has flat-lined past its threshold (the alarm missing during
+    # the 4-day silent graph-backfill stall — Lesson #100). register_expected_job
+    # below makes scheduler_liveness watch THIS watcher (the meta-watchdog — no
+    # new infra).
+    from triggers.cursor_stall_sentinel import check_cursor_stalls
+    scheduler.add_job(
+        check_cursor_stalls,
+        IntervalTrigger(minutes=30),
+        id="cursor_stall_sentinel", name="Long-running job cursor-stall check",
+        coalesce=True, max_instances=1, replace_existing=True,
+    )
+    register_expected_job("cursor_stall_sentinel", 30 * 60)
+    logger.info("Registered: cursor_stall_sentinel (every 30 minutes)")
+
     # F4: Financial signal detector — every 6 hours (Session 27)
     from orchestrator.financial_detector import run_financial_detection
     scheduler.add_job(
@@ -1768,6 +1784,17 @@ def start_scheduler():
     try:
         from triggers.scheduler_liveness_sentinel import reset_cold_start_anchor
         reset_cold_start_anchor()
+    except Exception:
+        pass
+
+    # LONG_RUNNING_JOB_OWNERSHIP_1: mirror the cold-start anchor reset for the
+    # cursor-stall sentinel so an in-process restart_scheduler() re-applies its
+    # 15-min grace window (deputy-codex S2 #3035).
+    try:
+        from triggers.cursor_stall_sentinel import (
+            reset_cold_start_anchor as _reset_cursor_stall_anchor,
+        )
+        _reset_cursor_stall_anchor()
     except Exception:
         pass
 
