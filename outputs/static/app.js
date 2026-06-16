@@ -814,6 +814,12 @@ function switchTab(tabName) {
     else if (tabName === 'kbl-pipeline') loadKBLPipelineTab();
 }
 
+function _activateOnKeyboard(e) {
+    if (e.key !== 'Enter' && e.key !== ' ') return;
+    e.preventDefault();
+    e.currentTarget.click();
+}
+
 // ═══ WEEKLY PRIORITIES WIDGET ═══
 
 function _renderPrioritiesWidget(priorities) {
@@ -1711,6 +1717,9 @@ function _renderMatterSection(containerId, matters, countId) {
         item.className = 'nav-item';
         item.dataset.tab = 'matters';
         item.dataset.matter = slug;
+        item.setAttribute('role', 'button');
+        item.tabIndex = 0;
+        item.addEventListener('keydown', _activateOnKeyboard);
         if (m.triaga_ref) item.dataset.triagaRef = m.triaga_ref;
 
         var dot = document.createElement('span');
@@ -1745,15 +1754,18 @@ function _initSectionToggle(headerId, listId, key, defaultExpanded) {
     var stored = localStorage.getItem('sidebar_' + key);
     var expanded = stored !== null ? stored === 'true' : defaultExpanded;
     list.style.display = expanded ? '' : 'none';
+    header.setAttribute('aria-expanded', String(expanded));
     var arrow = header.querySelector('.nav-section-arrow');
     if (arrow) arrow.innerHTML = expanded ? '&#9662;' : '&#9656;';
     // Already bound? Skip
     if (header.dataset.bound) return;
     header.dataset.bound = '1';
+    header.addEventListener('keydown', _activateOnKeyboard);
     header.addEventListener('click', function() {
         var isOpen = list.style.display !== 'none';
         list.style.display = isOpen ? 'none' : '';
         if (arrow) arrow.innerHTML = isOpen ? '&#9656;' : '&#9662;';
+        header.setAttribute('aria-expanded', String(!isOpen));
         localStorage.setItem('sidebar_' + key, !isOpen);
     });
 }
@@ -1776,6 +1788,9 @@ async function loadMediaSidebar() {
             var item = document.createElement('div');
             item.className = 'nav-item';
             item.dataset.category = cat.name;
+            item.setAttribute('role', 'button');
+            item.tabIndex = 0;
+            item.addEventListener('keydown', _activateOnKeyboard);
             var lbl = document.createElement('span');
             lbl.className = 'nav-label';
             lbl.textContent = cat.name;
@@ -1811,6 +1826,9 @@ async function loadPeopleSidebar() {
             item.className = 'nav-item';
             item.dataset.tab = 'person-detail';
             item.dataset.person = p.name;
+            item.setAttribute('role', 'button');
+            item.tabIndex = 0;
+            item.addEventListener('keydown', _activateOnKeyboard);
             var dot = document.createElement('span');
             dot.className = 'nav-dot ' + (p.overdue > 0 ? 'red' : 'slate');
             item.appendChild(dot);
@@ -1829,8 +1847,10 @@ async function loadPeopleSidebar() {
         // PEOPLE-SECTION-1: Auto-expand if there are people to show
         if (totalCount > 0) {
             var list = document.getElementById('peopleSubList');
+            var header = document.getElementById('navPeopleHeader');
             var arrow = document.querySelector('#navPeopleHeader .nav-section-arrow');
             if (list) list.style.display = '';
+            if (header) header.setAttribute('aria-expanded', 'true');
             if (arrow) arrow.innerHTML = '&#9662;';
             localStorage.setItem('sidebar_people', 'true');
         }
@@ -7409,6 +7429,9 @@ async function init() {
 
     // Sidebar navigation (static items)
     document.querySelectorAll('.nav-item[data-tab]').forEach(function(item) {
+        if (!item.hasAttribute('role') && item.tagName !== 'A') item.setAttribute('role', 'button');
+        if (item.tagName !== 'A') item.tabIndex = 0;
+        item.addEventListener('keydown', _activateOnKeyboard);
         item.addEventListener('click', function() {
             // If clicking a matters sub-item, set the matter slug
             if (item.dataset.matter) {
@@ -8152,6 +8175,9 @@ async function loadIdeasSidebar() {
             var item = document.createElement('div');
             item.className = 'nav-item';
             item.dataset.tab = 'ideas';
+            item.setAttribute('role', 'button');
+            item.tabIndex = 0;
+            item.addEventListener('keydown', _activateOnKeyboard);
             var lbl = document.createElement('span');
             lbl.className = 'nav-label';
             lbl.textContent = idea.content.substring(0, 40) + (idea.content.length > 40 ? '...' : '');
@@ -8163,8 +8189,10 @@ async function loadIdeasSidebar() {
         _initSectionToggle('navIdeasHeader', 'ideasSubList', 'ideas', false);
         if (ideas.length > 0) {
             var list = document.getElementById('ideasSubList');
+            var header = document.getElementById('navIdeasHeader');
             var arrow = document.querySelector('#navIdeasHeader .nav-section-arrow');
             if (list) list.style.display = '';
+            if (header) header.setAttribute('aria-expanded', 'true');
             if (arrow) arrow.innerHTML = '&#9662;';
             localStorage.setItem('sidebar_ideas', 'true');
         }

@@ -1,84 +1,55 @@
-# Baker CEO Cockpit — Design System v5 (Luxury Concierge)
+# Baker CEO Cockpit - Design System V6
 
-## Brand Essence
-Private wealth management meets AI chief of staff.
-Think Amex Centurion lounge meets Bloomberg terminal.
-Sophisticated, understated, premium.
+Inherits from shared design source:
 
-## Color Palette
+`/Users/dimitry/baker-vault/wiki/design/design-v2.md`
 
-### Core Surfaces
-| Token | Hex | Usage |
-|-------|-----|-------|
-| `--bg` | `#0D0F14` | Page background |
-| `--bg-subtle` | `#141820` | Sidebar, input backgrounds |
-| `--bg2` | `#1A1F28` | Card surfaces, elevated elements |
-| `--card` | `#1A1F28` | Cards, panels |
-| `--border` | `rgba(201,169,110,0.12)` | All borders |
+Selected pattern:
 
-### Text Hierarchy
-| Token | Hex | Usage |
-|-------|-----|-------|
-| `--text` | `#E8E4DC` | Primary text (cream) |
-| `--text2` | `#9B958B` | Secondary text |
-| `--text3` | `#6B6560` | Tertiary/muted text |
+`Pattern C - Baker Operational Dashboard`
 
-### Accent — Champagne Gold
-| Token | Hex | Usage |
-|-------|-----|-------|
-| `--blue` | `#C9A96E` | Primary accent (gold) |
-| `--blue-hover` | `#B89A5C` | Hover state |
-| `--blue-bg` | `rgba(201,169,110,0.10)` | Gold background tint |
+## Purpose
 
-### Semantic Colors (Muted)
-| Token | Hex | Usage |
-|-------|-----|-------|
-| `--red` | `#C75050` | Critical, errors |
-| `--amber` | `#D4A535` | Warnings, deadlines |
-| `--green` | `#5B9A6F` | Success, confirmed |
+Baker is a live operational cockpit for the Director. It must make current state, critical work, promised work, meetings, freshness, and next action easy to scan without turning the interface into a decorative cockpit.
 
-## Typography
+## Direction
 
-| Role | Font | Weight | Size |
-|------|------|--------|------|
-| Logo | EB Garamond | 700 | 18px, uppercase, 2px tracking |
-| Greeting/Headings | EB Garamond | 700 | 30px |
-| Section labels | DM Sans mono | 600 | 11px uppercase |
-| Body text | DM Sans | 400 | 13-14px |
-| Monospace | SF Mono / Fira Code | — | 10-11px |
+- Operational, calm, precise, and trustworthy.
+- Dark neutral base remains primary for now.
+- Blue is the compact metadata/action accent.
+- Red, amber, and green are semantic only.
+- Cards use Brisen Lab-style tactile depth.
+- Card action rows stay short; secondary actions move behind `...`.
 
-## Component Patterns
+## Primary Tokens
 
-### Cards
-- Background: `var(--card)` (#1A1F28)
-- Border: `1px solid var(--border)`
-- Border-radius: 14px
-- Shadow: `0 2px 8px rgba(0,0,0,0.15)`
+| Token | Value | Role |
+|---|---|---|
+| `--bg` | `#0D1117` | Page field |
+| `--bg-subtle` | `#10151C` | Sidebar and anchored chrome |
+| `--bg2` | `#1B222D` | Inputs and raised sub-surfaces |
+| `--card` | `#171D26` | Cards and panels |
+| `--border` | `rgba(140,154,170,0.24)` | Hairline grouping |
+| `--text` | `#EEF2F6` | Primary text |
+| `--text2` | `#B9C0C8` | Supporting text |
+| `--text3` | `#8B949E` | Metadata, still accessible |
+| `--blue` | `#58A6FF` | Focus, metadata, primary affordance |
+| `--amber` | `#D29922` | Warning/deadline |
+| `--green` | `#2BD964` | Healthy/complete |
+| `--red` | `#F85149` | Critical/error |
 
-### Grid Headers (Landing 2x2)
-- Travel: `rgba(201,169,110,0.08)` — gold tint
-- Critical: `rgba(199,80,80,0.08)` — red tint
-- Promised: `rgba(212,165,53,0.08)` — amber tint
-- Meetings: `rgba(91,154,111,0.08)` — green tint
+## Component Rules
 
-### Buttons
-- Primary: gold bg (`var(--blue)`), white text
-- Secondary: ghost border, gold text on hover
-- Pills: `border-radius: 22px`
+- Navigation controls are buttons or links with visible focus.
+- Main content exposes a `main` landmark.
+- Desktop cards use inset top highlight, bottom lip, and cast shadow.
+- Mobile home is the same cockpit information architecture in one column: briefing status, Travel, Critical, Promised To Do, Meetings, then Cortex/system status.
+- Mobile action cards show a top-right `...` menu; only the primary action remains visible.
+- Mobile must allow zoom and keep muted text above accessibility contrast thresholds.
+- Empty, loading, error, stale, success, and disabled states must be visible as text, not color only.
 
-### Chat Bubbles
-- User: `rgba(201,169,110,0.15)` with gold border
-- Baker: `var(--bg-subtle)` with standard border
+## Non-Goals
 
-### Sidebar
-- Background: `var(--bg-subtle)` (#141820)
-- Active item: gold bg tint + gold text + left border
-- Hover: subtle gold tint
-
-## Design Principles
-1. Never bright or saturated — always muted, sophisticated
-2. Gold accent only on interactive elements and highlights
-3. Serif (EB Garamond) for personality, sans (DM Sans) for readability
-4. Generous whitespace — let elements breathe
-5. Thin borders preferred over heavy shadows
-6. Premium restraint — less is more
+- Do not rewrite Baker API behavior in a design pass.
+- Do not make Baker look like AIology or AI Hotel.
+- Do not reintroduce luxury/champagne as the main identity.

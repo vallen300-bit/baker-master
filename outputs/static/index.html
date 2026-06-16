@@ -3,6 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="description" content="Baker CEO Cockpit live operational dashboard.">
     <title>Baker Cockpit</title>
     <!-- PWA-DESKTOP-1: Installable as desktop app -->
     <link rel="manifest" href="/static/manifest.json">
@@ -19,7 +20,8 @@
 
 <!-- Mobile fallback -->
 <div class="mobile-fallback">
-    Baker Cockpit is designed for laptop and tablet. Open on a larger screen for the full experience.
+    <div>Baker Cockpit is designed for laptop and tablet.</div>
+    <a class="mobile-fallback-link" href="/mobile">Open Baker Mobile</a>
 </div>
 
 <!-- SCHEDULER-WATCHDOG-1: Red banner when scheduler is dead -->
@@ -32,13 +34,13 @@
 
 <!-- SIDEBAR -->
 <div class="sidebar">
-    <div class="sidebar-logo" onclick="switchTab('morning-brief')" style="cursor:pointer;">BAKER <img src="/static/baker-face-green.svg" alt="Baker" class="sidebar-logo-icon" /></div>
+    <button class="sidebar-logo" type="button" onclick="switchTab('morning-brief')">BAKER <img src="/static/baker-face-green.svg" alt="Baker" class="sidebar-logo-icon" /></button>
     <!-- Cockpit fallback banner: shown when /matters-summary reports priorities-source unavailable (legacy_no_priorities) or schema-violation (error). Hidden by default; toggled by app.js loadMattersSummary. -->
     <div id="cockpit-fallback-banner" style="display:none; margin:6px 10px 8px; padding:6px 9px; font-size:11px; line-height:1.35; color:#8a6d3b; background:#fcf6e0; border:1px solid #f0e1a8; border-radius:3px;"></div>
-    <nav class="sidebar-nav">
+    <nav class="sidebar-nav" aria-label="Baker sections">
 
         <!-- SIDEBAR-RESTRUCTURE-1: Projects section (expandable) -->
-        <div class="nav-section-header" id="navProjectsHeader" data-section="projects">
+        <div class="nav-section-header" id="navProjectsHeader" data-section="projects" role="button" tabindex="0" aria-controls="projectsSubList" aria-expanded="true">
             <span class="nav-section-arrow">&#9662;</span>
             <span class="nav-section-label">Projects</span>
             <span class="nav-count" id="projectsCount"></span>
@@ -46,7 +48,7 @@
         <div class="nav-sub" id="projectsSubList"></div>
 
         <!-- SIDEBAR-RESTRUCTURE-1: Operations section (expandable) -->
-        <div class="nav-section-header" id="navOpsHeader" data-section="operations">
+        <div class="nav-section-header" id="navOpsHeader" data-section="operations" role="button" tabindex="0" aria-controls="operationsSubList" aria-expanded="false">
             <span class="nav-section-arrow">&#9656;</span>
             <span class="nav-section-label">Operations</span>
             <span class="nav-count" id="operationsCount"></span>
@@ -54,7 +56,7 @@
         <div class="nav-sub" id="operationsSubList" style="display:none;"></div>
 
         <!-- SIDEBAR-HIERARCHY-1: Inbox section (expandable, like Projects/Operations) -->
-        <div class="nav-section-header" id="navInboxHeader" data-section="inbox">
+        <div class="nav-section-header" id="navInboxHeader" data-section="inbox" role="button" tabindex="0" aria-controls="inboxSubList" aria-expanded="false">
             <span class="nav-section-arrow">&#9656;</span>
             <span class="nav-section-label">Inbox</span>
             <span class="nav-count" id="inboxCount"></span>
@@ -62,7 +64,7 @@
         <div class="nav-sub" id="inboxSubList" style="display:none;"></div>
 
         <!-- PEOPLE-SECTION-1: People section (expandable) -->
-        <div class="nav-section-header" id="navPeopleHeader" data-section="people">
+        <div class="nav-section-header" id="navPeopleHeader" data-section="people" role="button" tabindex="0" aria-controls="peopleSubList" aria-expanded="false">
             <span class="nav-section-arrow">&#9656;</span>
             <span class="nav-section-label">People</span>
             <span class="nav-count" id="peopleCount"></span>
@@ -70,7 +72,7 @@
         <div class="nav-sub" id="peopleSubList" style="display:none;"></div>
 
         <!-- IDEAS-CAPTURE-1: Ideas section -->
-        <div class="nav-section-header" id="navIdeasHeader" data-section="ideas">
+        <div class="nav-section-header" id="navIdeasHeader" data-section="ideas" role="button" tabindex="0" aria-controls="ideasSubList" aria-expanded="false">
             <span class="nav-section-arrow">&#9656;</span>
             <span class="nav-section-label">Ideas</span>
             <span class="nav-count" id="ideasCount"></span>
@@ -78,47 +80,47 @@
         <div class="nav-sub" id="ideasSubList" style="display:none;"></div>
 
         <!-- MEDIA-SIDEBAR: Media section (promoted to top tier, peer of Ideas/People) -->
-        <div class="nav-section-header" id="navMediaHeader" data-section="media">
+        <div class="nav-section-header" id="navMediaHeader" data-section="media" role="button" tabindex="0" aria-controls="mediaSubList" aria-expanded="false">
             <span class="nav-section-arrow">&#9656;</span>
             <span class="nav-section-label">Media</span>
             <span class="nav-count" id="mediaCount"></span>
         </div>
         <div class="nav-sub" id="mediaSubList" style="display:none;"></div>
 
-        <div class="nav-item" data-tab="ao-dashboard">
+        <div class="nav-item" data-tab="ao-dashboard" role="button" tabindex="0">
             <span class="nav-dot" id="aoDot" style="margin-top:1px;"></span>
             <span class="nav-label">AO Dashboard</span>
         </div>
 
         <div class="nav-divider"></div>
 
-        <div class="nav-item" data-tab="ask-baker">
+        <div class="nav-item" data-tab="ask-baker" role="button" tabindex="0">
             <span class="nav-label">Ask Baker</span>
         </div>
-        <div class="nav-item" data-tab="ask-specialist">
+        <div class="nav-item" data-tab="ask-specialist" role="button" tabindex="0">
             <span class="nav-label">Ask Specialist</span>
         </div>
-        <div class="nav-item" data-tab="ask-client-pm">
+        <div class="nav-item" data-tab="ask-client-pm" role="button" tabindex="0">
             <span class="nav-label">Client PM</span>
         </div>
-        <div class="nav-item" data-tab="search">
+        <div class="nav-item" data-tab="search" role="button" tabindex="0">
             <span class="nav-label">Search</span>
         </div>
 
         <div class="nav-divider"></div>
 
-        <div class="nav-item" data-tab="documents">
+        <div class="nav-item" data-tab="documents" role="button" tabindex="0">
             <span class="nav-label">Documents</span>
             <span class="nav-count" id="docsCount"></span>
         </div>
         <a class="nav-item nav-item-external" href="https://brisen-docs.onrender.com/templates/" target="_blank" rel="noopener noreferrer">
             <span class="nav-label">Templates Gallery</span>
         </a>
-        <div class="nav-item" data-tab="dossiers">
+        <div class="nav-item" data-tab="dossiers" role="button" tabindex="0">
             <span class="nav-label">Dossiers</span>
             <span class="nav-count" id="dossiersCount"></span>
         </div>
-        <div class="nav-item" data-tab="presentations">
+        <div class="nav-item" data-tab="presentations" role="button" tabindex="0">
             <span class="nav-label">Presentations</span>
             <span class="nav-count" id="presentationsCount"></span>
         </div>
@@ -128,22 +130,22 @@
 
         <div class="nav-divider"></div>
 
-        <div class="nav-item" data-tab="travel">
+        <div class="nav-item" data-tab="travel" role="button" tabindex="0">
             <span class="nav-label">Travel</span>
         </div>
 
         <div class="nav-divider"></div>
-        <div class="nav-item" data-tab="baker-data">
+        <div class="nav-item" data-tab="baker-data" role="button" tabindex="0">
             <span class="nav-label">Baker Data</span>
         </div>
-        <div class="nav-item" data-tab="kbl-pipeline">
+        <div class="nav-item" data-tab="kbl-pipeline" role="button" tabindex="0">
             <span class="nav-label">KBL Pipeline</span>
         </div>
     </nav>
 </div>
 
 <!-- RIGHT AREA -->
-<div class="right-area">
+<main class="right-area" id="mainContent">
 
     <!-- Command bar -->
     <div class="cmd-bar">
@@ -561,7 +563,7 @@
         </div>
 
     </div><!-- /content -->
-</div><!-- /right-area -->
+</main><!-- /right-area -->
 
 </div><!-- /app-wrap -->
 

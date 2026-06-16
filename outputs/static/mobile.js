@@ -1,4 +1,4 @@
-/* Baker Mobile — minimal JS for Ask Baker + Ask Specialist */
+/* Baker Mobile — phone adaptation of Baker Dashboard + Ask Baker/Specialist */
 
 // ═══ CONFIG ═══
 const BAKER = { apiKey: '' };
@@ -326,6 +326,370 @@ function md(text) {
     return h;
 }
 
+// ═══ MOBILE DASHBOARD ═══
+function _mobileSetText(id, value) {
+    var el = document.getElementById(id);
+    if (el) el.textContent = value == null ? '' : String(value);
+}
+
+function _mobileGreeting() {
+    var h = new Date().getHours();
+    if (h < 12) return 'Good morning, Dimitry';
+    if (h < 18) return 'Good afternoon, Dimitry';
+    return 'Good evening, Dimitry';
+}
+
+function _mobileDateLabel() {
+    try {
+        return new Date().toLocaleDateString('en-GB', {
+            weekday: 'short',
+            day: 'numeric',
+            month: 'short',
+        });
+    } catch (e) {
+        return '';
+    }
+}
+
+function _mobileTimeLabel(iso) {
+    if (!iso) return '';
+    try {
+        var d = new Date(iso);
+        if (isNaN(d.getTime())) return String(iso).slice(0, 16);
+        return d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+    } catch (e) {
+        return String(iso).slice(0, 16);
+    }
+}
+
+function _mobileRelativeTime(iso) {
+    if (!iso) return '';
+    try {
+        var d = new Date(iso);
+        if (isNaN(d.getTime())) return '';
+        var mins = Math.floor((new Date() - d) / 60000);
+        if (mins < 1) return 'Now';
+        if (mins < 60) return mins + 'm ago';
+        var hrs = Math.floor(mins / 60);
+        if (hrs < 24) return hrs + 'h ago';
+        return Math.floor(hrs / 24) + 'd ago';
+    } catch (e) {
+        return '';
+    }
+}
+
+function _mobileDayLabel(dateStr) {
+    if (!dateStr) return '';
+    var d = String(dateStr).slice(0, 10);
+    var today = new Date().toISOString().slice(0, 10);
+    if (d === today) return 'Today';
+    var diff = Math.round((new Date(d) - new Date(today)) / 86400000);
+    if (diff === 1) return 'Tomorrow';
+    if (diff > 1 && diff <= 7) return 'In ' + diff + ' days';
+    if (diff < 0) return Math.abs(diff) + 'd ago';
+    return d;
+}
+
+function _mobileDeadlineLabel(dateStr) {
+    if (!dateStr) return '';
+    var d = String(dateStr).slice(0, 10);
+    var today = new Date().toISOString().slice(0, 10);
+    var diff = Math.ceil((new Date(d) - new Date(today)) / 86400000);
+    if (diff < 0) return Math.abs(diff) + 'd overdue';
+    if (diff === 0) return 'Today';
+    if (diff === 1) return 'Tomorrow';
+    return diff + ' days';
+}
+
+function _mobileCreateDashCard(kind, title, meta, sub, body, dot) {
+    var card = document.createElement('div');
+    card.className = 'mobile-dash-card ' + (kind || 'info');
+
+    var main = document.createElement('div');
+    main.className = 'mobile-dash-card-main';
+
+    var dotEl = document.createElement('span');
+    dotEl.className = 'mobile-dash-dot ' + (dot || '');
+    main.appendChild(dotEl);
+
+    var titleEl = document.createElement('div');
+    titleEl.className = 'mobile-dash-title';
+    titleEl.textContent = title || 'Untitled';
+    main.appendChild(titleEl);
+
+    if (meta) {
+        var metaEl = document.createElement('div');
+        metaEl.className = 'mobile-dash-meta';
+        metaEl.textContent = meta;
+        main.appendChild(metaEl);
+    }
+    card.appendChild(main);
+
+    if (sub) {
+        var subEl = document.createElement('div');
+        subEl.className = 'mobile-dash-sub';
+        subEl.textContent = sub;
+        card.appendChild(subEl);
+    }
+
+    if (body) {
+        var detail = document.createElement('div');
+        detail.className = 'mobile-dash-card-detail';
+        detail.textContent = body;
+        card.appendChild(detail);
+        card.addEventListener('click', function() {
+            card.classList.toggle('expanded');
+        });
+    }
+
+    return card;
+}
+
+function _mobileRenderBucket(bodyId, countId, pillId, items, emptyText) {
+    var body = document.getElementById(bodyId);
+    if (!body) return;
+    body.textContent = '';
+    if (!items.length) {
+        var empty = document.createElement('div');
+        empty.className = 'mobile-empty';
+        empty.textContent = emptyText;
+        body.appendChild(empty);
+    } else {
+        for (var i = 0; i < items.length; i++) body.appendChild(items[i]);
+    }
+    var n = items.length || 0;
+    _mobileSetText(countId, n ? n : '');
+    _mobileSetText(pillId, n);
+}
+
+function _mobileBuildTravelItems(data) {
+    var items = [];
+    var trips = data.trips || [];
+    for (var i = 0; i < trips.length; i++) {
+        var trip = trips[i];
+        var end = trip.end_date || trip.start_date;
+        var title = trip.event_name || trip.destination || 'Trip';
+        var meta = _mobileDayLabel(trip.start_date);
+        if (end && end !== trip.start_date) meta += ' - ' + _mobileDayLabel(end);
+        var sub = [trip.origin, trip.destination].filter(Boolean).join(' -> ');
+        var body = [trip.status, trip.category].filter(Boolean).join(' · ');
+        items.push(_mobileCreateDashCard('travel', title, meta, sub, body, trip.status === 'confirmed' ? 'green' : 'amber'));
+    }
+
+    var events = data.travel_today || [];
+    for (var ei = 0; ei < events.length; ei++) {
+        var ev = events[ei];
+        items.push(_mobileCreateDashCard(
+            'travel',
+            ev.title || 'Travel event',
+            _mobileTimeLabel(ev.start),
+            ev.location || '',
+            ev.description || ev.prep_notes || '',
+            'amber'
+        ));
+    }
+
+    var deadlines = data.travel_deadlines || [];
+    for (var di = 0; di < deadlines.length; di++) {
+        var dl = deadlines[di];
+        items.push(_mobileCreateDashCard(
+            'travel',
+            dl.description || 'Travel deadline',
+            _mobileDeadlineLabel(dl.due_date),
+            dl.priority || '',
+            dl.source_snippet || '',
+            'amber'
+        ));
+    }
+
+    var alerts = data.travel_alerts || [];
+    for (var ai = 0; ai < alerts.length; ai++) {
+        var a = alerts[ai];
+        var title = (a.title || 'Travel alert').replace(/^(TODAY|In \d+d):\s*/i, '');
+        items.push(_mobileCreateDashCard(
+            'travel',
+            title,
+            a.travel_date ? _mobileDayLabel(a.travel_date) : _mobileRelativeTime(a.created_at),
+            (a.source || '').replace(/_/g, ' '),
+            a.body || '',
+            'blue'
+        ));
+    }
+    return items;
+}
+
+function _mobileBuildCriticalItems(data) {
+    var items = [];
+    var critical = data.critical_items || [];
+    for (var i = 0; i < critical.length; i++) {
+        var ci = critical[i];
+        items.push(_mobileCreateDashCard(
+            'critical',
+            ci.description || 'Critical item',
+            _mobileRelativeTime(ci.critical_flagged_at),
+            ci.priority || 'critical',
+            ci.source_snippet || '',
+            'red'
+        ));
+    }
+    return items;
+}
+
+function _mobileBuildPromisedItems(data) {
+    var items = [];
+    var deadlines = data.deadlines || [];
+    for (var i = 0; i < deadlines.length; i++) {
+        var dl = deadlines[i];
+        var priority = (dl.priority || 'normal').toLowerCase();
+        var dot = priority === 'critical' ? 'red' : priority === 'high' ? 'amber' : '';
+        items.push(_mobileCreateDashCard(
+            'promised',
+            dl.description || 'Deadline',
+            _mobileDeadlineLabel(dl.due_date),
+            dl.priority || '',
+            dl.source_snippet || '',
+            dot
+        ));
+    }
+    return items;
+}
+
+function _mobileBuildMeetingItems(data) {
+    var items = [];
+    var meetings = (data.meetings_today || []).filter(function(m) {
+        return !(m.title || '').startsWith('[Baker Prep]');
+    });
+    for (var i = 0; i < meetings.length; i++) {
+        var m = meetings[i];
+        var attendees = (m.attendees || []).slice(0, 3).join(', ');
+        if ((m.attendees || []).length > 3) attendees += ' +' + ((m.attendees || []).length - 3);
+        items.push(_mobileCreateDashCard(
+            'meeting',
+            m.title || 'Meeting',
+            _mobileTimeLabel(m.start),
+            attendees || (m.prepped ? 'Prepped' : 'Prep pending'),
+            [m.location, m.prep_notes].filter(Boolean).join('\n\n'),
+            m.prepped ? 'green' : 'amber'
+        ));
+    }
+
+    var detected = data.detected_meetings || [];
+    for (var di = 0; di < detected.length; di++) {
+        var dm = detected[di];
+        var participants = (dm.participant_names || []).join(', ');
+        items.push(_mobileCreateDashCard(
+            'meeting',
+            dm.title || 'Detected meeting',
+            [dm.meeting_time, _mobileDayLabel(dm.meeting_date)].filter(Boolean).join(' · '),
+            participants || dm.status || 'proposed',
+            dm.location || '',
+            dm.status === 'confirmed' ? 'green' : 'amber'
+        ));
+    }
+
+    var meetingAlerts = data.meeting_alerts || [];
+    for (var ai = 0; ai < meetingAlerts.length; ai++) {
+        var ma = meetingAlerts[ai];
+        items.push(_mobileCreateDashCard(
+            'meeting',
+            ma.title || 'Meeting alert',
+            _mobileRelativeTime(ma.created_at),
+            (ma.source || '').replace(/_/g, ' '),
+            ma.body || '',
+            'blue'
+        ));
+    }
+    return items;
+}
+
+function _mobileCortexRow(label, value, statusClass) {
+    var row = document.createElement('div');
+    row.className = 'mobile-cortex-row';
+    var l = document.createElement('span');
+    l.textContent = label;
+    row.appendChild(l);
+    var v = document.createElement('strong');
+    v.textContent = value;
+    if (statusClass) v.className = statusClass;
+    row.appendChild(v);
+    return row;
+}
+
+async function loadMobileCortexSummary() {
+    var body = document.getElementById('mobileCortexBody');
+    if (!body) return;
+    body.textContent = 'Loading Cortex status...';
+    try {
+        function getJson(url) {
+            return bakerFetch(url).then(function(r) { return r.ok ? r.json() : null; }).catch(function() { return null; });
+        }
+        var results = await Promise.all([
+            getJson('/api/health/scheduler'),
+            getJson('/api/cortex/events?limit=10'),
+            getJson('/api/cortex/lint?status=open&limit=20'),
+            getJson('/api/cortex/cycles/pending?limit=20&include_smoke=false'),
+        ]);
+        var health = results[0];
+        var events = (results[1] && results[1].events) || [];
+        var lint = (results[2] && results[2].lint_results) || [];
+        var pending = (results[3] && results[3].cycles) || [];
+
+        body.textContent = '';
+        var liveLabel = health ? (health.alive ? 'Alive' : 'Stale') : 'Unknown';
+        body.appendChild(_mobileCortexRow('Scheduler', liveLabel));
+        body.appendChild(_mobileCortexRow('Events', String(events.length)));
+        body.appendChild(_mobileCortexRow('Open lint', String(lint.length)));
+        body.appendChild(_mobileCortexRow('Pending cycles', String(pending.length)));
+
+        var count = [];
+        if (events.length) count.push(events.length + ' events');
+        if (lint.length) count.push(lint.length + ' lint');
+        if (pending.length) count.push(pending.length + ' pending');
+        _mobileSetText('mobileCortexCount', count.join(', '));
+    } catch (e) {
+        body.textContent = 'Cortex status unavailable.';
+        _mobileSetText('mobileCortexCount', '');
+    }
+}
+
+async function loadMobileDashboard() {
+    _mobileSetText('mobileBriefGreeting', _mobileGreeting());
+    _mobileSetText('mobileBriefDate', _mobileDateLabel());
+    _mobileSetText('mobileBriefStatus', 'Loading your cockpit...');
+
+    try {
+        var resp = await bakerFetch('/api/dashboard/morning-brief', { timeout: 25000 });
+        if (!resp.ok) throw new Error('Server returned ' + resp.status);
+        var data = await resp.json();
+
+        var travelItems = _mobileBuildTravelItems(data);
+        var criticalItems = _mobileBuildCriticalItems(data);
+        var promisedItems = _mobileBuildPromisedItems(data);
+        var meetingItems = _mobileBuildMeetingItems(data);
+
+        _mobileRenderBucket('mobileGridTravel', 'mobileGridTravelCount', 'mobileTravelCount', travelItems, 'No travel today.');
+        _mobileRenderBucket('mobileGridCritical', 'mobileGridCriticalCount', 'mobileCriticalCount', criticalItems, 'No critical items. All clear.');
+        _mobileRenderBucket('mobileGridPromised', 'mobileGridPromisedCount', 'mobilePromisedCount', promisedItems, 'No deadlines this week.');
+        _mobileRenderBucket('mobileGridMeetings', 'mobileGridMeetingsCount', 'mobileMeetingsCount', meetingItems, 'No meetings today.');
+
+        var status = [];
+        if (data.fire_count) status.push(data.fire_count + ' critical');
+        if (data.unanswered_count) status.push(data.unanswered_count + ' awaiting reply');
+        status.push('briefing live');
+        _mobileSetText('mobileBriefStatus', status.join(' · '));
+
+        loadMobileCortexSummary();
+    } catch (e) {
+        _mobileSetText('mobileBriefStatus', 'Briefing unavailable (' + (e.message || String(e)) + ').');
+        _mobileRenderBucket('mobileGridTravel', 'mobileGridTravelCount', 'mobileTravelCount', [], 'Travel unavailable.');
+        _mobileRenderBucket('mobileGridCritical', 'mobileGridCriticalCount', 'mobileCriticalCount', [], 'Critical items unavailable.');
+        _mobileRenderBucket('mobileGridPromised', 'mobileGridPromisedCount', 'mobilePromisedCount', [], 'Promised work unavailable.');
+        _mobileRenderBucket('mobileGridMeetings', 'mobileGridMeetingsCount', 'mobileMeetingsCount', [], 'Meetings unavailable.');
+        var cortex = document.getElementById('mobileCortexBody');
+        if (cortex) cortex.textContent = 'Cortex status unavailable.';
+    }
+}
+
 // ═══ TABS ═══
 function switchTab(tab) {
     document.querySelectorAll('.tab-btn').forEach(function(b) {
@@ -334,7 +698,9 @@ function switchTab(tab) {
     document.querySelectorAll('.chat-panel').forEach(function(p) {
         p.classList.toggle('active', p.id === 'panel-' + tab);
     });
-    if (tab === 'feed') {
+    if (tab === 'dashboard') {
+        loadMobileDashboard();
+    } else if (tab === 'feed') {
         loadMobileAlerts();
     } else {
         var inputId = tab === 'baker' ? 'bakerInput' : 'specialistInput';
@@ -630,7 +996,15 @@ async function streamChat(url, body, containerId, history) {
 function newChat() {
     // Determine which panel is active
     var bakerPanel = document.getElementById('panel-baker');
+    var specialistPanel = document.getElementById('panel-specialist');
     var isBaker = bakerPanel && bakerPanel.classList.contains('active');
+    var isSpecialist = specialistPanel && specialistPanel.classList.contains('active');
+
+    if (!isBaker && !isSpecialist) {
+        switchTab('baker');
+        setTimeout(newChat, 0);
+        return;
+    }
 
     if (isBaker) {
         bakerHistory = [];
@@ -956,13 +1330,16 @@ async function init() {
     refreshAlertBadge();
     setInterval(refreshAlertBadge, 5 * 60 * 1000);
 
-    // Auto-refresh Actions tab every 30s when visible
+    // Auto-refresh visible operational tab.
     setInterval(function() {
+        var dashboardPanel = document.getElementById('panel-dashboard');
         var feedPanel = document.getElementById('panel-feed');
-        if (feedPanel && feedPanel.classList.contains('active')) {
+        if (dashboardPanel && dashboardPanel.classList.contains('active')) {
+            loadMobileDashboard();
+        } else if (feedPanel && feedPanel.classList.contains('active')) {
             loadMobileAlerts();
         }
-    }, 30000);
+    }, 60000);
 
     // REALTIME-PUSH-1: Request notification permission + connect live stream
     if (window.Notification && Notification.permission === 'default') {
@@ -1003,10 +1380,10 @@ async function init() {
     // Default tab — check for deep link
     var urlParams = new URLSearchParams(window.location.search);
     var deepTab = urlParams.get('tab');
-    if (deepTab && ['feed', 'baker', 'specialist'].indexOf(deepTab) !== -1) {
+    if (deepTab && ['dashboard', 'feed', 'baker', 'specialist'].indexOf(deepTab) !== -1) {
         switchTab(deepTab);
     } else {
-        switchTab('feed');
+        switchTab('dashboard');
     }
 }
 
@@ -1284,6 +1661,17 @@ function _createAlertCard(alert) {
     card.className = 'alert-card t' + Math.min(tier, 3);
     card.dataset.alertId = alert.id;
 
+    var menuBtn = document.createElement('button');
+    menuBtn.type = 'button';
+    menuBtn.className = 'alert-kebab-btn';
+    menuBtn.setAttribute('aria-label', 'More actions for this card');
+    menuBtn.textContent = '\u22EF';
+    menuBtn.addEventListener('click', function(e) {
+        e.stopPropagation();
+        _showContextMenu(alert);
+    });
+    card.appendChild(menuBtn);
+
     // Header row
     var header = document.createElement('div');
     header.className = 'alert-card-header';
@@ -1322,32 +1710,12 @@ function _createAlertCard(alert) {
         card.appendChild(body);
     }
 
-    // Unified action buttons: View / Dismiss / Run
+    // Primary action stays visible; secondary actions live behind the menu.
     var sa = alert.structured_actions || {};
     var btnRow = document.createElement('div');
     btnRow.className = 'alert-action-buttons triage-buttons';
     btnRow.style.marginTop = '8px';
-
-    // View button (always shown) — toggles card expansion
-    var viewBtn = document.createElement('button');
-    viewBtn.className = 'triage-btn done';
-    viewBtn.textContent = 'View';
-    viewBtn.addEventListener('click', function(e) {
-        e.stopPropagation();
-        card.classList.toggle('card-expanded');
-        viewBtn.textContent = card.classList.contains('card-expanded') ? 'Collapse' : 'View';
-    });
-    btnRow.appendChild(viewBtn);
-
-    // Dismiss button (always shown)
-    var dismissBtn = document.createElement('button');
-    dismissBtn.className = 'triage-btn dismiss';
-    dismissBtn.textContent = 'Dismiss';
-    dismissBtn.addEventListener('click', function(e) {
-        e.stopPropagation();
-        _dismissAlertCard(alert.id, card);
-    });
-    btnRow.appendChild(dismissBtn);
+    var hasPrimaryAction = false;
 
     // Run button — only when there's an actionable structured_action
     if (alert.source === 'browser_transaction' && sa.action_id) {
@@ -1359,6 +1727,7 @@ function _createAlertCard(alert) {
             _confirmBrowserAction(sa.action_id, alert.id, card);
         });
         btnRow.appendChild(runBtn);
+        hasPrimaryAction = true;
     } else if (sa.research_proposal_id) {
         // Check if dossier is already completed — show View link directly
         if (sa.status === 'completed') {
@@ -1370,6 +1739,7 @@ function _createAlertCard(alert) {
             viewLink.target = '_blank';
             viewLink.addEventListener('click', function(e) { e.stopPropagation(); });
             btnRow.appendChild(viewLink);
+            hasPrimaryAction = true;
         } else {
             var runBtn = document.createElement('button');
             runBtn.className = 'triage-btn approve';
@@ -1379,6 +1749,7 @@ function _createAlertCard(alert) {
                 _runDossierFromAlert(sa.research_proposal_id, alert.id, card);
             });
             btnRow.appendChild(runBtn);
+            hasPrimaryAction = true;
         }
     } else if (alert.source === 'obligation' && sa.action_id) {
         var runBtn = document.createElement('button');
@@ -1389,9 +1760,10 @@ function _createAlertCard(alert) {
             _resolveAlertCard(alert.id, card);
         });
         btnRow.appendChild(runBtn);
+        hasPrimaryAction = true;
     }
 
-    card.appendChild(btnRow);
+    if (hasPrimaryAction) card.appendChild(btnRow);
 
     // Long-press → context menu
     var _lpTimer = null;
@@ -2213,6 +2585,7 @@ function _showContextMenu(alert) {
         { icon: '\uD83D\uDCAC', label: 'Ask Baker about this', id: 'ask' },
         { icon: '\u23F0', label: 'Snooze', id: 'snooze' },
         { icon: '\u27A1\uFE0F', label: 'Delegate', id: 'delegate' },
+        { icon: '\u2715', label: 'Dismiss', id: 'dismiss' },
     ];
 
     actions.forEach(function(action) {
@@ -2234,6 +2607,7 @@ function _showContextMenu(alert) {
             else if (action.id === 'snooze') _showSnoozeOptions(alert);
             else if (action.id === 'draft') _draftReply(alert);
             else if (action.id === 'delegate') _delegateAlert(alert);
+            else if (action.id === 'dismiss') _dismissAlertCard(alert.id);
         });
 
         sheet.appendChild(btn);
@@ -2698,10 +3072,21 @@ function _resolveAlertCard(alertId, card) {
 }
 
 function _dismissAlertCard(alertId, card) {
-    card.style.transition = 'opacity 0.3s, transform 0.3s';
-    card.style.opacity = '0';
-    card.style.transform = 'translateX(-100%)';
-    setTimeout(function() { card.remove(); }, 300);
+    if (!card) {
+        var cards = document.querySelectorAll('.alert-card');
+        for (var i = 0; i < cards.length; i++) {
+            if (cards[i].dataset.alertId === String(alertId)) {
+                card = cards[i];
+                break;
+            }
+        }
+    }
+    if (card) {
+        card.style.transition = 'opacity 0.3s, transform 0.3s';
+        card.style.opacity = '0';
+        card.style.transform = 'translateX(-100%)';
+        setTimeout(function() { card.remove(); }, 300);
+    }
     _mobileAlerts = _mobileAlerts.filter(function(a) { return a.id !== alertId; });
     bakerFetch('/api/alerts/' + alertId + '/dismiss', { method: 'POST' })
         .then(function() { refreshAlertBadge(); })
