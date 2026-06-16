@@ -120,14 +120,20 @@ def ensure_tables():
             )
         """)
 
-        # CONTACTS-RENAME-1: Create view so `contacts` and `vip_contacts` both work
-        cur.execute("""
-            CREATE OR REPLACE VIEW contacts AS SELECT * FROM vip_contacts
-        """)
+        # CONTACTS-RENAME-1: `contacts` compatibility alias over vip_contacts.
+        # Only create the view when NO relation named `contacts` already exists.
+        # In production `contacts` is now an independent table (people-intel),
+        # so this is skipped. The previous unconditional
+        # `CREATE OR REPLACE VIEW contacts` errored every boot with
+        # `"contacts" is not a view` because the target is a table, not a view.
+        cur.execute("SELECT to_regclass('public.contacts')")
+        if cur.fetchone()[0] is None:
+            cur.execute("CREATE VIEW contacts AS SELECT * FROM vip_contacts")
+            logger.info("deadlines: created `contacts` compatibility view over vip_contacts")
 
         conn.commit()
         cur.close()
-        logger.info("deadlines: tables verified (deadlines, vip_contacts, contacts view)")
+        logger.info("deadlines: tables verified (deadlines, vip_contacts)")
     except Exception as e:
         logger.error(f"deadlines: table creation failed: {e}")
     finally:
@@ -136,8 +142,15 @@ def ensure_tables():
 
 def seed_vip_contacts():
     """
-    VIP-SEED-1: Seed the VIP contacts table with the full Director-confirmed list.
-    Replaces old placeholder data. Runs on every startup — idempotent via row-count check.
+    VIP-SEED-1: Ensure the Director-confirmed VIP contacts exist.
+
+    Idempotent per-row upsert keyed on ``email``: refresh name/role/whatsapp_id
+    when the contact is present, insert when missing. **Never DELETEs.**
+    ``vip_contacts`` is the live contacts store (hundreds of rows, referenced by
+    ``contact_interactions`` + ``trip_contacts`` foreign keys), so the previous
+    "DELETE-everything-then-reinsert-11" logic both targeted real data and
+    errored on the FK every boot — the count never equalled 11, so the DELETE
+    fired and was rejected on every startup.
     """
     conn = get_conn()
     if not conn:
@@ -160,26 +173,35 @@ def seed_vip_contacts():
             ("Christophe Buchwalder", "External / Attorney-at-law", "buchwalder@gantey.ch", "41794055384@c.us"),
         ]
 
-        # Check if already migrated (11 rows = current version)
-        cur.execute("SELECT COUNT(*) FROM vip_contacts")
-        count = cur.fetchone()[0]
-        if count == len(vips):
-            logger.info(f"deadlines: vip_contacts already has {count} rows, skipping seed")
-            cur.close()
-            return
-
-        # Clear old data and insert fresh
-        cur.execute("DELETE FROM vip_contacts")
+        # Idempotent per-row upsert keyed on email — never DELETEs (avoids the
+        # FK violation from contact_interactions/trip_contacts) and never
+        # touches the other contacts in the table. UPDATE in place when the
+        # email is present; INSERT only when missing.
+        inserted = 0
         for name, role, email, whatsapp_id in vips:
             cur.execute("""
-                INSERT INTO vip_contacts (name, role, email, whatsapp_id)
-                VALUES (%s, %s, %s, %s)
-            """, (name, role, email, whatsapp_id))
+                UPDATE vip_contacts
+                   SET name = %s, role = %s, whatsapp_id = %s
+                 WHERE email = %s
+            """, (name, role, whatsapp_id, email))
+            if cur.rowcount == 0:
+                cur.execute("""
+                    INSERT INTO vip_contacts (name, role, email, whatsapp_id)
+                    VALUES (%s, %s, %s, %s)
+                """, (name, role, email, whatsapp_id))
+                inserted += 1
 
         conn.commit()
         cur.close()
-        logger.info(f"deadlines: seeded {len(vips)} VIP contacts (VIP-SEED-1)")
+        if inserted:
+            logger.info(f"deadlines: seeded {inserted} missing VIP contact(s) (VIP-SEED-1)")
+        else:
+            logger.debug("deadlines: VIP contacts already present (VIP-SEED-1)")
     except Exception as e:
+        try:
+            conn.rollback()
+        except Exception:
+            pass
         logger.error(f"deadlines: VIP seed failed: {e}")
     finally:
         put_conn(conn)
