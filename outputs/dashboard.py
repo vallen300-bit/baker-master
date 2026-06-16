@@ -13971,7 +13971,7 @@ async def get_memory_health():
         cur.execute("""
             SELECT
                 (SELECT COUNT(*) FROM email_messages WHERE received_date > NOW() - INTERVAL '90 days') as emails,
-                (SELECT COUNT(*) FROM whatsapp_messages WHERE received_at > NOW() - INTERVAL '90 days') as whatsapp,
+                (SELECT COUNT(*) FROM whatsapp_messages WHERE timestamp > NOW() - INTERVAL '90 days') as whatsapp,
                 (SELECT COUNT(*) FROM alerts WHERE created_at > NOW() - INTERVAL '90 days') as alerts,
                 (SELECT COUNT(*) FROM conversation_memory WHERE created_at > NOW() - INTERVAL '90 days') as conversations
         """)
