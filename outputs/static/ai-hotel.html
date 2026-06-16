@@ -177,6 +177,16 @@
   .ntime{font:500 11px/1 var(--mono);color:var(--faint);margin-left:auto}
   .nempty{background:var(--card);border:1px solid var(--line);border-radius:8px;padding:22px;text-align:center;color:var(--muted);font-size:14px;box-shadow:var(--shadow)}
 
+  .pf-flag{display:inline-block;font:700 10px/1 var(--mono);color:var(--amber);background:var(--amber-weak);border:1px solid var(--amber-line);border-radius:5px;padding:5px 9px;text-transform:uppercase;letter-spacing:.12em;margin-bottom:16px}
+  .pf-lead{font-size:15.5px;line-height:1.55;color:var(--text);margin-bottom:24px;max-width:72ch}
+  .pf-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:14px;margin-bottom:24px}
+  .pf-card{background:var(--card);border:1px solid var(--line);border-radius:8px;padding:18px 18px 20px;box-shadow:var(--shadow)}
+  .pf-tile{width:34px;height:34px;border-radius:9px;background:var(--amber-weak);border:1px solid var(--amber-line);display:grid;place-items:center;color:var(--amber);font:700 15px/1 var(--mono);margin-bottom:12px}
+  .pf-name{font-size:15.5px;font-weight:600;color:var(--amber);margin-bottom:6px}
+  .pf-blurb{font-size:13px;color:var(--text-2);line-height:1.55}
+  .pf-val{border-top:1px solid var(--line);padding-top:18px;display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:16px}
+  .pf-vlabel{font-size:13px;font-weight:600;color:var(--text);margin-bottom:5px}
+  .pf-vdesc{font-size:12.5px;color:var(--muted);line-height:1.45}
   .dummy{}
   dialog{border:1px solid var(--line);border-radius:12px;padding:0;max-width:620px;width:92%;background:var(--card);color:var(--text);box-shadow:var(--shadow)}
   dialog::backdrop{background:var(--overlay)}
@@ -382,7 +392,8 @@ const NAV=[
   {id:'stake',name:"Stakeholders' interests",icon:'users'},
   {id:'research',name:'Research',icon:'book'},
   {id:'comms',name:'Communications to parties',icon:'mail'},
-  {id:'notes',name:'Field notes',icon:'message'}
+  {id:'notes',name:'Field notes',icon:'message'},
+  {id:'planned',name:'Planned features',icon:'bot'}
 ];
 
 let current='hotel';
@@ -554,6 +565,36 @@ function renderNotes(main){
     });
 }
 
+function renderPlanned(main){
+  main.appendChild(el('div','kicker','Planned features'));
+  main.appendChild(el('h1','sec','Always-on AI front desk'));
+  main.appendChild(el('div','sec-sub','One of the features we plan for the AI Hotel, to debut at the Santa Clara flagship.'));
+  main.appendChild(el('div','pf-flag','Santa Clara flagship'));
+  main.appendChild(el('div','pf-lead','An orchestration layer that sits on top of every system the hotel already runs, including the PMS, CRM and even legacy desktop apps, so staff stop being the plumbing between screens and stay on the guest.'));
+  const grid=el('div','pf-grid');
+  [['1','Sits on top, replaces nothing','Runs the existing PMS, CRM and even legacy desktop apps the way a person would.'],
+   ['2','One brain, every channel','Phone, email, text and WhatsApp, answered as one front desk for every department, always on.'],
+   ['3','Works your way','Learns the way the best staff work; a manager finalises the sensitive calls.']].forEach(function(r){
+    const c=el('div','pf-card');
+    c.appendChild(el('div','pf-tile',r[0]));
+    c.appendChild(el('div','pf-name',r[1]));
+    c.appendChild(el('div','pf-blurb',r[2]));
+    grid.appendChild(c);
+  });
+  main.appendChild(grid);
+  const val=el('div','pf-val');
+  [['Revenue','Micro-profiles guests for the right offer later.'],
+   ['Lower cost','Automates the repetitive back-office load.'],
+   ['Brand','Every interaction kept at an A-plus level.'],
+   ['Team','Freed from plumbing for the work they love.']].forEach(function(r){
+    const v=el('div',null);
+    v.appendChild(el('div','pf-vlabel',r[0]));
+    v.appendChild(el('div','pf-vdesc',r[1]));
+    val.appendChild(v);
+  });
+  main.appendChild(val);
+}
+
 function show(id){
   current=id;closeMenu();window.scrollTo(0,0);buildNav();
   const main=document.getElementById('main');while(main.firstChild)main.removeChild(main.firstChild);
@@ -563,6 +604,7 @@ function show(id){
   else if(id==='research')renderLibrary(main,{kicker:'Library',title:'Research',sub:'Studies commissioned for this project. Each card opens its full report. More cards are added each session.'},RESEARCH);
   else if(id==='comms')renderLibrary(main,{kicker:'Outbound',title:'Communications to parties',sub:'Letters and messages to each party, built from this map. Each opens as a report once drafted.'},COMMS);
   else if(id==='notes')renderNotes(main);
+  else if(id==='planned')renderPlanned(main);
   else renderHotel(main);
 }
 
