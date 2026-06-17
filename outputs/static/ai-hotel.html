@@ -157,6 +157,8 @@
   a.rlink{display:inline-flex;align-items:center;gap:7px;font:600 12.5px/1 var(--sans);color:var(--accent);text-decoration:none;border:1px solid var(--accent-line);background:var(--accent-weak);padding:8px 13px;border-radius:8px}
   a.rlink:hover{background:var(--card-hover)}
   a.rlink .lic{display:flex} a.rlink .lic svg{width:13px;height:13px;stroke-width:2}
+  span.rlink{display:inline-flex;align-items:center;gap:7px;font:600 12.5px/1 var(--sans);color:var(--accent);border:1px solid var(--accent-line);background:var(--accent-weak);padding:8px 13px;border-radius:8px}
+  span.rlink .lic{display:flex} span.rlink .lic svg{width:13px;height:13px;stroke-width:2}
   .rsoon{font:600 11px/1 var(--mono);color:var(--faint);border:1px solid var(--line);padding:8px 12px;border-radius:8px}
 
   /* Field notes (live captures from the phone) */
@@ -394,11 +396,51 @@ const COMPETITORS=[
    url:'/static/ai-hotel-competitors-rosewood.html',status:'live'}
 ];
 
+/* ===== HITEC 2026 — vendors the Chairman scouted on the show floor (San Antonio,
+   17 Jun 2026). Each card = one booth: who he met, what they do, why it matters
+   to us, which AI-Hotel area it serves, and the contact captured from the badge.
+   Built from his dictated field notes + the badge/business-card photos. ===== */
+const VENDORS=[
+  {co:'Hudini',icon:'message',person:'Booth demo — in-room guest tablet',area:'Guest service — concierge & reservations',fit:'High fit',
+   what:'A guest-facing in-room tablet and kiosk that becomes the hotel’s digital concierge. From the room, a guest orders in-room dining (the order prints straight to the kitchen), books the restaurant or spa, calls housekeeping, and chats with concierge — all on one screen, across many connected vendors.',
+   why:'Already finalising rollout at Mandarin Oriental Dubai and a Mandarin downtown property. This is the closest match to our flagship’s guest-service vision, and it is live inside our own operator’s estate today — the single most actionable lead from the floor.',
+   contact:'Demo seen on a Hudini in-room tablet (Room 213, pillow-menu screen).'},
+  {co:'Data Plus, Inc',icon:'cube',person:'Bruce Bensetler — President',area:'Design & development + Operations',fit:'High fit',
+   what:'Two products. (1) AI accounts-payable: it scans incoming invoices with OCR, then AI agents match the vendor and line-items against that vendor’s history, score their confidence, and flag anything doubtful for a human — all synced to the accounting system. (2) A construction project-budgeting tool: full Gantt and a ~200-task build breakdown, pulling actual spend from accounts-payable and the ledger, tracking original vs. revised vs. actual budget and every change order. Cloud-hosted (Azure, Frankfurt region available).',
+   why:'Speaks directly to Brisen’s hotel-development business, not just hospitality operations — the construction-budgeting side is a rare find. Bruce is in the Hospitality Technology Hall of Fame.',
+   contact:'Bruce Bensetler, President, Data Plus, Inc.'},
+  {co:'RoomPriceGenie',icon:'sliders',person:'Nuha Pancras — Sales & Revenue Manager (+ Mike)',area:'Operations & personalization (revenue)',fit:'Swiss vendor',
+   what:'Automated revenue management. It layers on top of the systems a hotel already runs (Opera PMS, Lighthouse), reads market demand, how fast rooms are selling and occupancy, recommends a price, then pushes the new price back into the PMS automatically. It carries its own data API, so a hotel does not need its own separate Lighthouse subscription.',
+   why:'Dynamic pricing without a heavy integration project. Swiss-founded (Brisen’s home turf), now across Europe, Asia and Canada.',
+   contact:'Nuha Pancras — nuha@roompricegenie.com · Mike — mike@roompricegenie.com, +1 240 538 4419'},
+  {co:'Hercules Solutions',icon:'sliders',person:'Kevin Kuhne — CEO',area:'Operations & personalization (maintenance)',fit:'Worth a look',
+   what:'Building-systems sensing and analytics. It feeds millions of lines of equipment data into the cloud and uses it to spot under-performing properties, detect leaks early, and justify capital spend with evidence instead of an operator’s hunch. The sensors are stable enough to run for years untouched, cutting maintenance labour, and the data integrates into the hotel’s ticketing/PMS to auto-generate work orders.',
+   why:'Predictive maintenance plus a hard-numbers way to decide where capex actually goes across a portfolio. Says it is already proven competitively in Las Vegas. A regular operator can run it — no specialist needed.',
+   contact:'Kevin Kuhne, CEO, Hercules Solutions LLC.'},
+  {co:'Relay',icon:'users',person:'Abby DeForge — Sales Manager (Lux)',area:'Operations — staff communication',fit:'Worth a look',
+   what:'A wearable push-to-talk device for staff that runs on cellular (T-Mobile/LTE) instead of two-way radios, so it keeps signal where radios die — basements, behind concrete. It translates in real time for a multilingual team and guests (a housekeeper can speak Chinese and be heard in English), with satellite and more AI on the roadmap.',
+   why:'Reliable staff communication plus live translation for a diverse luxury workforce. Sold into property-management groups and full-service luxury resorts.',
+   contact:'Abby DeForge, Sales Manager (Lux), Relay.'},
+  {co:'Staff comms + actionable reports',icon:'message',person:'Booth conversation (device vendor)',area:'Operations — staff & safety',fit:'Idea to chase',
+   what:'A push-to-talk staff device (housekeeping, front desk, security, grounds) with transcription on the back end. The bigger idea the Chairman drew out: don’t just transcribe — turn a spoken alert into a printed, actionable report. A worker says “gas leak in room 354” and the system prints an emergency report someone can act on, not just a transcript.',
+   why:'The standout tip from the chat was a company called Aiola for the speech-to-actionable-report piece — worth a direct look. Turns staff chatter into safety actions.',
+   contact:'Follow-up: Aiola (speech-to-actionable-report).'},
+  {co:'American Sentinel',icon:'search',person:'Christopher Gonzales — Regional Sales Manager',area:'Operations — property security',fit:'Worth a look',
+   what:'AI-assisted property security. Mobile deterrent towers (8–15 ft, 360°, ~600 ft of visibility) watch the grounds and can speak down to an intruder (“please leave this parking lot”). A third-party human monitoring centre verifies every AI alert before acting, reads licence plates (LPR written to the cameras), and alerts the hotel’s chosen contact or police. Two tiers: AI detection first, a human second.',
+   why:'Perimeter security and parking/licence-plate monitoring for a property, with a human in the loop so guests aren’t hit with false alarms.',
+   contact:'Christopher Gonzales — christopher.gonzales@amsentinel.com, +1 956-502-0046 / +1 210-748-8669 · amsentinel.com'},
+  {co:'Optacy',icon:'book',person:'Julian Salama — CEO (Agilysys lanyard)',area:'Operations — data governance',fit:'Thin note — follow up',
+   what:'Captured as a single tag from the floor: “GDPR compliance.” The badge places the CEO in the Agilysys orbit.',
+   why:'Flagged for the data-privacy angle — relevant to EU guest data (e.g. Mandarin Oriental Vienna). Too thin to assess; needs a follow-up before it means anything.',
+   contact:'Julian Salama, CEO, Optacy.'}
+];
+
 const NAV=[
   {id:'hotel',name:'AI Hotel',icon:'hotel'},
   {id:'stake',name:"Stakeholders' interests",icon:'users'},
   {id:'research',name:'Research',icon:'book'},
   {id:'competitors',name:'Competitors',icon:'flag'},
+  {id:'hitec',name:'HITEC 2026 — floor scout',icon:'search'},
   {id:'comms',name:'Communications to parties',icon:'mail'},
   {id:'notes',name:'Field notes',icon:'message'},
   {id:'planned',name:'Planned features',icon:'bot'}
@@ -573,6 +615,44 @@ function renderNotes(main){
     });
 }
 
+/* ---- HITEC 2026 floor scout (vendors the Chairman met) ---- */
+function renderHitec(main){
+  main.appendChild(el('div','kicker','From the floor'));
+  main.appendChild(el('h1','sec','HITEC 2026 — floor scout'));
+  main.appendChild(el('div','sec-sub','Vendors the Chairman scouted at HITEC 2026 (San Antonio, 17 Jun 2026). Built from his dictated notes and the badge photos. Each card opens what they do, why it matters to us, and the contact. Most actionable first.'));
+  const grid=el('div','rgrid');
+  VENDORS.forEach(v=>{
+    const card=el('div','rcard');card.style.cursor='pointer';
+    card.dataset.text=(v.co+' '+v.person+' '+v.what+' '+v.why+' '+v.area+' '+v.contact).toLowerCase();
+    const top=el('div','rtop');top.appendChild(iconEl('rti',v.icon||'book'));
+    top.appendChild(el('span','rtitle',v.co));
+    top.appendChild(el('span','rstatus '+(/High fit/.test(v.fit)?'live':'soon'),v.fit));
+    card.appendChild(top);
+    card.appendChild(el('div','rmeta',v.person+'  ·  '+v.area));
+    card.appendChild(el('div','rdesc',v.what));
+    const foot=el('div','rfoot');
+    const a=el('span','rlink');a.appendChild(el('span',null,'Open detail'));a.appendChild(iconEl('lic','chev'));foot.appendChild(a);
+    card.appendChild(foot);
+    card.onclick=()=>openVendor(v);
+    grid.appendChild(card);
+  });
+  main.appendChild(grid);
+}
+function openVendor(v){
+  const tag=document.getElementById('dlgTag');tag.className='dlg-tag area';tag.textContent='HITEC 2026 · '+v.fit;
+  document.getElementById('dlgTitle').textContent=v.co;
+  document.getElementById('dlgTitle').style.color='var(--amber)';
+  document.getElementById('dlgWho').textContent=v.person+'  ·  '+v.area;
+  const b=document.getElementById('dlgBody');while(b.firstChild)b.removeChild(b.firstChild);
+  b.appendChild(el('div','dlg-h','What they do'));
+  b.appendChild(el('p','lead',v.what));
+  b.appendChild(el('div','dlg-h','Why it matters to us'));
+  b.appendChild(el('p',null,v.why));
+  b.appendChild(el('div','dlg-h','Contact'));
+  b.appendChild(el('p',null,v.contact));
+  document.getElementById('detail').showModal();
+}
+
 function renderPlanned(main){
   main.appendChild(el('div','kicker','Planned features'));
   main.appendChild(el('h1','sec','Always-on AI front desk'));
@@ -612,6 +692,7 @@ function show(id){
   else if(id==='research')renderLibrary(main,{kicker:'Library',title:'Research',sub:'Studies commissioned for this project. Each card opens its full report. More cards are added each session.'},RESEARCH);
   else if(id==='comms')renderLibrary(main,{kicker:'Outbound',title:'Communications to parties',sub:'Letters and messages to each party, built from this map. Each opens as a report once drafted.'},COMMS);
   else if(id==='competitors')renderLibrary(main,{kicker:'Market',title:'Competitors',sub:'Competitor moves in AI-native luxury hospitality. Each card opens its full note. Added as signals surface.'},COMPETITORS);
+  else if(id==='hitec')renderHitec(main);
   else if(id==='notes')renderNotes(main);
   else if(id==='planned')renderPlanned(main);
   else renderHotel(main);
