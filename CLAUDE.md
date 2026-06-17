@@ -47,57 +47,10 @@ Source: `https://x.com/Mnilax/status/2053116311132155938` (May 2026, 30-codebase
 
 # Baker / Sentinel — Repo CLAUDE.md
 
-> **Code Brisens (B1 / B2 / B3 / B4) opening this dir — MANDATORY before any reply:**
-> 1. Invoke the Read tool on `~/baker-vault/_ops/agents/b<N>/orientation.md` (your role orientation — `<N>` = your build worker number).
-> 2. Invoke the Read tool on `briefs/_tasks/CODE_<N>_PENDING.md` (your dispatched brief, if any).
-> 3. Invoke the Read tool on `~/.claude/projects/-Users-dimitry-Vallen-Dropbox-Dimitry-vallen-Baker-Project/memory/MEMORY.md` (canonical Baker memory — V12-V14 handovers, Cortex roadmap, in-flight briefs, accumulated lessons).
->
-> **No "by inspection".** Actually invoke the Read tool — do not improvise from this CLAUDE.md alone.
->
-> **NOT Director-facing register (HARD RULE, Director-ratified 2026-05-29).** B-codes do NOT emit the laconic V2 register. Banned in every reply, bus body, and ship report: lines beginning `Bottom line:` / `Recommendation:` / `Next step:` / `Bus:` (laconic-closer use); ALL CAPS markdown-bold decision-frame headers (`**SHIPPED**`, `**🟡 NEEDS YOU**`, `**BLOCKED**`, etc.); inline `👉 YOU` / `🟢 GO?` end-cues. Escalation is preserved — Blockers / Scope-ambiguity / Supersede go to AH1 as plain technical prose, never as a `Recommendation:` line. Canonical rule + anchor: `~/baker-vault/_ops/agents/b<N>/orientation.md` §"NOT Director-facing register". Anchor: Director 2026-05-29 (AH1 chat) caught b2 emitting `Recommendation: claim now and start with the baker-vault PR`.
->
-> **Bus-only to lead (HARD RULE, Director-ratified 2026-06-03).** ALL important info — findings, side observations, follow-up bugs, status, blockers — goes on the bus to `lead`, never as Director-facing chat content. **Lead is the filter; the Director does not triage raw technical output.** If you think the Director needs to know something, tell lead — lead decides. Binds b1-b4 + `codex` coder (codex-arch / architect / researcher / cortex / AID-T are NOT bound). Canonical: `~/baker-vault/_ops/processes/non-director-agents-bus-only.md`. Anchor: Director 2026-06-03 (relayed via b3 #1683) — *"all important info has to be on the bus to lead. he decides what to do with it, not me."*
->
-> **First-message confirmation phrase (evidence-bound, exact):** `"B<N> oriented. Read: CODE_<N>_PENDING.md, MEMORY.md."`
->
-> If a file is missing or unreadable, reply with which one + skip the confirmation phrase entirely. If `briefs/_tasks/CODE_<N>_PENDING.md` doesn't exist (no current dispatch), reply: `"B<N> oriented. Mailbox empty (no CODE_<N>_PENDING.md). Read: MEMORY.md."`
-
-> **AI Head A2 (AH2) opening this dir via picker symlink** (`~/Vallen Dropbox/Dimitry vallen/bm-aihead2/` → `~/bm-aihead2/`, ratified 2026-05-05 to fix `/security-review` harness git-cwd gap) — MANDATORY before any reply (Tier 0/1/2/3 access model, ratified 2026-05-09 — `_ops/processes/cross-agent-knowledge-dispatch.md`):
->
-> **Tier 0 — always (slim, engineer/architect-focused; Director-ratified 2026-05-23 PM2 — matter knowledge demoted to Tier 1):**
-> 1. *Global rules + Tier 0 portfolio context (`/Users/dimitry/.claude/CLAUDE.md` + imported `dropbox-tier0.md`) are harness-auto-loaded — do NOT Read again. Sanity check: confirm Rule 1 ("Director is non-technical") is visible in context; if missing, fall back to Read on `/Users/dimitry/.claude/CLAUDE.md`.*
-> 2. Invoke the Read tool on `~/baker-vault/_ops/agents/aihead2/orientation.md` (full AH2 orientation).
-> 3. Invoke the Read tool on `~/baker-vault/_ops/skills/ai-head/SKILL.md` (canonical AI Head operating rules).
-> 4. *Laconic register is hook-injected at SessionStart (`.claude/role-context/deputy.md` + appended `~/baker-vault/_ops/role-contexts/laconic-default.md`) — do NOT Read `~/.claude/skills/laconic/SKILL.md` again (saves ~5k tokens; dropped 2026-06-10 per Director context-bloat directive, AH2_LACONIC_TIER0_RETIRE_1). Read it only if the hook injection is missing from context.*
->
-> **Tier 1 — keyword-routed (load on match in user's first substantive message):**
->
-> | Keywords in user message | Also Read |
-> |---|---|
-> | cross-lane review, PR, security-review, picker-architect, code-reviewer | `~/baker-vault/_ops/processes/ai-head-autonomy-charter.md` (review boundaries) |
-> | AUTOPOLL, sentinel watch, gold_audit_sentinel, Mon 09:30 UTC | `~/baker-vault/_ops/agents/aihead2/operating.md` (lane state) |
-> | PINNED, handover, session resume, prior wait-state | `~/baker-vault/_ops/agents/aihead2/PINNED.md` (if present) |
-> | Cortex, capability set, signal queue (only when AH1-dispatched review fires) | `~/baker-vault/_ops/processes/cortex-stage2-v1-tracker.md` |
-> | matter context, desk shadow-org, AO/MOVIE/Hagenauer/Eastdil/Heidenauer disambig, Cortex history, Todoist API, BB-Desk, active roadmap pointers, strategic principles | `~/.claude/projects/-Users-dimitry-Vallen-Dropbox-Dimitry-vallen-Baker-Project/memory/MEMORY.md` (curated index — engineer/architect roles lazy-load this; Director-ratified 2026-05-23 PM2 to keep AH slim at session start) |
->
-> **Tier 2 — topic-depth (read only when question genuinely needs deep domain reasoning):**
->
-> | Question depth | Also Read |
-> |---|---|
-> | Specific PR review on substantive Tier-B diff | open the diff via `gh pr diff <N>` — do not pre-load briefs |
-> | Cortex architecture deep dive | `~/baker-vault/_ops/ideas/2026-04-27-cortex-architecture-final-locked.md` |
->
-> **Tier 3 — cross-agent dispatch (DO NOT read another agent's library directly):**
->
-> | Domain | Owner — dispatch a question; do not read directly |
-> |---|---|
-> | IT / SRE / NIST / agent-architecture / security-engineering / prompt-engineering | AID-T (`wiki/_ai-it/aid-t/library/`) |
-> | Finance / commercial reasoning / Baden-Baden vehicles | BEN (`wiki/_finance/baden-baden/`) |
-> | Specific matter context (Hagenauer, Cupial, MOVIE, AO, Annaberg, Balgerstrasse) | matter desk for that slug (`wiki/<matter-slug>/`) |
->
-> **First-message confirmation phrase (evidence-bound, exact):** `"AH2 oriented (Tier 0). Read: aihead2/orientation.md, ai-head/SKILL.md. Laconic via hook. Tier 1+ on demand."`
->
-> Block applies when cwd path is `/Users/dimitry/bm-aihead2` OR a Cowork-spawned worktree under it (`bm-aihead2/.claude/worktrees/<name>`). Pre-2026-05-10 the check was strict basename only, which broke when Cowork forced worktree-mode and spawned sessions under `.claude/worktrees/`. B-code sessions follow the B-code block above; AH1 sessions follow the AH1 block below.
+> **B-code (b1–b4) + AH2 (deputy) picker orientation moved to per-picker `.claude/role-context/<role>.md`**
+> (SESSION_SLIM_IMPL_1 L2, 2026-06-17) — injected at SessionStart by `.claude/hooks/session-start-role.sh`, so each
+> role loads only its own block instead of all three. AH1 orientation remains inline below because the AH1/lead
+> role-context is the symlinked shared laconic register (moving it there would corrupt the register).
 
 > **AI Head A1 (AH1) opening this dir via picker symlink** (`~/Vallen Dropbox/Dimitry vallen/bm-aihead1/` → `~/bm-aihead1/`, ratified 2026-05-08 to mirror AH2 pattern + drop session start cost from ~12% to ~6% by retiring the heavy `~/Desktop/baker-code` auto-memory slug; further trimmed 2026-05-23 PM2 — canonical MEMORY.md matter index demoted to Tier 1, lead stays slim at session start per Director directive "we need him as an engineer, an architect, etc. ... we need him slim. Especially at the start of the session") — MANDATORY before any reply (Tier 0/1/2/3 access model, ratified 2026-05-09 — `_ops/processes/cross-agent-knowledge-dispatch.md`):
 >
@@ -189,42 +142,19 @@ Per Director directive 2026-04-28T07:00Z + `_ops/processes/ai-head-autonomy-char
 
 No lint/typecheck config in repo. No GitHub Actions; Render is single deploy path.
 
-## Architecture — Cortex 3T migration in progress
+## Architecture — Cortex 3T (canonical docs, not restated here)
 
-**Today (2026-04-29):** Cortex Stage 2 V1 partially shipped — `CORTEX_3T_FORMALIZE_1A` + `1B` + `1C` merged 2026-04-28; `CORTEX_PHASE5_IDEMPOTENCY_1` (PR #75) merged 2026-04-28T17:24Z. DRY_RUN pending. First live AO-matter cycle = next milestone (per `_ops/processes/cortex-stage2-v1-tracker.md`).
+Live roadmap: https://brisen-docs.onrender.com/architecture/cortex-roadmap-current.html · locked spec:
+`_ops/ideas/2026-04-27-cortex-architecture-final-locked.md` (RA-23) · Stage-2 tracker:
+`_ops/processes/cortex-stage2-v1-tracker.md` · current state + capability-set counts: canonical MEMORY.md.
+Cortex Core = 6-phase cycle (sense→load→reason→propose→act→archive) in `orchestrator/cortex_runner.py`;
+per-matter configs in `baker-vault/wiki/matters/<slug>/cortex-config.md`; invoked specialists capped 5/cycle, 60s, 5-min.
 
-**Canonical RA-23 spec:** `_ops/ideas/2026-04-27-cortex-architecture-final-locked.md`
-(ratified 2026-04-27; will promote to `_ops/processes/cortex-architecture-final.md` via AI Head A Tier B).
-**Stage 1 brief:** `_ops/ideas/2026-04-27-cortex-3t-formalize-spec.md` (RA-22).
-
-### Legacy (still running, being migrated)
-- **18 active capability sets** out of 24 total (2 client_pm + 14 domain + 2 meta active; 6 domain inactive). DB-verified 2026-04-29 via `SELECT capability_type, active, COUNT(*) FROM capability_sets GROUP BY 1,2`. Accessed via fast/delegate path (`classify_intent()` → capability match → SSE stream).
-- Matter-PM absorption into Cortex per-matter configs **ratified 2026-04-27 (RA-23)**; execution lands when Stage 2 V1 first AO-matter cycle clears DRY_RUN. Until then: AO PM + MOVIE AM remain queryable via dashboard "Ask AO PM" / "Ask MOVIE AM" buttons.
-
-### Target (Cortex 3T — RA-23 ratified)
-- **Cortex Core:** 6-phase cycle (sense → load → reason → propose → act → archive)
-  in `orchestrator/cortex_runner.py`.
-- **Per-matter configs** absorb matter-PM brains; live in `baker-vault/wiki/matters/<slug>/cortex-config.md`.
-- **Invoked domain capabilities** (legal / finance / tax-CH/AT/DE / game-theory) called from Phase 3b.
-  Cap **5/cycle**, **60s** per specialist (2 retries), **5-min** absolute cycle timeout.
-- **Curated knowledge** per matter in `wiki/matters/<slug>/curated/<topic>-<date>.md`
-  (post-reasoned outputs, NOT raw data). Postgres mirror via `cortex_phase_outputs`.
-- **Entity registry** in `wiki/people/<slug>.md` + `wiki/entities/<slug>.md`.
-- **Activation:** Cortex auto-trigger (Phase 3a meta-reasoning) OR Director manual (Scan/dashboard).
-  No third path. No cron / peer / sentinel-direct triggering.
-- **Cortex meta-knowledge:** `wiki/_cortex/{director-gold-global,cross-matter-patterns,brisen-style}.md`.
-
-### Signal flow
-WhatsApp + email + meeting transcripts → ingestion classifies → `signal_queue`
-(with `matter_slug` + 0-3 `related_matters`) → Cortex Phase 1 (sense).
-WhatsApp pipeline: WAHA webhook → classify → route → `_wa_reply()`. 6h backfill.
-
-### Read/write split (Cortex era)
-- Sentinels write raw data tables; never wiki.
-- Cortex Phase 3 specialists write `cortex_phase_outputs` + curated markdown; read raw.
-- Director GOLD writes `proposed-gold.md` per matter via PR #66 workflow.
-- AI Head Tier B writes per-matter `cortex-config.md`.
-- All Baker writes audited to `baker_actions` table.
+**Load-bearing invariants (keep inline):**
+- Activation: Cortex auto-trigger (Phase 3a meta-reasoning) OR Director manual only. No cron / peer / sentinel-direct triggering.
+- Read/write split: sentinels write raw tables, never wiki; Cortex Phase-3 specialists write `cortex_phase_outputs` + curated
+  markdown (read raw); Director GOLD writes `proposed-gold.md` (PR #66 flow); AI Head Tier B writes `cortex-config.md`;
+  ALL Baker writes audited to `baker_actions`.
 
 ## Where stuff lives
 - `outputs/dashboard.py` → FastAPI app entry (~11.7k lines — be aware before edits)
