@@ -39,10 +39,16 @@ from orchestrator.gemini_client import is_gemini_model, call_flash, GeminiRespon
 # (python-docx, openpyxl, reportlab, python-pptx = ~120 MB saved at startup)
 
 
-def _llm_call(model: str, messages: list, max_tokens: int = 2000, system: str = None):
-    """GEMINI-MIGRATION-1: Unified LLM call — routes to Gemini or Anthropic."""
+def _llm_call(model: str, messages: list, max_tokens: int = 2000, system: str = None,
+              response_format: str = None, thinking_budget: int = None):
+    """GEMINI-MIGRATION-1: Unified LLM call — routes to Gemini or Anthropic.
+
+    response_format / thinking_budget are Gemini-only knobs (ignored on the
+    Anthropic branch). thinking_budget=0 disables 2.5-flash thinking so small
+    max_tokens calls don't truncate (AI_HOTEL_CAPTURE_CLASSIFY_1)."""
     if is_gemini_model(model):
-        return call_flash(messages=messages, max_tokens=max_tokens, system=system)
+        return call_flash(messages=messages, max_tokens=max_tokens, system=system,
+                          response_format=response_format, thinking_budget=thinking_budget)
     else:
         client = anthropic.Anthropic(api_key=config.claude.api_key)
         kwargs = dict(model=model, max_tokens=max_tokens, messages=messages)
@@ -9407,12 +9413,27 @@ async def ai_hotel_capture(image: UploadFile = File(None), note: str = Form(""))
             text_block += "\n\n(Photo only, no dictated text.)"
         content.append({"type": "text", "text": text_block})
 
+        # thinking_budget=0 DISABLES 2.5-flash thinking — without it the default
+        # dynamic thinking eats the 600-tok budget and truncates the JSON mid-
+        # object (finish_reason=MAX_TOKENS, empty .text), which silently routed
+        # 100% of captures to general (AI_HOTEL_CAPTURE_CLASSIFY_1 diagnosis).
+        # response_format="json" forces clean fence-free JSON.
         resp = _llm_call("gemini-2.5-flash", max_tokens=600,
+                         response_format="json", thinking_budget=0,
                          messages=[{"role": "user", "content": content}])
         answer = (resp.text or "").strip()
         from orchestrator.cost_monitor import log_api_cost
         log_api_cost("gemini-2.5-flash", resp.usage.input_tokens, resp.usage.output_tokens,
                      source="ai_hotel_capture")
+
+        # FAIL LOUD: an empty model response is the silent-truncation signature —
+        # log at error so it can never again be swallowed unnoticed.
+        if not answer:
+            logger.error(
+                "ai_hotel_capture classification returned EMPTY text "
+                "(in=%s out=%s) — staying general; check thinking/token budget.",
+                resp.usage.input_tokens, resp.usage.output_tokens,
+            )
 
         # Defensive parse: strip code fences, json.loads, validate section.
         raw = answer
@@ -9430,8 +9451,17 @@ async def ai_hotel_capture(image: UploadFile = File(None), note: str = Form(""))
             s = parsed.get("summary")
             if s and str(s).strip():
                 summary = str(s).strip()[:400]
+        elif answer:
+            # Non-empty but unusable (no valid section parsed): surface it loud
+            # rather than silently defaulting — this is the other silent path.
+            logger.error(
+                "ai_hotel_capture classification produced no valid section "
+                "(cand=%r) — staying general. Raw head: %s",
+                cand, answer[:200],
+            )
     except Exception as classify_err:
-        logger.warning(f"ai_hotel_capture classification failed (fail-soft to general): {classify_err}")
+        logger.error(f"ai_hotel_capture classification failed (fail-soft to general): {classify_err}",
+                     exc_info=True)
 
     # Persist (parameterized) — image as base64 text, never to disk.
     try:
@@ -9467,6 +9497,40 @@ async def ai_hotel_capture(image: UploadFile = File(None), note: str = Form(""))
         raise HTTPException(500, "Could not save capture")
 
     logger.info(f"ai_hotel_capture saved: id={new_id} source={source} section={section_guess}")
+
+    # AI_HOTEL_CAPTURE_EMBED_1: also make the note semantically searchable via
+    # Baker's vector memory. BEST-EFFORT — the DB row above is the source of
+    # truth; an embed failure must never block the 200 (the insert already
+    # committed). Routes through the canonical kbl ingest chokepoint, which uses
+    # the SentinelStoreBack singleton internally (never instantiate directly).
+    if note:
+        try:
+            from kbl.ingest_endpoint import ingest as _kbl_ingest
+            _body_parts = []
+            if summary and summary != note[:200]:
+                _body_parts.append(f"Summary: {summary}")
+            _body_parts.append(note)
+            _kbl_ingest(
+                frontmatter={
+                    "type": "entity",
+                    "slug": f"ai-hotel-capture-{new_id}",
+                    "name": f"AI Hotel field capture #{new_id} ({section_guess})",
+                    "updated": datetime.now(timezone.utc).strftime("%Y-%m-%d"),
+                    "author": "agent",
+                    "tags": ["ai-hotel"],
+                    "related": [],
+                },
+                body="\n\n".join(_body_parts),
+                trigger_source="ai_hotel_capture",
+            )
+            logger.info(f"ai_hotel_capture embedded to vector memory: id={new_id}")
+        except Exception as embed_err:
+            # Loud but non-fatal — capture is already persisted.
+            logger.error(
+                f"ai_hotel_capture embed failed (non-fatal, id={new_id}): {embed_err}",
+                exc_info=True,
+            )
+
     return {"id": new_id, "section_guess": section_guess,
             "related_area": related_area, "summary": summary}
 

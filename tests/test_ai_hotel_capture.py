@@ -162,6 +162,12 @@ def _client(monkeypatch, llm_text='{"section_guess":"general","related_area":nul
     monkeypatch.setattr(dash, "_get_store", lambda: stub)
     monkeypatch.setattr(dash, "_llm_call", lambda *a, **k: _FakeResp(llm_text))
     monkeypatch.setattr(cm, "log_api_cost", lambda *a, **k: None)
+    # AI_HOTEL_CAPTURE_EMBED_1: capture flow now routes the note through the
+    # kbl ingest chokepoint (which uses the global SentinelStoreBack singleton,
+    # NOT the stub store). No-op it by default so TestClient runs stay hermetic
+    # and never touch real PG/Qdrant; embed-specific tests re-patch it.
+    import kbl.ingest_endpoint as _kie
+    monkeypatch.setattr(_kie, "ingest", lambda *a, **k: None)
     return TestClient(dash.app), stub
 
 
@@ -331,3 +337,134 @@ def test_captures_limit_clamped(monkeypatch):
     resp = client.get("/api/ai-hotel/captures?limit=9999",
                       headers={"X-Baker-Key": "test-key"})
     assert resp.status_code == 200
+
+
+# ─── AI_HOTEL_CAPTURE_CLASSIFY_1: defect-1 regression (classification) ──────
+
+
+def test_classify_call_disables_thinking_and_uses_json():
+    """Source-level guard for the root cause: the capture classifier MUST
+    disable gemini-2.5-flash thinking (thinking_budget=0) and request JSON.
+    Without these the 600-token call truncates mid-JSON (thinking ate the
+    budget, finish_reason=MAX_TOKENS) and EVERY capture silently defaulted to
+    section=general + raw-truncation summary."""
+    src = Path("outputs/dashboard.py").read_text()
+    seg = src[src.index("async def ai_hotel_capture("):src.index("async def ai_hotel_captures(")]
+    assert "thinking_budget=0" in seg
+    assert 'response_format="json"' in seg
+
+
+@_skip_without_dashboard
+def test_known_note_routes_off_general_with_ai_summary(monkeypatch):
+    """Behavioral regression: a real classified note must route OFF general and
+    carry an AI summary, never the raw note[:200] truncation default."""
+    note = ("Housekeeper, front desk and security teams want hands-free "
+            "multilingual comms while on the floor.")
+    client, stub = _client(
+        monkeypatch,
+        llm_text='{"section_guess":"use_case","related_area":"staff training",'
+                 '"summary":"AI comms for hotel staff: multilingual, hands-free"}',
+    )
+    resp = client.post("/api/ai-hotel/capture", headers={"X-Baker-Key": "test-key"},
+                       data={"note": note})
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+    assert body["section_guess"] == "use_case"          # routed off general
+    assert body["section_guess"] != "general"
+    assert body["related_area"] == "staff training"
+    assert body["summary"] != note[:200]                # AI summary, not raw trunc
+    assert body["summary"].startswith("AI comms")
+
+
+@_skip_without_dashboard
+def test_classify_exception_falls_soft_but_returns_200(monkeypatch):
+    """FAIL-LOUD-but-fault-tolerant: if the LLM call raises, the capture still
+    persists + returns 200 general (the error is logged loud server-side)."""
+    client, stub = _client(monkeypatch)
+    import outputs.dashboard as dash
+
+    def _boom(*a, **k):
+        raise RuntimeError("gemini exploded")
+
+    monkeypatch.setattr(dash, "_llm_call", _boom)
+    resp = client.post("/api/ai-hotel/capture", headers={"X-Baker-Key": "test-key"},
+                       data={"note": "Some floor observation"})
+    assert resp.status_code == 200, resp.text
+    assert resp.json()["section_guess"] == "general"
+    assert len(stub.rows) == 1  # persisted despite classify failure
+
+
+# ─── AI_HOTEL_CAPTURE_EMBED_1: defect-2 regression (vector memory) ──────────
+
+
+def test_capture_embeds_via_kbl_ingest_source():
+    """Source-level: capture flow routes the note through the canonical kbl
+    ingest chokepoint, attributed (ai-hotel) and via the documented trigger."""
+    src = Path("outputs/dashboard.py").read_text()
+    seg = src[src.index("async def ai_hotel_capture("):src.index("async def ai_hotel_captures(")]
+    assert "from kbl.ingest_endpoint import ingest" in seg
+    assert 'trigger_source="ai_hotel_capture"' in seg
+    assert '"ai-hotel"' in seg
+
+
+@_skip_without_dashboard
+def test_embed_invoked_with_attribution(monkeypatch):
+    """The note is handed to kbl ingest tagged ai-hotel, authored by agent,
+    via trigger_source=ai_hotel_capture."""
+    client, stub = _client(
+        monkeypatch,
+        llm_text='{"section_guess":"comms","related_area":null,"summary":"Reach out to NVIDIA."}',
+    )
+    calls = []
+    import kbl.ingest_endpoint as kie
+    monkeypatch.setattr(kie, "ingest", lambda **k: calls.append(k))
+    resp = client.post("/api/ai-hotel/capture", headers={"X-Baker-Key": "test-key"},
+                       data={"note": "Email NVIDIA about a flagship reference."})
+    assert resp.status_code == 200, resp.text
+    assert len(calls) == 1
+    fm = calls[0]["frontmatter"]
+    assert fm["type"] == "entity"
+    assert fm["author"] == "agent"
+    assert fm["tags"] == ["ai-hotel"]
+    assert fm["slug"].startswith("ai-hotel-capture-")
+    assert calls[0]["trigger_source"] == "ai_hotel_capture"
+
+
+@_skip_without_dashboard
+def test_embed_failure_does_not_block_capture(monkeypatch):
+    """Best-effort embed: an ingest exception must NOT block the DB insert or
+    the 200 response (the capture row already committed)."""
+    client, stub = _client(
+        monkeypatch,
+        llm_text='{"section_guess":"research","related_area":null,"summary":"A datapoint."}',
+    )
+    import kbl.ingest_endpoint as kie
+
+    def _boom(*a, **k):
+        raise RuntimeError("qdrant down")
+
+    monkeypatch.setattr(kie, "ingest", _boom)
+    resp = client.post("/api/ai-hotel/capture", headers={"X-Baker-Key": "test-key"},
+                       data={"note": "competitor opened an AI suite"})
+    assert resp.status_code == 200, resp.text
+    assert resp.json()["section_guess"] == "research"
+    assert len(stub.rows) == 1  # persisted despite embed failure
+
+
+@_skip_without_dashboard
+def test_photo_only_no_note_skips_embed(monkeypatch):
+    """A pure photo with no dictation has no note_text to embed — the ingest
+    chokepoint must not be called (nothing to make searchable)."""
+    client, stub = _client(monkeypatch)
+    calls = []
+    import kbl.ingest_endpoint as kie
+    monkeypatch.setattr(kie, "ingest", lambda **k: calls.append(k))
+    big = _make_jpeg(2400)
+    resp = client.post(
+        "/api/ai-hotel/capture",
+        headers={"X-Baker-Key": "test-key"},
+        files={"image": ("booth.jpg", big, "image/jpeg")},
+    )
+    assert resp.status_code == 200, resp.text
+    assert len(stub.rows) == 1
+    assert len(calls) == 0  # no note → no embed
