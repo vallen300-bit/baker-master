@@ -331,7 +331,8 @@ const ICONS={
   bot:'<rect x="4" y="8" width="16" height="12" rx="2"/><path d="M12 8V4"/><circle cx="12" cy="3" r="1"/><line x1="9" y1="13" x2="9" y2="13.01"/><line x1="15" y1="13" x2="15" y2="13.01"/><path d="M9 17h6"/>',
   star:'<polygon points="12 2 15.1 8.6 22 9.3 17 14 18.2 21 12 17.5 5.8 21 7 14 2 9.3 8.9 8.6 12 2"/>',
   external:'<path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/><polyline points="15 3 21 3 21 9"/><line x1="10" y1="14" x2="21" y2="3"/>',
-  dot:'<circle cx="12" cy="12" r="4"/>'
+  dot:'<circle cx="12" cy="12" r="4"/>',
+  flag:'<path d="M4 15s1-1 4-1 5 2 8 2 4-1 4-1V3s-1 1-4 1-5-2-8-2-4 1-4 1z"/><line x1="4" y1="22" x2="4" y2="15"/>'
 };
 function svgIcon(key){
   const inner=ICONS[key]||ICONS.dot;
@@ -387,10 +388,17 @@ const COMMS=[
    desc:'Outbound communication to Mandarin Oriental, built from this stakeholder map and the AI-Hotel use-case areas.',status:'soon'}
 ];
 
+const COMPETITORS=[
+  {title:'Rosewood — “Hospitality 2030” AI hackathon',icon:'flag',meta:'Origination Desk · 17 Jun 2026 · two-source verified',
+   desc:'A leading luxury operator ran what it billed as the sector’s first AI hackathon — at Rosewood Sand Hill in Silicon Valley, partnered with Anthropic and ElevenLabs. What the move means for our flagship, with the counter-case and watch items.',
+   url:'/static/ai-hotel-competitors-rosewood.html',status:'live'}
+];
+
 const NAV=[
   {id:'hotel',name:'AI Hotel',icon:'hotel'},
   {id:'stake',name:"Stakeholders' interests",icon:'users'},
   {id:'research',name:'Research',icon:'book'},
+  {id:'competitors',name:'Competitors',icon:'flag'},
   {id:'comms',name:'Communications to parties',icon:'mail'},
   {id:'notes',name:'Field notes',icon:'message'},
   {id:'planned',name:'Planned features',icon:'bot'}
@@ -603,6 +611,7 @@ function show(id){
   else if(id==='stake')renderStake(main);
   else if(id==='research')renderLibrary(main,{kicker:'Library',title:'Research',sub:'Studies commissioned for this project. Each card opens its full report. More cards are added each session.'},RESEARCH);
   else if(id==='comms')renderLibrary(main,{kicker:'Outbound',title:'Communications to parties',sub:'Letters and messages to each party, built from this map. Each opens as a report once drafted.'},COMMS);
+  else if(id==='competitors')renderLibrary(main,{kicker:'Market',title:'Competitors',sub:'Competitor moves in AI-native luxury hospitality. Each card opens its full note. Added as signals surface.'},COMPETITORS);
   else if(id==='notes')renderNotes(main);
   else if(id==='planned')renderPlanned(main);
   else renderHotel(main);
