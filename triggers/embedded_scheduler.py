@@ -310,15 +310,23 @@ def _register_jobs(scheduler: BackgroundScheduler):
     logger.info("Registered: dropbox_edita_poll (Edita-Feed)")
 
     # Todoist polling — every 30 minutes
-    from triggers.todoist_trigger import run_todoist_poll
-    scheduler.add_job(
-        run_todoist_poll,
-        IntervalTrigger(seconds=config.triggers.todoist_check_interval),
-        id="todoist_poll", name="Todoist task polling",
-        coalesce=True, max_instances=1, replace_existing=True,
-    )
-    register_expected_job("todoist_poll", config.triggers.todoist_check_interval)
-    logger.info(f"Registered: todoist_poll (every {config.triggers.todoist_check_interval}s)")
+    # TODOIST_RETIRE_1: Director retired Todoist 2026-06-18 ("I don't use it;
+    # keep on-demand access"); prod sets TODOIST_POLL_ENABLED=false so the job
+    # (and its expected-job watchdog entry) are skipped, mirroring fireflies
+    # above. run_todoist_poll stays importable/callable for on-demand use either
+    # way, and the valid env token is kept for the on-demand MCP path.
+    if config.triggers.todoist_poll_enabled:
+        from triggers.todoist_trigger import run_todoist_poll
+        scheduler.add_job(
+            run_todoist_poll,
+            IntervalTrigger(seconds=config.triggers.todoist_check_interval),
+            id="todoist_poll", name="Todoist task polling",
+            coalesce=True, max_instances=1, replace_existing=True,
+        )
+        register_expected_job("todoist_poll", config.triggers.todoist_check_interval)
+        logger.info(f"Registered: todoist_poll (every {config.triggers.todoist_check_interval}s)")
+    else:
+        logger.info("todoist_poll disabled via TODOIST_POLL_ENABLED — skipping registration")
 
     # RSS polling — every 60 minutes (RSS-1)
     from triggers.rss_trigger import run_rss_poll

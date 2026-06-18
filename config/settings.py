@@ -472,6 +472,12 @@ class TriggerConfig:
     # WhatsApp: migrated to WAHA webhook (Session 26) — polling removed
     # Todoist polling interval
     todoist_check_interval: int = 1800  # 30 minutes
+    # Todoist poll toggle (TODOIST_RETIRE_1). Default TRUE in code to preserve
+    # behavior + tests; prod disable is via env TODOIST_POLL_ENABLED=false
+    # (Director retired Todoist 2026-06-18 — "I don't use it; keep on-demand
+    # access"). Mirrors FIREFLIES_SCAN_ENABLED. The on-demand MCP path
+    # (baker_todoist_tasks) and the valid env token are untouched.
+    todoist_poll_enabled: bool = os.getenv("TODOIST_POLL_ENABLED", "true").lower() == "true"
     # Dropbox polling interval
     dropbox_check_interval: int = int(os.getenv("DROPBOX_CHECK_INTERVAL", "1800"))  # 30 minutes
     # RSS polling interval
