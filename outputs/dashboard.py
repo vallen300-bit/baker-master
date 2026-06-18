@@ -9448,9 +9448,14 @@ async def ai_hotel_capture(
         try:
             import base64 as _b64a
             audio_b64 = _b64a.standard_b64encode(audio_bytes).decode("utf-8")
+            # thinking_budget=0 is load-bearing here exactly as on the sibling
+            # classify call: 2.5-flash's default dynamic thinking would eat the
+            # output budget and truncate/empty the transcript (the #372
+            # MAX_TOKENS root cause). Transcription needs ZERO thinking.
             aresp = _llm_call(
                 "gemini-2.5-flash",
                 max_tokens=_AI_HOTEL_TRANSCRIBE_MAX_TOKENS,
+                thinking_budget=0,
                 messages=[{"role": "user", "content": [
                     {"type": "audio", "source": {"type": "base64",
                                                  "media_type": audio_type, "data": audio_b64}},
