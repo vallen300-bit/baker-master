@@ -365,3 +365,48 @@ def test_ingest_atomic_rollback_on_ledger_failure(
     assert cur.fetchone()[0] == 0
     cur.execute("SELECT COUNT(*) FROM baker_actions")
     assert cur.fetchone()[0] == 0
+
+
+# ─── QDRANT_COLLECTION_CREATE_1: lazy ensure-create in _upsert_vector ──────
+
+@pytest.fixture
+def patch_embed(monkeypatch):
+    """Stub models.cortex._embed_text (imported inside _upsert_vector) to a
+    fixed non-empty vector so the upsert path executes without Voyage."""
+    import models.cortex as cortex
+    monkeypatch.setattr(cortex, "_embed_text", lambda text: [0.1] * 1024)
+
+
+def test_upsert_vector_creates_collection_when_missing(patch_embed, valid_matter_fm):
+    """get_collection raising (fresh Qdrant) → create_collection called once with
+    baker-wiki / 1024 / COSINE, then upsert proceeds. Guards the 404 defect."""
+    from unittest.mock import MagicMock
+    from qdrant_client.models import Distance
+
+    client = MagicMock()
+    client.get_collection.side_effect = Exception("404: collection not found")
+
+    pid = mod._upsert_vector(client, valid_matter_fm, "some body text", wiki_page_id=7)
+
+    assert pid is not None
+    client.create_collection.assert_called_once()
+    kwargs = client.create_collection.call_args.kwargs
+    assert kwargs["collection_name"] == "baker-wiki"
+    assert kwargs["vectors_config"].size == 1024
+    assert kwargs["vectors_config"].distance == Distance.COSINE
+    client.upsert.assert_called_once()
+
+
+def test_upsert_vector_idempotent_when_collection_exists(patch_embed, valid_matter_fm):
+    """get_collection succeeding (collection already present) → create_collection
+    NOT called; upsert still proceeds. Idempotency on repeat ingest."""
+    from unittest.mock import MagicMock
+
+    client = MagicMock()
+    client.get_collection.return_value = object()  # exists, no raise
+
+    pid = mod._upsert_vector(client, valid_matter_fm, "some body text", wiki_page_id=7)
+
+    assert pid is not None
+    client.create_collection.assert_not_called()
+    client.upsert.assert_called_once()
