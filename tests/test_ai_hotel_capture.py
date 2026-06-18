@@ -660,6 +660,45 @@ def test_audio_transcribed_into_note_text_source_audio(monkeypatch):
     assert len(stub.image_rows) == 0
 
 
+def _has_audio_part(messages):
+    for m in (messages or []):
+        c = m.get("content")
+        if isinstance(c, list):
+            for p in c:
+                if isinstance(p, dict) and p.get("type") == "audio":
+                    return True
+    return False
+
+
+@_skip_without_dashboard
+def test_audio_transcription_disables_thinking(monkeypatch):
+    """AUDIO_THINKING_BUDGET_GUARD_1: the audio transcription _llm_call MUST pass
+    thinking_budget=0 — the same load-bearing guard the classify call documents.
+    Without it 2.5-flash's default dynamic thinking eats the output budget and
+    truncates/empties the transcript (the #372 MAX_TOKENS root cause)."""
+    import outputs.dashboard as dash
+    client, stub = _client(monkeypatch)
+
+    calls = []
+
+    def _record(model, messages=None, **k):
+        calls.append({"messages": messages, "kwargs": k})
+        if _has_audio_part(messages):
+            return _FakeResp("the transcript")
+        return _FakeResp('{"section_guess":"general","related_area":null,"summary":"x"}')
+
+    monkeypatch.setattr(dash, "_llm_call", _record)
+    resp = client.post(
+        "/api/ai-hotel/capture",
+        headers={"X-Baker-Key": "test-key"},
+        files={"audio": ("d.webm", b"\x1aE\xdf\xa3bytes", "audio/webm")},
+    )
+    assert resp.status_code == 200, resp.text
+    audio_calls = [c for c in calls if _has_audio_part(c["messages"])]
+    assert len(audio_calls) == 1
+    assert audio_calls[0]["kwargs"].get("thinking_budget") == 0
+
+
 @_skip_without_dashboard
 def test_audio_unsupported_type_rejected(monkeypatch):
     """Audio type allowlist is enforced server-side."""
