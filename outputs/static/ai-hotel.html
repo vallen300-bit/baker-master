@@ -166,6 +166,8 @@
   .ncard{background:var(--card);border:1px solid var(--line);border-radius:8px;padding:16px 18px;display:flex;gap:14px;box-shadow:var(--shadow);transition:border-color .14s,box-shadow .14s}
   .ncard:hover{border-color:var(--id-blue-line);box-shadow:var(--shadow-hover)}
   .nthumb{width:64px;height:64px;border-radius:8px;object-fit:cover;border:1px solid var(--line);flex:0 0 auto;background:var(--bg)}
+  .nthumbs{display:flex;gap:6px;flex-wrap:wrap;margin-top:10px}
+  .nthumbs img{width:44px;height:44px;border-radius:6px;object-fit:cover;border:1px solid var(--line);background:var(--bg)}
   .nbody{flex:1 1 auto;min-width:0}
   .nsmry{font-size:14.5px;color:var(--text);line-height:1.5;margin-bottom:10px;word-wrap:break-word}
   .nmeta{display:flex;align-items:center;gap:9px;flex-wrap:wrap}
@@ -606,7 +608,10 @@ function renderNotes(main){
       if(!caps.length){wrap.appendChild(el('div','nempty','No field notes yet. Snap or dictate one from the capture page.'));return;}
       caps.forEach(c=>{
         const card=el('div','ncard');
-        if(c.image){const img=document.createElement('img');img.className='nthumb';img.src=c.image;img.alt='Field photo';img.loading='lazy';card.appendChild(img);}
+        // images[] is the upgraded multi-photo field; fall back to the legacy
+        // single image for any pre-upgrade capture.
+        const imgs=(Array.isArray(c.images)&&c.images.length)?c.images:(c.image?[c.image]:[]);
+        if(imgs.length){const img=document.createElement('img');img.className='nthumb';img.src=imgs[0];img.alt='Field photo';img.loading='lazy';card.appendChild(img);}
         const body=el('div','nbody');
         body.appendChild(el('div','nsmry',c.summary||'(no summary)'));
         const meta=el('div','nmeta');
@@ -614,7 +619,13 @@ function renderNotes(main){
         meta.appendChild(el('span','ntag '+sec,NOTE_SECTION_LABELS[sec]));
         if(c.related_area)meta.appendChild(el('span','nrel',c.related_area));
         meta.appendChild(el('span','ntime',fmtNoteTime(c.created_at)));
-        body.appendChild(meta);card.appendChild(body);wrap.appendChild(card);
+        body.appendChild(meta);
+        if(imgs.length>1){
+          const strip=el('div','nthumbs');
+          imgs.slice(1).forEach(src=>{const t=document.createElement('img');t.src=src;t.alt='Field photo';t.loading='lazy';strip.appendChild(t);});
+          body.appendChild(strip);
+        }
+        card.appendChild(body);wrap.appendChild(card);
       });
     })
     .catch(()=>{

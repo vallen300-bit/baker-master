@@ -78,7 +78,19 @@ class _DictCursor:
         self._result = []
 
     def execute(self, sql, params=None):
-        if "INSERT INTO ai_hotel_captures" in sql:
+        if "INSERT INTO ai_hotel_capture_images" in sql:
+            # AI_HOTEL_CAPTURE_UPGRADES_1 child-table insert.
+            capture_id, ordinal, b64, media = params
+            self._store.image_rows.append({
+                "id": self._store._next_img_id,
+                "capture_id": capture_id,
+                "ordinal": ordinal,
+                "image_b64": b64,
+                "image_media": media,
+            })
+            self._store._next_img_id += 1
+            self._result = []
+        elif "INSERT INTO ai_hotel_captures" in sql:
             source, note, b64, media, section, related, summary = params
             new_id = self._store._next_id
             self._store._next_id += 1
@@ -95,6 +107,12 @@ class _DictCursor:
                 "status": "new",
             })
             self._result = [(new_id,)]
+        elif "FROM ai_hotel_capture_images" in sql:
+            # GET child-image fetch: WHERE capture_id = ANY(%s) ORDER BY capture_id, ordinal.
+            cap_ids = params[0] if params else []
+            kids = [dict(i) for i in self._store.image_rows if i["capture_id"] in cap_ids]
+            kids = sorted(kids, key=lambda i: (i["capture_id"], i["ordinal"]))
+            self._result = kids
         elif "FROM ai_hotel_captures" in sql:
             rows = [r for r in self._store.rows if r["status"] != "dismissed"]
             rows = sorted(rows, key=lambda r: r["created_at"], reverse=True)
@@ -129,7 +147,9 @@ class _StubConn:
 class _StubStore:
     def __init__(self):
         self.rows = []
+        self.image_rows = []      # AI_HOTEL_CAPTURE_UPGRADES_1 child photos
         self._next_id = 1
+        self._next_img_id = 1
 
     def _get_conn(self):
         return _StubConn(self)
@@ -261,7 +281,7 @@ def test_bad_image_type_rejected(monkeypatch):
     resp = client.post(
         "/api/ai-hotel/capture",
         headers={"X-Baker-Key": "test-key"},
-        files={"image": ("note.txt", b"not an image", "text/plain")},
+        files={"images": ("note.txt", b"not an image", "text/plain")},
     )
     assert resp.status_code == 400
 
@@ -275,7 +295,7 @@ def test_undecodable_image_rejected_not_stored(monkeypatch):
     resp = client.post(
         "/api/ai-hotel/capture",
         headers={"X-Baker-Key": "test-key"},
-        files={"image": ("booth.jpg", junk, "image/jpeg")},
+        files={"images": ("booth.jpg", junk, "image/jpeg")},
     )
     assert resp.status_code == 400, resp.text
     assert len(stub.rows) == 0  # nothing persisted
@@ -291,7 +311,7 @@ def test_valid_large_image_capped_under_500kb(monkeypatch):
     resp = client.post(
         "/api/ai-hotel/capture",
         headers={"X-Baker-Key": "test-key"},
-        files={"image": ("booth.jpg", big, "image/jpeg")},
+        files={"images": ("booth.jpg", big, "image/jpeg")},
         data={"note": "booth shot"},
     )
     assert resp.status_code == 200, resp.text
@@ -307,15 +327,30 @@ def test_valid_large_image_capped_under_500kb(monkeypatch):
 @_skip_without_dashboard
 def test_oversize_note_rejected(monkeypatch):
     """codex G3 S3: note length is enforced server-side, not just by the HTML
-    maxlength attribute."""
+    maxlength attribute. AI_HOTEL_CAPTURE_UPGRADES_1 raised the cap to 50000 so
+    long audio transcripts fit; > 50000 is still rejected."""
     client, stub = _client(monkeypatch)
     resp = client.post(
         "/api/ai-hotel/capture",
         headers={"X-Baker-Key": "test-key"},
-        data={"note": "x" * 4001},
+        data={"note": "x" * 50001},
     )
     assert resp.status_code == 400, resp.text
     assert len(stub.rows) == 0
+
+
+@_skip_without_dashboard
+def test_long_note_under_new_cap_succeeds(monkeypatch):
+    """A note that exceeds the OLD 4000 cap but is within the new 50000 cap must
+    now succeed (long transcripts must fit)."""
+    client, stub = _client(monkeypatch)
+    resp = client.post(
+        "/api/ai-hotel/capture",
+        headers={"X-Baker-Key": "test-key"},
+        data={"note": "x" * 5000},
+    )
+    assert resp.status_code == 200, resp.text
+    assert len(stub.rows) == 1
 
 
 @_skip_without_dashboard
@@ -479,7 +514,7 @@ def test_photo_only_no_note_skips_embed(monkeypatch):
     resp = client.post(
         "/api/ai-hotel/capture",
         headers={"X-Baker-Key": "test-key"},
-        files={"image": ("booth.jpg", big, "image/jpeg")},
+        files={"images": ("booth.jpg", big, "image/jpeg")},
     )
     assert resp.status_code == 200, resp.text
     assert len(stub.rows) == 1
@@ -538,3 +573,168 @@ def test_embed_qdrant_none_does_not_claim_embedded(monkeypatch, caplog):
     text = caplog.text
     assert "NOT vector-embedded" in text          # warned about the gap
     assert "embedded to vector memory" not in text  # never falsely claimed success
+
+
+# ─── AI_HOTEL_CAPTURE_UPGRADES_1: multi-photo (child table) ─────────────────
+
+
+def _img_files(n):
+    """n small valid JPEGs posted under the repeated `images` multipart key."""
+    return [("images", (f"p{i}.jpg", _make_jpeg(64), "image/jpeg")) for i in range(n)]
+
+
+@_skip_without_dashboard
+def test_three_images_one_parent_three_ordered_children_classified_once(monkeypatch):
+    """AC2: 3 photos + a note → 1 parent row + 3 ordered child rows; the vision
+    classifier is invoked exactly once (on the first image), never per-photo."""
+    import outputs.dashboard as dash
+    client, stub = _client(monkeypatch)
+
+    calls = {"n": 0}
+    real_fake = _FakeResp('{"section_guess":"stakeholder","related_area":"NVIDIA","summary":"NVIDIA booth."}')
+
+    def _counting(*a, **k):
+        calls["n"] += 1
+        return real_fake
+
+    monkeypatch.setattr(dash, "_llm_call", _counting)
+
+    resp = client.post(
+        "/api/ai-hotel/capture",
+        headers={"X-Baker-Key": "test-key"},
+        files=_img_files(3),
+        data={"note": "three booth shots"},
+    )
+    assert resp.status_code == 200, resp.text
+    assert len(stub.rows) == 1
+    assert stub.rows[0]["source"] == "photo"
+    kids = sorted([i for i in stub.image_rows if i["capture_id"] == stub.rows[0]["id"]],
+                  key=lambda i: i["ordinal"])
+    assert [k["ordinal"] for k in kids] == [0, 1, 2]
+    assert all(k["image_b64"] for k in kids)
+    assert calls["n"] == 1   # classified once, not 3×
+
+
+@_skip_without_dashboard
+def test_ninth_image_rejected(monkeypatch):
+    """AC2: more than 8 photos → 400, nothing persisted."""
+    client, stub = _client(monkeypatch)
+    resp = client.post(
+        "/api/ai-hotel/capture",
+        headers={"X-Baker-Key": "test-key"},
+        files=_img_files(9),
+    )
+    assert resp.status_code == 400, resp.text
+    assert len(stub.rows) == 0
+    assert len(stub.image_rows) == 0
+
+
+@_skip_without_dashboard
+def test_audio_transcribed_into_note_text_source_audio(monkeypatch):
+    """AC2: an audio dictation is transcribed server-side, the transcript lands
+    in note_text, and provenance is source='audio'."""
+    import outputs.dashboard as dash
+    client, stub = _client(monkeypatch)
+
+    def _smart(model, messages=None, **k):
+        # Audio call → transcript; otherwise → classify JSON.
+        msgs = messages or []
+        for m in msgs:
+            c = m.get("content")
+            if isinstance(c, list) and any(isinstance(p, dict) and p.get("type") == "audio" for p in c):
+                return _FakeResp("This is the dictated transcript about the NVIDIA booth.")
+        return _FakeResp('{"section_guess":"stakeholder","related_area":"NVIDIA","summary":"Booth chat."}')
+
+    monkeypatch.setattr(dash, "_llm_call", _smart)
+
+    resp = client.post(
+        "/api/ai-hotel/capture",
+        headers={"X-Baker-Key": "test-key"},
+        files={"audio": ("dictation.webm", b"\x1aE\xdf\xa3fakewebmbytes", "audio/webm")},
+    )
+    assert resp.status_code == 200, resp.text
+    assert len(stub.rows) == 1
+    row = stub.rows[0]
+    assert row["source"] == "audio"
+    assert "dictated transcript" in (row["note_text"] or "")
+    assert len(stub.image_rows) == 0
+
+
+@_skip_without_dashboard
+def test_audio_unsupported_type_rejected(monkeypatch):
+    """Audio type allowlist is enforced server-side."""
+    client, stub = _client(monkeypatch)
+    resp = client.post(
+        "/api/ai-hotel/capture",
+        headers={"X-Baker-Key": "test-key"},
+        files={"audio": ("clip.txt", b"not audio", "text/plain")},
+    )
+    assert resp.status_code == 400, resp.text
+    assert len(stub.rows) == 0
+
+
+@_skip_without_dashboard
+def test_get_returns_images_array_ordered_and_legacy_first(monkeypatch):
+    """AC3: GET returns images:[...] ordered by ordinal; legacy `image` = first."""
+    client, stub = _client(monkeypatch)
+    stub.rows = [
+        {"id": 7, "created_at": _dt.datetime(2026, 6, 18, 9, 0), "source": "photo",
+         "note_text": "multi", "image_b64": "QUFB", "image_media": "image/jpeg",
+         "section_guess": "stakeholder", "related_area": "NVIDIA",
+         "summary": "Three shots.", "status": "new"},
+    ]
+    stub.image_rows = [
+        {"id": 3, "capture_id": 7, "ordinal": 2, "image_b64": "Q0ND", "image_media": "image/jpeg"},
+        {"id": 1, "capture_id": 7, "ordinal": 0, "image_b64": "QUFB", "image_media": "image/jpeg"},
+        {"id": 2, "capture_id": 7, "ordinal": 1, "image_b64": "QkJC", "image_media": "image/jpeg"},
+    ]
+    resp = client.get("/api/ai-hotel/captures", headers={"X-Baker-Key": "test-key"})
+    assert resp.status_code == 200, resp.text
+    c = resp.json()["captures"][0]
+    assert c["images"] == [
+        "data:image/jpeg;base64,QUFB",
+        "data:image/jpeg;base64,QkJC",
+        "data:image/jpeg;base64,Q0ND",
+    ]
+    assert c["image"] == "data:image/jpeg;base64,QUFB"   # legacy = first
+    assert "image_b64" not in c
+
+
+@_skip_without_dashboard
+def test_get_legacy_single_image_row_backward_compatible(monkeypatch):
+    """AC3: a pre-upgrade row with only the parent image_b64 (no child rows) still
+    renders — images=[that one], image=that one."""
+    client, stub = _client(monkeypatch)
+    stub.rows = [
+        {"id": 5, "created_at": _dt.datetime(2026, 6, 14, 9, 0), "source": "photo",
+         "note_text": None, "image_b64": "WllY", "image_media": "image/jpeg",
+         "section_guess": "use_case", "related_area": None,
+         "summary": "Legacy single.", "status": "new"},
+    ]
+    stub.image_rows = []   # no children — pre-migration capture
+    resp = client.get("/api/ai-hotel/captures", headers={"X-Baker-Key": "test-key"})
+    assert resp.status_code == 200, resp.text
+    c = resp.json()["captures"][0]
+    assert c["images"] == ["data:image/jpeg;base64,WllY"]
+    assert c["image"] == "data:image/jpeg;base64,WllY"
+
+
+# ─── Migration shape (source-level) ────────────────────────────────────────
+
+
+def test_migration_creates_child_table_and_adds_audio_source():
+    """AC1 source-level: the migration creates the child table, backfills
+    existing images as ordinal=0, and adds 'audio' to the source CHECK. The
+    destructive down-section stays commented (runner executes the file raw)."""
+    from pathlib import Path as _P
+    mig = _P("migrations/20260618_ai_hotel_capture_images.sql").read_text()
+    assert "CREATE TABLE IF NOT EXISTS ai_hotel_capture_images" in mig
+    assert "ON DELETE CASCADE" in mig
+    assert "ordinal" in mig
+    assert "INSERT INTO ai_hotel_capture_images" in mig      # backfill
+    assert "WHERE c.image_b64 IS NOT NULL" in mig
+    assert "'audio'" in mig                                   # source CHECK widened
+    # down-section is present but commented out (never auto-run).
+    assert "-- DROP TABLE IF EXISTS ai_hotel_capture_images" in mig
+    up = mig.split("== migrate:down ==")[0]
+    assert "DROP TABLE" not in up                             # no live drop in up
