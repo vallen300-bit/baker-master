@@ -53,6 +53,7 @@ def generate(
     max_tokens: int = 2000,
     system: str = None,
     response_format: str = None,
+    thinking_budget: int = None,
 ) -> GeminiResponse:
     """
     Call Gemini API with Claude-style message format.
@@ -67,6 +68,13 @@ def generate(
             strict JSON (no markdown fences, no leading/trailing prose).
             Other values are ignored. Backward compatible — existing
             callers omit the kwarg and get the original behavior.
+        thinking_budget: when not None, caps Gemini 2.5 "thinking" tokens via
+            ``ThinkingConfig(thinking_budget=...)``. Pass 0 to DISABLE thinking
+            entirely. Critical for small ``max_tokens`` calls: 2.5-flash's
+            default dynamic thinking can consume the whole output budget and
+            truncate the answer (finish_reason=MAX_TOKENS, empty/partial text).
+            Guarded for SDK compat — silently ignored if the installed
+            google-genai lacks ThinkingConfig. (AI_HOTEL_CAPTURE_CLASSIFY_1.)
     """
     from google.genai import types
 
@@ -109,6 +117,24 @@ def generate(
         config_kwargs["system_instruction"] = system
     if response_format == "json":
         config_kwargs["response_mime_type"] = "application/json"
+    if thinking_budget is not None:
+        # SDK-compat guard. Two stale-SDK failure modes, both caught:
+        #   - AttributeError/TypeError: ThinkingConfig (or its field) missing.
+        #   - ValueError: google-genai <1.10 has ThinkingConfig but its pydantic
+        #     model REJECTS thinking_budget (ValidationError subclasses ValueError).
+        # requirements.txt pins >=1.10.0 so this should never fire in prod; if it
+        # does the install drifted below floor — log LOUD (error) since the call
+        # will then truncate and silently route to general (G3 S2-1).
+        try:
+            config_kwargs["thinking_config"] = types.ThinkingConfig(
+                thinking_budget=thinking_budget
+            )
+        except (AttributeError, TypeError, ValueError) as e:
+            logger.error(
+                "ThinkingConfig(thinking_budget=%s) unsupported by installed "
+                "google-genai (need >=1.10.0) — thinking NOT capped, response may "
+                "truncate: %s", thinking_budget, e,
+            )
     gen_config = types.GenerateContentConfig(**config_kwargs)
 
     # Retry with exponential backoff for transient errors (503, 429)
@@ -140,9 +166,11 @@ def generate(
             raise
 
 
-def call_flash(messages: list, max_tokens: int = 2000, system: str = None) -> GeminiResponse:
+def call_flash(messages: list, max_tokens: int = 2000, system: str = None,
+               response_format: str = None, thinking_budget: int = None) -> GeminiResponse:
     """Convenience: call Gemini Flash (workhorse tier)."""
-    return generate(config.gemini.flash_model, messages, max_tokens, system)
+    return generate(config.gemini.flash_model, messages, max_tokens, system,
+                    response_format=response_format, thinking_budget=thinking_budget)
 
 
 def call_pro(messages: list, max_tokens: int = 2000, system: str = None) -> GeminiResponse:
