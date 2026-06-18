@@ -126,8 +126,19 @@ def _status_for_failures(n: int) -> str:
 # Public API
 # ─────────────────────────────────────────────
 
-def report_success(source: str):
-    """Called after a successful poll. Resets failure count. Fires recovery alert if was down."""
+def report_success(source: str, payload: "dict | None" = None):
+    """Called after a successful poll. Resets failure count. Fires recovery alert if was down.
+
+    ``payload`` is an OPTIONAL observability blob some callers pass
+    (roadmap_drift_sentinel, wiki_lint, ao_pm_lint, movie_am_lint). It is
+    accepted and ignored here — the function's contract is purely "mark this
+    source healthy". Before REPORT_SUCCESS_ARITY_FIX_1 the signature took only
+    ``source``, so those 2-arg calls raised ``TypeError`` swallowed by their
+    callers' bare ``except``; the success was silently lost and any source that
+    had ever failed stayed wedged 'down' forever (roadmap_drift_sentinel froze
+    at its 2026-05-20 clickup_post_failed despite succeeding daily since).
+    Accepting the kwarg makes all four call sites recover correctly.
+    """
     if source in RETIRED_SOURCES:
         return  # RETIRE_DEAD_EVOK_SENTINELS_1: never resurrect a retired row.
     conn, store = _get_conn()
