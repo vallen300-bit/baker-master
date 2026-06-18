@@ -288,7 +288,7 @@ def _upsert_vector(client, fm: dict, body: str, wiki_page_id: int) -> Optional[i
     if client is None:
         logger.info("kbl.ingest: Qdrant unavailable — skipping vector upsert")
         return None
-    from qdrant_client.models import PointStruct
+    from qdrant_client.models import PointStruct, VectorParams, Distance
     from models.cortex import _embed_text
 
     text = f"{fm['name']}\n\n{body[:2000]}"
@@ -296,6 +296,22 @@ def _upsert_vector(client, fm: dict, body: str, wiki_page_id: int) -> Optional[i
     if not vec:
         return None
     point_id = int(hashlib.sha256(f"kbl_{fm['slug']}".encode()).hexdigest()[:16], 16)
+    # QDRANT_COLLECTION_CREATE_1: lazy, idempotent ensure-create. The baker-wiki
+    # collection is not bootstrapped elsewhere, so on a fresh Qdrant the upsert
+    # below 404s and KBL gold ingest silently never lands. Mirror the proven
+    # substack_ingest.py pattern: get_collection / except -> create_collection.
+    try:
+        client.get_collection("baker-wiki")
+    except Exception:
+        try:
+            client.create_collection(
+                collection_name="baker-wiki",
+                vectors_config=VectorParams(size=1024, distance=Distance.COSINE),
+            )
+            logger.info("kbl.ingest: created Qdrant collection baker-wiki")
+        except Exception as e:
+            # Race tolerable: a concurrent caller may have created it already.
+            logger.info("kbl.ingest: baker-wiki create_collection raced/failed: %s", e)
     client.upsert(
         collection_name="baker-wiki",
         points=[PointStruct(
