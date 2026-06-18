@@ -98,6 +98,17 @@ def generate(
                         data=b64.b64decode(src["data"]),
                         mime_type=src.get("media_type", "image/jpeg"),
                     ))
+                elif isinstance(part, dict) and part.get("type") == "audio":
+                    # Gemini 2.5 is natively multimodal for audio understanding —
+                    # an audio Part transcribes via the same generate() →
+                    # response.text path the image/text branches already use
+                    # (AI_HOTEL_CAPTURE_UPGRADES_1). Mirrors the image branch.
+                    import base64 as b64
+                    src = part.get("source", {})
+                    parts.append(types.Part.from_bytes(
+                        data=b64.b64decode(src["data"]),
+                        mime_type=src.get("media_type", "audio/webm"),
+                    ))
                 else:
                     parts.append(str(part))
             contents.append(types.Content(role=role, parts=[

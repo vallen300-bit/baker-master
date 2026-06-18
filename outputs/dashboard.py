@@ -9310,6 +9310,25 @@ _AI_HOTEL_CLASSIFY_PROMPT = (
 # stored raw.
 _AI_HOTEL_DB_RAW_CAP = 370_000
 
+# AI_HOTEL_CAPTURE_UPGRADES_1 limits.
+_AI_HOTEL_MAX_IMAGES = 8            # photos per capture; the 9th is rejected (400)
+_AI_HOTEL_NOTE_CAP = 50_000        # server-enforced note ceiling (HTML maxlength is advisory)
+_AI_HOTEL_AUDIO_CAP = 25 * 1024 * 1024   # 25MB hard cap; ~10-min dictation fits well under
+_AI_HOTEL_AUDIO_TYPES = (
+    "audio/webm", "audio/mp4", "audio/mpeg", "audio/wav", "audio/x-wav",
+    "audio/ogg", "audio/aac", "audio/m4a", "audio/x-m4a",
+)
+
+# Verbatim-transcription prompt for the dictated-audio path. Gemini returns the
+# transcript as plain text via the same response.text access the classify call
+# already uses — no new response-shape assumption (three-way match holds).
+_AI_HOTEL_TRANSCRIBE_PROMPT = (
+    "Transcribe this audio dictation verbatim into plain English text. "
+    "Output ONLY the transcript — no commentary, no headings, no speaker labels. "
+    "If the audio is silent or unintelligible, output an empty string."
+)
+_AI_HOTEL_TRANSCRIBE_MAX_TOKENS = 8000   # ~10-min speech ≈ 1.5k words ≈ 2k tok; generous
+
 
 def _ai_hotel_resize_for_db(image_bytes: bytes, content_type: str):
     """Validate + resize an uploaded image to <= ~500KB base64 for Postgres.
@@ -9362,27 +9381,37 @@ def _ai_hotel_resize_for_db(image_bytes: bytes, content_type: str):
 
 
 @app.post("/api/ai-hotel/capture", tags=["ai-hotel"], dependencies=[Depends(verify_api_key)])
-async def ai_hotel_capture(image: UploadFile = File(None), note: str = Form("")):
-    """AI_HOTEL_FIELD_CAPTURE_1: accept a phone photo and/or dictated note,
-    classify it into one AI-Hotel dashboard section via Claude/Gemini Vision,
-    persist to Postgres (image as base64 — Render FS is ephemeral). Modeled on
-    scan_image's image-handling + LLM pattern.
+async def ai_hotel_capture(
+    images: list[UploadFile] = File(None),
+    audio: UploadFile = File(None),
+    note: str = Form(""),
+):
+    """AI_HOTEL_FIELD_CAPTURE_1 + _UPGRADES_1: accept up to 8 phone photos
+    and/or a dictated note and/or a long audio dictation; classify into one
+    AI-Hotel dashboard section via Gemini Vision; persist to Postgres (photos as
+    base64 in a child table — Render FS is ephemeral). Modeled on scan_image's
+    image-handling + LLM pattern.
     """
     note = (note or "").strip()
-    # Enforce the note cap server-side — the HTML maxlength=4000 is advisory
-    # only and trivially bypassed (codex G3 S3).
-    if len(note) > 4000:
-        raise HTTPException(400, "Note too long (max 4000 characters).")
-    has_image = image is not None and getattr(image, "filename", None)
+    # Enforce the note cap server-side — the HTML maxlength is advisory only and
+    # trivially bypassed (codex G3 S3). This bounds the user-typed note; a long
+    # audio transcript is appended afterward (transcripts can be lengthy).
+    if len(note) > _AI_HOTEL_NOTE_CAP:
+        raise HTTPException(400, f"Note too long (max {_AI_HOTEL_NOTE_CAP} characters).")
 
-    if not has_image and not note:
-        raise HTTPException(400, "Provide a photo or a note (or both).")
+    # FastAPI gives `images` as None, [] or a list of UploadFile; an empty field
+    # arrives as an UploadFile with no filename. Keep only real uploads.
+    incoming = [im for im in (images or []) if im is not None and getattr(im, "filename", None)]
+    if len(incoming) > _AI_HOTEL_MAX_IMAGES:
+        raise HTTPException(400, f"Too many photos (max {_AI_HOTEL_MAX_IMAGES} per capture).")
+    has_audio = audio is not None and getattr(audio, "filename", None)
 
-    b64 = None
-    image_media = None
+    if not incoming and not note and not has_audio:
+        raise HTTPException(400, "Provide a photo, a note, or an audio dictation.")
 
-    if has_image:
-        # Validate file type (scan_image allowlist, verbatim).
+    # --- Resize each photo (reuse the single-image validator verbatim) --------
+    resized_images: list = []   # list of (b64, media) in upload order
+    for image in incoming:
         content_type = image.content_type or ""
         if not content_type.startswith("image/"):
             ext = Path(image.filename or "").suffix.lower()
@@ -9391,18 +9420,80 @@ async def ai_hotel_capture(image: UploadFile = File(None), note: str = Form(""))
             content_type = type_map.get(ext, "")
         if content_type not in ("image/jpeg", "image/png", "image/gif", "image/webp"):
             raise HTTPException(400, "Unsupported image type. Accepted: JPEG, PNG, GIF, WebP.")
-
         image_bytes = await image.read()
-        if len(image_bytes) > 20 * 1024 * 1024:  # 20MB hard limit
+        if len(image_bytes) > 20 * 1024 * 1024:  # 20MB hard limit, per photo
             raise HTTPException(400, "Image too large (max 20MB).")
-
         try:
-            b64, image_media = _ai_hotel_resize_for_db(image_bytes, content_type)
+            ib64, imedia = _ai_hotel_resize_for_db(image_bytes, content_type)
         except ValueError as ve:
             logger.warning(f"ai_hotel_capture rejected image: {ve}")
             raise HTTPException(400, "Unreadable image, or could not compress it under the size limit.")
+        resized_images.append((ib64, imedia))
 
-    source = "photo" if b64 else "note"
+    # --- Transcribe audio (server-side via Gemini multimodal) -----------------
+    transcript = ""
+    if has_audio:
+        audio_type = audio.content_type or ""
+        if audio_type not in _AI_HOTEL_AUDIO_TYPES:
+            ext = Path(audio.filename or "").suffix.lower()
+            audio_map = {".webm": "audio/webm", ".mp4": "audio/mp4", ".m4a": "audio/mp4",
+                         ".mp3": "audio/mpeg", ".wav": "audio/wav", ".ogg": "audio/ogg",
+                         ".aac": "audio/aac"}
+            audio_type = audio_map.get(ext, "")
+        if audio_type not in _AI_HOTEL_AUDIO_TYPES:
+            raise HTTPException(400, "Unsupported audio type. Accepted: WebM, MP4/M4A, MP3, WAV, OGG, AAC.")
+        audio_bytes = await audio.read()
+        if len(audio_bytes) > _AI_HOTEL_AUDIO_CAP:
+            raise HTTPException(400, "Audio too large (max 25MB).")
+        try:
+            import base64 as _b64a
+            audio_b64 = _b64a.standard_b64encode(audio_bytes).decode("utf-8")
+            aresp = _llm_call(
+                "gemini-2.5-flash",
+                max_tokens=_AI_HOTEL_TRANSCRIBE_MAX_TOKENS,
+                messages=[{"role": "user", "content": [
+                    {"type": "audio", "source": {"type": "base64",
+                                                 "media_type": audio_type, "data": audio_b64}},
+                    {"type": "text", "text": _AI_HOTEL_TRANSCRIBE_PROMPT},
+                ]}],
+            )
+            transcript = (aresp.text or "").strip()
+            from orchestrator.cost_monitor import log_api_cost
+            log_api_cost("gemini-2.5-flash", aresp.usage.input_tokens, aresp.usage.output_tokens,
+                         source="ai_hotel_capture_transcribe")
+            if not transcript:
+                logger.warning(
+                    "ai_hotel_capture audio transcription returned EMPTY text "
+                    "(in=%s out=%s).", aresp.usage.input_tokens, aresp.usage.output_tokens)
+        except HTTPException:
+            raise
+        except Exception as tx_err:
+            # Fault-tolerant: a transcription failure must not lose the capture.
+            # Fall through with an empty transcript (loud server-side log).
+            logger.error(f"ai_hotel_capture audio transcription failed: {tx_err}", exc_info=True)
+            transcript = ""
+
+    # Fold the transcript into note_text — the text that is classified + embedded.
+    if transcript:
+        note = f"{note}\n\n{transcript}".strip() if note else transcript
+
+    if not resized_images and not note:
+        # Audio yielded no usable transcript and nothing else was attached —
+        # fail loud rather than persist an empty capture.
+        raise HTTPException(400, "Nothing to save — audio could not be transcribed and no photo or note was provided.")
+
+    # Provenance: photos win, else audio-only, else plain note.
+    if resized_images:
+        source = "photo"
+    elif has_audio:
+        source = "audio"
+    else:
+        source = "note"
+
+    # Legacy single-image columns mirror the FIRST photo for any un-upgraded
+    # reader; ALL photos also land in the child table after the parent insert.
+    b64 = resized_images[0][0] if resized_images else None
+    image_media = resized_images[0][1] if resized_images else None
     section_guess = "general"
     related_area = None
     summary = (note[:200] if note else "Photo capture")
@@ -9487,6 +9578,16 @@ async def ai_hotel_capture(image: UploadFile = File(None), note: str = Form(""))
                  section_guess, related_area, summary),
             )
             new_id = cur.fetchone()[0]
+            # One child row per photo, ordered. The first photo is duplicated in
+            # the parent legacy columns above for un-upgraded readers; the GET
+            # endpoint reads the child table for the full ordered set.
+            for ordinal, (ib64, imedia) in enumerate(resized_images):
+                cur.execute(
+                    """INSERT INTO ai_hotel_capture_images
+                           (capture_id, ordinal, image_b64, image_media)
+                       VALUES (%s, %s, %s, %s)""",
+                    (new_id, ordinal, ib64, imedia),
+                )
             conn.commit()
             cur.close()
         except Exception:
@@ -9578,6 +9679,20 @@ async def ai_hotel_captures(limit: int = 100):
                 (limit,),
             )
             rows = cur.fetchall()
+            # Fetch all child photos for the returned captures in ONE query
+            # (avoids N+1); group by capture_id in Python, ordered by ordinal.
+            cap_ids = [r["id"] for r in rows]
+            child_by_cap: dict = {}
+            if cap_ids:
+                cur.execute(
+                    """SELECT capture_id, ordinal, image_b64, image_media
+                         FROM ai_hotel_capture_images
+                        WHERE capture_id = ANY(%s)
+                        ORDER BY capture_id, ordinal""",
+                    (cap_ids,),
+                )
+                for ci in cur.fetchall():
+                    child_by_cap.setdefault(ci["capture_id"], []).append(ci)
             cur.close()
         except Exception:
             conn.rollback()
@@ -9587,9 +9702,23 @@ async def ai_hotel_captures(limit: int = 100):
         captures = []
         for r in rows:
             d = dict(r)
-            b64 = d.pop("image_b64", None)
-            media = d.get("image_media") or "image/jpeg"
-            d["image"] = f"data:{media};base64,{b64}" if b64 else None
+            parent_b64 = d.pop("image_b64", None)
+            parent_media = d.get("image_media") or "image/jpeg"
+            # Build the ordered images[] from the child table; fall back to the
+            # legacy single parent image for any pre-migration row.
+            children = child_by_cap.get(d["id"], [])
+            if children:
+                images = [
+                    f"data:{(ci.get('image_media') or 'image/jpeg')};base64,{ci['image_b64']}"
+                    for ci in children if ci.get("image_b64")
+                ]
+            elif parent_b64:
+                images = [f"data:{parent_media};base64,{parent_b64}"]
+            else:
+                images = []
+            d["images"] = images
+            # Legacy single-image field = first image, for any un-upgraded client.
+            d["image"] = images[0] if images else None
             captures.append(_serialize(d))
         return {"captures": captures}
     except Exception as e:

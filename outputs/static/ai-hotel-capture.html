@@ -34,21 +34,45 @@
         padding:18px;margin-bottom:16px;box-shadow:0 8px 22px rgba(31,28,20,.06)}
   label.fl{display:block;font:700 10px/1 var(--mono);letter-spacing:.12em;
            text-transform:uppercase;color:var(--muted);margin-bottom:10px}
+  .fl .ct{color:var(--navy);float:right;letter-spacing:.06em}
 
   .camrow{display:flex;flex-direction:column;gap:12px}
   .bigbtn{display:flex;align-items:center;justify-content:center;gap:10px;width:100%;
-          padding:18px;border-radius:11px;border:1.5px dashed var(--navy-line);
+          min-height:56px;padding:18px;border-radius:11px;border:1.5px dashed var(--navy-line);
           background:var(--navy-weak);color:var(--navy);font:600 16px/1 var(--sans);
           cursor:pointer;-webkit-tap-highlight-color:transparent}
   .bigbtn:active{transform:scale(.99)}
+  .bigbtn:disabled{opacity:.5;cursor:not-allowed}
   .bigbtn svg{width:22px;height:22px;stroke-width:1.8}
   #fileInput{display:none}
-  .preview{margin-top:4px;display:none}
-  .preview.show{display:block}
-  .preview img{width:100%;max-height:240px;object-fit:cover;border-radius:10px;
-               border:1px solid var(--line)}
-  .preview .clearimg{margin-top:8px;background:none;border:none;color:var(--red);
-                     font:600 13px var(--sans);cursor:pointer;padding:4px 0}
+
+  /* Multi-photo previews */
+  .thumbs{display:grid;grid-template-columns:repeat(auto-fill,minmax(84px,1fr));gap:10px;margin-top:4px}
+  .thumb{position:relative;border-radius:10px;overflow:hidden;border:1px solid var(--line);
+         aspect-ratio:1/1;background:var(--bg)}
+  .thumb img{width:100%;height:100%;object-fit:cover;display:block}
+  .thumb .rm{position:absolute;top:4px;right:4px;width:30px;height:30px;border-radius:50%;
+             border:none;background:rgba(23,23,23,.62);color:#fff;font:700 16px/1 var(--sans);
+             cursor:pointer;display:grid;place-items:center;-webkit-tap-highlight-color:transparent}
+
+  /* Audio recorder */
+  .recrow{display:flex;flex-direction:column;gap:12px}
+  .recbtns{display:flex;gap:10px;flex-wrap:wrap}
+  .recbtn{flex:1 1 auto;min-width:120px;min-height:52px;display:flex;align-items:center;
+          justify-content:center;gap:9px;padding:14px;border-radius:11px;border:1px solid var(--navy-line);
+          background:var(--card);color:var(--navy);font:600 15px/1 var(--sans);cursor:pointer;
+          -webkit-tap-highlight-color:transparent}
+  .recbtn:active{transform:scale(.99)}
+  .recbtn:disabled{opacity:.4;cursor:not-allowed}
+  .recbtn.danger{color:var(--red);border-color:rgba(180,35,24,.4)}
+  .recbtn svg{width:18px;height:18px;stroke-width:1.9}
+  .recstat{display:flex;align-items:center;gap:9px;font:600 14px/1 var(--mono);color:var(--text-2)}
+  .recdot{width:11px;height:11px;border-radius:50%;background:var(--red);flex:0 0 auto}
+  .recdot.live{animation:pulse 1s ease-in-out infinite}
+  .recdot.paused{background:var(--amber);animation:none}
+  .recdot.done{background:var(--green);animation:none}
+  @keyframes pulse{0%,100%{opacity:1}50%{opacity:.25}}
+  .recnote{font-size:12.5px;color:var(--muted)}
 
   textarea{width:100%;min-height:96px;padding:13px 14px;border:1px solid var(--line);
            border-radius:11px;font:inherit;font-size:16px;background:var(--bg);
@@ -56,7 +80,7 @@
   textarea:focus{outline:none;border-color:var(--navy);box-shadow:0 0 0 3px var(--navy-weak)}
   .hint{font-size:12.5px;color:var(--muted);margin-top:8px}
 
-  .send{width:100%;padding:16px;border:none;border-radius:12px;background:var(--navy);
+  .send{width:100%;min-height:52px;padding:16px;border:none;border-radius:12px;background:var(--navy);
         color:#fff;font:650 16px/1 var(--sans);cursor:pointer;margin-top:4px;
         -webkit-tap-highlight-color:transparent}
   .send:active{transform:scale(.99)}
@@ -84,26 +108,53 @@
     <div class="mark"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="2" width="16" height="20" rx="1.5"/><path d="M9 22v-4h6v4"/><line x1="9" y1="6" x2="9" y2="6.01"/><line x1="15" y1="6" x2="15" y2="6.01"/><line x1="9" y1="10" x2="9" y2="10.01"/><line x1="15" y1="10" x2="15" y2="10.01"/></svg></div>
     <div><div class="title">Field capture</div><div class="sub">ai hotel · hitec</div></div>
   </div>
-  <div class="lead">Snap a booth photo or dictate a note. It's sorted automatically and lands in the AI Hotel dashboard's Field notes.</div>
+  <div class="lead">Snap booth photos, record what they say, or dictate a note. Attach several to one capture, then press Send once. It's sorted automatically and lands in the AI Hotel dashboard's Field notes.</div>
 
   <div class="nokey" id="nokey">Open this page with your access key in the link (<code>?key=…</code>). Sending is disabled until then.</div>
 
   <div class="card">
-    <label class="fl" for="camBtn">Photo</label>
+    <label class="fl" for="camBtn">Photos<span class="ct" id="photoCt"></span></label>
     <div class="camrow">
-      <button type="button" class="bigbtn" id="camBtn">
+      <button type="button" class="bigbtn" id="camBtn" aria-label="Add a photo">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round"><path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"/><circle cx="12" cy="13" r="4"/></svg>
-        Take or choose photo
+        Add photo
       </button>
-      <input type="file" id="fileInput" accept="image/*" capture="environment">
-      <div class="preview" id="preview"><img id="previewImg" alt="Selected photo preview"><button type="button" class="clearimg" id="clearImg">Remove photo</button></div>
+      <input type="file" id="fileInput" accept="image/*" multiple>
+      <div class="thumbs" id="thumbs" aria-live="polite"></div>
+    </div>
+  </div>
+
+  <div class="card" id="recCard">
+    <label class="fl">Audio dictation</label>
+    <div class="recrow">
+      <div class="recbtns">
+        <button type="button" class="recbtn" id="recBtn" aria-label="Start recording">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="2" width="6" height="12" rx="3"/><path d="M5 10a7 7 0 0 0 14 0"/><line x1="12" y1="19" x2="12" y2="22"/></svg>
+          Record
+        </button>
+        <button type="button" class="recbtn" id="pauseBtn" disabled aria-label="Pause recording">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round"><rect x="6" y="5" width="4" height="14" rx="1"/><rect x="14" y="5" width="4" height="14" rx="1"/></svg>
+          Pause
+        </button>
+        <button type="button" class="recbtn danger" id="stopBtn" disabled aria-label="Stop recording">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round"><rect x="6" y="6" width="12" height="12" rx="2"/></svg>
+          Stop
+        </button>
+      </div>
+      <div class="recstat" id="recStat" style="display:none">
+        <span class="recdot" id="recDot"></span>
+        <span id="recTime">0:00</span>
+        <span id="recLabel"></span>
+        <button type="button" class="clearimg" id="clearAudio" style="margin-left:auto;background:none;border:none;color:var(--red);font:600 13px var(--sans);cursor:pointer;display:none">Remove</button>
+      </div>
+      <div class="recnote" id="recNote">Record the person talking. Pause during irrelevant stretches, resume, then stop.</div>
     </div>
   </div>
 
   <div class="card">
     <label class="fl" for="noteInput">Note (tap mic on your keyboard to dictate)</label>
-    <textarea id="noteInput" placeholder="Dictate or type a quick note…" maxlength="4000" enterkeyhint="done"></textarea>
-    <div class="hint">A photo, a note, or both. The classifier decides where it goes.</div>
+    <textarea id="noteInput" placeholder="Dictate or type a note…" maxlength="50000" enterkeyhint="done"></textarea>
+    <div class="hint">A photo, a note, audio — any mix. The classifier decides where it goes.</div>
   </div>
 
   <button class="send" id="sendBtn" disabled>Send</button>
@@ -119,35 +170,133 @@
   var KEY=params.get('key')||'';
   var fileInput=document.getElementById('fileInput');
   var camBtn=document.getElementById('camBtn');
-  var preview=document.getElementById('preview');
-  var previewImg=document.getElementById('previewImg');
-  var clearImg=document.getElementById('clearImg');
+  var thumbs=document.getElementById('thumbs');
+  var photoCt=document.getElementById('photoCt');
   var noteInput=document.getElementById('noteInput');
   var sendBtn=document.getElementById('sendBtn');
   var result=document.getElementById('result');
   var nokey=document.getElementById('nokey');
-  var selectedFile=null;
+  var recCard=document.getElementById('recCard');
+  var recBtn=document.getElementById('recBtn');
+  var pauseBtn=document.getElementById('pauseBtn');
+  var stopBtn=document.getElementById('stopBtn');
+  var recStat=document.getElementById('recStat');
+  var recDot=document.getElementById('recDot');
+  var recTime=document.getElementById('recTime');
+  var recLabel=document.getElementById('recLabel');
+  var clearAudio=document.getElementById('clearAudio');
+  var recNote=document.getElementById('recNote');
+
+  var MAX_PHOTOS=8;
+  var selectedFiles=[];      // accumulated photo File objects
+  var audioBlob=null;        // recorded dictation Blob
+  var mediaRecorder=null, mediaStream=null, chunks=[];
+  var elapsed=0, timer=null;
 
   if(!KEY){ nokey.classList.add('show'); }
 
   function refreshSend(){
-    var hasContent=(selectedFile!==null)||(noteInput.value.trim().length>0);
+    var hasContent=(selectedFiles.length>0)||(audioBlob!==null)||(noteInput.value.trim().length>0);
     sendBtn.disabled=!(KEY && hasContent);
   }
 
-  camBtn.addEventListener('click',function(){ fileInput.click(); });
+  // ── Multi-photo ──────────────────────────────────────────────────────────
+  function renderThumbs(){
+    while(thumbs.firstChild) thumbs.removeChild(thumbs.firstChild);
+    selectedFiles.forEach(function(f,idx){
+      var cell=document.createElement('div'); cell.className='thumb';
+      var img=document.createElement('img'); img.alt='Selected photo '+(idx+1);
+      img.src=URL.createObjectURL(f); cell.appendChild(img);
+      var rm=document.createElement('button');
+      rm.type='button'; rm.className='rm'; rm.textContent='×';
+      rm.setAttribute('aria-label','Remove photo '+(idx+1));
+      rm.addEventListener('click',function(){
+        selectedFiles.splice(idx,1); renderThumbs(); refreshSend();
+      });
+      cell.appendChild(rm); thumbs.appendChild(cell);
+    });
+    photoCt.textContent=selectedFiles.length?(selectedFiles.length+'/'+MAX_PHOTOS):'';
+    camBtn.disabled=selectedFiles.length>=MAX_PHOTOS;
+  }
+  camBtn.addEventListener('click',function(){ if(!camBtn.disabled) fileInput.click(); });
   fileInput.addEventListener('change',function(){
-    var f=fileInput.files&&fileInput.files[0];
-    if(!f){ return; }
-    selectedFile=f;
-    var url=URL.createObjectURL(f);
-    previewImg.src=url; preview.classList.add('show');
-    refreshSend();
+    var files=fileInput.files?Array.prototype.slice.call(fileInput.files):[];
+    files.forEach(function(f){ if(selectedFiles.length<MAX_PHOTOS) selectedFiles.push(f); });
+    fileInput.value='';   // reset so re-picking the same file fires change again
+    renderThumbs(); refreshSend();
   });
-  clearImg.addEventListener('click',function(){
-    selectedFile=null; fileInput.value=''; preview.classList.remove('show'); previewImg.src='';
-    refreshSend();
+
+  // ── Audio recorder (MediaRecorder + pause/resume) ────────────────────────
+  function fmtTime(s){ var m=Math.floor(s/60); var ss=s%60; return m+':'+(ss<10?'0':'')+ss; }
+  function tick(){ elapsed++; recTime.textContent=fmtTime(elapsed); }
+  function startTimer(){ if(!timer) timer=setInterval(tick,1000); }
+  function stopTimer(){ if(timer){ clearInterval(timer); timer=null; } }
+
+  if(!(navigator.mediaDevices && navigator.mediaDevices.getUserMedia && window.MediaRecorder)){
+    // Graceful degrade — keep photo + note, drop the recorder.
+    recCard.style.display='none';
+  }
+
+  recBtn.addEventListener('click',function(){
+    if(mediaRecorder && mediaRecorder.state!=='inactive') return;
+    navigator.mediaDevices.getUserMedia({audio:true}).then(function(stream){
+      mediaStream=stream; chunks=[]; audioBlob=null; clearAudio.style.display='none';
+      var opts={};
+      if(window.MediaRecorder.isTypeSupported && MediaRecorder.isTypeSupported('audio/webm')) opts.mimeType='audio/webm';
+      else if(window.MediaRecorder.isTypeSupported && MediaRecorder.isTypeSupported('audio/mp4')) opts.mimeType='audio/mp4';
+      mediaRecorder=new MediaRecorder(stream,opts);
+      mediaRecorder.ondataavailable=function(e){ if(e.data && e.data.size>0) chunks.push(e.data); };
+      mediaRecorder.onstop=function(){
+        var type=(mediaRecorder && mediaRecorder.mimeType)||'audio/webm';
+        audioBlob=new Blob(chunks,{type:type});
+        if(mediaStream){ mediaStream.getTracks().forEach(function(t){t.stop();}); mediaStream=null; }
+        stopTimer();
+        recDot.className='recdot done'; recLabel.textContent='Recorded';
+        clearAudio.style.display='inline'; refreshSend();
+      };
+      mediaRecorder.start();
+      elapsed=0; recTime.textContent='0:00'; startTimer();
+      recStat.style.display='flex'; recDot.className='recdot live'; recLabel.textContent='Recording';
+      recBtn.disabled=true; pauseBtn.disabled=false; stopBtn.disabled=false;
+      pauseBtn.setAttribute('aria-label','Pause recording');
+      setPauseLabel('Pause');
+      refreshSend();
+    }).catch(function(err){
+      recNote.textContent='Microphone unavailable: '+(err&&err.message?err.message:'permission denied')+'. Photo and note still work.';
+    });
   });
+
+  function setPauseLabel(text){
+    // Replace the button's trailing text node, keep the leading SVG icon.
+    var node=pauseBtn.childNodes[pauseBtn.childNodes.length-1];
+    if(node && node.nodeType===3){ node.nodeValue=' '+text; }
+    else { pauseBtn.appendChild(document.createTextNode(' '+text)); }
+  }
+
+  pauseBtn.addEventListener('click',function(){
+    if(!mediaRecorder) return;
+    if(mediaRecorder.state==='recording'){
+      mediaRecorder.pause(); stopTimer();
+      recDot.className='recdot paused'; recLabel.textContent='Paused';
+      setPauseLabel('Resume'); pauseBtn.setAttribute('aria-label','Resume recording');
+    } else if(mediaRecorder.state==='paused'){
+      mediaRecorder.resume(); startTimer();
+      recDot.className='recdot live'; recLabel.textContent='Recording';
+      setPauseLabel('Pause'); pauseBtn.setAttribute('aria-label','Pause recording');
+    }
+  });
+
+  stopBtn.addEventListener('click',function(){
+    if(mediaRecorder && mediaRecorder.state!=='inactive'){ mediaRecorder.stop(); }
+    recBtn.disabled=false; pauseBtn.disabled=true; stopBtn.disabled=true;
+  });
+
+  clearAudio.addEventListener('click',function(){
+    audioBlob=null; chunks=[]; recStat.style.display='none';
+    recDot.className='recdot'; recLabel.textContent=''; clearAudio.style.display='none';
+    recTime.textContent='0:00'; refreshSend();
+  });
+
   noteInput.addEventListener('input',refreshSend);
 
   function showResult(cls,buildFn){
@@ -156,13 +305,27 @@
     buildFn(result);
   }
 
+  function resetForm(){
+    selectedFiles=[]; renderThumbs();
+    audioBlob=null; chunks=[]; recStat.style.display='none';
+    recDot.className='recdot'; recLabel.textContent=''; clearAudio.style.display='none';
+    recTime.textContent='0:00';
+    noteInput.value='';
+  }
+
   sendBtn.addEventListener('click',function(){
     if(sendBtn.disabled) return;
     var note=noteInput.value.trim();
-    if(!KEY || (!selectedFile && !note)) return;
+    if(!KEY || (!selectedFiles.length && !note && !audioBlob)) return;
     sendBtn.disabled=true; sendBtn.textContent='Sending…';
     var fd=new FormData();
-    if(selectedFile) fd.append('image',selectedFile);
+    selectedFiles.forEach(function(f,i){
+      fd.append('images', f, (f.name || ('photo-'+(i+1)+'.jpg')));
+    });
+    if(audioBlob){
+      var ext=(audioBlob.type.indexOf('mp4')!==-1)?'mp4':'webm';
+      fd.append('audio', audioBlob, 'dictation.'+ext);
+    }
     fd.append('note',note);
     fetch('/api/ai-hotel/capture',{method:'POST',headers:{'X-Baker-Key':KEY},body:fd})
       .then(function(r){
@@ -190,9 +353,7 @@
             root.appendChild(s);
           }
         });
-        // reset inputs for the next capture
-        selectedFile=null; fileInput.value=''; preview.classList.remove('show'); previewImg.src='';
-        noteInput.value='';
+        resetForm();
       })
       .catch(function(e){
         showResult('err',function(root){
@@ -204,6 +365,7 @@
       });
   });
 
+  renderThumbs();
   refreshSend();
 })();
 </script>
