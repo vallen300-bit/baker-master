@@ -142,7 +142,14 @@ def report_success(source: str):
         row = cur.fetchone()
         prev_status = row[0] if row else "unknown"
 
-        # Upsert to healthy
+        # Upsert to healthy. Clear last_error_msg on recovery: otherwise a
+        # sentinel that recovered keeps surfacing its last error forever on
+        # /api/health (status flips to healthy + failures reset to 0, but the
+        # stale error string lingers and reads as a live wedge). Anchor:
+        # HEALTH_TRIAGE 2026-06-18 — plaud_backfill + doc_pipeline both showed
+        # consecutive_failures=0 yet carried weeks-old "wedged"/"read-only
+        # transaction" issue text, manufacturing false alarms. last_error_at is
+        # left intact as a historical marker.
         cur.execute("""
             INSERT INTO sentinel_health (source, last_success_at, consecutive_failures, status, updated_at)
             VALUES (%s, NOW(), 0, 'healthy', NOW())
@@ -150,6 +157,7 @@ def report_success(source: str):
                 last_success_at = NOW(),
                 consecutive_failures = 0,
                 status = 'healthy',
+                last_error_msg = NULL,
                 updated_at = NOW()
         """, (source,))
         conn.commit()
