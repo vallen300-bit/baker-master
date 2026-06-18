@@ -1,5 +1,5 @@
 ---
-status: PENDING
+status: COMPLETE
 brief_id: BACKFILL_VERIFY_1
 to: b4
 from: lead
