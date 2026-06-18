@@ -118,15 +118,23 @@ def generate(
     if response_format == "json":
         config_kwargs["response_mime_type"] = "application/json"
     if thinking_budget is not None:
-        # SDK-compat guard: older google-genai builds lack ThinkingConfig.
-        # Failing to cap thinking is non-fatal (degrades to default behavior),
-        # so swallow the AttributeError rather than break the call.
+        # SDK-compat guard. Two stale-SDK failure modes, both caught:
+        #   - AttributeError/TypeError: ThinkingConfig (or its field) missing.
+        #   - ValueError: google-genai <1.10 has ThinkingConfig but its pydantic
+        #     model REJECTS thinking_budget (ValidationError subclasses ValueError).
+        # requirements.txt pins >=1.10.0 so this should never fire in prod; if it
+        # does the install drifted below floor — log LOUD (error) since the call
+        # will then truncate and silently route to general (G3 S2-1).
         try:
             config_kwargs["thinking_config"] = types.ThinkingConfig(
                 thinking_budget=thinking_budget
             )
-        except (AttributeError, TypeError) as e:
-            logger.warning("ThinkingConfig unavailable in this SDK build: %s", e)
+        except (AttributeError, TypeError, ValueError) as e:
+            logger.error(
+                "ThinkingConfig(thinking_budget=%s) unsupported by installed "
+                "google-genai (need >=1.10.0) — thinking NOT capped, response may "
+                "truncate: %s", thinking_budget, e,
+            )
     gen_config = types.GenerateContentConfig(**config_kwargs)
 
     # Retry with exponential backoff for transient errors (503, 429)

@@ -3,7 +3,9 @@
 
 # Core
 anthropic>=0.40.0          # Claude API client
-google-genai>=1.0.0        # Gemini API client (GEMINI-MIGRATION-1)
+google-genai>=1.10.0       # Gemini API client (GEMINI-MIGRATION-1). Floor 1.10.0:
+                           # <1.10 rejects ThinkingConfig(thinking_budget=...) with a
+                           # pydantic ValidationError (AI_HOTEL_CAPTURE_CLASSIFY_1 G3 S2-1).
 voyageai>=0.3.0            # Voyage AI embeddings
 qdrant-client>=1.16.1,<1.17.0  # Qdrant vector DB; query_points API verified, block silent minor drift
 

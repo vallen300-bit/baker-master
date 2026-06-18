@@ -9510,7 +9510,7 @@ async def ai_hotel_capture(image: UploadFile = File(None), note: str = Form(""))
             if summary and summary != note[:200]:
                 _body_parts.append(f"Summary: {summary}")
             _body_parts.append(note)
-            _kbl_ingest(
+            _result = _kbl_ingest(
                 frontmatter={
                     "type": "entity",
                     "slug": f"ai-hotel-capture-{new_id}",
@@ -9523,7 +9523,20 @@ async def ai_hotel_capture(image: UploadFile = File(None), note: str = Form(""))
                 body="\n\n".join(_body_parts),
                 trigger_source="ai_hotel_capture",
             )
-            logger.info(f"ai_hotel_capture embedded to vector memory: id={new_id}")
+            # ingest() writes the wiki page atomically but does the Qdrant upsert
+            # post-atomically and returns qdrant_point_id=None when Qdrant is down
+            # or the embedding is empty. Don't claim "embedded" unless it actually
+            # vectorized — that false-success was itself a silent gap (G3 S2-2).
+            if getattr(_result, "qdrant_point_id", None) is not None:
+                logger.info(
+                    f"ai_hotel_capture embedded to vector memory: id={new_id} "
+                    f"point={_result.qdrant_point_id}"
+                )
+            else:
+                logger.warning(
+                    f"ai_hotel_capture wiki page written but NOT vector-embedded "
+                    f"(Qdrant unavailable or empty embedding): id={new_id}"
+                )
         except Exception as embed_err:
             # Loud but non-fatal — capture is already persisted.
             logger.error(

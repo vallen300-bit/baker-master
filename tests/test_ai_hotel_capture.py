@@ -149,6 +149,17 @@ class _FakeResp:
         self.usage = _FakeUsage()
 
 
+class _FakeIngestResult:
+    """Mimics kbl.ingest_endpoint.IngestResult. qdrant_point_id=None models the
+    'wiki written but not vectorized' path (Qdrant down / empty embedding)."""
+    def __init__(self, qdrant_point_id=987654):
+        self.wiki_page_id = 1
+        self.slug = "ai-hotel-capture-1"
+        self.qdrant_point_id = qdrant_point_id
+        self.gold_mirrored = False
+        self.mirror_path = None
+
+
 def _client(monkeypatch, llm_text='{"section_guess":"general","related_area":null,"summary":"x"}'):
     from fastapi.testclient import TestClient
     import outputs.dashboard as dash
@@ -167,7 +178,7 @@ def _client(monkeypatch, llm_text='{"section_guess":"general","related_area":nul
     # NOT the stub store). No-op it by default so TestClient runs stay hermetic
     # and never touch real PG/Qdrant; embed-specific tests re-patch it.
     import kbl.ingest_endpoint as _kie
-    monkeypatch.setattr(_kie, "ingest", lambda *a, **k: None)
+    monkeypatch.setattr(_kie, "ingest", lambda *a, **k: _FakeIngestResult())
     return TestClient(dash.app), stub
 
 
@@ -417,7 +428,12 @@ def test_embed_invoked_with_attribution(monkeypatch):
     )
     calls = []
     import kbl.ingest_endpoint as kie
-    monkeypatch.setattr(kie, "ingest", lambda **k: calls.append(k))
+
+    def _record(**k):
+        calls.append(k)
+        return _FakeIngestResult()
+
+    monkeypatch.setattr(kie, "ingest", _record)
     resp = client.post("/api/ai-hotel/capture", headers={"X-Baker-Key": "test-key"},
                        data={"note": "Email NVIDIA about a flagship reference."})
     assert resp.status_code == 200, resp.text
@@ -468,3 +484,57 @@ def test_photo_only_no_note_skips_embed(monkeypatch):
     assert resp.status_code == 200, resp.text
     assert len(stub.rows) == 1
     assert len(calls) == 0  # no note → no embed
+
+
+# ─── G3 re-gate: S2-1 (dependency floor) + S2-2 (embed-None path) ──────────
+
+
+def test_genai_dependency_floor_supports_thinking_budget():
+    """G3 S2-1: thinking_budget=0 (the Defect-1 fix) requires google-genai
+    >=1.10.0 — older versions REJECT ThinkingConfig(thinking_budget=...) with a
+    pydantic ValidationError, which crashes the classify call into the very
+    silent-general fallback we are fixing. Guard the floor in requirements.txt."""
+    import re
+    req = Path("requirements.txt").read_text()
+    m = re.search(r"^google-genai>=(\d+)\.(\d+)", req, re.MULTILINE)
+    assert m, "google-genai floor not pinned in requirements.txt"
+    major, minor = int(m.group(1)), int(m.group(2))
+    assert (major, minor) >= (1, 10), (
+        f"google-genai floor {major}.{minor} < 1.10 — "
+        "ThinkingConfig.thinking_budget unsupported below 1.10.0"
+    )
+
+
+def test_thinking_config_accepts_budget_in_installed_sdk():
+    """G3 S2-1 runtime proof: the installed google-genai must accept the field
+    we depend on. Skips cleanly where the SDK isn't installed (e.g. local 3.9/
+    homebrew without google-genai); runs green in CI / prod-parity envs."""
+    try:
+        from google.genai import types
+    except Exception:
+        pytest.skip("google-genai not importable in this env")
+    # Must construct without raising — proves >=1.10.0 behavior.
+    cfg = types.ThinkingConfig(thinking_budget=0)
+    assert cfg.thinking_budget == 0
+
+
+@_skip_without_dashboard
+def test_embed_qdrant_none_does_not_claim_embedded(monkeypatch, caplog):
+    """G3 S2-2: when ingest returns qdrant_point_id=None (Qdrant down / empty
+    embedding), the capture must NOT log a success 'embedded' claim — it logs a
+    WARNING instead, still persists the row, and still returns 200."""
+    import logging
+    client, stub = _client(
+        monkeypatch,
+        llm_text='{"section_guess":"research","related_area":null,"summary":"A datapoint."}',
+    )
+    import kbl.ingest_endpoint as kie
+    monkeypatch.setattr(kie, "ingest", lambda **k: _FakeIngestResult(qdrant_point_id=None))
+    with caplog.at_level(logging.WARNING, logger="sentinel.dashboard"):
+        resp = client.post("/api/ai-hotel/capture", headers={"X-Baker-Key": "test-key"},
+                           data={"note": "competitor opened an AI suite"})
+    assert resp.status_code == 200, resp.text
+    assert len(stub.rows) == 1  # row persisted
+    text = caplog.text
+    assert "NOT vector-embedded" in text          # warned about the gap
+    assert "embedded to vector memory" not in text  # never falsely claimed success
