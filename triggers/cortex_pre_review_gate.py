@@ -63,10 +63,14 @@ def _vault_root() -> Optional[Path]:
 
 
 def matter_has_cortex_config(matter_slug: str) -> bool:
-    """True iff <vault>/wiki/matters/<matter_slug>/cortex-config.md exists.
+    """True iff <vault>/wiki/matters/<matter_slug>/cortex-config.md exists
+    AND current Cortex policy allows this matter.
 
     Single source of truth for 'is this matter Cortex-enabled'. Used by the
     pre-review gate; future: also by /api/cortex/run rate-limit upstream.
+
+    In Cortex Lite mode, config existence is necessary but not sufficient:
+    CORTEX_LITE_MATTERS is the temporary matter allowlist.
     """
     if not matter_slug:
         return False
@@ -74,7 +78,20 @@ def matter_has_cortex_config(matter_slug: str) -> bool:
     if not root:
         return False
     cfg = root / "wiki" / "matters" / matter_slug / "cortex-config.md"
-    return cfg.is_file()
+    if not cfg.is_file():
+        return False
+    try:
+        from orchestrator.cortex_lite_policy import matter_allowed
+        if not matter_allowed(matter_slug):
+            logger.info(
+                "cortex lite skipped matter=%s not in CORTEX_LITE_MATTERS",
+                matter_slug,
+            )
+            return False
+    except Exception as e:
+        logger.error("cortex lite matter policy failed matter=%s: %s", matter_slug, e)
+        return False
+    return True
 
 
 def _read_cost_estimate(matter_slug: str) -> float:

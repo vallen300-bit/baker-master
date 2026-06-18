@@ -529,3 +529,21 @@ def test_matter_notification_deferred_truthy_spellings(monkeypatch, tmp_path):
         )
         importlib.reload(g)
         assert g.matter_notification_deferred(slug) is False, spelling
+
+
+def test_matter_has_cortex_config_lite_allowlist_blocks_nonlisted(monkeypatch, tmp_path):
+    """Lite mode: a matter with cortex-config.md is still blocked unless allowlisted."""
+    for slug in ("oskolkov", "movie"):
+        matter = tmp_path / "wiki" / "matters" / slug
+        matter.mkdir(parents=True)
+        (matter / "cortex-config.md").write_text(
+            f"---\nmatter_slug: {slug}\n---\n", encoding="utf-8",
+        )
+    monkeypatch.setenv("BAKER_VAULT_PATH", str(tmp_path))
+    monkeypatch.setenv("CORTEX_LITE_ENABLED", "true")
+    monkeypatch.setenv("CORTEX_LITE_MATTERS", "oskolkov")
+    import importlib
+    import triggers.cortex_pre_review_gate as g
+    importlib.reload(g)
+    assert g.matter_has_cortex_config("oskolkov") is True
+    assert g.matter_has_cortex_config("movie") is False

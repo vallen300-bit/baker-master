@@ -47,7 +47,8 @@ def test_endpoint_dispatches_to_phase5_handlers_in_source():
 def test_endpoint_rejects_invalid_actions_in_source():
     """Invalid action names must 400, not 500."""
     src = Path("outputs/dashboard.py").read_text()
-    assert 'if action not in ("approve", "edit", "refresh", "reject"):' in src
+    # CORTEX_LITE_REBASE_1 WP-D added "useful" to the whitelist.
+    assert 'if action not in ("approve", "edit", "refresh", "reject", "useful"):' in src
     assert "invalid_action:" in src
 
 

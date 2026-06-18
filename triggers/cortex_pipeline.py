@@ -60,6 +60,10 @@ async def maybe_trigger_cortex(
         # No matter → nothing to reason about; skip silently
         return
 
+    # CORTEX_LITE_REBASE_1: in Lite mode the signal pipeline must never bypass
+    # the pre-review gate to direct-fire a cycle.
+    from orchestrator.cortex_lite_policy import direct_fire_allowed
+
     # CORTEX_PRE_REVIEW_GATE_1: prefer the cost gate when enabled.
     if _gate_enabled():
         try:
@@ -79,9 +83,15 @@ async def maybe_trigger_cortex(
                 # Decision already on file: do not re-post and do not fire.
                 return
             if _secret() is None:
+                if not direct_fire_allowed():
+                    logger.warning(
+                        "cortex lite direct-fire suppressed: gate secret missing "
+                        "signal_id=%s matter=%s", signal_id, matter_slug,
+                    )
+                    return
                 # Gate intent ON but secret missing → fall through to direct-fire
                 # so Cortex still works (logged at error in post_gate).
-                pass
+                pass  # legacy direct-fire only outside Lite mode
             else:
                 # post_gate failed for transient reasons (Slack post error etc).
                 # Skip cycle to avoid runaway spend without Director approval.
@@ -96,7 +106,19 @@ async def maybe_trigger_cortex(
                 "falling through to direct-fire",
                 signal_id, matter_slug, e,
             )
-            # fall through to legacy path
+            if not direct_fire_allowed():
+                logger.warning(
+                    "cortex lite direct-fire suppressed after gate exception "
+                    "signal_id=%s matter=%s", signal_id, matter_slug,
+                )
+                return
+            # fall through to legacy path only outside Lite mode
+
+    # CORTEX_LITE_REBASE_1: final guard — never reach legacy direct-fire in Lite.
+    if not direct_fire_allowed():
+        logger.warning("cortex lite direct-fire suppressed signal_id=%s matter=%s",
+                       signal_id, matter_slug)
+        return
 
     # Legacy direct-fire path (kill-switch / fallback).
     try:

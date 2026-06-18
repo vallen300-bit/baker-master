@@ -154,7 +154,8 @@ def test_cortex_ratify_js_helpers_exist():
 
 
 def _pending_row(cyc_id, proposal_text=None, director_card=None,
-                 triggered_by="scan_intent", is_smoke=False):
+                 triggered_by="scan_intent", is_smoke=False,
+                 age_hours=0.2, is_stale_pending=False):
     return {
         "cycle_id": cyc_id,
         "matter_slug": "hagenauer-rg7",
@@ -164,6 +165,8 @@ def _pending_row(cyc_id, proposal_text=None, director_card=None,
         "cost_tokens": 4567,
         "started_at": None,
         "age_minutes": 12.5,
+        "age_hours": age_hours,
+        "is_stale_pending": is_stale_pending,
         "proposal_text": proposal_text,
         "director_card": director_card,
         "is_smoke": is_smoke,
@@ -496,3 +499,66 @@ def test_action_endpoint_dispatches_each_canonical_action(monkeypatch):
         assert resp.status_code == 200, resp.text
     expected_names = {"cortex_approve", "cortex_edit", "cortex_refresh", "cortex_reject"}
     assert {c[0] for c in captured} == expected_names
+
+
+# ─── CORTEX_LITE_REBASE_1 WP-D — stale chip + useful action ───
+
+
+def test_pending_includes_age_hours_and_stale_flag(monkeypatch):
+    """Pending API response carries age_hours + is_stale_pending."""
+    _set_api_key(monkeypatch)
+    cyc_id = str(uuid.uuid4())
+    rows = [_pending_row(cyc_id, proposal_text="x", age_hours=80.0,
+                         is_stale_pending=True)]
+    from outputs import dashboard
+    monkeypatch.setattr(dashboard, "_get_store", lambda: _StubStore([rows]))
+    resp = _client().get("/api/cortex/cycles/pending", headers=_hdr())
+    assert resp.status_code == 200, resp.text
+    c = resp.json()["cycles"][0]
+    assert c["age_hours"] == 80.0
+    assert c["is_stale_pending"] is True
+
+
+def test_useful_action_persists(monkeypatch):
+    """POST action=useful returns ok and is accepted (feedback_ledger write)."""
+    _set_api_key(monkeypatch)
+    cyc_id = str(uuid.uuid4())
+    from outputs import dashboard
+    # cursor.fetchone() -> matter_slug lookup; INSERT is a no-op on the stub.
+    monkeypatch.setattr(dashboard, "_get_store",
+                        lambda: _StubStore([("hagenauer-rg7",)]))
+    resp = _client().post(
+        f"/cortex/cycle/{cyc_id}/action",
+        headers=_hdr(),
+        json={"action": "useful", "useful": True, "note": "clear ask"},
+    )
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+    assert body["status"] == "ok"
+    assert body["action"] == "useful"
+    assert body["useful"] is True
+
+
+def test_unknown_action_still_rejected(monkeypatch):
+    """An action outside the whitelist is rejected with invalid_action."""
+    _set_api_key(monkeypatch)
+    cyc_id = str(uuid.uuid4())
+    resp = _client().post(
+        f"/cortex/cycle/{cyc_id}/action",
+        headers=_hdr(),
+        json={"action": "frobnicate"},
+    )
+    assert resp.status_code == 400
+    assert "invalid_action" in resp.text
+
+
+def test_wp_d_source_guards():
+    """Stale chip + useful action wired across dashboard.py, app.js, style.css."""
+    dash = Path("outputs/dashboard.py").read_text()
+    assert "is_stale_pending" in dash
+    assert '"useful"' in dash  # action whitelist + handler
+    appjs = Path("outputs/static/app.js").read_text()
+    assert "cycle-stale-tag" in appjs
+    assert "_cortexPendingUseful" in appjs
+    css = Path("outputs/static/style.css").read_text()
+    assert "cycle-stale-tag" in css

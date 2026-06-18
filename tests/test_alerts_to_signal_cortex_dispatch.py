@@ -154,3 +154,49 @@ def test_insert_signal_returns_none_on_duplicate():
         "created_at": None,
     })
     assert bridge._insert_signal_if_new(_Cur(), row) is None
+
+
+# --------------------------------------------------------------------------
+# CORTEX_LITE_REBASE_1 WP-C — Lite mode must never fall through to direct-fire
+# --------------------------------------------------------------------------
+# NOTE (b1 deviation from brief, documented in ship report): the brief's first
+# test omitted CORTEX_PIPELINE_ENABLED=true, which makes maybe_dispatch early-
+# return before maybe_trigger_cortex runs — i.e. the test would pass vacuously
+# and prove nothing (Lesson #8). We set the flag so the suppression path is
+# actually exercised. Assertion is unchanged: Lite mode must not direct-fire.
+
+
+def test_maybe_trigger_lite_secret_missing_does_not_direct_fire(monkeypatch):
+    calls = []
+
+    async def _fake_cycle(**kwargs):
+        calls.append(kwargs)
+
+    monkeypatch.setenv("CORTEX_PIPELINE_ENABLED", "true")
+    monkeypatch.setenv("CORTEX_LIVE_PIPELINE", "true")
+    monkeypatch.setenv("CORTEX_GATE_ENABLED", "true")
+    monkeypatch.setenv("CORTEX_LITE_ENABLED", "true")
+    monkeypatch.delenv("CORTEX_GATE_SECRET", raising=False)
+    monkeypatch.setattr("orchestrator.cortex_runner.maybe_run_cycle", _fake_cycle)
+    cortex_pipeline.maybe_dispatch(signal_id=42, matter_slug="oskolkov")
+    assert calls == []
+
+
+def test_maybe_trigger_lite_gate_exception_does_not_direct_fire(monkeypatch):
+    calls = []
+
+    async def _fake_cycle(**kwargs):
+        calls.append(kwargs)
+
+    def _boom(**kwargs):
+        raise RuntimeError("slack down")
+
+    monkeypatch.setenv("CORTEX_PIPELINE_ENABLED", "true")
+    monkeypatch.setenv("CORTEX_LIVE_PIPELINE", "true")
+    monkeypatch.setenv("CORTEX_GATE_ENABLED", "true")
+    monkeypatch.setenv("CORTEX_LITE_ENABLED", "true")
+    monkeypatch.setenv("CORTEX_GATE_SECRET", "test-secret-32-characters-long-XX")
+    monkeypatch.setattr("triggers.cortex_pre_review_gate.post_gate", _boom)
+    monkeypatch.setattr("orchestrator.cortex_runner.maybe_run_cycle", _fake_cycle)
+    cortex_pipeline.maybe_dispatch(signal_id=43, matter_slug="oskolkov")
+    assert calls == []

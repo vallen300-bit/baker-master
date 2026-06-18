@@ -10752,9 +10752,13 @@ function _renderCortexPending(body, cycles) {
         var smokeChip = c.is_smoke
             ? '<span class="cycle-smoke-tag">smoke</span>'
             : '';
+        // CORTEX_LITE_REBASE_1 WP-D: visible decision-debt marker on aged cycles.
+        var staleChip = c.is_stale_pending
+            ? '<span class="cycle-stale-tag">stale</span>'
+            : '';
         return '<div class="cortex-pending-row" data-cycle="' + escAttr(cid) + '">' +
             '<div class="cortex-pending-head" onclick="_cortexPendingToggle(\'' + escAttr(cid) + '\')">' +
-                '<span class="cortex-pending-matter">' + esc(c.matter_slug || '—') + smokeChip + '</span>' +
+                '<span class="cortex-pending-matter">' + esc(c.matter_slug || '—') + smokeChip + staleChip + '</span>' +
                 '<span class="cortex-pending-age">' + esc(_cortexFmtAge(c.age_minutes)) + '</span>' +
                 '<span class="cortex-pending-preview" title="' + escAttr(preview) + '">' + esc(preview) + (c.has_proposal ? '' : ' (no proposal yet)') + '</span>' +
             '</div>' +
@@ -10835,6 +10839,10 @@ function _cortexPendingExpansionHtml(cycleId) {
             '<button class="cortex-pending-btn edit"    onclick="_cortexPendingEdit(\'' + btnsId + '\')">Edit</button>' +
             '<button class="cortex-pending-btn refresh" onclick="_cortexPendingAction(\'' + btnsId + '\',\'refresh\')">Refresh</button>' +
             '<button class="cortex-pending-btn reject"  onclick="_cortexPendingReject(\'' + btnsId + '\')">Reject</button>' +
+            '<span class="cortex-pending-useful" id="cortexUsefulBtns-' + btnsId + '">' +
+                '<button class="cortex-pending-btn useful-yes" id="cortexUseful-yes-' + btnsId + '" onclick="_cortexPendingUseful(\'' + btnsId + '\',true)" title="Mark this proposal useful">👍 Useful</button>' +
+                '<button class="cortex-pending-btn useful-no"  id="cortexUseful-no-' + btnsId + '" onclick="_cortexPendingUseful(\'' + btnsId + '\',false)" title="Mark this proposal not useful">👎 Not useful</button>' +
+            '</span>' +
         '</div>' +
         '<div class="cortex-pending-edit-form" id="cortexPendingEditForm-' + btnsId + '" style="display:none">' +
             '<div class="cortex-pending-edit-label">What\'s wrong with this proposal, or how should it change?</div>' +
@@ -11084,6 +11092,43 @@ function _cortexPendingReject(cycleId) {
     var reason = window.prompt('Optional reject reason:', '');
     if (reason === null) return;     // user cancelled
     _cortexPendingAction(cycleId, 'reject', { reason: reason });
+}
+
+/* CORTEX_LITE_REBASE_1 WP-D: one-tap Director usefulness verdict for the
+   14-day proof. Unlike approve/reject this does NOT change cycle status or
+   dismiss the card — it only captures the verdict (feedback_ledger) and
+   reflects the selected state on the buttons. No full-list reload. */
+async function _cortexPendingUseful(cycleId, useful) {
+    if (_cortexActionInFlight[cycleId]) return;
+    _cortexActionInFlight[cycleId] = true;
+    var toast = document.getElementById('cortexPendingToast-' + cycleId);
+    var label = useful ? '👍 useful' : '👎 not useful';
+    if (toast) { toast.textContent = 'Saving ' + label + '…'; toast.className = 'cortex-pending-toast in-flight'; }
+    try {
+        var resp = await bakerFetch('/cortex/cycle/' + encodeURIComponent(cycleId) + '/action', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ action: 'useful', useful: !!useful }),
+        });
+        if (!resp.ok) {
+            var errBody = '';
+            try { errBody = await resp.text(); } catch (e) {}
+            if (toast) { toast.textContent = 'Save failed: HTTP ' + resp.status + ' ' + errBody.slice(0, 200); toast.className = 'cortex-pending-toast error'; }
+            return;
+        }
+        if (toast) { toast.textContent = 'Recorded: ' + label; toast.className = 'cortex-pending-toast ok'; }
+        var wrap = document.getElementById('cortexUsefulBtns-' + cycleId);
+        if (wrap) {
+            var btns = wrap.querySelectorAll('button');
+            for (var i = 0; i < btns.length; i++) { btns[i].classList.remove('selected'); }
+            var sel = document.getElementById('cortexUseful-' + (useful ? 'yes' : 'no') + '-' + cycleId);
+            if (sel) sel.classList.add('selected');
+        }
+    } catch (e) {
+        if (toast) { toast.textContent = 'Error: ' + String(e); toast.className = 'cortex-pending-toast error'; }
+    } finally {
+        delete _cortexActionInFlight[cycleId];
+    }
 }
 
 // ═══ KBL PIPELINE TAB — observability for 7-step pipeline (MVP) ═══

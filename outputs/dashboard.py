@@ -6971,6 +6971,8 @@ async def list_cortex_cycles_pending(
     if not conn:
         raise HTTPException(status_code=503, detail="Database unavailable")
     safe_limit = min(max(limit, 1), 100)
+    from orchestrator.cortex_lite_policy import stale_pending_hours
+    stale_hours = stale_pending_hours()
     try:
         import psycopg2.extras
         cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
@@ -6985,7 +6987,9 @@ async def list_cortex_cycles_pending(
                     c.cost_dollars,
                     c.cost_tokens,
                     c.started_at,
-                    EXTRACT(EPOCH FROM (NOW() - c.started_at))/60 AS age_minutes,
+                    EXTRACT(EPOCH FROM (NOW() - c.started_at))/60   AS age_minutes,
+                    EXTRACT(EPOCH FROM (NOW() - c.started_at))/3600 AS age_hours,
+                    (EXTRACT(EPOCH FROM (NOW() - c.started_at))/3600 >= %(stale_hours)s) AS is_stale_pending,
                     (
                       SELECT po.payload->>'proposal_text'
                       FROM cortex_phase_outputs po
@@ -7025,7 +7029,8 @@ async def list_cortex_cycles_pending(
             ORDER BY started_at DESC
             LIMIT %(limit)s
             """,
-            {"include_smoke": bool(include_smoke), "limit": safe_limit},
+            {"include_smoke": bool(include_smoke), "limit": safe_limit,
+             "stale_hours": stale_hours},
         )
         rows = cur.fetchall()
         # Hidden-count: only meaningful when the toggle is hiding smoke.
@@ -7073,6 +7078,8 @@ async def list_cortex_cycles_pending(
                 "cost_tokens": int(r.get("cost_tokens") or 0),
                 "started_at": r.get("started_at"),
                 "age_minutes": float(r.get("age_minutes") or 0.0),
+                "age_hours": float(r.get("age_hours") or 0.0),
+                "is_stale_pending": bool(r.get("is_stale_pending")),
                 "proposal_preview": preview,
                 "has_proposal": bool(proposal_text),
                 "director_card": director_card if isinstance(director_card, dict) else None,
@@ -15879,18 +15886,73 @@ async def cortex_cycle_action(cycle_id: str, request: Request):
     """Director clicked a button on the Cortex proposal card.
 
     Body shape:
-        {"action": "approve|edit|refresh|reject",
+        {"action": "approve|edit|refresh|reject|useful",
          "edits": "<optional new text for edit>",
          "selected_gold_files": ["<files chosen via per-file checkboxes>"],
-         "reason": "<optional rejection reason>"}
+         "reason": "<optional rejection reason>",
+         "useful": true|false, "note": "<optional usefulness note>"}
     """
     try:
         body = await request.json()
     except Exception:
         raise HTTPException(status_code=400, detail="invalid_json_body")
     action = (body.get("action") or "").lower()
-    if action not in ("approve", "edit", "refresh", "reject"):
+    if action not in ("approve", "edit", "refresh", "reject", "useful"):
         raise HTTPException(status_code=400, detail=f"invalid_action:{action}")
+
+    if action == "useful":
+        # CORTEX_LITE_REBASE_1 WP-D: capture the Director's one-tap usefulness
+        # verdict for the 14-day proof. Persisted to feedback_ledger (the
+        # purpose-built, already-wired feedback store) — NO schema change.
+        useful = bool(body.get("useful"))
+        note = (body.get("note") or "")[:500]
+        store = _get_store()
+        conn = store._get_conn()
+        if conn is None:
+            raise HTTPException(status_code=503, detail="Database unavailable")
+        try:
+            cur = conn.cursor()
+            # Best-effort matter resolution for proof-window analysis.
+            cur.execute(
+                "SELECT matter_slug FROM cortex_cycles "
+                "WHERE cycle_id::text = %s LIMIT 1",
+                (cycle_id,),
+            )
+            row = cur.fetchone()
+            target_matter = row[0] if row else None
+            payload = {
+                "cycle_id": cycle_id,
+                "useful": useful,
+                "source": "director_card",
+            }
+            cur.execute(
+                """
+                INSERT INTO feedback_ledger
+                    (action_type, target_matter, payload, director_note)
+                VALUES (%s, %s, %s::jsonb, %s)
+                """,
+                (
+                    "cortex:useful" if useful else "cortex:not_useful",
+                    target_matter,
+                    json.dumps(payload),
+                    note,
+                ),
+            )
+            conn.commit()
+            cur.close()
+            return {"status": "ok", "action": "useful", "useful": useful}
+        except Exception as e:
+            try:
+                conn.rollback()
+            except Exception:
+                pass
+            logger.error(
+                "/cortex/cycle/%s/action [useful] failed: %s", cycle_id, e,
+            )
+            raise HTTPException(status_code=500, detail=str(e))
+        finally:
+            store._put_conn(conn)
+
     from orchestrator.cortex_phase5_act import (
         cortex_approve, cortex_edit, cortex_refresh, cortex_reject,
     )
