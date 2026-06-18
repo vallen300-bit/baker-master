@@ -2207,3 +2207,28 @@ select:focus-visible {
   text-transform: uppercase;
   letter-spacing: 0.05em;
 }
+
+/* CORTEX_LITE_REBASE_1 WP-D: stale decision-debt chip (mirror smoke chip,
+   distinct amber so aged tier_b_pending cycles stand out). */
+.cycle-stale-tag {
+  display: inline-block;
+  margin-left: 8px;
+  padding: 1px 6px;
+  border-radius: 3px;
+  background: #4a3410;
+  color: #e0a23a;
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+/* CORTEX_LITE_REBASE_1 WP-D: usefulness verdict buttons on the pending card. */
+.cortex-pending-useful {
+  display: inline-flex;
+  gap: 6px;
+  margin-left: auto;
+}
+.cortex-pending-btn.useful-yes,
+.cortex-pending-btn.useful-no { background: var(--card); }
+.cortex-pending-btn.useful-yes.selected { background: var(--green, #5b9a6f); color: #fff; border-color: transparent; }
+.cortex-pending-btn.useful-no.selected  { background: var(--fire,  #c75050); color: #fff; border-color: transparent; }
