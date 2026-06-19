@@ -7,7 +7,7 @@
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
 <meta name="theme-color" content="#1a3a52">
 <title>AI Hotel — Field capture</title>
-<!-- build: AI_HOTEL_GPS_CAPTURE_1 v3 (GPS evidence: 📍 tag-location + site-visit submit path). Self-contained page opened via ?key= bookmark — no referenced sub-asset to ?v=-bust. -->
+<!-- build: AI_HOTEL_REMEMBER_KEY_1 v4 (remember ?key= in localStorage + strip from URL; GPS evidence v3). Self-contained page opened via ?key= bookmark — no referenced sub-asset to ?v=-bust. -->
 <meta name="x-build" content="ai-hotel-field-notes-and-audio-1-v2">
 <style>
   :root{
@@ -253,8 +253,19 @@
 
 <script>
 (function(){
+  // AI_HOTEL_REMEMBER_KEY_1: resolve the access key from ?key= OR a remembered
+  // localStorage value, so a bookmarked/bare link still authenticates. On a
+  // keyed visit, persist + strip ?key= from the URL (security hygiene). The
+  // nokey gate below re-evaluates against the RESOLVED key, so a remembered key
+  // re-enables sending. localStorage wrapped in try/catch (Safari private mode).
   var params=new URLSearchParams(location.search);
   var KEY=params.get('key')||'';
+  if(KEY){
+    try{localStorage.setItem('aih.key',KEY);}catch(e){}
+    try{params.delete('key');var _qs=params.toString();history.replaceState({},'',location.pathname+(_qs?('?'+_qs):''));}catch(e){}
+  }else{
+    try{KEY=localStorage.getItem('aih.key')||'';}catch(e){KEY='';}
+  }
   var fileInput=document.getElementById('fileInput');
   var camBtn=document.getElementById('camBtn');
   var thumbs=document.getElementById('thumbs');
