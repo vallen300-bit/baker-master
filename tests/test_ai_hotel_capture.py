@@ -373,8 +373,11 @@ def test_captures_read_builds_data_url_and_hides_dismissed(monkeypatch):
     assert len(caps) == 1
     c = caps[0]
     assert c["id"] == 1
-    assert c["image"] == "data:image/jpeg;base64,QUJD"
-    assert "image_b64" not in c  # raw b64 popped, only the data URL returned
+    # AI_HOTEL_FIELDNOTES_THUMBNAIL_LAZYIMG_1: list returns thumb + image_count,
+    # never the full-res base64 / images[] / image fields.
+    assert c["image_count"] == 1
+    assert c["thumb"] is None              # "QUJD" is not a decodable image → fail-soft null
+    assert "image" not in c and "images" not in c and "image_b64" not in c
 
 
 @_skip_without_dashboard
@@ -730,13 +733,12 @@ def test_get_returns_images_array_ordered_and_legacy_first(monkeypatch):
     resp = client.get("/api/ai-hotel/captures", headers={"X-Baker-Key": "test-key"})
     assert resp.status_code == 200, resp.text
     c = resp.json()["captures"][0]
-    assert c["images"] == [
-        "data:image/jpeg;base64,QUFB",
-        "data:image/jpeg;base64,QkJC",
-        "data:image/jpeg;base64,Q0ND",
-    ]
-    assert c["image"] == "data:image/jpeg;base64,QUFB"   # legacy = first
-    assert "image_b64" not in c
+    # AI_HOTEL_FIELDNOTES_THUMBNAIL_LAZYIMG_1: list = thumb + count only; the
+    # ordered full images now come from GET /captures/{id}/images (see
+    # test_ai_hotel_thumbnails). Fake b64 → thumb is None (fail-soft).
+    assert c["image_count"] == 3
+    assert c["thumb"] is None
+    assert "images" not in c and "image" not in c and "image_b64" not in c
 
 
 @_skip_without_dashboard
@@ -754,8 +756,10 @@ def test_get_legacy_single_image_row_backward_compatible(monkeypatch):
     resp = client.get("/api/ai-hotel/captures", headers={"X-Baker-Key": "test-key"})
     assert resp.status_code == 200, resp.text
     c = resp.json()["captures"][0]
-    assert c["images"] == ["data:image/jpeg;base64,WllY"]
-    assert c["image"] == "data:image/jpeg;base64,WllY"
+    # legacy parent image counts as 1; thumb null for fake b64 (fail-soft).
+    assert c["image_count"] == 1
+    assert c["thumb"] is None
+    assert "images" not in c and "image" not in c
 
 
 # ─── Migration shape (source-level) ────────────────────────────────────────
