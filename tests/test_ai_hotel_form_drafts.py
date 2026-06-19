@@ -219,6 +219,20 @@ class _Cursor:
             cap_id, ordinal, b64, media = params
             self.s.images.append({"capture_id": cap_id, "ordinal": ordinal, "image_b64": b64, "image_media": media})
             self.rowcount = 1
+        elif "INSERT INTO ai_hotel_capture_audio" in sql:
+            cap_id, ab64, amedia, dur = params        # ordinal is the literal 0 in the SQL
+            aid = self.s._next_audio
+            self.s._next_audio += 1
+            self.s.audio.append({"id": aid, "capture_id": cap_id, "audio_b64": ab64,
+                                 "audio_media": amedia, "duration_seconds": dur, "transcript_text": None})
+            self._result = [(aid,)]
+            self.rowcount = 1
+        elif "UPDATE ai_hotel_capture_audio" in sql:
+            tx, aid = params
+            for a in self.s.audio:
+                if a["id"] == aid:
+                    a["transcript_text"] = tx
+            self.rowcount = 1
         elif "INSERT INTO ai_hotel_form_records" in sql:
             cap_id, ftype, ver, ej, fmj, vej, model, pv = params
             nid = self.s._next_form
@@ -277,9 +291,11 @@ class _Store:
     def __init__(self):
         self.captures = []
         self.images = []
+        self.audio = []
         self.forms = []
         self._next_cap = 1
         self._next_form = 1
+        self._next_audio = 901
 
     def _get_conn(self):
         return _Conn(self)

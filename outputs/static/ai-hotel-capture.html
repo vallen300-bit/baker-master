@@ -7,6 +7,8 @@
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
 <meta name="theme-color" content="#1a3a52">
 <title>AI Hotel — Field capture</title>
+<!-- build: AI_HOTEL_FIELD_NOTES_AND_AUDIO_1 v2 (G3 copy-honesty fix). Self-contained page opened via ?key= bookmark — no referenced sub-asset to ?v=-bust. -->
+<meta name="x-build" content="ai-hotel-field-notes-and-audio-1-v2">
 <style>
   :root{
     --bg:#f7f6f2; --card:#ffffff; --line:#ddd8ce; --text:#171717; --text-2:#54524c;
@@ -269,6 +271,7 @@
   var MAX_PHOTOS=8;
   var selectedFiles=[];      // accumulated photo File objects
   var audioBlob=null;        // recorded dictation Blob
+  var audioDuration=0;       // clip length in seconds (sent so Baker stores it)
   var mediaRecorder=null, mediaStream=null, chunks=[];
   var elapsed=0, timer=null;
 
@@ -330,7 +333,9 @@
         audioBlob=new Blob(chunks,{type:type});
         if(mediaStream){ mediaStream.getTracks().forEach(function(t){t.stop();}); mediaStream=null; }
         stopTimer();
+        audioDuration=elapsed;
         recDot.className='recdot done'; recLabel.textContent='Recorded';
+        recNote.textContent='Recorded locally. Extract a Site or Supplier card to save the audio to Baker; sending a plain note keeps the audio on this device only.';
         clearAudio.style.display='inline'; refreshSend();
       };
       mediaRecorder.start();
@@ -525,6 +530,7 @@
     if(audioBlob){
       var ext=(audioBlob.type.indexOf('mp4')!==-1)?'mp4':'webm';
       fd.append('audio', audioBlob, 'dictation.'+ext);
+      fd.append('duration_seconds', String(audioDuration||0));
     }
     fd.append('note', noteInput.value.trim());
     return fd;
@@ -595,7 +601,8 @@
           verr.classList.add('show');
           return;
         }
-        finishSheet((currentDraft.form_title||'Card')+' saved.');
+        finishSheet(audioBlob ? 'Saved to Baker: audio + transcript + card.'
+                              : ((currentDraft.form_title||'Card')+' saved.'));
       })
       .catch(function(){ verr.textContent='Network error — try again.'; verr.classList.add('show'); })
       .finally(function(){ saveCard.textContent=savedLabel; recomputeSave(); });
@@ -626,6 +633,7 @@
     if(mode==='site_visit'||mode==='supplier_card'){ submitStructured(); return; }
     var note=noteInput.value.trim();
     if(!KEY || (!selectedFiles.length && !note && !audioBlob)) return;
+    var hadAudio=!!audioBlob;   // free-note path does NOT persist audio — be honest below
     sendBtn.disabled=true; sendBtn.textContent='Sending…';
     var fd=new FormData();
     selectedFiles.forEach(function(f,i){
@@ -651,7 +659,7 @@
         }
         var b=res.body||{};
         showResult('ok',function(root){
-          root.appendChild(document.createTextNode('Saved.'));
+          root.appendChild(document.createTextNode(hadAudio ? 'Saved (note + photos). Audio kept on this device only — Extract a Site/Supplier card to save the recording to Baker.' : 'Saved.'));
           var tag=document.createElement('div');
           var label=(b.section_guess||'general');
           if(b.related_area) label+=' · '+b.related_area;

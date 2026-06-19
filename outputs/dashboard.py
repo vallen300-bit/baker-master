@@ -9661,10 +9661,44 @@ async def ai_hotel_capture(
             "related_area": related_area, "summary": summary}
 
 
+def _ai_hotel_form_record_view(fr):
+    """AI_HOTEL_FIELD_NOTES_CARD_SHELF_1: shape a raw ai_hotel_form_records row
+    into the feed's optional `form_record` object, or None.
+
+    Fail-soft (AC5): any malformed/missing field yields None rather than breaking
+    the feed. Never duplicates image base64 — images stay sourced from captures.
+    A confirmed card surfaces its user-corrected values; otherwise the extracted
+    values."""
+    if not fr:
+        return None
+    try:
+        status = fr.get("status")
+        corrected = fr.get("corrected_json")
+        extracted = fr.get("extracted_json")
+        vals = corrected if (status == "confirmed" and isinstance(corrected, dict)) else extracted
+        if not isinstance(vals, dict):
+            vals = {}
+        fm = fr.get("field_meta_json")
+        if not isinstance(fm, dict):
+            fm = {}
+        return {
+            "id": fr.get("id"),
+            "form_type": fr.get("form_type"),
+            "schema_version": fr.get("schema_version"),
+            "status": status,
+            "values": vals,
+            "field_meta": fm,
+        }
+    except Exception:
+        return None
+
+
 @app.get("/api/ai-hotel/captures", tags=["ai-hotel"], dependencies=[Depends(verify_api_key)])
 async def ai_hotel_captures(limit: int = 100):
-    """AI_HOTEL_FIELD_CAPTURE_1: list field-note captures, newest first, for the
-    dashboard "Field notes" surface. Fail-soft empty list on any error."""
+    """AI_HOTEL_FIELD_CAPTURE_1 + _FIELD_NOTES_CARD_SHELF_1: list field-note
+    captures newest-first for the dashboard "Field notes" surface, each with its
+    latest non-discarded structured card (form_record) when present. Fail-soft
+    empty list on any error."""
     limit = max(1, min(limit, 200))
     try:
         store = _get_store()
@@ -9698,6 +9732,55 @@ async def ai_hotel_captures(limit: int = 100):
                 )
                 for ci in cur.fetchall():
                     child_by_cap.setdefault(ci["capture_id"], []).append(ci)
+            # AI_HOTEL_FIELD_NOTES_CARD_SHELF_1: attach the latest non-discarded
+            # structured form record per capture (one extra batch query, N+1-safe).
+            # Fail-soft: a form-record failure must NEVER break the raw capture
+            # feed (AC5) — guard locally, clear any aborted txn, serve captures.
+            form_by_cap: dict = {}
+            if cap_ids:
+                try:
+                    cur.execute(
+                        """SELECT DISTINCT ON (capture_id)
+                                  capture_id, id, form_type, schema_version, status,
+                                  extracted_json, corrected_json, field_meta_json
+                             FROM ai_hotel_form_records
+                            WHERE capture_id = ANY(%s) AND status <> 'discarded'
+                            ORDER BY capture_id, id DESC""",
+                        (cap_ids,),
+                    )
+                    for fr in cur.fetchall():
+                        form_by_cap[fr["capture_id"]] = fr
+                except Exception as fe:
+                    logger.error(
+                        "ai_hotel_captures form_record join failed (feed still served): %s", fe)
+                    conn.rollback()
+                    form_by_cap = {}
+            # WP-B / AC10: audio METADATA only in the list — never the big base64.
+            # Full audio_b64 is fetched on demand from the card-detail endpoint.
+            audio_by_cap: dict = {}
+            if cap_ids:
+                try:
+                    cur.execute(
+                        """SELECT capture_id, ordinal, audio_media, duration_seconds,
+                                  (transcript_text IS NOT NULL AND transcript_text <> '')
+                                      AS has_transcript
+                             FROM ai_hotel_capture_audio
+                            WHERE capture_id = ANY(%s)
+                            ORDER BY capture_id, ordinal""",
+                        (cap_ids,),
+                    )
+                    for a in cur.fetchall():
+                        audio_by_cap.setdefault(a["capture_id"], []).append({
+                            "ordinal": a["ordinal"],
+                            "audio_media": a["audio_media"],
+                            "duration_seconds": a["duration_seconds"],
+                            "has_transcript": bool(a["has_transcript"]),
+                        })
+                except Exception as ae:
+                    logger.error(
+                        "ai_hotel_captures audio metadata join failed (feed still served): %s", ae)
+                    conn.rollback()
+                    audio_by_cap = {}
             cur.close()
         except Exception:
             conn.rollback()
@@ -9724,11 +9807,62 @@ async def ai_hotel_captures(limit: int = 100):
             d["images"] = images
             # Legacy single-image field = first image, for any un-upgraded client.
             d["image"] = images[0] if images else None
+            # Attach the structured card (if any); fail-soft per row (AC5).
+            d["form_record"] = _ai_hotel_form_record_view(form_by_cap.get(d["id"]))
+            # Attach audio METADATA only (AC10) — playback bytes come from detail.
+            d["audio"] = audio_by_cap.get(d["id"], [])
             captures.append(_serialize(d))
         return {"captures": captures}
     except Exception as e:
         logger.error(f"GET /api/ai-hotel/captures failed: {e}")
         return {"captures": []}
+
+
+@app.get("/api/ai-hotel/captures/{capture_id}/audio", tags=["ai-hotel"],
+         dependencies=[Depends(verify_api_key)])
+async def ai_hotel_capture_audio_detail(capture_id: int):
+    """AI_HOTEL_FIELD_NOTES_AND_AUDIO_1: full audio for ONE capture, fetched on
+    demand from card detail (the list endpoint returns metadata only — AC10).
+    Returns playable data-URL(s). Fail-soft empty list on any error."""
+    try:
+        store = _get_store()
+        import psycopg2.extras
+        conn = store._get_conn()
+        if not conn:
+            return {"audio": []}
+        try:
+            cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+            cur.execute(
+                """SELECT ordinal, audio_b64, audio_media, duration_seconds, transcript_text
+                     FROM ai_hotel_capture_audio
+                    WHERE capture_id = %s
+                    ORDER BY ordinal
+                    LIMIT 20""",
+                (capture_id,),
+            )
+            rows = cur.fetchall()
+            cur.close()
+        except Exception:
+            conn.rollback()
+            raise
+        finally:
+            store._put_conn(conn)
+        audio = []
+        for a in rows:
+            if not a.get("audio_b64"):
+                continue
+            media = a.get("audio_media") or "audio/webm"
+            audio.append({
+                "ordinal": a.get("ordinal"),
+                "audio_media": media,
+                "duration_seconds": a.get("duration_seconds"),
+                "transcript_text": a.get("transcript_text"),
+                "audio": f"data:{media};base64,{a['audio_b64']}",
+            })
+        return {"audio": audio}
+    except Exception as e:
+        logger.error(f"GET /api/ai-hotel/captures/{capture_id}/audio failed: {e}")
+        return {"audio": []}
 
 
 # ── AI_HOTEL_VOICE_FORM_SUPPLIER_1: voice → structured supplier-card draft ───
@@ -9773,6 +9907,7 @@ async def ai_hotel_form_draft(
     images: list[UploadFile] = File(None),
     audio: UploadFile = File(None),
     note: str = Form(""),
+    duration_seconds: str = Form(""),
 ):
     """Voice/note/photo capture → schema-driven structured draft (site_visit or
     supplier_card). Flow: resolve form_type (explicit or auto-detect) → persist
@@ -9862,6 +9997,19 @@ async def ai_hotel_form_draft(
     image_media = resized_images[0][1] if resized_images else None
     summary = (note[:200] if note else "Field dictation")
 
+    # WP-A: prepare the raw audio for persistence. It is stored as a child row in
+    # the SAME transaction as the raw capture (below) — i.e. BEFORE transcription
+    # — so a transcription failure never loses the recording (AC6/AC7).
+    audio_id = None
+    audio_b64 = None
+    audio_duration = None
+    if has_audio and audio_bytes is not None:
+        import base64 as _b64p
+        audio_b64 = _b64p.standard_b64encode(audio_bytes).decode("utf-8")
+        _ds = str(duration_seconds or "").strip()
+        if _ds.isdigit():
+            audio_duration = int(_ds)
+
     # 2) Persist the RAW capture FIRST — BEFORE transcription/extraction. This is
     #    the no-data-loss invariant (G3 S1 fix): the early "provide something"
     #    400 already rejected truly-empty submissions, so by here we always have
@@ -9889,6 +10037,16 @@ async def ai_hotel_form_draft(
                        VALUES (%s, %s, %s, %s)""",
                     (capture_id, ordinal, ib64, imedia),
                 )
+            # WP-A: persist the raw audio in the SAME transaction (committed
+            # BEFORE transcription) so a transcription failure keeps BOTH rows.
+            if has_audio and audio_b64:
+                cur.execute(
+                    """INSERT INTO ai_hotel_capture_audio
+                           (capture_id, ordinal, audio_b64, audio_media, duration_seconds)
+                       VALUES (%s, 0, %s, %s, %s) RETURNING id""",
+                    (capture_id, audio_b64, audio_type, audio_duration),
+                )
+                audio_id = cur.fetchone()[0]
             conn.commit()
             cur.close()
         except Exception:
@@ -9922,6 +10080,13 @@ async def ai_hotel_form_draft(
                                 WHERE id = %s""",
                             (note or None, updated_summary, capture_id),
                         )
+                        # AC8: mirror the transcript onto the audio row too.
+                        if audio_id is not None:
+                            cur.execute(
+                                """UPDATE ai_hotel_capture_audio
+                                      SET transcript_text = %s WHERE id = %s""",
+                                (transcript, audio_id),
+                            )
                         conn.commit()
                         cur.close()
                     except Exception:
