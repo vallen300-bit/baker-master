@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<!-- build: AI_HOTEL_GPS_CAPTURE_1 (GPS evidence: accuracy-tiered location + Maps link). Served no-cache (#382) — self-contained, no ?v= sub-asset. -->
+<!-- build: AI_HOTEL_REMEMBER_KEY_1 (persist ?key= in localStorage + strip from URL; GPS evidence accuracy-tiered location + Maps link). Served no-cache (#382) — self-contained, no ?v= sub-asset. -->
 <title>AI Hotel — NVIDIA × Mandarin Oriental × Brisen</title>
 <style>
   :root{
@@ -610,7 +610,26 @@ function fmtNoteTime(iso){
   catch(e){return String(iso).slice(0,16);}
 }
 /* AI_HOTEL_FIELD_NOTES_CARD_SHELF_1: structured cards folded into Field notes */
-function noteKey(){return new URLSearchParams(location.search).get('key')||'';}
+// AI_HOTEL_REMEMBER_KEY_1: a bookmarked/shared link that dropped ?key= rendered
+// an EMPTY feed (no X-Baker-Key → 401) — the Director "can't see my card" root
+// cause. Persist the key on first keyed visit, fall back to it when the URL has
+// none, and strip ?key= from the address bar (localStorage is per-origin and not
+// leaked in a copied link / referer — strictly better than key-in-URL). All
+// existing callers keep calling noteKey() unchanged. localStorage is wrapped in
+// try/catch (Safari private mode throws). The strip runs once: after it, the URL
+// has no key so subsequent calls take the stored-key branch.
+function noteKey(){
+  try{
+    var u=new URLSearchParams(location.search);
+    var k=u.get('key');
+    if(k){
+      try{localStorage.setItem('aih.key',k);}catch(e){}
+      try{u.delete('key');var qs=u.toString();history.replaceState({},'',location.pathname+(qs?('?'+qs):''));}catch(e){}
+      return k;
+    }
+    try{return localStorage.getItem('aih.key')||'';}catch(e){return '';}
+  }catch(e){return '';}
+}
 function cardKind(c){
   const ft=c.form_record&&c.form_record.form_type;
   if(ft==='site_visit')return 'site';
