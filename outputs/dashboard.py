@@ -9731,6 +9731,398 @@ async def ai_hotel_captures(limit: int = 100):
         return {"captures": []}
 
 
+# ── AI_HOTEL_VOICE_FORM_SUPPLIER_1: voice → structured supplier-card draft ───
+# Structured extraction sits BESIDE the raw capture, never replaces it. The raw
+# capture (note/transcript/photos) is persisted FIRST; the typed draft is a
+# child record that only becomes 'confirmed' after an explicit user review.
+
+
+def _ai_hotel_transcribe(audio_bytes: bytes, audio_type: str) -> str:
+    """Transcribe dictated audio via Gemini (thinking_budget=0 — same load-
+    bearing guard as the capture leg). Returns '' on any failure: a transcription
+    failure must never lose the raw capture (the caller persists raw regardless)."""
+    try:
+        import base64 as _b64a
+        audio_b64 = _b64a.standard_b64encode(audio_bytes).decode("utf-8")
+        aresp = _llm_call(
+            "gemini-2.5-flash",
+            max_tokens=_AI_HOTEL_TRANSCRIBE_MAX_TOKENS,
+            thinking_budget=0,
+            messages=[{"role": "user", "content": [
+                {"type": "audio", "source": {"type": "base64",
+                                             "media_type": audio_type, "data": audio_b64}},
+                {"type": "text", "text": _AI_HOTEL_TRANSCRIBE_PROMPT},
+            ]}],
+        )
+        transcript = (aresp.text or "").strip()
+        from orchestrator.cost_monitor import log_api_cost
+        log_api_cost("gemini-2.5-flash", aresp.usage.input_tokens, aresp.usage.output_tokens,
+                     source="ai_hotel_form_draft_transcribe")
+        if not transcript:
+            logger.warning("ai_hotel_form_draft transcription returned EMPTY text "
+                           "(in=%s out=%s).", aresp.usage.input_tokens, aresp.usage.output_tokens)
+        return transcript
+    except Exception as tx_err:
+        logger.error(f"ai_hotel_form_draft transcription failed: {tx_err}", exc_info=True)
+        return ""
+
+
+@app.post("/api/ai-hotel/form-drafts", tags=["ai-hotel"], dependencies=[Depends(verify_api_key)])
+async def ai_hotel_form_draft(
+    form_type: str = Form(""),
+    images: list[UploadFile] = File(None),
+    audio: UploadFile = File(None),
+    note: str = Form(""),
+):
+    """Voice/note/photo capture → schema-driven structured draft (site_visit or
+    supplier_card). Flow: resolve form_type (explicit or auto-detect) → persist
+    raw capture (safety net) → transcribe → schema-driven extraction →
+    deterministic validators → draft.
+
+    The draft is never auto-confirmed. zero send/payment/external side-effects.
+    """
+    from orchestrator.ai_hotel_form_schemas import (
+        get_form_schema, detect_form_type, build_extraction_prompt,
+        parse_and_validate, PROMPT_VERSION,
+    )
+
+    # 1) Resolve form_type. An EXPLICIT unknown form_type → 400 with NO rows
+    #    written (AC7). An ABSENT form_type is auto-detected after transcription
+    #    (always resolves to a valid form, never 400).
+    form_type = (form_type or "").strip()
+    schema = None
+    auto_detected = False
+    if form_type:
+        schema = get_form_schema(form_type)
+        if schema is None:
+            raise HTTPException(400, f"Unknown form_type: {form_type!r}")
+
+    note = (note or "").strip()
+    if len(note) > _AI_HOTEL_NOTE_CAP:
+        raise HTTPException(400, f"Note too long (max {_AI_HOTEL_NOTE_CAP} characters).")
+
+    incoming = [im for im in (images or []) if im is not None and getattr(im, "filename", None)]
+    if len(incoming) > _AI_HOTEL_MAX_IMAGES:
+        raise HTTPException(400, f"Too many photos (max {_AI_HOTEL_MAX_IMAGES} per capture).")
+    has_audio = audio is not None and getattr(audio, "filename", None)
+    if not incoming and not note and not has_audio:
+        raise HTTPException(400, "Provide a photo, a note, or an audio dictation.")
+
+    # --- Resize photos (reuse the single-image validator verbatim) ------------
+    resized_images: list = []
+    for image in incoming:
+        content_type = image.content_type or ""
+        if not content_type.startswith("image/"):
+            ext = Path(image.filename or "").suffix.lower()
+            type_map = {".jpg": "image/jpeg", ".jpeg": "image/jpeg", ".png": "image/png",
+                        ".gif": "image/gif", ".webp": "image/webp"}
+            content_type = type_map.get(ext, "")
+        if content_type not in ("image/jpeg", "image/png", "image/gif", "image/webp"):
+            raise HTTPException(400, "Unsupported image type. Accepted: JPEG, PNG, GIF, WebP.")
+        image_bytes = await image.read()
+        if len(image_bytes) > 20 * 1024 * 1024:
+            raise HTTPException(400, "Image too large (max 20MB).")
+        try:
+            ib64, imedia = _ai_hotel_resize_for_db(image_bytes, content_type)
+        except ValueError as ve:
+            logger.warning(f"ai_hotel_form_draft rejected image: {ve}")
+            raise HTTPException(400, "Unreadable image, or could not compress it under the size limit.")
+        resized_images.append((ib64, imedia))
+
+    # --- Validate + read audio (do NOT transcribe yet) ------------------------
+    # G3 S1 fix: transcription must NOT run before the raw capture is persisted.
+    # We validate/read the audio here, persist the raw row, THEN transcribe — so
+    # an audio-only dictation whose transcription fails still leaves a
+    # retrievable capture row (never a 400 with zero rows).
+    transcript = ""
+    audio_bytes = None
+    audio_type = None
+    if has_audio:
+        audio_type = audio.content_type or ""
+        if audio_type not in _AI_HOTEL_AUDIO_TYPES:
+            ext = Path(audio.filename or "").suffix.lower()
+            audio_map = {".webm": "audio/webm", ".mp4": "audio/mp4", ".m4a": "audio/mp4",
+                         ".mp3": "audio/mpeg", ".wav": "audio/wav", ".ogg": "audio/ogg",
+                         ".aac": "audio/aac"}
+            audio_type = audio_map.get(ext, "")
+        if audio_type not in _AI_HOTEL_AUDIO_TYPES:
+            raise HTTPException(400, "Unsupported audio type. Accepted: WebM, MP4/M4A, MP3, WAV, OGG, AAC.")
+        audio_bytes = await audio.read()
+        if len(audio_bytes) > _AI_HOTEL_AUDIO_CAP:
+            raise HTTPException(400, "Audio too large (max 25MB).")
+
+    # Provenance + legacy single-image mirror columns.
+    if resized_images:
+        source = "photo"
+    elif has_audio:
+        source = "audio"
+    else:
+        source = "note"
+    b64 = resized_images[0][0] if resized_images else None
+    image_media = resized_images[0][1] if resized_images else None
+    summary = (note[:200] if note else "Field dictation")
+
+    # 2) Persist the RAW capture FIRST — BEFORE transcription/extraction. This is
+    #    the no-data-loss invariant (G3 S1 fix): the early "provide something"
+    #    400 already rejected truly-empty submissions, so by here we always have
+    #    audio, a photo, or a note. The typed note (if any) is stored now; the
+    #    transcript is folded in via an UPDATE once transcription succeeds.
+    try:
+        store = _get_store()
+        conn = store._get_conn()
+        if not conn:
+            raise HTTPException(503, "Database unavailable")
+        try:
+            cur = conn.cursor()
+            cur.execute(
+                """INSERT INTO ai_hotel_captures
+                       (source, note_text, image_b64, image_media,
+                        section_guess, related_area, summary)
+                   VALUES (%s, %s, %s, %s, %s, %s, %s) RETURNING id""",
+                (source, note or None, b64, image_media, "general", None, summary),
+            )
+            capture_id = cur.fetchone()[0]
+            for ordinal, (ib64, imedia) in enumerate(resized_images):
+                cur.execute(
+                    """INSERT INTO ai_hotel_capture_images
+                           (capture_id, ordinal, image_b64, image_media)
+                       VALUES (%s, %s, %s, %s)""",
+                    (capture_id, ordinal, ib64, imedia),
+                )
+            conn.commit()
+            cur.close()
+        except Exception:
+            conn.rollback()
+            raise
+        finally:
+            store._put_conn(conn)
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"POST /api/ai-hotel/form-drafts raw capture insert failed: {e}")
+        raise HTTPException(500, "Could not save capture")
+
+    # 2b) Transcribe AFTER the raw capture is safely committed. A transcription
+    #     failure now leaves the capture row intact (no data loss); on success we
+    #     fold the transcript into note_text via an UPDATE.
+    if has_audio:
+        transcript = _ai_hotel_transcribe(audio_bytes, audio_type)
+        if transcript:
+            note = f"{note}\n\n{transcript}".strip() if note else transcript
+            updated_summary = note[:200] if note else summary
+            try:
+                store = _get_store()
+                conn = store._get_conn()
+                if conn:
+                    try:
+                        cur = conn.cursor()
+                        cur.execute(
+                            """UPDATE ai_hotel_captures
+                                  SET note_text = %s, summary = %s
+                                WHERE id = %s""",
+                            (note or None, updated_summary, capture_id),
+                        )
+                        conn.commit()
+                        cur.close()
+                    except Exception:
+                        conn.rollback()
+                        raise
+                    finally:
+                        store._put_conn(conn)
+            except Exception as e:
+                logger.error(f"POST /api/ai-hotel/form-drafts transcript UPDATE failed "
+                             f"(capture {capture_id} intact): {e}")
+
+    # 2c) Auto-detect the form_type from the full captured text (incl. transcript)
+    #     when not explicit. The user's explicit selection always wins (AC5/AC6).
+    if schema is None:
+        detected, auto_detected = detect_form_type(note)
+        schema = get_form_schema(detected)
+
+    # 3) Schema-driven extraction (guarded — never raises out; raw already safe).
+    extraction_failed = False
+    extracted: dict = {}
+    try:
+        prompt = build_extraction_prompt(schema, transcript, note)
+        eresp = _llm_call(
+            "gemini-2.5-flash", max_tokens=1500,
+            response_format="json", thinking_budget=0,
+            messages=[{"role": "user", "content": [{"type": "text", "text": prompt}]}],
+        )
+        from orchestrator.cost_monitor import log_api_cost
+        log_api_cost("gemini-2.5-flash", eresp.usage.input_tokens, eresp.usage.output_tokens,
+                     source="ai_hotel_form_draft_extract")
+        raw = (eresp.text or "").strip()
+        if not raw:
+            logger.error("ai_hotel_form_draft extraction returned EMPTY text (in=%s out=%s).",
+                         eresp.usage.input_tokens, eresp.usage.output_tokens)
+            extraction_failed = True
+        else:
+            body_txt = raw
+            if body_txt.startswith("```"):
+                body_txt = body_txt.split("```", 2)[1] if "```" in body_txt[3:] else body_txt.strip("`")
+                if body_txt.lstrip().lower().startswith("json"):
+                    body_txt = body_txt.lstrip()[4:]
+            s_i, e_i = body_txt.find("{"), body_txt.rfind("}")
+            extracted = json.loads(body_txt[s_i:e_i + 1]) if s_i != -1 and e_i != -1 else {}
+            if not isinstance(extracted, dict):
+                extracted = {}
+                extraction_failed = True
+    except Exception as ex_err:
+        logger.error(f"ai_hotel_form_draft extraction failed (raw capture {capture_id} intact): {ex_err}",
+                     exc_info=True)
+        extraction_failed = True
+        extracted = {}
+
+    result = parse_and_validate(schema, extracted, capture_source=source)
+    if extraction_failed:
+        result.warnings.append(
+            "Extraction failed — the raw capture was saved; fields are blank. Fill them in or retry.")
+
+    # 4) Persist the DRAFT record BESIDE the raw capture. A failure here must NOT
+    #    lose the raw capture (already committed) — degrade to draft_id=None.
+    draft_id = None
+    try:
+        store = _get_store()
+        conn = store._get_conn()
+        if conn:
+            try:
+                cur = conn.cursor()
+                cur.execute(
+                    """INSERT INTO ai_hotel_form_records
+                           (capture_id, form_type, schema_version, status,
+                            extracted_json, field_meta_json, validation_errors_json,
+                            model, prompt_version)
+                       VALUES (%s, %s, %s, 'draft', %s::jsonb, %s::jsonb, %s::jsonb, %s, %s)
+                       RETURNING id""",
+                    (capture_id, schema.form_type, schema.version,
+                     json.dumps(result.values), json.dumps(result.field_meta),
+                     json.dumps(result.validation_errors),
+                     "gemini-2.5-flash", PROMPT_VERSION),
+                )
+                draft_id = cur.fetchone()[0]
+                conn.commit()
+                cur.close()
+            except Exception:
+                conn.rollback()
+                raise
+            finally:
+                store._put_conn(conn)
+    except Exception as e:
+        logger.error(f"POST /api/ai-hotel/form-drafts draft insert failed (raw capture {capture_id} intact): {e}")
+        result.warnings.append("Draft record could not be saved; the raw capture was kept. Retry extraction.")
+
+    logger.info(f"ai_hotel_form_draft saved: capture_id={capture_id} draft_id={draft_id} "
+                f"form_type={schema.form_type} auto={auto_detected} "
+                f"missing={len(result.missing_critical)} errors={len(result.validation_errors)}")
+
+    return {
+        "capture_id": capture_id,
+        "draft_id": draft_id,
+        "form_type": schema.form_type,
+        "form_title": schema.title,
+        "schema_version": schema.version,
+        "auto_detected": auto_detected,
+        "status": "draft",
+        "values": result.values,
+        "field_meta": result.field_meta,
+        "missing_critical": result.missing_critical,
+        "validation_errors": result.validation_errors,
+        "warnings": result.warnings,
+        "transcript_preview": (transcript[:280] if transcript else ""),
+    }
+
+
+@app.post("/api/ai-hotel/form-drafts/{draft_id}/confirm", tags=["ai-hotel"],
+          dependencies=[Depends(verify_api_key)])
+async def ai_hotel_form_draft_confirm(draft_id: int, payload: dict = Body(default=None)):
+    """Promote a draft to a confirmed, typed record — the ONLY path that writes
+    status='confirmed'. Server re-validates the user-corrected values (the model
+    never confirms anything). Required-but-missing or malformed → 422, no write."""
+    from orchestrator.ai_hotel_form_schemas import get_form_schema, validate_corrected
+    payload = payload or {}
+    corrected = payload.get("values") or {}
+    ack = tuple(payload.get("acknowledged_unknown") or ())
+
+    store = _get_store()
+    conn = store._get_conn()
+    if not conn:
+        raise HTTPException(503, "Database unavailable")
+    try:
+        cur = conn.cursor()
+        cur.execute(
+            "SELECT form_type, status FROM ai_hotel_form_records WHERE id = %s",
+            (draft_id,),
+        )
+        row = cur.fetchone()
+        if not row:
+            raise HTTPException(404, "Draft not found")
+        form_type, status = row[0], row[1]
+        if status != "draft":
+            raise HTTPException(409, f"Draft already {status}; cannot confirm.")
+        schema = get_form_schema(form_type)
+        if schema is None:
+            raise HTTPException(400, f"Unknown form_type on draft: {form_type}")
+        normalized, missing, errors = validate_corrected(schema, corrected, ack)
+        if missing or errors:
+            raise HTTPException(422, detail={
+                "error": "validation_failed",
+                "missing_critical": missing,
+                "validation_errors": errors,
+            })
+        cur.execute(
+            """UPDATE ai_hotel_form_records
+                  SET status = 'confirmed', corrected_json = %s::jsonb,
+                      reviewed_at = now(), updated_at = now()
+                WHERE id = %s AND status = 'draft'""",
+            (json.dumps(normalized), draft_id),
+        )
+        conn.commit()
+        cur.close()
+    except HTTPException:
+        conn.rollback()
+        raise
+    except Exception as e:
+        conn.rollback()
+        logger.error(f"confirm form draft {draft_id} failed: {e}")
+        raise HTTPException(500, "Could not confirm draft")
+    finally:
+        store._put_conn(conn)
+    return {"draft_id": draft_id, "status": "confirmed", "values": normalized}
+
+
+@app.post("/api/ai-hotel/form-drafts/{draft_id}/discard", tags=["ai-hotel"],
+          dependencies=[Depends(verify_api_key)])
+async def ai_hotel_form_draft_discard(draft_id: int):
+    """Discard a draft (user chose 'keep as field note only'). The raw capture is
+    untouched and stays retrievable; only the structured draft is set discarded."""
+    affected = 0
+    store = _get_store()
+    conn = store._get_conn()
+    if not conn:
+        raise HTTPException(503, "Database unavailable")
+    try:
+        cur = conn.cursor()
+        cur.execute(
+            """UPDATE ai_hotel_form_records
+                  SET status = 'discarded', reviewed_at = now(), updated_at = now()
+                WHERE id = %s AND status = 'draft'""",
+            (draft_id,),
+        )
+        affected = cur.rowcount
+        conn.commit()
+        cur.close()
+    except Exception as e:
+        conn.rollback()
+        logger.error(f"discard form draft {draft_id} failed: {e}")
+        raise HTTPException(500, "Could not discard draft")
+    finally:
+        store._put_conn(conn)
+    if not affected:
+        raise HTTPException(409, "Draft not found or not in draft state")
+    return {"draft_id": draft_id, "status": "discarded"}
+
+
 @app.get("/api/scan/detect", tags=["dashboard-v3"], dependencies=[Depends(verify_api_key)])
 async def detect_capability(q: str = Query("", max_length=500)):
     """
