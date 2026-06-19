@@ -269,6 +269,7 @@
   var MAX_PHOTOS=8;
   var selectedFiles=[];      // accumulated photo File objects
   var audioBlob=null;        // recorded dictation Blob
+  var audioDuration=0;       // clip length in seconds (sent so Baker stores it)
   var mediaRecorder=null, mediaStream=null, chunks=[];
   var elapsed=0, timer=null;
 
@@ -330,7 +331,9 @@
         audioBlob=new Blob(chunks,{type:type});
         if(mediaStream){ mediaStream.getTracks().forEach(function(t){t.stop();}); mediaStream=null; }
         stopTimer();
+        audioDuration=elapsed;
         recDot.className='recdot done'; recLabel.textContent='Recorded';
+        recNote.textContent='Recorded locally — tap Extract/Send to save to Baker.';
         clearAudio.style.display='inline'; refreshSend();
       };
       mediaRecorder.start();
@@ -525,6 +528,7 @@
     if(audioBlob){
       var ext=(audioBlob.type.indexOf('mp4')!==-1)?'mp4':'webm';
       fd.append('audio', audioBlob, 'dictation.'+ext);
+      fd.append('duration_seconds', String(audioDuration||0));
     }
     fd.append('note', noteInput.value.trim());
     return fd;
@@ -595,7 +599,8 @@
           verr.classList.add('show');
           return;
         }
-        finishSheet((currentDraft.form_title||'Card')+' saved.');
+        finishSheet(audioBlob ? 'Saved to Baker: audio + transcript + card.'
+                              : ((currentDraft.form_title||'Card')+' saved.'));
       })
       .catch(function(){ verr.textContent='Network error — try again.'; verr.classList.add('show'); })
       .finally(function(){ saveCard.textContent=savedLabel; recomputeSave(); });

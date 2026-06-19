@@ -180,6 +180,23 @@
   .nrel{font:600 11px/1 var(--mono);color:var(--text-2)}
   .ntime{font:500 11px/1 var(--mono);color:var(--faint);margin-left:auto}
   .nempty{background:var(--card);border:1px solid var(--line);border-radius:8px;padding:22px;text-align:center;color:var(--muted);font-size:14px;box-shadow:var(--shadow)}
+  /* AI_HOTEL_FIELD_NOTES_CARD_SHELF_1: card-type chips, filters, compact row, detail */
+  .nfilter{display:flex;gap:7px;flex-wrap:wrap;margin:0 0 16px}
+  .nfbtn{font:600 12px/1 var(--sans);padding:8px 13px;border-radius:7px;border:1px solid var(--line);background:var(--card);color:var(--text-2);cursor:pointer}
+  .nfbtn.on{background:var(--id-blue);color:#fff;border-color:var(--id-blue)}
+  .ntag.kind-site{background:var(--id-blue-weak);color:var(--id-blue);border:1px solid var(--id-blue-line)}
+  .ntag.kind-supplier{background:var(--green-weak);color:var(--green);border:1px solid var(--green-line)}
+  .ntag.kind-free{background:var(--bg);color:var(--muted);border:1px solid var(--line)}
+  .ncompact{font:500 12.5px/1.5 var(--mono);color:var(--text-2);margin-top:9px;word-wrap:break-word}
+  .kv{display:flex;gap:10px;padding:7px 0;border-bottom:1px solid var(--line)}
+  .kvk{flex:0 0 38%;font:600 12px/1.5 var(--mono);text-transform:uppercase;letter-spacing:.03em;color:var(--muted)}
+  .kvv{flex:1;font-size:14px;color:var(--text);word-wrap:break-word;white-space:pre-wrap}
+  .dlg-acts{display:flex;gap:9px;flex-wrap:wrap;margin-top:18px}
+  .sbtn2{font:600 13px/1 var(--sans);padding:11px 15px;border-radius:8px;border:1px solid var(--id-blue-line);background:var(--card);color:var(--id-blue);cursor:pointer}
+  .sbtn2.danger{color:var(--accent);border-color:var(--accent-line)}
+  .sbtn2:disabled{opacity:.5;cursor:not-allowed}
+  .naudio{width:100%;margin:10px 0 4px;display:block}
+  .naudio-dl{display:inline-block;font:600 12.5px/1 var(--mono);color:var(--id-blue);margin:2px 0 8px;text-decoration:none}
 
   .pf-flag{display:inline-block;font:700 10px/1 var(--mono);color:var(--amber);background:var(--amber-weak);border:1px solid var(--amber-line);border-radius:5px;padding:5px 9px;text-transform:uppercase;letter-spacing:.12em;margin-bottom:16px}
   .pf-lead{font-size:15.5px;line-height:1.55;color:var(--text);margin-bottom:24px;max-width:72ch}
@@ -589,49 +606,190 @@ function fmtNoteTime(iso){
   try{return d.toLocaleString(undefined,{month:'short',day:'numeric',hour:'2-digit',minute:'2-digit'});}
   catch(e){return String(iso).slice(0,16);}
 }
+/* AI_HOTEL_FIELD_NOTES_CARD_SHELF_1: structured cards folded into Field notes */
+function noteKey(){return new URLSearchParams(location.search).get('key')||'';}
+function imgsOf(c){return (Array.isArray(c.images)&&c.images.length)?c.images:(c.image?[c.image]:[]);}
+function cardKind(c){
+  const ft=c.form_record&&c.form_record.form_type;
+  if(ft==='site_visit')return 'site';
+  if(ft==='supplier_card')return 'supplier';
+  return 'free';
+}
+function cardKindLabel(k){return k==='site'?'Site':(k==='supplier'?'Supplier':'Free note');}
+function researchCount(u){return u?String(u).split(';').map(s=>s.trim()).filter(Boolean).length:0;}
+function humanizeVal(v){return String(v).replace(/_/g,' ');}
+
 function renderNotes(main){
   main.appendChild(el('div','kicker','From the floor'));
   main.appendChild(el('h1','sec','Field notes'));
-  main.appendChild(el('div','sec-sub','Photos and notes captured on the phone, sorted automatically. Newest first. Read-only here — capture happens from the phone bookmark.'));
-  const key=new URLSearchParams(location.search).get('key');
+  main.appendChild(el('div','sec-sub','Photos, notes and saved cards captured on the phone, sorted automatically. Newest first. Tap a card to see its fields and raw capture.'));
+  const key=noteKey();
   if(!key){
     main.appendChild(el('div','nempty','Open this dashboard with your access key in the link (?key=…) to load field notes.'));
     return;
   }
+  let filter='all', allCaps=[];
+  const bar=el('div','nfilter');
+  [['all','All'],['site','Site Cards'],['supplier','Suppliers'],['free','Free Notes']].forEach(function(pair){
+    const b=el('button','nfbtn'+(pair[0]==='all'?' on':''),pair[1]); b.dataset.k=pair[0];
+    b.onclick=function(){filter=pair[0];Array.prototype.forEach.call(bar.children,function(x){x.classList.toggle('on',x.dataset.k===filter);});apply();};
+    bar.appendChild(b);
+  });
+  main.appendChild(bar);
   const wrap=el('div','ngrid');main.appendChild(wrap);
   wrap.appendChild(el('div','nempty','Loading field notes…'));
+
+  function apply(){
+    while(wrap.firstChild)wrap.removeChild(wrap.firstChild);
+    const list=allCaps.filter(function(c){return filter==='all'||cardKind(c)===filter;});
+    if(!list.length){wrap.appendChild(el('div','nempty','No field notes in this filter yet.'));return;}
+    list.forEach(function(c){wrap.appendChild(buildNoteCard(c));});
+  }
   fetch('/api/ai-hotel/captures?limit=100',{headers:{'X-Baker-Key':key}})
-    .then(r=>r.json())
-    .then(data=>{
-      while(wrap.firstChild)wrap.removeChild(wrap.firstChild);
-      const caps=(data&&Array.isArray(data.captures))?data.captures:[];
-      if(!caps.length){wrap.appendChild(el('div','nempty','No field notes yet. Snap or dictate one from the capture page.'));return;}
-      caps.forEach(c=>{
-        const card=el('div','ncard');
-        // images[] is the upgraded multi-photo field; fall back to the legacy
-        // single image for any pre-upgrade capture.
-        const imgs=(Array.isArray(c.images)&&c.images.length)?c.images:(c.image?[c.image]:[]);
-        if(imgs.length){const img=document.createElement('img');img.className='nthumb';img.src=imgs[0];img.alt='Field photo';img.loading='lazy';card.appendChild(img);}
-        const body=el('div','nbody');
-        body.appendChild(el('div','nsmry',c.summary||'(no summary)'));
-        const meta=el('div','nmeta');
-        const sec=noteSection(c.section_guess);
-        meta.appendChild(el('span','ntag '+sec,NOTE_SECTION_LABELS[sec]));
-        if(c.related_area)meta.appendChild(el('span','nrel',c.related_area));
-        meta.appendChild(el('span','ntime',fmtNoteTime(c.created_at)));
-        body.appendChild(meta);
-        if(imgs.length>1){
-          const strip=el('div','nthumbs');
-          imgs.slice(1).forEach(src=>{const t=document.createElement('img');t.src=src;t.alt='Field photo';t.loading='lazy';strip.appendChild(t);});
-          body.appendChild(strip);
-        }
-        card.appendChild(body);wrap.appendChild(card);
-      });
+    .then(function(r){return r.json();})
+    .then(function(data){
+      allCaps=(data&&Array.isArray(data.captures))?data.captures:[];
+      if(!allCaps.length){while(wrap.firstChild)wrap.removeChild(wrap.firstChild);wrap.appendChild(el('div','nempty','No field notes yet. Snap or dictate one from the capture page.'));return;}
+      apply();
     })
-    .catch(()=>{
+    .catch(function(){
       while(wrap.firstChild)wrap.removeChild(wrap.firstChild);
       wrap.appendChild(el('div','nempty','Could not load field notes. Check your key and connection.'));
     });
+}
+
+function buildNoteCard(c){
+  const kind=cardKind(c);
+  const card=el('div','ncard');
+  const imgs=imgsOf(c);
+  if(imgs.length){const img=document.createElement('img');img.className='nthumb';img.src=imgs[0];img.alt='Field photo';img.loading='lazy';card.appendChild(img);}
+  const body=el('div','nbody');
+  body.appendChild(el('div','nsmry',c.summary||'(no summary)'));
+  const meta=el('div','nmeta');
+  meta.appendChild(el('span','ntag kind-'+kind,cardKindLabel(kind)));   // type chip
+  if(kind==='free'){const sec=noteSection(c.section_guess);meta.appendChild(el('span','ntag '+sec,NOTE_SECTION_LABELS[sec]));}
+  if(c.related_area)meta.appendChild(el('span','nrel',c.related_area));
+  meta.appendChild(el('span','ntime',fmtNoteTime(c.created_at)));
+  body.appendChild(meta);
+  // Compact structured row for site / supplier cards.
+  const v=(c.form_record&&c.form_record.values)||{};
+  if(kind==='site'){
+    const bits=[];
+    if(v.address_or_location_clue)bits.push(v.address_or_location_clue);
+    else if(v.geo_context)bits.push(v.geo_context);
+    if(v.hospitality_fit)bits.push('fit: '+humanizeVal(v.hospitality_fit));
+    if(v.overall_score)bits.push('score '+v.overall_score+'/5');
+    if(v.next_action)bits.push('→ '+humanizeVal(v.next_action));
+    const miss=researchCount(v.unknowns_to_research);
+    if(miss)bits.push(miss+' to research');
+    if(bits.length)body.appendChild(el('div','ncompact',bits.join('  ·  ')));
+  } else if(kind==='supplier'){
+    const bits=[];
+    if(v.company_name)bits.push(v.company_name);
+    if(v.ai_hotel_category)bits.push(humanizeVal(v.ai_hotel_category));
+    if(v.follow_up_action&&v.follow_up_action!=='none')bits.push('→ '+humanizeVal(v.follow_up_action));
+    if(bits.length)body.appendChild(el('div','ncompact',bits.join('  ·  ')));
+  }
+  if(imgs.length>1){
+    const strip=el('div','nthumbs');
+    imgs.slice(1).forEach(function(src){const t=document.createElement('img');t.src=src;t.alt='Field photo';t.loading='lazy';strip.appendChild(t);});
+    body.appendChild(strip);
+  }
+  card.appendChild(body);
+  card.style.cursor='pointer';
+  card.onclick=function(){openNoteDetail(c);};
+  return card;
+}
+
+function cardAsText(c){
+  const lines=[];
+  lines.push(cardKindLabel(cardKind(c))+' — '+(c.summary||''));
+  const v=(c.form_record&&c.form_record.values)||{};
+  Object.keys(v).forEach(function(k){const val=v[k];if(val!==null&&val!==undefined&&val!=='')lines.push(humanizeVal(k)+': '+val);});
+  if(c.note_text)lines.push('',c.note_text);
+  return lines.join('\n');
+}
+
+function openNoteDetail(c){
+  const kind=cardKind(c);
+  const fr=c.form_record;
+  const tag=document.getElementById('dlgTag');
+  tag.className='dlg-tag area';
+  tag.textContent=cardKindLabel(kind)+(fr&&fr.status?(' · '+fr.status):'');
+  const title=document.getElementById('dlgTitle');
+  title.textContent=(c.summary?String(c.summary).slice(0,90):'Field note');title.style.color='';
+  document.getElementById('dlgWho').textContent=fmtNoteTime(c.created_at);
+  const b=document.getElementById('dlgBody');while(b.firstChild)b.removeChild(b.firstChild);
+  // Structured fields (AC3).
+  if(fr&&fr.values){
+    b.appendChild(el('div','dlg-h','Card fields'));
+    let any=false;
+    Object.keys(fr.values).forEach(function(k){
+      const val=fr.values[k];if(val===null||val===undefined||val==='')return;
+      any=true;
+      const row=el('div','kv');row.appendChild(el('span','kvk',humanizeVal(k)));row.appendChild(el('span','kvv',String(val)));
+      b.appendChild(row);
+    });
+    if(!any)b.appendChild(el('p',null,'No fields were filled on this card.'));
+  }
+  // Raw evidence (AC3): transcript/note + audio + photos.
+  b.appendChild(el('div','dlg-h','Raw capture'));
+  if(c.note_text)b.appendChild(el('p',null,c.note_text));
+  else b.appendChild(el('p',null,c.summary||'(no dictated text)'));
+  // Audio: list view carries METADATA only (AC10); full bytes load on demand.
+  const aud=Array.isArray(c.audio)?c.audio:[];
+  if(aud.length){
+    const dur=aud[0].duration_seconds?(aud[0].duration_seconds+'s'):'recording';
+    b.appendChild(el('div','dlg-h','Audio · '+dur));
+    const loadBtn=el('button','sbtn2','Load & play audio');
+    loadBtn.onclick=function(){
+      loadBtn.disabled=true;loadBtn.textContent='Loading…';
+      fetch('/api/ai-hotel/captures/'+c.id+'/audio',{headers:{'X-Baker-Key':noteKey()}})
+        .then(function(r){return r.json();})
+        .then(function(d){
+          const list=(d&&Array.isArray(d.audio))?d.audio:[];
+          if(!list.length){loadBtn.textContent='No audio found';return;}
+          loadBtn.remove();
+          list.forEach(function(clip,i){
+            const au=document.createElement('audio');au.controls=true;au.preload='none';au.src=clip.audio;au.className='naudio';
+            b.appendChild(au);
+            const dl=document.createElement('a');dl.href=clip.audio;
+            dl.download='dictation-'+c.id+'-'+i+'.'+((String(clip.audio_media||'audio/webm').split('/')[1])||'webm');
+            dl.textContent='Download audio';dl.className='naudio-dl';
+            b.appendChild(dl);
+          });
+        })
+        .catch(function(){loadBtn.disabled=false;loadBtn.textContent='Load failed — retry';});
+    };
+    b.appendChild(loadBtn);
+  }
+  const imgs=imgsOf(c);
+  if(imgs.length){
+    const strip=el('div','nthumbs');
+    imgs.forEach(function(src){const t=document.createElement('img');t.src=src;t.alt='Field photo';t.loading='lazy';strip.appendChild(t);});
+    b.appendChild(strip);
+  }
+  // Actions: Copy (client-side) + Dismiss (reuses the #380 discard endpoint).
+  const acts=el('div','dlg-acts');
+  const copyBtn=el('button','sbtn2','Copy card text');
+  copyBtn.onclick=function(){
+    const txt=cardAsText(c);
+    if(navigator.clipboard&&navigator.clipboard.writeText){navigator.clipboard.writeText(txt).then(function(){copyBtn.textContent='Copied';},function(){copyBtn.textContent='Copy failed';});}
+    else{copyBtn.textContent='Clipboard unavailable';}
+  };
+  acts.appendChild(copyBtn);
+  if(fr&&fr.id&&fr.status!=='discarded'){
+    const disBtn=el('button','sbtn2 danger','Dismiss card');
+    disBtn.onclick=function(){
+      disBtn.disabled=true;disBtn.textContent='Dismissing…';
+      fetch('/api/ai-hotel/form-drafts/'+fr.id+'/discard',{method:'POST',headers:{'X-Baker-Key':noteKey()}})
+        .then(function(r){if(!r.ok)throw new Error();disBtn.textContent='Dismissed — reopen Field notes to refresh.';})
+        .catch(function(){disBtn.disabled=false;disBtn.textContent='Dismiss failed — try again';});
+    };
+    acts.appendChild(disBtn);
+  }
+  b.appendChild(acts);
+  document.getElementById('detail').showModal();
 }
 
 /* ---- HITEC 2026 floor scout (vendors the Chairman met) ---- */
