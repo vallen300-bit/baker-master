@@ -46,3 +46,4 @@ outputs/share-site/
 venv/
 
 CLAUDE.local.md
+.r2_creds.tmp.json
