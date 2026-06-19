@@ -1072,6 +1072,12 @@ var STAKEHOLDERS=[
    note:'The guest experience is the proof the whole thesis rests on — no guest delight, no validation.'}
 ];
 
+// AI_HOTEL_REMEMBER_KEY_1: resolve the access key ON LOAD (not lazily when the
+// Field Notes view renders) so a keyed visit persists + strips ?key= even when
+// the landing view is the vision page (AC1/AC4 regardless of default section).
+// noteKey() is idempotent: after the strip the URL has no key, so later calls
+// in renderNotes just read the stored value.
+noteKey();
 buildNav();show('hotel');
 </script>
 </body>
