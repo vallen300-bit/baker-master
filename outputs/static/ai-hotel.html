@@ -3,6 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
+<!-- build: AI_HOTEL_GPS_CAPTURE_1 (GPS evidence: accuracy-tiered location + Maps link). Served no-cache (#382) — self-contained, no ?v= sub-asset. -->
 <title>AI Hotel — NVIDIA × Mandarin Oriental × Brisen</title>
 <style>
   :root{
@@ -659,6 +660,27 @@ function renderNotes(main){
     });
 }
 
+// AI_HOTEL_GPS_CAPTURE_1: accuracy tiers — ≤50 m verified, ≤150 m approx., else
+// low-accuracy (flagged, never shown as exact). The server stores no geocoded
+// address for a >150 m fix, so 'low' naturally falls through to the dictated clue.
+function gpsAccuracyTier(g){
+  if(!g||g.lat==null||g.accuracy_m==null)return null;
+  if(g.accuracy_m<=50)return 'verified';
+  if(g.accuracy_m<=150)return 'approx';
+  return 'low';
+}
+// Compact-row location preference (Director: GPS = verified evidence, separate
+// from the dictated clue which is a claim): (1) verified GPS address, (2) approx.
+// GPS address, (3) dictated clue when GPS is absent/low-accuracy, (4) missing.
+function compactLocation(c,v){
+  const g=c&&c.gps;const tier=gpsAccuracyTier(g);
+  if(g&&g.address&&tier==='verified')return '📍 '+g.address;
+  if(g&&g.address&&tier==='approx')return '📍 '+g.address+' (approx.)';
+  if(v&&v.address_or_location_clue)return v.address_or_location_clue;
+  if(v&&v.geo_context)return v.geo_context;
+  if(g&&g.lat!=null)return '📍 location tagged'+(g.accuracy_m!=null?(' (±'+Math.round(g.accuracy_m)+' m)'):'');
+  return 'Location missing';
+}
 function buildNoteCard(c){
   const kind=cardKind(c);
   const card=el('div','ncard');
@@ -676,8 +698,7 @@ function buildNoteCard(c){
   const v=(c.form_record&&c.form_record.values)||{};
   if(kind==='site'){
     const bits=[];
-    if(v.address_or_location_clue)bits.push(v.address_or_location_clue);
-    else if(v.geo_context)bits.push(v.geo_context);
+    const loc=compactLocation(c,v);if(loc)bits.push(loc);
     if(v.hospitality_fit)bits.push('fit: '+humanizeVal(v.hospitality_fit));
     if(v.overall_score)bits.push('score '+v.overall_score+'/5');
     if(v.next_action)bits.push('→ '+humanizeVal(v.next_action));
@@ -729,6 +750,35 @@ function openNoteDetail(c){
     });
     if(!any)b.appendChild(el('p',null,'No fields were filled on this card.'));
   }
+  // AI_HOTEL_GPS_CAPTURE_1: location evidence shown SEPARATELY from the dictated
+  // clue (evidence vs claim). The Maps link is built from lat/lng (URL-encoded),
+  // NEVER from the free-text address (AC8).
+  (function(){
+    const g=c.gps;const vv=(fr&&fr.values)||{};
+    const clue=vv.address_or_location_clue||vv.geo_context||'';
+    b.appendChild(el('div','dlg-h','Location'));
+    if(g&&g.lat!=null){
+      const tier=gpsAccuracyTier(g);
+      const tierLabel=(tier==='verified')?'verified':((tier==='approx')?'approximate':'low accuracy');
+      if(g.address){const r=el('div','kv');r.appendChild(el('span','kvk','GPS address'));r.appendChild(el('span','kvv',g.address+((tier==='approx')?' (approx.)':'')));b.appendChild(r);}
+      const cr=el('div','kv');cr.appendChild(el('span','kvk','Coordinates'));cr.appendChild(el('span','kvv',Number(g.lat).toFixed(6)+', '+Number(g.lng).toFixed(6)));b.appendChild(cr);
+      if(g.accuracy_m!=null){const ar=el('div','kv');ar.appendChild(el('span','kvk','Accuracy'));ar.appendChild(el('span','kvv','±'+Math.round(g.accuracy_m)+' m ('+tierLabel+')'));b.appendChild(ar);}
+      if(g.captured_at){const tr=el('div','kv');tr.appendChild(el('span','kvk','Captured'));tr.appendChild(el('span','kvv',fmtNoteTime(g.captured_at)));b.appendChild(tr);}
+      if(g.address_source){const sr=el('div','kv');sr.appendChild(el('span','kvk','Address source'));sr.appendChild(el('span','kvv',g.address_source));b.appendChild(sr);}
+      const q=encodeURIComponent(Number(g.lat)+','+Number(g.lng));
+      const linkRow=el('div','dlg-acts');
+      const gm=document.createElement('a');gm.href='https://maps.google.com/?q='+q;gm.target='_blank';gm.rel='noopener';gm.className='sbtn2';gm.textContent='Open in Google Maps';linkRow.appendChild(gm);
+      const am=document.createElement('a');am.href='geo:'+q;am.className='sbtn2';am.textContent='Open in Maps';linkRow.appendChild(am);
+      b.appendChild(linkRow);
+    } else if(g&&g.address_status==='permission_denied'){
+      b.appendChild(el('p',null,'No GPS — location permission was denied at capture.'));
+    } else if(g&&g.address_status==='timeout'){
+      b.appendChild(el('p',null,'No GPS — a location fix could not be obtained at capture.'));
+    } else {
+      b.appendChild(el('p',null,'No GPS location was captured.'));
+    }
+    if(clue){const dr=el('div','kv');dr.appendChild(el('span','kvk','Dictated clue'));dr.appendChild(el('span','kvv',clue));b.appendChild(dr);}
+  })();
   // Raw evidence (AC3): transcript/note + audio + photos.
   b.appendChild(el('div','dlg-h','Raw capture'));
   if(c.note_text)b.appendChild(el('p',null,c.note_text));

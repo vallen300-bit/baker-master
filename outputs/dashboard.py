@@ -9430,11 +9430,171 @@ def _ai_hotel_thumb_data_url(image_b64, media: str = "image/jpeg", px: int = 160
         return None
 
 
+# ── AI_HOTEL_GPS_CAPTURE_1: capture-level GPS evidence ──────────────────────
+# GPS is captured client-side (navigator.geolocation, with permission) and is
+# HARD EVIDENCE — stored SEPARATELY from any dictated address_or_location_clue
+# (a claim). The coordinates are persisted as a post-commit enrichment of the
+# raw capture row (the raw capture is committed FIRST, exactly like the audio
+# transcript UPDATE) so a GPS/geocode failure can NEVER lose a capture.
+
+_AI_HOTEL_GPS_ACCURACY_LOW_M = 150.0   # > this → low-accuracy: store, flag, do NOT geocode
+_ai_hotel_nominatim_last_call = [0.0]  # module-level 1-req/s guard for OSM Nominatim
+
+
+def _ai_hotel_reverse_geocode(lat: float, lng: float):
+    """Reverse-geocode (lat,lng) → (address, source) server-side, single-shot.
+
+    Google Geocoding API if GOOGLE_GEOCODING_API_KEY is set (best street-address
+    quality), else OSM Nominatim with an explicit User-Agent + a 1 req/s guard.
+    NEVER raises — returns (None, None) on any failure so the caller can record
+    gps_address_status='geocode_failed' with the coordinates still intact. No
+    geocode key is ever exposed client-side; this runs server-only."""
+    import os as _os
+    import requests as _requests
+    gkey = (_os.environ.get("GOOGLE_GEOCODING_API_KEY") or "").strip()
+    try:
+        if gkey:
+            r = _requests.get(
+                "https://maps.googleapis.com/maps/api/geocode/json",
+                params={"latlng": f"{lat},{lng}", "key": gkey},
+                timeout=6,
+            )
+            r.raise_for_status()
+            data = r.json()
+            results = data.get("results") or []
+            if data.get("status") == "OK" and results:
+                addr = (results[0].get("formatted_address") or "").strip()
+                if addr:
+                    return addr[:500], "google"
+            return None, None
+        # OSM Nominatim — usage policy requires a real User-Agent + ≤1 req/s.
+        import time as _time
+        elapsed = _time.time() - _ai_hotel_nominatim_last_call[0]
+        if elapsed < 1.0:
+            _time.sleep(1.0 - elapsed)
+        _ai_hotel_nominatim_last_call[0] = _time.time()
+        r = _requests.get(
+            "https://nominatim.openstreetmap.org/reverse",
+            params={"lat": lat, "lon": lng, "format": "jsonv2"},
+            headers={"User-Agent": "BakerSentinel/1.0 (ai-hotel field capture; dvallen@brisengroup.com)"},
+            timeout=6,
+        )
+        r.raise_for_status()
+        data = r.json()
+        addr = (data.get("display_name") or "").strip()
+        if addr:
+            return addr[:500], "nominatim"
+        return None, None
+    except Exception as e:
+        logger.warning("ai_hotel reverse-geocode failed (address=None): %s", e)
+        return None, None
+
+
+def _ai_hotel_persist_gps(store, capture_id: int, *, gps_lat="", gps_lng="",
+                          gps_accuracy_m="", gps_captured_at="",
+                          gps_capture_method="", gps_address_status=""):
+    """Post-commit GPS enrichment of an already-saved capture. Parses + validates
+    the client payload, reverse-geocodes ONCE (server-side, non-blocking), and
+    UPDATEs the gps_* columns. NEVER raises — the raw capture is already
+    committed, so any failure here is logged and swallowed (AC2/AC3 fail-soft).
+
+    Status precedence (gps_address_status):
+      - no coords + client 'permission_denied'/'timeout' → that status, coords NULL
+      - coords + accuracy > 150 m → 'low_accuracy', address NULL (a fuzzy point
+        must NOT be geocoded into a precise-looking street address — kill criterion)
+      - coords + geocode ok       → 'ok'
+      - coords + geocode failed   → 'geocode_failed'
+      - nothing requested         → 'not_requested'
+    """
+    def _f(x):
+        try:
+            s = str(x).strip()
+            return float(s) if s != "" else None
+        except (TypeError, ValueError):
+            return None
+
+    try:
+        lat = _f(gps_lat)
+        lng = _f(gps_lng)
+        acc = _f(gps_accuracy_m)
+        client_status = (gps_address_status or "").strip().lower()
+
+        # captured_at: accept an ISO-8601 string; store NULL if unparseable.
+        captured_at = None
+        cap_raw = (gps_captured_at or "").strip()
+        if cap_raw:
+            try:
+                import datetime as _dt
+                captured_at = _dt.datetime.fromisoformat(cap_raw.replace("Z", "+00:00"))
+            except ValueError:
+                logger.warning("ai_hotel GPS captured_at unparseable (stored NULL): %r", cap_raw)
+
+        address = None
+        source = None
+
+        have_coords = (
+            lat is not None and lng is not None
+            and -90.0 <= lat <= 90.0 and -180.0 <= lng <= 180.0
+        )
+        if lat is not None and lng is not None and not have_coords:
+            # Out-of-range coordinates — reject server-side (the DB CHECK is the
+            # backstop). Do not store junk coords presented as GPS evidence.
+            logger.warning("ai_hotel GPS coords out of range, dropped: lat=%r lng=%r", lat, lng)
+            lat = lng = acc = None
+
+        if have_coords:
+            if acc is not None and acc < 0:
+                acc = None
+            if acc is not None and acc > _AI_HOTEL_GPS_ACCURACY_LOW_M:
+                status = "low_accuracy"   # flagged, NOT geocoded (no precise-looking address)
+            else:
+                address, source = _ai_hotel_reverse_geocode(lat, lng)
+                status = "ok" if address else "geocode_failed"
+        elif client_status in ("permission_denied", "timeout"):
+            status = client_status
+            lat = lng = acc = None
+            captured_at = None
+        else:
+            status = "not_requested"
+
+        with_conn = store._get_conn()
+        if not with_conn:
+            return
+        try:
+            cur = with_conn.cursor()
+            cur.execute(
+                """UPDATE ai_hotel_captures
+                      SET gps_lat = %s, gps_lng = %s, gps_accuracy_m = %s,
+                          gps_captured_at = %s, gps_address = %s,
+                          gps_address_source = %s, gps_address_status = %s
+                    WHERE id = %s""",
+                (lat, lng, acc, captured_at, address, source, status, capture_id),
+            )
+            with_conn.commit()
+            cur.close()
+            logger.info("ai_hotel GPS persisted: capture=%s status=%s acc=%s source=%s",
+                        capture_id, status, acc, source)
+        except Exception:
+            with_conn.rollback()
+            raise
+        finally:
+            store._put_conn(with_conn)
+    except Exception as e:
+        # Capture is already committed — never propagate (AC2/AC3 fail-soft).
+        logger.error("ai_hotel GPS persist failed (capture %s intact): %s", capture_id, e)
+
+
 @app.post("/api/ai-hotel/capture", tags=["ai-hotel"], dependencies=[Depends(verify_api_key)])
 async def ai_hotel_capture(
     images: list[UploadFile] = File(None),
     audio: UploadFile = File(None),
     note: str = Form(""),
+    gps_lat: str = Form(""),
+    gps_lng: str = Form(""),
+    gps_accuracy_m: str = Form(""),
+    gps_captured_at: str = Form(""),
+    gps_capture_method: str = Form(""),
+    gps_address_status: str = Form(""),
 ):
     """AI_HOTEL_FIELD_CAPTURE_1 + _UPGRADES_1: accept up to 8 phone photos
     and/or a dictated note and/or a long audio dictation; classify into one
@@ -9661,6 +9821,15 @@ async def ai_hotel_capture(
 
     logger.info(f"ai_hotel_capture saved: id={new_id} source={source} section={section_guess}")
 
+    # AI_HOTEL_GPS_CAPTURE_1: enrich with GPS evidence AFTER the raw capture is
+    # safely committed (single-shot reverse-geocode, non-blocking, non-fatal).
+    _ai_hotel_persist_gps(
+        store, new_id,
+        gps_lat=gps_lat, gps_lng=gps_lng, gps_accuracy_m=gps_accuracy_m,
+        gps_captured_at=gps_captured_at, gps_capture_method=gps_capture_method,
+        gps_address_status=gps_address_status,
+    )
+
     # AI_HOTEL_CAPTURE_EMBED_1: also make the note semantically searchable via
     # Baker's vector memory. BEST-EFFORT — the DB row above is the source of
     # truth; an embed failure must never block the 200 (the insert already
@@ -9760,7 +9929,9 @@ async def ai_hotel_captures(limit: int = 100):
             cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
             cur.execute(
                 """SELECT id, created_at, source, note_text, image_b64, image_media,
-                          section_guess, related_area, summary, status
+                          section_guess, related_area, summary, status,
+                          gps_lat, gps_lng, gps_accuracy_m, gps_captured_at,
+                          gps_address, gps_address_source, gps_address_status
                      FROM ai_hotel_captures
                     WHERE status <> 'dismissed'
                     ORDER BY created_at DESC
@@ -9866,6 +10037,34 @@ async def ai_hotel_captures(limit: int = 100):
             d["form_record"] = _ai_hotel_form_record_view(form_by_cap.get(d["id"]))
             # Attach audio METADATA only (AC10) — playback bytes come from detail.
             d["audio"] = audio_by_cap.get(d["id"], [])
+            # AI_HOTEL_GPS_CAPTURE_1: fold the gps_* columns into one compact
+            # `gps` object for the feed (small metadata — coords + short address;
+            # NO heavy payload). Null for captures with no GPS so legacy rows
+            # render cleanly (AC6). The Maps deep link is built client-side from
+            # lat/lng (never from the free-text address) — AC8.
+            g_lat = d.pop("gps_lat", None)
+            g_lng = d.pop("gps_lng", None)
+            g_acc = d.pop("gps_accuracy_m", None)
+            g_cap_at = d.pop("gps_captured_at", None)
+            g_addr = d.pop("gps_address", None)
+            g_src = d.pop("gps_address_source", None)
+            g_status = d.pop("gps_address_status", None)
+            g_cap_iso = g_cap_at.isoformat() if hasattr(g_cap_at, "isoformat") else g_cap_at
+            if g_lat is not None and g_lng is not None:
+                d["gps"] = {
+                    "lat": g_lat, "lng": g_lng, "accuracy_m": g_acc,
+                    "captured_at": g_cap_iso, "address": g_addr,
+                    "address_source": g_src, "address_status": g_status,
+                }
+            elif g_status and g_status != "not_requested":
+                # No coords but a meaningful outcome (permission_denied/timeout).
+                d["gps"] = {
+                    "lat": None, "lng": None, "accuracy_m": None,
+                    "captured_at": None, "address": None,
+                    "address_source": None, "address_status": g_status,
+                }
+            else:
+                d["gps"] = None
             captures.append(_serialize(d))
         return {"captures": captures}
     except Exception as e:
@@ -10010,6 +10209,12 @@ async def ai_hotel_form_draft(
     audio: UploadFile = File(None),
     note: str = Form(""),
     duration_seconds: str = Form(""),
+    gps_lat: str = Form(""),
+    gps_lng: str = Form(""),
+    gps_accuracy_m: str = Form(""),
+    gps_captured_at: str = Form(""),
+    gps_capture_method: str = Form(""),
+    gps_address_status: str = Form(""),
 ):
     """Voice/note/photo capture → schema-driven structured draft (site_visit or
     supplier_card). Flow: resolve form_type (explicit or auto-detect) → persist
@@ -10161,6 +10366,16 @@ async def ai_hotel_form_draft(
     except Exception as e:
         logger.error(f"POST /api/ai-hotel/form-drafts raw capture insert failed: {e}")
         raise HTTPException(500, "Could not save capture")
+
+    # 2a) AI_HOTEL_GPS_CAPTURE_1: enrich the just-committed capture with GPS
+    # evidence (single-shot reverse-geocode, non-blocking, non-fatal) BEFORE
+    # transcription/extraction so the location survives even if those fail.
+    _ai_hotel_persist_gps(
+        store, capture_id,
+        gps_lat=gps_lat, gps_lng=gps_lng, gps_accuracy_m=gps_accuracy_m,
+        gps_captured_at=gps_captured_at, gps_capture_method=gps_capture_method,
+        gps_address_status=gps_address_status,
+    )
 
     # 2b) Transcribe AFTER the raw capture is safely committed. A transcription
     #     failure now leaves the capture row intact (no data loss); on success we

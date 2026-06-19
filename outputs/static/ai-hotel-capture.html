@@ -7,7 +7,7 @@
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
 <meta name="theme-color" content="#1a3a52">
 <title>AI Hotel — Field capture</title>
-<!-- build: AI_HOTEL_FIELD_NOTES_AND_AUDIO_1 v2 (G3 copy-honesty fix). Self-contained page opened via ?key= bookmark — no referenced sub-asset to ?v=-bust. -->
+<!-- build: AI_HOTEL_GPS_CAPTURE_1 v3 (GPS evidence: 📍 tag-location + site-visit submit path). Self-contained page opened via ?key= bookmark — no referenced sub-asset to ?v=-bust. -->
 <meta name="x-build" content="ai-hotel-field-notes-and-audio-1-v2">
 <style>
   :root{
@@ -221,6 +221,12 @@
     <div class="hint">A photo, a note, audio — any mix. The classifier decides where it goes.</div>
   </div>
 
+  <div class="card" id="gpsCard">
+    <label class="fl">Location <span class="ct" id="gpsAccCt"></span></label>
+    <button type="button" class="sbtn ghost" id="gpsBtn" aria-label="Tag the exact GPS location">📍 Tag location</button>
+    <div class="hint" id="gpsStatus">GPS adds the exact, verified location — far better than a dictated guess. Tap to capture (your phone will ask permission).</div>
+  </div>
+
   <button class="send" id="sendBtn" disabled>Send</button>
 
   <div class="result" id="result"></div>
@@ -401,6 +407,83 @@
 
   var mode='note';                  // 'note' | 'site_visit' | 'supplier_card'
   var currentDraft=null;            // last /form-drafts response
+
+  // ── AI_HOTEL_GPS_CAPTURE_1: capture-level GPS evidence ──────────────────────
+  // GPS is captured from a USER GESTURE (the 📍 button + the Site-visit Send
+  // path) — iOS grants permission more reliably when tied to a tap, not a silent
+  // page-load read. A denied/timed-out fix never blocks the save (capture still
+  // goes through without coordinates). Status is the CLIENT outcome; the server
+  // resolves the final gps_address_status after reverse-geocoding.
+  var gpsBtn=document.getElementById('gpsBtn');
+  var gpsStatus=document.getElementById('gpsStatus');
+  var gpsAccCt=document.getElementById('gpsAccCt');
+  var STALE_MS=10*60*1000;          // 10 minutes
+  var gps={lat:null,lng:null,acc:null,at:null,method:null,status:null};
+
+  function gpsStale(){ return gps.at && (Date.now()-Date.parse(gps.at))>STALE_MS; }
+
+  function updateGpsUI(){
+    if(!gpsBtn) return;
+    if(gps.lat!=null){
+      var acc=(gps.acc!=null)?('±'+Math.round(gps.acc)+' m'):'';
+      gpsAccCt.textContent=acc;
+      gpsBtn.textContent='📍 Location tagged — retag';
+      gpsStatus.textContent=(gpsStale()
+        ? 'Location is over 10 minutes old — tap to re-tag, or send anyway.'
+        : 'Exact location captured'+(acc?(' ('+acc+')'):'')+'. Stored as verified evidence, separate from any dictated clue.');
+    } else if(gps.status==='permission_denied'){
+      gpsAccCt.textContent='';
+      gpsBtn.textContent='📍 Tag location';
+      gpsStatus.textContent='Location not added — permission denied. The capture still saves; tap to try again.';
+    } else if(gps.status==='timeout'){
+      gpsAccCt.textContent='';
+      gpsBtn.textContent='📍 Tag location';
+      gpsStatus.textContent='Location not added — could not get a fix. The capture still saves; tap to retry.';
+    } else {
+      gpsAccCt.textContent='';
+      gpsBtn.textContent='📍 Tag location';
+      gpsStatus.textContent='GPS adds the exact, verified location — far better than a dictated guess. Tap to capture (your phone will ask permission).';
+    }
+  }
+
+  function captureGps(method, cb){
+    if(!navigator.geolocation){ gps.status='timeout'; updateGpsUI(); if(cb)cb(); return; }
+    gpsBtn.disabled=true; gpsStatus.textContent='Getting location…';
+    navigator.geolocation.getCurrentPosition(function(pos){
+      gps.lat=pos.coords.latitude; gps.lng=pos.coords.longitude;
+      gps.acc=(pos.coords.accuracy!=null)?pos.coords.accuracy:null;
+      gps.at=new Date().toISOString(); gps.method=method; gps.status=null;
+      gpsBtn.disabled=false; updateGpsUI(); if(cb)cb();
+    }, function(err){
+      gps.lat=gps.lng=gps.acc=gps.at=null; gps.method=method;
+      gps.status=(err && err.code===1)?'permission_denied':'timeout';
+      gpsBtn.disabled=false; updateGpsUI(); if(cb)cb();
+    }, {enableHighAccuracy:true, timeout:10000, maximumAge:0});
+  }
+
+  function appendGps(fd){
+    if(gps.lat!=null){
+      fd.append('gps_lat', String(gps.lat));
+      fd.append('gps_lng', String(gps.lng));
+      if(gps.acc!=null) fd.append('gps_accuracy_m', String(gps.acc));
+      if(gps.at) fd.append('gps_captured_at', gps.at);
+      fd.append('gps_capture_method', gps.method||'manual_tag_location');
+    }
+    if(gps.status){ fd.append('gps_address_status', gps.status); }
+  }
+
+  // Returns false if the caller should abort this submit (user chose to re-tag a
+  // stale fix). Otherwise true (proceed — fresh, absent, or accepted-stale GPS).
+  function gpsStaleOkToSend(){
+    if(gps.lat!=null && gpsStale()){
+      if(!window.confirm('Location is over 10 minutes old. Send with this older location? Press Cancel to re-tag.')){
+        captureGps('manual_tag_location'); return false;
+      }
+    }
+    return true;
+  }
+
+  if(gpsBtn){ gpsBtn.addEventListener('click',function(){ captureGps('manual_tag_location'); }); }
   // Text fields render as a textarea; everything else as a single-line input.
   var LONG_FIELDS={offering_summary:1,brisen_relevance:1,notes:1,geo_context:1,
     site_condition:1,access_parking_visibility:1,surrounding_demand_drivers:1,
@@ -533,6 +616,7 @@
       fd.append('duration_seconds', String(audioDuration||0));
     }
     fd.append('note', noteInput.value.trim());
+    appendGps(fd);
     return fd;
   }
 
@@ -626,11 +710,23 @@
     recDot.className='recdot'; recLabel.textContent=''; clearAudio.style.display='none';
     recTime.textContent='0:00';
     noteInput.value='';
+    gps={lat:null,lng:null,acc:null,at:null,method:null,status:null}; updateGpsUI();
   }
 
   sendBtn.addEventListener('click',function(){
     if(sendBtn.disabled) return;
-    if(mode==='site_visit'||mode==='supplier_card'){ submitStructured(); return; }
+    if(mode==='site_visit'||mode==='supplier_card'){
+      // The Site-visit Send path auto-captures GPS from this tap if not already
+      // tagged and not previously denied (the brief's "user gesture" path);
+      // supplier_card relies on the 📍 button only.
+      if(mode==='site_visit' && gps.lat==null && gps.status!=='permission_denied'){
+        captureGps('auto_site_visit', function(){ if(gpsStaleOkToSend()) submitStructured(); });
+        return;
+      }
+      if(gpsStaleOkToSend()) submitStructured();
+      return;
+    }
+    if(!gpsStaleOkToSend()) return;
     var note=noteInput.value.trim();
     if(!KEY || (!selectedFiles.length && !note && !audioBlob)) return;
     var hadAudio=!!audioBlob;   // free-note path does NOT persist audio — be honest below
@@ -644,6 +740,7 @@
       fd.append('audio', audioBlob, 'dictation.'+ext);
     }
     fd.append('note',note);
+    appendGps(fd);
     fetch('/api/ai-hotel/capture',{method:'POST',headers:{'X-Baker-Key':KEY},body:fd})
       .then(function(r){
         return r.json().then(function(j){ return {ok:r.ok,status:r.status,body:j}; })
@@ -684,6 +781,7 @@
 
   renderThumbs();
   refreshSend();
+  updateGpsUI();
 })();
 </script>
 </body>
