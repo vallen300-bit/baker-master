@@ -100,6 +100,62 @@
   .nokey.show{display:block}
   .foot{text-align:center;font:600 11px/1.5 var(--mono);color:var(--muted);
         margin-top:26px;text-transform:uppercase;letter-spacing:.1em}
+
+  /* Mode selector (Free note / Supplier card) */
+  .seg{display:flex;gap:0;background:var(--navy-weak);border:1px solid var(--navy-line);
+       border-radius:11px;padding:4px;margin:0 0 18px}
+  .seg button{flex:1;min-height:42px;border:none;background:transparent;color:var(--navy);
+       font:600 14px/1 var(--sans);border-radius:8px;cursor:pointer;
+       -webkit-tap-highlight-color:transparent}
+  .seg button.on{background:var(--navy);color:#fff}
+  .seg button:disabled{opacity:.45;cursor:not-allowed}
+
+  /* Review sheet (structured supplier-card draft) */
+  .sheet{margin-top:16px;display:none}
+  .sheet.show{display:block}
+  .sheet .shead{display:flex;align-items:center;gap:10px;margin-bottom:4px}
+  .sheet .shead .title{font-weight:650;font-size:16px}
+  .grp{font:700 11px/1 var(--mono);letter-spacing:.12em;text-transform:uppercase;color:var(--navy);
+       margin:18px 0 12px;padding-bottom:6px;border-bottom:1px solid var(--navy-line)}
+  .grp:first-child{margin-top:2px}
+  .frow{margin-bottom:14px}
+  .frow .flab{display:flex;align-items:center;gap:8px;font:700 10px/1 var(--mono);
+       letter-spacing:.1em;text-transform:uppercase;color:var(--muted);margin-bottom:7px}
+  .frow.req .flab{color:var(--navy)}
+  .frow.missing .flab{color:var(--red)}
+  .chip{display:inline-block;font:700 9px/1 var(--mono);letter-spacing:.04em;padding:3px 6px;
+        border-radius:5px;text-transform:uppercase}
+  .chip.hi{background:var(--green-weak);color:#2f5c1e}
+  .chip.mid{background:rgba(183,121,31,.14);color:var(--amber)}
+  .chip.lo{background:var(--red-weak);color:var(--red)}
+  .chip.req{background:var(--navy);color:#fff}
+  .frow input,.frow textarea{width:100%;padding:11px 12px;border:1px solid var(--line);
+       border-radius:9px;font:inherit;font-size:16px;background:var(--bg);color:var(--text)}
+  .frow textarea{min-height:60px;resize:vertical;line-height:1.45}
+  .frow.missing input,.frow.missing textarea{border-color:var(--red)}
+  .frow input:focus,.frow textarea:focus{outline:none;border-color:var(--navy);
+       box-shadow:0 0 0 3px var(--navy-weak)}
+  .unk{display:flex;align-items:center;gap:7px;margin-top:6px;font-size:12.5px;color:var(--muted)}
+  .unk input{width:auto;margin:0}
+  .verr{background:var(--red-weak);border:1px solid rgba(180,35,24,.3);color:var(--red);
+        border-radius:9px;padding:10px 12px;font-size:13px;margin-bottom:14px;display:none}
+  .verr.show{display:block}
+  .acc{border:1px solid var(--line);border-radius:9px;margin:6px 0 16px;overflow:hidden}
+  .acc summary{padding:12px 13px;font:600 13px var(--sans);color:var(--text-2);cursor:pointer;
+       list-style:none}
+  .acc summary::-webkit-details-marker{display:none}
+  .acc .accbody{padding:0 13px 13px;font-size:13.5px;color:var(--text-2);white-space:pre-wrap}
+  .acc .accthumbs{display:grid;grid-template-columns:repeat(auto-fill,minmax(72px,1fr));gap:8px;
+       padding:0 13px 13px}
+  .acc .accthumbs img{width:100%;aspect-ratio:1/1;object-fit:cover;border-radius:8px;
+       border:1px solid var(--line)}
+  .sheetbtns{display:flex;flex-direction:column;gap:9px;margin-top:6px}
+  .sbtn{width:100%;min-height:50px;border-radius:11px;font:650 15px/1 var(--sans);cursor:pointer;
+        border:1px solid var(--navy-line);-webkit-tap-highlight-color:transparent}
+  .sbtn.primary{background:var(--navy);color:#fff;border-color:var(--navy)}
+  .sbtn.primary:disabled{background:#c9c4ba;border-color:#c9c4ba;cursor:not-allowed}
+  .sbtn.ghost{background:var(--card);color:var(--navy)}
+  .sbtn.ghost:active,.sbtn.primary:active{transform:scale(.99)}
 </style>
 </head>
 <body>
@@ -111,6 +167,12 @@
   <div class="lead">Snap booth photos, record what they say, or dictate a note. Attach several to one capture, then press Send once. It's sorted automatically and lands in the AI Hotel dashboard's Field notes.</div>
 
   <div class="nokey" id="nokey">Open this page with your access key in the link (<code>?key=…</code>). Sending is disabled until then.</div>
+
+  <div class="seg" id="seg" role="tablist" aria-label="Capture mode">
+    <button type="button" id="modeNote" class="on" aria-pressed="true">Free note</button>
+    <button type="button" id="modeSite" aria-pressed="false">Site visit</button>
+    <button type="button" id="modeSupplier" aria-pressed="false">Supplier card</button>
+  </div>
 
   <div class="card">
     <label class="fl" for="camBtn">Photos<span class="ct" id="photoCt"></span></label>
@@ -160,6 +222,23 @@
   <button class="send" id="sendBtn" disabled>Send</button>
 
   <div class="result" id="result"></div>
+
+  <div class="sheet" id="sheet" aria-live="polite">
+    <div class="shead"><div class="title" id="sheetTitle">Review card</div></div>
+    <div class="hint" style="margin-bottom:14px">Extracted from your capture. Empty fields weren't clearly stated — fill what you know, leave the rest blank, then save. Nothing is sent anywhere.</div>
+    <div class="verr" id="verr"></div>
+    <div id="fields"></div>
+    <details class="acc" id="rawAcc">
+      <summary>Raw capture (transcript &amp; photos)</summary>
+      <div class="accbody" id="rawText"></div>
+      <div class="accthumbs" id="rawThumbs"></div>
+    </details>
+    <div class="sheetbtns">
+      <button type="button" class="sbtn primary" id="saveCard" disabled>Save supplier card</button>
+      <button type="button" class="sbtn ghost" id="keepNote">Keep as field note only</button>
+      <button type="button" class="sbtn ghost" id="retryExtract">Retry extraction</button>
+    </div>
+  </div>
 
   <div class="foot">Brisen · same-origin · key stays in your link</div>
 </div>
@@ -299,6 +378,235 @@
 
   noteInput.addEventListener('input',refreshSend);
 
+  // ── Mode (Free note / Site visit / Supplier card) + review sheet ─────────
+  var seg=document.getElementById('seg');
+  var modeNote=document.getElementById('modeNote');
+  var modeSite=document.getElementById('modeSite');
+  var modeSupplier=document.getElementById('modeSupplier');
+  var sheet=document.getElementById('sheet');
+  var sheetTitle=document.getElementById('sheetTitle');
+  var verr=document.getElementById('verr');
+  var fieldsBox=document.getElementById('fields');
+  var rawAcc=document.getElementById('rawAcc');
+  var rawText=document.getElementById('rawText');
+  var rawThumbs=document.getElementById('rawThumbs');
+  var saveCard=document.getElementById('saveCard');
+  var keepNote=document.getElementById('keepNote');
+  var retryExtract=document.getElementById('retryExtract');
+
+  var mode='note';                  // 'note' | 'site_visit' | 'supplier_card'
+  var currentDraft=null;            // last /form-drafts response
+  // Text fields render as a textarea; everything else as a single-line input.
+  var LONG_FIELDS={offering_summary:1,brisen_relevance:1,notes:1,geo_context:1,
+    site_condition:1,access_parking_visibility:1,surrounding_demand_drivers:1,
+    ai_hotel_angle:1,red_flags_physical:1,red_flags_deal:1,unknowns_to_research:1};
+  var FORM_LABELS={site_visit:'Save site card',supplier_card:'Save supplier card'};
+
+  function extractLabel(){
+    return mode==='site_visit'?'Extract site card':'Extract supplier card';
+  }
+  function setMode(m){
+    mode=m;
+    var structured=(m==='site_visit'||m==='supplier_card');
+    modeNote.classList.toggle('on',m==='note'); modeNote.setAttribute('aria-pressed',m==='note');
+    modeSite.classList.toggle('on',m==='site_visit'); modeSite.setAttribute('aria-pressed',m==='site_visit');
+    modeSupplier.classList.toggle('on',m==='supplier_card'); modeSupplier.setAttribute('aria-pressed',m==='supplier_card');
+    sendBtn.textContent=(m==='note')?'Send':extractLabel();
+    if(!structured){ sheet.classList.remove('show'); currentDraft=null; }
+    refreshSend();
+  }
+  modeNote.addEventListener('click',function(){ setMode('note'); });
+  modeSite.addEventListener('click',function(){ setMode('site_visit'); });
+  modeSupplier.addEventListener('click',function(){ setMode('supplier_card'); });
+
+  function chipFor(conf){
+    if(conf===null||conf===undefined) return null;
+    if(conf>=0.75) return {cls:'hi',txt:'high'};
+    if(conf>=0.5) return {cls:'mid',txt:'med'};
+    return {cls:'lo',txt:'low'};
+  }
+  function criticalKeys(){
+    var m=(currentDraft&&currentDraft.field_meta)||{};
+    return Object.keys(m).filter(function(k){ return m[k] && m[k].critical; });
+  }
+
+  function recomputeSave(){
+    var ok=true;
+    criticalKeys().forEach(function(k){
+      var inp=document.getElementById('f_'+k);
+      var unk=document.getElementById('u_'+k);
+      var has=inp && inp.value.trim().length>0;
+      var marked=unk && unk.checked;
+      var row=document.getElementById('row_'+k);
+      if(row) row.classList.toggle('missing', !has && !marked);
+      if(!has && !marked) ok=false;
+    });
+    saveCard.disabled=!ok;
+  }
+
+  function renderReview(resp){
+    currentDraft=resp;
+    while(fieldsBox.firstChild) fieldsBox.removeChild(fieldsBox.firstChild);
+    var values=resp.values||{};
+    var meta=resp.field_meta||{};
+    var missing={}; (resp.missing_critical||[]).forEach(function(k){ missing[k]=1; });
+    if(sheetTitle){
+      sheetTitle.textContent='Review '+((resp.form_title||'card'))
+        +(resp.auto_detected?' (auto-detected)':'');
+    }
+    var lastGroup=null;
+    Object.keys(values).forEach(function(k){
+      var fm=meta[k]||{};
+      var crit=!!fm.critical;
+      var label=fm.label||k.replace(/_/g,' ');
+      // Group header
+      if(fm.group && fm.group!==lastGroup){
+        lastGroup=fm.group;
+        var gh=document.createElement('div'); gh.className='grp'; gh.textContent=fm.group;
+        fieldsBox.appendChild(gh);
+      }
+      var row=document.createElement('div');
+      row.className='frow'+(crit?' req':'')+((crit && missing[k])?' missing':'');
+      row.id='row_'+k;
+      var lab=document.createElement('div'); lab.className='flab';
+      lab.appendChild(document.createTextNode(label+(crit?' *':'')));
+      var chip=chipFor(fm.confidence);
+      if(chip && values[k]!==null){
+        var c=document.createElement('span'); c.className='chip '+chip.cls; c.textContent=chip.txt;
+        lab.appendChild(c);
+      }
+      row.appendChild(lab);
+      var input;
+      if(k==='overall_score'){
+        input=document.createElement('select');
+        var blank=document.createElement('option'); blank.value=''; blank.textContent='—';
+        input.appendChild(blank);
+        [1,2,3,4,5].forEach(function(n){
+          var o=document.createElement('option'); o.value=String(n); o.textContent=String(n);
+          input.appendChild(o);
+        });
+      } else if(LONG_FIELDS[k]){ input=document.createElement('textarea'); }
+      else { input=document.createElement('input'); input.type='text'; }
+      input.id='f_'+k;
+      input.value=(values[k]===null||values[k]===undefined)?'':String(values[k]);
+      input.setAttribute('aria-label',label);
+      input.addEventListener('input',recomputeSave);
+      input.addEventListener('change',recomputeSave);
+      row.appendChild(input);
+      if(crit){
+        var unkWrap=document.createElement('label'); unkWrap.className='unk';
+        var unk=document.createElement('input'); unk.type='checkbox'; unk.id='u_'+k;
+        unk.addEventListener('change',recomputeSave);
+        unkWrap.appendChild(unk);
+        unkWrap.appendChild(document.createTextNode('Mark unknown'));
+        row.appendChild(unkWrap);
+      }
+      fieldsBox.appendChild(row);
+    });
+    saveCard.textContent=FORM_LABELS[resp.form_type]||'Save card';
+    // Raw transcript / note + photos accordion
+    var rawTxt=(resp.transcript_preview||'')||noteInput.value.trim();
+    rawText.textContent=rawTxt||'(no dictated text)';
+    while(rawThumbs.firstChild) rawThumbs.removeChild(rawThumbs.firstChild);
+    selectedFiles.forEach(function(f){
+      var img=document.createElement('img'); img.src=URL.createObjectURL(f); img.alt='Captured photo';
+      rawThumbs.appendChild(img);
+    });
+    rawAcc.open=false;
+    verr.classList.remove('show'); verr.textContent='';
+    sheet.classList.add('show');
+    recomputeSave();
+  }
+
+  function structuredFD(){
+    var fd=new FormData();
+    fd.append('form_type', mode);   // explicit selection overrides server auto-detect
+    selectedFiles.forEach(function(f,i){ fd.append('images', f, (f.name||('photo-'+(i+1)+'.jpg'))); });
+    if(audioBlob){
+      var ext=(audioBlob.type.indexOf('mp4')!==-1)?'mp4':'webm';
+      fd.append('audio', audioBlob, 'dictation.'+ext);
+    }
+    fd.append('note', noteInput.value.trim());
+    return fd;
+  }
+
+  function submitStructured(){
+    if(!KEY) return;
+    sendBtn.disabled=true; sendBtn.textContent='Extracting…';
+    retryExtract.disabled=true; retryExtract.textContent='Extracting…';
+    fetch('/api/ai-hotel/form-drafts',{method:'POST',headers:{'X-Baker-Key':KEY},body:structuredFD()})
+      .then(function(r){ return r.json().then(function(j){ return {ok:r.ok,status:r.status,body:j}; })
+        .catch(function(){ return {ok:r.ok,status:r.status,body:{}}; }); })
+      .then(function(res){
+        if(!res.ok){
+          var msg=(res.body&&(res.body.detail||res.body.error))||('Error '+res.status);
+          showResult('err',function(root){ root.appendChild(document.createTextNode('Could not extract: '+msg)); });
+          return;
+        }
+        result.className='result';   // hide the plain result; the sheet takes over
+        renderReview(res.body||{});
+      })
+      .catch(function(e){
+        showResult('err',function(root){
+          root.appendChild(document.createTextNode('Network error — try again. '+(e&&e.message?e.message:'')));
+        });
+      })
+      .finally(function(){
+        sendBtn.textContent=extractLabel(); refreshSend();
+        retryExtract.disabled=false; retryExtract.textContent='Retry extraction';
+      });
+  }
+
+  retryExtract.addEventListener('click',function(){ submitStructured(); });
+
+  keepNote.addEventListener('click',function(){
+    if(!currentDraft||!currentDraft.draft_id||!KEY){ finishSheet('Kept as field note.'); return; }
+    fetch('/api/ai-hotel/form-drafts/'+currentDraft.draft_id+'/discard',
+          {method:'POST',headers:{'X-Baker-Key':KEY}})
+      .then(function(){ finishSheet('Kept as field note — the dictation is saved, no card created.'); })
+      .catch(function(){ finishSheet('Kept as field note.'); });
+  });
+
+  saveCard.addEventListener('click',function(){
+    if(saveCard.disabled||!currentDraft||!currentDraft.draft_id||!KEY) return;
+    var values={}; var ack=[];
+    Object.keys(currentDraft.values||{}).forEach(function(k){
+      var inp=document.getElementById('f_'+k);
+      values[k]=inp?inp.value.trim():'';
+    });
+    criticalKeys().forEach(function(k){
+      var unk=document.getElementById('u_'+k);
+      if(unk && unk.checked && !values[k]) ack.push(k);
+    });
+    var savedLabel=saveCard.textContent;
+    saveCard.disabled=true; saveCard.textContent='Saving…';
+    fetch('/api/ai-hotel/form-drafts/'+currentDraft.draft_id+'/confirm',
+          {method:'POST',headers:{'X-Baker-Key':KEY,'Content-Type':'application/json'},
+           body:JSON.stringify({values:values,acknowledged_unknown:ack})})
+      .then(function(r){ return r.json().then(function(j){ return {ok:r.ok,status:r.status,body:j}; })
+        .catch(function(){ return {ok:r.ok,status:r.status,body:{}}; }); })
+      .then(function(res){
+        if(!res.ok){
+          var d=res.body&&res.body.detail;
+          var parts=[];
+          if(d&&d.missing_critical&&d.missing_critical.length) parts.push('Missing: '+d.missing_critical.join(', '));
+          if(d&&d.validation_errors&&d.validation_errors.length) parts=parts.concat(d.validation_errors);
+          verr.textContent=parts.length?parts.join('  '):('Could not save (error '+res.status+').');
+          verr.classList.add('show');
+          return;
+        }
+        finishSheet((currentDraft.form_title||'Card')+' saved.');
+      })
+      .catch(function(){ verr.textContent='Network error — try again.'; verr.classList.add('show'); })
+      .finally(function(){ saveCard.textContent=savedLabel; recomputeSave(); });
+  });
+
+  function finishSheet(msg){
+    sheet.classList.remove('show'); currentDraft=null;
+    resetForm();
+    showResult('ok',function(root){ root.appendChild(document.createTextNode(msg)); });
+  }
+
   function showResult(cls,buildFn){
     result.className='result show '+cls;
     while(result.firstChild) result.removeChild(result.firstChild);
@@ -315,6 +623,7 @@
 
   sendBtn.addEventListener('click',function(){
     if(sendBtn.disabled) return;
+    if(mode==='site_visit'||mode==='supplier_card'){ submitStructured(); return; }
     var note=noteInput.value.trim();
     if(!KEY || (!selectedFiles.length && !note && !audioBlob)) return;
     sendBtn.disabled=true; sendBtn.textContent='Sending…';
