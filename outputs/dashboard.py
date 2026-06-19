@@ -31,6 +31,28 @@ from fastapi import BackgroundTasks, Body, Depends, FastAPI, File, Form, Header,
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, PlainTextResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
+
+
+class NoCacheHTMLStaticFiles(StaticFiles):
+    """STATIC_HTML_NOCACHE_REVALIDATE_1: static mount that forces revalidation on
+    HTML so a deploy is never masked by a browser/PWA-cached page (Director
+    stale-dashboard incident 2026-06-19 — opened AI-Hotel Field Notes after the
+    #381 deploy and saw a pre-deploy cached copy).
+
+    Uses ``no-cache`` (always revalidate), NOT ``no-store`` — the existing etag
+    then yields a cheap 304 Not Modified when the file is unchanged, so it stays
+    fresh-on-deploy with near-zero bandwidth otherwise. HTML only; images / JS /
+    CSS keep normal caching.
+    """
+
+    def file_response(self, *args, **kwargs):
+        resp = super().file_response(*args, **kwargs)
+        try:
+            if resp.headers.get("content-type", "").startswith("text/html"):
+                resp.headers["Cache-Control"] = "no-cache"
+        except Exception:
+            pass
+        return resp
 from pydantic import BaseModel, Field
 
 from config.settings import config
@@ -1542,7 +1564,7 @@ async def startup():
 
     # Mount static files if directory exists
     if _static_dir.exists():
-        app.mount("/static", StaticFiles(directory=str(_static_dir)), name="static")
+        app.mount("/static", NoCacheHTMLStaticFiles(directory=str(_static_dir)), name="static")
         logger.info(f"Static files mounted from {_static_dir}")
 
 
