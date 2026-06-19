@@ -12,6 +12,7 @@ qdrant-client>=1.16.1,<1.17.0  # Qdrant vector DB; query_points API verified, bl
 # Database
 asyncpg>=0.30.0            # PostgreSQL async client
 psycopg2-binary>=2.9.0     # PostgreSQL sync client (for scripts)
+boto3==1.34.162            # Cloudflare R2/S3-compatible object storage (AI_HOTEL_OBJECT_STORAGE_R2_1)
 
 # Web framework (for dashboard + API)
 fastapi>=0.115.0

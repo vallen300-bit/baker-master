@@ -3756,6 +3756,14 @@ async def health_check():
     except Exception:
         docs_missing_qdrant = None
 
+    # AI_HOTEL_OBJECT_STORAGE_R2_1: expose object-storage readiness without
+    # letting R2 config or network failures affect Render liveness.
+    try:
+        from kbl.object_storage import storage_health
+        object_storage = storage_health(probe=False)
+    except Exception:
+        object_storage = {"status": "error", "error": "health_check_failed"}
+
     status = "healthy"
     if not db_ok or not scheduler_ok or sentinels_down > 0:
         status = "degraded"
@@ -3768,6 +3776,7 @@ async def health_check():
         "sentinels_down": sentinels_down,
         "sentinels_down_list": sentinels_down_list,
         "documents_missing_qdrant": docs_missing_qdrant,
+        "object_storage": object_storage,
         "vault_mirror_last_pull": vault_mirror_status["vault_mirror_last_pull"],
         "vault_mirror_commit_sha": vault_mirror_status["vault_mirror_commit_sha"],
         "vault_sync_thread_alive": vault_mirror_status.get(
@@ -4602,10 +4611,17 @@ async def api_health():
     except Exception:
         deadline_feedback_stats = {"count": 0, "last_failure_at": None}
 
+    try:
+        from kbl.object_storage import storage_health
+        object_storage = storage_health()
+    except Exception:
+        object_storage = {"status": "error", "error": "health_check_failed"}
+
     return {
         "status": "degraded" if any_down else "healthy",
         "sentinels": sentinels,
         "deadline_feedback": deadline_feedback_stats,
+        "object_storage": object_storage,
         "checked_at": datetime.now(timezone.utc).isoformat(),
     }
 
