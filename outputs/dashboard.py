@@ -9829,8 +9829,14 @@ async def ai_hotel_form_draft(
             raise HTTPException(400, "Unreadable image, or could not compress it under the size limit.")
         resized_images.append((ib64, imedia))
 
-    # --- Transcribe audio (server-side via Gemini) ----------------------------
+    # --- Validate + read audio (do NOT transcribe yet) ------------------------
+    # G3 S1 fix: transcription must NOT run before the raw capture is persisted.
+    # We validate/read the audio here, persist the raw row, THEN transcribe — so
+    # an audio-only dictation whose transcription fails still leaves a
+    # retrievable capture row (never a 400 with zero rows).
     transcript = ""
+    audio_bytes = None
+    audio_type = None
     if has_audio:
         audio_type = audio.content_type or ""
         if audio_type not in _AI_HOTEL_AUDIO_TYPES:
@@ -9844,15 +9850,8 @@ async def ai_hotel_form_draft(
         audio_bytes = await audio.read()
         if len(audio_bytes) > _AI_HOTEL_AUDIO_CAP:
             raise HTTPException(400, "Audio too large (max 25MB).")
-        transcript = _ai_hotel_transcribe(audio_bytes, audio_type)
 
-    # Fold transcript into the note text the extractor reads.
-    if transcript:
-        note = f"{note}\n\n{transcript}".strip() if note else transcript
-
-    if not resized_images and not note:
-        raise HTTPException(400, "Nothing to save — audio could not be transcribed and no photo or note was provided.")
-
+    # Provenance + legacy single-image mirror columns.
     if resized_images:
         source = "photo"
     elif has_audio:
@@ -9861,16 +9860,13 @@ async def ai_hotel_form_draft(
         source = "note"
     b64 = resized_images[0][0] if resized_images else None
     image_media = resized_images[0][1] if resized_images else None
+    summary = (note[:200] if note else "Field dictation")
 
-    # Auto-detect the form_type from the captured text when not explicit. The
-    # user's explicit selection always wins (AC5/AC6).
-    if schema is None:
-        detected, auto_detected = detect_form_type(note)
-        schema = get_form_schema(detected)
-    summary = (note[:200] if note else f"{schema.title} dictation")
-
-    # 2) Persist the RAW capture FIRST — the safety net, committed before we run
-    #    (and therefore before we can trust) any extraction (core rule, AC1/AC6).
+    # 2) Persist the RAW capture FIRST — BEFORE transcription/extraction. This is
+    #    the no-data-loss invariant (G3 S1 fix): the early "provide something"
+    #    400 already rejected truly-empty submissions, so by here we always have
+    #    audio, a photo, or a note. The typed note (if any) is stored now; the
+    #    transcript is folded in via an UPDATE once transcription succeeds.
     try:
         store = _get_store()
         conn = store._get_conn()
@@ -9905,6 +9901,43 @@ async def ai_hotel_form_draft(
     except Exception as e:
         logger.error(f"POST /api/ai-hotel/form-drafts raw capture insert failed: {e}")
         raise HTTPException(500, "Could not save capture")
+
+    # 2b) Transcribe AFTER the raw capture is safely committed. A transcription
+    #     failure now leaves the capture row intact (no data loss); on success we
+    #     fold the transcript into note_text via an UPDATE.
+    if has_audio:
+        transcript = _ai_hotel_transcribe(audio_bytes, audio_type)
+        if transcript:
+            note = f"{note}\n\n{transcript}".strip() if note else transcript
+            updated_summary = note[:200] if note else summary
+            try:
+                store = _get_store()
+                conn = store._get_conn()
+                if conn:
+                    try:
+                        cur = conn.cursor()
+                        cur.execute(
+                            """UPDATE ai_hotel_captures
+                                  SET note_text = %s, summary = %s
+                                WHERE id = %s""",
+                            (note or None, updated_summary, capture_id),
+                        )
+                        conn.commit()
+                        cur.close()
+                    except Exception:
+                        conn.rollback()
+                        raise
+                    finally:
+                        store._put_conn(conn)
+            except Exception as e:
+                logger.error(f"POST /api/ai-hotel/form-drafts transcript UPDATE failed "
+                             f"(capture {capture_id} intact): {e}")
+
+    # 2c) Auto-detect the form_type from the full captured text (incl. transcript)
+    #     when not explicit. The user's explicit selection always wins (AC5/AC6).
+    if schema is None:
+        detected, auto_detected = detect_form_type(note)
+        schema = get_form_schema(detected)
 
     # 3) Schema-driven extraction (guarded — never raises out; raw already safe).
     extraction_failed = False

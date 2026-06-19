@@ -393,6 +393,31 @@ def test_ac3_raw_capture_survives_extraction_exception(monkeypatch):
     assert any("Extraction failed" in w for w in b["warnings"])
 
 
+@_skip_without_dashboard
+def test_ac3_audio_only_transcription_failure_persists_capture_not_400(monkeypatch):
+    """G3 S1 regression (the gap AC3 missed): an AUDIO-ONLY submission whose
+    transcription _llm_call raises must still persist the raw capture row
+    (transcript empty) and return a draft — NEVER a 400 with zero rows. The raw
+    capture is now committed BEFORE transcription runs."""
+    import outputs.dashboard as dash
+    client, store = _client(monkeypatch)
+
+    def _boom(model, messages=None, **k):
+        raise RuntimeError("gemini exploded")
+
+    monkeypatch.setattr(dash, "_llm_call", _boom)
+    resp = client.post("/api/ai-hotel/form-drafts", headers=_HDR,
+                       data={"form_type": "site_visit"},
+                       files={"audio": ("d.webm", b"\x1aE\xdf\xa3fakebytes", "audio/webm")})
+    assert resp.status_code == 200, resp.text            # NOT a 400-with-zero-rows
+    assert len(store.captures) == 1                       # the dictation event is preserved
+    assert store.captures[0]["source"] == "audio"
+    assert len(store.images) == 0                         # audio-only → no image rows
+    b = resp.json()
+    assert b["draft_id"] is not None
+    assert b["transcript_preview"] == ""                  # transcription failed, empty
+
+
 # ─── AC4: no confirmed record before review ─────────────────────────────────
 
 
