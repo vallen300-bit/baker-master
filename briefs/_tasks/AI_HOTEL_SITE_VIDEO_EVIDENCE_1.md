@@ -33,5 +33,12 @@ Dispatch only AFTER GPS capture (AI_HOTEL_GPS_CAPTURE_1) + audio persistence + F
 2. Any video failure loses the raw capture/card = rollback.
 3. Upload p95 too slow/unreliable on iPhone = keep video off.
 
+## Carried-forward gate notes (from AI_HOTEL_OBJECT_STORAGE_R2_1 #387 review)
+1. **MANDATORY (codex G3 MEDIUM):** the upload handler MUST enforce a per-media business size cap (e.g. video ≤ N MB) and pass that exact value as `File.size` to `generate_presigned_put(max_bytes=...)` BEFORE presigning. The substrate signs the exact Content-Length but does NOT impose an app-level cap below the 5 GiB hard ceiling — the caller owns this. AC: oversize file rejected client-side AND server refuses to presign above the cap.
+2. **Hardening (security-review minor):** prefer `storage_health(probe=False)` on the public `/api/health` path so it does not issue a live R2 `head_bucket` on every unauthenticated hit. Use probe=True only on an auth-gated readiness check.
+
+## Substrate now available (post-#387)
+`kbl/object_storage.py` is live: `put_object`, `generate_presigned_put/get` (expiry clamped ≤300s), `delete_object`, `storage_enabled()`, `storage_health()`. Table `ai_hotel_capture_media` exists. Env vars set by lead. Build video against THIS — do not add a second storage path.
+
 ## Product rationale
 Short video proves arrival flow, frontage, traffic, noise, access, parking, surrounding quality better than stills. Useful for later investor/site-review decks.
