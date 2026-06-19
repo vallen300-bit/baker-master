@@ -21,8 +21,10 @@ def test_dashboard_page_remembers_and_strips_key():
     seg = src[src.index("function noteKey()"):src.index("function cardKind(")]
     # AC1: persist on keyed visit
     assert "localStorage.setItem('aih.key',k)" in seg
-    # AC2: fall back to stored key when URL has none
-    assert "localStorage.getItem('aih.key')||''" in seg
+    # AC2: fall back to stored key when URL has none (KEY_PASTE_SELFSERVE_1 added
+    # an in-memory session fallback after the stored-key read).
+    assert "localStorage.getItem('aih.key')" in seg
+    assert "return _aihSessionKey||''" in seg
     # AC4: strip key from URL, preserving any other query params
     assert "u.delete('key')" in seg and "history.replaceState" in seg
     assert "location.pathname+(qs?('?'+qs):'')" in seg
