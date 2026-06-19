@@ -166,6 +166,8 @@
   .ncard{background:var(--card);border:1px solid var(--line);border-radius:8px;padding:16px 18px;display:flex;gap:14px;box-shadow:var(--shadow);transition:border-color .14s,box-shadow .14s}
   .ncard:hover{border-color:var(--id-blue-line);box-shadow:var(--shadow-hover)}
   .nthumb{width:64px;height:64px;border-radius:8px;object-fit:cover;border:1px solid var(--line);flex:0 0 auto;background:var(--bg)}
+  .nphotos{font:600 12px/1.4 var(--mono);color:var(--id-blue);margin-top:9px}
+  .nphotos-ph{font-size:13px;color:var(--muted);margin:8px 0}
   .nthumbs{display:flex;gap:6px;flex-wrap:wrap;margin-top:10px}
   .nthumbs img{width:44px;height:44px;border-radius:6px;object-fit:cover;border:1px solid var(--line);background:var(--bg)}
   .nbody{flex:1 1 auto;min-width:0}
@@ -608,7 +610,6 @@ function fmtNoteTime(iso){
 }
 /* AI_HOTEL_FIELD_NOTES_CARD_SHELF_1: structured cards folded into Field notes */
 function noteKey(){return new URLSearchParams(location.search).get('key')||'';}
-function imgsOf(c){return (Array.isArray(c.images)&&c.images.length)?c.images:(c.image?[c.image]:[]);}
 function cardKind(c){
   const ft=c.form_record&&c.form_record.form_type;
   if(ft==='site_visit')return 'site';
@@ -661,8 +662,8 @@ function renderNotes(main){
 function buildNoteCard(c){
   const kind=cardKind(c);
   const card=el('div','ncard');
-  const imgs=imgsOf(c);
-  if(imgs.length){const img=document.createElement('img');img.className='nthumb';img.src=imgs[0];img.alt='Field photo';img.loading='lazy';card.appendChild(img);}
+  // Tiny server-side thumbnail only (full images load on tap) — keeps the feed small.
+  if(c.thumb){const img=document.createElement('img');img.className='nthumb';img.src=c.thumb;img.alt='Field photo';img.loading='lazy';card.appendChild(img);}
   const body=el('div','nbody');
   body.appendChild(el('div','nsmry',c.summary||'(no summary)'));
   const meta=el('div','nmeta');
@@ -690,11 +691,7 @@ function buildNoteCard(c){
     if(v.follow_up_action&&v.follow_up_action!=='none')bits.push('→ '+humanizeVal(v.follow_up_action));
     if(bits.length)body.appendChild(el('div','ncompact',bits.join('  ·  ')));
   }
-  if(imgs.length>1){
-    const strip=el('div','nthumbs');
-    imgs.slice(1).forEach(function(src){const t=document.createElement('img');t.src=src;t.alt='Field photo';t.loading='lazy';strip.appendChild(t);});
-    body.appendChild(strip);
-  }
+  if((c.image_count||0)>1){ body.appendChild(el('div','nphotos',c.image_count+' photos · tap to view')); }
   card.appendChild(body);
   card.style.cursor='pointer';
   card.onclick=function(){openNoteDetail(c);};
@@ -763,11 +760,22 @@ function openNoteDetail(c){
     };
     b.appendChild(loadBtn);
   }
-  const imgs=imgsOf(c);
-  if(imgs.length){
-    const strip=el('div','nthumbs');
-    imgs.forEach(function(src){const t=document.createElement('img');t.src=src;t.alt='Field photo';t.loading='lazy';strip.appendChild(t);});
-    b.appendChild(strip);
+  // Photos: list carries a thumbnail only; full images load on demand here.
+  if((c.image_count||0)>0){
+    b.appendChild(el('div','dlg-h','Photos · '+c.image_count));
+    const ph=el('div','nphotos-ph','Loading photos…');
+    b.appendChild(ph);
+    fetch('/api/ai-hotel/captures/'+c.id+'/images',{headers:{'X-Baker-Key':noteKey()}})
+      .then(function(r){return r.json();})
+      .then(function(d){
+        const list=(d&&Array.isArray(d.images))?d.images:[];
+        ph.remove();
+        if(!list.length){b.appendChild(el('div','nphotos-ph','No photos found.'));return;}
+        const strip=el('div','nthumbs');
+        list.forEach(function(src){const t=document.createElement('img');t.src=src;t.alt='Field photo';t.loading='lazy';strip.appendChild(t);});
+        b.appendChild(strip);
+      })
+      .catch(function(){ph.textContent='Could not load photos — reopen to retry.';});
   }
   // Actions: Copy (client-side) + Dismiss (reuses the #380 discard endpoint).
   const acts=el('div','dlg-acts');

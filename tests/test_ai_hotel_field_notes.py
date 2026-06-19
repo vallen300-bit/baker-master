@@ -239,9 +239,10 @@ def test_ac3_item_has_structured_and_raw(monkeypatch):
     c = client.get("/api/ai-hotel/captures", headers=_HDR).json()["captures"][0]
     # structured
     assert c["form_record"]["values"]["company_name"] == "NVIDIA"
-    # raw evidence: transcript/note + photo both present on the same item
+    # raw evidence: transcript/note on the item + a photo present (image_count;
+    # full photos lazy-fetched in detail per FIELDNOTES_THUMBNAIL_LAZYIMG_1).
     assert c["note_text"] == "NVIDIA at booth 14"
-    assert c["images"] and c["images"][0].startswith("data:image/jpeg;base64,")
+    assert c["image_count"] == 1
 
 
 # ─── AC4: latest non-discarded wins; multiple cards collapse to one ─────────

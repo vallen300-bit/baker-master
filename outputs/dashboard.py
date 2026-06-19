@@ -9380,6 +9380,34 @@ def _ai_hotel_resize_for_db(image_bytes: bytes, content_type: str):
     return b64, "image/jpeg"
 
 
+def _ai_hotel_thumb_data_url(image_b64, media: str = "image/jpeg", px: int = 160):
+    """AI_HOTEL_FIELDNOTES_THUMBNAIL_LAZYIMG_1: a small (~160px longest-edge)
+    JPEG thumbnail data-URL from a stored base64 image, or None.
+
+    The Field Notes list inlined full-res base64 for every capture (7.1 MB feed →
+    phone hung on "Loading…"). The list now carries only this tiny thumb; full
+    images load on tap. Fail-soft: any decode/resize error returns None so the
+    feed never breaks (kill criterion)."""
+    if not image_b64:
+        return None
+    try:
+        import base64 as _b64
+        from io import BytesIO
+        from PIL import Image as PILImage
+        raw = _b64.b64decode(image_b64)
+        img = PILImage.open(BytesIO(raw))
+        img.load()
+        if img.mode not in ("RGB", "L"):
+            img = img.convert("RGB")
+        img.thumbnail((px, px), PILImage.LANCZOS)
+        buf = BytesIO()
+        img.save(buf, format="JPEG", quality=70, optimize=True)
+        return "data:image/jpeg;base64," + _b64.b64encode(buf.getvalue()).decode("ascii")
+    except Exception as e:
+        logger.warning("ai_hotel thumbnail generation failed (thumb=None): %s", e)
+        return None
+
+
 @app.post("/api/ai-hotel/capture", tags=["ai-hotel"], dependencies=[Depends(verify_api_key)])
 async def ai_hotel_capture(
     images: list[UploadFile] = File(None),
@@ -9792,21 +9820,26 @@ async def ai_hotel_captures(limit: int = 100):
             d = dict(r)
             parent_b64 = d.pop("image_b64", None)
             parent_media = d.get("image_media") or "image/jpeg"
-            # Build the ordered images[] from the child table; fall back to the
-            # legacy single parent image for any pre-migration row.
-            children = child_by_cap.get(d["id"], [])
+            # AI_HOTEL_FIELDNOTES_THUMBNAIL_LAZYIMG_1: the list returns ONLY a
+            # tiny thumbnail of the first image + a count — never the full-res
+            # base64 (that 7.1 MB feed hung the Director's phone). Full images
+            # load on tap via GET /captures/{id}/images.
+            children = [ci for ci in child_by_cap.get(d["id"], []) if ci.get("image_b64")]
             if children:
-                images = [
-                    f"data:{(ci.get('image_media') or 'image/jpeg')};base64,{ci['image_b64']}"
-                    for ci in children if ci.get("image_b64")
-                ]
+                image_count = len(children)
+                first_b64 = children[0]["image_b64"]
+                first_media = children[0].get("image_media") or "image/jpeg"
             elif parent_b64:
-                images = [f"data:{parent_media};base64,{parent_b64}"]
+                image_count = 1
+                first_b64 = parent_b64
+                first_media = parent_media
             else:
-                images = []
-            d["images"] = images
-            # Legacy single-image field = first image, for any un-upgraded client.
-            d["image"] = images[0] if images else None
+                image_count = 0
+                first_b64 = None
+                first_media = "image/jpeg"
+            d["thumb"] = _ai_hotel_thumb_data_url(first_b64, first_media)
+            d["image_count"] = image_count
+            d.pop("image_media", None)   # not needed in the list payload
             # Attach the structured card (if any); fail-soft per row (AC5).
             d["form_record"] = _ai_hotel_form_record_view(form_by_cap.get(d["id"]))
             # Attach audio METADATA only (AC10) — playback bytes come from detail.
@@ -9863,6 +9896,53 @@ async def ai_hotel_capture_audio_detail(capture_id: int):
     except Exception as e:
         logger.error(f"GET /api/ai-hotel/captures/{capture_id}/audio failed: {e}")
         return {"audio": []}
+
+
+@app.get("/api/ai-hotel/captures/{capture_id}/images", tags=["ai-hotel"],
+         dependencies=[Depends(verify_api_key)])
+async def ai_hotel_capture_images_detail(capture_id: int):
+    """AI_HOTEL_FIELDNOTES_THUMBNAIL_LAZYIMG_1: full-res images for ONE capture,
+    fetched on demand from card detail (the list returns thumbnails only).
+    Returns ordered `data:` URLs. Fail-soft empty list on any error."""
+    try:
+        store = _get_store()
+        import psycopg2.extras
+        conn = store._get_conn()
+        if not conn:
+            return {"images": []}
+        try:
+            cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+            cur.execute(
+                """SELECT ordinal, image_b64, image_media
+                     FROM ai_hotel_capture_images
+                    WHERE capture_id = %s
+                    ORDER BY ordinal
+                    LIMIT 50""",
+                (capture_id,),
+            )
+            rows = cur.fetchall()
+            if not rows:
+                # legacy single-image row (pre child-table) — fall back to parent.
+                cur.execute(
+                    "SELECT image_b64, image_media FROM ai_hotel_captures WHERE id = %s",
+                    (capture_id,),
+                )
+                p = cur.fetchone()
+                rows = [p] if (p and p.get("image_b64")) else []
+            cur.close()
+        except Exception:
+            conn.rollback()
+            raise
+        finally:
+            store._put_conn(conn)
+        images = [
+            f"data:{(r.get('image_media') or 'image/jpeg')};base64,{r['image_b64']}"
+            for r in rows if r.get("image_b64")
+        ]
+        return {"images": images}
+    except Exception as e:
+        logger.error(f"GET /api/ai-hotel/captures/{capture_id}/images failed: {e}")
+        return {"images": []}
 
 
 # ── AI_HOTEL_VOICE_FORM_SUPPLIER_1: voice → structured supplier-card draft ───
