@@ -151,6 +151,19 @@ def _scan_prompt_with_ingestion_surfaces() -> str:
 # ============================================================
 
 _BAKER_API_KEY = os.getenv("BAKER_API_KEY", "")
+_AI_HOTEL_SESSION_COOKIE = "aih_session"
+_AI_HOTEL_SESSION_SCOPE = "ai-hotel:read"
+_AI_HOTEL_SESSION_TTL_S = int(os.getenv("AI_HOTEL_SESSION_TTL_SECONDS", "43200"))
+_AI_HOTEL_PIN_RATE_LIMIT_PER_MIN = int(os.getenv("AI_HOTEL_PIN_RATE_LIMIT_PER_MIN", "5"))
+_AI_HOTEL_PIN_LOCKOUT_FAILURES = int(os.getenv("AI_HOTEL_PIN_LOCKOUT_FAILURES", "10"))
+_AI_HOTEL_PIN_LOCKOUT_S = int(os.getenv("AI_HOTEL_PIN_LOCKOUT_SECONDS", "900"))
+_AI_HOTEL_PIN_WINDOW_S = 60
+_ai_hotel_pin_lock = threading.Lock()
+_ai_hotel_pin_state: dict[str, dict] = {}
+
+
+class AIHotelPinAuthRequest(BaseModel):
+    pin: str = Field("", max_length=64)
 
 
 async def verify_api_key(x_baker_key: str = Header(None, alias="X-Baker-Key")):
@@ -167,6 +180,134 @@ async def verify_api_key(x_baker_key: str = Header(None, alias="X-Baker-Key")):
             detail="Invalid or missing API key",
             headers={"WWW-Authenticate": "X-Baker-Key"},
         )
+
+
+def _ai_hotel_client_ip(request: Request) -> str:
+    """Best-effort client key for PIN throttling behind Render's proxy."""
+    try:
+        xff = (request.headers.get("x-forwarded-for") or "").split(",", 1)[0].strip()
+        if xff:
+            return xff[:80]
+        if request.client and request.client.host:
+            return request.client.host[:80]
+    except Exception:
+        pass
+    return "unknown"
+
+
+def _ai_hotel_pin_rate_check(ip: str) -> None:
+    """Fault-tolerant in-memory throttle for the public four-digit PIN surface."""
+    now = time.time()
+    try:
+        with _ai_hotel_pin_lock:
+            st = _ai_hotel_pin_state.setdefault(ip, {
+                "attempts": [],
+                "failures": 0,
+                "locked_until": 0.0,
+            })
+            locked_until = float(st.get("locked_until") or 0)
+            if locked_until > now:
+                raise HTTPException(429, "Too many attempts. Try again later.")
+            attempts = [t for t in st.get("attempts", []) if now - float(t) < _AI_HOTEL_PIN_WINDOW_S]
+            if len(attempts) >= _AI_HOTEL_PIN_RATE_LIMIT_PER_MIN:
+                st["attempts"] = attempts
+                raise HTTPException(429, "Too many attempts. Try again later.")
+            attempts.append(now)
+            st["attempts"] = attempts
+    except HTTPException:
+        raise
+    except Exception as e:
+        # Auth must stay available even if in-memory accounting is malformed.
+        logger.error("ai_hotel PIN rate-limit check failed open: %s", e)
+
+
+def _ai_hotel_pin_record_failure(ip: str) -> None:
+    now = time.time()
+    try:
+        with _ai_hotel_pin_lock:
+            st = _ai_hotel_pin_state.setdefault(ip, {
+                "attempts": [],
+                "failures": 0,
+                "locked_until": 0.0,
+            })
+            st["failures"] = int(st.get("failures") or 0) + 1
+            if st["failures"] >= _AI_HOTEL_PIN_LOCKOUT_FAILURES:
+                st["locked_until"] = now + _AI_HOTEL_PIN_LOCKOUT_S
+            logger.warning("ai_hotel PIN auth failed: ip=%s failures=%s", ip, st["failures"])
+    except Exception as e:
+        logger.error("ai_hotel PIN failure accounting failed: %s", e)
+
+
+def _ai_hotel_pin_record_success(ip: str) -> None:
+    try:
+        with _ai_hotel_pin_lock:
+            _ai_hotel_pin_state.pop(ip, None)
+    except Exception:
+        pass
+
+
+def _ai_hotel_session_secret() -> bytes:
+    secret = (os.getenv("AI_HOTEL_SESSION_SECRET") or _BAKER_API_KEY or "").strip()
+    if not secret:
+        logger.error("AI Hotel session secret unavailable")
+        raise HTTPException(503, "AI Hotel PIN auth unavailable.")
+    return secret.encode("utf-8")
+
+
+def _ai_hotel_b64url(raw: bytes) -> str:
+    import base64
+    return base64.urlsafe_b64encode(raw).rstrip(b"=").decode("ascii")
+
+
+def _ai_hotel_b64url_decode(txt: str) -> bytes:
+    import base64
+    return base64.urlsafe_b64decode(txt + "=" * (-len(txt) % 4))
+
+
+def _ai_hotel_sign_session() -> str:
+    exp = int(time.time()) + max(300, _AI_HOTEL_SESSION_TTL_S)
+    payload = {
+        "scope": _AI_HOTEL_SESSION_SCOPE,
+        "iat": int(time.time()),
+        "exp": exp,
+        "nonce": uuid4().hex,
+    }
+    body = _ai_hotel_b64url(json.dumps(payload, separators=(",", ":")).encode("utf-8"))
+    sig = hmac.new(_ai_hotel_session_secret(), body.encode("ascii"), hashlib.sha256).digest()
+    return f"{body}.{_ai_hotel_b64url(sig)}"
+
+
+def _ai_hotel_session_valid(token: str | None) -> bool:
+    if not token or "." not in token:
+        return False
+    try:
+        body, sig = token.split(".", 1)
+        expected = hmac.new(_ai_hotel_session_secret(), body.encode("ascii"), hashlib.sha256).digest()
+        supplied = _ai_hotel_b64url_decode(sig)
+        if not hmac.compare_digest(expected, supplied):
+            return False
+        payload = json.loads(_ai_hotel_b64url_decode(body).decode("utf-8"))
+        if payload.get("scope") != _AI_HOTEL_SESSION_SCOPE:
+            return False
+        return int(payload.get("exp") or 0) >= int(time.time())
+    except Exception:
+        return False
+
+
+async def verify_ai_hotel_read_access(
+    request: Request,
+    x_baker_key: str = Header(None, alias="X-Baker-Key"),
+):
+    """AI-Hotel read-only auth: master header OR scoped signed httpOnly cookie."""
+    if _BAKER_API_KEY and x_baker_key and hmac.compare_digest(x_baker_key, _BAKER_API_KEY):
+        return
+    if _ai_hotel_session_valid(request.cookies.get(_AI_HOTEL_SESSION_COOKIE)):
+        return
+    raise HTTPException(
+        status_code=401,
+        detail="Invalid or missing AI Hotel read credentials",
+        headers={"WWW-Authenticate": "X-Baker-Key"},
+    )
 
 
 # ============================================================
@@ -213,6 +354,38 @@ app.add_middleware(
     allow_methods=["GET", "POST", "PUT"],
     allow_headers=["Content-Type", "X-Baker-Key"],
 )
+
+
+@app.post("/api/ai-hotel/pin-auth", tags=["ai-hotel"])
+async def ai_hotel_pin_auth(request: Request, payload: AIHotelPinAuthRequest):
+    """Exchange the short AI-Hotel PIN for a scoped read-only session cookie.
+
+    This never returns or aliases the master X-Baker-Key. Failed attempts log
+    only aggregate counts and client IP, never the submitted PIN value.
+    """
+    ip = _ai_hotel_client_ip(request)
+    _ai_hotel_pin_rate_check(ip)
+    expected = (os.getenv("AI_HOTEL_PIN") or "6470").strip()
+    if not expected:
+        raise HTTPException(503, "AI Hotel PIN not configured.")
+    supplied = (payload.pin or "").strip()
+    if not hmac.compare_digest(supplied, expected):
+        _ai_hotel_pin_record_failure(ip)
+        raise HTTPException(401, "Incorrect code.")
+    _ai_hotel_pin_record_success(ip)
+    token = _ai_hotel_sign_session()
+    ttl = max(300, _AI_HOTEL_SESSION_TTL_S)
+    resp = JSONResponse({"ok": True})
+    resp.set_cookie(
+        key=_AI_HOTEL_SESSION_COOKIE,
+        value=token,
+        max_age=ttl,
+        httponly=True,
+        secure=True,
+        samesite="strict",
+        path="/api/ai-hotel",
+    )
+    return resp
 
 # ============================================================
 # SCHEDULER-WATCHDOG-1: Request-time heartbeat check
@@ -10143,7 +10316,8 @@ async def ai_hotel_capture_media_confirm(
         raise HTTPException(500, "Could not save media metadata.")
 
 
-@app.get("/api/ai-hotel/captures", tags=["ai-hotel"], dependencies=[Depends(verify_api_key)])
+@app.get("/api/ai-hotel/captures", tags=["ai-hotel"],
+         dependencies=[Depends(verify_ai_hotel_read_access)])
 async def ai_hotel_captures(limit: int = 100):
     """AI_HOTEL_FIELD_CAPTURE_1 + _FIELD_NOTES_CARD_SHELF_1: list field-note
     captures newest-first for the dashboard "Field notes" surface, each with its
@@ -10336,7 +10510,7 @@ async def ai_hotel_captures(limit: int = 100):
 
 
 @app.get("/api/ai-hotel/captures/{capture_id}/audio", tags=["ai-hotel"],
-         dependencies=[Depends(verify_api_key)])
+         dependencies=[Depends(verify_ai_hotel_read_access)])
 async def ai_hotel_capture_audio_detail(capture_id: int):
     """AI_HOTEL_FIELD_NOTES_AND_AUDIO_1: full audio for ONE capture, fetched on
     demand from card detail (the list endpoint returns metadata only — AC10).
@@ -10383,7 +10557,7 @@ async def ai_hotel_capture_audio_detail(capture_id: int):
 
 
 @app.get("/api/ai-hotel/captures/{capture_id}/images", tags=["ai-hotel"],
-         dependencies=[Depends(verify_api_key)])
+         dependencies=[Depends(verify_ai_hotel_read_access)])
 async def ai_hotel_capture_images_detail(capture_id: int):
     """AI_HOTEL_FIELDNOTES_THUMBNAIL_LAZYIMG_1: full-res images for ONE capture,
     fetched on demand from card detail (the list returns thumbnails only).
@@ -10430,7 +10604,7 @@ async def ai_hotel_capture_images_detail(capture_id: int):
 
 
 @app.get("/api/ai-hotel/captures/{capture_id}/thumbs", tags=["ai-hotel"],
-         dependencies=[Depends(verify_api_key)])
+         dependencies=[Depends(verify_ai_hotel_read_access)])
 async def ai_hotel_capture_thumbs_detail(capture_id: int):
     """AI_HOTEL_FIELDNOTES_IMAGE_VIEWER_FIX_1: per-image SMALL thumbnails for one
     capture's detail strip. The old detail path pulled every full-res image in
@@ -10480,7 +10654,7 @@ async def ai_hotel_capture_thumbs_detail(capture_id: int):
 
 
 @app.get("/api/ai-hotel/captures/{capture_id}/images/{idx}", tags=["ai-hotel"],
-         dependencies=[Depends(verify_api_key)])
+         dependencies=[Depends(verify_ai_hotel_read_access)])
 async def ai_hotel_capture_single_image_detail(capture_id: int, idx: int):
     """AI_HOTEL_FIELDNOTES_IMAGE_VIEWER_FIX_1: ONE full-res image (by ordinal) for
     the lightbox — loaded only when the user taps a thumb, so the detail modal
@@ -10527,7 +10701,7 @@ async def ai_hotel_capture_single_image_detail(capture_id: int, idx: int):
 
 
 @app.get("/api/ai-hotel/captures/{capture_id}/media", tags=["ai-hotel"],
-         dependencies=[Depends(verify_api_key)])
+         dependencies=[Depends(verify_ai_hotel_read_access)])
 async def ai_hotel_capture_media_detail(capture_id: int):
     """Return short-lived playback URLs for R2-backed capture media.
 
