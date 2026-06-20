@@ -393,11 +393,11 @@ async def verify_ai_hotel_photo_edit_access(
     request: Request,
     x_baker_key: str = Header(None, alias="X-Baker-Key"),
 ):
-    """AI-Hotel narrow photo-edit auth for in-viewer rotation only.
+    """AI-Hotel narrow edit auth for private Field Notes repair actions.
 
     The master key remains the general write/admin credential. The scoped
-    AI-Hotel cookie is accepted here only because the manual rotate button is a
-    Director-approved repair action inside the private Field Notes viewer.
+    AI-Hotel cookie is accepted here only because these manual controls are
+    Director-approved repair actions inside the private Field Notes viewer.
     """
     if _BAKER_API_KEY and x_baker_key and hmac.compare_digest(x_baker_key, _BAKER_API_KEY):
         return
@@ -10513,6 +10513,7 @@ async def ai_hotel_captures(limit: int = 100):
                           gps_address, gps_address_source, gps_address_status
                      FROM ai_hotel_captures
                     WHERE status <> 'dismissed'
+                      AND deleted_at IS NULL
                     ORDER BY created_at DESC
                     LIMIT %s""",
                 (limit,),
@@ -10982,6 +10983,56 @@ async def ai_hotel_capture_image_rotate(
             capture_id, idx, e,
         )
         raise HTTPException(status_code=500, detail="Image rotate failed.")
+
+
+@app.post("/api/ai-hotel/captures/{capture_id}/delete", tags=["ai-hotel"],
+          dependencies=[Depends(verify_ai_hotel_photo_edit_access)])
+async def ai_hotel_capture_soft_delete(capture_id: int):
+    """Soft-delete one Field Notes capture without destroying evidence/media.
+
+    AI_HOTEL_DELETE_CARD_BUTTON_1: the card disappears from the live Field Notes
+    feed, but the capture row and linked image/audio/video rows remain
+    recoverable. Idempotent: deleting an already-hidden capture keeps the first
+    deleted_at timestamp.
+    """
+    try:
+        store = _get_store()
+        import psycopg2.extras
+        conn = store._get_conn()
+        if not conn:
+            raise HTTPException(status_code=503, detail="DB unavailable")
+        try:
+            cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+            cur.execute(
+                """UPDATE ai_hotel_captures
+                      SET deleted_at = COALESCE(deleted_at, NOW())
+                    WHERE id = %s
+                RETURNING id, deleted_at""",
+                (capture_id,),
+            )
+            row = cur.fetchone()
+            if not row:
+                raise HTTPException(status_code=404, detail="Capture not found.")
+            conn.commit()
+            cur.close()
+        except HTTPException:
+            conn.rollback()
+            raise
+        except Exception:
+            conn.rollback()
+            raise
+        finally:
+            store._put_conn(conn)
+        deleted = _serialize({"deleted_at": row.get("deleted_at")})["deleted_at"]
+        return {"ok": True, "id": row.get("id") or capture_id, "deleted_at": deleted}
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(
+            "POST /api/ai-hotel/captures/%s/delete failed: %s",
+            capture_id, e,
+        )
+        raise HTTPException(status_code=500, detail="Capture delete failed.")
 
 
 @app.get("/api/ai-hotel/captures/{capture_id}/media", tags=["ai-hotel"],

@@ -648,6 +648,7 @@ function fmtNoteTime(iso){
 // key entered on the self-service empty state (or supplied via ?key=) still
 // authenticates the session even when localStorage throws (Safari private mode).
 var _aihSessionKey='';
+var _aihDeletedCaptureIds={};
 function noteKey(){
   try{
     var u=new URLSearchParams(location.search);
@@ -807,7 +808,7 @@ function renderNotes(main){
 
   function apply(){
     while(wrap.firstChild)wrap.removeChild(wrap.firstChild);
-    const list=allCaps.filter(function(c){return filter==='all'||cardKind(c)===filter;});
+    const list=allCaps.filter(function(c){return !_aihDeletedCaptureIds[String(c.id)]&&(filter==='all'||cardKind(c)===filter);});
     if(!list.length){wrap.appendChild(el('div','nempty','No field notes in this filter yet.'));return;}
     list.forEach(function(c){wrap.appendChild(buildNoteCard(c));});
   }
@@ -913,6 +914,31 @@ function updatePhotoThumbs(c, idx, thumb){
   Array.prototype.forEach.call(document.querySelectorAll('.nthumbs[data-capture-id="'+c.id+'"] img[data-photo-idx="'+idx+'"]'),function(img){
     img.src=thumb;img.classList.remove('nthumb-missing');
   });
+}
+
+function removeDeletedNoteCard(c){
+  _aihDeletedCaptureIds[String(c.id)]=true;
+  Array.prototype.forEach.call(document.querySelectorAll('.ncard[data-capture-id="'+c.id+'"]'),function(card){
+    if(card&&card.parentNode)card.parentNode.removeChild(card);
+  });
+  const grid=document.querySelector('.ngrid');
+  if(grid&&!grid.querySelector('.ncard')&&!grid.querySelector('.nempty')){
+    grid.appendChild(el('div','nempty','No field notes in this filter yet.'));
+  }
+}
+function deleteNoteCard(c, btn){
+  if(!confirm('Delete this field note? It will be hidden.'))return;
+  if(btn){btn.disabled=true;btn.textContent='Deleting…';}
+  fetch('/api/ai-hotel/captures/'+c.id+'/delete',aiHotelJsonOptions({}))
+    .then(function(r){if(!r.ok)throw new Error();return r.json();})
+    .then(function(){
+      removeDeletedNoteCard(c);
+      document.getElementById('detail').close();
+    })
+    .catch(function(){
+      if(btn){btn.disabled=false;btn.textContent='Delete field note';}
+      alert('Could not delete field note.');
+    });
 }
 
 function cardAsText(c){
@@ -1161,6 +1187,9 @@ function openNoteDetail(c){
     else{copyBtn.textContent='Clipboard unavailable';}
   };
   acts.appendChild(copyBtn);
+  const delBtn=el('button','sbtn2 danger','Delete field note');
+  delBtn.onclick=function(){deleteNoteCard(c,delBtn);};
+  acts.appendChild(delBtn);
   if(fr&&fr.id&&fr.status!=='discarded'&&noteKey()){
     const disBtn=el('button','sbtn2 danger','Dismiss card');
     disBtn.onclick=function(){
