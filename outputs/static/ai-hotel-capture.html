@@ -46,7 +46,7 @@
   .bigbtn:active{transform:scale(.99)}
   .bigbtn:disabled{opacity:.5;cursor:not-allowed}
   .bigbtn svg{width:22px;height:22px;stroke-width:1.8}
-  #fileInput{display:none}
+  #fileInput,#videoInput{display:none}
 
   /* Multi-photo previews */
   .thumbs{display:grid;grid-template-columns:repeat(auto-fill,minmax(84px,1fr));gap:10px;margin-top:4px}
@@ -56,6 +56,14 @@
   .thumb .rm{position:absolute;top:4px;right:4px;width:30px;height:30px;border-radius:50%;
              border:none;background:rgba(23,23,23,.62);color:#fff;font:700 16px/1 var(--sans);
              cursor:pointer;display:grid;place-items:center;-webkit-tap-highlight-color:transparent}
+  .vwrap{display:none;border:1px solid var(--line);border-radius:10px;overflow:hidden;background:var(--bg)}
+  .vwrap.show{display:block}
+  .vwrap video{display:block;width:100%;max-height:220px;background:#111}
+  .vbar{display:flex;align-items:center;gap:10px;padding:10px 12px;border-top:1px solid var(--line);
+        color:var(--text-2);font-size:13px}
+  .vbar button{margin-left:auto;border:none;background:transparent;color:var(--red);
+        font:600 13px var(--sans);cursor:pointer}
+  .vbad{color:var(--red)}
 
   /* Audio recorder */
   .recrow{display:flex;flex-direction:column;gap:12px}
@@ -188,6 +196,22 @@
     </div>
   </div>
 
+  <div class="card" id="videoCard">
+    <label class="fl" for="videoBtn">Site video<span class="ct" id="videoCt"></span></label>
+    <div class="camrow">
+      <button type="button" class="bigbtn" id="videoBtn" aria-label="Add a short site video">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round"><path d="m22 8-6 4 6 4V8z"/><rect x="2" y="6" width="14" height="12" rx="2"/></svg>
+        Add short site video
+      </button>
+      <input type="file" id="videoInput" accept="video/webm,video/mp4,video/quicktime" capture="environment">
+      <div class="recnote" id="videoInfo">10-30 seconds, max 50MB. Video uploads directly to R2 after the capture is saved.</div>
+      <div class="vwrap" id="videoPreviewWrap">
+        <video id="videoPreview" controls muted preload="metadata"></video>
+        <div class="vbar"><span id="videoMeta"></span><button type="button" id="clearVideo">Remove</button></div>
+      </div>
+    </div>
+  </div>
+
   <div class="card" id="recCard">
     <label class="fl">Audio dictation</label>
     <div class="recrow">
@@ -270,6 +294,14 @@
   var camBtn=document.getElementById('camBtn');
   var thumbs=document.getElementById('thumbs');
   var photoCt=document.getElementById('photoCt');
+  var videoInput=document.getElementById('videoInput');
+  var videoBtn=document.getElementById('videoBtn');
+  var videoInfo=document.getElementById('videoInfo');
+  var videoCt=document.getElementById('videoCt');
+  var videoPreviewWrap=document.getElementById('videoPreviewWrap');
+  var videoPreview=document.getElementById('videoPreview');
+  var videoMeta=document.getElementById('videoMeta');
+  var clearVideo=document.getElementById('clearVideo');
   var noteInput=document.getElementById('noteInput');
   var sendBtn=document.getElementById('sendBtn');
   var result=document.getElementById('result');
@@ -286,7 +318,12 @@
   var recNote=document.getElementById('recNote');
 
   var MAX_PHOTOS=8;
+  var VIDEO_MAX_BYTES=50*1024*1024;
+  var VIDEO_MAX_SECONDS=30;
+  var VIDEO_MIN_SECONDS=1;
   var selectedFiles=[];      // accumulated photo File objects
+  var selectedVideo=null;    // {file,duration,posterBlob,uploadedCaptureId}
+  var selectedVideoUrl='';
   var audioBlob=null;        // recorded dictation Blob
   var audioDuration=0;       // clip length in seconds (sent so Baker stores it)
   var mediaRecorder=null, mediaStream=null, chunks=[];
@@ -295,7 +332,7 @@
   if(!KEY){ nokey.classList.add('show'); }
 
   function refreshSend(){
-    var hasContent=(selectedFiles.length>0)||(audioBlob!==null)||(noteInput.value.trim().length>0);
+    var hasContent=(selectedFiles.length>0)||(audioBlob!==null)||(selectedVideo!==null)||(noteInput.value.trim().length>0);
     sendBtn.disabled=!(KEY && hasContent);
   }
 
@@ -324,6 +361,110 @@
     fileInput.value='';   // reset so re-picking the same file fires change again
     renderThumbs(); refreshSend();
   });
+
+  // ── Short site video (browser → presigned R2 PUT) ────────────────────────
+  function videoTypeFor(f){
+    var t=(f.type||'').split(';')[0].trim().toLowerCase();
+    if(t)return t;
+    var name=(f.name||'').toLowerCase();
+    if(/\.mov$/.test(name))return 'video/quicktime';
+    if(/\.mp4$/.test(name)||/\.m4v$/.test(name))return 'video/mp4';
+    if(/\.webm$/.test(name))return 'video/webm';
+    return '';
+  }
+  function fmtBytes(n){
+    if(!n)return '0 MB';
+    return (n/(1024*1024)).toFixed(n>=10*1024*1024?0:1)+' MB';
+  }
+  function setVideoInfo(txt,bad){
+    videoInfo.textContent=txt;
+    videoInfo.className='recnote'+(bad?' vbad':'');
+  }
+  function clearSelectedVideo(){
+    selectedVideo=null;
+    if(selectedVideoUrl){URL.revokeObjectURL(selectedVideoUrl);selectedVideoUrl='';}
+    videoPreview.removeAttribute('src'); videoPreview.load();
+    videoPreviewWrap.classList.remove('show');
+    videoMeta.textContent=''; videoCt.textContent='';
+    setVideoInfo('10-30 seconds, max 50MB. Video uploads directly to R2 after the capture is saved.',false);
+    refreshSend();
+  }
+  function readVideoDuration(file){
+    return new Promise(function(resolve,reject){
+      var url=URL.createObjectURL(file);
+      var v=document.createElement('video');
+      var done=false;
+      var to=setTimeout(function(){finish(null);},8000);
+      function finish(val){
+        if(done)return; done=true; clearTimeout(to); URL.revokeObjectURL(url);
+        if(val&&isFinite(val))resolve(val); else reject(new Error('Could not read video duration.'));
+      }
+      v.preload='metadata';
+      v.onloadedmetadata=function(){finish(v.duration);};
+      v.onerror=function(){finish(null);};
+      v.src=url;
+    });
+  }
+  function makeVideoPoster(file,duration){
+    return new Promise(function(resolve){
+      try{
+        var url=URL.createObjectURL(file);
+        var v=document.createElement('video');
+        var settled=false;
+        var to=setTimeout(function(){finish(null);},6000);
+        function finish(blob){
+          if(settled)return; settled=true; clearTimeout(to); URL.revokeObjectURL(url);
+          resolve(blob&&blob.size<=1024*1024?blob:null);
+        }
+        v.muted=true; v.preload='metadata'; v.playsInline=true;
+        v.onloadedmetadata=function(){try{v.currentTime=Math.min(0.2,Math.max(0.1,(duration||1)/2));}catch(e){finish(null);}};
+        v.onseeked=function(){
+          try{
+            var canvas=document.createElement('canvas');
+            var w=v.videoWidth||640, h=v.videoHeight||360;
+            var scale=Math.min(1,640/Math.max(w,h));
+            canvas.width=Math.max(1,Math.round(w*scale));
+            canvas.height=Math.max(1,Math.round(h*scale));
+            canvas.getContext('2d').drawImage(v,0,0,canvas.width,canvas.height);
+            canvas.toBlob(function(blob){finish(blob);},'image/jpeg',0.72);
+          }catch(e){finish(null);}
+        };
+        v.onerror=function(){finish(null);};
+        v.src=url;
+      }catch(e){resolve(null);}
+    });
+  }
+  videoBtn.addEventListener('click',function(){ videoInput.click(); });
+  videoInput.addEventListener('change',function(){
+    var f=videoInput.files&&videoInput.files[0]; videoInput.value='';
+    if(!f)return;
+    var t=videoTypeFor(f);
+    if(['video/webm','video/mp4','video/quicktime'].indexOf(t)===-1){
+      setVideoInfo('Unsupported video type. Use WebM, MP4, or MOV.',true); return;
+    }
+    if(f.size>VIDEO_MAX_BYTES){
+      setVideoInfo('Video too large: '+fmtBytes(f.size)+'. Max is 50MB.',true); return;
+    }
+    setVideoInfo('Checking video…',false);
+    readVideoDuration(f).then(function(duration){
+      if(duration<VIDEO_MIN_SECONDS||duration>VIDEO_MAX_SECONDS){
+        setVideoInfo('Video must be 30 seconds or shorter.',true); return;
+      }
+      clearSelectedVideo();
+      selectedVideoUrl=URL.createObjectURL(f);
+      videoPreview.src=selectedVideoUrl;
+      videoPreviewWrap.classList.add('show');
+      videoCt.textContent=Math.round(duration)+'s';
+      videoMeta.textContent=Math.round(duration)+'s · '+fmtBytes(f.size);
+      selectedVideo={file:f,duration:duration,posterBlob:null,uploadedCaptureId:null};
+      setVideoInfo('Video ready. It will attach after the capture is saved.',false);
+      refreshSend();
+      makeVideoPoster(f,duration).then(function(blob){
+        if(selectedVideo&&selectedVideo.file===f)selectedVideo.posterBlob=blob;
+      });
+    }).catch(function(e){setVideoInfo((e&&e.message)||'Could not read video.',true);});
+  });
+  clearVideo.addEventListener('click',clearSelectedVideo);
 
   // ── Audio recorder (MediaRecorder + pause/resume) ────────────────────────
   function fmtTime(s){ var m=Math.floor(s/60); var ss=s%60; return m+':'+(ss<10?'0':'')+ss; }
@@ -483,6 +624,76 @@
     if(gps.status){ fd.append('gps_address_status', gps.status); }
   }
 
+  function apiJson(url,body){
+    return fetch(url,{method:'POST',headers:{'X-Baker-Key':KEY,'Content-Type':'application/json'},body:JSON.stringify(body)})
+      .then(function(r){return r.json().then(function(j){return {ok:r.ok,status:r.status,body:j};})
+        .catch(function(){return {ok:r.ok,status:r.status,body:{}};});})
+      .then(function(res){
+        if(!res.ok){
+          var msg=(res.body&&(res.body.detail||res.body.error))||('HTTP '+res.status);
+          throw new Error(msg);
+        }
+        return res.body||{};
+      });
+  }
+  function putToR2(upload,blob){
+    var h={};
+    Object.keys((upload&&upload.headers)||{}).forEach(function(k){
+      // Browsers own Content-Length for fetch bodies; setting it manually is
+      // forbidden. R2 still verifies the signed length against File.size.
+      if(k.toLowerCase()!=='content-length')h[k]=upload.headers[k];
+    });
+    if(!h['Content-Type'])h['Content-Type']=blob.type||'application/octet-stream';
+    return fetch(upload.url,{method:upload.method||'PUT',headers:h,body:blob})
+      .then(function(r){if(!r.ok)throw new Error('R2 upload failed ('+r.status+').');});
+  }
+  function presignMedia(captureId,asset,blob,duration){
+    return apiJson('/api/ai-hotel/captures/'+captureId+'/media/presign',{
+      asset:asset,
+      content_type:blob.type||((asset==='video')?'video/mp4':'image/jpeg'),
+      size_bytes:blob.size,
+      duration_seconds:duration||null
+    });
+  }
+  function uploadSelectedVideo(captureId){
+    if(!selectedVideo||!captureId)return Promise.resolve({ok:true,skipped:true});
+    if(selectedVideo.uploadedCaptureId===captureId)return Promise.resolve({ok:true,skipped:true});
+    var v=selectedVideo;
+    var vtype=videoTypeFor(v.file);
+    var uploadBlob=v.file.type?v.file:new Blob([v.file],{type:vtype||'video/mp4'});
+    var poster=v.posterBlob||null;
+    setVideoInfo('Uploading video evidence…',false);
+    return presignMedia(captureId,'video',uploadBlob,v.duration)
+      .then(function(p){
+        return putToR2(p.upload,uploadBlob).then(function(){return {videoKey:p.key};});
+      })
+      .then(function(state){
+        if(!poster)return state;
+        return presignMedia(captureId,'thumbnail',poster,null)
+          .then(function(tp){return putToR2(tp.upload,poster).then(function(){state.thumbKey=tp.key;return state;});})
+          .catch(function(){return state;});  // poster is nice-to-have; the video remains the evidence.
+      })
+      .then(function(state){
+        return apiJson('/api/ai-hotel/captures/'+captureId+'/media/confirm',{
+          media_type:'video',
+          storage_key:state.videoKey,
+          thumbnail_key:state.thumbKey||null,
+          content_type:vtype||v.file.type||'video/mp4',
+          size_bytes:uploadBlob.size,
+          duration_seconds:v.duration
+        });
+      })
+      .then(function(){
+        v.uploadedCaptureId=captureId;
+        setVideoInfo('Video attached to capture #'+captureId+'.',false);
+        return {ok:true};
+      })
+      .catch(function(e){
+        setVideoInfo('Capture saved, but video upload failed: '+((e&&e.message)||'unknown error'),true);
+        return {ok:false,error:(e&&e.message)||'video upload failed'};
+      });
+  }
+
   // Returns false if the caller should abort this submit (user chose to re-tag a
   // stale fix). Otherwise true (proceed — fresh, absent, or accepted-stale GPS).
   function gpsStaleOkToSend(){
@@ -626,7 +837,9 @@
       fd.append('audio', audioBlob, 'dictation.'+ext);
       fd.append('duration_seconds', String(audioDuration||0));
     }
-    fd.append('note', noteInput.value.trim());
+    var rawNote=noteInput.value.trim();
+    if(!rawNote&&selectedVideo&&!selectedFiles.length&&!audioBlob)rawNote='Site video evidence.';
+    fd.append('note', rawNote);
     appendGps(fd);
     return fd;
   }
@@ -645,7 +858,11 @@
           return;
         }
         result.className='result';   // hide the plain result; the sheet takes over
-        renderReview(res.body||{});
+        var body=res.body||{};
+        renderReview(body);
+        if(selectedVideo&&body.capture_id){
+          uploadSelectedVideo(body.capture_id);
+        }
       })
       .catch(function(e){
         showResult('err',function(root){
@@ -717,11 +934,13 @@
 
   function resetForm(){
     selectedFiles=[]; renderThumbs();
+    clearSelectedVideo();
     audioBlob=null; chunks=[]; recStat.style.display='none';
     recDot.className='recdot'; recLabel.textContent=''; clearAudio.style.display='none';
     recTime.textContent='0:00';
     noteInput.value='';
     gps={lat:null,lng:null,acc:null,at:null,method:null,status:null}; updateGpsUI();
+    refreshSend();
   }
 
   sendBtn.addEventListener('click',function(){
@@ -739,8 +958,9 @@
     }
     if(!gpsStaleOkToSend()) return;
     var note=noteInput.value.trim();
-    if(!KEY || (!selectedFiles.length && !note && !audioBlob)) return;
+    if(!KEY || (!selectedFiles.length && !note && !audioBlob && !selectedVideo)) return;
     var hadAudio=!!audioBlob;   // free-note path does NOT persist audio — be honest below
+    var hadVideo=!!selectedVideo;
     sendBtn.disabled=true; sendBtn.textContent='Sending…';
     var fd=new FormData();
     selectedFiles.forEach(function(f,i){
@@ -750,6 +970,7 @@
       var ext=(audioBlob.type.indexOf('mp4')!==-1)?'mp4':'webm';
       fd.append('audio', audioBlob, 'dictation.'+ext);
     }
+    if(!note&&hadVideo&&!selectedFiles.length&&!audioBlob)note='Site video evidence.';
     fd.append('note',note);
     appendGps(fd);
     fetch('/api/ai-hotel/capture',{method:'POST',headers:{'X-Baker-Key':KEY},body:fd})
@@ -766,19 +987,24 @@
           return;
         }
         var b=res.body||{};
-        showResult('ok',function(root){
-          root.appendChild(document.createTextNode(hadAudio ? 'Saved (note + photos). Audio kept on this device only — Extract a Site/Supplier card to save the recording to Baker.' : 'Saved.'));
-          var tag=document.createElement('div');
-          var label=(b.section_guess||'general');
-          if(b.related_area) label+=' · '+b.related_area;
-          tag.className='tag'; tag.textContent=label;
-          root.appendChild(tag);
-          if(b.summary){
-            var s=document.createElement('div'); s.className='smry'; s.textContent=b.summary;
-            root.appendChild(s);
-          }
+        var upload=(hadVideo&&b.id)?uploadSelectedVideo(b.id):Promise.resolve({ok:true});
+        return upload.then(function(up){
+          showResult('ok',function(root){
+            var msg=hadAudio ? 'Saved (note + photos). Audio kept on this device only — Extract a Site/Supplier card to save the recording to Baker.' : 'Saved.';
+            if(hadVideo)msg+=(up&&up.ok)?' Video attached.':' Video upload failed; raw capture is saved.';
+            root.appendChild(document.createTextNode(msg));
+            var tag=document.createElement('div');
+            var label=(b.section_guess||'general');
+            if(b.related_area) label+=' · '+b.related_area;
+            tag.className='tag'; tag.textContent=label;
+            root.appendChild(tag);
+            if(b.summary){
+              var s=document.createElement('div'); s.className='smry'; s.textContent=b.summary;
+              root.appendChild(s);
+            }
+          });
+          resetForm();
         });
-        resetForm();
       })
       .catch(function(e){
         showResult('err',function(root){
