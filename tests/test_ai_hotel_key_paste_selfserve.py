@@ -24,10 +24,12 @@ def test_empty_state_renders_key_entry():
     # AC1: the keyless branch routes to the self-service entry, not a dead hint.
     assert "function renderKeyEntry(main)" in src
     notes = src[src.index("function renderNotes(main)"):src.index("function cardAsText(")]
-    assert "if(!key){\n    renderKeyEntry(main);" in notes
+    assert "renderKeyEntry(main)" in notes
+    assert "throw new Error('unauth')" in notes
     seg = src[src.index("function renderKeyEntry(main)"):src.index("function renderNotes(main)")]
     assert "type='password'" in seg and "Paste access key" in seg
     assert "Load field notes" in seg
+    assert "Enter access code" in seg and "/api/ai-hotel/pin-auth" in seg
 
 
 def test_probe_before_persist_and_session_fallback():
@@ -40,7 +42,8 @@ def test_probe_before_persist_and_session_fallback():
     success_then = seg.index(".then(function(){")
     assert success_then < persist_idx          # setItem lives in the success .then, not the catch
     # AC4: wrong key shows inline message + leaves input; no silent store in catch.
-    catch_seg = seg[seg.index(".catch(function(e){"):]
+    key_probe = seg[seg.index("fetch('/api/ai-hotel/captures?limit=1'"):]
+    catch_seg = key_probe[key_probe.index(".catch(function(e){"):]
     assert "Key not accepted" in catch_seg
     assert "localStorage.setItem" not in catch_seg
     # AC2: reload-free re-render via show('notes').

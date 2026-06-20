@@ -659,6 +659,12 @@ function noteKey(){
     return _aihSessionKey||'';
   }catch(e){return _aihSessionKey||'';}
 }
+function aiHotelReadOptions(){
+  const opts={credentials:'same-origin'};
+  const k=noteKey();
+  if(k)opts.headers={'X-Baker-Key':k};
+  return opts;
+}
 function cardKind(c){
   const ft=c.form_record&&c.form_record.form_type;
   if(ft==='site_visit')return 'site';
@@ -678,7 +684,15 @@ function humanizeVal(v){return String(v).replace(/_/g,' ');}
 // stored, so a wrong key never overwrites a good stored key into a broken state.
 function renderKeyEntry(main){
   const box=el('div','nempty');
-  box.appendChild(el('div','nkeyhint','Field notes are private. Paste your access key once to load them on this device.'));
+  box.appendChild(el('div','nkeyhint','Field notes are private. Enter the access code, or paste your access key once to load them on this device.'));
+  const pinRow=el('div','nkeyrow');
+  const pin=document.createElement('input');
+  pin.type='text';pin.inputMode='numeric';pin.pattern='[0-9]*';pin.maxLength=4;
+  pin.placeholder='Enter access code';pin.className='nkeyinput';
+  pin.autocomplete='one-time-code';pin.autocapitalize='off';pin.spellcheck=false;
+  const pinBtn=el('button','nkeybtn','Unlock');
+  pinRow.appendChild(pin);pinRow.appendChild(pinBtn);
+  box.appendChild(pinRow);
   const row=el('div','nkeyrow');
   const inp=document.createElement('input');
   inp.type='password';inp.placeholder='Paste access key';inp.className='nkeyinput';
@@ -688,7 +702,34 @@ function renderKeyEntry(main){
   const msg=el('div','nkeymsg');
   box.appendChild(row);box.appendChild(msg);
   main.appendChild(box);
-  function attempt(){
+  function attemptPin(){
+    const p=(pin.value||'').trim();
+    if(!p){pin.focus();return;}
+    pinBtn.disabled=true;pinBtn.textContent='Unlocking...';msg.textContent='';msg.className='nkeymsg';
+    fetch('/api/ai-hotel/pin-auth',{
+      method:'POST',
+      credentials:'same-origin',
+      headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({pin:p})
+    })
+      .then(function(r){
+        if(r.status===401||r.status===403)throw new Error('unauth');
+        if(r.status===429)throw new Error('limited');
+        if(!r.ok)throw new Error('http');
+        return r.json();
+      })
+      .then(function(){show('notes');})
+      .catch(function(e){
+        pinBtn.disabled=false;pinBtn.textContent='Unlock';
+        msg.className='nkeymsg show';
+        msg.textContent=(e&&e.message==='limited')
+          ?'Too many attempts - wait and try again.'
+          :((e&&e.message==='unauth')
+            ?'Code not accepted - check it and try again.'
+            :'Could not unlock - check your connection and try again.');
+      });
+  }
+  function attemptKey(){
     const k=(inp.value||'').trim();
     if(!k){inp.focus();return;}
     btn.disabled=true;btn.textContent='Loading…';msg.textContent='';msg.className='nkeymsg';
@@ -712,8 +753,10 @@ function renderKeyEntry(main){
           :'Could not load — check your connection and try again.';
       });
   }
-  btn.onclick=attempt;
-  inp.addEventListener('keydown',function(e){if(e.key==='Enter')attempt();});
+  pinBtn.onclick=attemptPin;
+  pin.addEventListener('keydown',function(e){if(e.key==='Enter')attemptPin();});
+  btn.onclick=attemptKey;
+  inp.addEventListener('keydown',function(e){if(e.key==='Enter')attemptKey();});
 }
 
 function renderNotes(main){
@@ -721,10 +764,6 @@ function renderNotes(main){
   main.appendChild(el('h1','sec','Field notes'));
   main.appendChild(el('div','sec-sub','Photos, notes and saved cards captured on the phone, sorted automatically. Newest first. Tap a card to see its fields and raw capture.'));
   const key=noteKey();
-  if(!key){
-    renderKeyEntry(main);
-    return;
-  }
   let filter='all', allCaps=[];
   const bar=el('div','nfilter');
   [['all','All'],['site','Site Cards'],['supplier','Suppliers'],['free','Free Notes']].forEach(function(pair){
@@ -736,7 +775,7 @@ function renderNotes(main){
   // safety) — clears the stored + session key and returns to the entry state.
   const forget=el('button','nforget','Forget key');
   forget.onclick=function(){try{localStorage.removeItem('aih.key');}catch(e){}_aihSessionKey='';show('notes');};
-  bar.appendChild(forget);
+  if(key)bar.appendChild(forget);
   main.appendChild(bar);
   const wrap=el('div','ngrid');main.appendChild(wrap);
   wrap.appendChild(el('div','nempty','Loading field notes…'));
@@ -747,14 +786,23 @@ function renderNotes(main){
     if(!list.length){wrap.appendChild(el('div','nempty','No field notes in this filter yet.'));return;}
     list.forEach(function(c){wrap.appendChild(buildNoteCard(c));});
   }
-  fetch('/api/ai-hotel/captures?limit=100',{headers:{'X-Baker-Key':key}})
-    .then(function(r){return r.json();})
+  fetch('/api/ai-hotel/captures?limit=100',aiHotelReadOptions())
+    .then(function(r){
+      if((r.status===401||r.status===403)&&!key)throw new Error('unauth');
+      if(!r.ok)throw new Error('http');
+      return r.json();
+    })
     .then(function(data){
       allCaps=(data&&Array.isArray(data.captures))?data.captures:[];
       if(!allCaps.length){while(wrap.firstChild)wrap.removeChild(wrap.firstChild);wrap.appendChild(el('div','nempty','No field notes yet. Snap or dictate one from the capture page.'));return;}
       apply();
     })
-    .catch(function(){
+    .catch(function(e){
+      if(e&&e.message==='unauth'){
+        while(main.firstChild)main.removeChild(main.firstChild);
+        renderKeyEntry(main);
+        return;
+      }
       while(wrap.firstChild)wrap.removeChild(wrap.firstChild);
       wrap.appendChild(el('div','nempty','Could not load field notes. Check your key and connection.'));
     });
@@ -844,7 +892,7 @@ function renderPhotos(b, c){
   b.appendChild(el('div','dlg-h','Photos · '+n));
   const ph=el('div','nphotos-ph','Loading photos…');
   b.appendChild(ph);
-  fetch('/api/ai-hotel/captures/'+c.id+'/thumbs',{headers:{'X-Baker-Key':noteKey()}})
+  fetch('/api/ai-hotel/captures/'+c.id+'/thumbs',aiHotelReadOptions())
     .then(function(r){return r.json();})
     .then(function(d){
       const list=(d&&Array.isArray(d.thumbs))?d.thumbs:[];
@@ -889,7 +937,7 @@ function openLightbox(c, startIdx){
     if(cache[idx]){imgEl.src=cache[idx];imgEl.style.display='block';spin.style.display='none';return;}
     imgEl.style.display='none';spin.style.display='block';spin.textContent='Loading…';
     const want=idx;
-    fetch('/api/ai-hotel/captures/'+c.id+'/images/'+idx,{headers:{'X-Baker-Key':noteKey()}})
+    fetch('/api/ai-hotel/captures/'+c.id+'/images/'+idx,aiHotelReadOptions())
       .then(function(r){return r.json();})
       .then(function(d){
         if(want!==idx)return;
@@ -978,7 +1026,7 @@ function openNoteDetail(c){
     const loadBtn=el('button','sbtn2','Load & play audio');
     loadBtn.onclick=function(){
       loadBtn.disabled=true;loadBtn.textContent='Loading…';
-      fetch('/api/ai-hotel/captures/'+c.id+'/audio',{headers:{'X-Baker-Key':noteKey()}})
+      fetch('/api/ai-hotel/captures/'+c.id+'/audio',aiHotelReadOptions())
         .then(function(r){return r.json();})
         .then(function(d){
           const list=(d&&Array.isArray(d.audio))?d.audio:[];
@@ -1005,7 +1053,7 @@ function openNoteDetail(c){
     const loadVideo=el('button','sbtn2','Load & play video');
     loadVideo.onclick=function(){
       loadVideo.disabled=true;loadVideo.textContent='Loading…';
-      fetch('/api/ai-hotel/captures/'+c.id+'/media',{headers:{'X-Baker-Key':noteKey()}})
+      fetch('/api/ai-hotel/captures/'+c.id+'/media',aiHotelReadOptions())
         .then(function(r){return r.json();})
         .then(function(d){
           const list=(d&&Array.isArray(d.media))?d.media:[];
@@ -1044,7 +1092,7 @@ function openNoteDetail(c){
     else{copyBtn.textContent='Clipboard unavailable';}
   };
   acts.appendChild(copyBtn);
-  if(fr&&fr.id&&fr.status!=='discarded'){
+  if(fr&&fr.id&&fr.status!=='discarded'&&noteKey()){
     const disBtn=el('button','sbtn2 danger','Dismiss card');
     disBtn.onclick=function(){
       disBtn.disabled=true;disBtn.textContent='Dismissing…';

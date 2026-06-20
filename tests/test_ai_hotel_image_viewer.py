@@ -64,10 +64,10 @@ def test_backend_endpoints_exist():
     src = Path("outputs/dashboard.py").read_text()
     assert '"/api/ai-hotel/captures/{capture_id}/thumbs"' in src
     assert '"/api/ai-hotel/captures/{capture_id}/images/{idx}"' in src
-    # both auth-gated
+    # both read-auth gated (master key or scoped AI-Hotel PIN cookie)
     seg = src[src.index('"/api/ai-hotel/captures/{capture_id}/thumbs"'):
               src.index('"/api/ai-hotel/captures/{capture_id}/media"')]
-    assert seg.count("Depends(verify_api_key)") >= 2
+    assert seg.count("Depends(verify_ai_hotel_read_access)") >= 2
 
 
 # ─── TestClient backend behaviour ───────────────────────────────────────────
