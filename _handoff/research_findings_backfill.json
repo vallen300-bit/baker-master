@@ -1,0 +1,78 @@
+{
+  "_note": "DRAFT payloads synthesized by cowork-ah1 from the 4-site research note (vault 4dd8d09) + researcher bus #3483. VERIFY against researcher's full corpus before writing (Director instruction: check with researcher for ALL research). Write each object into ai_hotel_form_records.research_findings on BOTH corrected_json and extracted_json for the listed capture_id (status=confirmed → view reads corrected_json; writing both is belt-and-suspenders).",
+  "24": {
+    "fr_id": 8,
+    "site_label": "2900 Lakeside",
+    "research_findings": {
+      "researched_on": "2026-06-19",
+      "source": "Brisen Researcher (web, ≥2 independent sources/claim) + Santa Clara parcel GIS",
+      "confidence": "high — GPS + entitlement verified",
+      "headline": "APN 216-30-048 — a 1.96-acre site ALREADY ENTITLED for a 190-room hotel (Use Permit PLN2018-13582). Controlled by developer Stratus Development Partners, ~3 mi from NVIDIA. Acquiring it = buying out an in-flight entitled project, not raw land.",
+      "answers": [
+        {"q": "Legal owner / title holder", "a": "Controlled by Stratus Development Partners, LLC (likely via SPE “CS Lakeside Santa Clara LLC”). Last sold $17.2M on 2018-05-14. Exact recorded deed needs a paid county pull (Assessor/Recorder, APN 216-30-048)."},
+        {"q": "Zoning + entitlements", "a": "Zoned ML (Light Industrial). Hotel Use Permit PLN2018-13582 ALREADY GRANTED (Planning Commission 2019-06-12): demolish + a 5-story, 190-room hotel + parking. The hard hurdle is already cleared."},
+        {"q": "Parcel boundaries / lot size", "a": "APN 216-30-048; 1.96 ac (85,380 sf); existing vacant ~36,472 sf office/clinic built 1981 (last tenant Cardiva Medical — the real “cardiovascular” clue; there was no school of medicine)."},
+        {"q": "Asking price / valuation", "a": "Off-market — no asking price. Last sale $17.2M (2018, ~$8.78M/acre). County assessed market value $19.57M (2025-26). A real number needs a broker/owner approach to Stratus."},
+        {"q": "Permits + building code path", "a": "Entitlement complete (2019); developer lists construction start Q4 2025. Verify live permit status at the City of Santa Clara Permit Center by APN."},
+        {"q": "Comparable sales / market comps", "a": "Best comp = the parcel’s own 2018 trade ($201/sf land). County commercial-land median ~$565K/acre; entitled freeway-frontage hotel sites near Levi’s Stadium transact at a large premium."}
+      ],
+      "flags": [
+        "RED FLAG — not a passive seller: an active developer with an approved entitlement and a live 190-room project. Acquiring means buying into/out of an in-flight deal — entitlement risk already retired, but limited leverage + a premium.",
+        "Researcher (#3483) confirms the “abandoned site near Embassy Suites” you also captured (card 23) is the SAME 2900 Lakeside parcel, slated for demolition — two cards, one site.",
+        "NVIDIA ~3 mi / <10 min on the 101 spine; steps from Levi’s Stadium + Great America transit. Strong for the AI-hotel thesis."
+      ],
+      "needs_paid_pull": "Santa Clara County Assessor/Recorder, APN 216-30-048 — exact owner / recorded deed + a price read (broker / CoStar).",
+      "sources": "PropertyShark (APN, 2018 sale, assessed value); City of Santa Clara project listing + agenda (Use Permit PLN2018-13582, 190 rooms); Milani Associates / BLDUP (Stratus, parcel); Yelp / Cardiva Medical."
+    }
+  },
+  "19": {
+    "fr_id": 7,
+    "site_label": "(unnamed) Santa Clara “spectacular view” site",
+    "research_findings": {
+      "researched_on": "2026-06-19",
+      "source": "Brisen Researcher (web) — AREA-LEVEL only; no GPS/address was captured",
+      "confidence": "low — address-gated (owner/title/lot/price cannot be pinned without an address)",
+      "headline": "No GPS/address was captured, so owner, lot and price are BLOCKED. Your 3 photos point to Sunnyvale Baylands Park (Caribbean Dr / Lawrence Expwy) — a precise pull is queued once you confirm that location.",
+      "answers": [
+        {"q": "Exact street address", "a": "NOT captured. Best read from your 3 photos: Sunnyvale Baylands Park area (Caribbean Dr / Lawrence Expwy). Confirm and a precise parcel pull becomes possible."},
+        {"q": "Legal owner / title holder", "a": "BLOCKED — needs the confirmed address/GPS."},
+        {"q": "Zoning + entitlements", "a": "Santa Clara updated its Zoning Code (July 2025); hotels in commercial/mixed-use need Architectural Review + usually a Conditional Use Permit + CEQA. The North Santa Clara / stadium district is the established hospitality zone."},
+        {"q": "Parcel boundaries / lot size", "a": "BLOCKED — needs address."},
+        {"q": "Asking price / valuation", "a": "BLOCKED for this parcel. Area benchmarks: county land ~$565K–$1.75M/acre; Silicon Valley hotel assets ~$145,566/room (H1 2025)."},
+        {"q": "Permits + building code path", "a": "City of Santa Clara Permit Center; the entitlement (not the building permit) is the long pole."},
+        {"q": "Comparable sales / market comps", "a": "Hyatt Regency Santa Clara land $25M (2026); Sheraton San Jose / Milpitas ~$20M; SV hotel volume +17.3% to $1.39B (H1 2025)."}
+      ],
+      "flags": [
+        "Strongest nearby competitor: Hyatt Regency Santa Clara (505 rooms) — the only hotel attached to the Convention Center, steps from Levi’s Stadium; a moat a new entrant can’t replicate without the AI-hotel differentiator.",
+        "A GPS re-capture (or your confirming “Baylands Park”) unblocks owner + lot + price."
+      ],
+      "needs": "Confirm the exact location (photos suggest Sunnyvale Baylands Park) — then a precise parcel pull can run.",
+      "sources": "Researcher 4-site note (vault 4dd8d09), Site 19 section — area-level hypotheses + comps."
+    }
+  },
+  "17": {
+    "fr_id": 5,
+    "site_label": "(unnamed) Palo Alto / Four Seasons area",
+    "research_findings": {
+      "researched_on": "2026-06-19",
+      "source": "Brisen Researcher (web, ≥2 sources/claim) — competitor confirmed; OUR parcel address-gated",
+      "confidence": "mixed — competitor/area high; our specific parcel BLOCKED (no GPS/address)",
+      "headline": "Your named competitor = Four Seasons Hotel Silicon Valley, East Palo Alto (2050 University Ave) — a 200-key, the submarket’s dominant luxury asset. High fit for VC/tech business meetings, BUT ~13 mi (~21 min) from NVIDIA — materially farther than a Santa Clara site.",
+      "answers": [
+        {"q": "Exact street address (our site)", "a": "BLOCKED — no GPS/address captured. Likely corridor: East Palo Alto (University Ave / Bay Rd “Four Corners” TOD) or Palo Alto near Embarcadero."},
+        {"q": "Legal owner / title holder", "a": "BLOCKED — needs address (San Mateo County records)."},
+        {"q": "Zoning + entitlements", "a": "Palo Alto = HARD (office cap, ~271-day permits, anti-development). East Palo Alto = more permissive / pro-revenue (Ravenswood / 4-Corners TOD plan; TOT raised to 12%, pushing 14%). If Brisen has a choice of side, target East Palo Alto."},
+        {"q": "Parcel boundaries / lot size", "a": "BLOCKED — needs address."},
+        {"q": "Asking price / valuation", "a": "BLOCKED. Submarket trades ~$6,250–$176,000/key (mostly distress — a floor that understates prime PA/EPA luxury land)."},
+        {"q": "Permits + building code path", "a": "Palo Alto = multi-stage + cap/moratorium gating (slow). East Palo Alto = streamlined via the Specific Plan."},
+        {"q": "Comparable sales / market comps", "a": "Anchored by the Four Seasons (200 keys, opened 2006, 7,050 sf meeting + courtyard). Only true 5-star in the immediate submarket — owns the exact luxury business-meeting niche Brisen would enter."}
+      ],
+      "flags": [
+        "City-of-record (Palo Alto vs East Palo Alto) swings entitlement difficulty enormously — confirm once the address is known.",
+        "NVIDIA-distance caveat: this site trades NVIDIA-proximity for Stanford / VC prestige. Director decides which driver wins."
+      ],
+      "needs": "Exact address/GPS for our parcel, and which side of the line (Palo Alto vs East Palo Alto).",
+      "sources": "Researcher 4-site note (vault 4dd8d09), Site 17 section."
+    }
+  }
+}
