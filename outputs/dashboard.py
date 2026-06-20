@@ -389,6 +389,27 @@ async def verify_ai_hotel_read_access(
     )
 
 
+async def verify_ai_hotel_photo_edit_access(
+    request: Request,
+    x_baker_key: str = Header(None, alias="X-Baker-Key"),
+):
+    """AI-Hotel narrow photo-edit auth for in-viewer rotation only.
+
+    The master key remains the general write/admin credential. The scoped
+    AI-Hotel cookie is accepted here only because the manual rotate button is a
+    Director-approved repair action inside the private Field Notes viewer.
+    """
+    if _BAKER_API_KEY and x_baker_key and hmac.compare_digest(x_baker_key, _BAKER_API_KEY):
+        return
+    if _ai_hotel_session_valid(request.cookies.get(_AI_HOTEL_SESSION_COOKIE)):
+        return
+    raise HTTPException(
+        status_code=401,
+        detail="Invalid or missing AI Hotel photo edit credentials",
+        headers={"WWW-Authenticate": "X-Baker-Key"},
+    )
+
+
 # ============================================================
 # Logging — must be module-level so uvicorn outputs.dashboard:app picks it up
 # ============================================================
@@ -10854,7 +10875,7 @@ async def ai_hotel_capture_single_image_detail(capture_id: int, idx: int):
 
 
 @app.post("/api/ai-hotel/captures/{capture_id}/images/{idx}/rotate", tags=["ai-hotel"],
-          dependencies=[Depends(verify_ai_hotel_read_access)])
+          dependencies=[Depends(verify_ai_hotel_photo_edit_access)])
 async def ai_hotel_capture_image_rotate(
     capture_id: int,
     idx: int,
@@ -10910,6 +10931,16 @@ async def ai_hotel_capture_image_rotate(
                     RETURNING ordinal""",
                     (new_b64, new_media, capture_id, idx, old_b64),
                 )
+                updated = cur.fetchone()
+                if not updated:
+                    raise HTTPException(status_code=409, detail="Image changed; reload and retry.")
+                if idx == 0:
+                    cur.execute(
+                        """UPDATE ai_hotel_captures
+                              SET image_b64 = %s, image_media = %s
+                            WHERE id = %s""",
+                        (new_b64, new_media, capture_id),
+                    )
             else:
                 cur.execute(
                     """UPDATE ai_hotel_captures
@@ -10918,9 +10949,9 @@ async def ai_hotel_capture_image_rotate(
                     RETURNING id""",
                     (new_b64, new_media, capture_id, old_b64),
                 )
-            updated = cur.fetchone()
-            if not updated:
-                raise HTTPException(status_code=409, detail="Image changed; reload and retry.")
+                updated = cur.fetchone()
+                if not updated:
+                    raise HTTPException(status_code=409, detail="Image changed; reload and retry.")
             conn.commit()
             cur.close()
         except HTTPException:

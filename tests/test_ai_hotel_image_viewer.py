@@ -91,8 +91,10 @@ def test_backend_endpoints_exist():
     # both read-auth gated (master key or scoped AI-Hotel PIN cookie)
     seg = src[src.index('"/api/ai-hotel/captures/{capture_id}/thumbs"'):
               src.index('"/api/ai-hotel/captures/{capture_id}/media"')]
-    assert seg.count("Depends(verify_ai_hotel_read_access)") >= 3
+    assert seg.count("Depends(verify_ai_hotel_read_access)") >= 2
+    assert "Depends(verify_ai_hotel_photo_edit_access)" in seg
     assert "UPDATE ai_hotel_capture_images" in seg
+    assert "UPDATE ai_hotel_captures" in seg
     assert "AND image_b64 = %s" in seg
 
 
@@ -136,10 +138,14 @@ class _Cur:
                     self._res = [{"ordinal": idx}]
                     break
         elif "UPDATE ai_hotel_captures" in sql:
-            new_b64, new_media, cid, old_b64 = params
+            if len(params) == 3:
+                new_b64, new_media, cid = params
+                old_b64 = None
+            else:
+                new_b64, new_media, cid, old_b64 = params
             self._res = []
             for r in self.s.parents:
-                if r["id"] == cid and r.get("image_b64") == old_b64:
+                if r["id"] == cid and (old_b64 is None or r.get("image_b64") == old_b64):
                     r["image_b64"] = new_b64
                     r["image_media"] = new_media
                     self._res = [{"id": cid}]
@@ -306,6 +312,9 @@ def test_single_image_endpoint_transposes_phone_exif_orientation(monkeypatch):
 def test_rotate_endpoint_persists_child_image_and_returns_new_thumb(monkeypatch):
     store = _Store()
     original = _plain_jpeg_b64((80, 40))
+    store.parents = [
+        {"id": 17, "image_b64": original, "image_media": "image/jpeg"},
+    ]
     store.images = [
         {"capture_id": 17, "ordinal": 0, "image_b64": original, "image_media": "image/jpeg"},
     ]
@@ -322,6 +331,7 @@ def test_rotate_endpoint_persists_child_image_and_returns_new_thumb(monkeypatch)
     assert body["ok"] is True and body["deg"] == 90
     assert body["thumb"].startswith("THUMB:")
     assert store.images[0]["image_b64"] != original
+    assert store.parents[0]["image_b64"] == store.images[0]["image_b64"]
     assert _image_size_from_data_url(body["image"]) == (40, 80)
     detail = client.get("/api/ai-hotel/captures/17/images/0", headers=_HDR).json()["image"]
     assert _image_size_from_data_url(detail) == (40, 80)
@@ -345,6 +355,39 @@ def test_rotate_endpoint_updates_legacy_parent_fallback(monkeypatch):
     assert resp.status_code == 200, resp.text
     assert store.parents[0]["image_b64"] != original
     assert _image_size_from_data_url(resp.json()["image"]) == (30, 90)
+
+
+@_skip
+def test_rotate_endpoint_accepts_scoped_pin_cookie(monkeypatch):
+    from fastapi.testclient import TestClient
+    import outputs.dashboard as dash
+
+    store = _Store()
+    original = _plain_jpeg_b64((80, 40))
+    store.parents = [
+        {"id": 17, "image_b64": original, "image_media": "image/jpeg"},
+    ]
+    store.images = [
+        {"capture_id": 17, "ordinal": 0, "image_b64": original, "image_media": "image/jpeg"},
+    ]
+    monkeypatch.setenv("BAKER_API_KEY", "test-key")
+    monkeypatch.setenv("AI_HOTEL_PIN", "6470")
+    monkeypatch.setenv("AI_HOTEL_SESSION_SECRET", "session-secret")
+    monkeypatch.setattr(dash, "_BAKER_API_KEY", "test-key")
+    monkeypatch.setattr(dash, "_get_store", lambda: store)
+    dash._ai_hotel_pin_state.clear()
+    dash.app.dependency_overrides.pop(dash.verify_api_key, None)
+    dash.app.dependency_overrides.pop(dash.verify_ai_hotel_read_access, None)
+    dash.app.dependency_overrides.pop(dash.verify_ai_hotel_photo_edit_access, None)
+    client = TestClient(dash.app, base_url="https://testserver")
+
+    pin = client.post("/api/ai-hotel/pin-auth", json={"pin": "6470"})
+    resp = client.post("/api/ai-hotel/captures/17/images/0/rotate", json={"deg": 90})
+
+    assert pin.status_code == 200
+    assert resp.status_code == 200, resp.text
+    assert store.images[0]["image_b64"] != original
+    assert store.parents[0]["image_b64"] == store.images[0]["image_b64"]
 
 
 @_skip
