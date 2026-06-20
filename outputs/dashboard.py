@@ -9716,14 +9716,16 @@ def _ai_hotel_resize_for_db(image_bytes: bytes, content_type: str):
     """Validate + resize an uploaded image to <= ~500KB base64 for Postgres.
 
     Always re-encodes to JPEG so the stored row is a known-good, size-capped
-    image. Raises ``ValueError`` when the bytes are not a decodable image or
+    image. Applies EXIF orientation before re-encoding so phone portrait shots do
+    not become sideways after Pillow strips metadata. Raises ``ValueError`` when
+    the bytes are not a decodable image or
     cannot be brought under ``_AI_HOTEL_DB_RAW_CAP`` — the caller converts that
     to HTTP 400 (codex G3 S2: never persist undecodable/oversize raw bytes).
     Returns ``(b64_text, "image/jpeg")``.
     """
     import base64
     from io import BytesIO
-    from PIL import Image as PILImage
+    from PIL import Image as PILImage, ImageOps
 
     # Decode/validate up front — reject anything PIL cannot open (verify() then
     # a fresh open, since verify() leaves the handle unusable for further ops).
@@ -9731,6 +9733,7 @@ def _ai_hotel_resize_for_db(image_bytes: bytes, content_type: str):
         PILImage.open(BytesIO(image_bytes)).verify()
         img = PILImage.open(BytesIO(image_bytes))
         img.load()
+        img = ImageOps.exif_transpose(img)
         if img.mode not in ("RGB", "L"):
             img = img.convert("RGB")
     except Exception as decode_err:
@@ -9775,10 +9778,11 @@ def _ai_hotel_thumb_data_url(image_b64, media: str = "image/jpeg", px: int = 160
     try:
         import base64 as _b64
         from io import BytesIO
-        from PIL import Image as PILImage
+        from PIL import Image as PILImage, ImageOps
         raw = _b64.b64decode(image_b64)
         img = PILImage.open(BytesIO(raw))
         img.load()
+        img = ImageOps.exif_transpose(img)
         if img.mode not in ("RGB", "L"):
             img = img.convert("RGB")
         img.thumbnail((px, px), PILImage.LANCZOS)
@@ -9788,6 +9792,44 @@ def _ai_hotel_thumb_data_url(image_b64, media: str = "image/jpeg", px: int = 160
     except Exception as e:
         logger.warning("ai_hotel thumbnail generation failed (thumb=None): %s", e)
         return None
+
+
+def _ai_hotel_image_data_url(image_b64, media: str = "image/jpeg"):
+    """Return a displayable data URL, correcting EXIF orientation when present.
+
+    Stored AI-Hotel images are usually already JPEG-normalized at upload. This
+    helper preserves the raw stored data unless it sees an EXIF orientation tag,
+    then rotates pixels and re-encodes to JPEG so the lightbox is upright even if
+    the stored row still carries phone orientation metadata. Bad legacy/fake rows
+    fall back to the previous straight-through data URL behavior.
+    """
+    if not image_b64:
+        return None
+    media = media or "image/jpeg"
+    raw_url = f"data:{media};base64,{image_b64}"
+    try:
+        import base64 as _b64
+        from io import BytesIO
+        from PIL import Image as PILImage, ImageOps
+
+        raw = _b64.b64decode(image_b64)
+        img = PILImage.open(BytesIO(raw))
+        img.load()
+        try:
+            orientation = img.getexif().get(274)
+        except Exception:
+            orientation = None
+        if orientation not in (2, 3, 4, 5, 6, 7, 8):
+            return raw_url
+        img = ImageOps.exif_transpose(img)
+        if img.mode not in ("RGB", "L"):
+            img = img.convert("RGB")
+        buf = BytesIO()
+        img.save(buf, format="JPEG", quality=85, optimize=True)
+        return "data:image/jpeg;base64," + _b64.b64encode(buf.getvalue()).decode("ascii")
+    except Exception as e:
+        logger.warning("ai_hotel full-image EXIF orientation fallback used: %s", e)
+        return raw_url
 
 
 # ── AI_HOTEL_GPS_CAPTURE_1: capture-level GPS evidence ──────────────────────
@@ -10673,7 +10715,7 @@ async def ai_hotel_capture_images_detail(capture_id: int):
         finally:
             store._put_conn(conn)
         images = [
-            f"data:{(r.get('image_media') or 'image/jpeg')};base64,{r['image_b64']}"
+            _ai_hotel_image_data_url(r["image_b64"], r.get("image_media") or "image/jpeg")
             for r in rows if r.get("image_b64")
         ]
         return {"images": images}
@@ -10773,7 +10815,7 @@ async def ai_hotel_capture_single_image_detail(capture_id: int, idx: int):
         if not r or not r.get("image_b64"):
             return {"image": None}
         media = r.get("image_media") or "image/jpeg"
-        return {"image": f"data:{media};base64,{r['image_b64']}"}
+        return {"image": _ai_hotel_image_data_url(r["image_b64"], media)}
     except Exception as e:
         logger.error(f"GET /api/ai-hotel/captures/{capture_id}/images/{idx} failed: {e}")
         return {"image": None}
