@@ -207,19 +207,59 @@ def test_pin_rate_limit_and_lockout(monkeypatch):
 
 
 @_skip
-def test_spoofed_xff_left_tokens_do_not_reset_rate_limit(monkeypatch):
+def test_cf_connecting_ip_is_limiter_key(monkeypatch):
     client, dash = _client(monkeypatch)
     monkeypatch.setattr(dash, "_AI_HOTEL_PIN_RATE_LIMIT_PER_MIN", 2)
     monkeypatch.setattr(dash, "_AI_HOTEL_PIN_LOCKOUT_FAILURES", 10)
 
-    # Render appends the observed client IP at the right. If we keyed off the
-    # spoofable left side, these three attempts would look like three clients.
+    # Render is Cloudflare-fronted; Cloudflare sets CF-Connecting-IP to the
+    # observed client IP. The limiter must key off that header when present.
     headers = [
-        {"x-forwarded-for": "203.0.113.1, 198.51.100.20"},
-        {"x-forwarded-for": "203.0.113.2, 198.51.100.20"},
-        {"x-forwarded-for": "203.0.113.3, 198.51.100.20"},
+        {"cf-connecting-ip": "198.51.100.20"},
+        {"cf-connecting-ip": "198.51.100.20"},
+        {"cf-connecting-ip": "198.51.100.20"},
     ]
 
     assert client.post("/api/ai-hotel/pin-auth", json={"pin": "0000"}, headers=headers[0]).status_code == 401
     assert client.post("/api/ai-hotel/pin-auth", json={"pin": "0001"}, headers=headers[1]).status_code == 401
     assert client.post("/api/ai-hotel/pin-auth", json={"pin": "0002"}, headers=headers[2]).status_code == 429
+
+
+@_skip
+def test_spoofed_xff_cannot_influence_key_when_cf_connecting_ip_present(monkeypatch):
+    client, dash = _client(monkeypatch)
+    monkeypatch.setattr(dash, "_AI_HOTEL_PIN_RATE_LIMIT_PER_MIN", 2)
+    monkeypatch.setattr(dash, "_AI_HOTEL_PIN_LOCKOUT_FAILURES", 10)
+
+    headers = [
+        {"cf-connecting-ip": "198.51.100.21", "x-forwarded-for": "203.0.113.1"},
+        {"cf-connecting-ip": "198.51.100.21", "x-forwarded-for": "203.0.113.2"},
+        {"cf-connecting-ip": "198.51.100.21", "x-forwarded-for": "203.0.113.3"},
+    ]
+
+    assert client.post("/api/ai-hotel/pin-auth", json={"pin": "0000"}, headers=headers[0]).status_code == 401
+    assert client.post("/api/ai-hotel/pin-auth", json={"pin": "0001"}, headers=headers[1]).status_code == 401
+    assert client.post("/api/ai-hotel/pin-auth", json={"pin": "0002"}, headers=headers[2]).status_code == 429
+
+
+def test_client_ip_header_fallbacks_are_fault_tolerant():
+    import outputs.dashboard as dash
+
+    class _Headers:
+        def __init__(self, vals):
+            self.vals = vals
+
+        def getlist(self, name):
+            return self.vals.get(name, [])
+
+    class _Client:
+        host = "127.0.0.1"
+
+    class _Req:
+        def __init__(self, vals):
+            self.headers = _Headers(vals)
+            self.client = _Client()
+
+    assert dash._ai_hotel_client_ip(_Req({"cf-connecting-ip": ["", "198.51.100.22"]})) == "198.51.100.22"
+    assert dash._ai_hotel_client_ip(_Req({"true-client-ip": ["198.51.100.23"]})) == "198.51.100.23"
+    assert dash._ai_hotel_client_ip(_Req({"x-forwarded-for": ["203.0.113.99"]})) == "127.0.0.1"

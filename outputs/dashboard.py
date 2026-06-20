@@ -185,18 +185,29 @@ async def verify_api_key(x_baker_key: str = Header(None, alias="X-Baker-Key")):
 def _ai_hotel_client_ip(request: Request) -> str:
     """Best-effort client key for PIN throttling behind Render's proxy.
 
-    Render appends the observed client IP to X-Forwarded-For. A public client can
-    spoof left-side XFF tokens, so the limiter keys off the rightmost non-empty
-    hop rather than the user-controlled leftmost token.
+    Render's public edge is Cloudflare-fronted and forwards CF-Connecting-IP as
+    the real client IP. Do not key off X-Forwarded-For: its hop count is not a
+    stable trust boundary and client-supplied values can pollute it.
     """
+    def _single_header(name: str) -> str:
+        try:
+            values = request.headers.getlist(name)  # Starlette Headers supports this.
+        except Exception:
+            try:
+                values = [request.headers.get(name)]
+            except Exception:
+                values = []
+        for value in reversed(values or []):
+            text = str(value or "").strip()
+            if text:
+                return text[:80]
+        return ""
+
     try:
-        xff_tokens = [
-            t.strip()
-            for t in (request.headers.get("x-forwarded-for") or "").split(",")
-            if t.strip()
-        ]
-        if xff_tokens:
-            return xff_tokens[-1][:80]
+        for header in ("cf-connecting-ip", "true-client-ip"):
+            value = _single_header(header)
+            if value:
+                return value
         if request.client and request.client.host:
             return request.client.host[:80]
     except Exception:
