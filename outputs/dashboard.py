@@ -4613,7 +4613,7 @@ async def api_health():
 
     try:
         from kbl.object_storage import storage_health
-        object_storage = storage_health()
+        object_storage = storage_health(probe=False)
     except Exception:
         object_storage = {"status": "error", "error": "health_check_failed"}
 
@@ -9356,6 +9356,12 @@ _AI_HOTEL_AUDIO_TYPES = (
     "audio/webm", "audio/mp4", "audio/mpeg", "audio/wav", "audio/x-wav",
     "audio/ogg", "audio/aac", "audio/m4a", "audio/x-m4a",
 )
+_AI_HOTEL_VIDEO_CAP = 50 * 1024 * 1024
+_AI_HOTEL_VIDEO_MAX_SECONDS = 30.0
+_AI_HOTEL_VIDEO_TYPES = ("video/webm", "video/mp4", "video/quicktime")
+_AI_HOTEL_POSTER_CAP = 1 * 1024 * 1024
+_AI_HOTEL_POSTER_TYPES = ("image/jpeg", "image/png", "image/webp")
+_AI_HOTEL_MEDIA_PREFIX = "ai-hotel/captures"
 
 # Verbatim-transcription prompt for the dictated-audio path. Gemini returns the
 # transcript as plain text via the same response.text access the classify call
@@ -9366,6 +9372,92 @@ _AI_HOTEL_TRANSCRIBE_PROMPT = (
     "If the audio is silent or unintelligible, output an empty string."
 )
 _AI_HOTEL_TRANSCRIBE_MAX_TOKENS = 8000   # ~10-min speech ≈ 1.5k words ≈ 2k tok; generous
+
+
+class AIHotelCaptureMediaPresignRequest(BaseModel):
+    asset: Literal["video", "thumbnail"] = "video"
+    content_type: str
+    size_bytes: int = Field(..., ge=1)
+    duration_seconds: Optional[float] = None
+
+
+class AIHotelCaptureMediaConfirmRequest(BaseModel):
+    media_type: Literal["video"] = "video"
+    storage_key: str
+    thumbnail_key: Optional[str] = None
+    content_type: str
+    size_bytes: int = Field(..., ge=1)
+    duration_seconds: float
+
+
+def _ai_hotel_clean_content_type(content_type: str) -> str:
+    return (content_type or "").split(";", 1)[0].strip().lower()
+
+
+def _ai_hotel_validate_media_payload(
+    asset: str,
+    content_type: str,
+    size_bytes: int,
+    duration_seconds: Optional[float] = None,
+):
+    content_type = _ai_hotel_clean_content_type(content_type)
+    try:
+        size_bytes = int(size_bytes)
+    except (TypeError, ValueError):
+        raise HTTPException(400, "Invalid media size.")
+    if size_bytes <= 0:
+        raise HTTPException(400, "Invalid media size.")
+    if asset == "video":
+        if content_type not in _AI_HOTEL_VIDEO_TYPES:
+            raise HTTPException(400, "Unsupported video type. Accepted: WebM, MP4, MOV.")
+        if size_bytes > _AI_HOTEL_VIDEO_CAP:
+            raise HTTPException(400, "Video too large (max 50MB).")
+        try:
+            duration = float(duration_seconds)
+        except (TypeError, ValueError):
+            raise HTTPException(400, "Video duration is required.")
+        if duration <= 0 or duration > _AI_HOTEL_VIDEO_MAX_SECONDS:
+            raise HTTPException(400, "Video must be 30 seconds or shorter.")
+        return content_type, size_bytes, duration
+    if asset == "thumbnail":
+        if content_type not in _AI_HOTEL_POSTER_TYPES:
+            raise HTTPException(400, "Unsupported thumbnail type. Accepted: JPEG, PNG, WebP.")
+        if size_bytes > _AI_HOTEL_POSTER_CAP:
+            raise HTTPException(400, "Thumbnail too large (max 1MB).")
+        return content_type, size_bytes, None
+    raise HTTPException(400, "Unsupported media asset.")
+
+
+def _ai_hotel_media_ext(content_type: str) -> str:
+    return {
+        "video/webm": "webm",
+        "video/mp4": "mp4",
+        "video/quicktime": "mov",
+        "image/jpeg": "jpg",
+        "image/png": "png",
+        "image/webp": "webp",
+    }.get(content_type, "bin")
+
+
+def _ai_hotel_media_prefix(capture_id: int, asset: str) -> str:
+    folder = "video" if asset == "video" else "thumbnail"
+    return f"{_AI_HOTEL_MEDIA_PREFIX}/{int(capture_id)}/{folder}/"
+
+
+def _ai_hotel_new_media_key(capture_id: int, asset: str, content_type: str) -> str:
+    return (
+        f"{_ai_hotel_media_prefix(capture_id, asset)}"
+        f"{uuid4().hex}.{_ai_hotel_media_ext(content_type)}"
+    )
+
+
+def _ai_hotel_require_media_key(capture_id: int, asset: str, key: str) -> str:
+    key = (key or "").strip()
+    if not key.startswith(_ai_hotel_media_prefix(capture_id, asset)):
+        raise HTTPException(400, "Media key does not belong to this capture.")
+    if any(part in ("", ".", "..") for part in key.split("/")) or "\\" in key:
+        raise HTTPException(400, "Invalid media key.")
+    return key
 
 
 def _ai_hotel_resize_for_db(image_bytes: bytes, content_type: str):
@@ -9928,6 +10020,129 @@ def _ai_hotel_form_record_view(fr):
         return None
 
 
+@app.post("/api/ai-hotel/captures/{capture_id}/media/presign",
+          tags=["ai-hotel"], dependencies=[Depends(verify_api_key)])
+async def ai_hotel_capture_media_presign(
+    capture_id: int,
+    payload: AIHotelCaptureMediaPresignRequest,
+):
+    """Presign one R2 media object for an existing raw capture.
+
+    The caller must enforce the user-facing cap and pass the browser's
+    ``File.size`` before this route signs. This route repeats those checks
+    server-side; it never accepts base64 media and never creates the parent
+    capture, so upload failure cannot roll back the raw capture row.
+    """
+    content_type, size_bytes, duration = _ai_hotel_validate_media_payload(
+        payload.asset, payload.content_type, payload.size_bytes, payload.duration_seconds,
+    )
+    try:
+        store = _get_store()
+        conn = store._get_conn()
+        if not conn:
+            raise HTTPException(503, "Database unavailable")
+        try:
+            cur = conn.cursor()
+            cur.execute("SELECT 1 FROM ai_hotel_captures WHERE id = %s", (capture_id,))
+            if not cur.fetchone():
+                raise HTTPException(404, "Capture not found.")
+            cur.close()
+        finally:
+            store._put_conn(conn)
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error("ai_hotel media presign capture check failed: %s", e)
+        raise HTTPException(500, "Could not prepare media upload.")
+
+    key = _ai_hotel_new_media_key(capture_id, payload.asset, content_type)
+    try:
+        from kbl.object_storage import generate_presigned_put
+        signed = generate_presigned_put(key, content_type, size_bytes, expires=300)
+    except Exception as e:
+        logger.error("ai_hotel media presign failed: %s", e)
+        raise HTTPException(503, "Media storage unavailable.")
+    if not signed.get("ok"):
+        logger.warning("ai_hotel media presign unavailable: %s", signed.get("error"))
+        raise HTTPException(503, "Media storage unavailable.")
+    return {
+        "ok": True,
+        "asset": payload.asset,
+        "key": key,
+        "upload": signed,
+        "limits": {
+            "video_max_bytes": _AI_HOTEL_VIDEO_CAP,
+            "video_max_seconds": _AI_HOTEL_VIDEO_MAX_SECONDS,
+            "thumbnail_max_bytes": _AI_HOTEL_POSTER_CAP,
+        },
+        "duration_seconds": duration,
+    }
+
+
+@app.post("/api/ai-hotel/captures/{capture_id}/media/confirm",
+          tags=["ai-hotel"], dependencies=[Depends(verify_api_key)])
+async def ai_hotel_capture_media_confirm(
+    capture_id: int,
+    payload: AIHotelCaptureMediaConfirmRequest,
+):
+    """Record metadata for a video that was already uploaded to R2."""
+    content_type, size_bytes, duration = _ai_hotel_validate_media_payload(
+        "video", payload.content_type, payload.size_bytes, payload.duration_seconds,
+    )
+    storage_key = _ai_hotel_require_media_key(capture_id, "video", payload.storage_key)
+    thumbnail_key = None
+    if payload.thumbnail_key:
+        thumbnail_key = _ai_hotel_require_media_key(capture_id, "thumbnail", payload.thumbnail_key)
+    try:
+        store = _get_store()
+        conn = store._get_conn()
+        if not conn:
+            raise HTTPException(503, "Database unavailable")
+        try:
+            cur = conn.cursor()
+            cur.execute("SELECT 1 FROM ai_hotel_captures WHERE id = %s", (capture_id,))
+            if not cur.fetchone():
+                raise HTTPException(404, "Capture not found.")
+            cur.execute(
+                """INSERT INTO ai_hotel_capture_media
+                       (capture_id, media_type, storage_key, thumbnail_key,
+                        content_type, size_bytes, duration_seconds)
+                   VALUES (%s, 'video', %s, %s, %s, %s, %s)
+                   RETURNING id, created_at""",
+                (capture_id, storage_key, thumbnail_key, content_type, size_bytes, duration),
+            )
+            row = cur.fetchone()
+            conn.commit()
+            cur.close()
+        except HTTPException:
+            conn.rollback()
+            raise
+        except Exception:
+            conn.rollback()
+            raise
+        finally:
+            store._put_conn(conn)
+        media_id = row[0] if not isinstance(row, dict) else row.get("id")
+        created_at = row[1] if not isinstance(row, dict) else row.get("created_at")
+        return {
+            "ok": True,
+            "media": {
+                "id": media_id,
+                "media_type": "video",
+                "content_type": content_type,
+                "size_bytes": size_bytes,
+                "duration_seconds": duration,
+                "has_thumbnail": bool(thumbnail_key),
+                "created_at": created_at.isoformat() if hasattr(created_at, "isoformat") else created_at,
+            },
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error("POST /api/ai-hotel/captures/%s/media/confirm failed: %s", capture_id, e)
+        raise HTTPException(500, "Could not save media metadata.")
+
+
 @app.get("/api/ai-hotel/captures", tags=["ai-hotel"], dependencies=[Depends(verify_api_key)])
 async def ai_hotel_captures(limit: int = 100):
     """AI_HOTEL_FIELD_CAPTURE_1 + _FIELD_NOTES_CARD_SHELF_1: list field-note
@@ -10018,6 +10233,36 @@ async def ai_hotel_captures(limit: int = 100):
                         "ai_hotel_captures audio metadata join failed (feed still served): %s", ae)
                     conn.rollback()
                     audio_by_cap = {}
+            # R2-backed video METADATA only. Do not include storage_key,
+            # presigned URLs, or any binary payload in the list response.
+            video_by_cap: dict = {}
+            if cap_ids:
+                try:
+                    cur.execute(
+                        """SELECT capture_id, id, content_type, size_bytes,
+                                  duration_seconds, created_at,
+                                  (thumbnail_key IS NOT NULL AND thumbnail_key <> '')
+                                      AS has_thumbnail
+                             FROM ai_hotel_capture_media
+                            WHERE capture_id = ANY(%s) AND media_type = 'video'
+                            ORDER BY capture_id, created_at DESC""",
+                        (cap_ids,),
+                    )
+                    for v in cur.fetchall():
+                        video_by_cap.setdefault(v["capture_id"], []).append({
+                            "id": v["id"],
+                            "content_type": v["content_type"],
+                            "size_bytes": v["size_bytes"],
+                            "duration_seconds": v["duration_seconds"],
+                            "created_at": v["created_at"].isoformat()
+                                if hasattr(v["created_at"], "isoformat") else v["created_at"],
+                            "has_thumbnail": bool(v["has_thumbnail"]),
+                        })
+                except Exception as ve:
+                    logger.error(
+                        "ai_hotel_captures video metadata join failed (feed still served): %s", ve)
+                    conn.rollback()
+                    video_by_cap = {}
             cur.close()
         except Exception:
             conn.rollback()
@@ -10053,6 +10298,8 @@ async def ai_hotel_captures(limit: int = 100):
             d["form_record"] = _ai_hotel_form_record_view(form_by_cap.get(d["id"]))
             # Attach audio METADATA only (AC10) — playback bytes come from detail.
             d["audio"] = audio_by_cap.get(d["id"], [])
+            # Attach video METADATA only — playback URLs come from media detail.
+            d["video"] = video_by_cap.get(d["id"], [])
             # AI_HOTEL_GPS_CAPTURE_1: fold the gps_* columns into one compact
             # `gps` object for the feed (small metadata — coords + short address;
             # NO heavy payload). Null for captures with no GPS so legacy rows
@@ -10180,6 +10427,74 @@ async def ai_hotel_capture_images_detail(capture_id: int):
     except Exception as e:
         logger.error(f"GET /api/ai-hotel/captures/{capture_id}/images failed: {e}")
         return {"images": []}
+
+
+@app.get("/api/ai-hotel/captures/{capture_id}/media", tags=["ai-hotel"],
+         dependencies=[Depends(verify_api_key)])
+async def ai_hotel_capture_media_detail(capture_id: int):
+    """Return short-lived playback URLs for R2-backed capture media.
+
+    The feed endpoint returns metadata only; this detail route signs read URLs on
+    demand and deliberately omits the underlying R2 object keys.
+    """
+    try:
+        store = _get_store()
+        import psycopg2.extras
+        conn = store._get_conn()
+        if not conn:
+            return {"media": []}
+        try:
+            cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+            cur.execute(
+                """SELECT id, media_type, storage_key, thumbnail_key,
+                          content_type, size_bytes, duration_seconds, created_at
+                     FROM ai_hotel_capture_media
+                    WHERE capture_id = %s AND media_type = 'video'
+                    ORDER BY created_at DESC
+                    LIMIT 20""",
+                (capture_id,),
+            )
+            rows = cur.fetchall()
+            cur.close()
+        except Exception:
+            conn.rollback()
+            raise
+        finally:
+            store._put_conn(conn)
+        try:
+            from kbl.object_storage import generate_presigned_get
+        except Exception:
+            generate_presigned_get = None
+        media = []
+        for r in rows:
+            created_at = r.get("created_at")
+            item = {
+                "id": r.get("id"),
+                "media_type": r.get("media_type"),
+                "content_type": r.get("content_type"),
+                "size_bytes": r.get("size_bytes"),
+                "duration_seconds": r.get("duration_seconds"),
+                "created_at": created_at.isoformat() if hasattr(created_at, "isoformat") else created_at,
+                "url": None,
+                "thumbnail_url": None,
+            }
+            if generate_presigned_get:
+                try:
+                    signed = generate_presigned_get(r.get("storage_key"), expires=300)
+                    if signed.get("ok"):
+                        item["url"] = signed.get("url")
+                    tkey = r.get("thumbnail_key")
+                    if tkey:
+                        tsigned = generate_presigned_get(tkey, expires=300)
+                        if tsigned.get("ok"):
+                            item["thumbnail_url"] = tsigned.get("url")
+                except Exception as se:
+                    logger.warning("ai_hotel media signed read failed for %s: %s", r.get("id"), se)
+            media.append(item)
+        return {"media": media}
+    except Exception as e:
+        logger.error(f"GET /api/ai-hotel/captures/{capture_id}/media failed: {e}")
+        return {"media": []}
 
 
 # ── AI_HOTEL_VOICE_FORM_SUPPLIER_1: voice → structured supplier-card draft ───
