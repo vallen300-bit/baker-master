@@ -684,6 +684,21 @@ function cardKind(c){
 function cardKindLabel(k){return k==='site'?'Site':(k==='supplier'?'Supplier':'Free note');}
 function researchCount(u){return u?String(u).split(';').map(s=>s.trim()).filter(Boolean).length:0;}
 function humanizeVal(v){return String(v).replace(/_/g,' ');}
+// AI_HOTEL_READABLE_CARD_TITLE_1: Director cannot use DB row numbers — cards are
+// named "<Name> · <HH:MM>" (capture time, same locale as the Captured line) so the
+// label matches how the site is referred to in conversation. Name = site label /
+// company / first words of the summary.
+function fmtNoteHM(iso){if(!iso)return '';try{const d=new Date(iso);if(isNaN(d.getTime()))return '';return d.toLocaleTimeString(undefined,{hour:'2-digit',minute:'2-digit'});}catch(e){return '';}}
+function cardName(c){
+  const v=(c.form_record&&c.form_record.values)||{};
+  const k=cardKind(c);
+  let nm='';
+  if(k==='site')nm=v.site_label||v.site_name||'';
+  else if(k==='supplier')nm=v.company_name||'';
+  if(!nm){const s=(c.summary||'').trim();nm=s?s.split(/\s+/).slice(0,6).join(' '):'';}
+  return nm||'Field note';
+}
+function cardTitle(c){const t=fmtNoteHM(c.created_at);return cardName(c)+(t?(' · '+t):'');}
 
 // AI_HOTEL_KEY_PASTE_SELFSERVE_1: self-service key entry on the keyless empty
 // state. REMEMBER_KEY (#385/#386) cures the bookmarked-link case, but the
@@ -846,7 +861,11 @@ function buildNoteCard(c){
   // Tiny server-side thumbnail only (full images load on tap) — keeps the feed small.
   if(c.thumb){const img=document.createElement('img');img.className='nthumb';img.src=c.thumb;img.alt='Field photo';img.loading='lazy';img.dataset.captureId=String(c.id);card.appendChild(img);}
   const body=el('div','nbody');
-  body.appendChild(el('div','nsmry',c.summary||'(no summary)'));
+  // AI_HOTEL_READABLE_CARD_TITLE_1: readable "<Name> · <HH:MM>" title; raw summary
+  // demoted to a secondary line so no context is lost.
+  body.appendChild(el('div','nsmry',cardTitle(c)));
+  const _sm=(c.summary||'').trim();
+  if(_sm&&_sm!==cardName(c))body.appendChild(el('div','ncompact',_sm));
   const meta=el('div','nmeta');
   meta.appendChild(el('span','ntag kind-'+kind,cardKindLabel(kind)));   // type chip
   if(kind==='free'){const sec=noteSection(c.section_guess);meta.appendChild(el('span','ntag '+sec,NOTE_SECTION_LABELS[sec]));}
@@ -1016,7 +1035,8 @@ function openNoteDetail(c){
   tag.className='dlg-tag area';
   tag.textContent=cardKindLabel(kind)+(fr&&fr.status?(' · '+fr.status):'');
   const title=document.getElementById('dlgTitle');
-  title.textContent=(c.summary?String(c.summary).slice(0,90):'Field note');title.style.color='';
+  // AI_HOTEL_READABLE_CARD_TITLE_1: detail header uses the same readable title.
+  title.textContent=cardTitle(c);title.style.color='';
   document.getElementById('dlgWho').textContent=fmtNoteTime(c.created_at);
   const b=document.getElementById('dlgBody');while(b.firstChild)b.removeChild(b.firstChild);
   // Structured fields (AC3).
