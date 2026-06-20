@@ -217,6 +217,12 @@
   .kv{display:flex;gap:10px;padding:7px 0;border-bottom:1px solid var(--line)}
   .kvk{flex:0 0 38%;font:600 12px/1.5 var(--mono);text-transform:uppercase;letter-spacing:.03em;color:var(--muted)}
   .kvv{flex:1;font-size:14px;color:var(--text);word-wrap:break-word;white-space:pre-wrap}
+  /* AI_HOTEL_RESEARCH_FINDINGS_1 — researched answers written back onto a card */
+  .rf-head{font-size:14px;line-height:1.55;color:var(--text);background:var(--amber-weak);border-left:3px solid var(--amber);border-radius:0 6px 6px 0;padding:10px 13px;margin:0 0 12px;word-wrap:break-word}
+  .rf-meta{font:500 11.5px/1.5 var(--mono);color:var(--muted);margin:0 0 12px;word-wrap:break-word}
+  .rf-flag{font-size:13px;line-height:1.5;color:var(--text-2);margin:9px 0 0;padding-left:4px;word-wrap:break-word}
+  .rf-need{font-size:13px;line-height:1.5;color:var(--amber);font-weight:600;margin:11px 0 0;word-wrap:break-word}
+  .rf-src{font:500 11px/1.5 var(--mono);color:var(--faint);margin:11px 0 0;word-wrap:break-word}
   .dlg-acts{display:flex;gap:9px;flex-wrap:wrap;margin-top:18px}
   .sbtn2{font:600 13px/1 var(--sans);padding:11px 15px;border-radius:8px;border:1px solid var(--id-blue-line);background:var(--card);color:var(--id-blue);cursor:pointer}
   .sbtn2.danger{color:var(--accent);border-color:var(--accent-line)}
@@ -880,8 +886,10 @@ function buildNoteCard(c){
     if(v.hospitality_fit)bits.push('fit: '+humanizeVal(v.hospitality_fit));
     if(v.overall_score)bits.push('score '+v.overall_score+'/5');
     if(v.next_action)bits.push('→ '+humanizeVal(v.next_action));
-    const miss=researchCount(v.unknowns_to_research);
-    if(miss)bits.push(miss+' to research');
+    // AI_HOTEL_RESEARCH_FINDINGS_1: once a card's unknowns are researched, show a
+    // "✓ researched" badge instead of the "N to research" prompt.
+    if(v.research_findings){bits.push('✓ researched');}
+    else{const miss=researchCount(v.unknowns_to_research);if(miss)bits.push(miss+' to research');}
     if(bits.length)body.appendChild(el('div','ncompact',bits.join('  ·  ')));
   } else if(kind==='supplier'){
     const bits=[];
@@ -1028,6 +1036,31 @@ function openLightbox(c, startIdx){
   load();
 }
 
+// AI_HOTEL_RESEARCH_FINDINGS_1: render a card's researched answers. rf is the
+// structured object written onto form_record.values.research_findings:
+//   {headline, source, confidence, researched_on, answers:[{q,a}],
+//    flags:[...], needs|needs_paid_pull, sources}
+// Defensive: any missing/malformed field is simply skipped (never throws).
+function renderResearchFindings(b,rf){
+  b.appendChild(el('div','dlg-h','🔎 Research findings'));
+  if(rf.headline)b.appendChild(el('div','rf-head',String(rf.headline)));
+  const meta=[rf.source,rf.confidence,rf.researched_on?('researched '+rf.researched_on):''].filter(Boolean).join('  ·  ');
+  if(meta)b.appendChild(el('div','rf-meta',meta));
+  const ans=Array.isArray(rf.answers)?rf.answers:[];
+  ans.forEach(function(a){
+    if(!a)return;
+    const q=a.q||a.question||'';const v=a.a||a.answer||'';
+    if(!q&&!v)return;
+    const row=el('div','kv');row.appendChild(el('span','kvk',String(q)));row.appendChild(el('span','kvv',String(v)));
+    b.appendChild(row);
+  });
+  const flags=Array.isArray(rf.flags)?rf.flags:[];
+  flags.forEach(function(f){if(f)b.appendChild(el('div','rf-flag','⚑ '+String(f)));});
+  const needs=rf.needs||rf.needs_paid_pull;
+  if(needs)b.appendChild(el('div','rf-need','Needs · '+String(needs)));
+  if(rf.sources)b.appendChild(el('div','rf-src','Sources: '+String(rf.sources)));
+}
+
 function openNoteDetail(c){
   const kind=cardKind(c);
   const fr=c.form_record;
@@ -1041,15 +1074,24 @@ function openNoteDetail(c){
   const b=document.getElementById('dlgBody');while(b.firstChild)b.removeChild(b.firstChild);
   // Structured fields (AC3).
   if(fr&&fr.values){
+    const rf=fr.values.research_findings;
     b.appendChild(el('div','dlg-h','Card fields'));
     let any=false;
     Object.keys(fr.values).forEach(function(k){
+      // AI_HOTEL_RESEARCH_FINDINGS_1: the structured research_findings object is
+      // rendered in its own block below — never as a raw "[object Object]" row;
+      // and once researched, the raw unknowns list is superseded by the answers.
+      if(k==='research_findings')return;
+      if(k==='unknowns_to_research'&&rf)return;
       const val=fr.values[k];if(val===null||val===undefined||val==='')return;
       any=true;
       const row=el('div','kv');row.appendChild(el('span','kvk',humanizeVal(k)));row.appendChild(el('span','kvv',String(val)));
       b.appendChild(row);
     });
     if(!any)b.appendChild(el('p',null,'No fields were filled on this card.'));
+    // AI_HOTEL_RESEARCH_FINDINGS_1: filled-in answers to the card's "unknowns to
+    // research" — researcher output written back onto the card (Director ask).
+    if(rf&&typeof rf==='object')renderResearchFindings(b,rf);
   }
   // AI_HOTEL_FIELDNOTES_IMAGE_VIEWER_FIX_1: photos near the top (not buried under
   // GPS/audio), small thumbs that load immediately, tap-to-enlarge full-res.
