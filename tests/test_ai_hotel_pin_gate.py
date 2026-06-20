@@ -64,13 +64,19 @@ class _Store:
         pass
 
 
-def _client(monkeypatch, *, pin="6470"):
+def _client(monkeypatch, *, pin="6470", session_secret="session-secret"):
     from fastapi.testclient import TestClient
     import outputs.dashboard as dash
 
     monkeypatch.setattr(dash, "_BAKER_API_KEY", "master-key")
-    monkeypatch.setenv("AI_HOTEL_PIN", pin)
-    monkeypatch.setenv("AI_HOTEL_SESSION_SECRET", "session-secret")
+    if pin is None:
+        monkeypatch.delenv("AI_HOTEL_PIN", raising=False)
+    else:
+        monkeypatch.setenv("AI_HOTEL_PIN", pin)
+    if session_secret is None:
+        monkeypatch.delenv("AI_HOTEL_SESSION_SECRET", raising=False)
+    else:
+        monkeypatch.setenv("AI_HOTEL_SESSION_SECRET", session_secret)
     monkeypatch.setattr(dash, "_AI_HOTEL_PIN_RATE_LIMIT_PER_MIN", 5)
     monkeypatch.setattr(dash, "_AI_HOTEL_PIN_LOCKOUT_FAILURES", 10)
     monkeypatch.setattr(dash, "_AI_HOTEL_PIN_LOCKOUT_S", 900)
@@ -85,6 +91,8 @@ def test_pin_route_and_scoped_read_dependency_in_source():
     src = Path("outputs/dashboard.py").read_text()
     assert '"/api/ai-hotel/pin-auth"' in src
     assert "hmac.compare_digest(supplied, expected)" in src
+    assert 'os.getenv("AI_HOTEL_PIN") or "6470"' not in src
+    assert 'os.getenv("AI_HOTEL_SESSION_SECRET") or _BAKER_API_KEY' not in src
     assert 'key=_AI_HOTEL_SESSION_COOKIE' in src
     assert 'httponly=True' in src and 'secure=True' in src and 'samesite="strict"' in src
 
@@ -150,6 +158,35 @@ def test_wrong_pin_is_generic_401(monkeypatch):
 
 
 @_skip
+def test_pin_auth_fails_closed_without_configured_pin(monkeypatch):
+    client, _dash = _client(monkeypatch, pin=None)
+
+    resp = client.post(
+        "/api/ai-hotel/pin-auth",
+        json={"pin": "6470"},
+        headers={"x-forwarded-for": "198.51.100.14"},
+    )
+
+    assert resp.status_code == 503
+    assert "aih_session=" not in resp.headers.get("set-cookie", "")
+
+
+@_skip
+def test_pin_auth_requires_dedicated_session_secret(monkeypatch):
+    client, _dash = _client(monkeypatch, session_secret=None)
+
+    resp = client.post(
+        "/api/ai-hotel/pin-auth",
+        json={"pin": "6470"},
+        headers={"x-forwarded-for": "198.51.100.15"},
+    )
+
+    assert resp.status_code == 503
+    assert "master-key" not in resp.text
+    assert "aih_session=" not in resp.headers.get("set-cookie", "")
+
+
+@_skip
 def test_pin_rate_limit_and_lockout(monkeypatch):
     client, dash = _client(monkeypatch)
     monkeypatch.setattr(dash, "_AI_HOTEL_PIN_RATE_LIMIT_PER_MIN", 2)
@@ -167,3 +204,22 @@ def test_pin_rate_limit_and_lockout(monkeypatch):
     for wrong in ("1000", "1001", "1002"):
         assert client.post("/api/ai-hotel/pin-auth", json={"pin": wrong}, headers={"x-forwarded-for": ip}).status_code == 401
     assert client.post("/api/ai-hotel/pin-auth", json={"pin": "6470"}, headers={"x-forwarded-for": ip}).status_code == 429
+
+
+@_skip
+def test_spoofed_xff_left_tokens_do_not_reset_rate_limit(monkeypatch):
+    client, dash = _client(monkeypatch)
+    monkeypatch.setattr(dash, "_AI_HOTEL_PIN_RATE_LIMIT_PER_MIN", 2)
+    monkeypatch.setattr(dash, "_AI_HOTEL_PIN_LOCKOUT_FAILURES", 10)
+
+    # Render appends the observed client IP at the right. If we keyed off the
+    # spoofable left side, these three attempts would look like three clients.
+    headers = [
+        {"x-forwarded-for": "203.0.113.1, 198.51.100.20"},
+        {"x-forwarded-for": "203.0.113.2, 198.51.100.20"},
+        {"x-forwarded-for": "203.0.113.3, 198.51.100.20"},
+    ]
+
+    assert client.post("/api/ai-hotel/pin-auth", json={"pin": "0000"}, headers=headers[0]).status_code == 401
+    assert client.post("/api/ai-hotel/pin-auth", json={"pin": "0001"}, headers=headers[1]).status_code == 401
+    assert client.post("/api/ai-hotel/pin-auth", json={"pin": "0002"}, headers=headers[2]).status_code == 429

@@ -183,11 +183,20 @@ async def verify_api_key(x_baker_key: str = Header(None, alias="X-Baker-Key")):
 
 
 def _ai_hotel_client_ip(request: Request) -> str:
-    """Best-effort client key for PIN throttling behind Render's proxy."""
+    """Best-effort client key for PIN throttling behind Render's proxy.
+
+    Render appends the observed client IP to X-Forwarded-For. A public client can
+    spoof left-side XFF tokens, so the limiter keys off the rightmost non-empty
+    hop rather than the user-controlled leftmost token.
+    """
     try:
-        xff = (request.headers.get("x-forwarded-for") or "").split(",", 1)[0].strip()
-        if xff:
-            return xff[:80]
+        xff_tokens = [
+            t.strip()
+            for t in (request.headers.get("x-forwarded-for") or "").split(",")
+            if t.strip()
+        ]
+        if xff_tokens:
+            return xff_tokens[-1][:80]
         if request.client and request.client.host:
             return request.client.host[:80]
     except Exception:
@@ -247,7 +256,7 @@ def _ai_hotel_pin_record_success(ip: str) -> None:
 
 
 def _ai_hotel_session_secret() -> bytes:
-    secret = (os.getenv("AI_HOTEL_SESSION_SECRET") or _BAKER_API_KEY or "").strip()
+    secret = (os.getenv("AI_HOTEL_SESSION_SECRET") or "").strip()
     if not secret:
         logger.error("AI Hotel session secret unavailable")
         raise HTTPException(503, "AI Hotel PIN auth unavailable.")
@@ -365,7 +374,7 @@ async def ai_hotel_pin_auth(request: Request, payload: AIHotelPinAuthRequest):
     """
     ip = _ai_hotel_client_ip(request)
     _ai_hotel_pin_rate_check(ip)
-    expected = (os.getenv("AI_HOTEL_PIN") or "6470").strip()
+    expected = (os.getenv("AI_HOTEL_PIN") or "").strip()
     if not expected:
         raise HTTPException(503, "AI Hotel PIN not configured.")
     supplied = (payload.pin or "").strip()
