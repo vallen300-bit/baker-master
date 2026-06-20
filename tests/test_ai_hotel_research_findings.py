@@ -61,6 +61,20 @@ def test_research_renderer_is_fail_soft_and_text_only():
     assert ".innerHTML" not in renderer
 
 
+def test_copy_card_text_serializes_research_findings():
+    html = _html()
+    copy_path = html[html.index("function appendResearchFindingsText(lines, rf)"):html.index("function renderPhotos(b, c)")]
+    card_text = copy_path[copy_path.index("function cardAsText(c)"):]
+
+    assert "function appendResearchFindingsText(lines, rf)" in copy_path
+    assert "if(k==='research_findings')return;" in card_text
+    assert "if(k==='unknowns_to_research'&&rf&&typeof rf==='object')return;" in card_text
+    assert "appendResearchFindingsText(lines,rf)" in card_text
+    assert "String(val)" in card_text
+    assert "+val" not in card_text
+    assert "[object Object]" not in copy_path
+
+
 def test_research_patch_preserves_latest_main_field_note_controls():
     html = _html()
 

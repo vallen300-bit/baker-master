@@ -947,11 +947,38 @@ function deleteNoteCard(c, btn){
     });
 }
 
+function appendResearchFindingsText(lines, rf){
+  if(!rf||typeof rf!=='object')return;
+  lines.push('','Research findings');
+  if(rf.headline)lines.push('Headline: '+String(rf.headline));
+  const meta=[rf.source,rf.confidence,rf.researched_on?('researched '+rf.researched_on):''].filter(Boolean).join('  ·  ');
+  if(meta)lines.push('Meta: '+meta);
+  const answers=Array.isArray(rf.answers)?rf.answers:[];
+  answers.forEach(function(a){
+    if(!a)return;
+    const q=a.q||a.question||'';
+    const val=a.a||a.answer||'';
+    if(!q&&!val)return;
+    lines.push(String(q)+': '+String(val));
+  });
+  const flags=Array.isArray(rf.flags)?rf.flags:[];
+  flags.forEach(function(f){if(f)lines.push('Flag: '+String(f));});
+  const needs=rf.needs||rf.needs_paid_pull;
+  if(needs)lines.push('Needs: '+String(needs));
+  if(rf.sources)lines.push('Sources: '+String(rf.sources));
+}
+
 function cardAsText(c){
   const lines=[];
   lines.push(cardKindLabel(cardKind(c))+' — '+(c.summary||''));
   const v=(c.form_record&&c.form_record.values)||{};
-  Object.keys(v).forEach(function(k){const val=v[k];if(val!==null&&val!==undefined&&val!=='')lines.push(humanizeVal(k)+': '+val);});
+  const rf=v.research_findings;
+  Object.keys(v).forEach(function(k){
+    if(k==='research_findings')return;
+    if(k==='unknowns_to_research'&&rf&&typeof rf==='object')return;
+    const val=v[k];if(val!==null&&val!==undefined&&val!=='')lines.push(humanizeVal(k)+': '+String(val));
+  });
+  if(rf&&typeof rf==='object')appendResearchFindingsText(lines,rf);
   if(c.note_text)lines.push('',c.note_text);
   return lines.join('\n');
 }
