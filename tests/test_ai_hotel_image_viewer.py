@@ -13,6 +13,8 @@ on cellular) and (b) they showed as un-enlargeable 44px crops buried under GPS/a
 
 from __future__ import annotations
 
+import base64
+from io import BytesIO
 from pathlib import Path
 
 import pytest
@@ -64,10 +66,18 @@ def test_backend_endpoints_exist():
     src = Path("outputs/dashboard.py").read_text()
     assert '"/api/ai-hotel/captures/{capture_id}/thumbs"' in src
     assert '"/api/ai-hotel/captures/{capture_id}/images/{idx}"' in src
+    assert "ImageOps.exif_transpose" in src
+    assert "_ai_hotel_image_data_url" in src
     # both read-auth gated (master key or scoped AI-Hotel PIN cookie)
     seg = src[src.index('"/api/ai-hotel/captures/{capture_id}/thumbs"'):
               src.index('"/api/ai-hotel/captures/{capture_id}/media"')]
     assert seg.count("Depends(verify_ai_hotel_read_access)") >= 2
+
+
+def test_photo_css_has_exif_orientation_fallback():
+    src = Path("outputs/static/ai-hotel.html").read_text()
+    assert "image-orientation:from-image" in src
+    assert ".nthumb,.nthumbs img,.lbox-img" in src
 
 
 # ─── TestClient backend behaviour ───────────────────────────────────────────
@@ -155,6 +165,26 @@ def _client(monkeypatch, store):
 _HDR = {"X-Baker-Key": "test-key"}
 
 
+def _exif_rotated_jpeg_b64() -> str:
+    from PIL import Image as PILImage
+
+    img = PILImage.new("RGB", (40, 20), "white")
+    exif = PILImage.Exif()
+    exif[274] = 6
+    buf = BytesIO()
+    img.save(buf, format="JPEG", exif=exif)
+    return base64.standard_b64encode(buf.getvalue()).decode("ascii")
+
+
+def _image_size_from_data_url(url: str) -> tuple[int, int]:
+    from PIL import Image as PILImage
+
+    raw = base64.b64decode(url.split(",", 1)[1])
+    img = PILImage.open(BytesIO(raw))
+    img.load()
+    return img.size
+
+
 @_skip
 def test_thumbs_returns_small_ordered_per_image(monkeypatch):
     store = _Store()
@@ -166,6 +196,27 @@ def test_thumbs_returns_small_ordered_per_image(monkeypatch):
     client = _client(monkeypatch, store)
     d = client.get("/api/ai-hotel/captures/17/thumbs", headers=_HDR).json()
     assert d["thumbs"] == ["THUMB:AAAA", "THUMB:BBBB", "THUMB:CCCC"]   # ordered, small markers
+
+
+@_skip
+def test_upload_resize_transposes_phone_exif_orientation():
+    import outputs.dashboard as dash
+
+    raw = base64.b64decode(_exif_rotated_jpeg_b64())
+    resized_b64, media = dash._ai_hotel_resize_for_db(raw, "image/jpeg")
+    assert media == "image/jpeg"
+    width, height = _image_size_from_data_url(f"data:image/jpeg;base64,{resized_b64}")
+    assert height > width
+
+
+@_skip
+def test_thumbnail_transposes_phone_exif_orientation():
+    import outputs.dashboard as dash
+
+    thumb = dash._ai_hotel_thumb_data_url(_exif_rotated_jpeg_b64(), "image/jpeg", px=160)
+    assert thumb is not None
+    width, height = _image_size_from_data_url(thumb)
+    assert height > width
 
 
 @_skip
@@ -182,6 +233,20 @@ def test_single_image_by_index_and_fail_soft(monkeypatch):
     # out-of-range → fail-soft null, never 500
     r2 = client.get("/api/ai-hotel/captures/17/images/9", headers=_HDR)
     assert r2.status_code == 200 and r2.json()["image"] is None
+
+
+@_skip
+def test_single_image_endpoint_transposes_phone_exif_orientation(monkeypatch):
+    store = _Store()
+    store.images = [
+        {"capture_id": 17, "ordinal": 0, "image_b64": _exif_rotated_jpeg_b64(), "image_media": "image/jpeg"},
+    ]
+    client = _client(monkeypatch, store)
+
+    data_url = client.get("/api/ai-hotel/captures/17/images/0", headers=_HDR).json()["image"]
+
+    width, height = _image_size_from_data_url(data_url)
+    assert height > width
 
 
 @_skip
