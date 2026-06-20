@@ -36,7 +36,10 @@ def test_source_guards_soft_delete_only():
 def test_ui_confirm_posts_delete_and_hides_card():
     html = Path("outputs/static/ai-hotel.html").read_text()
     delete_fn = html[html.index("function removeDeletedNoteCard("):html.index("function cardAsText(")]
-    detail = html[html.index("function openNoteDetail("):html.index("/* ---- HITEC 2026")]
+    # v7 restructure removed the old "/* ---- HITEC 2026" marker; the stable
+    # post-openNoteDetail boundary is now the first v7 render hook. This extracts
+    # the full openNoteDetail span (which carries the Delete-field-note button).
+    detail = html[html.index("function openNoteDetail("):html.index("function vendorPipelineHook(")]
 
     assert "Delete field note" in detail
     assert "confirm('Delete this field note? It will be hidden.')" in delete_fn
