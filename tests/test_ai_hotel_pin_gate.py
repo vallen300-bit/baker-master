@@ -6,6 +6,7 @@ sets an httpOnly signed cookie that is accepted only by AI-Hotel read routes.
 
 from __future__ import annotations
 
+import time
 from pathlib import Path
 
 import pytest
@@ -93,6 +94,12 @@ def test_pin_route_and_scoped_read_dependency_in_source():
     assert "hmac.compare_digest(supplied, expected)" in src
     assert 'os.getenv("AI_HOTEL_PIN") or "6470"' not in src
     assert 'os.getenv("AI_HOTEL_SESSION_SECRET") or _BAKER_API_KEY' not in src
+    assert "client_ip_source=%s" in src
+    log_block = src[
+        src.index("logger.info(\n        \"ai_hotel PIN auth client_ip_source"):
+        src.index("_ai_hotel_pin_rate_check(ip)")
+    ]
+    assert "payload.pin" not in log_block
     assert 'key=_AI_HOTEL_SESSION_COOKIE' in src
     assert 'httponly=True' in src and 'secure=True' in src and 'samesite="strict"' in src
 
@@ -263,3 +270,59 @@ def test_client_ip_header_fallbacks_are_fault_tolerant():
     assert dash._ai_hotel_client_ip(_Req({"cf-connecting-ip": ["", "198.51.100.22"]})) == "198.51.100.22"
     assert dash._ai_hotel_client_ip(_Req({"true-client-ip": ["198.51.100.23"]})) == "198.51.100.23"
     assert dash._ai_hotel_client_ip(_Req({"x-forwarded-for": ["203.0.113.99"]})) == "127.0.0.1"
+
+
+def test_pin_state_prunes_stale_entries(monkeypatch):
+    import outputs.dashboard as dash
+
+    now = time.time()
+    stale = now - dash._AI_HOTEL_PIN_WINDOW_S - dash._AI_HOTEL_PIN_LOCKOUT_S - 30
+    dash._ai_hotel_pin_state.clear()
+    dash._ai_hotel_pin_state.update({
+        "198.51.100.30": {
+            "attempts": [stale],
+            "failures": 1,
+            "locked_until": stale,
+            "last_seen": stale,
+        },
+        "198.51.100.31": {
+            "attempts": [now],
+            "failures": 1,
+            "locked_until": 0.0,
+            "last_seen": now,
+        },
+    })
+
+    dash._ai_hotel_pin_rate_check("198.51.100.32")
+
+    assert "198.51.100.30" not in dash._ai_hotel_pin_state
+    assert "198.51.100.31" in dash._ai_hotel_pin_state
+    assert "198.51.100.32" in dash._ai_hotel_pin_state
+
+
+def test_pin_state_hard_cap_evicts_oldest(monkeypatch):
+    import outputs.dashboard as dash
+
+    now = time.time()
+    monkeypatch.setattr(dash, "_AI_HOTEL_PIN_STATE_MAX", 2)
+    dash._ai_hotel_pin_state.clear()
+    dash._ai_hotel_pin_state.update({
+        "198.51.100.40": {
+            "attempts": [now - 10],
+            "failures": 1,
+            "locked_until": 0.0,
+            "last_seen": now - 10,
+        },
+        "198.51.100.41": {
+            "attempts": [now - 5],
+            "failures": 1,
+            "locked_until": 0.0,
+            "last_seen": now - 5,
+        },
+    })
+
+    dash._ai_hotel_pin_rate_check("198.51.100.42")
+
+    assert len(dash._ai_hotel_pin_state) <= 2
+    assert "198.51.100.40" not in dash._ai_hotel_pin_state
+    assert "198.51.100.42" in dash._ai_hotel_pin_state

@@ -157,6 +157,7 @@ _AI_HOTEL_SESSION_TTL_S = int(os.getenv("AI_HOTEL_SESSION_TTL_SECONDS", "43200")
 _AI_HOTEL_PIN_RATE_LIMIT_PER_MIN = int(os.getenv("AI_HOTEL_PIN_RATE_LIMIT_PER_MIN", "5"))
 _AI_HOTEL_PIN_LOCKOUT_FAILURES = int(os.getenv("AI_HOTEL_PIN_LOCKOUT_FAILURES", "10"))
 _AI_HOTEL_PIN_LOCKOUT_S = int(os.getenv("AI_HOTEL_PIN_LOCKOUT_SECONDS", "900"))
+_AI_HOTEL_PIN_STATE_MAX = int(os.getenv("AI_HOTEL_PIN_STATE_MAX", "10000"))
 _AI_HOTEL_PIN_WINDOW_S = 60
 _ai_hotel_pin_lock = threading.Lock()
 _ai_hotel_pin_state: dict[str, dict] = {}
@@ -182,7 +183,7 @@ async def verify_api_key(x_baker_key: str = Header(None, alias="X-Baker-Key")):
         )
 
 
-def _ai_hotel_client_ip(request: Request) -> str:
+def _ai_hotel_client_ip_details(request: Request) -> tuple[str, str, bool, bool]:
     """Best-effort client key for PIN throttling behind Render's proxy.
 
     Render's public edge is Cloudflare-fronted and forwards CF-Connecting-IP as
@@ -204,15 +205,60 @@ def _ai_hotel_client_ip(request: Request) -> str:
         return ""
 
     try:
-        for header in ("cf-connecting-ip", "true-client-ip"):
-            value = _single_header(header)
-            if value:
-                return value
+        cf_ip = _single_header("cf-connecting-ip")
+        true_ip = _single_header("true-client-ip")
+        if cf_ip:
+            return cf_ip, "cf-connecting-ip", True, bool(true_ip)
+        if true_ip:
+            return true_ip, "true-client-ip", False, True
         if request.client and request.client.host:
-            return request.client.host[:80]
+            return request.client.host[:80], "request.client.host", False, False
     except Exception:
         pass
-    return "unknown"
+    return "unknown", "unknown", False, False
+
+
+def _ai_hotel_client_ip(request: Request) -> str:
+    return _ai_hotel_client_ip_details(request)[0]
+
+
+def _ai_hotel_pin_prune_locked(now: float) -> None:
+    """Prune expired PIN-attempt state and enforce a hard cap.
+
+    Caller must hold _ai_hotel_pin_lock. Fault-tolerant by design: any malformed
+    row is discarded so the public endpoint cannot accumulate bad state forever.
+    """
+    try:
+        for ip, st in list(_ai_hotel_pin_state.items()):
+            try:
+                attempts = [
+                    float(t) for t in st.get("attempts", [])
+                    if now - float(t) < _AI_HOTEL_PIN_WINDOW_S
+                ]
+                locked_until = float(st.get("locked_until") or 0)
+                st["attempts"] = attempts
+                last_seen = float(st.get("last_seen") or 0)
+                if attempts:
+                    last_seen = max(last_seen, max(attempts))
+                if locked_until > 0:
+                    last_seen = max(last_seen, locked_until)
+                st["last_seen"] = last_seen
+                if not attempts and locked_until <= now:
+                    _ai_hotel_pin_state.pop(ip, None)
+            except Exception:
+                _ai_hotel_pin_state.pop(ip, None)
+
+        cap = max(1, int(_AI_HOTEL_PIN_STATE_MAX or 1))
+        over = len(_ai_hotel_pin_state) - cap
+        if over > 0:
+            oldest = sorted(
+                _ai_hotel_pin_state.items(),
+                key=lambda item: float(item[1].get("last_seen") or 0),
+            )
+            for ip, _st in oldest[:over]:
+                _ai_hotel_pin_state.pop(ip, None)
+    except Exception as e:
+        logger.error("ai_hotel PIN state prune failed open: %s", e)
 
 
 def _ai_hotel_pin_rate_check(ip: str) -> None:
@@ -220,10 +266,12 @@ def _ai_hotel_pin_rate_check(ip: str) -> None:
     now = time.time()
     try:
         with _ai_hotel_pin_lock:
+            _ai_hotel_pin_prune_locked(now)
             st = _ai_hotel_pin_state.setdefault(ip, {
                 "attempts": [],
                 "failures": 0,
                 "locked_until": 0.0,
+                "last_seen": now,
             })
             locked_until = float(st.get("locked_until") or 0)
             if locked_until > now:
@@ -231,9 +279,12 @@ def _ai_hotel_pin_rate_check(ip: str) -> None:
             attempts = [t for t in st.get("attempts", []) if now - float(t) < _AI_HOTEL_PIN_WINDOW_S]
             if len(attempts) >= _AI_HOTEL_PIN_RATE_LIMIT_PER_MIN:
                 st["attempts"] = attempts
+                st["last_seen"] = now
                 raise HTTPException(429, "Too many attempts. Try again later.")
             attempts.append(now)
             st["attempts"] = attempts
+            st["last_seen"] = now
+            _ai_hotel_pin_prune_locked(now)
     except HTTPException:
         raise
     except Exception as e:
@@ -245,15 +296,19 @@ def _ai_hotel_pin_record_failure(ip: str) -> None:
     now = time.time()
     try:
         with _ai_hotel_pin_lock:
+            _ai_hotel_pin_prune_locked(now)
             st = _ai_hotel_pin_state.setdefault(ip, {
                 "attempts": [],
                 "failures": 0,
                 "locked_until": 0.0,
+                "last_seen": now,
             })
             st["failures"] = int(st.get("failures") or 0) + 1
+            st["last_seen"] = now
             if st["failures"] >= _AI_HOTEL_PIN_LOCKOUT_FAILURES:
                 st["locked_until"] = now + _AI_HOTEL_PIN_LOCKOUT_S
             logger.warning("ai_hotel PIN auth failed: ip=%s failures=%s", ip, st["failures"])
+            _ai_hotel_pin_prune_locked(now)
     except Exception as e:
         logger.error("ai_hotel PIN failure accounting failed: %s", e)
 
@@ -383,7 +438,11 @@ async def ai_hotel_pin_auth(request: Request, payload: AIHotelPinAuthRequest):
     This never returns or aliases the master X-Baker-Key. Failed attempts log
     only aggregate counts and client IP, never the submitted PIN value.
     """
-    ip = _ai_hotel_client_ip(request)
+    ip, ip_source, has_cf_ip, has_true_ip = _ai_hotel_client_ip_details(request)
+    logger.info(
+        "ai_hotel PIN auth client_ip_source=%s cf_connecting_ip_present=%s true_client_ip_present=%s",
+        ip_source, has_cf_ip, has_true_ip,
+    )
     _ai_hotel_pin_rate_check(ip)
     expected = (os.getenv("AI_HOTEL_PIN") or "").strip()
     if not expected:
