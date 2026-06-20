@@ -10429,6 +10429,103 @@ async def ai_hotel_capture_images_detail(capture_id: int):
         return {"images": []}
 
 
+@app.get("/api/ai-hotel/captures/{capture_id}/thumbs", tags=["ai-hotel"],
+         dependencies=[Depends(verify_api_key)])
+async def ai_hotel_capture_thumbs_detail(capture_id: int):
+    """AI_HOTEL_FIELDNOTES_IMAGE_VIEWER_FIX_1: per-image SMALL thumbnails for one
+    capture's detail strip. The old detail path pulled every full-res image in
+    one response (capture 17 = 2.07 MB → "Loading photos…" hang on cellular).
+    The strip now loads these tiny ~160px thumbs (6 imgs ≈ 60-90 KB) immediately;
+    a tapped photo fetches its single full-res image on demand from /images/{idx}.
+    Ordered, fail-soft (a bad image yields null, never breaks the strip)."""
+    try:
+        store = _get_store()
+        import psycopg2.extras
+        conn = store._get_conn()
+        if not conn:
+            return {"thumbs": []}
+        try:
+            cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+            cur.execute(
+                """SELECT ordinal, image_b64, image_media
+                     FROM ai_hotel_capture_images
+                    WHERE capture_id = %s
+                    ORDER BY ordinal
+                    LIMIT 50""",
+                (capture_id,),
+            )
+            rows = cur.fetchall()
+            if not rows:
+                cur.execute(
+                    "SELECT image_b64, image_media FROM ai_hotel_captures WHERE id = %s",
+                    (capture_id,),
+                )
+                p = cur.fetchone()
+                rows = [p] if (p and p.get("image_b64")) else []
+            cur.close()
+        except Exception:
+            conn.rollback()
+            raise
+        finally:
+            store._put_conn(conn)
+        # _ai_hotel_thumb_data_url is fail-soft (returns None on a bad image).
+        thumbs = [
+            _ai_hotel_thumb_data_url(r["image_b64"], r.get("image_media") or "image/jpeg")
+            for r in rows if r.get("image_b64")
+        ]
+        return {"thumbs": thumbs}
+    except Exception as e:
+        logger.error(f"GET /api/ai-hotel/captures/{capture_id}/thumbs failed: {e}")
+        return {"thumbs": []}
+
+
+@app.get("/api/ai-hotel/captures/{capture_id}/images/{idx}", tags=["ai-hotel"],
+         dependencies=[Depends(verify_api_key)])
+async def ai_hotel_capture_single_image_detail(capture_id: int, idx: int):
+    """AI_HOTEL_FIELDNOTES_IMAGE_VIEWER_FIX_1: ONE full-res image (by ordinal) for
+    the lightbox — loaded only when the user taps a thumb, so the detail modal
+    never pulls the whole 2 MB image set upfront. Auth-gated, fail-soft: an
+    out-of-range index returns {"image": null} (never a 500)."""
+    try:
+        if idx < 0:
+            return {"image": None}
+        store = _get_store()
+        import psycopg2.extras
+        conn = store._get_conn()
+        if not conn:
+            return {"image": None}
+        try:
+            cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+            cur.execute(
+                """SELECT image_b64, image_media
+                     FROM ai_hotel_capture_images
+                    WHERE capture_id = %s AND ordinal = %s
+                    LIMIT 1""",
+                (capture_id, idx),
+            )
+            r = cur.fetchone()
+            if r is None and idx == 0:
+                # legacy single-image capture (pre child-table) — parent column.
+                cur.execute(
+                    "SELECT image_b64, image_media FROM ai_hotel_captures WHERE id = %s",
+                    (capture_id,),
+                )
+                r = cur.fetchone()
+            cur.close()
+        except Exception:
+            conn.rollback()
+            raise
+        finally:
+            store._put_conn(conn)
+        if not r or not r.get("image_b64"):
+            return {"image": None}
+        media = r.get("image_media") or "image/jpeg"
+        return {"image": f"data:{media};base64,{r['image_b64']}"}
+    except Exception as e:
+        logger.error(f"GET /api/ai-hotel/captures/{capture_id}/images/{idx} failed: {e}")
+        return {"image": None}
+
+
 @app.get("/api/ai-hotel/captures/{capture_id}/media", tags=["ai-hotel"],
          dependencies=[Depends(verify_api_key)])
 async def ai_hotel_capture_media_detail(capture_id: int):
