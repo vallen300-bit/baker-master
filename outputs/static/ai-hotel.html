@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<!-- build: AI_HOTEL_FIELDNOTES_IMAGE_VIEWER_FIX_1 (tap-to-enlarge lightbox + on-demand single-image load, no 2MB upfront; self-service key entry; remember-key; GPS). Served no-cache (#382) — self-contained, no ?v= sub-asset. -->
+<!-- build: AI_HOTEL_DASHBOARD_V7_RESTRUCTURE_1 (13-section external presentation spine: grouped nav Narrative/Case/Execution/Evidence, one declarative SECTIONS model + reusable presentation-section renderer, Pattern-B first-screen status strip, visible empty-states. §13 Field Notes preserved 100% — renderNotes untouched: lightbox+rotate, soft-delete, research-findings, audio/video, GPS, PIN/key auth). Served no-cache (#382) — self-contained, no ?v= sub-asset. -->
 <title>AI Hotel — NVIDIA × Mandarin Oriental × Brisen</title>
 <style>
   :root{
@@ -317,6 +317,35 @@
     .topbar .tb-name{font-size:14px}
     .theme-toggle button{min-width:42px;padding:8px 8px}
   }
+
+  /* AI_HOTEL_DASHBOARD_V7: grouped nav + reusable presentation sections */
+  .navsub{font:700 9.5px/1 var(--mono);text-transform:uppercase;letter-spacing:.12em;color:var(--faint);padding:15px 20px 6px}
+  .navsub:first-child{padding-top:6px}
+  .navnum{flex:0 0 auto;width:22px;font:700 11px/1 var(--mono);color:var(--faint);text-align:left}
+  .navitem.active .navnum{color:var(--accent)}
+  .psec-head{display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin:0 0 9px}
+  .psec-head h1.sec{margin:0}
+  .psec-num{color:var(--faint);font-weight:650}
+  .pstatus{font:700 9px/1 var(--mono);letter-spacing:.08em;text-transform:uppercase;padding:4px 8px;border-radius:6px}
+  .pstatus.ready{background:var(--green-weak);color:var(--green);border:1px solid var(--green-line)}
+  .pstatus.partial{background:var(--amber-weak);color:var(--amber);border:1px solid var(--amber-line)}
+  .pstatus.draft{background:var(--bg);color:var(--faint);border:1px solid var(--line)}
+  .psrc{font:500 11.5px/1.5 var(--mono);color:var(--faint);margin:0 0 22px}
+  .pcard{background:var(--card);border:1px solid var(--line);border-radius:8px;padding:16px 18px;margin:0 0 13px;box-shadow:var(--shadow);transition:border-color .14s,box-shadow .14s}
+  .pcard:hover{border-color:var(--id-blue-line);box-shadow:var(--shadow-hover)}
+  .plabel{font:700 10px/1.3 var(--mono);letter-spacing:.1em;text-transform:uppercase;color:var(--text-2);margin:0 0 11px}
+  .pbody .ppar{font-size:14px;line-height:1.6;color:var(--text-2);margin:0 0 9px}
+  .pbody .ppar:last-child{margin-bottom:0}
+  .pbul{margin:0;padding:0;list-style:none;display:flex;flex-direction:column;gap:8px}
+  .pbul li{position:relative;padding-left:17px;font-size:13.8px;line-height:1.55;color:var(--text-2)}
+  .pbul li::before{content:"";position:absolute;left:0;top:8px;width:5px;height:5px;border-radius:2px;background:var(--accent-line)}
+  .pempty{font-size:13px;font-style:italic;color:var(--muted);background:var(--bg);border:1px dashed var(--line);border-radius:7px;padding:11px 13px}
+  .pchips{display:flex;gap:8px;flex-wrap:wrap;margin-top:12px}
+  .pchip{font:600 11.5px/1 var(--sans);padding:7px 11px;border-radius:7px;border:1px solid var(--line);background:var(--bg);color:var(--text-2);text-decoration:none}
+  .pchip-link{color:var(--accent);border-color:var(--accent-line);background:var(--accent-weak);cursor:pointer}
+  .pchip-link:hover{background:var(--card-hover)}
+  .linkbtn{font:inherit;border:none;background:none;color:var(--id-blue);cursor:pointer;padding:0;text-decoration:underline}
+  .pmuted{color:var(--muted)}
 </style>
 </head>
 <body>
@@ -345,12 +374,12 @@
     </div>
     <div class="navlabel">Sections</div>
     <div id="nav"></div>
-    <div class="sb-foot"><span class="dot"></span> Working draft · v6</div>
+    <div class="sb-foot"><span class="dot"></span> Working draft · v7</div>
   </aside>
   <button class="resizer" id="resizer" aria-label="Resize sidebar" aria-orientation="vertical" title="Drag to resize"><span></span></button>
   <main class="main">
     <div class="main-top">
-      <div class="draft-line"><span class="dot"></span> Pattern B · working draft · v6</div>
+      <div class="draft-line"><span class="dot"></span> Pattern B · working draft · v7</div>
       <div class="theme-toggle" role="group" aria-label="Theme">
         <button type="button" data-theme-choice="light" aria-pressed="true">Light</button>
         <button type="button" data-theme-choice="dark" aria-pressed="false">Dark</button>
@@ -431,123 +460,347 @@ const AREAS=[
    value:'Medium — frees human time for guest-facing service',scaling:'Medium — tech not yet ready for BOH complexity',compute:'Very high',view:'Potential long-term opportunity'}
 ];
 
-/* ===== library: research + communications. Add a card per session. ===== */
-const RESEARCH=[
-  {title:'NVIDIA give/get precedents',icon:'book',meta:'Researcher · 15 Jun 2026 · bus #3041',
-   desc:'Five real cases where NVIDIA gave something — brand, solution engineers, co-marketing, named design-partner status — to gain a flagship reference and GPU/CUDA pull-through. Includes the smallest ask that has repeatedly worked, and whether NVIDIA ever invests capital. All citations verified live.',
-   url:'/static/nvidia-give-get-precedents.html',status:'live'}
-];
-const COMMS=[
-  {title:'To NVIDIA — P. Storer letter',icon:'mail',meta:'Draft pending',
-   desc:'The revised Storer letter to NVIDIA: the cheap, lighthouse-scale ask drawn from the precedents research and the stakeholder map.',status:'soon'},
-  {title:'To Mandarin Oriental',icon:'mail',meta:'Draft pending',
-   desc:'Outbound communication to Mandarin Oriental, built from this stakeholder map and the AI-Hotel use-case areas.',status:'soon'}
+/* ============================================================================
+ * AI_HOTEL_DASHBOARD_V7 — 13-section presentation spine.
+ * Content packages authored by B2 (§1-4), B3 (§5-8), B4 (§9-12), folded in
+ * verbatim below as the declarative SECTIONS model. §13 = Field Evidence,
+ * rendered by the preserved renderNotes() special hook (NOT in SECTIONS).
+ * Render hooks wired by B1: areasGrid / siteThesis / plannedFrontDesk
+ * (subsection-level) + vendorPipeline (section-level).
+ * ========================================================================== */
+
+/* ---- B2 package: sections 1-4 (narrative) ---- */
+const V7_SECTIONS_1_4 = [
+  {
+    id:'exec',order:1,group:'narrative',num:'01',title:'Executive Summary',
+    kicker:'The one-screen case',summary:'',status:'draft',
+    source:'Brisen × NVIDIA × Mandarin Oriental',
+    subsections:[
+      {label:'Project thesis',body:'',empty:'Thesis to be written.',chips:[]},
+      {label:'Why now',body:'',empty:'Timing rationale to be written.',chips:[]},
+      {label:'Partnership proposition',body:'A flagship AI-native luxury hotel in Santa Clara, structured as a three-way partnership: NVIDIA as the compute and AI-platform partner, Mandarin Oriental as the luxury operator and brand, and Brisen as the capital and development partner.',empty:'Partnership proposition to be written.',chips:[]},
+      {label:'Current ask',body:'',empty:'The current ask to be written.',chips:[]}
+    ],
+    emptyText:'This section is not yet filled.'
+  },
+  {
+    id:'why',order:2,group:'narrative',num:'02',title:'Why AI Hotel',
+    kicker:'The case for an AI-native flagship',
+    summary:'AI lets a fast-growing luxury operator hold a consistent service standard across a portfolio that is more than doubling — by enhancing the human touch, not replacing it.',
+    status:'ready',source:'Mandarin Oriental AI concept note (R. Bick, 22 May 2026)',
+    subsections:[
+      {label:'The growth challenge',body:'Mandarin Oriental is scaling from roughly 45 operating hotels toward a 100-plus property pipeline. Holding a consistent luxury standard across a portfolio that more than doubles is the operating challenge AI is meant to address.',empty:'Growth-challenge framing to be written.',chips:[]},
+      {label:'Guiding principle',body:'AI enhances luxury service; it does not replace the human touch. Every use case keeps a person in the loop and frees staff for high-value, guest-facing engagement.',empty:'Guiding principle to be written.',chips:[]},
+      {label:'Existing AI use-case areas',body:'Seven AI use-case areas are already mapped for the property: the flagship AI-native build, guest-service concierge and reservations, staff training and coaching, operations and personalization, design and development digital twins, AI discovery (search / GEO), and back-of-house robotics.',empty:'AI use-case areas load from the concept note.',render:'areasGrid',chips:[]}
+    ],
+    emptyText:'This section is not yet filled.'
+  },
+  {
+    id:'site',order:3,group:'narrative',num:'03',title:'Santa Clara Site Thesis',
+    kicker:'Why Silicon Valley, why this site',summary:'',status:'partial',
+    source:'Field Evidence — site research (notes 24 / 19 / 17)',
+    subsections:[
+      {label:'Location rationale',body:'',empty:'Location rationale to be written.',chips:[]},
+      {label:'Demand drivers',body:['Silicon Valley business and meeting demand','Proximity to major technology-company campuses and their visitor traffic','San José and San Francisco airport access','Convention and conference draw','A dense technology ecosystem that fits an AI-native hospitality flagship'],empty:'Demand drivers to be written.',chips:[]},
+      {label:'Competitive set',body:'',empty:'Competitive set to be written.',chips:[]},
+      {label:'Scouted sites',body:'',empty:'Site research summary loads from Field Evidence.',render:'siteThesis',chips:[]},
+      {label:'Owner, zoning, parcel, price & permits',body:'',empty:'Owner / zoning / parcel / price / permits to be confirmed from site diligence.',chips:[]}
+    ],
+    emptyText:'This section is not yet filled.'
+  },
+  {
+    id:'experience',order:4,group:'narrative',num:'04',title:'Guest & Staff Experience',
+    kicker:'What AI changes for guests and staff',
+    summary:'AI runs across the guest journey and behind the scenes — concierge and reservations, pre-arrival, personalization, staff copilots, an always-on front desk and multilingual staff communication.',
+    status:'ready',source:'Mandarin Oriental AI concept note + planned features + HITEC 2026 vendor evidence',
+    subsections:[
+      {label:'Guest concierge & reservations',body:'Conversational booking and concierge that handles complex questions, recommends rooms and packages, recovers abandoned bookings, and always escalates to a human agent.',empty:'Guest concierge & reservations copy to be written.',chips:[]},
+      {label:'Pre-arrival planning',body:'Pre-arrival planning that prepares the stay before the guest arrives, with a seamless hand-off to the human team.',empty:'Pre-arrival planning copy to be written.',chips:[]},
+      {label:'Personalization',body:'Personalization across room, dining, spa and loyalty, drawn from connected, real-time guest data.',empty:'Personalization copy to be written.',chips:[]},
+      {label:'Staff training copilots',body:'Training copilots and multilingual SOP assistants that bring front desk, concierge, housekeeping, spa and F&B to proficiency faster as the portfolio grows.',empty:'Staff training copy to be written.',chips:[]},
+      {label:'Always-on AI front desk',body:'An always-on orchestration layer that sits on top of the existing PMS, CRM and even legacy desktop apps — one front desk across phone, email, text and WhatsApp for every department — debuting at the Santa Clara flagship.',empty:'Always-on AI front-desk concept loads from planned features.',render:'plannedFrontDesk',chips:[]},
+      {label:'Staff communication & translation',body:'Wearable push-to-talk staff communication with real-time translation for a multilingual team, and spoken alerts turned into actionable safety reports — drawn from HITEC 2026 vendor evidence (see §9 Vendor & Partner Pipeline).',empty:'Staff communication & translation copy to be written.',chips:[]}
+    ],
+    emptyText:'This section is not yet filled.'
+  }
 ];
 
-const COMPETITORS=[
-  {title:'Rosewood — “Hospitality 2030” AI hackathon',icon:'flag',meta:'Origination Desk · 17 Jun 2026 · two-source verified',
-   desc:'A leading luxury operator ran what it billed as the sector’s first AI hackathon — at Rosewood Sand Hill in Silicon Valley, partnered with Anthropic and ElevenLabs. What the move means for our flagship, with the counter-case and watch items.',
-   url:'/static/ai-hotel-competitors-rosewood.html',status:'live'}
+/* ---- B3 package: sections 5-8 (case) ---- */
+const V7_SECTIONS_5_8 = [
+  {
+    id:'stake-giveget',order:5,group:'case',num:'05',title:'Stakeholder Give/Get',
+    kicker:'What each party gives, and what each party gets',
+    summary:'Six parties make the flagship work. Each gives something scarce and gets something it cannot buy elsewhere — the basis for every ask. Per-party current ask, status and next move are tracked where known.',
+    status:'partial',source:'Brisen stakeholder map (ai-hotel.html STAKEHOLDERS)',
+    subsections:[
+      {label:'NVIDIA — chips · models · ecosystem',body:['Gives · Brand & lighthouse co-marketing: NVIDIA lends its name and co-marketing machine to a flagship "lighthouse" deployment — joint press, a named case study, stage time.','Gives · Engineering support (strategic/lighthouse only): solution architects and engineers assigned free of charge to strategic, lighthouse-scale accounts as a sales investment.','Gives · Priority GPU allocation: moves a partner to the front of the queue for newest GPUs in a supply-constrained market.','Gives · Inception perks & connections: credits, support, and a pipeline of vetted AI startups Brisen can pull into the locked library.','Gets · Hospitality validation: a working luxury-hotel deployment proves the stack in hospitality and de-risks the whole category.','Gets · GPU & compute sales: every AI workload — and the vertical it unlocks — runs on NVIDIA GPUs and compute.','Gets · Library & SDK / CUDA lock-in: building on NVIDIA libraries, SDKs and CUDA deepens platform dependence.','Gets · A flagship showcase site: the named hotel NVIDIA can physically show prospects.','Note: almost nothing NVIDIA gives actually costs it — so what we ask is cheap to grant. Architect support is conditional on the prize being big enough.'],empty:'NVIDIA give/get to be filled.',chips:[{label:'NVIDIA give/get precedents →',href:'#market-proof'}]},
+      {label:'Mandarin Oriental — brand & operator · MOHG',body:['Gives · MO brand & service standards: the name and renowned luxury-service standards — the scarce asset that makes the hotel a credible luxury-AI proof point.','Gives · The venue & operations: a real, operating hotel to deploy in, plus the staff to run the pilot day to day.','Gives · Guest access & data: access to real luxury guests and their consented data.','Gets · MO brand uplift: positions MO as the most innovative luxury brand.','Gets · AI rolled to other MO hotels: proven solutions extended across the portfolio, serving its ~45 → 100+ growth goal.','Gets · NVIDIA brand association: reflected credibility from partnering with NVIDIA.','Gets · AUM growth & marketing halo: higher asset value and earned-media halo across the group.','Note: MO’s brand is the scarce asset the whole project routes through. Protect it — wall off MO-specific AI from anything sold elsewhere, or its moat leaks.'],empty:'Mandarin Oriental give/get to be filled.'},
+      {label:'Brisen — developer & sponsor',body:['Gives · The build & orchestration: Brisen assembles and runs the whole thing — partners, build and delivery.','Gives · Capital & risk-bearing: puts in (or arranges) the money and carries development risk.','Gives · The relationships: access to NVIDIA, MO and investors is itself the enabling asset.','Gets · Platform & equity upside: the durable prize — owning the platform and equity in what is built, not just fees.','Gets · US-market entry: a beachhead into the US market via Santa Clara.','Gets · Development fees: current income from developing and delivering the project.','Gets · Brand value: Brisen positioned as the builder of hospitality AI.','Note: Brisen sits in two seats — developer and, likely, investor/owner. Its prize is the platform and equity, not the fees.'],empty:'Brisen give/get to be filled.'},
+      {label:'AI companies & start-ups — AI builders · locked library',body:['Gives · Their AI into the locked library: startups contribute products into Brisen’s curated "locked" library for the hotel.','Gives · Equity / lock-in: in return for validation and distribution, they give equity or accept lock-in terms.','Gives · Integration & support: they do the integration work and support the live deployment.','Gets · Real-hotel validation: live proof their product works in a real luxury hotel.','Gets · MO + NVIDIA halo: reflected credibility from both brands at once.','Gets · Distribution to hotels: a route to many hotel customers via the platform.','Gets · Valuation lift: validation plus distribution lifts their valuation.','Note: the library is Brisen’s aggregation play — startups validated in the flagship, then distributed through Brisen’s own platform, walled off from MO-specific data.'],empty:'AI start-up give/get to be filled.'},
+      {label:'Investor / owner / lender — capital (may be Brisen)',body:['Gives · Capital & financing: provides the money — equity or debt — to build and own the asset.','Gets · The asset: ownership of the hotel real estate itself.','Gets · Platform stake: a share in the platform built on top of the hotel.','Gets · Start-up equity: exposure to the upside of the library start-ups.','Gets · NVIDIA brand: association with NVIDIA’s brand and ecosystem.','Gets · Brisen brand value: reflected value from Brisen’s track record as builder.','Note: the capital seat may be Brisen itself. Whoever holds it captures the most ranked value.'],empty:'Investor/owner/lender give/get to be filled.'},
+      {label:'Guests — end customers',body:['Gives · Room spend: premium room rates and on-property spend.','Gives · Data & consent: guests share, with consent, the data that personalises their service.','Gets · A personalised luxury stay: a futuristic, deeply personalised experience.','Gets · Service that anticipates them: AI lets staff anticipate needs before guests ask.','Note: the guest experience is the proof the whole thesis rests on — no guest delight, no validation.'],empty:'Guest give/get to be filled.'},
+      {label:'City / community',body:'',empty:'City & community give/get to be mapped — permitting goodwill, local hiring, civic profile, traffic/zoning impact.'},
+      {label:'Per-party current ask · status · next move',body:'',empty:'Tracked per party — current ask, status and next move to be filled where known.'}
+    ],
+    emptyText:'Stakeholder give/get map is not yet filled.'
+  },
+  {
+    id:'business-case',order:6,group:'case',num:'06',title:'Business Case',
+    kicker:'Where the value comes from',
+    summary:'The economic logic in qualitative terms. Figures are deliberately not stated until diligence — described drivers only.',
+    status:'partial',source:'',
+    subsections:[
+      {label:'Revenue uplift',body:['Premium positioning as a luxury-AI flagship supports rate and occupancy.','Personalisation and anticipatory service lift on-property spend — dining, spa, experiences.','Earned-media halo from an NVIDIA × MO launch widens demand.','Figures: — to be quantified —'],empty:'Revenue uplift to be described.'},
+      {label:'Cost reduction',body:['Automation of routine guest and operations tasks frees staff time for guest-facing service.','Predictive maintenance cuts unplanned downtime and justifies capex with evidence (HITEC vendor evidence).','AI back-office — invoice OCR and accounts-payable matching — reduces administrative load.','Figures: — to be quantified —'],empty:'Cost reduction to be described.'},
+      {label:'Platform upside',body:['A locked library of validated AI startups, distributed through the Brisen platform.','Equity in library companies plus recurring distribution to other MO hotels and the wider vertical.','Aggregation play: validate once in the flagship, distribute many times.','Figures: — to be quantified —'],empty:'Platform upside to be described.'},
+      {label:'Capex / development economics',body:'',empty:'Build cost, fit-out and AI infrastructure capex — to be modelled.'},
+      {label:'Investor return',body:'',empty:'IRR / equity-return case — to be modelled.'},
+      {label:'Valuation case',body:'',empty:'Asset and platform valuation thesis — to be developed.'}
+    ],
+    emptyText:'Business case is not yet filled.'
+  },
+  {
+    id:'tech-architecture',order:7,group:'case',num:'07',title:'Technology Architecture',
+    kicker:'The NVIDIA-anchored stack',
+    summary:'How the flagship is built — NVIDIA compute at the base, an orchestration layer above, integrated into the hotel’s existing systems rather than replacing them.',
+    status:'partial',source:'',
+    subsections:[
+      {label:'NVIDIA compute · GPU · CUDA · SDK lock-in',body:['On-prem GPU servers in the hotel plus cloud GPU consumption for inference.','Applications built on CUDA and NIM microservices; Omniverse / NeMo adoption.','Standardising the stack on NVIDIA tooling deepens switching costs and platform dependence.'],empty:'NVIDIA compute layer to be described.'},
+      {label:'Digital twins & simulation',body:['An Omniverse-class digital twin of the property for layout, operations and guest-flow simulation.','Scenario testing before physical change — design, staffing and service-flow trials in simulation.'],empty:'Digital-twin layer to be described.'},
+      {label:'AI front-desk orchestration layer',body:['An always-on AI front desk coordinating concierge, reservations, housekeeping and service requests across vendors.','Routes guest intent to the right system or human — the integration spine of the guest experience.'],empty:'Orchestration layer to be described.'},
+      {label:'PMS / CRM / legacy integration',body:['Layers on the systems a hotel already runs (e.g. Opera PMS, CRM, channel managers) rather than ripping them out.','Floor evidence shows 90–100+ integration patterns are standard for hospitality vendors (see Vendor & Partner Pipeline).'],empty:'Integration approach to be described.',chips:[{label:'See Vendor & Partner Pipeline →',href:'#vendor-pipeline'}]},
+      {label:'Data architecture',body:'',empty:'Data model, storage and flow design — to be specified.'},
+      {label:'Privacy / consent model',body:'',empty:'Guest-data consent and privacy architecture — to be specified.'},
+      {label:'Build vs buy map',body:'',empty:'Which capabilities are built, bought or partnered — to be mapped.'}
+    ],
+    emptyText:'Technology architecture is not yet filled.'
+  },
+  {
+    id:'market-proof',order:8,group:'case',num:'08',title:'Market Proof',
+    kicker:'Evidence the thesis holds',
+    summary:'External evidence that AI in luxury hospitality is real and moving — precedents, competitor signals and floor-scouted vendors.',
+    status:'partial',source:'Researcher + Origination Desk + HITEC 2026 floor scout',
+    subsections:[
+      {label:'NVIDIA give/get precedents',body:'Five real cases where NVIDIA gave something — brand, solution engineers, co-marketing, named design-partner status — to gain a flagship reference and GPU/CUDA pull-through. Includes the smallest ask that has repeatedly worked, and whether NVIDIA ever invests capital. All citations verified live. (Researcher · 15 Jun 2026 · bus #3041)',empty:'NVIDIA precedents to be summarised.',chips:[{label:'Open research →',href:'/static/nvidia-give-get-precedents.html'}]},
+      {label:'Competitor signal — Rosewood "Hospitality 2030" AI hackathon',body:'A leading luxury operator ran what it billed as the sector’s first AI hackathon — at Rosewood Sand Hill in Silicon Valley, partnered with Anthropic and ElevenLabs. What the move means for our flagship, with the counter-case and watch items. (Origination Desk · 17 Jun 2026 · two-source verified)',empty:'Competitor signal to be summarised.',chips:[{label:'Open analysis →',href:'/static/ai-hotel-competitors-rosewood.html'}]},
+      {label:'HITEC 2026 vendor evidence',body:'Nine vendors scouted on the San Antonio show floor demonstrate live AI across guest service, revenue management, predictive maintenance, staff communication and property security — proof the tooling already exists in production.',empty:'HITEC evidence to be summarised.',chips:[{label:'See Vendor & Partner Pipeline →',href:'#vendor-pipeline'}]},
+      {label:'Luxury hospitality AI benchmarks',body:'',empty:'Named luxury-operator AI benchmarks — to be compiled.'},
+      {label:'Customer demand evidence',body:'',empty:'Guest demand / willingness-to-pay evidence — to be gathered.'}
+    ],
+    emptyText:'Market proof is not yet filled.'
+  }
 ];
 
-/* ===== HITEC 2026 — vendors the Chairman scouted on the show floor (San Antonio,
-   17 Jun 2026). Each card = one booth: who he met, what they do, why it matters
-   to us, which AI-Hotel area it serves, and the contact captured from the badge.
-   Built from his dictated field notes + the badge/business-card photos. ===== */
-const VENDORS=[
-  {co:'Hudini',icon:'message',person:'Booth demo — in-room guest tablet',area:'Guest service — concierge & reservations',fit:'High fit',
-   what:'A guest-facing in-room tablet and kiosk that becomes the hotel’s digital concierge. From the room, a guest orders in-room dining (the order prints straight to the kitchen), books the restaurant or spa, calls housekeeping, and chats with concierge — all on one screen, across many connected vendors.',
-   why:'Already finalising rollout at Mandarin Oriental Dubai and a Mandarin downtown property. This is the closest match to our flagship’s guest-service vision, and it is live inside our own operator’s estate today — the single most actionable lead from the floor.',
-   dossier:'Hudini is a guest-experience and operations platform for luxury and upscale hotels (operated by Mankara Technologies; US / Middle East / APAC presence), in business since roughly 2018–2019. Its omnichannel suite — mobile app, in-room tablet, kiosk, IPTV and messaging — covers contactless check-in, room controls, dining, service requests and upselling, with 100+ integrations to existing hotel systems. It already runs AI: “Hudini AI” does intent-based guest messaging, automated request routing and AI-driven upselling. Live in production at Royal Mansour Marrakech, Atlantis Dubai, The Biltmore Dubai and SH Hotels & Resorts. The Mandarin Oriental Dubai rollout heard on the floor is not yet confirmed in public sources.',
-   contact:'Demo seen on a Hudini in-room tablet (Room 213, pillow-menu screen).'},
-  {co:'Data Plus, Inc',icon:'cube',person:'Bruce Bensetler — President',area:'Design & development + Operations',fit:'High fit',
-   what:'Two products. (1) AI accounts-payable: it scans incoming invoices with OCR, then AI agents match the vendor and line-items against that vendor’s history, score their confidence, and flag anything doubtful for a human — all synced to the accounting system. (2) A construction project-budgeting tool: full Gantt and a ~200-task build breakdown, pulling actual spend from accounts-payable and the ledger, tracking original vs. revised vs. actual budget and every change order. Cloud-hosted (Azure, Frankfurt region available).',
-   why:'Speaks directly to Brisen’s hotel-development business, not just hospitality operations — the construction-budgeting side is a rare find. Bruce is in the Hospitality Technology Hall of Fame.',
-   dossier:'Data Plus is a long-established US hospitality back-office software vendor (Massachusetts), founded 1973, with its first hotel ERP in 1986 — roughly five decades operating. It builds purpose-built financial software for hotels, resorts, clubs and casinos: USALI-compliant general accounting, procurement, accounts-payable and vendor payments, plus a capital/construction project-budgeting module that ties capex to actual spend. It already uses AI — DP Invoice applies AI/OCR to capture, auto-code and analyse invoices (vendor claims ~99.5% accuracy). Widely deployed: the company cites 1,200+ properties across ~15 countries (self-reported). The construction-budgeting side is a rare fit for Brisen’s development business, not just hotel operations.',
-   contact:'Bruce Bensetler, President, Data Plus, Inc.'},
-  {co:'RoomPriceGenie',icon:'sliders',person:'Nuha Pancras — Sales & Revenue Manager (+ Mike)',area:'Operations & personalization (revenue)',fit:'Swiss vendor',
-   what:'Automated revenue management. It layers on top of the systems a hotel already runs (Opera PMS, Lighthouse), reads market demand, how fast rooms are selling and occupancy, recommends a price, then pushes the new price back into the PMS automatically. It carries its own data API, so a hotel does not need its own separate Lighthouse subscription.',
-   why:'Dynamic pricing without a heavy integration project. Swiss-founded (Brisen’s home turf), now across Europe, Asia and Canada.',
-   dossier:'RoomPriceGenie (RoomPriceGenie GmbH) is a Swiss revenue-management vendor headquartered in Steinhausen, Canton Zug, operating since 2017 (founded by a former hedge-fund quant). Its cloud software automates dynamic room pricing for mainly independent hotels and small groups: it layers on the existing PMS/channel stack (90+ integrations — Mews, SiteMinder, Opera), reads demand and competitor rates, and pushes new prices automatically up to 24× a day. Pricing is AI / algorithm-driven (supply-demand plus competitor-rate model). In production at 4,000+ hotels worldwide, backed by a $75M growth round. Note: the base skews independent/budget — no named luxury customers surfaced, so the luxury fit is unproven.',
-   contact:'Nuha Pancras — nuha@roompricegenie.com · Mike — mike@roompricegenie.com, +1 240 538 4419'},
-  {co:'Hercules Solutions',icon:'sliders',person:'Kevin Kuhne — CEO',area:'Operations & personalization (maintenance)',fit:'Verify first',
-   what:'Building-systems sensing and analytics. It feeds millions of lines of equipment data into the cloud and uses it to spot under-performing properties, detect leaks early, and justify capital spend with evidence instead of an operator’s hunch. The sensors are stable enough to run for years untouched, cutting maintenance labour, and the data integrates into the hotel’s ticketing/PMS to auto-generate work orders.',
-   why:'Predictive maintenance plus a hard-numbers way to decide where capex actually goes across a portfolio. Says it is already proven competitively in Las Vegas. A regular operator can run it — no specialist needed.',
-   dossier:'Scouted as a building-systems sensing and predictive-maintenance vendor (the floor note: cloud equipment data, leak detection, capex justification, PMS-integrated work orders, “proven in Las Vegas”). Web verification could NOT confirm a company matching that description under this exact name and CEO (Kevin Kuhne, per the badge). The only close online match — herculessolutionsllc.com — is a 2024 aquatic/pool-automation firm (THOR controller + ZEUS cloud, marketed as “AI-powered predictive maintenance”), with a different listed leader and no named hotel customers. So the AI predictive-maintenance positioning is real in the adjacent match, but the broader building-systems profile and the Las Vegas claim are unverified. Treat as a direct-follow-up lead — confirm identity and references with Kevin Kuhne.',
-   contact:'Kevin Kuhne, CEO, Hercules Solutions LLC.'},
-  {co:'Relay',icon:'users',person:'Abby DeForge — Sales Manager (Lux)',area:'Operations — staff communication',fit:'Worth a look',
-   what:'A wearable push-to-talk device for staff that runs on cellular (T-Mobile/LTE) instead of two-way radios, so it keeps signal where radios die — basements, behind concrete. It translates in real time for a multilingual team and guests (a housekeeper can speak Chinese and be heard in English), with satellite and more AI on the roadmap.',
-   why:'Reliable staff communication plus live translation for a diverse luxury workforce. Sold into property-management groups and full-service luxury resorts.',
-   dossier:'Relay, Inc. (relaypro.com, Raleigh, North Carolina) makes cloud-connected push-to-talk wearables for frontline staff. It grew out of Republic Wireless (founded ~2011; first Relay device 2018), so ~7 years in market. The pocket device runs on 4G/5G LTE and WiFi instead of two-way radios — nationwide push-to-talk voice, panic alerts, indoor location, back-end transcription and a web dashboard. Its AI feature, TeamTranslate, does real-time voice translation across 25–30+ languages (named to Fast Company’s 2025 World Changing Ideas list). Deployed in hospitality today: Atrium Hospitality (80 properties, 28 states) and Raleigh Marriott City Center; the company cites 4,000+ hotels/resorts/casinos (self-reported).',
-   contact:'Abby DeForge, Sales Manager (Lux), Relay.'},
-  {co:'Staff comms + actionable reports',icon:'message',person:'Booth conversation (device vendor)',area:'Operations — staff & safety',fit:'Idea to chase',
-   what:'A push-to-talk staff device (housekeeping, front desk, security, grounds) with transcription on the back end. The bigger idea the Chairman drew out: don’t just transcribe — turn a spoken alert into a printed, actionable report. A worker says “gas leak in room 354” and the system prints an emergency report someone can act on, not just a transcript.',
-   why:'The standout tip from the chat was a company called Aiola for the speech-to-actionable-report piece — worth a direct look. Turns staff chatter into safety actions.',
-   dossier:'The lead to chase is aiOla — an Israeli enterprise voice-AI company (Herzliya), operating since ~2019–2020, ~$58M raised including strategic backing from United Airlines Ventures. Its core is a proprietary speech-recognition foundation model, “Jargonic,” built for noisy, jargon-heavy frontline environments (claimed 95%+ accuracy, 120+ languages), turning spoken input into structured data and automated workflows/reports — exactly the “gas leak in room 354 → printed actionable report” capability described on the floor. It is firmly an AI company. But it is deployed in aviation, manufacturing and logistics, NOT yet in hotels — hospitality appears only in its own marketing, with no named hotel installation. Promising tech, unproven in our sector.',
-   contact:'Follow-up: aiOla (aiola.ai) — speech-to-actionable-report.'},
-  {co:'American Sentinel',icon:'search',person:'Christopher Gonzales — Regional Sales Manager',area:'Operations — property security',fit:'Worth a look',
-   what:'AI-assisted property security. Mobile deterrent towers (8–15 ft, 360°, ~600 ft of visibility) watch the grounds and can speak down to an intruder (“please leave this parking lot”). A third-party human monitoring centre verifies every AI alert before acting, reads licence plates (LPR written to the cameras), and alerts the hotel’s chosen contact or police. Two tiers: AI detection first, a human second.',
-   why:'Perimeter security and parking/licence-plate monitoring for a property, with a human in the loop so guests aren’t hit with false alarms.',
-   dossier:'American Sentinel (amsentinel.com) is a US property-security vendor founded 2024, based in the Pharr / McAllen area of south Texas. It deploys solar-powered mobile surveillance towers — 360° PTZ cameras, two-way speak-down audio, floodlights and a cloud video-management system — backed by a 24/7 human monitoring service. It already uses AI: AI threat/object detection plus licence-plate and face recognition trigger alerts that a human centre verifies before dispatch. Documented use is in construction, warehousing, storage and corporate campuses; no hotel, resort or hospitality deployment is named anywhere, so hospitality use is unproven. A young company — useful for perimeter and parking security, but ask for references.',
-   contact:'Christopher Gonzales — christopher.gonzales@amsentinel.com, +1 956-502-0046 / +1 210-748-8669 · amsentinel.com'},
-  {co:'Optacy',icon:'book',person:'Julian Salama — Co-founder & CTO',area:'Operations — data governance',fit:'Thin fit',
-   what:'A data-privacy compliance tool. It manages consumer data-privacy requests (DSAR/DSR) under GDPR, CCPA, US state laws and others: requests arrive via branded webforms, a toll-free hotline and email into one dashboard, with deadline tracking and automated notifications.',
-   why:'Flagged for the data-privacy angle — relevant to EU guest data (e.g. Mandarin Oriental Vienna). A niche compliance tool, not a hospitality platform.',
-   dossier:'Optacy is a data-privacy compliance vendor (operating under Privacy Toll Free, LLC; Delaware, US), launched 2019 — which clarifies the bare “GDPR compliance” floor note. Its product manages consumer data-privacy requests (DSAR/DSR) under GDPR, CCPA, US state laws, LGPD and APPI: a dashboard ingesting requests via branded webforms, a toll-free hotline and email, with deadline tracking and automated notifications. It is NOT an AI product (only voicemail transcription); no AI/ML is marketed. Named customers are general enterprise (J.Crew, HPE, Bungie, J.D. Power) — none in hospitality, and no Agilysys partnership is findable despite the lanyard. Relevant only as a niche EU-guest-data privacy tool; thin fit. (Badge said “CEO”; he is listed online as Co-founder/CTO.)',
-   contact:'Julian Salama, Co-founder & CTO, Optacy.'}
+/* ---- B4 package: sections 9-12 (execution) ---- */
+const V7_SECTIONS_9_12 = [
+  {
+    id:'vendors',order:9,group:'execution',num:'09',title:'Vendor & Partner Pipeline',
+    kicker:'Scouted on the floor — ranked by fit',
+    summary:'Vendors the Chairman met on the HITEC 2026 show floor (San Antonio, 17 Jun 2026), ranked by fit to the flagship, each with its next action, owner and follow-up status.',
+    status:'partial',source:'Chairman HITEC field notes + badge / business-card photos · 17 Jun 2026',
+    render:'vendorPipeline',
+    subsections:[
+      {label:'Hudini — High fit',rank:1,body:['What it is: a guest-facing in-room tablet and kiosk that becomes the hotel’s digital concierge — in-room dining (printed straight to the kitchen), restaurant and spa booking, housekeeping calls and concierge chat, all on one screen across many connected vendors.','Why it matters: already finalising rollout at Mandarin Oriental Dubai and a Mandarin downtown property — the closest match to our flagship’s guest-service vision, and live inside our own operator’s estate today.','Background: guest-experience and operations platform for luxury hotels (Mankara Technologies; US / Middle East / APAC), in business since ~2018. Omnichannel suite with 100+ integrations and live AI (intent-based messaging, request routing, AI upselling) at Royal Mansour Marrakech, Atlantis Dubai and SH Hotels. The Mandarin Oriental Dubai rollout heard on the floor is not yet confirmed in public sources.'],nextAction:'Confirm the Mandarin Oriental Dubai / downtown rollout through our operator and request a reference.',owner:'',followUp:'Scouted at HITEC, San Antonio, 17 Jun 2026 — no outreach logged yet.',empty:'Vendor detail to be filled.',chips:[]},
+      {label:'Data Plus, Inc — High fit',rank:2,body:['What it is: two products — (1) AI accounts-payable that OCR-scans invoices, then AI agents match vendor and line-items against history, score confidence and flag doubt for a human; (2) a construction project-budgeting tool with full Gantt, ~200-task build breakdown, and original-vs-revised-vs-actual budget tracking pulling real spend from AP and the ledger. Cloud-hosted (Azure, Frankfurt region available).','Why it matters: speaks directly to Brisen’s hotel-development business, not just operations — the construction-budgeting side is a rare find.','Background: long-established US hospitality back-office vendor (Massachusetts, founded 1973; first hotel ERP 1986). USALI-compliant accounting, procurement and AP plus a capex/construction module. DP Invoice already applies AI/OCR (vendor claims ~99.5% accuracy); 1,200+ properties across ~15 countries (self-reported). President Bruce Bensetler is in the Hospitality Technology Hall of Fame.'],nextAction:'Scope a demo of the construction project-budgeting module against a live Brisen development.',owner:'',followUp:'Scouted at HITEC, San Antonio, 17 Jun 2026 — no outreach logged yet.',empty:'Vendor detail to be filled.',chips:[{label:'Bruce Bensetler — President',href:''}]},
+      {label:'RoomPriceGenie — Swiss vendor',rank:3,body:['What it is: automated revenue management that layers on top of the systems a hotel already runs (Opera PMS, Lighthouse), reads market demand and pace, recommends a price, and pushes it back into the PMS automatically. Carries its own data API, so no separate Lighthouse subscription is needed.','Why it matters: dynamic pricing without a heavy integration project; Swiss-founded (Brisen’s home turf), now across Europe, Asia and Canada.','Background: Swiss revenue-management vendor (RoomPriceGenie GmbH, Steinhausen, Zug; since 2017). 90+ integrations, prices updated up to 24× a day, AI / algorithm-driven, 4,000+ hotels and a $75M growth round. Caveat: the base skews independent / budget — no named luxury customers surfaced, so the luxury fit is unproven.'],nextAction:'Ask for a named luxury-segment reference before any pilot; confirm Opera PMS fit.',owner:'',followUp:'Scouted at HITEC, San Antonio, 17 Jun 2026 — no outreach logged yet.',empty:'Vendor detail to be filled.',chips:[{label:'Nuha Pancras',href:'mailto:nuha@roompricegenie.com'},{label:'Mike',href:'mailto:mike@roompricegenie.com'}]},
+      {label:'Relay — Worth a look',rank:4,body:['What it is: a wearable push-to-talk device for staff that runs on cellular (LTE) instead of two-way radios, so it keeps signal where radios die — basements, behind concrete. It translates in real time for a multilingual team and guests, with satellite and more AI on the roadmap.','Why it matters: reliable staff communication plus live translation for a diverse luxury workforce; sold into property-management groups and full-service luxury resorts.','Background: Relay, Inc. (Raleigh, NC), out of Republic Wireless (~2011; first Relay device 2018). 4G/5G + WiFi push-to-talk, panic alerts, indoor location, transcription and a web dashboard. Its TeamTranslate AI does real-time translation across 25–30+ languages (Fast Company 2025 World Changing Ideas). Deployed in hospitality today (Atrium Hospitality, Raleigh Marriott City Center); 4,000+ hotels/resorts/casinos self-reported.'],nextAction:'Trial TeamTranslate with a multilingual housekeeping team; check coverage in back-of-house dead zones.',owner:'',followUp:'Scouted at HITEC, San Antonio, 17 Jun 2026 — no outreach logged yet.',empty:'Vendor detail to be filled.',chips:[{label:'Abby DeForge — Sales (Lux)',href:''}]},
+      {label:'aiOla (staff comms → actionable reports) — Idea to chase',rank:5,body:['What it is: the speech-to-actionable-report idea drawn out of a push-to-talk booth conversation — don’t just transcribe staff chatter, turn a spoken alert into a printed, actionable report (“gas leak in room 354” → an emergency report someone can act on).','Why it matters: turns staff chatter into safety actions; the standout tip from the chat was aiOla for the speech-to-report piece — worth a direct look.','Background: aiOla is an Israeli enterprise voice-AI company (Herzliya, since ~2019; ~$58M raised incl. United Airlines Ventures). Its “Jargonic” speech model targets noisy, jargon-heavy frontline work (claimed 95%+ accuracy, 120+ languages), producing structured data and automated reports. Caveat: deployed in aviation, manufacturing and logistics — NOT yet in hotels; hospitality fit is unproven.'],nextAction:'Open a direct conversation with aiOla and ask for a hospitality proof-of-concept.',owner:'',followUp:'Scouted at HITEC, San Antonio, 17 Jun 2026 — no outreach logged yet.',empty:'Vendor detail to be filled.',chips:[{label:'aiola.ai',href:'https://aiola.ai'}]},
+      {label:'American Sentinel — Worth a look',rank:6,body:['What it is: AI-assisted property security — mobile deterrent towers (8–15 ft, 360°, ~600 ft visibility) that watch the grounds and can speak down to an intruder. A third-party human monitoring centre verifies every AI alert before acting, reads licence plates, and alerts the hotel’s contact or police. Two tiers: AI detection first, a human second.','Why it matters: perimeter security and parking / licence-plate monitoring with a human in the loop, so guests aren’t hit with false alarms.','Background: US property-security vendor (Pharr / McAllen, Texas; founded 2024). Solar-powered mobile surveillance towers, two-way speak-down audio, floodlights and cloud VMS, plus 24/7 human monitoring; AI threat / LPR / face recognition trigger human-verified dispatch. Caveat: documented use is construction, warehousing and campuses — no named hotel deployment, so hospitality use is unproven; young company, ask for references.'],nextAction:'Request hospitality references and a perimeter / parking pilot scope.',owner:'',followUp:'Scouted at HITEC, San Antonio, 17 Jun 2026 — no outreach logged yet.',empty:'Vendor detail to be filled.',chips:[{label:'Christopher Gonzales',href:'mailto:christopher.gonzales@amsentinel.com'},{label:'amsentinel.com',href:'https://amsentinel.com'}]},
+      {label:'Hercules Solutions — Verify first',rank:7,body:['What it is: building-systems sensing and analytics — millions of lines of equipment data into the cloud to spot under-performing properties, detect leaks early, and justify capex with evidence; sensors run for years untouched and integrate into ticketing / PMS to auto-generate work orders.','Why it matters: predictive maintenance plus a hard-numbers way to decide where capex goes across a portfolio; claims to be proven competitively in Las Vegas, runnable by a regular operator.','Background: web verification could NOT confirm a company matching this description under the badge name and CEO (Kevin Kuhne). The closest online match — herculessolutionsllc.com — is a 2024 aquatic / pool-automation firm marketed as “AI-powered predictive maintenance,” with a different listed leader and no named hotel customers. Treat as a direct-follow-up lead — confirm identity and references first.'],nextAction:'Confirm company identity and references directly with Kevin Kuhne before any evaluation.',owner:'',followUp:'Scouted at HITEC, San Antonio, 17 Jun 2026 — identity unverified, no outreach logged yet.',empty:'Vendor detail to be filled.',chips:[{label:'Kevin Kuhne — CEO',href:''}]},
+      {label:'Optacy — Thin fit',rank:8,body:['What it is: a data-privacy compliance tool that manages consumer data-privacy requests (DSAR / DSR) under GDPR, CCPA, US state laws and others — requests arrive via branded webforms, a toll-free hotline and email into one dashboard, with deadline tracking and automated notifications.','Why it matters: flagged for the data-privacy angle, relevant to EU guest data (e.g. Mandarin Oriental Vienna); a niche compliance tool, not a hospitality platform.','Background: data-privacy compliance vendor (Privacy Toll Free, LLC; Delaware; launched 2019). Caveat: NOT an AI product (only voicemail transcription); named customers are general enterprise (J.Crew, HPE, Bungie, J.D. Power), none in hospitality, and no Agilysys partnership is findable despite the lanyard. Relevant only as a niche EU-guest-data privacy tool.'],nextAction:'Park as a niche compliance option; revisit only if EU guest-data DSAR volume warrants.',owner:'',followUp:'Scouted at HITEC, San Antonio, 17 Jun 2026 — no outreach logged yet.',empty:'Vendor detail to be filled.',chips:[{label:'Julian Salama — Co-founder & CTO',href:''}]}
+    ],
+    emptyText:'Vendor pipeline to be filled.'
+  },
+  {
+    id:'roadmap',order:10,group:'execution',num:'10',title:'Execution Roadmap',
+    kicker:'From decision to opening',summary:'',status:'draft',source:'',
+    subsections:[
+      {label:'First 30 days',body:'',empty:'First-30-day plan to be written.',chips:[]},
+      {label:'First 90 days',body:'',empty:'First-90-day plan to be written.',chips:[]},
+      {label:'Partner outreach sequence',body:'',empty:'Partner outreach sequence to be written.',chips:[]},
+      {label:'Site diligence sequence',body:'',empty:'Site diligence sequence to be written.',chips:[]},
+      {label:'Pilot plan',body:'',empty:'Pilot plan to be written.',chips:[]},
+      {label:'Build / opening timeline',body:'',empty:'Build and opening timeline to be written.',chips:[]}
+    ],
+    emptyText:'Execution roadmap not yet filled.'
+  },
+  {
+    id:'risks',order:11,group:'execution',num:'11',title:'Risks & Governance',
+    kicker:'What protects the brand and the moat',
+    summary:'The flagship’s first governance priority is protecting the Mandarin Oriental brand and the service moat; the remaining risk areas are still to be assessed.',
+    status:'partial',source:'Brisen + MO concept thesis',
+    subsections:[
+      {label:'MO brand protection & moat leakage',body:['AI must enhance the Mandarin Oriental luxury service standard, never replace the human touch that defines the brand — the flagship is judged by MO’s bar, not by the technology.','Every AI partner and vendor must be contractually bound so that MO’s proprietary service standards and guest-relationship data do not become a competitor’s training set or product feature — the service moat cannot leak through the supply chain.','Co-marketing with NVIDIA and any vendor publicity must keep brand control with Mandarin Oriental, so the flagship reads as an MO property enhanced by AI, not as a technology showcase wearing the MO name.'],empty:'',chips:[]},
+      {label:'Guest-data consent',body:'',empty:'Guest-data consent model to be assessed.',chips:[]},
+      {label:'AI hallucination / service failure',body:'',empty:'Hallucination and service-failure controls to be assessed.',chips:[]},
+      {label:'Labour / staff acceptance',body:'',empty:'Staff-acceptance plan to be assessed.',chips:[]},
+      {label:'Cost overrun',body:'',empty:'Cost-overrun controls to be assessed.',chips:[]},
+      {label:'Vendor dependency',body:'',empty:'Vendor-dependency mitigation to be assessed.',chips:[]},
+      {label:'Regulatory / zoning',body:'',empty:'Regulatory and zoning risk to be assessed.',chips:[]}
+    ],
+    emptyText:'Risk and governance assessment not yet filled.'
+  },
+  {
+    id:'ask',order:12,group:'execution',num:'12',title:'The Ask',
+    kicker:'What we are asking each partner for',
+    summary:'The asks to NVIDIA and Mandarin Oriental are stated; investor, site-owner and vendor asks are still to be defined. Draft outreach letters are linked below.',
+    status:'partial',source:'Brisen partnership concept + stakeholder map',
+    subsections:[
+      {label:'NVIDIA ask',body:['Co-marketing and named design-partner / flagship-reference status.','Solution-engineering support to stand up the AI stack.','GPU and compute priority, with CUDA / SDK access.','NVIDIA Inception access for the AI startups in the pipeline.'],empty:'',chips:[]},
+      {label:'Mandarin Oriental ask',body:['Use of the Mandarin Oriental brand for the flagship.','An operating venue and MO’s operating partnership.','MO service standards as the bar that AI must enhance, not replace.','Guest-experience and consented data access to personalise and train.'],empty:'',chips:[]},
+      {label:'Investor ask',body:'',empty:'Investor ask to be defined.',chips:[]},
+      {label:'Site-owner ask',body:'',empty:'Site-owner ask to be defined.',chips:[]},
+      {label:'Vendor ask',body:'',empty:'Vendor ask to be defined.',chips:[]},
+      {label:'Draft outreach letters',body:['To NVIDIA — P. Storer letter: the cheap, lighthouse-scale ask drawn from the precedents research and the stakeholder map (draft pending).','To Mandarin Oriental: outbound communication built from the stakeholder map and the AI-Hotel use-case areas (draft pending).'],empty:'Draft letters to be linked when ready.',chips:[]}
+    ],
+    emptyText:'The ask not yet filled.'
+  }
 ];
 
-const NAV=[
-  {id:'hotel',name:'AI Hotel',icon:'hotel'},
-  {id:'stake',name:"Stakeholders' interests",icon:'users'},
-  {id:'research',name:'Research',icon:'book'},
-  {id:'competitors',name:'Competitors',icon:'flag'},
-  {id:'hitec',name:'HITEC 2026 — floor scout',icon:'search'},
-  {id:'comms',name:'Communications to parties',icon:'mail'},
-  {id:'notes',name:'Field notes',icon:'message'},
-  {id:'planned',name:'Planned features',icon:'bot'}
+/* ---- assembled spine ---- */
+const SECTIONS=V7_SECTIONS_1_4.concat(V7_SECTIONS_5_8,V7_SECTIONS_9_12);
+/* §13 Field Evidence is NOT in SECTIONS — it renders via the preserved renderNotes() special hook. */
+const NOTES_SECTION={id:'notes',num:'13',group:'evidence',title:'Field Evidence',kicker:'Appendix'};
+const NAV_GROUPS=[
+  {key:'narrative',label:'Narrative · 01–04'},
+  {key:'case',label:'Case · 05–08'},
+  {key:'execution',label:'Execution · 09–12'},
+  {key:'evidence',label:'Evidence · 13'}
 ];
+/* B3/B4 chip hrefs use '#slug' affordances; B1 owns the final anchor wiring. */
+const SECTION_ALIASES={'vendor-pipeline':'vendors','market-proof':'market-proof'};
+function sectionById(id){if(id==='notes')return NOTES_SECTION;return SECTIONS.find(function(s){return s.id===id;})||null;}
 
-let current='hotel';
+let current='exec';
+
+/* ---- grouped nav (Narrative / Case / Execution / Evidence) ---- */
+function navEntries(){
+  return NAV_GROUPS.map(function(g){
+    return {
+      group:g,
+      items:g.key==='evidence'
+        ? [NOTES_SECTION]
+        : SECTIONS.filter(function(s){return s.group===g.key;}).sort(function(a,b){return a.order-b.order;})
+    };
+  });
+}
 function buildNav(){
   const nav=document.getElementById('nav');while(nav.firstChild)nav.removeChild(nav.firstChild);
-  NAV.forEach(n=>{
-    const it=el('button','navitem'+(n.id===current?' active':''));it.id='nav-'+n.id;it.type='button';
-    it.appendChild(iconEl('ic',n.icon));it.appendChild(el('div',null,n.name));
-    it.onclick=()=>show(n.id);nav.appendChild(it);
+  navEntries().forEach(function(grp){
+    nav.appendChild(el('div','navsub',grp.group.label));
+    grp.items.forEach(function(s){
+      const it=el('button','navitem'+(s.id===current?' active':''));it.id='nav-'+s.id;it.type='button';
+      it.appendChild(el('span','navnum',s.num));
+      it.appendChild(el('div',null,s.title));
+      it.onclick=function(){show(s.id);};
+      nav.appendChild(it);
+    });
   });
 }
 
-/* ---- AI Hotel ---- */
-function renderHotel(main){
-  main.appendChild(el('div','kicker','The vision'));
-  main.appendChild(el('h1','sec','AI Hotel — what it could be'));
-  const ctx=el('div','thesis-lead');
-  ctx.appendChild(document.createTextNode('Mandarin Oriental wants to scale from ~45 to 100+ hotels while preserving its hallmark of high-touch, human-led luxury. AI is the enabler. The partnership splits naturally: '));
-  ctx.appendChild(el('b',null,'NVIDIA'));ctx.appendChild(document.createTextNode(' brings accelerated computing, simulation, digital twins and agentic AI; '));
-  ctx.appendChild(el('b',null,'Brisen'));ctx.appendChild(document.createTextNode(' brings luxury asset development; '));
-  ctx.appendChild(el('b',null,'Mandarin Oriental'));ctx.appendChild(document.createTextNode(' brings brand standards, operating know-how and a premium use-case environment.'));
-  main.appendChild(ctx);
+/* ---- reusable presentation-section renderer (§1-12) ---- */
+function statusLabel(s){return s==='ready'?'Ready':(s==='partial'?'In progress':'Draft');}
+function renderPresentationSection(main,sec){
+  if(!sec){main.appendChild(el('div','nempty','Section not found.'));return;}
+  if(sec.kicker)main.appendChild(el('div','kicker',sec.kicker));
+  const head=el('div','psec-head');
+  const h=el('h1','sec');
+  h.appendChild(el('span','psec-num',sec.num+' · '));
+  h.appendChild(document.createTextNode(sec.title));
+  head.appendChild(h);
+  if(sec.status)head.appendChild(el('span','pstatus '+sec.status,statusLabel(sec.status)));
+  main.appendChild(head);
+  if(sec.summary)main.appendChild(el('div','sec-sub',sec.summary));
+  else main.appendChild(el('div','sec-sub pmuted',sec.emptyText||'This section is not yet filled.'));
+  if(sec.source)main.appendChild(el('div','psrc',sec.source));
+  if(sec.id==='exec')main.appendChild(buildStatusStrip());
+  // section-level render hook (e.g. vendorPipeline) takes over the body.
+  if(sec.render&&SECTION_HOOKS[sec.render]){SECTION_HOOKS[sec.render](main,sec);return;}
+  (Array.isArray(sec.subsections)?sec.subsections:[]).forEach(function(sub){main.appendChild(buildSubsection(sec,sub));});
+}
+function buildSubsection(sec,sub){
+  const card=el('div','pcard');
+  const txt=[sub.label||''];
+  if(sub.label)card.appendChild(el('div','plabel',sub.label));
+  const bodyWrap=el('div','pbody');
+  let hasContent=false;
+  const body=sub.body;
+  if(typeof body==='string'&&body.trim()){bodyWrap.appendChild(el('p','ppar',body));txt.push(body);hasContent=true;}
+  else if(Array.isArray(body)&&body.length){const ul=el('ul','pbul');body.forEach(function(line){if(line){ul.appendChild(el('li',null,String(line)));txt.push(String(line));}});bodyWrap.appendChild(ul);hasContent=true;}
+  if(sub.render&&SUB_HOOKS[sub.render]){try{SUB_HOOKS[sub.render](bodyWrap,sec,sub);hasContent=true;}catch(e){}}
+  if(!hasContent)bodyWrap.appendChild(el('div','pempty',sub.empty||'— to be filled —'));
+  card.appendChild(bodyWrap);
+  if(Array.isArray(sub.chips)&&sub.chips.length){card.appendChild(buildChips(sub.chips));sub.chips.forEach(function(c){if(c&&c.label)txt.push(c.label);});}
+  card.dataset.text=txt.join(' ').toLowerCase();
+  return card;
+}
+function buildChips(chips){
+  const row=el('div','pchips');
+  (Array.isArray(chips)?chips:[]).forEach(function(ch){
+    if(!ch||!ch.label)return;
+    const href=ch.href||'';
+    if(href&&href.charAt(0)==='#'){
+      const target=SECTION_ALIASES[href.slice(1)]||href.slice(1);
+      if(sectionById(target)){const b=el('button','pchip pchip-link',ch.label);b.type='button';b.onclick=function(){show(target);};row.appendChild(b);return;}
+      row.appendChild(el('span','pchip',ch.label));return;
+    }
+    if(href&&(href.indexOf('http')===0||href.charAt(0)==='/'||href.indexOf('mailto:')===0)){
+      const a=el('a','pchip pchip-link',ch.label);a.href=href;
+      if(href.indexOf('mailto:')!==0){a.target='_blank';a.rel='noopener';}
+      row.appendChild(a);return;
+    }
+    row.appendChild(el('span','pchip',ch.label));   // bare label (e.g. a contact name)
+  });
+  return row;
+}
+
+/* ---- Pattern-B first screen: thesis + status + next action + evidence freshness ---- */
+function buildStatusStrip(){
+  const wrap=el('div','project-state');
+  const exec=sectionById('exec');
+  let thesis='';
+  if(exec&&Array.isArray(exec.subsections)){const pp=exec.subsections.find(function(s){return /partnership proposition/i.test(s.label||'');});if(pp&&typeof pp.body==='string')thesis=pp.body;}
+  const c1=el('div','state-card primary');c1.appendChild(el('div','label','Thesis'));c1.appendChild(el('div','value',thesis||'An AI-native luxury hotel in Santa Clara — NVIDIA compute, Mandarin Oriental brand, Brisen capital.'));wrap.appendChild(c1);
+  const counts={ready:0,partial:0,draft:0};SECTIONS.forEach(function(s){if(counts[s.status]!=null)counts[s.status]++;});
+  const c2=el('div','state-card');c2.appendChild(el('div','label','Status'));c2.appendChild(el('div','value','Working draft · v7 · '+counts.ready+' ready · '+counts.partial+' in progress · '+counts.draft+' draft'));wrap.appendChild(c2);
+  const nextSec=SECTIONS.slice().sort(function(a,b){return a.order-b.order;}).find(function(s){return s.status==='draft'&&s.id!=='exec';});
+  const c3=el('div','state-card');c3.appendChild(el('div','label','Next'));const nv=el('div','value');
+  if(nextSec){nv.appendChild(document.createTextNode('Fill '));const link=el('button','linkbtn',nextSec.num+' · '+nextSec.title);link.type='button';link.onclick=function(){show(nextSec.id);};nv.appendChild(link);}
+  else nv.textContent='Advance partner outreach (§12).';
+  c3.appendChild(nv);wrap.appendChild(c3);
+  const c4=el('div','state-card');c4.appendChild(el('div','label','Evidence'));const ev=el('div','value');
+  const el0=el('button','linkbtn','Field evidence → Appendix §13');el0.type='button';el0.onclick=function(){show('notes');};ev.appendChild(el0);
+  c4.appendChild(ev);wrap.appendChild(c4);
+  fetch('/api/ai-hotel/captures?limit=100',aiHotelReadOptions())
+    .then(function(r){if(!r.ok)throw 0;return r.json();})
+    .then(function(d){
+      const caps=(d&&Array.isArray(d.captures))?d.captures:[];if(!caps.length)return;
+      let latest='';caps.forEach(function(c){if(c.created_at&&(!latest||c.created_at>latest))latest=c.created_at;});
+      const link=el('button','linkbtn',caps.length+' field note'+(caps.length>1?'s':'')+(latest?(' · '+fmtNoteTime(latest)):''));link.type='button';link.onclick=function(){show('notes');};
+      ev.textContent='';ev.appendChild(link);
+    })
+    .catch(function(){});
+  return wrap;
+}
+
+/* ---- §2 hook: existing AREAS use-case grid ---- */
+function renderAreasGrid(container){
   const grid=el('div','agrid');
-  AREAS.forEach(a=>{
-    const card=el('button','acard');card.type='button';card.dataset.text=(a.name+' '+a.blurb+' '+a.uses.join(' ')+' '+a.view).toLowerCase();
-    card.setAttribute('aria-label',a.name);
+  AREAS.forEach(function(a){
+    const card=el('button','acard');card.type='button';card.dataset.text=(a.name+' '+a.blurb+' '+a.uses.join(' ')+' '+a.view).toLowerCase();card.setAttribute('aria-label',a.name);
     const head=el('div','ahead');head.appendChild(iconEl('atile',a.icon));head.appendChild(el('div','aname',a.name));card.appendChild(head);
     card.appendChild(el('div','ablurb',a.blurb));
     const chips=el('div','achips');
-    [['Value',a.value],['Scaling',a.scaling],['Compute',a.compute]].forEach(p=>{
-      const short=p[1].split(' —')[0].split(' -')[0];
-      const ca=el('span','ca');ca.appendChild(el('b',null,p[0]+': '));ca.appendChild(document.createTextNode(short));chips.appendChild(ca);
-    });
+    [['Value',a.value],['Scaling',a.scaling],['Compute',a.compute]].forEach(function(p){const short=p[1].split(' —')[0].split(' -')[0];const ca=el('span','ca');ca.appendChild(el('b',null,p[0]+': '));ca.appendChild(document.createTextNode(short));chips.appendChild(ca);});
     card.appendChild(chips);
     const v=el('div','averdict');v.appendChild(el('span','vt'));v.appendChild(el('span',null,a.view));card.appendChild(v);
     const dots=el('div','card-dots','···');dots.setAttribute('aria-hidden','true');card.appendChild(dots);
-    card.onclick=()=>openArea(a);grid.appendChild(card);
+    card.onclick=function(){openArea(a);};grid.appendChild(card);
   });
-  main.appendChild(grid);
-  const src=el('div','snote','AI here enhances luxury service — it does not replace the human touch. Click any area for its use cases and Mandarin Oriental’s initial assessment. Source: Mandarin Oriental concept note “AI opportunities in hospitality” (R. Bick, 22 May 2026).');
-  src.style.marginTop='28px';main.appendChild(src);
+  container.appendChild(grid);
 }
+
+/* ---- AI use-case area detail (opened from the §2 areas grid) ---- */
 function openArea(a){
   const tag=document.getElementById('dlgTag');tag.className='dlg-tag area';tag.textContent='AI use case';
   document.getElementById('dlgTitle').textContent=a.name;
@@ -563,73 +816,6 @@ function openArea(a){
     const cell=el('div','a');cell.appendChild(el('div','k',p[0]));cell.appendChild(el('div','v',p[1]));grid.appendChild(cell);});
   b.appendChild(grid);
   document.getElementById('detail').showModal();
-}
-
-/* ---- stakeholders ---- */
-function rankItem(side,item,i){
-  const b=el('button','item '+side+(i===0?' top':''));b.type='button';
-  b.appendChild(el('span','num',String(i+1)));b.appendChild(el('span','itx',item.t));b.appendChild(iconEl('chev','chev'));
-  b.onclick=()=>openItem(side,item);return b;
-}
-function giveGetCols(s){
-  const cols=el('div','cols');
-  const cg=el('div','col gives');const hg=el('h4');hg.appendChild(el('span','chip'));hg.appendChild(el('span',null,'Gives'));cg.appendChild(hg);
-  const ig=el('div','items');s.gives.forEach((it,i)=>ig.appendChild(rankItem('gives',it,i)));cg.appendChild(ig);
-  const ct=el('div','col gets');const ht=el('h4');ht.appendChild(el('span','chip'));ht.appendChild(el('span',null,'Gets'));ct.appendChild(ht);
-  const it2=el('div','items');s.gets.forEach((it,i)=>it2.appendChild(rankItem('gets',it,i)));ct.appendChild(it2);
-  cols.appendChild(cg);cols.appendChild(ct);return cols;
-}
-function renderStake(main){
-  main.appendChild(el('div','kicker','Strategic overview'));
-  main.appendChild(el('h1','sec',"Stakeholders' interests"));
-  main.appendChild(el('div','sec-sub','Every stakeholder in the AI Hotel (Mandarin Oriental, Santa Clara). What each gives, and what each gets — ranked 1 = most important. Click any line for what it means, with examples.'));
-  const lg=el('div','legend');
-  const l1=el('div','lr');l1.appendChild(el('span','sw g'));l1.appendChild(el('span',null,'Gives — what it contributes'));
-  const l2=el('div','lr');l2.appendChild(el('span','sw t'));l2.appendChild(el('span',null,'Gets — what it receives'));
-  lg.appendChild(l1);lg.appendChild(l2);main.appendChild(lg);
-  const wrap=el('div','cards');
-  STAKEHOLDERS.forEach(s=>{
-    const card=el('div','scard');card.dataset.text=(s.name+' '+s.role+' '+s.gives.map(i=>i.t).join(' ')+' '+s.gets.map(i=>i.t).join(' ')+' '+s.note).toLowerCase();
-    const head=el('div','shead');head.appendChild(el('span','sidx',s.idx));head.appendChild(el('span','sname',s.name));head.appendChild(el('span','srole',s.role));
-    card.appendChild(head);card.appendChild(giveGetCols(s));
-    if(s.note)card.appendChild(el('div','snote',s.note));
-    wrap.appendChild(card);
-  });
-  main.appendChild(wrap);
-}
-function openItem(side,item){
-  const tag=document.getElementById('dlgTag');tag.className='dlg-tag '+side;tag.textContent=side==='gives'?'Gives':'Gets';
-  document.getElementById('dlgTitle').textContent=item.t;
-  document.getElementById('dlgTitle').style.color='';
-  document.getElementById('dlgWho').textContent=(side==='gives'?'What this party gives':'What this party gets');
-  const b=document.getElementById('dlgBody');while(b.firstChild)b.removeChild(b.firstChild);
-  b.appendChild(el('p','lead',item.x||''));
-  if(item.ex&&item.ex.length){b.appendChild(el('div','dlg-h','Examples'));const ul=el('ul','exlist');item.ex.forEach(e=>ul.appendChild(el('li',null,e)));b.appendChild(ul);}
-  document.getElementById('detail').showModal();
-}
-
-/* ---- library (research / communications) ---- */
-function renderLibrary(main,opts,arr){
-  main.appendChild(el('div','kicker',opts.kicker));
-  main.appendChild(el('h1','sec',opts.title));
-  main.appendChild(el('div','sec-sub',opts.sub));
-  const grid=el('div','rgrid');
-  arr.forEach(r=>{
-    const card=el('div','rcard');card.dataset.text=(r.title+' '+r.desc+' '+(r.meta||'')).toLowerCase();
-    const top=el('div','rtop');top.appendChild(iconEl('rti',r.icon||'book'));
-    const live=r.status==='live'&&r.url;
-    if(live){const a=el('a','rtitle',r.title);a.href=r.url;a.target='_blank';a.rel='noopener';top.appendChild(a);}
-    else top.appendChild(el('span','rtitle',r.title));
-    top.appendChild(el('span','rstatus '+(live?'live':'soon'),live?'Live':'Soon'));
-    card.appendChild(top);
-    if(r.meta)card.appendChild(el('div','rmeta',r.meta));
-    card.appendChild(el('div','rdesc',r.desc||''));
-    const foot=el('div','rfoot');
-    if(live){const a=el('a','rlink');a.href=r.url;a.target='_blank';a.rel='noopener';a.appendChild(el('span',null,'Open report'));a.appendChild(iconEl('lic','external'));foot.appendChild(a);}
-    else foot.appendChild(el('span','rsoon','Draft pending'));
-    card.appendChild(foot);grid.appendChild(card);
-  });
-  main.appendChild(grid);
 }
 
 /* ---- field notes (live captures from the phone) ---- */
@@ -1265,96 +1451,132 @@ function openNoteDetail(c){
   document.getElementById('detail').showModal();
 }
 
-/* ---- HITEC 2026 floor scout (vendors the Chairman met) ---- */
-function renderHitec(main){
-  main.appendChild(el('div','kicker','From the floor'));
-  main.appendChild(el('h1','sec','HITEC 2026 — floor scout'));
-  main.appendChild(el('div','sec-sub','Vendors the Chairman scouted at HITEC 2026 (San Antonio, 17 Jun 2026). Built from his dictated notes and the badge photos. Each card opens what they do, why it matters to us, and the contact. Most actionable first.'));
+/* ============================================================================
+ * v7 render hooks — wired into the SECTIONS model.
+ *   SUB_HOOKS (subsection-level): areasGrid, plannedFrontDesk, siteThesis
+ *   SECTION_HOOKS (section-level): vendorPipeline
+ * ========================================================================== */
+
+/* §9 — Vendor & Partner Pipeline (B4 package: each subsection = one vendor) */
+function vendorPipelineHook(main,sec){
+  const subs=Array.isArray(sec.subsections)?sec.subsections:[];
+  if(!subs.length){main.appendChild(el('div','pempty',sec.emptyText||'Vendor pipeline to be filled.'));return;}
   const grid=el('div','rgrid');
-  VENDORS.forEach(v=>{
+  subs.forEach(function(sub){
+    const bodyArr=Array.isArray(sub.body)?sub.body:(sub.body?[String(sub.body)]:[]);
     const card=el('div','rcard');card.style.cursor='pointer';
-    card.dataset.text=(v.co+' '+v.person+' '+v.what+' '+v.why+' '+v.area+' '+v.contact+' '+(v.dossier||'')).toLowerCase();
-    const top=el('div','rtop');top.appendChild(iconEl('rti',v.icon||'book'));
-    top.appendChild(el('span','rtitle',v.co));
-    top.appendChild(el('span','rstatus '+(/High fit/.test(v.fit)?'live':'soon'),v.fit));
+    card.dataset.text=(sub.label+' '+bodyArr.join(' ')+' '+(sub.nextAction||'')+' '+(sub.followUp||'')).toLowerCase();
+    const top=el('div','rtop');top.appendChild(iconEl('rti','search'));
+    top.appendChild(el('span','rtitle',sub.label||'Vendor'));
+    if(sub.rank)top.appendChild(el('span','rstatus '+(sub.rank<=2?'live':'soon'),'#'+sub.rank));
     card.appendChild(top);
-    card.appendChild(el('div','rmeta',v.person+'  ·  '+v.area));
-    card.appendChild(el('div','rdesc',v.what));
-    const foot=el('div','rfoot');
-    const a=el('span','rlink');a.appendChild(el('span',null,'Open detail'));a.appendChild(iconEl('lic','chev'));foot.appendChild(a);
-    card.appendChild(foot);
-    card.onclick=()=>openVendor(v);
+    if(sub.nextAction)card.appendChild(el('div','rmeta','Next: '+sub.nextAction));
+    card.appendChild(el('div','rdesc',bodyArr[0]||sub.empty||''));
+    const foot=el('div','rfoot');const a=el('span','rlink');a.appendChild(el('span',null,'Open detail'));a.appendChild(iconEl('lic','chev'));foot.appendChild(a);card.appendChild(foot);
+    card.onclick=function(){openVendorV7(sub);};
     grid.appendChild(card);
   });
   main.appendChild(grid);
 }
-function openVendor(v){
-  const tag=document.getElementById('dlgTag');tag.className='dlg-tag area';tag.textContent='HITEC 2026 · '+v.fit;
-  document.getElementById('dlgTitle').textContent=v.co;
-  document.getElementById('dlgTitle').style.color='var(--amber)';
-  document.getElementById('dlgWho').textContent=v.person+'  ·  '+v.area;
+function openVendorV7(sub){
+  const tag=document.getElementById('dlgTag');tag.className='dlg-tag area';tag.textContent='Vendor'+(sub.rank?(' · #'+sub.rank):'');
+  const t=document.getElementById('dlgTitle');t.textContent=sub.label||'Vendor';t.style.color='var(--amber)';
+  document.getElementById('dlgWho').textContent=sub.followUp||'';
   const b=document.getElementById('dlgBody');while(b.firstChild)b.removeChild(b.firstChild);
-  b.appendChild(el('div','dlg-h','What they do'));
-  b.appendChild(el('p','lead',v.what));
-  b.appendChild(el('div','dlg-h','Why it matters to us'));
-  b.appendChild(el('p',null,v.why));
-  if(v.dossier){
-    b.appendChild(el('div','dlg-h','Company dossier'));
-    b.appendChild(el('p',null,v.dossier));
-  }
-  b.appendChild(el('div','dlg-h','Contact'));
-  b.appendChild(el('p',null,v.contact));
+  const bodyArr=Array.isArray(sub.body)?sub.body:(sub.body?[String(sub.body)]:[]);
+  if(bodyArr.length){b.appendChild(el('div','dlg-h','Detail'));const ul=el('ul','exlist');bodyArr.forEach(function(line){if(line)ul.appendChild(el('li',null,String(line)));});b.appendChild(ul);}
+  b.appendChild(el('div','dlg-h','Next action'));b.appendChild(el('p',null,sub.nextAction||'—'));
+  b.appendChild(el('div','dlg-h','Owner'));
+  if(sub.owner)b.appendChild(el('p',null,sub.owner));
+  else b.appendChild(el('div','pempty','No Brisen owner assigned yet.'));
+  if(sub.followUp){b.appendChild(el('div','dlg-h','Follow-up status'));b.appendChild(el('p',null,sub.followUp));}
+  if(Array.isArray(sub.chips)&&sub.chips.length){b.appendChild(el('div','dlg-h','Contacts & links'));b.appendChild(buildChips(sub.chips));}
   document.getElementById('detail').showModal();
 }
 
-function renderPlanned(main){
-  main.appendChild(el('div','kicker','Planned features'));
-  main.appendChild(el('h1','sec','Always-on AI front desk'));
-  main.appendChild(el('div','sec-sub','One of the features we plan for the AI Hotel, to debut at the Santa Clara flagship.'));
-  main.appendChild(el('div','pf-flag','Santa Clara flagship'));
-  main.appendChild(el('div','pf-lead','An orchestration layer that sits on top of every system the hotel already runs, including the PMS, CRM and even legacy desktop apps, so staff stop being the plumbing between screens and stay on the guest.'));
+/* §4 — Always-on AI front desk concept (preserved planned-features visual) */
+function plannedFrontDeskHook(container){
+  container.appendChild(el('div','pf-flag','Santa Clara flagship'));
   const grid=el('div','pf-grid');
   [['1','Sits on top, replaces nothing','Runs the existing PMS, CRM and even legacy desktop apps the way a person would.'],
    ['2','One brain, every channel','Phone, email, text and WhatsApp, answered as one front desk for every department, always on.'],
    ['3','Works your way','Learns the way the best staff work; a manager finalises the sensitive calls.']].forEach(function(r){
-    const c=el('div','pf-card');
-    c.appendChild(el('div','pf-tile',r[0]));
-    c.appendChild(el('div','pf-name',r[1]));
-    c.appendChild(el('div','pf-blurb',r[2]));
-    grid.appendChild(c);
+    const c=el('div','pf-card');c.appendChild(el('div','pf-tile',r[0]));c.appendChild(el('div','pf-name',r[1]));c.appendChild(el('div','pf-blurb',r[2]));grid.appendChild(c);
   });
-  main.appendChild(grid);
+  container.appendChild(grid);
   const val=el('div','pf-val');
-  [['Revenue','Micro-profiles guests for the right offer later.'],
-   ['Lower cost','Automates the repetitive back-office load.'],
-   ['Brand','Every interaction kept at an A-plus level.'],
-   ['Team','Freed from plumbing for the work they love.']].forEach(function(r){
-    const v=el('div',null);
-    v.appendChild(el('div','pf-vlabel',r[0]));
-    v.appendChild(el('div','pf-vdesc',r[1]));
-    val.appendChild(v);
-  });
-  main.appendChild(val);
+  [['Revenue','Micro-profiles guests for the right offer later.'],['Lower cost','Automates the repetitive back-office load.'],['Brand','Every interaction kept at an A-plus level.'],['Team','Freed from plumbing for the work they love.']].forEach(function(r){const v=el('div',null);v.appendChild(el('div','pf-vlabel',r[0]));v.appendChild(el('div','pf-vdesc',r[1]));val.appendChild(v);});
+  container.appendChild(val);
 }
 
+/* §3 — Site thesis derived from the §13 Field-Notes research_findings (no duplication;
+   normalizes to owner / zoning-or-parcel / price-or-permits / evidence + links back to §13).
+   Auth-gated source: absent/unauthorised/malformed → visible empty-state + link to §13. */
+function normalizeSiteFindings(rf){
+  const out={owner:'',zoning:'',price:'',permits:'',evidence:''};
+  if(!rf||typeof rf!=='object')return out;
+  (Array.isArray(rf.answers)?rf.answers:[]).forEach(function(a){
+    if(!a)return;const q=(a.q||a.question||'').toLowerCase();const v=(a.a||a.answer||'');if(!v)return;
+    if(/owner|seller|landlord|title/.test(q)&&!out.owner)out.owner=v;
+    else if(/zoning|parcel|apn|lot|entitl/.test(q)&&!out.zoning)out.zoning=v;
+    else if(/price|cost|ask|psf|rent|\$/.test(q)&&!out.price)out.price=v;
+    else if(/permit|approval/.test(q)&&!out.permits)out.permits=v;
+  });
+  out.evidence=[rf.confidence,rf.researched_on?('researched '+rf.researched_on):''].filter(Boolean).join(' · ')||(rf.source||'');
+  return out;
+}
+function buildSiteThesisRow(c){
+  const v=(c.form_record&&c.form_record.values)||{};
+  const rf=v.research_findings;const n=normalizeSiteFindings(rf);
+  const card=el('div','pcard');
+  card.appendChild(el('div','plabel',cardName(c)));
+  if(rf&&rf.headline)card.appendChild(el('p','ppar',String(rf.headline)));
+  [['Owner',n.owner],['Zoning / parcel',n.zoning],['Price / permits',[n.price,n.permits].filter(Boolean).join(' · ')],['Evidence',n.evidence]].forEach(function(p){
+    const row=el('div','kv');row.appendChild(el('span','kvk',p[0]));row.appendChild(el('span','kvv',p[1]||'—'));card.appendChild(row);
+  });
+  const chips=el('div','pchips');const b=el('button','pchip pchip-link','Open in Field Evidence →');b.type='button';b.onclick=function(){show('notes');};chips.appendChild(b);card.appendChild(chips);
+  return card;
+}
+function siteThesisEmpty(sub){
+  const w=el('div',null);
+  w.appendChild(el('div','pempty',(sub&&sub.empty)||'Site research summary loads from Field Evidence.'));
+  const chips=el('div','pchips');const b=el('button','pchip pchip-link','Open Field Evidence (§13) →');b.type='button';b.onclick=function(){show('notes');};chips.appendChild(b);
+  w.appendChild(chips);return w;
+}
+function siteThesisHook(container,sec,sub){
+  const ph=el('div','pempty','Loading site research from Field Evidence…');container.appendChild(ph);
+  fetch('/api/ai-hotel/captures?limit=100',aiHotelReadOptions())
+    .then(function(r){if(!r.ok)throw 0;return r.json();})
+    .then(function(d){
+      const caps=(d&&Array.isArray(d.captures))?d.captures:[];
+      const sites=caps.filter(function(c){const v=c.form_record&&c.form_record.values;return cardKind(c)==='site'&&v&&v.research_findings&&typeof v.research_findings==='object';});
+      ph.remove();
+      if(!sites.length){container.appendChild(siteThesisEmpty(sub));return;}
+      sites.forEach(function(c){container.appendChild(buildSiteThesisRow(c));});
+    })
+    .catch(function(){ph.remove();container.appendChild(siteThesisEmpty(sub));});
+}
+
+const SUB_HOOKS={areasGrid:renderAreasGrid,plannedFrontDesk:plannedFrontDeskHook,siteThesis:siteThesisHook};
+const SECTION_HOOKS={vendorPipeline:vendorPipelineHook};
+
 function show(id){
+  if(!sectionById(id))id='exec';
   current=id;closeMenu();window.scrollTo(0,0);buildNav();
   const main=document.getElementById('main');while(main.firstChild)main.removeChild(main.firstChild);
-  document.getElementById('search').value='';
-  if(id==='hotel')renderHotel(main);
-  else if(id==='stake')renderStake(main);
-  else if(id==='research')renderLibrary(main,{kicker:'Library',title:'Research',sub:'Studies commissioned for this project. Each card opens its full report. More cards are added each session.'},RESEARCH);
-  else if(id==='comms')renderLibrary(main,{kicker:'Outbound',title:'Communications to parties',sub:'Letters and messages to each party, built from this map. Each opens as a report once drafted.'},COMMS);
-  else if(id==='competitors')renderLibrary(main,{kicker:'Market',title:'Competitors',sub:'Competitor moves in AI-native luxury hospitality. Each card opens its full note. Added as signals surface.'},COMPETITORS);
-  else if(id==='hitec')renderHitec(main);
-  else if(id==='notes')renderNotes(main);
-  else if(id==='planned')renderPlanned(main);
-  else renderHotel(main);
+  const sb=document.getElementById('search');if(sb)sb.value='';
+  try{
+    if(id==='notes')renderNotes(main);                          // §13 — preserved special hook
+    else renderPresentationSection(main,sectionById(id));        // §1-12 — reusable renderer
+  }catch(e){
+    while(main.firstChild)main.removeChild(main.firstChild);
+    main.appendChild(el('div','nempty','This section could not be displayed.'));
+  }
 }
 
 function doSearch(q){
   q=q.trim().toLowerCase();
-  document.querySelectorAll('.scard,.acard,.rcard').forEach(c=>{c.classList.toggle('hide',!(!q||(c.dataset.text||'').includes(q)));});
+  document.querySelectorAll('.pcard,.acard,.rcard,.scard').forEach(function(c){c.classList.toggle('hide',!(!q||(c.dataset.text||'').includes(q)));});
 }
 
 const sidebarEl=document.getElementById('sidebar'),scrimEl=document.getElementById('scrim'),menuBtn=document.getElementById('menuBtn');
@@ -1389,92 +1611,13 @@ document.querySelectorAll('[data-theme-choice]').forEach(btn=>btn.addEventListen
 try{setTheme(localStorage.getItem('aih.theme')||'light');}catch(e){setTheme('light');}
 syncDrawerA11y();
 
-/* ===== stakeholder data ===== */
-var STAKEHOLDERS=[
-  {idx:'01',name:'NVIDIA',role:'chips · models · ecosystem',
-   gives:[
-     {t:'Brand & lighthouse co-marketing',x:'NVIDIA lends its name and co-marketing machine to a flagship "lighthouse" deployment — joint press, a named case study, stage time, logos side by side. It tells the market this is NVIDIA-grade AI.',ex:['A co-branded "AI lighthouse" launch with joint CEO billing','A named customer story on nvidia.com','Stage time / a demo at GTC']},
-     {t:'Engineering support (strategic/lighthouse only)',x:'NVIDIA assigns solution architects and engineers free of charge — but only to strategic, lighthouse-scale accounts, as a sales investment that drives future GPU adoption. Ordinary support is a paid product.',ex:['Dedicated solution architects on the build','Direct line to NVIDIA deep-learning engineers','Roadmap and early-access briefings']},
-     {t:'Priority GPU allocation',x:'In a supply-constrained market, NVIDIA can move a partner to the front of the queue for its newest GPUs — a real and scarce concession.',ex:['Early units before general availability','Guaranteed allocation when supply is tight']},
-     {t:'Inception perks & connections',x:'Access to NVIDIA Inception, its startup program — credits, support, and a pipeline of vetted AI startups Brisen can pull into the locked library.',ex:['Cloud / compute credits','Warm intros to AI startups','Co-marketing for member startups']}
-   ],
-   gets:[
-     {t:'Hospitality validation — opens the vertical',x:'A working luxury-hotel deployment proves NVIDIA’s stack works in hospitality, de-risking the whole category and turning every other hotel and operator into a prospective buyer.',ex:['Proof AI lifts guest satisfaction / RevPAR','A reference the sales team shows every chain','A new vertical in NVIDIA’s enterprise story']},
-     {t:'GPU & compute sales',x:'Every AI workload in the hotel — and across the vertical it unlocks — runs on NVIDIA GPUs and compute. That recurring hardware demand is the durable commercial return.',ex:['On-prem GPU servers in the hotel','Cloud GPU consumption for inference','Pull-through demand as other hotels copy it']},
-     {t:'Library & SDK / CUDA lock-in',x:'Building on NVIDIA’s libraries, SDKs and CUDA deepens platform dependence — switching costs that protect future revenue.',ex:['Apps built on CUDA / NIM microservices','Omniverse / NeMo adoption','Developers trained on NVIDIA tooling']},
-     {t:'A flagship showcase site to sell from',x:'The named hotel NVIDIA can point to and physically show prospects — its hospitality demo and case study in one place.',ex:['Site visits and demos for prospects','A booth case study at industry events','Press tours of "the AI hotel"']}
-   ],
-   note:'Almost nothing NVIDIA gives actually costs it — so what we ask is cheap to grant. Architect support is conditional on the prize being big enough. Precedents: see Research → NVIDIA precedents.'},
-  {idx:'02',name:'Mandarin Oriental',role:'brand & operator · MOHG',
-   gives:[
-     {t:'MO brand & service standards',x:'The Mandarin Oriental name and its renowned luxury-service standards — the scarce asset that makes the hotel a credible luxury-AI proof point.',ex:['The MO brand on the flagship','MO’s service playbook applied to the AI']},
-     {t:'The venue & operations',x:'A real, operating hotel to deploy in, plus the staff and operations to run the pilot day to day.',ex:['Rooms, lobby and F&B as the live test bed','Staff running the AI in production']},
-     {t:'Guest access & data',x:'Access to real luxury guests and their consented data — without which nothing can be validated.',ex:['Guest journeys to instrument','Consented preference and stay data']}
-   ],
-   gets:[
-     {t:'MO brand uplift',x:'Positions MO as the most innovative luxury brand — a positioning and marketing win.',ex:['"World’s first AI luxury hotel" story','Differentiation vs Four Seasons / Aman']},
-     {t:'AI rolled to other MO hotels',x:'Proven AI solutions extended across the wider MO portfolio — directly serving its ~45 → 100+ growth goal.',ex:['Roll-out to MO Vienna and beyond','Group-wide efficiency gains']},
-     {t:'NVIDIA brand association',x:'Reflected credibility from partnering with NVIDIA.',ex:['Joint "AI lighthouse" billing']},
-     {t:'AUM growth & marketing halo',x:'Higher asset value and earned-media halo across the group.',ex:['RevPAR / valuation uplift','Earned media coverage']}
-   ],
-   note:'MO’s brand is the scarce asset the whole project routes through. Protect it: wall off MO-specific AI from anything sold elsewhere, or its moat leaks.'},
-  {idx:'03',name:'Brisen',role:'developer & sponsor',
-   gives:[
-     {t:'The build & orchestration',x:'Brisen assembles and runs the whole thing — partners, build and delivery.',ex:['Orchestrating NVIDIA + MO + startups','Program-managing the build']},
-     {t:'Capital & risk-bearing',x:'Brisen puts in (or arranges) the money and carries the development risk.',ex:['Development capital','Taking first-loss risk']},
-     {t:'The relationships',x:'Brisen’s access to NVIDIA, MO and investors is itself the enabling asset.',ex:['The Storer / NVIDIA relationship','The MO ownership relationship']}
-   ],
-   gets:[
-     {t:'Platform & equity upside',x:'The durable prize: owning the platform and equity in what’s built, not just fees.',ex:['Equity in the platform company','Stakes in library startups']},
-     {t:'US-market entry',x:'A beachhead into the US market via Santa Clara.',ex:['A flagship US asset','US network and deal flow']},
-     {t:'Development fees',x:'Current income from developing and delivering the project.',ex:['Development and management fees']},
-     {t:'Brand value',x:'Brisen positioned as the builder of hospitality AI.',ex:['"Brisen instinct" credibility','Track record for the next deal']}
-   ],
-   note:'Brisen sits in two seats — developer and, likely, investor/owner. Its prize is the platform and equity, not the fees.'},
-  {idx:'04',name:'AI companies & start-ups',role:'AI builders · locked library',
-   gives:[
-     {t:'Their AI into the locked library',x:'Startups contribute their products into Brisen’s curated "locked" library for the hotel.',ex:['A concierge-AI model','A housekeeping-robotics product']},
-     {t:'Equity / lock-in',x:'In return for validation and distribution, they give equity or accept lock-in terms.',ex:['Equity to Brisen','Exclusivity in hospitality']},
-     {t:'Integration & support',x:'They do the integration work and support the live deployment.',ex:['Integrating with hotel systems','On-site support during the pilot']}
-   ],
-   gets:[
-     {t:'Real-hotel validation',x:'Live proof their product works in a real luxury hotel.',ex:['A case study in a flagship','Performance data from real guests']},
-     {t:'MO + NVIDIA halo',x:'Reflected credibility from both brands at once.',ex:['"Validated at Mandarin Oriental, on NVIDIA"']},
-     {t:'Distribution to hotels',x:'A route to many hotel customers via the platform.',ex:['Pipeline to other MO hotels','Distribution across the vertical']},
-     {t:'Valuation lift',x:'Validation plus distribution lifts their valuation.',ex:['A stronger next funding round']}
-   ],
-   note:'The library is Brisen’s aggregation play — startups validated in the flagship, then distributed through Brisen’s own platform, walled off from MO-specific data and standards.'},
-  {idx:'05',name:'Investor / owner / lender',role:'capital — may be Brisen',
-   gives:[
-     {t:'Capital & financing',x:'Provides the money — equity or debt — to build and own the asset.',ex:['Equity investment','Construction / acquisition financing']}
-   ],
-   gets:[
-     {t:'The asset',x:'Ownership of the hotel real estate itself.',ex:['Title to the Santa Clara asset']},
-     {t:'Platform stake',x:'A share in the platform built on top of the hotel.',ex:['Equity in the platform company']},
-     {t:'Start-up equity',x:'Exposure to the upside of the library start-ups.',ex:['A basket of AI-startup stakes']},
-     {t:'NVIDIA brand',x:'Association with NVIDIA’s brand and ecosystem.',ex:['Credibility attached to the asset']},
-     {t:'Brisen brand value',x:'Reflected value from Brisen’s track record as builder.',ex:['Confidence in delivery']}
-   ],
-   note:'The capital seat may be Brisen itself. Whoever holds it captures the most ranked value.'},
-  {idx:'06',name:'Guests',role:'end customers',
-   gives:[
-     {t:'Room spend',x:'Guests pay premium room rates and on-property spend.',ex:['Room revenue','F&B and experiences spend']},
-     {t:'Data & consent',x:'Guests share, with consent, the data that personalises their service.',ex:['Preferences','Stay history']}
-   ],
-   gets:[
-     {t:'A personalised luxury stay',x:'A futuristic, deeply personalised experience.',ex:['Service that remembers preferences','A frictionless, anticipatory stay']},
-     {t:'Service that anticipates them',x:'AI lets staff anticipate needs before guests ask.',ex:['Requests handled proactively','Tailored recommendations']}
-   ],
-   note:'The guest experience is the proof the whole thesis rests on — no guest delight, no validation.'}
-];
-
 // AI_HOTEL_REMEMBER_KEY_1: resolve the access key ON LOAD (not lazily when the
 // Field Notes view renders) so a keyed visit persists + strips ?key= even when
 // the landing view is the vision page (AC1/AC4 regardless of default section).
 // noteKey() is idempotent: after the strip the URL has no key, so later calls
 // in renderNotes just read the stored value.
 noteKey();
-buildNav();show('hotel');
+buildNav();show('exec');
 </script>
 </body>
 </html>
