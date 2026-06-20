@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<!-- build: AI_HOTEL_KEY_PASTE_SELFSERVE_1 (self-service key entry on keyless empty state; remember-key persist+strip; GPS evidence). Served no-cache (#382) — self-contained, no ?v= sub-asset. -->
+<!-- build: AI_HOTEL_FIELDNOTES_IMAGE_VIEWER_FIX_1 (tap-to-enlarge lightbox + on-demand single-image load, no 2MB upfront; self-service key entry; remember-key; GPS). Served no-cache (#382) — self-contained, no ?v= sub-asset. -->
 <title>AI Hotel — NVIDIA × Mandarin Oriental × Brisen</title>
 <style>
   :root{
@@ -171,6 +171,18 @@
   .nphotos-ph{font-size:13px;color:var(--muted);margin:8px 0}
   .nthumbs{display:flex;gap:6px;flex-wrap:wrap;margin-top:10px}
   .nthumbs img{width:44px;height:44px;border-radius:6px;object-fit:cover;border:1px solid var(--line);background:var(--bg)}
+  /* AI_HOTEL_FIELDNOTES_IMAGE_VIEWER_FIX_1: tappable detail thumbs + lightbox */
+  .nthumbs img.nthumb-tap{width:72px;height:72px;border-radius:7px;cursor:pointer;transition:transform .08s ease}
+  .nthumbs img.nthumb-tap:hover{transform:scale(1.05)}
+  .nthumb-missing{background:var(--panel)}
+  .lbox{position:fixed;inset:0;z-index:9999;background:rgba(8,8,8,.93);display:flex;align-items:center;justify-content:center}
+  .lbox-stage{max-width:96vw;max-height:88vh;display:flex;align-items:center;justify-content:center}
+  .lbox-img{max-width:96vw;max-height:88vh;object-fit:contain;border-radius:4px;box-shadow:0 8px 40px rgba(0,0,0,.55)}
+  .lbox-msg{color:#eee;font:500 14px/1.4 var(--sans)}
+  .lbox-x{position:absolute;top:14px;right:16px;width:40px;height:40px;border-radius:50%;border:none;background:rgba(255,255,255,.16);color:#fff;font-size:18px;cursor:pointer}
+  .lbox-nav{position:absolute;top:50%;transform:translateY(-50%);width:46px;height:46px;border-radius:50%;border:none;background:rgba(255,255,255,.16);color:#fff;font-size:26px;line-height:1;cursor:pointer}
+  .lbox-prev{left:12px}.lbox-next{right:12px}
+  .lbox-count{position:absolute;bottom:16px;left:0;right:0;text-align:center;color:#ddd;font:600 13px/1 var(--mono)}
   .nbody{flex:1 1 auto;min-width:0}
   .nsmry{font-size:14.5px;color:var(--text);line-height:1.5;margin-bottom:10px;word-wrap:break-word}
   .nmeta{display:flex;align-items:center;gap:9px;flex-wrap:wrap}
@@ -821,6 +833,85 @@ function cardAsText(c){
   return lines.join('\n');
 }
 
+// AI_HOTEL_FIELDNOTES_IMAGE_VIEWER_FIX_1: detail-modal photo strip. The old path
+// fetched ALL full-res images in one response (capture 17 = 2.07 MB → "Loading
+// photos…" hang on cellular) and showed them as un-enlargeable 44px crops. Now
+// the strip loads tiny per-image thumbs immediately (GET /thumbs) and each thumb
+// is tap-to-enlarge — the single full-res image loads on demand in a lightbox.
+function renderPhotos(b, c){
+  const n=c.image_count||0;
+  if(n<=0)return;
+  b.appendChild(el('div','dlg-h','Photos · '+n));
+  const ph=el('div','nphotos-ph','Loading photos…');
+  b.appendChild(ph);
+  fetch('/api/ai-hotel/captures/'+c.id+'/thumbs',{headers:{'X-Baker-Key':noteKey()}})
+    .then(function(r){return r.json();})
+    .then(function(d){
+      const list=(d&&Array.isArray(d.thumbs))?d.thumbs:[];
+      ph.remove();
+      if(!list.length){b.appendChild(el('div','nphotos-ph','No photos found.'));return;}
+      const strip=el('div','nthumbs');
+      list.forEach(function(src,i){
+        const t=document.createElement('img');
+        t.alt='Field photo '+(i+1);t.loading='lazy';t.className='nthumb-tap';t.title='Tap to enlarge';
+        if(src)t.src=src; else t.classList.add('nthumb-missing');
+        t.onclick=function(){openLightbox(c,i);};
+        strip.appendChild(t);
+      });
+      b.appendChild(strip);
+    })
+    .catch(function(){ph.textContent='Could not load photos — reopen to retry.';});
+}
+
+// Full-screen photo viewer. Loads ONE full-res image at a time on demand
+// (GET /captures/{id}/images/{idx}) so the modal never pulls the whole set;
+// prev/next + swipe between a card's photos; tap backdrop / ✕ / Esc to close.
+function openLightbox(c, startIdx){
+  const total=c.image_count||0;
+  if(total<=0)return;
+  let idx=Math.max(0,Math.min(startIdx||0,total-1));
+  const cache={};
+  const ov=el('div','lbox');ov.setAttribute('role','dialog');ov.setAttribute('aria-label','Photo viewer');
+  const stage=el('div','lbox-stage');
+  const imgEl=document.createElement('img');imgEl.className='lbox-img';imgEl.alt='Field photo';imgEl.style.display='none';
+  const spin=el('div','lbox-msg','Loading…');
+  stage.appendChild(spin);stage.appendChild(imgEl);
+  const counter=el('div','lbox-count','');
+  const closeBtn=el('button','lbox-x','✕');closeBtn.setAttribute('aria-label','Close');
+  const prev=el('button','lbox-nav lbox-prev','‹');prev.setAttribute('aria-label','Previous photo');
+  const next=el('button','lbox-nav lbox-next','›');next.setAttribute('aria-label','Next photo');
+  ov.appendChild(closeBtn);ov.appendChild(prev);ov.appendChild(stage);ov.appendChild(next);ov.appendChild(counter);
+  document.body.appendChild(ov);
+  function close(){document.removeEventListener('keydown',onKey);ov.remove();}
+  function load(){
+    counter.textContent=(idx+1)+' / '+total;
+    prev.style.visibility=next.style.visibility=(total>1?'visible':'hidden');
+    if(cache[idx]){imgEl.src=cache[idx];imgEl.style.display='block';spin.style.display='none';return;}
+    imgEl.style.display='none';spin.style.display='block';spin.textContent='Loading…';
+    const want=idx;
+    fetch('/api/ai-hotel/captures/'+c.id+'/images/'+idx,{headers:{'X-Baker-Key':noteKey()}})
+      .then(function(r){return r.json();})
+      .then(function(d){
+        if(want!==idx)return;
+        if(d&&d.image){cache[idx]=d.image;imgEl.src=d.image;imgEl.style.display='block';spin.style.display='none';}
+        else{spin.textContent='Photo unavailable.';}
+      })
+      .catch(function(){if(want===idx)spin.textContent='Could not load — use ‹ › to retry.';});
+  }
+  function go(d){idx=(idx+d+total)%total;load();}
+  prev.onclick=function(e){e.stopPropagation();go(-1);};
+  next.onclick=function(e){e.stopPropagation();go(1);};
+  closeBtn.onclick=function(e){e.stopPropagation();close();};
+  ov.onclick=function(){close();};
+  stage.onclick=function(e){e.stopPropagation();};
+  function onKey(e){if(e.key==='Escape')close();else if(e.key==='ArrowLeft')go(-1);else if(e.key==='ArrowRight')go(1);}
+  document.addEventListener('keydown',onKey);
+  let sx=null;
+  stage.addEventListener('touchstart',function(e){sx=e.touches[0].clientX;},{passive:true});
+  stage.addEventListener('touchend',function(e){if(sx==null)return;const dx=e.changedTouches[0].clientX-sx;if(Math.abs(dx)>40)go(dx<0?1:-1);sx=null;},{passive:true});
+  load();
+}
+
 function openNoteDetail(c){
   const kind=cardKind(c);
   const fr=c.form_record;
@@ -843,6 +934,9 @@ function openNoteDetail(c){
     });
     if(!any)b.appendChild(el('p',null,'No fields were filled on this card.'));
   }
+  // AI_HOTEL_FIELDNOTES_IMAGE_VIEWER_FIX_1: photos near the top (not buried under
+  // GPS/audio), small thumbs that load immediately, tap-to-enlarge full-res.
+  renderPhotos(b, c);
   // AI_HOTEL_GPS_CAPTURE_1: location evidence shown SEPARATELY from the dictated
   // clue (evidence vs claim). The Maps link is built from lat/lng (URL-encoded),
   // NEVER from the free-text address (AC8).
@@ -937,23 +1031,10 @@ function openNoteDetail(c){
     };
     b.appendChild(loadVideo);
   }
-  // Photos: list carries a thumbnail only; full images load on demand here.
-  if((c.image_count||0)>0){
-    b.appendChild(el('div','dlg-h','Photos · '+c.image_count));
-    const ph=el('div','nphotos-ph','Loading photos…');
-    b.appendChild(ph);
-    fetch('/api/ai-hotel/captures/'+c.id+'/images',{headers:{'X-Baker-Key':noteKey()}})
-      .then(function(r){return r.json();})
-      .then(function(d){
-        const list=(d&&Array.isArray(d.images))?d.images:[];
-        ph.remove();
-        if(!list.length){b.appendChild(el('div','nphotos-ph','No photos found.'));return;}
-        const strip=el('div','nthumbs');
-        list.forEach(function(src){const t=document.createElement('img');t.src=src;t.alt='Field photo';t.loading='lazy';strip.appendChild(t);});
-        b.appendChild(strip);
-      })
-      .catch(function(){ph.textContent='Could not load photos — reopen to retry.';});
-  }
+  // Photos now render near the top (renderPhotos, called right after Card fields)
+  // — moved out from under GPS/audio so they are the first thing the Director
+  // sees, and the strip loads small thumbs (not the 2 MB full-res set) + tap-to-
+  // enlarge (AI_HOTEL_FIELDNOTES_IMAGE_VIEWER_FIX_1).
   // Actions: Copy (client-side) + Dismiss (reuses the #380 discard endpoint).
   const acts=el('div','dlg-acts');
   const copyBtn=el('button','sbtn2','Copy card text');
