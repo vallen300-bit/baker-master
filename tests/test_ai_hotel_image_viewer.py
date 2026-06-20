@@ -43,6 +43,24 @@ def test_lightbox_loads_single_image_on_demand():
     assert "cache[idx]" in lb                                # don't refetch a viewed image
 
 
+def test_lightbox_has_persistent_rotate_control():
+    src = Path("outputs/static/ai-hotel.html").read_text()
+    lb = src[src.index("function openLightbox("):src.index("function openNoteDetail(")]
+    assert "lbox-rotate" in src
+    assert "Rotate photo clockwise" in lb
+    assert "/captures/'+c.id+'/images/'+idx+'/rotate" in lb
+    assert "aiHotelJsonOptions({deg:90})" in lb
+    assert "updatePhotoThumbs(c,idx" in lb
+
+
+def test_rotate_thumb_update_does_not_replace_feed_for_non_first_photo():
+    src = Path("outputs/static/ai-hotel.html").read_text()
+    fn = src[src.index("function updatePhotoThumbs("):src.index("function cardAsText(")]
+    assert "if(idx===0)" in fn
+    assert ".nthumb[data-capture-id" in fn
+    assert "data-photo-idx" in fn
+
+
 def test_photos_block_moved_above_gps_and_audio():
     src = Path("outputs/static/ai-hotel.html").read_text()
     start = src.index("function openNoteDetail(")
@@ -66,12 +84,18 @@ def test_backend_endpoints_exist():
     src = Path("outputs/dashboard.py").read_text()
     assert '"/api/ai-hotel/captures/{capture_id}/thumbs"' in src
     assert '"/api/ai-hotel/captures/{capture_id}/images/{idx}"' in src
+    assert '"/api/ai-hotel/captures/{capture_id}/images/{idx}/rotate"' in src
     assert "ImageOps.exif_transpose" in src
     assert "_ai_hotel_image_data_url" in src
+    assert "_ai_hotel_rotate_image_b64" in src
     # both read-auth gated (master key or scoped AI-Hotel PIN cookie)
     seg = src[src.index('"/api/ai-hotel/captures/{capture_id}/thumbs"'):
               src.index('"/api/ai-hotel/captures/{capture_id}/media"')]
     assert seg.count("Depends(verify_ai_hotel_read_access)") >= 2
+    assert "Depends(verify_ai_hotel_photo_edit_access)" in seg
+    assert "UPDATE ai_hotel_capture_images" in seg
+    assert "UPDATE ai_hotel_captures" in seg
+    assert "AND image_b64 = %s" in seg
 
 
 def test_photo_css_has_exif_orientation_fallback():
@@ -100,7 +124,33 @@ class _Cur:
         self._res = []
 
     def execute(self, sql, params=None):
-        if "FROM ai_hotel_capture_images" in sql and "AND ordinal = %s" in sql:
+        if "UPDATE ai_hotel_capture_images" in sql:
+            new_b64, new_media, cid, idx, old_b64 = params
+            self._res = []
+            for r in self.s.images:
+                if (
+                    r["capture_id"] == cid
+                    and r["ordinal"] == idx
+                    and r["image_b64"] == old_b64
+                ):
+                    r["image_b64"] = new_b64
+                    r["image_media"] = new_media
+                    self._res = [{"ordinal": idx}]
+                    break
+        elif "UPDATE ai_hotel_captures" in sql:
+            if len(params) == 3:
+                new_b64, new_media, cid = params
+                old_b64 = None
+            else:
+                new_b64, new_media, cid, old_b64 = params
+            self._res = []
+            for r in self.s.parents:
+                if r["id"] == cid and (old_b64 is None or r.get("image_b64") == old_b64):
+                    r["image_b64"] = new_b64
+                    r["image_media"] = new_media
+                    self._res = [{"id": cid}]
+                    break
+        elif "FROM ai_hotel_capture_images" in sql and "AND ordinal = %s" in sql:
             cid, idx = params
             self._res = [r for r in self.s.images if r["capture_id"] == cid and r["ordinal"] == idx][:1]
         elif "FROM ai_hotel_capture_images" in sql:                       # ordered list
@@ -173,6 +223,15 @@ def _exif_rotated_jpeg_b64() -> str:
     exif[274] = 6
     buf = BytesIO()
     img.save(buf, format="JPEG", exif=exif)
+    return base64.standard_b64encode(buf.getvalue()).decode("ascii")
+
+
+def _plain_jpeg_b64(size: tuple[int, int] = (80, 40)) -> str:
+    from PIL import Image as PILImage
+
+    img = PILImage.new("RGB", size, "white")
+    buf = BytesIO()
+    img.save(buf, format="JPEG")
     return base64.standard_b64encode(buf.getvalue()).decode("ascii")
 
 
@@ -250,8 +309,132 @@ def test_single_image_endpoint_transposes_phone_exif_orientation(monkeypatch):
 
 
 @_skip
+def test_rotate_endpoint_persists_child_image_and_returns_new_thumb(monkeypatch):
+    store = _Store()
+    original = _plain_jpeg_b64((80, 40))
+    store.parents = [
+        {"id": 17, "image_b64": original, "image_media": "image/jpeg"},
+    ]
+    store.images = [
+        {"capture_id": 17, "ordinal": 0, "image_b64": original, "image_media": "image/jpeg"},
+    ]
+    client = _client(monkeypatch, store)
+
+    resp = client.post(
+        "/api/ai-hotel/captures/17/images/0/rotate",
+        headers=_HDR,
+        json={"deg": 90},
+    )
+
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+    assert body["ok"] is True and body["deg"] == 90
+    assert body["thumb"].startswith("THUMB:")
+    assert store.images[0]["image_b64"] != original
+    assert store.parents[0]["image_b64"] == store.images[0]["image_b64"]
+    assert _image_size_from_data_url(body["image"]) == (40, 80)
+    detail = client.get("/api/ai-hotel/captures/17/images/0", headers=_HDR).json()["image"]
+    assert _image_size_from_data_url(detail) == (40, 80)
+
+
+@_skip
+def test_rotate_endpoint_updates_legacy_parent_fallback(monkeypatch):
+    store = _Store()
+    original = _plain_jpeg_b64((90, 30))
+    store.parents = [
+        {"id": 9, "image_b64": original, "image_media": "image/jpeg"},
+    ]
+    client = _client(monkeypatch, store)
+
+    resp = client.post(
+        "/api/ai-hotel/captures/9/images/0/rotate",
+        headers=_HDR,
+        json={"deg": 90},
+    )
+
+    assert resp.status_code == 200, resp.text
+    assert store.parents[0]["image_b64"] != original
+    assert _image_size_from_data_url(resp.json()["image"]) == (30, 90)
+
+
+@_skip
+def test_rotate_endpoint_accepts_scoped_pin_cookie(monkeypatch):
+    from fastapi.testclient import TestClient
+    import outputs.dashboard as dash
+
+    store = _Store()
+    original = _plain_jpeg_b64((80, 40))
+    store.parents = [
+        {"id": 17, "image_b64": original, "image_media": "image/jpeg"},
+    ]
+    store.images = [
+        {"capture_id": 17, "ordinal": 0, "image_b64": original, "image_media": "image/jpeg"},
+    ]
+    monkeypatch.setenv("BAKER_API_KEY", "test-key")
+    monkeypatch.setenv("AI_HOTEL_PIN", "6470")
+    monkeypatch.setenv("AI_HOTEL_SESSION_SECRET", "session-secret")
+    monkeypatch.setattr(dash, "_BAKER_API_KEY", "test-key")
+    monkeypatch.setattr(dash, "_get_store", lambda: store)
+    dash._ai_hotel_pin_state.clear()
+    dash.app.dependency_overrides.pop(dash.verify_api_key, None)
+    dash.app.dependency_overrides.pop(dash.verify_ai_hotel_read_access, None)
+    dash.app.dependency_overrides.pop(dash.verify_ai_hotel_photo_edit_access, None)
+    client = TestClient(dash.app, base_url="https://testserver")
+
+    pin = client.post("/api/ai-hotel/pin-auth", json={"pin": "6470"})
+    resp = client.post("/api/ai-hotel/captures/17/images/0/rotate", json={"deg": 90})
+
+    assert pin.status_code == 200
+    assert resp.status_code == 200, resp.text
+    assert store.images[0]["image_b64"] != original
+    assert store.parents[0]["image_b64"] == store.images[0]["image_b64"]
+
+
+@_skip
+def test_rotate_endpoint_rejects_invalid_degree_without_mutating(monkeypatch):
+    store = _Store()
+    original = _plain_jpeg_b64((80, 40))
+    store.images = [
+        {"capture_id": 17, "ordinal": 0, "image_b64": original, "image_media": "image/jpeg"},
+    ]
+    client = _client(monkeypatch, store)
+
+    resp = client.post(
+        "/api/ai-hotel/captures/17/images/0/rotate",
+        headers=_HDR,
+        json={"deg": 45},
+    )
+
+    assert resp.status_code == 400
+    assert store.images[0]["image_b64"] == original
+
+
+@_skip
+def test_rotate_endpoint_bad_image_loses_nothing(monkeypatch):
+    store = _Store()
+    original = "not base64 at all!!"
+    store.images = [
+        {"capture_id": 17, "ordinal": 0, "image_b64": original, "image_media": "image/jpeg"},
+    ]
+    client = _client(monkeypatch, store)
+
+    resp = client.post(
+        "/api/ai-hotel/captures/17/images/0/rotate",
+        headers=_HDR,
+        json={"deg": 90},
+    )
+
+    assert resp.status_code == 400
+    assert store.images[0]["image_b64"] == original
+
+
+@_skip
 def test_new_endpoints_require_auth(monkeypatch):
     store = _Store()
     client = _client(monkeypatch, store)
     assert client.get("/api/ai-hotel/captures/17/thumbs").status_code == 401
     assert client.get("/api/ai-hotel/captures/17/images/0").status_code == 401
+    assert client.post(
+        "/api/ai-hotel/captures/17/images/0/rotate",
+        json={"deg": 90},
+    ).status_code == 401

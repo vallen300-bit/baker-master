@@ -1,7 +1,8 @@
-"""AI_HOTEL_PIN_GATE_1 — short PIN -> scoped AI-Hotel read cookie.
+"""AI_HOTEL_PIN_GATE_1 — short PIN -> scoped AI-Hotel viewer cookie.
 
-The master X-Baker-Key is still the only write/admin credential. The PIN flow
-sets an httpOnly signed cookie that is accepted only by AI-Hotel read routes.
+The master X-Baker-Key is still the general write/admin credential. The PIN flow
+sets an httpOnly signed cookie accepted by AI-Hotel read routes plus the explicit
+manual photo-rotate repair action inside the private Field Notes viewer.
 """
 
 from __future__ import annotations
@@ -109,6 +110,11 @@ def test_pin_route_and_scoped_read_dependency_in_source():
     assert "verify_api_key" in write_seg
     presign_seg = src[src.index('media/presign"'):src.index("async def ai_hotel_capture_media_presign(")]
     assert "verify_api_key" in presign_seg
+    rotate_seg = src[
+        src.index('@app.post("/api/ai-hotel/captures/{capture_id}/images/{idx}/rotate"'):
+        src.index("async def ai_hotel_capture_image_rotate(")
+    ]
+    assert "verify_ai_hotel_photo_edit_access" in rotate_seg
 
 
 def test_pin_ui_uses_cookie_flow_without_key_storage():

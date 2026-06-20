@@ -167,6 +167,10 @@ class AIHotelPinAuthRequest(BaseModel):
     pin: str = Field("", max_length=64)
 
 
+class AIHotelImageRotateRequest(BaseModel):
+    deg: int = Field(..., description="Clockwise rotation degrees: 90, 180, or 270")
+
+
 async def verify_api_key(x_baker_key: str = Header(None, alias="X-Baker-Key")):
     """Validate API key from X-Baker-Key header."""
     if not _BAKER_API_KEY:
@@ -381,6 +385,27 @@ async def verify_ai_hotel_read_access(
     raise HTTPException(
         status_code=401,
         detail="Invalid or missing AI Hotel read credentials",
+        headers={"WWW-Authenticate": "X-Baker-Key"},
+    )
+
+
+async def verify_ai_hotel_photo_edit_access(
+    request: Request,
+    x_baker_key: str = Header(None, alias="X-Baker-Key"),
+):
+    """AI-Hotel narrow photo-edit auth for in-viewer rotation only.
+
+    The master key remains the general write/admin credential. The scoped
+    AI-Hotel cookie is accepted here only because the manual rotate button is a
+    Director-approved repair action inside the private Field Notes viewer.
+    """
+    if _BAKER_API_KEY and x_baker_key and hmac.compare_digest(x_baker_key, _BAKER_API_KEY):
+        return
+    if _ai_hotel_session_valid(request.cookies.get(_AI_HOTEL_SESSION_COOKIE)):
+        return
+    raise HTTPException(
+        status_code=401,
+        detail="Invalid or missing AI Hotel photo edit credentials",
         headers={"WWW-Authenticate": "X-Baker-Key"},
     )
 
@@ -9832,6 +9857,34 @@ def _ai_hotel_image_data_url(image_b64, media: str = "image/jpeg"):
         return raw_url
 
 
+def _ai_hotel_rotate_image_b64(image_b64: str, media: str = "image/jpeg", deg: int = 90):
+    """Rotate stored AI-Hotel image pixels clockwise and return JPEG base64.
+
+    The caller updates Postgres only after this helper has decoded, rotated, and
+    re-encoded successfully, so a bad legacy image never destroys the original
+    stored bytes.
+    """
+    import base64 as _b64
+    from io import BytesIO
+    from PIL import Image as PILImage, ImageOps
+
+    if deg not in (90, 180, 270):
+        raise ValueError("deg must be 90, 180, or 270")
+    raw = _b64.b64decode(image_b64)
+    img = PILImage.open(BytesIO(raw))
+    img.load()
+    img = ImageOps.exif_transpose(img)
+    if img.mode not in ("RGB", "L"):
+        img = img.convert("RGB")
+    rotated = img.rotate(-deg, expand=True)
+    if rotated.mode != "RGB":
+        rotated = rotated.convert("RGB")
+    buf = BytesIO()
+    rotated.save(buf, format="JPEG", quality=85, optimize=True)
+    data = buf.getvalue()
+    return _b64.b64encode(data).decode("ascii"), "image/jpeg"
+
+
 # ── AI_HOTEL_GPS_CAPTURE_1: capture-level GPS evidence ──────────────────────
 # GPS is captured client-side (navigator.geolocation, with permission) and is
 # HARD EVIDENCE — stored SEPARATELY from any dictated address_or_location_clue
@@ -10819,6 +10872,116 @@ async def ai_hotel_capture_single_image_detail(capture_id: int, idx: int):
     except Exception as e:
         logger.error(f"GET /api/ai-hotel/captures/{capture_id}/images/{idx} failed: {e}")
         return {"image": None}
+
+
+@app.post("/api/ai-hotel/captures/{capture_id}/images/{idx}/rotate", tags=["ai-hotel"],
+          dependencies=[Depends(verify_ai_hotel_photo_edit_access)])
+async def ai_hotel_capture_image_rotate(
+    capture_id: int,
+    idx: int,
+    payload: AIHotelImageRotateRequest,
+):
+    """Rotate ONE stored photo clockwise and persist the pixel change.
+
+    AI_HOTEL_PHOTO_ROTATE_BUTTON_1: manual repair for old EXIF-stripped sideways
+    Field Notes photos. Reads the stored base64, rotates into a fresh JPEG
+    buffer, and updates Postgres only after the new bytes are ready; thumbs and
+    full images are generated on demand from the same stored copy.
+    """
+    if idx < 0:
+        raise HTTPException(status_code=404, detail="Image not found.")
+    deg = int(payload.deg)
+    if deg not in (90, 180, 270):
+        raise HTTPException(status_code=400, detail="deg must be 90, 180, or 270.")
+    try:
+        store = _get_store()
+        import psycopg2.extras
+        conn = store._get_conn()
+        if not conn:
+            raise HTTPException(status_code=503, detail="DB unavailable")
+        try:
+            cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+            cur.execute(
+                """SELECT image_b64, image_media
+                     FROM ai_hotel_capture_images
+                    WHERE capture_id = %s AND ordinal = %s
+                    LIMIT 1""",
+                (capture_id, idx),
+            )
+            row = cur.fetchone()
+            target = "child"
+            if row is None and idx == 0:
+                cur.execute(
+                    "SELECT image_b64, image_media FROM ai_hotel_captures WHERE id = %s",
+                    (capture_id,),
+                )
+                row = cur.fetchone()
+                target = "parent"
+            if not row or not row.get("image_b64"):
+                raise HTTPException(status_code=404, detail="Image not found.")
+
+            old_b64 = row["image_b64"]
+            media = row.get("image_media") or "image/jpeg"
+            new_b64, new_media = _ai_hotel_rotate_image_b64(old_b64, media, deg)
+            if target == "child":
+                cur.execute(
+                    """UPDATE ai_hotel_capture_images
+                          SET image_b64 = %s, image_media = %s
+                        WHERE capture_id = %s AND ordinal = %s AND image_b64 = %s
+                    RETURNING ordinal""",
+                    (new_b64, new_media, capture_id, idx, old_b64),
+                )
+                updated = cur.fetchone()
+                if not updated:
+                    raise HTTPException(status_code=409, detail="Image changed; reload and retry.")
+                if idx == 0:
+                    cur.execute(
+                        """UPDATE ai_hotel_captures
+                              SET image_b64 = %s, image_media = %s
+                            WHERE id = %s""",
+                        (new_b64, new_media, capture_id),
+                    )
+            else:
+                cur.execute(
+                    """UPDATE ai_hotel_captures
+                          SET image_b64 = %s, image_media = %s
+                        WHERE id = %s AND image_b64 = %s
+                    RETURNING id""",
+                    (new_b64, new_media, capture_id, old_b64),
+                )
+                updated = cur.fetchone()
+                if not updated:
+                    raise HTTPException(status_code=409, detail="Image changed; reload and retry.")
+            conn.commit()
+            cur.close()
+        except HTTPException:
+            conn.rollback()
+            raise
+        except Exception:
+            conn.rollback()
+            raise
+        finally:
+            store._put_conn(conn)
+        return {
+            "ok": True,
+            "deg": deg,
+            "image": _ai_hotel_image_data_url(new_b64, new_media),
+            "thumb": _ai_hotel_thumb_data_url(new_b64, new_media),
+        }
+    except HTTPException:
+        raise
+    except ValueError as e:
+        logger.warning(
+            "POST /api/ai-hotel/captures/%s/images/%s/rotate rejected: %s",
+            capture_id, idx, e,
+        )
+        raise HTTPException(status_code=400, detail="Image could not be rotated.")
+    except Exception as e:
+        logger.error(
+            "POST /api/ai-hotel/captures/%s/images/%s/rotate failed: %s",
+            capture_id, idx, e,
+        )
+        raise HTTPException(status_code=500, detail="Image rotate failed.")
 
 
 @app.get("/api/ai-hotel/captures/{capture_id}/media", tags=["ai-hotel"],
