@@ -217,6 +217,12 @@
   .kv{display:flex;gap:10px;padding:7px 0;border-bottom:1px solid var(--line)}
   .kvk{flex:0 0 38%;font:600 12px/1.5 var(--mono);text-transform:uppercase;letter-spacing:.03em;color:var(--muted)}
   .kvv{flex:1;font-size:14px;color:var(--text);word-wrap:break-word;white-space:pre-wrap}
+  /* AI_HOTEL_RESEARCH_FINDINGS_1: researched answers written back onto a card. */
+  .rf-head{font-size:14px;line-height:1.55;color:var(--text);background:var(--amber-weak);border-left:3px solid var(--amber);border-radius:0 6px 6px 0;padding:10px 13px;margin:0 0 12px;word-wrap:break-word}
+  .rf-meta{font:500 11.5px/1.5 var(--mono);color:var(--muted);margin:0 0 12px;word-wrap:break-word}
+  .rf-flag{font-size:13px;line-height:1.5;color:var(--text-2);margin:9px 0 0;padding-left:4px;word-wrap:break-word}
+  .rf-need{font-size:13px;line-height:1.5;color:var(--amber);font-weight:600;margin:11px 0 0;word-wrap:break-word}
+  .rf-src{font:500 11px/1.5 var(--mono);color:var(--faint);margin:11px 0 0;word-wrap:break-word}
   .dlg-acts{display:flex;gap:9px;flex-wrap:wrap;margin-top:18px}
   .sbtn2{font:600 13px/1 var(--sans);padding:11px 15px;border-radius:8px;border:1px solid var(--id-blue-line);background:var(--card);color:var(--id-blue);cursor:pointer}
   .sbtn2.danger{color:var(--accent);border-color:var(--accent-line)}
@@ -881,8 +887,8 @@ function buildNoteCard(c){
     if(v.hospitality_fit)bits.push('fit: '+humanizeVal(v.hospitality_fit));
     if(v.overall_score)bits.push('score '+v.overall_score+'/5');
     if(v.next_action)bits.push('→ '+humanizeVal(v.next_action));
-    const miss=researchCount(v.unknowns_to_research);
-    if(miss)bits.push(miss+' to research');
+    if(v.research_findings&&typeof v.research_findings==='object')bits.push('✓ researched');
+    else{const miss=researchCount(v.unknowns_to_research);if(miss)bits.push(miss+' to research');}
     if(bits.length)body.appendChild(el('div','ncompact',bits.join('  ·  ')));
   } else if(kind==='supplier'){
     const bits=[];
@@ -941,11 +947,38 @@ function deleteNoteCard(c, btn){
     });
 }
 
+function appendResearchFindingsText(lines, rf){
+  if(!rf||typeof rf!=='object')return;
+  lines.push('','Research findings');
+  if(rf.headline)lines.push('Headline: '+String(rf.headline));
+  const meta=[rf.source,rf.confidence,rf.researched_on?('researched '+rf.researched_on):''].filter(Boolean).join('  ·  ');
+  if(meta)lines.push('Meta: '+meta);
+  const answers=Array.isArray(rf.answers)?rf.answers:[];
+  answers.forEach(function(a){
+    if(!a)return;
+    const q=a.q||a.question||'';
+    const val=a.a||a.answer||'';
+    if(!q&&!val)return;
+    lines.push(String(q)+': '+String(val));
+  });
+  const flags=Array.isArray(rf.flags)?rf.flags:[];
+  flags.forEach(function(f){if(f)lines.push('Flag: '+String(f));});
+  const needs=rf.needs||rf.needs_paid_pull;
+  if(needs)lines.push('Needs: '+String(needs));
+  if(rf.sources)lines.push('Sources: '+String(rf.sources));
+}
+
 function cardAsText(c){
   const lines=[];
   lines.push(cardKindLabel(cardKind(c))+' — '+(c.summary||''));
   const v=(c.form_record&&c.form_record.values)||{};
-  Object.keys(v).forEach(function(k){const val=v[k];if(val!==null&&val!==undefined&&val!=='')lines.push(humanizeVal(k)+': '+val);});
+  const rf=v.research_findings;
+  Object.keys(v).forEach(function(k){
+    if(k==='research_findings')return;
+    if(k==='unknowns_to_research'&&rf&&typeof rf==='object')return;
+    const val=v[k];if(val!==null&&val!==undefined&&val!=='')lines.push(humanizeVal(k)+': '+String(val));
+  });
+  if(rf&&typeof rf==='object')appendResearchFindingsText(lines,rf);
   if(c.note_text)lines.push('',c.note_text);
   return lines.join('\n');
 }
@@ -1054,6 +1087,30 @@ function openLightbox(c, startIdx){
   load();
 }
 
+function renderResearchFindings(b, rf){
+  b.appendChild(el('div','dlg-h','Research findings'));
+  if(!rf||typeof rf!=='object')return;
+  if(rf.headline)b.appendChild(el('div','rf-head',String(rf.headline)));
+  const meta=[rf.source,rf.confidence,rf.researched_on?('researched '+rf.researched_on):''].filter(Boolean).join('  ·  ');
+  if(meta)b.appendChild(el('div','rf-meta',meta));
+  const answers=Array.isArray(rf.answers)?rf.answers:[];
+  answers.forEach(function(a){
+    if(!a)return;
+    const q=a.q||a.question||'';
+    const val=a.a||a.answer||'';
+    if(!q&&!val)return;
+    const row=el('div','kv');
+    row.appendChild(el('span','kvk',String(q)));
+    row.appendChild(el('span','kvv',String(val)));
+    b.appendChild(row);
+  });
+  const flags=Array.isArray(rf.flags)?rf.flags:[];
+  flags.forEach(function(f){if(f)b.appendChild(el('div','rf-flag','Flag: '+String(f)));});
+  const needs=rf.needs||rf.needs_paid_pull;
+  if(needs)b.appendChild(el('div','rf-need','Needs: '+String(needs)));
+  if(rf.sources)b.appendChild(el('div','rf-src','Sources: '+String(rf.sources)));
+}
+
 function openNoteDetail(c){
   const kind=cardKind(c);
   const fr=c.form_record;
@@ -1067,15 +1124,19 @@ function openNoteDetail(c){
   const b=document.getElementById('dlgBody');while(b.firstChild)b.removeChild(b.firstChild);
   // Structured fields (AC3).
   if(fr&&fr.values){
+    const rf=fr.values.research_findings;
     b.appendChild(el('div','dlg-h','Card fields'));
     let any=false;
     Object.keys(fr.values).forEach(function(k){
+      if(k==='research_findings')return;
+      if(k==='unknowns_to_research'&&rf&&typeof rf==='object')return;
       const val=fr.values[k];if(val===null||val===undefined||val==='')return;
       any=true;
       const row=el('div','kv');row.appendChild(el('span','kvk',humanizeVal(k)));row.appendChild(el('span','kvv',String(val)));
       b.appendChild(row);
     });
     if(!any)b.appendChild(el('p',null,'No fields were filled on this card.'));
+    if(rf&&typeof rf==='object')renderResearchFindings(b,rf);
   }
   // AI_HOTEL_FIELDNOTES_IMAGE_VIEWER_FIX_1: photos near the top (not buried under
   // GPS/audio), small thumbs that load immediately, tap-to-enlarge full-res.
