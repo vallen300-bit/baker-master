@@ -400,15 +400,31 @@ def _upsert_quiet_alert(
         # Fix 2 (ALERT_NOISE_FASTFOLLOW_1): race-proof dedup at the DB. The partial
         # unique index uq_alerts_pending_quiet (migration 20260621_alerts_uq_pending_quiet)
         # guarantees ≤1 pending quiet/awaiting card per (source, source_id, trigger).
-        # ON CONFLICT DO NOTHING makes the app path and the DB constraint agree: if a
-        # concurrent sweep / second worker / restart-overlap inserts first, this INSERT
-        # no-ops (rowcount=0) instead of raising — no duplicate, no Slack re-push.
+        # If a concurrent sweep / second worker / restart-overlap inserts first, this
+        # INSERT no-ops (rowcount=0) instead of raising — no duplicate, no Slack re-push.
+        #
+        # Arbiter is PINNED via index inference — the index column list + the exact
+        # partial WHERE predicate — NOT a bare targetless `ON CONFLICT DO NOTHING`
+        # (codex gate #3612): a targetless clause would swallow ANY future unique
+        # violation on alerts, masking unrelated bugs. Inference instead fails loud
+        # ("no unique constraint matching the ON CONFLICT specification") if this
+        # index is ever dropped, and lets unrelated unique violations propagate.
+        # NOTE: `ON CONFLICT ON CONSTRAINT uq_alerts_pending_quiet` (codex's literal
+        # wording) is NOT usable here — uq_alerts_pending_quiet is a partial UNIQUE
+        # INDEX, not a table CONSTRAINT; the ON CONSTRAINT form raises "constraint ...
+        # does not exist" at runtime (verified empirically). A partial index can only
+        # be inferred by (columns) + WHERE predicate. Same arbiter, same fail-loud
+        # guarantee, correct syntax.
         cur.execute(
             """
             INSERT INTO alerts (source, source_id, tier, title, body,
                                 matter_slug, status, structured_actions, created_at)
             VALUES (%s, %s, %s, %s, %s, %s, 'pending', %s::jsonb, NOW())
-            ON CONFLICT DO NOTHING
+            ON CONFLICT (source, source_id, (structured_actions->>'trigger'))
+            WHERE status = 'pending'
+              AND source = 'proactive_pm_sentinel'
+              AND structured_actions->>'trigger' IN ('quiet_thread', 'awaiting_counterparty')
+            DO NOTHING
             """,
             (
                 "proactive_pm_sentinel", source_id, tier, title[:500], body[:4000],
