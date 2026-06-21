@@ -80,10 +80,20 @@ Syntax: all 6 `policy/*.py` files `py_compile` clean; `import policy` clean.
 
 ---
 
+## G2 REQUEST_CHANGES round 1 — deputy-codex (bus #3633) — ADDRESSED
+
+deputy-codex returned REQUEST_CHANGES with 2 blockers + 1 coverage note. All fixed in the follow-up commit:
+
+- **F1 (AC7/T1/T2 leak):** `query_visible_items(project=False)` returned the full `EvidenceItem` (with `raw_body`/`title`) to external callers. Fix: `query_visible_items` now FORCES partner projection for any `principal.is_external` regardless of the `project` flag — an external caller can never receive a raw item. Regression: `test_f1_external_query_never_returns_raw_item_default_path` (+ `test_f1_internal_default_path_returns_full_item` proves internal behaviour unchanged). Probe on fixed head: NVIDIA default read → `dict`, no `raw_body`/`title`/`source_refs`.
+- **F2 (AC8 gap):** projection lacked a source count. Fix: `partner_projection` now emits `source_count` (count only — raw `source_refs` may embed internal ids and must not leak). Regression: `test_f2_projection_carries_source_count`.
+- **AC6 coverage note:** `save_item` could persist a `shared_view`/`action_linked` item directly, bypassing the human-ratify gate. Fix: `save_item` raises `PromotionBypassError` for partner-visible states unless `via_lifecycle=True` (the post-promotion persistence step). Regressions: `test_ac6_save_item_cannot_bypass_promotion_gate`, `_via_lifecycle_allows_partner_visible`, `_internal_state_allowed_by_default`.
+
+Re-run: `113 passed` (was 107; +6). Singleton guard green.
+
 ## Gate plan status
 
 - G1 self-test → `pytest` + singleton guard green ✅
-- G2 deputy-codex AC + threat-model gate vs #3621 → **requested**
+- G2 deputy-codex AC + threat-model gate vs #3621 → round 1 REQUEST_CHANGES **addressed**; re-review requested
 - G3 deputy augmented chain (architect + codex-verifier) → after G2
 - G4 lead `/security-review` (Tier-A) → merge
 - POST_DEPLOY_AC v1 after Render deploy (migration runs clean at startup) → after merge

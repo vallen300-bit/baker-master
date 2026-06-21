@@ -197,8 +197,31 @@ def test_ac2_query_visible_items_filters_server_side():
     shared = shared_partner_item(NVIDIA, object_id="shared-1")
     factory = _fake_factory([raw, shared])
     visible = store.query_visible_items(NVIDIA, Action.READ, conn_factory=factory)
-    ids = {it.object_id for it in visible}
+    # external caller receives projections (dicts), never raw items (F1).
+    ids = {p["object_id"] for p in visible}
     assert ids == {"shared-1"}  # raw never reaches the partner
+
+
+def test_f1_external_query_never_returns_raw_item_default_path():
+    # deputy-codex F1: a partner read via the DEFAULT path (project=False) must
+    # still get a redacted projection — never an EvidenceItem with raw_body/title.
+    shared = shared_partner_item(NVIDIA, object_id="shared-1")
+    factory = _fake_factory([shared])
+    visible = store.query_visible_items(NVIDIA, Action.READ, conn_factory=factory)
+    assert len(visible) == 1
+    proj = visible[0]
+    assert not isinstance(proj, EvidenceItem)
+    assert "raw_body" not in proj and "title" not in proj
+    assert "source_refs" not in proj
+    assert "must never leak" not in " ".join(str(v) for v in proj.values())
+
+
+def test_f1_internal_default_path_returns_full_item():
+    # internal callers still get full items by default (no behaviour change).
+    item = make_item(object_id="raw-1", classification=Classification.BRISEN_RAW)
+    factory = _fake_factory([item])
+    visible = store.query_visible_items(BRISEN_DIRECTOR, Action.READ, conn_factory=factory)
+    assert isinstance(visible[0], EvidenceItem)
 
 
 # =========================================================================== #
@@ -361,6 +384,26 @@ def test_ac6_approve_records_proposer_approver_rationale_source():
     assert item.lifecycle_state is LifecycleState.SHARED_VIEW
 
 
+def test_ac6_save_item_cannot_bypass_promotion_gate():
+    # deputy-codex coverage note: a writer hand-building a shared_view item and
+    # persisting it directly must be refused — promotion goes through lifecycle.
+    item = shared_partner_item(NVIDIA)
+    with pytest.raises(store.PromotionBypassError):
+        store.save_item(item, conn_factory=_fake_factory([item]))
+
+
+def test_ac6_save_item_via_lifecycle_allows_partner_visible():
+    # the post-promotion persistence step is allowed with the explicit flag.
+    item = shared_partner_item(NVIDIA)
+    store.save_item(item, via_lifecycle=True, conn_factory=_fake_factory([item]))
+
+
+def test_ac6_save_item_internal_state_allowed_by_default():
+    # non-partner-visible states persist freely (no flag needed).
+    item = make_item(lifecycle_state=LifecycleState.VERIFIED_EVIDENCE)
+    store.save_item(item, conn_factory=_fake_factory([item]))
+
+
 # =========================================================================== #
 # AC7 — partner-safe projection is a DERIVED view, no raw leakage; audit redacted
 # =========================================================================== #
@@ -372,8 +415,18 @@ def test_ac7_projection_excludes_internal_fields():
     assert "allowed_orgs" not in proj
     assert proj["claim"] == item.claim
     assert proj["confidence"] == item.confidence
+    assert "source_refs" not in proj  # raw refs never leak (T2/T5)
     # the secret body text appears nowhere in the projection values
     assert "must never leak" not in " ".join(str(v) for v in proj.values())
+
+
+def test_f2_projection_carries_source_count():
+    # deputy-codex F2: partner-visible evidence must carry a source COUNT
+    # (non-sensitive), not the raw refs.
+    item = shared_partner_item(NVIDIA, source_refs=("s1", "s2", "s3"))
+    proj = engine.partner_projection(NVIDIA, item)
+    assert proj["source_count"] == 3
+    assert "source_refs" not in proj
 
 
 def test_ac7_projection_denied_fails_closed():

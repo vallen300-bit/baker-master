@@ -247,6 +247,10 @@ def partner_projection(
         "object_type": getattr(item.object_type, "value", item.object_type),
         "claim": item.claim,
         "source_type": item.source_type,
+        # source_count (NOT source_refs): the rubric requires partner-visible
+        # evidence to carry a source count, but the raw refs may embed internal
+        # identifiers (email ids, vault paths) and must never leak (T2/T5).
+        "source_count": len(item.source_refs),
         "confidence": item.confidence,
         "freshness": item.freshness,
         "last_reviewed": item.last_reviewed,

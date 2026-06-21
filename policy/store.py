@@ -21,6 +21,7 @@ from typing import Any, Callable, List, Optional
 from policy.audit import AuditSink
 from policy.engine import evaluate, partner_projection
 from policy.models import (
+    PARTNER_VISIBLE_STATES,
     Action,
     AuditEvent,
     Classification,
@@ -51,6 +52,19 @@ class PolicyUnavailableError(RuntimeError):
 
     Callers must surface this as a visible error and return NO object payload —
     never degrade to returning unfiltered objects.
+    """
+
+
+class PromotionBypassError(RuntimeError):
+    """Raised when ``save_item`` is asked to persist an item already in a
+    partner-visible lifecycle state without going through the human-ratify gate.
+
+    ``save_item`` is a low-level raw-persistence primitive. The ONLY legitimate
+    way an item reaches ``shared_view`` / ``action_linked`` is via
+    ``lifecycle.approve_promotion`` (AC6 human ratify). A writer that hand-builds
+    a ``shared_view`` item and calls ``save_item`` directly would bypass that
+    gate — so the persistence path refuses it unless ``via_lifecycle=True`` marks
+    the call as the post-promotion persistence step.
     """
 
 
@@ -86,8 +100,28 @@ def _row_to_item(row: dict[str, Any]) -> EvidenceItem:
 # --------------------------------------------------------------------------- #
 # Writes
 # --------------------------------------------------------------------------- #
-def save_item(item: EvidenceItem, *, conn_factory: ConnFactory = _default_conn_factory) -> None:
-    """Upsert an evidence_item keyed on object_id. Parameterized SQL only."""
+def save_item(
+    item: EvidenceItem,
+    *,
+    via_lifecycle: bool = False,
+    conn_factory: ConnFactory = _default_conn_factory,
+) -> None:
+    """Upsert an evidence_item keyed on object_id. Parameterized SQL only.
+
+    Low-level raw-persistence primitive. Persisting an item already in a
+    partner-visible state (``shared_view`` / ``action_linked``) is REFUSED unless
+    ``via_lifecycle=True`` — this prevents a future writer from bypassing the AC6
+    human-ratify promotion gate by hand-building a shared item and saving it. The
+    post-promotion persistence step in ``lifecycle`` is the only caller that sets
+    the flag.
+    """
+
+    if item.lifecycle_state in PARTNER_VISIBLE_STATES and not via_lifecycle:
+        raise PromotionBypassError(
+            f"refusing direct persistence of object_id={item.object_id} in "
+            f"partner-visible state {getattr(item.lifecycle_state, 'value', item.lifecycle_state)}; "
+            f"promote via lifecycle.approve_promotion (AC6) or pass via_lifecycle=True"
+        )
 
     try:
         with conn_factory() as conn:
@@ -247,13 +281,21 @@ def query_visible_items(
 
     Loads candidate rows (all, or the given ``object_ids``) and runs
     ``engine.evaluate`` on each — the SAME policy function every other surface
-    uses (AC2). ``project=True`` returns partner-safe projections (AC7) instead of
-    full items, for external callers.
+    uses (AC2).
+
+    **External callers ALWAYS receive partner-safe projections** (AC7), never raw
+    ``EvidenceItem``s — ``raw_body`` / ``title`` / source_refs can never reach an
+    external principal through this path regardless of the ``project`` flag (T1/T2
+    confused-deputy: a caller forgetting ``project=True`` must not leak). For
+    internal callers, ``project=True`` opts into the redacted view; the default
+    returns full items.
 
     Fail-closed (T10): if the store is unreachable or the query errors, raises
     ``PolicyUnavailableError`` and returns NO payload. There is no fallback that
     returns unfiltered objects.
     """
+
+    external = principal.is_external
 
     try:
         with conn_factory() as conn:
@@ -277,8 +319,9 @@ def query_visible_items(
         decision = evaluate(principal, item, action, sink=sink)
         if not decision.allow:
             continue
-        if project:
-            # partner_projection re-evaluates (defensive double-check) + redacts.
+        if external or project:
+            # External callers NEVER get the raw item — force the redacted
+            # partner projection (re-evaluates as a defensive double-check).
             visible.append(partner_projection(principal, item, sink=sink))
         else:
             visible.append(item)
