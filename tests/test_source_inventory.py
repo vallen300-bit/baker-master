@@ -115,6 +115,28 @@ def test_ac3_misregistered_partner_safe_still_denied_without_grant():
     assert registry.external_projection_for(NVIDIA, rec) is None
 
 
+def test_f1_external_projection_fails_closed_on_missing_policy_object_id():
+    # deputy-codex F1: a non-gap record missing policy_object_id must NOT project —
+    # no fallback to source_id, no leaked identifier. Fail closed (raise), no payload.
+    rec = _valid_wired(policy_object_id=None)
+    with pytest.raises(registry.RegistryInvalidError):
+        registry.external_projection_for(NVIDIA, rec)
+
+
+def test_f1_query_external_fails_closed_on_invalid_record(monkeypatch):
+    good = _valid_wired()
+    bad = _valid_wired(source_id=fixtures.opaque_id("bad"), policy_object_id=None)
+    monkeypatch.setattr(store, "load_sources", lambda **k: [good, bad])
+    with pytest.raises(registry.RegistryInvalidError):
+        store.query_external_visible_sources(NVIDIA)
+
+
+def test_f1_record_to_evidence_item_requires_policy_object_id():
+    rec = _valid_wired(policy_object_id=None)
+    with pytest.raises(registry.RegistryInvalidError):
+        registry.record_to_evidence_item(rec)
+
+
 # =========================================================================== #
 # AC4 / T3 — uses the LIVE Step-1 policy engine; no duplicate allow path
 # =========================================================================== #

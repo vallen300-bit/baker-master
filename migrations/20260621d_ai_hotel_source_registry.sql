@@ -78,7 +78,11 @@ CREATE TABLE IF NOT EXISTS source_registry (
         collection_status <> 'gap'
         OR (gap_owner IS NOT NULL AND gap_reason IS NOT NULL
             AND gap_next_action IS NOT NULL
-            AND external_projection_available = FALSE))
+            AND external_projection_available = FALSE)),
+    -- AC1/T9 (deputy-codex F1): a non-gap source MUST link to a Step-1 policy
+    -- object. No policy_object_id => fail closed at the DB, never a fallback id.
+    CONSTRAINT chk_nongap_needs_policy_object CHECK (
+        collection_status = 'gap' OR policy_object_id IS NOT NULL)
 );
 
 CREATE INDEX IF NOT EXISTS idx_source_registry_domain_status

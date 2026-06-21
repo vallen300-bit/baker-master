@@ -109,10 +109,18 @@ def record_to_evidence_item(rec: SourceRecord) -> EvidenceItem:
     ``raw_body`` / ``title`` carry only internal sentinels — the registry holds NO
     content. They exist so the projection's redaction is exercised (AC6): if any
     code path ever leaked them, the projection test would catch it.
+
+    A non-gap record MUST carry ``policy_object_id``. There is NO ``source_id``
+    fallback (deputy-codex F1, AC1/T9): falling back to ``source_id`` would leak an
+    opaque source identifier into the external projection's ``object_id``. Missing
+    ``policy_object_id`` fails closed.
     """
 
+    if not rec.policy_object_id:
+        raise RegistryInvalidError("policy_object_id", "required to build evidence item")
+
     return EvidenceItem(
-        object_id=rec.policy_object_id or rec.source_id,
+        object_id=rec.policy_object_id,
         object_type=OBJECT_TYPE_TO_POLICY[rec.object_type],
         classification=rec.classification,
         lifecycle_state=rec.lifecycle_state,
@@ -177,6 +185,13 @@ def external_projection_for(
     """
 
     sink = sink or default_sink()
+
+    # Fail-closed FIRST (deputy-codex F1, AC1/T9): a registry-invalid record — e.g.
+    # a non-gap row missing policy_object_id — must NEVER yield an external
+    # payload. validate_record raises RegistryInvalidError, which propagates so the
+    # caller surfaces registry-invalid rather than leaking a default/fallback id.
+    validate_record(rec)
+
     if rec.is_gap:
         return None  # gap rows carry no payload, never externally visible (AC8)
 

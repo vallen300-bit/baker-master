@@ -92,9 +92,22 @@ internal/raw/financial rows are hidden with reasons; gaps are explicit.
 
 ---
 
+## G2 REQUEST_CHANGES round 1 — deputy-codex (bus #3665) — ADDRESSED
+
+deputy-codex returned REQUEST_CHANGES with 1 blocker (F1, AC1/T9). Fixed:
+
+- **F1 (AC1/T9 leak):** `external_projection_for` projected without calling `validate_record`, and `record_to_evidence_item` fell back to `rec.source_id` when `policy_object_id` was missing — so a non-gap record without `policy_object_id` still projected externally, leaking a source-id-like identifier as `object_id`. Fixes:
+  1. `external_projection_for` now calls `validate_record(rec)` FIRST — a registry-invalid record raises `RegistryInvalidError` (fail closed, no payload) before any projection.
+  2. `record_to_evidence_item` removed the `source_id` fallback — missing `policy_object_id` raises (no leaked identifier).
+  3. Migration adds DB CHECK `chk_nongap_needs_policy_object` (non-gap ⇒ `policy_object_id IS NOT NULL`).
+  4. Negative regressions: `test_f1_external_projection_fails_closed_on_missing_policy_object_id`, `test_f1_query_external_fails_closed_on_invalid_record`, `test_f1_record_to_evidence_item_requires_policy_object_id`.
+  Probe on fixed head: `external_projection_for(NVIDIA, _valid_wired(policy_object_id=None))` raises `RegistryInvalidError` (was: returned a projection with `object_id=src_…`).
+
+Re-run: `38 passed` (was 35; +3). Combined with Step-1: `151 passed`. Singleton green.
+
 ## Gate plan status
 - G1 self-test → `pytest` + singleton green ✅
-- G2 deputy-codex AC + threat-model gate vs #3653 → **requested**
+- G2 deputy-codex AC + threat-model gate vs #3653 → round 1 REQUEST_CHANGES **addressed**; re-review requested
 - G3 deputy augmented chain (architect + codex-verifier) → after G2
 - G4 lead `/security-review` (Tier-A, partner-leak surface) → merge
 - POST_DEPLOY_AC v1 after Render deploy (migration runs clean at startup)
