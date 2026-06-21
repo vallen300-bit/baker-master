@@ -58,6 +58,7 @@ def _bootstrap_alert_schema(dsn: str) -> None:
                 status TEXT DEFAULT 'active',
                 sla_hours INTEGER,
                 turn_count INTEGER DEFAULT 0,
+                last_turn_direction TEXT,
                 started_at TIMESTAMPTZ DEFAULT NOW(),
                 created_at TIMESTAMPTZ DEFAULT NOW(),
                 updated_at TIMESTAMPTZ DEFAULT NOW()
@@ -72,6 +73,13 @@ def _bootstrap_alert_schema(dsn: str) -> None:
                 committer_agent TEXT,
                 created_at TIMESTAMPTZ DEFAULT NOW()
             );
+            -- Mirror migration 20260621_alerts_uq_pending_quiet so ON CONFLICT
+            -- DO NOTHING + the race test exercise the real DB constraint.
+            CREATE UNIQUE INDEX IF NOT EXISTS uq_alerts_pending_quiet
+                ON alerts (source, source_id, (structured_actions->>'trigger'))
+                WHERE status = 'pending'
+                  AND source = 'proactive_pm_sentinel'
+                  AND structured_actions->>'trigger' IN ('quiet_thread', 'awaiting_counterparty');
             """
         )
         conn.commit()
@@ -440,3 +448,245 @@ def test_sweep_collapses_backlog_and_logs(alert_store, needs_live_pg):
     counts2 = store.sweep_alert_noise()
     assert counts2["quiet_flood_expired"] == 0
     assert counts2["stale_expired"] == 0
+
+
+# ─── ALERT_NOISE_FASTFOLLOW_1 ───────────────────────────────────────────────
+
+# Fix 1: upsert UPDATE must exclude rows curated in the SELECT→UPDATE window.
+
+class _RaceCursor:
+    """Wraps a real cursor; on the first fetchone() that returns a row (the
+    upsert's SELECT), acks that row out-of-band on a SEPARATE committed
+    connection — simulating the Director acknowledging the card in the TOCTOU
+    window between the SELECT and the UPDATE. The subsequent guarded UPDATE
+    (READ COMMITTED) then sees acknowledged_at IS NOT NULL → rowcount 0."""
+
+    def __init__(self, real, dsn):
+        self._real = real
+        self._dsn = dsn
+        self._acked = False
+
+    def fetchone(self):
+        row = self._real.fetchone()
+        if not self._acked and row is not None:
+            self._acked = True
+            c = psycopg2.connect(self._dsn)
+            try:
+                cur = c.cursor()
+                cur.execute("UPDATE alerts SET acknowledged_at = NOW() WHERE id = %s",
+                            (row[0],))
+                c.commit()
+                cur.close()
+            finally:
+                c.close()
+        return row
+
+    @property
+    def rowcount(self):
+        return self._real.rowcount
+
+    def __getattr__(self, name):
+        return getattr(self._real, name)
+
+
+class _RaceConn:
+    def __init__(self, real, dsn):
+        self._real = real
+        self._dsn = dsn
+
+    def cursor(self, *a, **k):
+        return _RaceCursor(self._real.cursor(*a, **k), self._dsn)
+
+    def __getattr__(self, name):
+        return getattr(self._real, name)
+
+
+class _RaceStore:
+    def __init__(self, dsn):
+        self._dsn = dsn
+
+    def _get_conn(self):
+        return _RaceConn(psycopg2.connect(self._dsn), self._dsn)
+
+    def _put_conn(self, conn):
+        if conn is None:
+            return
+        try:
+            conn.rollback()
+        except Exception:
+            pass
+        try:
+            conn.close()
+        except Exception:
+            pass
+
+
+def test_upsert_toctou_ack_in_window_skips_update(alert_store, needs_live_pg):
+    """Fix 1: if the row is acknowledged between the upsert SELECT and UPDATE, the
+    guarded UPDATE no-ops (rowcount 0) → returns 'skipped_acknowledged' and never
+    refreshes tier/title/created_at on the now-curated card."""
+    from orchestrator.proactive_pm_sentinel import _upsert_quiet_alert
+
+    # Seed an existing pending, un-acknowledged quiet card.
+    sid = "race-thread-1"
+    conn = psycopg2.connect(needs_live_pg)
+    try:
+        cur = conn.cursor()
+        cur.execute(
+            """
+            INSERT INTO alerts (source, source_id, tier, title, body, status,
+                                structured_actions, created_at)
+            VALUES ('proactive_pm_sentinel', %s, 2, 'orig title', 'orig body',
+                    'pending', %s::jsonb, NOW() - INTERVAL '1 hour')
+            RETURNING id
+            """,
+            (sid, json.dumps({"trigger": "quiet_thread"})),
+        )
+        existing_id = cur.fetchone()[0]
+        conn.commit()
+        cur.close()
+    finally:
+        conn.close()
+
+    race_store = _RaceStore(needs_live_pg)
+    op, _ = _upsert_quiet_alert(
+        race_store, source_id=sid, tier=3, title="refreshed title",
+        body="refreshed body", matter_slug="ao_pm",
+        structured={"trigger": "quiet_thread"},
+    )
+    assert op == "skipped_acknowledged", f"expected skip, got {op}"
+
+    # The curated row must be untouched: still tier 2, original title, acked.
+    conn = psycopg2.connect(needs_live_pg)
+    try:
+        cur = conn.cursor()
+        cur.execute(
+            "SELECT tier, title, acknowledged_at FROM alerts WHERE id = %s",
+            (existing_id,),
+        )
+        tier, title, acked = cur.fetchone()
+        cur.close()
+    finally:
+        conn.close()
+    assert tier == 2, f"UPDATE leaked through the guard: tier={tier}"
+    assert title == "orig title", f"UPDATE leaked through the guard: title={title!r}"
+    assert acked is not None, "row should be acknowledged (set in the race window)"
+
+    # No duplicate was inserted as a fall-through.
+    assert len(_pending_for(needs_live_pg, sid)) == 1
+
+
+# Fix 2: partial unique index rejects a concurrent second pending quiet card.
+
+def test_partial_unique_index_blocks_concurrent_pending(alert_store, needs_live_pg):
+    """Fix 2: uq_alerts_pending_quiet enforces ≤1 pending quiet/awaiting card per
+    (source, source_id, trigger). A plain duplicate INSERT raises; ON CONFLICT DO
+    NOTHING no-ops. Only one pending row survives."""
+    # Index exists (created by the bootstrap, mirrors the migration).
+    conn = psycopg2.connect(needs_live_pg)
+    try:
+        cur = conn.cursor()
+        cur.execute(
+            "SELECT indexname FROM pg_indexes "
+            "WHERE tablename='alerts' AND indexname='uq_alerts_pending_quiet'"
+        )
+        assert cur.fetchone() is not None, "uq_alerts_pending_quiet missing"
+        cur.close()
+
+        sid = "uq-thread-1"
+        sa = json.dumps({"trigger": "quiet_thread"})
+
+        def _insert(on_conflict: bool):
+            c = psycopg2.connect(needs_live_pg)
+            try:
+                cu = c.cursor()
+                tail = "ON CONFLICT DO NOTHING" if on_conflict else ""
+                cu.execute(
+                    f"""
+                    INSERT INTO alerts (source, source_id, tier, title, body, status,
+                                        structured_actions, created_at)
+                    VALUES ('proactive_pm_sentinel', %s, 2, 't', 'b', 'pending',
+                            %s::jsonb, NOW())
+                    {tail}
+                    """,
+                    (sid, sa),
+                )
+                rc = cu.rowcount
+                c.commit()
+                cu.close()
+                return rc
+            finally:
+                c.close()
+
+        assert _insert(on_conflict=False) == 1  # first card lands
+
+        # Plain duplicate INSERT violates the unique index.
+        with pytest.raises(psycopg2.errors.UniqueViolation):
+            _insert(on_conflict=False)
+
+        # ON CONFLICT DO NOTHING no-ops instead of raising.
+        assert _insert(on_conflict=True) == 0
+
+        cur = conn.cursor()
+        cur.execute(
+            "SELECT count(*) FROM alerts WHERE source_id=%s AND status='pending'",
+            (sid,),
+        )
+        assert cur.fetchone()[0] == 1, "exactly one pending card must survive"
+        cur.close()
+    finally:
+        conn.close()
+
+
+# Fix 3: thread-builder writes last_turn_direction; sentinel demotes on the
+# column, not the OUTBOUND_MARKER substring.
+
+def test_thread_builder_direction_drives_demote(alert_store, needs_live_pg, monkeypatch):
+    """Fix 3: a thread built with last_turn_direction='outbound' carries the column,
+    and the sentinel demotes it to tier 3 even when topic_summary has NO marker —
+    proving the demote keys off the durable column, not the brittle string."""
+    import orchestrator.capability_threads as ct
+    from orchestrator.proactive_pm_sentinel import detect_quiet_threads, OUTBOUND_MARKER
+
+    # force_new=True returns before any embed, so the retriever is never used;
+    # stub _get_global_instance so no Qdrant/network instantiation happens.
+    import memory.retriever as _rt
+    monkeypatch.setattr(_rt.SentinelRetriever, "_get_global_instance",
+                        classmethod(lambda cls: object()))
+    # Keep entity extraction offline/deterministic.
+    monkeypatch.setattr(ct, "extract_entity_cluster", lambda *a, **k: {})
+
+    topic_hint = "email_outbound: status note — Re: Annaberg dataroom"
+    assert OUTBOUND_MARKER not in topic_hint.lower(), "test must NOT rely on the marker"
+
+    thread_id, _ = ct.stitch_or_create_thread(
+        pm_slug="ao_pm", question="q", answer="a",
+        topic_summary_hint=topic_hint, surface="signal",
+        force_new=True, last_turn_direction="outbound",
+    )
+
+    # Column was populated by the builder.
+    conn = psycopg2.connect(needs_live_pg)
+    try:
+        cur = conn.cursor()
+        cur.execute(
+            "SELECT last_turn_direction FROM capability_threads WHERE thread_id=%s",
+            (thread_id,),
+        )
+        assert cur.fetchone()[0] == "outbound"
+        # Age the thread past the 6h floor + SLA so the sentinel evaluates it.
+        cur.execute(
+            "UPDATE capability_threads SET last_turn_at = NOW() - INTERVAL '72 hours' "
+            "WHERE thread_id=%s",
+            (thread_id,),
+        )
+        conn.commit()
+        cur.close()
+    finally:
+        conn.close()
+
+    detect_quiet_threads()
+    rows = _pending_for(needs_live_pg, thread_id)
+    assert len(rows) == 1
+    assert rows[0]["tier"] == 3, f"column-driven demote failed: tier={rows[0]['tier']}"
+    assert rows[0]["structured_actions"]["trigger"] == "awaiting_counterparty"

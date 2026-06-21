@@ -102,7 +102,8 @@ def detect_quiet_threads() -> dict:
         # Cast t.thread_id (UUID) to text to match alerts.source_id (TEXT).
         cur.execute(
             """
-            SELECT t.thread_id, t.pm_slug, t.topic_summary, t.last_turn_at, t.sla_hours
+            SELECT t.thread_id, t.pm_slug, t.topic_summary, t.last_turn_at,
+                   t.sla_hours, t.last_turn_direction
             FROM capability_threads t
             WHERE t.status = 'active'
               AND t.last_turn_at < NOW() - INTERVAL '6 hours'
@@ -150,7 +151,19 @@ def detect_quiet_threads() -> dict:
             # counterparty", not a Director to-do. Demote to tier 3 (off the action
             # feed) — the card still exists, per Director ruling "demote, don't hide".
             topic = t.get("topic_summary") or ""
-            is_outbound = OUTBOUND_MARKER in topic.lower()
+            # Fix 3 (ALERT_NOISE_FASTFOLLOW_1): prefer the durable
+            # capability_threads.last_turn_direction column (fed at write-time from
+            # the same @brisengroup.com direction signal that drives
+            # contact_interactions.direction). Fall back to the OUTBOUND_MARKER
+            # substring in topic_summary for old/un-rebuilt threads where the column
+            # is still NULL — so the demote never regresses for un-migrated rows.
+            _dir = (t.get("last_turn_direction") or "").lower()
+            if _dir == "outbound":
+                is_outbound = True
+            elif _dir == "inbound":
+                is_outbound = False
+            else:
+                is_outbound = OUTBOUND_MARKER in topic.lower()
             tier = 3 if is_outbound else 2
             trigger = "awaiting_counterparty" if is_outbound else "quiet_thread"
 
@@ -333,6 +346,14 @@ def _upsert_quiet_alert(
         if row:
             existing_id = row[0]
             existing_sa = row[1] if isinstance(row[1], dict) else None
+            # Fix 1 (ALERT_NOISE_FASTFOLLOW_1): TOCTOU guard. The SELECT above
+            # filtered acknowledged/snoozed, but the Director could ack/snooze this
+            # exact row in the window between SELECT and UPDATE. Re-assert the guard
+            # in the UPDATE WHERE so we never refresh tier/title/body or bump
+            # created_at on a row that became curated mid-call (which would
+            # re-surface an acknowledged card). rowcount=0 → the row was curated in
+            # the window: skip, do NOT fall through to INSERT (that would create the
+            # duplicate this upsert exists to prevent).
             cur.execute(
                 """
                 UPDATE alerts
@@ -341,14 +362,19 @@ def _upsert_quiet_alert(
                     structured_actions = %s::jsonb,
                     created_at = NOW(), updated_at = NOW()
                 WHERE id = %s
+                  AND acknowledged_at IS NULL
+                  AND (snoozed_until IS NULL OR snoozed_until <= NOW())
                 """,
                 (
                     tier, title[:500], body[:4000], matter_slug,
                     json.dumps(structured, default=str), existing_id,
                 ),
             )
+            updated = cur.rowcount
             conn.commit()
             cur.close()
+            if updated == 0:
+                return ("skipped_acknowledged", None)
             return ("updated", existing_sa)
 
         # No pending card. Respect a Director-curated card for the same thread —
@@ -371,19 +397,46 @@ def _upsert_quiet_alert(
             cur.close()
             return ("skipped_acknowledged", None)
 
+        # Fix 2 (ALERT_NOISE_FASTFOLLOW_1): race-proof dedup at the DB. The partial
+        # unique index uq_alerts_pending_quiet (migration 20260621_alerts_uq_pending_quiet)
+        # guarantees ≤1 pending quiet/awaiting card per (source, source_id, trigger).
+        # If a concurrent sweep / second worker / restart-overlap inserts first, this
+        # INSERT no-ops (rowcount=0) instead of raising — no duplicate, no Slack re-push.
+        #
+        # Arbiter is PINNED via index inference — the index column list + the exact
+        # partial WHERE predicate — NOT a bare targetless `ON CONFLICT DO NOTHING`
+        # (codex gate #3612): a targetless clause would swallow ANY future unique
+        # violation on alerts, masking unrelated bugs. Inference instead fails loud
+        # ("no unique constraint matching the ON CONFLICT specification") if this
+        # index is ever dropped, and lets unrelated unique violations propagate.
+        # NOTE: `ON CONFLICT ON CONSTRAINT uq_alerts_pending_quiet` (codex's literal
+        # wording) is NOT usable here — uq_alerts_pending_quiet is a partial UNIQUE
+        # INDEX, not a table CONSTRAINT; the ON CONSTRAINT form raises "constraint ...
+        # does not exist" at runtime (verified empirically). A partial index can only
+        # be inferred by (columns) + WHERE predicate. Same arbiter, same fail-loud
+        # guarantee, correct syntax.
         cur.execute(
             """
             INSERT INTO alerts (source, source_id, tier, title, body,
                                 matter_slug, status, structured_actions, created_at)
             VALUES (%s, %s, %s, %s, %s, %s, 'pending', %s::jsonb, NOW())
+            ON CONFLICT (source, source_id, (structured_actions->>'trigger'))
+            WHERE status = 'pending'
+              AND source = 'proactive_pm_sentinel'
+              AND structured_actions->>'trigger' IN ('quiet_thread', 'awaiting_counterparty')
+            DO NOTHING
             """,
             (
                 "proactive_pm_sentinel", source_id, tier, title[:500], body[:4000],
                 matter_slug, json.dumps(structured, default=str),
             ),
         )
+        inserted = cur.rowcount
         conn.commit()
         cur.close()
+        if inserted == 0:
+            # Lost an insert race against a concurrent process — the card exists.
+            return ("noop", None)
         return ("inserted", None)
     except Exception as e:
         try:

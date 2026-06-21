@@ -113,6 +113,7 @@ def stitch_or_create_thread(
     surface: str = "sidebar",
     override_thread_id: Optional[str] = None,
     force_new: bool = False,
+    last_turn_direction: Optional[str] = None,
 ) -> tuple[str, dict]:
     """Find a thread to attach the new turn to, or start a new one.
 
@@ -139,24 +140,28 @@ def stitch_or_create_thread(
             "thread_id": override_thread_id,
             "score": 1.0,
         }
-        _touch_thread(store, override_thread_id, summary, new_entities)
+        _touch_thread(store, override_thread_id, summary, new_entities,
+                      last_turn_direction=last_turn_direction)
         return override_thread_id, decision
 
     if force_new:
-        return _create_new_thread(store, pm_slug, summary, new_entities, reason="force_new")
+        return _create_new_thread(store, pm_slug, summary, new_entities, reason="force_new",
+                                  last_turn_direction=last_turn_direction)
 
     # Fetch up to STITCH_MAX_CANDIDATES recent active threads for this pm_slug
     candidates = _recent_active_threads(store, pm_slug, STITCH_WINDOW_HOURS, STITCH_MAX_CANDIDATES)
 
     if not candidates:
-        return _create_new_thread(store, pm_slug, summary, new_entities, reason="no_candidates")
+        return _create_new_thread(store, pm_slug, summary, new_entities, reason="no_candidates",
+                                  last_turn_direction=last_turn_direction)
 
     # Embed the incoming topic once
     try:
         query_vec = retriever._embed_query(summary)
     except Exception as e:
         logger.warning(f"Thread stitcher embed failed [{pm_slug}]: {e}")
-        return _create_new_thread(store, pm_slug, summary, new_entities, reason="embed_error")
+        return _create_new_thread(store, pm_slug, summary, new_entities, reason="embed_error",
+                                  last_turn_direction=last_turn_direction)
 
     # Qdrant payload-filtered search for candidate thread_ids in baker-conversations
     scored = []
@@ -182,7 +187,8 @@ def stitch_or_create_thread(
             **{k: best[k] for k in ("score", "cosine", "entity_overlap", "recency")},
             "alternatives": scored[1:3],
         }
-        _touch_thread(store, best["thread_id"], summary, new_entities)
+        _touch_thread(store, best["thread_id"], summary, new_entities,
+                      last_turn_direction=last_turn_direction)
         return best["thread_id"], decision
 
     # Below threshold — start a new thread
@@ -190,6 +196,7 @@ def stitch_or_create_thread(
         store, pm_slug, summary, new_entities,
         reason="below_threshold",
         best_miss=best,
+        last_turn_direction=last_turn_direction,
     )
 
 
@@ -229,20 +236,25 @@ def _recent_active_threads(store, pm_slug: str, window_hours: int, limit: int) -
 
 
 def _create_new_thread(store, pm_slug: str, summary: str, entities: dict,
-                      reason: str, best_miss: Optional[dict] = None) -> tuple[str, dict]:
+                      reason: str, best_miss: Optional[dict] = None,
+                      last_turn_direction: Optional[str] = None) -> tuple[str, dict]:
     thread_id = str(uuid.uuid4())
     conn = store._get_conn()
     if not conn:
         return thread_id, {"matched_on": "new_thread_no_db", "reason": reason}
     try:
         cur = conn.cursor()
+        # last_turn_direction (ALERT_NOISE_FASTFOLLOW_1 Fix 3): durable
+        # outbound/inbound signal for the quiet-thread sentinel's demote decision.
+        # Nullable — NULL falls back to the OUTBOUND_MARKER substring at read-time.
         cur.execute(
             """
             INSERT INTO capability_threads
-                (thread_id, pm_slug, topic_summary, entity_cluster, turn_count)
-            VALUES (%s, %s, %s, %s::jsonb, 0)
+                (thread_id, pm_slug, topic_summary, entity_cluster, turn_count,
+                 last_turn_direction)
+            VALUES (%s, %s, %s, %s::jsonb, 0, %s)
             """,
-            (thread_id, pm_slug, summary, json.dumps(entities)),
+            (thread_id, pm_slug, summary, json.dumps(entities), last_turn_direction),
         )
         conn.commit()
         cur.close()
@@ -263,13 +275,18 @@ def _create_new_thread(store, pm_slug: str, summary: str, entities: dict,
     }
 
 
-def _touch_thread(store, thread_id: str, new_summary: str, new_entities: dict) -> None:
+def _touch_thread(store, thread_id: str, new_summary: str, new_entities: dict,
+                  last_turn_direction: Optional[str] = None) -> None:
     """Update last_turn_at + merge entity_cluster."""
     conn = store._get_conn()
     if not conn:
         return
     try:
         cur = conn.cursor()
+        # last_turn_direction (ALERT_NOISE_FASTFOLLOW_1 Fix 3): overwrite with the
+        # new turn's direction when known; COALESCE preserves the prior value when
+        # the caller can't determine direction (e.g. capability_runner Q&A turns),
+        # so a known signal is never clobbered by an unknown one.
         cur.execute(
             """
             UPDATE capability_threads
@@ -277,10 +294,11 @@ def _touch_thread(store, thread_id: str, new_summary: str, new_entities: dict) -
                 updated_at = NOW(),
                 entity_cluster = entity_cluster || %s::jsonb,
                 turn_count = turn_count + 1,
-                topic_summary = COALESCE(topic_summary, %s)
+                topic_summary = COALESCE(topic_summary, %s),
+                last_turn_direction = COALESCE(%s, last_turn_direction)
             WHERE thread_id = %s
             """,
-            (json.dumps(new_entities), new_summary, thread_id),
+            (json.dumps(new_entities), new_summary, last_turn_direction, thread_id),
         )
         conn.commit()
         cur.close()

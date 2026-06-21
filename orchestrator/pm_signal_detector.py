@@ -164,12 +164,20 @@ def flag_pm_signal(
                 stitch_or_create_thread, persist_turn,
             )
             _q = f"[signal {channel}] {source}"
+            # ALERT_NOISE_FASTFOLLOW_1 Fix 3: persist a durable direction on the
+            # thread. Outbound callers (email_outbound / whatsapp_outbound paths)
+            # pass a "*_outbound" channel — the same @brisengroup.com sender test
+            # that drives contact_interactions.direction upstream. This replaces
+            # sole reliance on the "Director outbound" topic_summary substring for
+            # the sentinel's demote decision (marker kept as NULL-row fallback).
+            _last_turn_direction = "outbound" if channel.endswith("_outbound") else "inbound"
             thread_id, stitch_decision = stitch_or_create_thread(
                 pm_slug=pm_slug,
                 question=_q,
                 answer=summary,
                 topic_summary_hint=f"{channel}: {source} — {summary[:200]}",
                 surface="signal",
+                last_turn_direction=_last_turn_direction,
             )
             persist_turn(
                 pm_slug=pm_slug, thread_id=thread_id, surface="signal",
