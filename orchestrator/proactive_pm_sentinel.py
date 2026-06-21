@@ -30,8 +30,23 @@ PM_SLA_DEFAULT_HOURS = {
 }
 PM_SLA_FALLBACK_HOURS = 48
 
-# Alert dedup window — don't re-fire on the same thread within this many hours.
+# Alert dedup window — kept for Slack-push throttle semantics only. Card creation
+# is now governed by upsert (one live card per thread), not this window.
 QUIET_ALERT_COOLDOWN_HOURS = 24
+
+# DASHBOARD_ALERT_NOISE_FIX_1 (Fix 1 + Fix 2).
+# Quiet-thread families that the upsert / auto-resolve / sweep treat as one card
+# per thread. 'quiet_thread' = counterparty spoke last (Director to-do, tier 2);
+# 'awaiting_counterparty' = Director spoke last, demoted to tier 3 "Waiting on them".
+QUIET_TRIGGERS = ("quiet_thread", "awaiting_counterparty")
+
+# Canonical direction marker. capability_threads.topic_summary carries a structured
+# prefix: outbound threads read "<channel>_outbound: Director outbound — ...",
+# inbound threads read "<channel>: <Counterparty> — ...". This substring is the
+# single reliable direction signal (the thread-builder has no direction column and
+# no independent inbound/outbound input — verified 2026-06-20). 122/122 of the live
+# Director-outbound cards match it.
+OUTBOUND_MARKER = "director outbound"
 
 # Dismiss-pattern surface (Upgrade 2)
 DISMISS_PATTERN_WINDOW_DAYS = 14
@@ -64,7 +79,20 @@ def detect_quiet_threads() -> dict:
     from memory.store_back import SentinelStoreBack
     store = SentinelStoreBack._get_global_instance()
 
-    result = {"checked": 0, "alerted": 0, "snoozed_skipped": 0, "errors": 0}
+    result = {
+        "checked": 0, "alerted": 0, "snoozed_skipped": 0,
+        "resolved_active": 0, "demoted_awaiting": 0, "refreshed": 0, "errors": 0,
+    }
+
+    # DASHBOARD_ALERT_NOISE_FIX_1 Fix 1: before scanning, auto-resolve quiet-thread
+    # cards whose thread has since received a new turn (no longer quiet). This is
+    # what stops the board from only ever growing. Non-fatal; never touches
+    # acknowledged/snoozed cards.
+    try:
+        result["resolved_active"] = _auto_resolve_active_quiet_alerts(store)
+    except Exception as e:
+        logger.warning(f"detect_quiet_threads auto-resolve pass failed: {e}")
+
     conn = store._get_conn()
     if not conn:
         return result
@@ -74,7 +102,8 @@ def detect_quiet_threads() -> dict:
         # Cast t.thread_id (UUID) to text to match alerts.source_id (TEXT).
         cur.execute(
             """
-            SELECT t.thread_id, t.pm_slug, t.topic_summary, t.last_turn_at, t.sla_hours
+            SELECT t.thread_id, t.pm_slug, t.topic_summary, t.last_turn_at,
+                   t.sla_hours, t.last_turn_direction
             FROM capability_threads t
             WHERE t.status = 'active'
               AND t.last_turn_at < NOW() - INTERVAL '6 hours'
@@ -118,31 +147,64 @@ def detect_quiet_threads() -> dict:
             if hours_silent < sla:
                 continue
 
-            if _already_alerted_recently(
-                store, "quiet_thread", str(t["thread_id"]),
-                QUIET_ALERT_COOLDOWN_HOURS,
-            ):
-                continue
+            # Fix 2: if the Director sent the last turn, this is "waiting on the
+            # counterparty", not a Director to-do. Demote to tier 3 (off the action
+            # feed) — the card still exists, per Director ruling "demote, don't hide".
+            #
+            # Direction source, durable-preferred: trust the capability_threads
+            # .last_turn_direction column when populated; otherwise fall back to the
+            # topic_summary structured marker ("..._outbound: Director outbound — ").
+            # The column is added by this slice's additive migration; its write-time
+            # populator lives in the thread-builder (capability_threads.py, a
+            # separate file) — until that lands the fallback drives demotion, so this
+            # works immediately and upgrades automatically once the column fills.
+            topic = t.get("topic_summary") or ""
+            direction = (t.get("last_turn_direction") or "").lower()
+            if direction in ("outbound", "inbound"):
+                is_outbound = direction == "outbound"
+            else:
+                is_outbound = OUTBOUND_MARKER in topic.lower()
+            tier = 3 if is_outbound else 2
+            trigger = "awaiting_counterparty" if is_outbound else "quiet_thread"
 
-            text = _format_quiet_thread_alert(t, hours_silent, sla)
-            pushed = _slack_push(DIRECTOR_DM_CHANNEL, text)
-            _record_alert(
+            text = _format_quiet_thread_alert(t, hours_silent, sla, awaiting=is_outbound)
+            label = "Waiting on counterparty" if is_outbound else "Quiet thread"
+            structured = {
+                "trigger": trigger,
+                "hours_silent": round(hours_silent, 1),
+                "sla_hours": sla,
+                "last_turn_direction": "outbound" if is_outbound else "inbound",
+            }
+
+            # Fix 1: upsert — one live card per thread. Refresh the existing pending
+            # card instead of inserting a duplicate; never re-noise an acknowledged
+            # thread (snoozed threads never reach here — anti-joined in the scan).
+            op, _existing_sa = _upsert_quiet_alert(
                 store,
-                source="proactive_pm_sentinel",
                 source_id=str(t["thread_id"]),
-                tier=2,
-                title=f"Quiet thread [{t['pm_slug']}]: {(t['topic_summary'] or '')[:80]}",
+                tier=tier,
+                title=f"{label} [{t['pm_slug']}]: {topic[:80]}",
                 body=text,
                 matter_slug=t["pm_slug"],
-                structured={
-                    "trigger": "quiet_thread",
-                    "hours_silent": round(hours_silent, 1),
-                    "sla_hours": sla,
-                    "slack_push_ok": bool(pushed),
-                },
+                structured=structured,
             )
-            if pushed:
-                result["alerted"] += 1
+            if op == "skipped_acknowledged":
+                continue
+            if op == "updated":
+                result["refreshed"] += 1
+            if is_outbound:
+                # Demoted "waiting on them" cards are passive — no Director DM push.
+                result["demoted_awaiting"] += 1
+                continue
+
+            # Slack-push throttle: push the Director DM only when a quiet episode is
+            # first surfaced (a fresh card). Refreshes don't re-ping; auto-resolve
+            # closes the card when the thread revives, so the next quiet episode is a
+            # new INSERT that re-pushes. Tighter than the old 24h window, no spam.
+            if op == "inserted":
+                pushed = _slack_push(DIRECTOR_DM_CHANNEL, text)
+                if pushed:
+                    result["alerted"] += 1
         except Exception as e:
             logger.warning(f"detect_quiet_threads thread={t.get('thread_id')}: {e}")
             result["errors"] += 1
@@ -179,15 +241,167 @@ def _count_active_snoozes(store) -> int:
         store._put_conn(conn)
 
 
-def _format_quiet_thread_alert(thread: dict, hours_silent: float, sla: int) -> str:
+def _format_quiet_thread_alert(
+    thread: dict, hours_silent: float, sla: int, awaiting: bool = False
+) -> str:
     topic = (thread.get("topic_summary") or "(no summary)")[:200]
     pm_label = thread["pm_slug"].upper().replace("_", " ")
+    if awaiting:
+        # Director spoke last — passive "waiting on the counterparty" card.
+        return (
+            f"*{pm_label} — waiting on counterparty*\n"
+            f"Thread: {topic}\n"
+            f"Director sent the last turn {hours_silent:.1f}h ago (SLA {sla}h); "
+            f"awaiting their reply.\n"
+            f"_Low priority — surfaced in 'Waiting on them', not the action feed._"
+        )
     return (
         f"*{pm_label} quiet-thread alert*\n"
         f"Thread: {topic}\n"
         f"Silent for {hours_silent:.1f}h (SLA {sla}h).\n"
         f"_Accept / Snooze / Dismiss / Reject via dashboard sentinel feedback._"
     )
+
+
+def _auto_resolve_active_quiet_alerts(store) -> int:
+    """Fix 1: resolve pending quiet-thread cards whose thread has since received a
+    new turn (no longer quiet).
+
+    NEVER touches acknowledged or actively-snoozed cards. Bounded by the indexed
+    `source` filter. Returns the count resolved; non-fatal.
+    """
+    conn = store._get_conn()
+    if not conn:
+        return 0
+    try:
+        cur = conn.cursor()
+        cur.execute(
+            """
+            UPDATE alerts a
+            SET status = 'resolved', exit_reason = 'thread_active_again', resolved_at = NOW()
+            FROM capability_threads t
+            WHERE a.source = 'proactive_pm_sentinel'
+              AND a.structured_actions->>'trigger' IN ('quiet_thread', 'awaiting_counterparty')
+              AND a.status = 'pending'
+              AND a.acknowledged_at IS NULL
+              AND (a.snoozed_until IS NULL OR a.snoozed_until <= NOW())
+              AND t.thread_id::text = a.source_id
+              AND t.last_turn_at > a.created_at
+            """
+        )
+        n = cur.rowcount
+        conn.commit()
+        cur.close()
+        return n if n and n > 0 else 0
+    except Exception as e:
+        try:
+            conn.rollback()
+        except Exception:
+            pass
+        logger.warning(f"_auto_resolve_active_quiet_alerts failed: {e}")
+        return 0
+    finally:
+        store._put_conn(conn)
+
+
+def _upsert_quiet_alert(
+    store,
+    source_id: str,
+    tier: int,
+    title: str,
+    body: str,
+    matter_slug: Optional[str],
+    structured: dict,
+) -> tuple[str, Optional[dict]]:
+    """Fix 1: one live quiet-thread card per thread.
+
+    If a pending (un-acknowledged) quiet-family card already exists for this
+    thread, UPDATE it in place (refresh body/tier/title/structured, bump
+    created_at). Otherwise INSERT a fresh pending card — UNLESS the thread already
+    has an acknowledged quiet card (the Director saw this episode; don't re-noise).
+
+    Snoozed threads never reach here (the scan anti-joins active snoozes). Returns
+    (op, existing_structured) where op ∈ {'inserted','updated','skipped_acknowledged','noop'}.
+    """
+    conn = store._get_conn()
+    if not conn:
+        return ("noop", None)
+    try:
+        cur = conn.cursor()
+        cur.execute(
+            """
+            SELECT id, structured_actions FROM alerts
+            WHERE source = 'proactive_pm_sentinel'
+              AND source_id = %s
+              AND status = 'pending'
+              AND acknowledged_at IS NULL
+              AND structured_actions->>'trigger' IN ('quiet_thread', 'awaiting_counterparty')
+            ORDER BY created_at DESC
+            LIMIT 1
+            """,
+            (source_id,),
+        )
+        row = cur.fetchone()
+        if row:
+            existing_id = row[0]
+            existing_sa = row[1] if isinstance(row[1], dict) else None
+            cur.execute(
+                """
+                UPDATE alerts
+                SET tier = %s, title = %s, body = %s,
+                    matter_slug = COALESCE(matter_slug, %s),
+                    structured_actions = %s::jsonb,
+                    created_at = NOW(), updated_at = NOW()
+                WHERE id = %s
+                """,
+                (
+                    tier, title[:500], body[:4000], matter_slug,
+                    json.dumps(structured, default=str), existing_id,
+                ),
+            )
+            conn.commit()
+            cur.close()
+            return ("updated", existing_sa)
+
+        # No pending card. Respect an acknowledged card for the same thread.
+        cur.execute(
+            """
+            SELECT 1 FROM alerts
+            WHERE source = 'proactive_pm_sentinel'
+              AND source_id = %s
+              AND status = 'acknowledged'
+              AND structured_actions->>'trigger' IN ('quiet_thread', 'awaiting_counterparty')
+            LIMIT 1
+            """,
+            (source_id,),
+        )
+        if cur.fetchone():
+            cur.close()
+            return ("skipped_acknowledged", None)
+
+        cur.execute(
+            """
+            INSERT INTO alerts (source, source_id, tier, title, body,
+                                matter_slug, status, structured_actions, created_at)
+            VALUES (%s, %s, %s, %s, %s, %s, 'pending', %s::jsonb, NOW())
+            """,
+            (
+                "proactive_pm_sentinel", source_id, tier, title[:500], body[:4000],
+                matter_slug, json.dumps(structured, default=str),
+            ),
+        )
+        conn.commit()
+        cur.close()
+        return ("inserted", None)
+    except Exception as e:
+        try:
+            conn.rollback()
+        except Exception:
+            pass
+        logger.warning(f"_upsert_quiet_alert({source_id}) failed: {e}")
+        return ("noop", None)
+    finally:
+        store._put_conn(conn)
 
 
 # ─── Upgrade 2: dismiss-pattern surface ───
