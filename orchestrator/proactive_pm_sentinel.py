@@ -322,6 +322,7 @@ def _upsert_quiet_alert(
               AND source_id = %s
               AND status = 'pending'
               AND acknowledged_at IS NULL
+              AND (snoozed_until IS NULL OR snoozed_until <= NOW())
               AND structured_actions->>'trigger' IN ('quiet_thread', 'awaiting_counterparty')
             ORDER BY created_at DESC
             LIMIT 1
@@ -350,14 +351,18 @@ def _upsert_quiet_alert(
             cur.close()
             return ("updated", existing_sa)
 
-        # No pending card. Respect an acknowledged card for the same thread.
+        # No pending card. Respect a Director-curated card for the same thread —
+        # never re-noise something acknowledged OR actively snoozed. Key on
+        # acknowledged_at (not status), so a still-'pending' row that carries an
+        # acknowledged_at timestamp is also honored (codex gate note, PR #398).
         cur.execute(
             """
             SELECT 1 FROM alerts
             WHERE source = 'proactive_pm_sentinel'
               AND source_id = %s
-              AND status = 'acknowledged'
               AND structured_actions->>'trigger' IN ('quiet_thread', 'awaiting_counterparty')
+              AND (acknowledged_at IS NOT NULL
+                   OR (snoozed_until IS NOT NULL AND snoozed_until > NOW()))
             LIMIT 1
             """,
             (source_id,),

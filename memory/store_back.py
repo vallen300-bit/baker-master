@@ -5006,41 +5006,23 @@ class SentinelStoreBack:
             counts["stale_expired"] = max(cur.rowcount or 0, 0)
             cur.execute(
                 "UPDATE alerts SET matter_slug = 'system' "
-                "WHERE status = 'pending' AND matter_slug IS NULL AND source IN %s",
+                "WHERE status = 'pending' AND matter_slug IS NULL AND source IN %s "
+                "AND acknowledged_at IS NULL "
+                "AND (snoozed_until IS NULL OR snoozed_until <= NOW())",
                 (INFRA_ALERT_SOURCES,),
             )
             counts["infra_tagged_system"] = max(cur.rowcount or 0, 0)
             cur.execute(
                 "UPDATE alerts SET matter_slug = 'unsorted' "
-                "WHERE status = 'pending' AND matter_slug IS NULL"
+                "WHERE status = 'pending' AND matter_slug IS NULL "
+                "AND acknowledged_at IS NULL "
+                "AND (snoozed_until IS NULL OR snoozed_until <= NOW())"
             )
             counts["null_matter_backfilled"] = max(cur.rowcount or 0, 0)
-            conn.commit()
-            cur.close()
-            logger.info(f"sweep_alert_noise done: {counts}")
-        except Exception as e:
-            try:
-                conn.rollback()
-            except Exception:
-                pass
-            logger.error(f"sweep_alert_noise failed: {e}")
-        finally:
-            self._put_conn(conn)
-
-        # Audit row (best-effort, separate connection — never fails the sweep).
-        try:
-            self._log_alert_noise_sweep(counts)
-        except Exception as e:
-            logger.warning(f"sweep_alert_noise audit log failed (non-fatal): {e}")
-        return counts
-
-    def _log_alert_noise_sweep(self, counts: dict) -> None:
-        """Append a baker_actions audit row for the one-time noise sweep."""
-        conn = self._get_conn()
-        if not conn:
-            return
-        try:
-            cur = conn.cursor()
+            # Audit row written in the SAME transaction as the destructive sweep
+            # (codex gate note, PR #398): if the baker_actions insert fails, the
+            # whole sweep rolls back, so the "sweep is always logged" invariant
+            # cannot be silently violated.
             cur.execute(
                 """
                 INSERT INTO baker_actions
@@ -5053,14 +5035,18 @@ class SentinelStoreBack:
             )
             conn.commit()
             cur.close()
+            counts["audit_logged"] = True
+            logger.info(f"sweep_alert_noise done: {counts}")
         except Exception as e:
             try:
                 conn.rollback()
             except Exception:
                 pass
-            logger.warning(f"_log_alert_noise_sweep failed: {e}")
+            counts["audit_logged"] = False
+            logger.error(f"sweep_alert_noise failed (rolled back, nothing changed): {e}")
         finally:
             self._put_conn(conn)
+        return counts
 
     def acknowledge_alert(self, alert_id: int):
         """Mark alert as acknowledged."""

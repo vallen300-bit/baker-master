@@ -120,7 +120,7 @@ def alert_store(needs_live_pg, monkeypatch):
         conn.close()
     # Bind the real store methods under test onto the shim (they only use
     # self._get_conn/_put_conn + module globals, so they work against the shim).
-    for _m in ("get_pending_alerts", "sweep_alert_noise", "_log_alert_noise_sweep"):
+    for _m in ("get_pending_alerts", "sweep_alert_noise"):
         setattr(shim, _m, getattr(sb.SentinelStoreBack, _m).__get__(shim))
     monkeypatch.setattr(
         sb.SentinelStoreBack, "_get_global_instance",
@@ -266,6 +266,35 @@ def test_auto_resolve_when_thread_active_again(alert_store, needs_live_pg):
     assert exit_reason == "thread_active_again"
 
 
+def test_acknowledged_at_set_blocks_renoise_even_if_pending(alert_store, needs_live_pg):
+    """Codex gate fix #1: an alert with acknowledged_at set but status still
+    'pending' must NOT be duplicated by a fresh card (guard keys on
+    acknowledged_at, not status)."""
+    from orchestrator.proactive_pm_sentinel import detect_quiet_threads
+    tid = _seed_thread(needs_live_pg, "email: Counterparty — advise", hours_silent=72)
+    conn = psycopg2.connect(needs_live_pg)
+    try:
+        cur = conn.cursor()
+        # Inconsistent state: acknowledged_at set but status left 'pending'.
+        cur.execute(
+            "INSERT INTO alerts (source, source_id, tier, title, body, status, "
+            "acknowledged_at, structured_actions, created_at) VALUES "
+            "('proactive_pm_sentinel',%s,2,'q','b','pending', NOW(),"
+            "'{\"trigger\":\"quiet_thread\"}'::jsonb, NOW() - INTERVAL '2 hours')",
+            (tid,),
+        )
+        conn.commit()
+        cur.close()
+    finally:
+        conn.close()
+
+    detect_quiet_threads()
+
+    # The existing acknowledged_at row is the only pending card — no duplicate.
+    rows = _pending_for(needs_live_pg, tid)
+    assert len(rows) == 1, f"acknowledged_at row must not be duplicated, got {len(rows)}"
+
+
 # ─── Fix 2: demote Director-outbound to tier 3 ───
 
 def test_director_outbound_demoted_to_tier3(alert_store, needs_live_pg):
@@ -347,6 +376,7 @@ def test_sweep_collapses_backlog_and_logs(alert_store, needs_live_pg):
     counts = store.sweep_alert_noise()
     assert counts["quiet_flood_expired"] == 5
     assert counts["stale_expired"] == 1
+    assert counts["audit_logged"] is True  # atomic audit committed with the sweep
 
     assert _status_of(needs_live_pg, stale_id)[0] == "expired"
     assert _status_of(needs_live_pg, ack_id)[0] == "pending", "acknowledged must survive"
