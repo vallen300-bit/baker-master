@@ -978,6 +978,28 @@ def _process_email_threads(new_threads: list):
         except Exception:
             pass  # Non-fatal
 
+        # PM-SIGNAL (outbound): a Director-SENT email to a PM contact. The inbound
+        # detector above keys on the counterparty as sender, so it misses
+        # Director-outbound mail. Mirror the WhatsApp outbound path
+        # (waha_webhook.py) so the thread's topic_summary carries the canonical
+        # "Director outbound" marker — the quiet-thread sentinel then demotes it to
+        # tier-3 'awaiting_counterparty' instead of surfacing it as a Director
+        # to-do (DASHBOARD_ALERT_NOISE_FIX_1 Fix 2; email-outbound blind-spot,
+        # codex gate B2). Direction is taken from the authoritative @brisengroup.com
+        # sender test that also drives contact_interactions.direction above.
+        try:
+            _ob_sender_email = metadata.get("primary_sender_email", "")
+            if _ob_sender_email and "@brisengroup.com" in _ob_sender_email.lower():
+                from orchestrator.pm_signal_detector import (
+                    detect_relevant_pms_outbound, flag_pm_signal,
+                )
+                _ob_text = f"{metadata.get('subject', '')} {thread['text'][:500]}"
+                for _pm_slug in detect_relevant_pms_outbound(_ob_text):
+                    flag_pm_signal(_pm_slug, "email_outbound", "Director outbound",
+                                   metadata.get("subject", "")[:200])
+        except Exception:
+            pass  # Non-fatal
+
         # TRIP-INTELLIGENCE-1: Auto-link to active trip if content mentions destination
         try:
             from memory.store_back import SentinelStoreBack

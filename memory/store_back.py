@@ -4960,18 +4960,21 @@ class SentinelStoreBack:
         """DASHBOARD_ALERT_NOISE_FIX_1 — one-time backlog sweep. Idempotent.
 
         Run AFTER the Fix 1-5 deploy so cleared noise doesn't immediately
-        regenerate. Four statements, all skipping acknowledged + actively-snoozed
-        alerts (Director-curated state is never touched):
-          1. Expire the proactive_pm_sentinel quiet-thread flood. The fixed sentinel
-             re-surfaces genuinely-quiet threads cleanly (one card each) on its next
-             run, so collapsing the backlog is safe.
+        regenerate. Four statements, EVERY ONE skipping acknowledged + actively-
+        snoozed alerts (Director-curated state is never touched, incl. the matter
+        relabels):
+          1. Expire the proactive_pm_sentinel quiet-thread flood (only the
+             quiet_thread/awaiting_counterparty triggers — dismiss_pattern cards
+             are left alone). The fixed sentinel re-surfaces genuinely-quiet threads
+             cleanly (one card each) on its next run, so collapsing the backlog is safe.
           2. Expire stale pending alerts older than the new 30-day TTL (recent
              pipeline items < 30d are kept — they may be genuine).
           3. Tag still-NULL infra alerts matter='system'.
           4. Backfill remaining NULL-matter business alerts to 'unsorted'.
 
-        Director-data-adjacent write — logs an audit row to baker_actions.
-        Returns per-statement counts.
+        Director-data-adjacent write — the baker_actions audit row is written in
+        the SAME transaction as the four statements, so the sweep can never commit
+        unlogged. Returns per-statement counts + audit_logged.
         """
         counts = {
             "quiet_flood_expired": 0,
@@ -4989,6 +4992,7 @@ class SentinelStoreBack:
                 UPDATE alerts SET status = 'expired', exit_reason = 'noise_sweep_2026_06',
                                   resolved_at = NOW()
                 WHERE source = 'proactive_pm_sentinel' AND status = 'pending'
+                  AND structured_actions->>'trigger' IN ('quiet_thread', 'awaiting_counterparty')
                   AND acknowledged_at IS NULL
                   AND (snoozed_until IS NULL OR snoozed_until <= NOW())
                 """

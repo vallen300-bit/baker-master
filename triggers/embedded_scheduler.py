@@ -1269,8 +1269,11 @@ def _register_jobs(scheduler: BackgroundScheduler):
         coalesce=True, max_instances=1, replace_existing=True,
         misfire_grace_time=3600,
     )
-    register_expected_job("expire_stale_alerts", 24 * 60 * 60)
-    logger.info("Registered: expire_stale_alerts (daily 04:00 UTC)")
+    # NOTE: CronTrigger jobs MUST NOT call register_expected_job — the liveness
+    # sentinel's expected-cadence model is for IntervalTrigger jobs only (codex
+    # gate B3). expire_stale_alerts is asserted as a cron job in
+    # test_scheduler_liveness_sentinel.py::_CRON_JOB_IDS instead.
+    logger.info("Registered: expire_stale_alerts (cron daily 04:00 UTC)")
 
     # CORTEX_TIER_B_RUNTIME_V1: calendar-month Tier B counter-reset audit.
     # Fires 1st of each month at 00:00 UTC. Reset is logical (counters are

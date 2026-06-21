@@ -126,6 +126,9 @@ def alert_store(needs_live_pg, monkeypatch):
         sb.SentinelStoreBack, "_get_global_instance",
         classmethod(lambda cls: shim),
     )
+    # Never fire a real Director Slack DM from a test (codex gate S2).
+    import orchestrator.proactive_pm_sentinel as _pps
+    monkeypatch.setattr(_pps, "_slack_push", lambda *a, **k: True)
     return shim
 
 
@@ -297,20 +300,61 @@ def test_acknowledged_at_set_blocks_renoise_even_if_pending(alert_store, needs_l
 
 # ─── Fix 2: demote Director-outbound to tier 3 ───
 
-def test_director_outbound_demoted_to_tier3(alert_store, needs_live_pg):
-    """Rubric 7: Director-outbound thread → tier 3 awaiting_counterparty, not tier 2."""
-    from orchestrator.proactive_pm_sentinel import detect_quiet_threads
+def test_whatsapp_outbound_demoted_to_tier3(alert_store, needs_live_pg):
+    """Rubric 7: WhatsApp Director-outbound thread → tier 3 awaiting_counterparty.
+    Built from the OUTBOUND_MARKER constant — the single source of truth (S3)."""
+    from orchestrator.proactive_pm_sentinel import detect_quiet_threads, OUTBOUND_MARKER
     tid = _seed_thread(
         needs_live_pg,
-        "whatsapp_outbound: Director outbound — Noted, locked in.",
+        f"whatsapp_outbound: {OUTBOUND_MARKER} — Noted, locked in.",
         hours_silent=72,
     )
     detect_quiet_threads()
-
     rows = _pending_for(needs_live_pg, tid)
     assert len(rows) == 1
     assert rows[0]["tier"] == 3, f"expected tier 3, got {rows[0]['tier']}"
     assert rows[0]["structured_actions"]["trigger"] == "awaiting_counterparty"
+
+
+def test_email_outbound_demoted_to_tier3(alert_store, needs_live_pg):
+    """Codex gate B2: email Director-outbound thread also demotes to tier 3.
+    The email-outbound writer plants the same marker, so the sentinel covers it."""
+    from orchestrator.proactive_pm_sentinel import detect_quiet_threads, OUTBOUND_MARKER
+    tid = _seed_thread(
+        needs_live_pg,
+        f"email_outbound: {OUTBOUND_MARKER} — Re: Annaberg dataroom",
+        hours_silent=72,
+    )
+    detect_quiet_threads()
+    rows = _pending_for(needs_live_pg, tid)
+    assert len(rows) == 1
+    assert rows[0]["tier"] == 3, f"expected tier 3, got {rows[0]['tier']}"
+    assert rows[0]["structured_actions"]["trigger"] == "awaiting_counterparty"
+
+
+def test_inbound_thread_stays_tier2(alert_store, needs_live_pg):
+    """Contract pin (S3): a thread WITHOUT the marker stays tier 2 / quiet_thread."""
+    from orchestrator.proactive_pm_sentinel import detect_quiet_threads, OUTBOUND_MARKER
+    topic = "email: Ines Wöckl — Re: Your interest in MO Residences"
+    assert OUTBOUND_MARKER not in topic.lower()
+    tid = _seed_thread(needs_live_pg, topic, hours_silent=72)
+    detect_quiet_threads()
+    rows = _pending_for(needs_live_pg, tid)
+    assert len(rows) == 1
+    assert rows[0]["tier"] == 2
+    assert rows[0]["structured_actions"]["trigger"] == "quiet_thread"
+
+
+def test_outbound_writer_label_contains_marker():
+    """Contract pin (S3): the 'Director outbound' source label that the WhatsApp
+    + email writers pass to flag_pm_signal contains OUTBOUND_MARKER, so a topic
+    summary built as '<channel>: <label> — ...' is detected. No live DB needed."""
+    from orchestrator.proactive_pm_sentinel import OUTBOUND_MARKER
+    writer_label = "Director outbound"  # waha_webhook.py:1175 + email_trigger.py
+    assert OUTBOUND_MARKER in writer_label.lower()
+    for channel in ("whatsapp_outbound", "email_outbound"):
+        topic = f"{channel}: {writer_label} — some subject"
+        assert OUTBOUND_MARKER in topic.lower()
 
 
 # ─── Fix 3: TTL expiry; ack/snooze immune ───
