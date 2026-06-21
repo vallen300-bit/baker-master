@@ -4965,13 +4965,18 @@ async def mobile():
 async def get_alerts(
     tier: Optional[int] = Query(None, ge=1, le=4),
     min_tier: Optional[int] = Query(None, ge=1, le=4),
+    category: str = Query("business", regex="^(business|system|all)$"),
 ):
     """
     Get pending alerts. Filter by exact tier, or min_tier (T2+ = upcoming, excludes T1).
+
+    DASHBOARD_ALERT_NOISE_FIX_1: `category` defaults to 'business' (the Director's
+    attention feed — infra/monitoring sources excluded, NULL matter → 'unsorted').
+    Use category=system for the System Health panel, category=all for everything.
     """
     try:
         store = _get_store()
-        alerts = store.get_pending_alerts(tier=tier)
+        alerts = store.get_pending_alerts(tier=tier, category=category)
         alerts = [_serialize(a) for a in alerts]
         if min_tier:
             alerts = [a for a in alerts if a.get('tier', 1) >= min_tier]
@@ -4979,6 +4984,24 @@ async def get_alerts(
     except Exception as e:
         logger.error(f"/api/alerts failed: {e}")
         return {"alerts": [], "count": 0, "error": str(e)}
+
+
+@app.post("/api/admin/alert-noise-sweep", tags=["alerts"], dependencies=[Depends(verify_api_key)])
+async def alert_noise_sweep():
+    """DASHBOARD_ALERT_NOISE_FIX_1: one-time (idempotent) backlog noise sweep.
+
+    Auth-gated. Expires the quiet-thread flood + stale >30d pending alerts and
+    backfills NULL-matter cards, never touching acknowledged/snoozed alerts. Logs
+    an audit row to baker_actions. Safe to re-run (a second run affects ~0 rows).
+    Intended to be called ONCE after the Fix 1-5 deploy is live.
+    """
+    try:
+        store = _get_store()
+        counts = store.sweep_alert_noise()
+        return {"status": "ok", **counts}
+    except Exception as e:
+        logger.error(f"/api/admin/alert-noise-sweep failed: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
 
 
 @app.post("/api/alerts/{alert_id}/acknowledge", tags=["alerts"], dependencies=[Depends(verify_api_key)])

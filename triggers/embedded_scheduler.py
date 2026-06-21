@@ -1256,6 +1256,25 @@ def _register_jobs(scheduler: BackgroundScheduler):
     else:
         logger.info("Proactive sentinels DISABLED (PROACTIVE_SENTINEL_ENABLED=false)")
 
+    # DASHBOARD_ALERT_NOISE_FIX_1 Fix 3: daily TTL expiry of stale pending alerts.
+    # Flat 30-day TTL (Director-LOCKED 2026-06-20); acknowledged/snoozed never
+    # expire. Runs regardless of the proactive-sentinel kill-switch — it's a
+    # board-hygiene job, not a sentinel.
+    from orchestrator.alert_expiry import expire_stale_alerts as _expire_stale_alerts
+    scheduler.add_job(
+        _expire_stale_alerts,
+        CronTrigger(hour=4, minute=0, timezone="UTC"),
+        id="expire_stale_alerts",
+        name="Alert TTL expiry (daily, flat 30-day TTL)",
+        coalesce=True, max_instances=1, replace_existing=True,
+        misfire_grace_time=3600,
+    )
+    # NOTE: CronTrigger jobs MUST NOT call register_expected_job — the liveness
+    # sentinel's expected-cadence model is for IntervalTrigger jobs only (codex
+    # gate B3). expire_stale_alerts is asserted as a cron job in
+    # test_scheduler_liveness_sentinel.py::_CRON_JOB_IDS instead.
+    logger.info("Registered: expire_stale_alerts (cron daily 04:00 UTC)")
+
     # CORTEX_TIER_B_RUNTIME_V1: calendar-month Tier B counter-reset audit.
     # Fires 1st of each month at 00:00 UTC. Reset is logical (counters are
     # read-driven from baker_actions); the audit row proves the boundary fired.
