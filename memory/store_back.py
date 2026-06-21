@@ -37,6 +37,11 @@ from config.settings import config
 
 logger = logging.getLogger("sentinel.store_back")
 
+# DASHBOARD_ALERT_NOISE_FIX_1 (Fix 4 + Fix 5). Operational/monitoring alert
+# sources are system health, not Director business to-dos. They are kept off the
+# default business feed and surfaced only under the explicit 'system' category.
+INFRA_ALERT_SOURCES = ("scheduler_job_liveness", "sentinel_health", "waha_session")
+
 
 def _normalize_pm_key(k: str) -> str:
     """Lowercase + collapse non-alphanumeric runs to single spaces."""
@@ -4704,6 +4709,11 @@ class SentinelStoreBack:
                         tier = 2
             except Exception:
                 pass  # cap check failed — proceed with original tier
+        # DASHBOARD_ALERT_NOISE_FIX_1 Fix 4/5: infra/monitoring alerts are system
+        # health, not business — tag matter 'system' (keeps them off the business
+        # feed and out of matter auto-matching).
+        if not matter_slug and source in INFRA_ALERT_SOURCES:
+            matter_slug = "system"
         # Auto-assign matter_slug if not provided
         if not matter_slug and (title or body):
             try:
@@ -4897,29 +4907,158 @@ class SentinelStoreBack:
         finally:
             self._put_conn(conn)
 
-    def get_pending_alerts(self, tier: int = None, limit: int = 100) -> list:
-        """Fetch unresolved alerts, optionally filtered by tier. Capped at limit."""
+    def get_pending_alerts(self, tier: int = None, limit: int = 100,
+                           category: str = "business") -> list:
+        """Fetch unresolved alerts, optionally filtered by tier. Capped at limit.
+
+        DASHBOARD_ALERT_NOISE_FIX_1 (Fix 4 + Fix 5) — `category`:
+          - 'business' (default): the Director's attention feed. Excludes infra /
+            monitoring sources (see INFRA_ALERT_SOURCES); NULL matter_slug is
+            normalized to 'unsorted' so no bare-NULL cards reach the feed.
+          - 'system': only infra / monitoring sources (the System Health panel).
+          - 'all': every pending alert (legacy, no source filter).
+        """
         conn = self._get_conn()
         if not conn:
             return []
         try:
             cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+            where = ["status = 'pending'"]
+            params: list = []
             if tier:
-                cur.execute(
-                    "SELECT * FROM alerts WHERE status = 'pending' AND tier = %s ORDER BY created_at DESC LIMIT %s",
-                    (tier, limit),
-                )
-            else:
-                cur.execute(
-                    "SELECT * FROM alerts WHERE status = 'pending' ORDER BY tier, created_at DESC LIMIT %s",
-                    (limit,),
-                )
-            rows = cur.fetchall()
+                where.append("tier = %s")
+                params.append(tier)
+            if category == "business":
+                # NULL source = legacy business alert → kept; infra sources dropped.
+                where.append("(source IS NULL OR source NOT IN %s)")
+                params.append(INFRA_ALERT_SOURCES)
+            elif category == "system":
+                where.append("source IN %s")
+                params.append(INFRA_ALERT_SOURCES)
+            # 'all' → no source filter
+            order = "created_at DESC" if tier else "tier, created_at DESC"
+            params.append(limit)
+            cur.execute(
+                f"SELECT * FROM alerts WHERE {' AND '.join(where)} "
+                f"ORDER BY {order} LIMIT %s",
+                tuple(params),
+            )
+            rows = [dict(r) for r in cur.fetchall()]
             cur.close()
-            return [dict(r) for r in rows]
+            if category == "business":
+                for r in rows:
+                    if not r.get("matter_slug"):
+                        r["matter_slug"] = "unsorted"
+            return rows
         except Exception as e:
             logger.error(f"get_pending_alerts failed: {e}")
             return []
+        finally:
+            self._put_conn(conn)
+
+    def sweep_alert_noise(self) -> dict:
+        """DASHBOARD_ALERT_NOISE_FIX_1 — one-time backlog sweep. Idempotent.
+
+        Run AFTER the Fix 1-5 deploy so cleared noise doesn't immediately
+        regenerate. Four statements, all skipping acknowledged + actively-snoozed
+        alerts (Director-curated state is never touched):
+          1. Expire the proactive_pm_sentinel quiet-thread flood. The fixed sentinel
+             re-surfaces genuinely-quiet threads cleanly (one card each) on its next
+             run, so collapsing the backlog is safe.
+          2. Expire stale pending alerts older than the new 30-day TTL (recent
+             pipeline items < 30d are kept — they may be genuine).
+          3. Tag still-NULL infra alerts matter='system'.
+          4. Backfill remaining NULL-matter business alerts to 'unsorted'.
+
+        Director-data-adjacent write — logs an audit row to baker_actions.
+        Returns per-statement counts.
+        """
+        counts = {
+            "quiet_flood_expired": 0,
+            "stale_expired": 0,
+            "infra_tagged_system": 0,
+            "null_matter_backfilled": 0,
+        }
+        conn = self._get_conn()
+        if not conn:
+            return counts
+        try:
+            cur = conn.cursor()
+            cur.execute(
+                """
+                UPDATE alerts SET status = 'expired', exit_reason = 'noise_sweep_2026_06',
+                                  resolved_at = NOW()
+                WHERE source = 'proactive_pm_sentinel' AND status = 'pending'
+                  AND acknowledged_at IS NULL
+                  AND (snoozed_until IS NULL OR snoozed_until <= NOW())
+                """
+            )
+            counts["quiet_flood_expired"] = max(cur.rowcount or 0, 0)
+            cur.execute(
+                """
+                UPDATE alerts SET status = 'expired', exit_reason = 'noise_sweep_2026_06',
+                                  resolved_at = NOW()
+                WHERE status = 'pending' AND acknowledged_at IS NULL
+                  AND (snoozed_until IS NULL OR snoozed_until <= NOW())
+                  AND created_at < NOW() - INTERVAL '30 days'
+                """
+            )
+            counts["stale_expired"] = max(cur.rowcount or 0, 0)
+            cur.execute(
+                "UPDATE alerts SET matter_slug = 'system' "
+                "WHERE status = 'pending' AND matter_slug IS NULL AND source IN %s",
+                (INFRA_ALERT_SOURCES,),
+            )
+            counts["infra_tagged_system"] = max(cur.rowcount or 0, 0)
+            cur.execute(
+                "UPDATE alerts SET matter_slug = 'unsorted' "
+                "WHERE status = 'pending' AND matter_slug IS NULL"
+            )
+            counts["null_matter_backfilled"] = max(cur.rowcount or 0, 0)
+            conn.commit()
+            cur.close()
+            logger.info(f"sweep_alert_noise done: {counts}")
+        except Exception as e:
+            try:
+                conn.rollback()
+            except Exception:
+                pass
+            logger.error(f"sweep_alert_noise failed: {e}")
+        finally:
+            self._put_conn(conn)
+
+        # Audit row (best-effort, separate connection — never fails the sweep).
+        try:
+            self._log_alert_noise_sweep(counts)
+        except Exception as e:
+            logger.warning(f"sweep_alert_noise audit log failed (non-fatal): {e}")
+        return counts
+
+    def _log_alert_noise_sweep(self, counts: dict) -> None:
+        """Append a baker_actions audit row for the one-time noise sweep."""
+        conn = self._get_conn()
+        if not conn:
+            return
+        try:
+            cur = conn.cursor()
+            cur.execute(
+                """
+                INSERT INTO baker_actions
+                    (action_type, payload, trigger_source, success, tier,
+                     committer_agent, created_at)
+                VALUES ('alert_noise_sweep', %s::jsonb,
+                        'DASHBOARD_ALERT_NOISE_FIX_1', true, 'A', 'system', NOW())
+                """,
+                (json.dumps(counts),),
+            )
+            conn.commit()
+            cur.close()
+        except Exception as e:
+            try:
+                conn.rollback()
+            except Exception:
+                pass
+            logger.warning(f"_log_alert_noise_sweep failed: {e}")
         finally:
             self._put_conn(conn)
 
