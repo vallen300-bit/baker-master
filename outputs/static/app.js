@@ -12391,49 +12391,68 @@ function _sentinelDispatchKebabLabel(alertId, label) {
         { key: 'travel', label: 'Travel' },
     ];
 
-    function _todayCard(card) {
-        var id = card && card.id;
+    // Inner card markup (text contexts only — every value through esc(); no
+    // attribute interpolation here). The card element itself, its id, and its
+    // listeners are built with DOM APIs in _renderTodayList so no server value
+    // ever reaches an HTML attribute sink (G0 F1 fix: esc() is a text-node
+    // escaper and does NOT escape `"`, so it is unsafe in attribute context).
+    function _todayCardInner(card) {
         var claim = esc((card && card.claim) || '(untitled)');
         var badge = (card && card.state) ? _stateBadge(card.state) : '';
         var why = card && card.why_matters
             ? '<div class="vt-card-why">' + esc(card.why_matters) + '</div>' : '';
         var sub = (card && (card.selected_reason || card.next_action)) || '';
         var subHtml = sub ? '<div class="vt-card-sub">' + esc(sub) + '</div>' : '';
-        // Read-only card; the ONLY action is to open the detail drawer.
         // Shows compact title + trusted state + reason; lane is the group header.
-        return '<div class="vt-card" role="button" tabindex="0" data-vi-id="' + esc(String(id)) + '">' +
-               '<div class="vt-card-top">' + badge +
-               '<div class="vt-card-claim">' + claim + '</div></div>' + why + subHtml + '</div>';
+        return '<div class="vt-card-top">' + badge +
+               '<div class="vt-card-claim">' + claim + '</div></div>' + why + subHtml;
     }
 
     function _renderTodayList(mount, payload) {
         var lanes = (payload && payload.lanes) || {};
         var total = (payload && payload.counts && payload.counts.total) || 0;
+        while (mount.firstChild) mount.removeChild(mount.firstChild);
         if (!total) {
-            setSafeHTML(mount, '<div class="vt-empty">No trusted items today.</div>');
+            var empty = document.createElement('div');
+            empty.className = 'vt-empty';
+            empty.textContent = 'No trusted items today.';
+            mount.appendChild(empty);
             return;
         }
-        var html = '';
         for (var i = 0; i < TODAY_LANES.length; i++) {
             var lane = TODAY_LANES[i];
             var cards = lanes[lane.key] || [];
             if (!cards.length) continue;
-            html += '<div class="vt-lane"><div class="vt-lane-title">' + esc(lane.label) +
-                    '<span class="vt-lane-count">' + cards.length + '</span></div>';
-            for (var j = 0; j < cards.length; j++) html += _todayCard(cards[j]);
-            html += '</div>';
-        }
-        setSafeHTML(mount, html);
-        // Delegate click/keyboard open to the drawer.
-        var nodes = mount.querySelectorAll('.vt-card[data-vi-id]');
-        for (var k = 0; k < nodes.length; k++) {
-            (function (node) {
-                var id = node.getAttribute('data-vi-id');
-                node.addEventListener('click', function () { openVerifiedItemDrawer(id); });
-                node.addEventListener('keydown', function (ev) {
-                    if (ev.key === 'Enter' || ev.key === ' ') { ev.preventDefault(); openVerifiedItemDrawer(id); }
-                });
-            })(nodes[k]);
+            var laneEl = document.createElement('div');
+            laneEl.className = 'vt-lane';
+            var title = document.createElement('div');
+            title.className = 'vt-lane-title';
+            title.textContent = lane.label;
+            var count = document.createElement('span');
+            count.className = 'vt-lane-count';
+            count.textContent = String(cards.length);
+            title.appendChild(count);
+            laneEl.appendChild(title);
+            for (var j = 0; j < cards.length; j++) {
+                (function (card) {
+                    var id = card && card.id;
+                    var el = document.createElement('div');
+                    el.className = 'vt-card';
+                    el.setAttribute('role', 'button');
+                    el.tabIndex = 0;
+                    // dataset is set via the DOM API (NOT HTML parsing) — never an
+                    // injection sink. The listeners use the closured `id`, so we
+                    // never read the value back out of an attribute.
+                    if (id !== null && id !== undefined) el.dataset.viId = String(id);
+                    setSafeHTML(el, _todayCardInner(card));  // inner = esc'd text only
+                    el.addEventListener('click', function () { openVerifiedItemDrawer(id); });
+                    el.addEventListener('keydown', function (ev) {
+                        if (ev.key === 'Enter' || ev.key === ' ') { ev.preventDefault(); openVerifiedItemDrawer(id); }
+                    });
+                    laneEl.appendChild(el);
+                })(cards[j]);
+            }
+            mount.appendChild(laneEl);
         }
     }
 
