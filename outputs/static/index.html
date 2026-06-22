@@ -138,6 +138,10 @@
         </div>
 
         <div class="nav-divider"></div>
+        <div class="nav-item" data-tab="system" role="button" tabindex="0">
+            <span class="nav-dot" id="systemNavDot" style="margin-top:1px;"></span>
+            <span class="nav-label">System</span>
+        </div>
         <div class="nav-item" data-tab="baker-data" role="button" tabindex="0">
             <span class="nav-label">Baker Data</span>
         </div>
@@ -177,6 +181,10 @@
                 <div class="brief-greeting" id="briefGreeting" style="display:flex;justify-content:space-between;align-items:baseline;">Good morning, Dimitry<span class="unanswered-badge" id="unansweredBadge" hidden></span></div>
                 <div class="brief-narrative" id="briefNarrative">Baker is loading your morning summary...</div>
             </div>
+
+            <!-- Compact System health/freshness strip (BAKER_DASHBOARD_V2_SYSTEM_HEALTH_CONSOLE_1) -->
+            <div id="todayHealthStrip" class="today-health-strip" hidden role="button" tabindex="0"
+                 title="Open System Health console" aria-label="Baker system health — open System console"></div>
 
             <!-- Weekly Priorities Widget -->
             <div id="prioritiesWidget" class="priorities-widget" hidden>
@@ -549,6 +557,15 @@
             <div id="bakerDataContent"></div>
         </div>
 
+        <!-- VIEW: System Health Console (BAKER_DASHBOARD_V2_SYSTEM_HEALTH_CONSOLE_1) -->
+        <div class="view" id="viewSystem">
+            <div class="syscon-header">
+                <div class="section-label" style="margin:0">System Health</div>
+                <button class="syscon-refresh-btn" id="systemRefreshBtn" title="Reload health">&#x21bb; Refresh</button>
+            </div>
+            <div id="systemConsoleContent"></div>
+        </div>
+
         <!-- VIEW: KBL Pipeline (observability — 4 widgets) -->
         <div class="view" id="viewKBLPipeline">
             <div class="kbl-header">
@@ -585,7 +602,7 @@
   })();
 </script>
 
-<script src="/static/app.js?v=128"></script>
+<script src="/static/app.js?v=129"></script>
 <script>
 // PWA-DESKTOP-1: Register service worker for installability
 if ('serviceWorker' in navigator) {
