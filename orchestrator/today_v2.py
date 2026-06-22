@@ -163,17 +163,25 @@ def build_today_payload(rows: list, limit_per_lane: int = 5) -> dict:
 
 
 def get_today_payload(limit_per_lane: int = 5) -> dict:
-    """Return the trusted Today payload from ``verified_items`` only.
+    """Return the trusted, *selected* Today payload from ``verified_items`` only.
 
-    Reads a generous slice of trusted rows, then assembles lanes. Fault-tolerant:
-    a degraded DB yields the stable empty-lane shape (AC9), never an error.
+    Reads a generous slice of trusted rows, then runs the deterministic selection
+    engine (dedup + rank + cap + explainable selection metadata) on top of the
+    safe lane assembler. Fault-tolerant: a degraded DB yields the stable
+    empty-lane shape (AC9), never an error.
+
+    The payload is a backward-compatible superset of ``build_today_payload``'s
+    shape — ``status`` / ``lanes`` / ``counts`` are unchanged; selection metadata
+    (``selection_summary`` / ``duplicates_collapsed`` / ``excluded_count`` and
+    per-card ``rank`` / ``selected_reason`` / ``duplicate_count``) is additive.
     """
     try:
         from models.verified_items import list_today_items
-        # Read enough to fill every lane even with skew + unknown types.
+        from orchestrator.today_selection import select_today_payload
+        # Read enough to fill every lane even with skew + unknown types + dupes.
         read_limit = max(200, len(LANES) * max(limit_per_lane, 1) * 5)
         rows = list_today_items(limit=read_limit)
-        return build_today_payload(rows, limit_per_lane=limit_per_lane)
+        return select_today_payload(rows, limit_per_lane=limit_per_lane)
     except Exception as e:  # pragma: no cover - defensive; list_today_items is itself guarded
         logger.error(f"today_v2: get_today_payload failed: {e}")
         return _empty_payload()
