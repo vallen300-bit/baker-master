@@ -145,7 +145,12 @@ def test_pin_success_sets_secure_cookie_and_reads_only_ai_hotel(monkeypatch):
     assert "HttpOnly" in set_cookie
     assert "Secure" in set_cookie
     assert "samesite=strict" in set_cookie.lower()
-    assert "Path=/api/ai-hotel" in set_cookie
+    # Cookie path was intentionally widened from "/api/ai-hotel" to "/" in
+    # AI_HOTEL_LAB_COCKPIT_UI_1 so one signed session covers the /ai-hotel-lab cockpit
+    # page + its /ai-hotel-lab/api/* and /api/ai-hotel/* calls. (Path only controls which
+    # paths the browser SENDS the cookie on; the server still honors it only inside the
+    # signed+scoped verifiers, so no new exposure.)
+    assert "Path=/" in set_cookie
     assert "master-key" not in resp.text
     assert "master-key" not in set_cookie
 
