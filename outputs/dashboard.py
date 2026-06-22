@@ -162,6 +162,11 @@ def _scan_prompt_with_ingestion_surfaces() -> str:
 _BAKER_API_KEY = os.getenv("BAKER_API_KEY", "")
 _AI_HOTEL_SESSION_COOKIE = "aih_session"
 _AI_HOTEL_SESSION_SCOPE = "ai-hotel:read"
+# AI_HOTEL_LAB_ADMIN_WRITE_SCOPE_1: a strictly higher scope for mutations
+# (projection-admin approve/revoke/refresh). Reads keep ai-hotel:read; the master
+# X-Baker-Key remains the general admin/write credential. A read-only credential
+# must never satisfy this scope (fail closed → 403).
+_AI_HOTEL_WRITE_SCOPE = "ai-hotel:write"
 _AI_HOTEL_SESSION_TTL_S = int(os.getenv("AI_HOTEL_SESSION_TTL_SECONDS", "43200"))
 _AI_HOTEL_PIN_RATE_LIMIT_PER_MIN = int(os.getenv("AI_HOTEL_PIN_RATE_LIMIT_PER_MIN", "5"))
 _AI_HOTEL_PIN_LOCKOUT_FAILURES = int(os.getenv("AI_HOTEL_PIN_LOCKOUT_FAILURES", "10"))
@@ -352,10 +357,10 @@ def _ai_hotel_b64url_decode(txt: str) -> bytes:
     return base64.urlsafe_b64decode(txt + "=" * (-len(txt) % 4))
 
 
-def _ai_hotel_sign_session() -> str:
+def _ai_hotel_sign_session(scope: str = _AI_HOTEL_SESSION_SCOPE) -> str:
     exp = int(time.time()) + max(300, _AI_HOTEL_SESSION_TTL_S)
     payload = {
-        "scope": _AI_HOTEL_SESSION_SCOPE,
+        "scope": scope,
         "iat": int(time.time()),
         "exp": exp,
         "nonce": uuid4().hex,
@@ -365,21 +370,35 @@ def _ai_hotel_sign_session() -> str:
     return f"{body}.{_ai_hotel_b64url(sig)}"
 
 
-def _ai_hotel_session_valid(token: str | None) -> bool:
+def _ai_hotel_session_scope(token: str | None) -> str | None:
+    """Return the VALIDATED scope of a signed session token (signature + expiry both
+    verified), or ``None`` if the token is missing/forged/expired. The single place
+    that authenticates a cookie; scope-specific deps compare the returned value. A
+    forged or tampered scope cannot pass because the whole payload is HMAC-signed."""
     if not token or "." not in token:
-        return False
+        return None
     try:
         body, sig = token.split(".", 1)
         expected = hmac.new(_ai_hotel_session_secret(), body.encode("ascii"), hashlib.sha256).digest()
         supplied = _ai_hotel_b64url_decode(sig)
         if not hmac.compare_digest(expected, supplied):
-            return False
+            return None
         payload = json.loads(_ai_hotel_b64url_decode(body).decode("utf-8"))
-        if payload.get("scope") != _AI_HOTEL_SESSION_SCOPE:
-            return False
-        return int(payload.get("exp") or 0) >= int(time.time())
+        if int(payload.get("exp") or 0) < int(time.time()):
+            return None
+        return payload.get("scope")
     except Exception:
-        return False
+        return None
+
+
+def _ai_hotel_session_valid(token: str | None) -> bool:
+    """True iff ``token`` grants at least READ access.
+
+    Read is satisfied by the read scope OR the higher write scope (write is a superset
+    of read), so a write-scoped credential can also drive read endpoints / the cockpit
+    page. The write gate (``verify_ai_hotel_write_access``) still requires the write
+    scope specifically; this only widens what counts as a valid READ session."""
+    return _ai_hotel_session_scope(token) in (_AI_HOTEL_SESSION_SCOPE, _AI_HOTEL_WRITE_SCOPE)
 
 
 async def verify_ai_hotel_read_access(
@@ -415,6 +434,40 @@ async def verify_ai_hotel_photo_edit_access(
     raise HTTPException(
         status_code=401,
         detail="Invalid or missing AI Hotel photo edit credentials",
+        headers={"WWW-Authenticate": "X-Baker-Key"},
+    )
+
+
+async def verify_ai_hotel_write_access(
+    request: Request,
+    x_baker_key: str = Header(None, alias="X-Baker-Key"),
+):
+    """AI_HOTEL_LAB_ADMIN_WRITE_SCOPE_1: admin-mutation auth (ai-hotel:write).
+
+    Gates the projection-admin endpoint (approve/revoke/refresh) with a STRICTLY
+    higher scope than reads. The master X-Baker-Key is the general admin/write
+    credential and passes. A session cookie passes ONLY if it carries the write
+    scope; a valid READ-only cookie is authenticated but insufficient → 403 (not a
+    silent allow, not 401). No credential at all → 401. Fail closed throughout.
+
+    This is an OUTER gate only — it does NOT replace the policy-layer human-admin
+    check in ``policy.projection.admin`` (AC7/T7), which still independently rejects
+    AI / external principals. Defense in depth.
+    """
+    if _BAKER_API_KEY and x_baker_key and hmac.compare_digest(x_baker_key, _BAKER_API_KEY):
+        return
+    scope = _ai_hotel_session_scope(request.cookies.get(_AI_HOTEL_SESSION_COOKIE))
+    if scope == _AI_HOTEL_WRITE_SCOPE:
+        return
+    if scope == _AI_HOTEL_SESSION_SCOPE:
+        # Authenticated, but a read-only credential cannot drive a mutation.
+        raise HTTPException(
+            status_code=403,
+            detail="AI Hotel write scope required (read-only credential cannot mutate)",
+        )
+    raise HTTPException(
+        status_code=401,
+        detail="Invalid or missing AI Hotel write credentials",
         headers={"WWW-Authenticate": "X-Baker-Key"},
     )
 
@@ -462,6 +515,11 @@ app.include_router(email_router)
 from outputs import ai_hotel_lab as _ai_hotel_lab
 from outputs.ai_hotel_lab import router as ai_hotel_lab_router
 app.include_router(ai_hotel_lab_router, dependencies=[Depends(verify_ai_hotel_read_access)])
+# AI_HOTEL_LAB_ADMIN_WRITE_SCOPE_1: the admin-mutation route carries an extra
+# placeholder write dependency (_write_auth) so the whole router stays read-gated while
+# POST /api/admin/{action} additionally requires ai-hotel:write. Bind the real verifier
+# here (the module can't import dashboard — circular), via the FastAPI DI override seam.
+app.dependency_overrides[_ai_hotel_lab._write_auth] = verify_ai_hotel_write_access
 
 
 def _ai_hotel_lab_authed(request: Request, x_baker_key: str | None) -> bool:
