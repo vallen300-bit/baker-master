@@ -101,7 +101,7 @@ into the Execution Roadmap. Distinguish available sources from planned/gap sourc
 
 ---
 
-## ACCEPTANCE CRITERIA (codex-arch #3836 — verbatim AC1-11; deputy-codex T# fold pending #3844)
+## ACCEPTANCE CRITERIA (codex-arch #3836 — verbatim AC1-11; deputy-codex rubric #3849 FOLDED below)
 
 - **AC1** Pattern B consistently: serious operational dashboard, restrained light mode, clear state hierarchy.
 - **AC2** External views consume Step-4 projection packets only (server-side; browser gets no raw rows externally).
@@ -115,6 +115,37 @@ into the Execution Roadmap. Distinguish available sources from planned/gap sourc
 - **AC10** Tests cover: no raw leak, no cross-role bleed, no client-side bypass, revoked projection hidden,
   stale projection marked, external empty state generic.
 - **AC11** Browser screenshots for Brisen internal, NVIDIA, MOHG, Venue Owner views before calling done.
+
+## DEPUTY-CODEX STEP-5 SECURITY/THREAT RUBRIC (bus #3849 — BINDING; map every row 1:1 to a named test + artifact)
+
+**AC refinements (security-critical reads of codex-arch AC1-11):**
+- AC1 Pattern-B state hierarchy is security-critical — raw/candidate cannot be styled as trusted. Test + screenshot.
+- AC2 External role endpoints consume ONLY Step-4 packets server-side; browser gets no raw rows/ids/search rows/registry internals.
+- AC3 Role selector/view-as is server-backed: role switch fetches that role's packet, clears prior-role state; no leak of raw text/hidden counts/blocked reasons/source hints/stale reasons.
+- AC4 Raw Signal Inbox internal-only: external roles have no DOM/network/localStorage/preloaded-JSON/hidden-field raw signal text.
+- AC5 Trusted Evidence lane = lifecycle-promoted only; raw/research/candidate cannot enter via CSS class or client transform.
+- AC6 Search coverage honest: live connectors produce results; missing/planned render as gaps/roadmap, never fabricated rows/counts.
+- AC7 Projection controls backend/audit-backed (Step-4 projection/admin state), not local toggles.
+- AC8 First-screen status from backend truth; degrade to explicit stale/gap/unknown, not optimistic copy.
+- AC9 Mobile/tablet keeps the same data boundary: no alternate endpoint/collapsed-drawer/cached-state/print-share path exposes external-forbidden data.
+- AC10 Test matrix maps every AC/T to named tests; **endpoint payload assertions count, template-only assertions do not.**
+- AC11 Browser proof: Brisen + NVIDIA + MOHG + Venue Owner screenshots + network-payload/DOM forbidden-token scan before done.
+
+**Threat cases (T1-T12):**
+- T1 Raw-text leak: raw email/WA/Plaud/doc/source text reaches external DOM/network/localStorage.
+- T2 Metadata leak: external empty state exposes hidden counts/blocked reasons/stale reasons/source hints/raw labels/blocked metadata.
+- T3 Cross-role bleed: NVIDIA sees MOHG/venue content or counts; MOHG sees NVIDIA/venue; venue sees partner strategy.
+- T4 Stale/revoked persistence: revoked packets still visible; stale still externally actionable after refresh/revoke/source update.
+- T5 Client-side permission bypass: frontend fetches broad/internal payload then filters in JS, or crafted role/query/header widens access.
+- T6 Second permission engine: JS or endpoint reimplements the role matrix instead of consuming Step-4 packets.
+- T7 Direct raw fetch: external view triggers `/alerts`, raw search, raw source registry/inventory, raw policy/search rows, or table-backed endpoints.
+- T8 Search fabrication: unavailable email/WA/web/authority connectors shown as working, or gaps hidden behind synthetic results.
+- T9 Source-hint leak: external views reveal never_external flags/internal source ids/raw paths/vendor names/internal routes/denied-source reasons.
+- T10 Hierarchy misread: Pattern-B makes raw amber/candidate look verified/shared/actionable.
+- T11 Responsive regression: mobile/tablet drawer/role selector/exported/printed/cached viewport leaks forbidden data or hides warnings.
+- T12 Proof gap: no browser/network evidence for all four roles, or only internal screenshot → gate stays REQUEST_CHANGES.
+
+G2 REQUEST_CHANGES on: any unmapped row, any external raw payload over the wire, any client-side permission filter, any optimistic/faked search coverage.
 
 ## NON-GOALS
 
