@@ -1,5 +1,5 @@
 ---
-status: PENDING
+status: COMPLETE (merged PR #412 @ 82dd49e, 2026-06-22)
 brief_id: AI_HOTEL_LAB_PROJECTION_ADMIN_STORE_1
 to: b2
 from: lead
