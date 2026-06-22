@@ -1018,3 +1018,22 @@ complete (Inbox 34%, Sent 0.4%). Nobody noticed until the Director asked "is it 
   agent to touch a single-file/single-binary subsystem owns it for that arc; others contribute via
   diagnosis/second-opinion (e.g. deputy-codex), never parallel edits. Surface the conflict immediately
   and re-assign — do not let two agents edit one handler.
+
+## 2026-06-22 — Don't reason a partner surface "out of scope"; prove it safe or fix it (B2, AI_HOTEL_LAB_PROJECTION_ADMIN_STORE_1 Step 5.1)
+- CONTEXT: Step 5.1 wired a persisted revoke kill switch that had to make a revoked item absent from
+  EVERY partner surface (packet/search/evidence/export). I wired packet/evidence/audit through the
+  overlay, but reasoned `/api/search` was "source-based, not item-based, so a revoked evidence item has
+  no search row to hide there" — and shipped with that as a note-to-gate rather than a fix.
+- MISS: deputy-codex G2 (#3970) proved it exploitable: a SourceRecord whose `policy_object_id` equals a
+  revoked `source_evidence_item_id` still returned the revoked claim to NVIDIA via external search. The
+  surface WAS item-reachable; my framing was an assumption, not a verified property. "Normal seeded
+  search doesn't leak" was absence of a matching row, not enforcement.
+- RULE: when you identify a surface that MIGHT leak a controlled value, you have two honest options —
+  (a) write a test that proves it cannot (populated adversarial corpus, not the benign seed), or (b) wire
+  the control through it. A prose note saying "probably fine because of how it's shaped" is neither.
+  Fail-closed enforcement beats "no row exists today" every time — corpora change.
+- FIX: external `get_search` now loads the revoke overlay, builds the revoked source-evidence id set, and
+  suppresses any external result whose `result_ref` (= source policy_object_id) is revoked (selective:
+  neighbors still return); fail-closed on store outage. Regression mirrors the gate probe (revoked row
+  suppressed + visible neighbor + claim text gone). The fix lived at the cockpit layer (lowest blast
+  radius) rather than the shared search runner/registry.
