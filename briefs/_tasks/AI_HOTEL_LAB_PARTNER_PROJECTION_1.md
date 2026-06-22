@@ -2,7 +2,7 @@
 
 **Sprint:** AI Hotel Lab — Sprint-0, Build Step 4 of 5 (partner-safe projection surface).
 **Dispatched_by:** lead (AH1). **Gate owner:** deputy-codex (AC + threat-model), deputy (augmented chain), lead (security-review + merge).
-**Source of truth:** codex-arch product framing (bus #3733, Director-confirmed GO) + deputy-codex Step-4 security rubric (bus #3734-reply — both binding).
+**Source of truth:** codex-arch product framing (bus #3733, Director-confirmed GO) + deputy-codex Step-4 security rubric (bus #3738 — both binding).
 **Builds on:** Step 1 LIVE policy engine `policy/` (66411ba) + Step 2 LIVE source registry `policy/sources/` (9f83b31) + Step 3 LIVE search/routing `policy/search/` (35e9c0f). This step CONSUMES all three; it must NOT add a second permission engine or join raw tables directly.
 **Harness-V2:** in scope — Context Contract + task class + done rubric + gate plan below.
 
@@ -100,7 +100,7 @@ states with reason** (never blank → `blocked_by_missing_confirmation` / `block
 
 ## ACCEPTANCE CRITERIA
 
-**Authoritative AC + threat rubric = deputy-codex bus #3734-reply (security) + codex-arch #3733 7 ACs
+**Authoritative AC + threat rubric = deputy-codex bus #3738 (security) + codex-arch #3733 7 ACs
 (product) — both binding.** codex-arch ACs (build to all 7):
 
 1. Backend returns role-specific partner-safe packets for NVIDIA, MOHG, venue-owner test users.
@@ -116,7 +116,7 @@ states with reason** (never blank → `blocked_by_missing_confirmation` / `block
 required before external `shared_view`; every projection cites its verified evidence item + policy
 decision; a projection cannot outlive revoked/stale underlying evidence (must mark stale/blocked);
 never-external hard-deny survives mis-registration; external direct API calls fail closed. deputy-codex
-#3734 threats are binding on top. The 10 codex-arch test/threat cases (cross-role, direct source_id,
+#3738 threats are binding on top. The 10 codex-arch test/threat cases (cross-role, direct source_id,
 raw_signal-no-project, never_external-block, misclassified-email, revoke, stale, view-as parity) are all
 mandatory test coverage.
 
@@ -124,7 +124,7 @@ mandatory test coverage.
 
 ## DONE RUBRIC (answer in the ship report — not "tests pass")
 
-1. Citation table mapping codex-arch AC1–AC7 + the 10 threat cases + deputy-codex #3734 AC/T to named tests (1:1).
+1. Citation table mapping codex-arch AC1–AC7 + the 10 threat cases + deputy-codex #3738 AC1-12 + T1-12 to named tests (1:1).
 2. **Derived-only test:** every external projection_item display field is proven to come from
    `partner_projection`, NOT raw source text (spy/mock; removing the projection call fails the test).
 3. **Cross-role isolation test:** NVIDIA principal cannot retrieve any MOHG/venue item (absent, not just
@@ -140,10 +140,24 @@ mandatory test coverage.
 9. **view-as parity test:** `view-as/{role}` byte-identical to the real external role's packet.
 10. **Empty-state test:** no blank — missing/blocked yields `blocked_by_missing_confirmation` /
     `blocked_by_policy` with reason.
-11. Migrations additive + idempotent (`IF NOT EXISTS`), runner-safe (no `CREATE INDEX CONCURRENTLY` in the
+11. **Field-allowlist test (deputy-codex AC4):** external packets carry ONLY allowlisted fields (opaque
+    id, safe title/summary, safe source label, evidence/action status, safe state, partner-safe action
+    text); assert raw ids/source_ids/provenance refs/file paths/participant lists/raw titles/internal
+    notes/denial reasons/raw task URLs are absent.
+12. **Action-link no-leak + non-mutating test (deputy-codex T8/AC9):** external action_linked packets
+    expose NO internal ClickUp/GitHub/Dropbox/admin URLs — safe action text only; viewing/listing a packet
+    mutates nothing (routing/registry/policy/lifecycle/evidence unchanged).
+13. **Serializer-boundary test (deputy-codex T9/AC10):** internal-preview + evidence-admin serializers are
+    SEPARATE from the external serializer; prove internal denial reasons/audit/source refs/raw fields/
+    hidden counts cannot appear in any external response.
+14. **Simulated-user spoof test (deputy-codex T10):** a test user tampering with org/role headers or query
+    params to impersonate another partner or Brisen is denied by the server-side principal fixture.
+15. **Cache/staleness revalidation test (deputy-codex T11):** a cached projection after a policy/source/
+    lifecycle change is revalidated/invalidated at response time — no stale external payload survives.
+16. Migrations additive + idempotent (`IF NOT EXISTS`), runner-safe (no `CREATE INDEX CONCURRENTLY` in the
     per-file transaction). `pytest` green (cite count) + `bash scripts/check_singletons.sh` green; Steps 1-3
     test suites still green (no regression).
-12. **DONE means:** no external audience can see another audience's items or any raw internal field;
+17. **DONE means:** no external audience can see another audience's items or any raw internal field;
     projection exists only through the Step-1 engine + human-approved lifecycle; revoke/stale are honored.
 
 ---
@@ -151,7 +165,7 @@ mandatory test coverage.
 ## GATE PLAN
 
 1. Builder self-test → `pytest` + singleton guard green; Steps 1-3 suites green.
-2. **deputy-codex** AC + threat-model gate vs #3734 (its owned scope) — REQUEST_CHANGES blocks merge until fixed + re-gated.
+2. **deputy-codex** AC + threat-model gate vs #3738 (its owned scope) — REQUEST_CHANGES blocks merge until fixed + re-gated.
 3. **deputy** augmented chain (architect + codex-verifier cross-vendor).
 4. **lead** /security-review (Tier-A — partner-leak surface, the highest of the sprint) → merge.
 5. POST_DEPLOY_AC v1 after Render deploy (migration runs clean at startup).
