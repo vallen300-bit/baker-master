@@ -788,68 +788,121 @@ _COCKPIT_HTML = r"""<!DOCTYPE html>
 <title>AI Hotel Lab — Cockpit</title>
 <style>
   :root{
-    --paper:#f7f6f2; --ink:#1c2530; --muted:#5d6b7a; --line:#dcd9d0; --card:#fffefb;
-    --navy:#1a3a52; --navy-soft:#e7edf2; --amber:#b3760a; --amber-bg:#fdf3e0;
-    --verified:#1f6b46; --verified-bg:#e8f3ec; --gap:#9a3b3b; --gap-bg:#f7eaea;
+    --canvas:#F7F6F2; --sidebar:#EFEEE8; --panel:#FFFFFF; --panel-hover:#FAF9F5;
+    --ink:#171717; --text-2:#54524C; --muted:#767168; --faint:#9B958B;
+    --line:#DDD8CE; --line-2:#ECE8DE; --accent:#1D1D1D; --blue:#0969DA;
+    --blue-soft:#E8F1FE; --amber:#B7791F; --amber-soft:#F8E9CA;
+    --green:#4C8F2F; --green-soft:#E7F1E4; --red:#A4423F; --red-soft:#F4E5E3;
+    --shadow:0 18px 42px rgba(30,24,12,.08),0 1px 0 rgba(255,255,255,.9) inset;
+    --shadow-sm:0 10px 24px rgba(30,24,12,.06),0 1px 0 rgba(255,255,255,.9) inset;
   }
   *{box-sizing:border-box}
-  body{margin:0;font:15px/1.5 -apple-system,BlinkMacSystemFont,"Segoe UI",Helvetica,Arial,sans-serif;color:var(--ink);background:var(--paper)}
-  header{background:var(--card);border-bottom:1px solid var(--line);padding:14px 20px;position:sticky;top:0;z-index:10}
-  .titlerow{display:flex;align-items:center;gap:14px;flex-wrap:wrap}
-  h1{font-size:18px;margin:0;letter-spacing:.3px}
-  .milestone{font-size:11px;color:var(--muted);border:1px solid var(--line);border-radius:3px;padding:2px 7px;text-transform:uppercase;letter-spacing:.5px}
-  .roles{margin-left:auto;display:flex;gap:6px;flex-wrap:wrap}
-  .roles button{font:inherit;font-size:13px;padding:6px 12px;border:1px solid var(--line);background:var(--paper);border-radius:4px;cursor:pointer;color:var(--ink)}
-  .roles button.active{background:var(--navy);color:#fff;border-color:var(--navy)}
-  .firstscreen{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:10px;margin-top:12px}
-  .stat{background:var(--paper);border:1px solid var(--line);border-radius:4px;padding:8px 10px}
-  .stat .k{font-size:10px;text-transform:uppercase;letter-spacing:.6px;color:var(--muted)}
-  .stat .v{font-size:14px;font-weight:600;margin-top:2px}
-  .searchbar{display:flex;gap:8px;margin-top:12px}
-  .searchbar input{flex:1;font:inherit;padding:8px 10px;border:1px solid var(--line);border-radius:4px;background:#fff}
-  .searchbar button{font:inherit;padding:8px 14px;border:1px solid var(--navy);background:var(--navy);color:#fff;border-radius:4px;cursor:pointer}
-  .layout{display:flex;min-height:60vh}
-  nav{width:230px;flex:0 0 230px;border-right:1px solid var(--line);padding:16px 0;background:var(--card)}
-  nav a{display:block;padding:8px 20px;color:var(--ink);text-decoration:none;font-size:14px;cursor:pointer;border-left:3px solid transparent}
-  nav a:hover{background:var(--navy-soft)} nav a.active{border-left-color:var(--navy);font-weight:600;background:var(--navy-soft)}
-  nav .seclabel{font-size:10px;text-transform:uppercase;letter-spacing:.6px;color:var(--muted);padding:14px 20px 4px}
-  main{flex:1;padding:20px;min-width:0}
-  .panel{background:var(--card);border:1px solid var(--line);border-radius:5px;padding:16px;margin-bottom:18px}
-  .panel h2{font-size:14px;margin:0 0 10px;text-transform:uppercase;letter-spacing:.5px;color:var(--navy)}
-  .item{border:1px solid var(--line);border-radius:4px;padding:10px 12px;margin-bottom:8px;background:#fff}
-  .item .claim{font-weight:600} .item .meta{font-size:12px;color:var(--muted);margin-top:4px}
-  .badge{display:inline-block;font-size:10px;text-transform:uppercase;letter-spacing:.5px;padding:2px 7px;border-radius:3px;margin-right:6px;font-weight:700}
-  .b-raw{background:var(--amber-bg);color:var(--amber);border:1px solid var(--amber)}
-  .b-verified{background:var(--verified-bg);color:var(--verified);border:1px solid var(--verified)}
-  .b-gap{background:var(--gap-bg);color:var(--gap);border:1px solid var(--gap)}
-  .b-state{background:var(--navy-soft);color:var(--navy);border:1px solid #b9c8d4}
-  .raw-card{border-left:4px solid var(--amber);background:var(--amber-bg)}
-  .verified-card{border-left:4px solid var(--verified)}
-  .btn{font:inherit;font-size:12px;padding:5px 10px;border:1px solid var(--line);background:var(--paper);border-radius:4px;cursor:pointer;margin-right:6px}
-  .btn.live{border-color:var(--verified);color:var(--verified)}
+  html{background:var(--canvas)}
+  body{
+    margin:0;font:14px/1.48 -apple-system,BlinkMacSystemFont,"Segoe UI",Helvetica,Arial,sans-serif;
+    color:var(--ink);background:var(--canvas);font-variant-numeric:tabular-nums;letter-spacing:0;
+  }
+  button,input{font:inherit;letter-spacing:0}
+  button:focus-visible,input:focus-visible,a:focus-visible{outline:3px solid rgba(9,105,218,.22);outline-offset:2px}
+  header{
+    background:#fffdf9;border-bottom:1px solid var(--line);padding:22px 26px 18px;
+  }
+  .hero{display:grid;grid-template-columns:minmax(360px,1.45fr) minmax(280px,.75fr);gap:16px;max-width:1480px;margin:0 auto}
+  .hero-main,.partner-gate,.searchbar,.stat,.panel,.item{background:var(--panel);border:1px solid var(--line);box-shadow:var(--shadow-sm)}
+  .hero-main{border-radius:8px;padding:22px 24px}
+  .eyebrow,.stat .k,nav .seclabel{color:var(--blue);font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:0}
+  h1{font-size:30px;line-height:1.12;margin:4px 0 8px;font-weight:650;letter-spacing:0}
+  .hero-copy{max-width:760px;color:var(--text-2);font-size:15px;margin:0}
+  .milestone{
+    display:inline-flex;align-items:center;gap:7px;margin-top:16px;font-size:12px;color:var(--text-2);
+    border:1px solid var(--line);border-radius:999px;padding:5px 10px;background:var(--panel-hover);
+  }
+  .milestone:before{content:"";width:7px;height:7px;border-radius:50%;background:var(--green);box-shadow:0 0 0 4px var(--green-soft)}
+  .partner-gate{border-radius:8px;padding:18px 20px}
+  .partner-gate .label{font-size:12px;color:var(--muted);font-weight:600}
+  .partner-gate .title{font-size:22px;line-height:1.14;font-weight:650;margin:6px 0;color:var(--ink)}
+  .partner-gate p{margin:0;color:var(--text-2);font-size:13px}
+  .roles{display:flex;gap:7px;flex-wrap:wrap;margin-top:18px}
+  .roles button{
+    min-height:36px;padding:7px 12px;border:1px solid var(--line);background:var(--panel);
+    border-radius:999px;cursor:pointer;color:var(--ink);box-shadow:0 1px 0 rgba(255,255,255,.8) inset;
+  }
+  .roles button:hover{background:var(--panel-hover);border-color:#c9c1b4}
+  .roles button.active{background:var(--accent);color:#fff;border-color:var(--accent)}
+  .firstscreen{max-width:1480px;margin:14px auto 0;display:grid;grid-template-columns:repeat(6,minmax(140px,1fr));gap:10px}
+  .stat{border-radius:8px;padding:12px 13px;min-height:82px}
+  .stat .k{color:var(--muted);font-size:10px}
+  .stat .v{font-size:14px;font-weight:650;line-height:1.28;margin-top:7px;color:var(--ink)}
+  .searchbar{max-width:1480px;margin:14px auto 0;display:flex;gap:10px;border-radius:8px;padding:10px}
+  .searchbar input{flex:1;min-width:0;padding:10px 12px;border:1px solid var(--line);border-radius:7px;background:#fff;color:var(--ink)}
+  .searchbar button{min-height:40px;padding:9px 16px;border:1px solid var(--accent);background:var(--accent);color:#fff;border-radius:7px;cursor:pointer;font-weight:650}
+  .searchbar button:hover{background:#000}
+  .layout{display:flex;min-height:60vh;max-width:1480px;margin:0 auto}
+  nav{width:250px;flex:0 0 250px;border-right:1px solid var(--line);padding:18px 12px;background:var(--sidebar)}
+  nav a{display:block;padding:9px 12px;color:var(--ink);text-decoration:none;font-size:14px;cursor:pointer;border-radius:7px;border:1px solid transparent;margin:2px 0}
+  nav a:hover{background:rgba(255,255,255,.55);border-color:var(--line)}
+  nav a.active{font-weight:650;background:var(--panel);border-color:var(--line);box-shadow:var(--shadow-sm)}
+  nav .seclabel{color:var(--muted);padding:16px 12px 6px}
+  main{flex:1;padding:24px;min-width:0}
+  .panel{border-radius:8px;padding:18px;margin-bottom:18px}
+  .panel h2{font-size:13px;margin:0 0 13px;text-transform:uppercase;letter-spacing:0;color:var(--blue)}
+  .item{border-radius:8px;padding:14px 15px;margin-bottom:10px}
+  .item:hover{background:var(--panel-hover);border-color:#cfc6b9}
+  .item .claim{font-weight:650;font-size:15px;line-height:1.35;color:var(--ink)}
+  .item .meta{font-size:12px;color:var(--muted);margin-top:7px}
+  .badge{display:inline-flex;align-items:center;min-height:21px;font-size:10px;text-transform:uppercase;letter-spacing:0;padding:2px 7px;border-radius:999px;margin-right:6px;font-weight:750}
+  .b-raw{background:var(--amber-soft);color:var(--amber);border:1px solid rgba(183,121,31,.34)}
+  .b-verified{background:var(--green-soft);color:var(--green);border:1px solid rgba(76,143,47,.3)}
+  .b-gap{background:var(--red-soft);color:var(--red);border:1px solid rgba(164,66,63,.28)}
+  .b-state{background:var(--blue-soft);color:var(--blue);border:1px solid rgba(9,105,218,.2)}
+  .raw-card{border-left:4px solid var(--amber);background:#fffaf0}
+  .verified-card{border-left:4px solid var(--green)}
+  .btn{min-height:34px;padding:6px 11px;border:1px solid var(--line);background:var(--panel);border-radius:7px;cursor:pointer;margin:10px 6px 0 0;font-weight:600}
+  .btn:hover{background:var(--panel-hover);border-color:#c9c1b4}
+  .btn.live{border-color:rgba(76,143,47,.38);color:var(--green);background:var(--green-soft)}
   .btn[disabled]{opacity:.5;cursor:not-allowed}
-  .reason{font-size:11px;color:var(--muted);font-style:italic;margin-top:4px}
-  .empty{color:var(--muted);font-size:13px;padding:8px 0}
-  table{width:100%;border-collapse:collapse;font-size:13px} th,td{text-align:left;padding:6px 8px;border-bottom:1px solid var(--line)}
-  .notice{background:var(--navy-soft);border:1px solid #b9c8d4;border-radius:4px;padding:8px 12px;font-size:12px;color:var(--navy);margin-bottom:14px}
-  pre{white-space:pre-wrap;font-size:12px}
-  @media(max-width:760px){.layout{flex-direction:column}nav{width:auto;flex:none;border-right:none;border-bottom:1px solid var(--line);display:flex;overflow-x:auto}nav .seclabel{display:none}nav a{white-space:nowrap;border-left:none;border-bottom:3px solid transparent}}
+  .reason{font-size:12px;color:var(--text-2);margin-top:10px;max-width:760px}
+  .empty{color:var(--muted);font-size:13px;padding:10px 0}
+  table{width:100%;border-collapse:collapse;font-size:13px}
+  th,td{text-align:left;padding:9px 8px;border-bottom:1px solid var(--line)}
+  th{color:var(--muted);font-size:11px;text-transform:uppercase;letter-spacing:0}
+  .notice{background:var(--blue-soft);border:1px solid rgba(9,105,218,.18);border-radius:8px;padding:11px 13px;font-size:13px;color:#174B8B;margin-bottom:14px}
+  pre{white-space:pre-wrap;font-size:12px;background:#fbfaf7;border:1px solid var(--line);border-radius:8px;padding:12px;overflow:auto}
+  @media(max-width:1040px){
+    header{padding:18px 18px 14px}.hero{grid-template-columns:1fr}.firstscreen{grid-template-columns:repeat(3,minmax(140px,1fr))}
+    .layout{display:block}nav{width:auto;display:flex;gap:6px;overflow-x:auto;border-right:none;border-bottom:1px solid var(--line);padding:12px}
+    nav .seclabel{display:none}nav a{white-space:nowrap}main{padding:18px}
+  }
+  @media(max-width:680px){
+    h1{font-size:26px}.hero-main,.partner-gate{padding:17px}.firstscreen{grid-template-columns:1fr 1fr}
+    .searchbar{display:block}.searchbar button{width:100%;margin-top:8px}
+  }
+  @media(max-width:420px){.firstscreen{grid-template-columns:1fr}.roles button{width:100%;justify-content:center}}
 </style></head>
 <body>
 <header>
-  <div class="titlerow">
-    <h1>AI Hotel Lab</h1>
-    <span class="milestone">Internal cockpit · view-as milestone</span>
-    <div class="roles" id="roles">
-      <button data-role="brisen" class="active">Brisen (internal)</button>
-      <button data-role="nvidia">View as NVIDIA</button>
-      <button data-role="mohg">View as MOHG</button>
-      <button data-role="venue">View as Venue Owner</button>
+  <section class="hero" aria-label="AI Hotel Lab status">
+    <div class="hero-main">
+      <div class="eyebrow">NVIDIA × Mandarin Oriental × Brisen</div>
+      <h1>AI Hotel Lab</h1>
+      <p class="hero-copy">Governed project room for the AI-hospitality lighthouse: partner-safe evidence, role-specific packets, source coverage, and Brisen-controlled activation.</p>
+      <span class="milestone">Partner-live capable · activation held</span>
+      <div class="roles" id="roles">
+        <button data-role="brisen" class="active">Brisen (internal)</button>
+        <button data-role="nvidia">View as NVIDIA</button>
+        <button data-role="mohg">View as MOHG</button>
+        <button data-role="venue">View as Venue Owner</button>
+      </div>
     </div>
-  </div>
+    <div class="partner-gate">
+      <div class="label">Control state</div>
+      <div class="title">Safe to demonstrate. Not opened externally.</div>
+      <p>Technical gates are clear. Real partner access remains held until the first audience, access mode, and visible scope are ratified.</p>
+    </div>
+  </section>
   <div class="firstscreen" id="firstscreen"></div>
   <div class="searchbar">
-    <input id="q" placeholder="Advanced search — internal Baker/vault/field; web & authorities shown as gaps until wired"/>
+    <input id="q" placeholder="Search governed evidence, source coverage, and partner-safe packet state"/>
     <button id="searchbtn">Search</button>
   </div>
 </header>
@@ -908,10 +961,12 @@ async function renderFirstScreen(){
   const fs=document.getElementById('firstscreen'); clear(fs);
   const pkt=await api('packet'); if(!pkt){ fs.appendChild(stat('status','unavailable')); return; }
   const c=pkt.counts||{};
-  [['Stage','Sprint-0 · Step 5 (cockpit)'],['Viewing as',pkt.audience_label],
-   ['Visible evidence',(c.visible||0)+' items'],['Action-linked',(c.action_linked||0)],
+  [['Thesis','AI-hospitality lighthouse governed by partner-safe evidence'],
+   ['Status','Sprint-0 live · gates cleared'],
+   ['Next action','Controlled demo before external access'],
    ['Evidence freshness',pkt.last_generated_at?pkt.last_generated_at.slice(0,10):'—'],
-   ['External sharing',isExternal()?'view-as preview (not partner-live)':'Brisen control']
+   ['External sharing',isExternal()?'View-as preview · not partner-live':'Brisen control'],
+   ['Visible packet',(c.visible||0)+' items · '+(c.action_linked||0)+' action-linked']
   ].forEach(s=>fs.appendChild(stat(s[0],s[1])));
 }
 function sectionItems(pkt){ const out=[]; for(const sec in (pkt.sections||{})){ const v=pkt.sections[sec]; if(Array.isArray(v)) v.forEach(i=>out.push({sec,i})); } return out; }
@@ -921,8 +976,8 @@ function notice(txt){ return h('div',{class:'notice',text:txt}); }
 async function viewOverview(){
   const wrap=h('div'); const pkt=await api('packet'); if(!pkt){wrap.appendChild(h('div',{class:'empty',text:'No packet.'}));return wrap;}
   wrap.appendChild(notice(isExternal()
-    ? 'Partner view-as preview. This is the exact server-built partner packet — no raw internal data reaches this view. Revoke is a durable, audited kill switch: a revoked item disappears from this view immediately.'
-    : 'Brisen internal command view. Raw signals are amber and internal-only; verified evidence is promoted; partner projections are governed server-side.'));
+    ? 'Partner preview uses the exact server-built packet. No raw internal data reaches this view. Revoke is a durable, audited kill switch: a revoked item disappears from this view immediately.'
+    : 'Brisen control view. Amber material is internal-only; verified evidence is promoted; partner packets are governed server-side.'));
   const p=panel('Evidence by section'); const items=sectionItems(pkt);
   if(!items.length) p.appendChild(h('div',{class:'empty',text:'No items available.'}));
   items.forEach(({sec,i})=>{
