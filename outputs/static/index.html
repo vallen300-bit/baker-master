@@ -14,7 +14,7 @@
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&family=EB+Garamond:wght@400;500;600;700&display=swap" rel="stylesheet">
-    <link rel="stylesheet" href="/static/style.css?v=83">
+    <link rel="stylesheet" href="/static/style.css?v=84">
 </head>
 <body>
 
@@ -185,6 +185,17 @@
             <!-- Compact System health/freshness strip (BAKER_DASHBOARD_V2_SYSTEM_HEALTH_CONSOLE_1) -->
             <div id="todayHealthStrip" class="today-health-strip" hidden role="button" tabindex="0"
                  title="Open System Health console" aria-label="Baker system health — open System console"></div>
+
+            <!-- BAKER_DASHBOARD_V2_CARD_DETAIL_1: trusted Today list (read-only).
+                 Sits ABOVE the legacy morning-brief grid; legacy untouched.
+                 Each card opens the verified-item detail drawer. Empty when
+                 verified_items is dormant. -->
+            <section id="today-trusted-section" class="today-trusted-section">
+                <div class="today-trusted-head">
+                    <span class="section-label" style="margin:0">Trusted Today</span>
+                </div>
+                <div id="today-trusted" class="today-trusted"></div>
+            </section>
 
             <!-- Weekly Priorities Widget -->
             <div id="prioritiesWidget" class="priorities-widget" hidden>
@@ -602,7 +613,7 @@
   })();
 </script>
 
-<script src="/static/app.js?v=129"></script>
+<script src="/static/app.js?v=131"></script>
 <script>
 // PWA-DESKTOP-1: Register service worker for installability
 if ('serviceWorker' in navigator) {
