@@ -196,6 +196,7 @@ def propose_route(
     sensitivity: Optional[Sensitivity] = None,
     never_external: bool = False,
     llm_router: Optional[LlmRouter] = None,
+    llm_text: Optional[str] = None,
 ) -> RoutingSuggestion:
     """Deterministic-first, LLM-assist-second routing proposal.
 
@@ -204,6 +205,14 @@ def propose_route(
     low confidence) AND an ``llm_router`` is supplied. The LLM output is wrapped as
     a PROPOSAL (``method=llm``), capped below deterministic confidence, and CANNOT
     override a fail-safe risk/permission routing — it never finalises or promotes.
+
+    **Prompt-injection defence (deputy-codex T8/AC9).** The LLM receives ``llm_text``
+    — a PROJECTION-SAFE descriptor (structural metadata + partner-safe claim) — NOT
+    the full text and NEVER raw bodies / internal titles. Whatever the LLM returns
+    is schema-validated: a non-``RouteTarget`` answer is discarded and the
+    deterministic route stands. The LLM's only output channel is a route SUGGESTION
+    — it has no path to mutate policy, promote, or widen visibility, so a malicious
+    source string cannot make routing reveal a hidden document or skip a gate.
     """
 
     deterministic = route_deterministic(
@@ -219,19 +228,28 @@ def propose_route(
     ):
         return deterministic
 
+    # T8: the LLM only ever sees projection-safe text, never raw text/titles.
+    safe_text = llm_text if llm_text is not None else text
     try:
-        target, reason, conf = llm_router(text)
-    except Exception:  # noqa: BLE001 - LLM failure falls back to deterministic, fail-safe
+        proposal = llm_router(safe_text)
+        target, reason, conf = proposal  # may raise if the LLM returned junk
+    except Exception:  # noqa: BLE001 - LLM failure / bad shape -> deterministic, fail-safe
         return deterministic
 
+    # Schema validation: a non-RouteTarget (e.g. an injected free-text "command")
+    # is rejected outright — the deterministic route stands.
     if not isinstance(target, RouteTarget):
+        return deterministic
+    try:
+        conf = min(float(conf), _LLM_CONFIDENCE_CAP)
+    except (TypeError, ValueError):
         return deterministic
 
     return RoutingSuggestion(
         route_target=target,
-        route_reason=f"llm assist: {reason}",
+        route_reason=f"llm assist: {str(reason)[:240]}",
         method=RoutingMethod.LLM,
-        confidence=min(float(conf), _LLM_CONFIDENCE_CAP),
+        confidence=conf,
         rule_no=None,
     )
 

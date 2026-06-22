@@ -50,6 +50,62 @@ def _enum(v: Any) -> Any:
     return getattr(v, "value", v)
 
 
+# AC10 hard ceiling — a candidate read can never exceed this many rows, and every
+# read is time-limited so a pathological query cannot run unbounded.
+_MAX_CANDIDATE_LIMIT = 500
+_STATEMENT_TIMEOUT_MS = 5000
+
+
+def load_search_candidates(
+    *,
+    limit: int = 100,
+    offset: int = 0,
+    domain: Any = None,
+    conn_factory: ConnFactory = _default_conn_factory,
+):
+    """Bounded, parameterized, time-limited read over the source registry (AC10).
+
+    This is the ONLY read path the search runner uses by default — it NEVER issues
+    an unbounded ``SELECT *`` (deputy-codex calls unbounded SQL over the registries a
+    blocker). ``limit`` is clamped to ``_MAX_CANDIDATE_LIMIT``; a per-statement
+    timeout bounds wall-clock; any DB error FAILS CLOSED (raises) so an external
+    search never degrades to an unfiltered or partial payload.
+
+    Row→record mapping reuses the Step-2 ``_row_to_record`` (no forked registry).
+    """
+
+    from policy.sources.store import _row_to_record
+
+    limit = max(1, min(int(limit), _MAX_CANDIDATE_LIMIT))
+    offset = max(0, int(offset))
+
+    try:
+        with conn_factory() as conn:
+            with conn.cursor() as cur:
+                # Bound wall-clock per statement (best-effort; ignored by non-PG fakes).
+                try:
+                    cur.execute("SET LOCAL statement_timeout = %s", (_STATEMENT_TIMEOUT_MS,))
+                except Exception:  # noqa: BLE001 - timeout is a guard, not a hard dep
+                    pass
+                if domain is not None:
+                    cur.execute(
+                        "SELECT * FROM source_registry WHERE domain = %s "
+                        "ORDER BY id LIMIT %s OFFSET %s",
+                        (_enum(domain), limit, offset),
+                    )
+                else:
+                    cur.execute(
+                        "SELECT * FROM source_registry ORDER BY id LIMIT %s OFFSET %s",
+                        (limit, offset),
+                    )
+                cols = [d[0] for d in cur.description]
+                rows = [dict(zip(cols, r)) for r in cur.fetchall()]
+        return [_row_to_record(r) for r in rows]
+    except Exception as exc:  # noqa: BLE001 - fail closed, never partial
+        logger.exception("load_search_candidates failed — failing closed")
+        raise SearchStoreUnavailableError(str(exc)) from exc
+
+
 def log_search_query(
     principal_org: str,
     principal_role: str,

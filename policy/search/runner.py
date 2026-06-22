@@ -38,33 +38,51 @@ from policy.search.models import (
 )
 
 # A candidate loader returns the SourceRecords to search over (default: the registry
-# store). Injected so the runner is DB-free in tests.
-CandidateLoader = Callable[[], Iterable[SourceRecord]]
+# store). Injected so the runner is DB-free in tests. It is ALWAYS called with an
+# explicit bound — the runner never issues an unbounded read (AC10).
+CandidateLoader = Callable[..., Iterable[SourceRecord]]
+
+# AC10 scale guards: a single search NEVER scans more than _MAX_SCAN candidate rows
+# and NEVER returns more than _PAGE_MAX results per page. Both are hard ceilings.
+_MAX_SCAN = 500
+_PAGE_MAX = 200
 
 
-def _default_loader() -> Iterable[SourceRecord]:
-    from policy.sources.store import load_sources
+def _default_loader(*, limit: int, offset: int = 0, domain=None) -> Iterable[SourceRecord]:
+    """Default candidate loader — a BOUNDED, parameterized, time-limited read over the
+    source registry. Never an unbounded ``SELECT *`` (deputy-codex AC10 blocker)."""
 
-    return load_sources()
+    from policy.search.store import load_search_candidates
+
+    return load_search_candidates(limit=limit, offset=offset, domain=domain)
 
 
 def _route_for_record(rec: SourceRecord, *, llm_router=None):
-    """Build a routing suggestion from a record's SAFE metadata (no raw text)."""
+    """Build a routing suggestion from a record's SAFE metadata (no raw text).
 
-    # Routing text is built from non-leaking metadata only: object type, source
-    # type, claim/name, and domain. Raw bodies / provenance refs are never used.
-    parts = [
-        rec.object_type.value,
-        rec.source_type,
-        rec.claim or rec.name or "",
+    Two texts are built:
+
+    * ``text`` — the DETERMINISTIC input: structural metadata + claim + internal
+      name. Deterministic rules are keyword matches and cannot be prompt-injected.
+    * ``llm_text`` — the PROJECTION-SAFE input handed to any LLM router (T8): it
+      OMITS the internal ``name`` (a potentially sensitive title) and uses only the
+      object type, source type, domain, and the partner-safe ``claim``. Raw bodies
+      and provenance refs are never used in either.
+    """
+
+    text = " ".join(p for p in (
+        rec.object_type.value, rec.source_type, rec.claim or rec.name or "",
         rec.domain.value,
-    ]
-    text = " ".join(p for p in parts if p)
+    ) if p)
+    llm_text = " ".join(p for p in (
+        rec.object_type.value, rec.source_type, rec.claim or "", rec.domain.value,
+    ) if p)
     return routing.propose_route(
         text,
         sensitivity=rec.sensitivity,
         never_external=rec.is_never_external,
         llm_router=llm_router,
+        llm_text=llm_text,
     )
 
 
@@ -127,6 +145,8 @@ def search(
     *,
     domain: Optional[SourceDomain] = None,
     section: Optional[RouteTarget] = None,
+    limit: int = 100,
+    offset: int = 0,
     candidates: Optional[Iterable[SourceRecord]] = None,
     loader: CandidateLoader = _default_loader,
     llm_router=None,
@@ -139,6 +159,11 @@ def search(
     ``domain`` filters to a Step-2 source domain (``source_domain`` mode);
     ``section`` filters to a route_target (``section`` mode).
 
+    Scale guards (deputy-codex AC10): ``limit`` is clamped to ``_PAGE_MAX`` and the
+    candidate scan is clamped to ``_MAX_SCAN`` — a search NEVER runs an unbounded
+    query. A backend (loader) failure PROPAGATES (fail closed): an external caller
+    never receives a partial or unfiltered payload on a store/index error.
+
     ``web_live_hook`` is a DEFINED hook only — it performs no crawling and returns a
     zero-result set routed to ``execution_roadmap`` (any future web result must enter
     ``raw_signal`` first).
@@ -146,6 +171,8 @@ def search(
 
     sink = sink or default_sink()
     external = principal.is_external
+    limit = max(1, min(int(limit), _PAGE_MAX))
+    offset = max(0, int(offset))
 
     # web/live-source is a hook only in Step 3 — no crawl, explicit empty.
     if mode is SearchMode.WEB_LIVE_HOOK:
@@ -160,7 +187,13 @@ def search(
             ),
         )
 
-    recs = list(candidates) if candidates is not None else list(loader())
+    # Bounded candidate read. The default loader issues a bounded SQL window; an
+    # in-memory candidate list (tests) is hard-capped at _MAX_SCAN too. Loader
+    # errors are NOT caught here — they propagate so external callers fail closed.
+    if candidates is not None:
+        recs = list(candidates)[:_MAX_SCAN]
+    else:
+        recs = list(loader(limit=_MAX_SCAN, offset=0, domain=domain))
 
     # Domain filter (source_domain mode) is a safe metadata pre-filter.
     if domain is not None:
@@ -223,8 +256,8 @@ def search(
             )
 
     if not results:
-        # Zero results: a source_gap candidate, never a blank, never a hidden-count.
-        route, reason = _zero_result_route(query, domain, section)
+        # True zero-result: a source_gap candidate, never a blank, never a hidden-count.
+        route, reason = _zero_result_route(query, domain, section, external)
         _audit_result(
             sink, principal, result_ref=None, projected=external,
             reason_code="zero_result", route_target=route.value,
@@ -234,7 +267,9 @@ def search(
             zero_result_route=route, zero_result_reason=reason,
         )
 
-    return SearchResultSet(mode=mode, query=query, results=tuple(results))
+    # AC10 pagination — return at most one bounded page of results.
+    paged = results[offset:offset + limit]
+    return SearchResultSet(mode=mode, query=query, results=tuple(paged))
 
 
 def _partner_body(projection: Mapping[str, Any]) -> Mapping[str, Any]:
@@ -264,13 +299,29 @@ def _zero_result_route(
     query: str,
     domain: Optional[SourceDomain],
     section: Optional[RouteTarget],
+    external: bool,
 ) -> "tuple[RouteTarget, str]":
-    """Decide the route for a zero-result query. Never leaks hidden material —
-    the reason describes the GAP, not what might be hidden."""
+    """Decide the route + message for a zero-result query.
 
-    target = section if section is not None else None
-    if target in (RouteTarget.RISK_PERMISSIONS_REVIEW,):
-        return target, "no visible results in this review section"
+    **External (deputy-codex T9/AC6): the message is GENERIC.** It never reveals
+    hidden-source existence, a result/hidden count, a domain facet, the exact deny
+    reason, or any gap inventory — only that nothing is available. An external
+    zero-result is indistinguishable whether the corpus is empty or everything was
+    policy-hidden.
+
+    Internal: the message may carry the search scope so the internal team can track
+    coverage gaps (logged to ``zero_result_gaps``).
+    """
+
+    if external:
+        # Identical generic message regardless of domain/section/why — no signal.
+        return (
+            RouteTarget.SOURCE_GAP_UNASSIGNED_REVIEW,
+            "no results available for this query",
+        )
+
+    if section is RouteTarget.RISK_PERMISSIONS_REVIEW:
+        return section, "no visible results in this review section"
     scope = f"domain={domain.value}" if domain else "all permitted sources"
     return (
         RouteTarget.SOURCE_GAP_UNASSIGNED_REVIEW,
