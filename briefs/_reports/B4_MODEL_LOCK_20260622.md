@@ -48,5 +48,20 @@ AC6: `model_policy.log_model_provenance()` emits a structured `MODEL_PROVENANCE 
 3. MERGE HELD ✅ (PR open, not requesting merge)
 4. Post-deploy AC after eventual merge: sampled trusted extraction rows show `gemini-2.5-pro`+.
 
+## Rework round 1 — codex G-review F1 (commit e577165)
+
+deputy-codex (#3764) REQUEST_CHANGES, one HIGH, valid + runtime-proven:
+`call_pro()` asserted the policy **floor** (`trusted_extraction_model()`) but
+dispatched `config.gemini.pro_model` **unvalidated** — so `pro_model='gemini-2.5-flash'`
+ran trusted paths on Flash via both `call_trusted()` and `_llm_call('gemini-2.5-pro')`.
+A config/env bypass straight back to Flash.
+
+Fix: `call_pro()` now asserts `config.gemini.pro_model` is non-Flash before
+`generate()` and raises `TrustedModelPolicyError` (fail loud) — never silently
+dispatches Flash. +4 regression tests: `call_pro` / `call_trusted` / `_llm_call('gemini-2.5-pro')`
+all raise AND `generate()` is not reached when `config.gemini.pro_model` is Flash;
+plus a positive control. `test_model_policy.py` now **17 passed**; regression
+bridge/ai_hotel/proactive/cost **65 passed / 8 skip**. Re-gate posted (#3775 deputy, #3776 codex-arch).
+
 ## Done-state
 Harness-done = PR #406 + pytest literal green. Arc/lock-done (= live trusted rows on Pro) is a **separate** post-deploy state, not claimed here.
