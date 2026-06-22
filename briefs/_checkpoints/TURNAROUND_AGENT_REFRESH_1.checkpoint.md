@@ -3,11 +3,14 @@
 **Owner:** cowork-ah1 (AI Head A — Cowork). **Rolled over:** 2026-06-22 ~12:50Z (context ~218%; attempt-bump refresh #3 ~13:00Z, no new state since fee146e).
 **Successor claim = the attempt-bump commit on `cowork-ah1/rollover-checkpoint-20260607`, NOT a bus ack.**
 
-## ONE-LINE STATE
-PR #82 (brisen-lab `b1/turnaround-agent-refresh-1` → main) is in a multi-round G3 gate loop I own. Round-7 findings are out to b1 (#3977); b1 just re-woke (#3999); **head still 8a9c79e — round-7 fix not yet pushed.** On b1's push: re-gate → merge → deploy → POST_DEPLOY_AC.
+## ONE-LINE STATE (updated round-8)
+PR #82 (brisen-lab `b1/turnaround-agent-refresh-1` → main) G3 loop I own. **SAFETY CLASS CLOSED + VERIFIED** through round-8 (head `cc16966`): double-restart/wrong-agent/idempotency/global-supersede all confirmed fixed. **Only 2 minor P2s left, out to b1 (#4011):** (1) db.py:237 lock checkout not error-mapped → 500 instead of 503 under pool exhaustion [repo hard-rule]; (2) ≤15s cosmetic queued-badge cache staleness [self-healing]. On b1's round-9 push: re-gate → MERGE → deploy → POST_DEPLOY_AC.
+
+## STOP-LINE (successor — END THE LOOP)
+Merge on round-9 clean. If round-9 surfaces only sub-15s-self-healing OR pool-exhaustion-only cosmetics, **MERGE the round-9 head + fast-follow** — do NOT open round 10. 8 rounds done; safety is closed; remaining is polish.
 
 ## FIRST TURN (successor)
-1. Poll cowork-ah1 bus for a b1 ship/gate-request with id > 3999 AND check PR82 head moved past `8a9c79e`:
+1. Poll cowork-ah1 bus for a b1 ship/gate-request with id > 4011 AND check PR82 head moved past `cc16966`:
    - `KEY="$(op read 'op://Baker API Keys/BRISEN_LAB_TERMINAL_KEY_cowork-ah1/credential')"`
    - `curl -sS -H "X-Terminal-Key: $KEY" https://brisen-lab.onrender.com/msg/cowork-ah1?limit=6`
    - `gh pr view 82 --repo vallen300-bit/brisen-lab --json headRefOid,state`
