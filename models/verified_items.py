@@ -650,3 +650,51 @@ def get_events(item_id: int, limit: int = 100) -> list[dict]:
         return []
     finally:
         _put_conn(conn)
+
+
+def list_today_items(limit: int = 200) -> list[dict]:
+    """BAKER_DASHBOARD_V2_TODAY_1 — read-only helper for the trusted Today
+    surface. Returns ONLY ``verified``/``ratified`` rows, ordered for Today
+    (ratified before verified, then due_at asc NULLS LAST, then updated_at desc,
+    then id desc). Does NOT change ``list_items`` behavior (which sorts by
+    updated_at only). Fault-tolerant: [] on degraded DB; rollback before return.
+    """
+    if not isinstance(limit, int) or limit <= 0:
+        limit = 200
+    if limit > 1000:
+        limit = 1000
+    conn = _get_conn()
+    if not conn:
+        return []
+    try:
+        cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+        cur.execute(
+            """
+            SELECT id, state, item_type, claim, why_matters, next_action, owner,
+                   due_at, confidence, matter_slug, related_matters, people,
+                   source_type, source_trust, source_refs, verification_summary,
+                   counterargument, dismiss_reason, signal_candidate_id,
+                   created_by, extraction_model, source_model,
+                   created_at, updated_at
+            FROM verified_items
+            WHERE state IN ('verified', 'ratified')
+            ORDER BY CASE WHEN state = 'ratified' THEN 0 ELSE 1 END,
+                     due_at ASC NULLS LAST,
+                     updated_at DESC,
+                     id DESC
+            LIMIT %s
+            """,
+            (limit,),
+        )
+        rows = cur.fetchall()
+        cur.close()
+        return [dict(r) for r in rows]
+    except Exception as e:
+        try:
+            conn.rollback()
+        except Exception:
+            pass
+        logger.error(f"verified_items: list_today_items failed: {e}")
+        return []
+    finally:
+        _put_conn(conn)
