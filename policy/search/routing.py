@@ -6,8 +6,12 @@ Routing decides WHICH dashboard section a result belongs to. It is:
 * **LLM assist-only** — the LLM may PROPOSE a target + reason, never finalise, never
   promote, never mutate policy. The LLM is an injected callable so the layer stays
   DB-free / network-free in tests (default: no LLM, deterministic only).
-* **Human-overridable always** — :func:`apply_override` records the override
-  (actor / prior / new / rationale / timestamp) and NEVER touches policy fields.
+* **Human-overridable — HUMAN BRISEN only** — :func:`apply_override` records the
+  override (actor / prior / new / rationale / timestamp) and NEVER touches policy
+  fields. A route state-change is a human action: only a non-AI Brisen principal may
+  override (deputy-codex AC8). An AI proposer or any external principal is rejected
+  and the denial is audited — an override audit row can never read "human override"
+  for a non-human / non-Brisen actor.
 
 Routing is NOT a visibility control. It never widens access; classification /
 allowed_orgs / lifecycle are owned by the Step-1 engine. A sensitive or
@@ -17,10 +21,13 @@ sees it — but the engine still decides whether anyone external ever sees it.
 
 from __future__ import annotations
 
+import logging
 from datetime import datetime, timezone
 from typing import Any, Callable, Optional, Sequence
 
 from policy.models import Org, Principal, Sensitivity
+
+logger = logging.getLogger("policy.search.routing")
 from policy.search.models import (
     RawSignal,
     RouteTarget,
@@ -254,6 +261,35 @@ def propose_route(
     )
 
 
+class OverrideDenied(RuntimeError):
+    """Raised when a routing override is attempted by a non-human or non-Brisen actor.
+
+    A route state-change must be a HUMAN Brisen override (deputy-codex AC8): AI
+    proposers and external principals are rejected so an override audit row can never
+    misattribute a non-human / non-Brisen action as a "human override"."""
+
+    def __init__(self, reason_code: str) -> None:
+        super().__init__(f"override denied: {reason_code}")
+        self.reason_code = reason_code
+
+
+def _require_human_brisen_override(actor: Principal) -> None:
+    """Guard: only a non-AI Brisen principal may override a route (AC8).
+
+    Rejects AI proposers and any external principal, auditing the denial (fail-loud
+    structured log) before raising ``OverrideDenied``. Shared by both override entry
+    points so neither can mutate routing state for a disallowed actor."""
+
+    if not isinstance(actor.org, Org) or actor.org is not Org.BRISEN or actor.is_ai:
+        reason = "override_requires_human_brisen"
+        logger.warning(
+            "policy.search.routing OVERRIDE DENIED actor_org=%s actor_role=%s "
+            "is_ai=%s reason=%s",
+            getattr(actor.org, "value", actor.org), actor.role, actor.is_ai, reason,
+        )
+        raise OverrideDenied(reason)
+
+
 def apply_override(
     signal_id: str,
     suggestion: RoutingSuggestion,
@@ -263,14 +299,17 @@ def apply_override(
     rationale: str,
     recorder: Optional[Callable[[RoutingOverride], None]] = None,
 ) -> RoutingOverride:
-    """Record a human override of a routing suggestion (AC5). Human override always
-    wins; it is audited and NEVER mutates policy.
+    """Record a HUMAN BRISEN override of a routing suggestion (AC5/AC8). Human
+    override always wins; it is audited and NEVER mutates policy.
 
-    Routing is a placement decision, so any internal actor may re-file a result —
-    but the override changes ONLY ``route_target``. It cannot touch classification,
-    allowed_orgs, or lifecycle (those stay the Step-1 engine's), so it can never
-    silently widen visibility (governance invariant).
+    Only a non-AI Brisen principal may override (deputy-codex AC8) — AI proposers and
+    external principals are rejected via :func:`_require_human_brisen_override`
+    BEFORE any ``RoutingOverride`` is created. The override changes ONLY
+    ``route_target``; it cannot touch classification, allowed_orgs, or lifecycle
+    (those stay the Step-1 engine's), so it can never silently widen visibility.
     """
+
+    _require_human_brisen_override(actor)   # AC8 — reject AI / external before any work
 
     if not isinstance(new_target, RouteTarget):
         raise ValueError(f"override target must be a RouteTarget, got {new_target!r}")
@@ -298,8 +337,15 @@ def apply_override_to_signal(
     rationale: str,
     recorder: Optional[Callable[[RoutingOverride], None]] = None,
 ) -> RoutingOverride:
-    """Override the proposed route on a stored ``RawSignal`` (AC5), mutating ONLY the
-    ``proposed_route_target`` and appending an audit-trail ref. Policy is untouched."""
+    """Override the proposed route on a stored ``RawSignal`` (AC5/AC8), mutating ONLY
+    the ``proposed_route_target`` and appending an audit-trail ref. Policy is
+    untouched.
+
+    Guarded by the shared :func:`_require_human_brisen_override` (AC8): an AI or
+    external actor is rejected BEFORE the signal is mutated, so a non-human override
+    can never flip a route or write a misattributed audit row."""
+
+    _require_human_brisen_override(actor)   # AC8 — reject before mutating the signal
 
     suggestion = RoutingSuggestion(
         route_target=signal.proposed_route_target,

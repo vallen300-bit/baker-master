@@ -223,6 +223,56 @@ def test_ac5_override_is_audited():
     assert len(recorded) == 1
 
 
+# --- deputy-codex F1 / AC8 — route override is HUMAN-BRISEN-only (AI + external rejected) ---
+@pytest.mark.parametrize("bad_actor", [BRISEN_AI, NVIDIA, MOHG, VENUE])
+def test_f1_apply_override_rejects_non_human_brisen(bad_actor):
+    rec = _wired()
+    suggestion = runner._route_for_record(rec)
+    recorded = []
+    with pytest.raises(routing.OverrideDenied):
+        routing.apply_override(
+            fixtures.opaque_id("f1-ovr"), suggestion,
+            RouteTarget.MARKETING_PR, bad_actor,
+            rationale="should be rejected", recorder=recorded.append,
+        )
+    assert recorded == []  # no override row created for a disallowed actor
+
+
+@pytest.mark.parametrize("bad_actor", [BRISEN_AI, NVIDIA, MOHG, VENUE])
+def test_f1_apply_override_to_signal_rejects_non_human_brisen(bad_actor):
+    rec = _wired()
+    sig = signals.signal_from_record(
+        rec, runner._route_for_record(rec),
+        signal_id=fixtures.opaque_id("f1-sig"),
+        raw_summary_internal="x", evidence_needed_to_confirm="y",
+    )
+    before_target = sig.proposed_route_target
+    before_reason = sig.route_reason
+    before_trail = sig.audit_trail
+    with pytest.raises(routing.OverrideDenied):
+        routing.apply_override_to_signal(
+            sig, RouteTarget.MARKETING_PR, bad_actor, rationale="reject me",
+        )
+    # signal untouched — no flipped route, no misattributed "human override" audit
+    assert sig.proposed_route_target is before_target
+    assert sig.route_reason == before_reason
+    assert sig.audit_trail == before_trail
+
+
+def test_f1_human_brisen_override_still_allowed():
+    rec = _wired()
+    sig = signals.signal_from_record(
+        rec, runner._route_for_record(rec),
+        signal_id=fixtures.opaque_id("f1-ok"),
+        raw_summary_internal="x", evidence_needed_to_confirm="y",
+    )
+    ov = routing.apply_override_to_signal(
+        sig, RouteTarget.MARKETING_PR, BRISEN_TEAM, rationale="belongs in PR",
+    )
+    assert sig.proposed_route_target is RouteTarget.MARKETING_PR
+    assert ov.actor_is_ai is False and ov.actor_org == "brisen"
+
+
 def test_ac5_override_on_signal_changes_only_route_not_policy():
     rec = _wired()
     sig = signals.signal_from_record(

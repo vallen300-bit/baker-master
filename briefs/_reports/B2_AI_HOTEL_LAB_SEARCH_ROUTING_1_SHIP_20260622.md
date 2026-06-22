@@ -19,7 +19,7 @@ path, no forked registry, no forked taxonomy.
 | `policy/search/signals.py` | amber raw-signal capture (lands `raw_signal`); promotion ONLY via the Step-1 lifecycle gate |
 | `policy/search/store.py` | parameterized SQL for 6 tables + bounded/time-limited `load_search_candidates`; every `except` fails closed |
 | `migrations/20260622_ai_hotel_search_routing.sql` | 6 tables, additive + idempotent (`IF NOT EXISTS`), enum CHECK constraints, plain indexes |
-| `tests/test_search_routing.py` | 71 tests, 1:1 to ACs / threats / done-rubric |
+| `tests/test_search_routing.py` | 80 tests, 1:1 to ACs / threats / done-rubric |
 
 ## Done rubric (answered point by point)
 
@@ -33,7 +33,7 @@ path, no forked registry, no forked taxonomy.
 8. **Staleness regression (T9)** — `test_t9_demote_after_index_hides_stale_payload` / `_redact_external_flag_after_index` / `_never_external_after_index`: live re-check at response time; no stale partner-safe payload.
 9. **Prompt-injection (T8/AC9)** — `test_t8_llm_router_receives_projection_safe_text_only`, `_llm_non_routetarget_output_is_rejected`, `_injection_text_cannot_widen_external_visibility`, `_llm_output_only_channel_is_a_suggestion`.
 10. **Abuse/scale (AC10)** — `test_ac10_results_are_limit_bounded`, `_pagination_offset`, `_limit_hard_capped_to_page_max`, `_candidate_scan_hard_capped`, `_external_search_fails_closed_on_backend_error`, `_load_search_candidates_fails_closed`, `_load_search_candidates_clamps_limit` (bounded SQL: `LIMIT`/`OFFSET`, limit clamped to 500, statement timeout, no unbounded `SELECT`).
-11. **Migrations + green** — additive/idempotent, no `CREATE INDEX CONCURRENTLY`; `pytest tests/test_search_routing.py` = **71 passed**; `bash scripts/check_singletons.sh` = green; `tests/test_source_inventory.py` = **38 passed** (no Step-2 regression).
+11. **Migrations + green** — additive/idempotent, no `CREATE INDEX CONCURRENTLY`; `pytest tests/test_search_routing.py` = **80 passed**; `bash scripts/check_singletons.sh` = green; `tests/test_source_inventory.py` = **38 passed** (no Step-2 regression).
 12. **DONE invariant** — information can enter and be routed, but nothing becomes externally visible or trusted evidence except through the Step-1 policy engine + the human-ratified lifecycle gate.
 
 ## Citation table
@@ -63,7 +63,7 @@ authoritative text in #3683 and gates PR #403 against it):
 | AC5 never-external/sensitive fail closed (search+counts+facets+routing) | `test_ac8_never_external_source_hidden_and_routed_to_risk`, `test_t9_never_external_after_index_hides_payload`, `test_t8_injection_text_cannot_widen_external_visibility`, `test_zero_result_external_is_generic_no_facets` |
 | AC6 zero-result non-leaking (generic external; internal gap log) | `test_ac6_zero_result_is_gap_candidate_not_blank`, `test_ac6_zero_result_does_not_leak_hidden_material`, `test_zero_result_external_is_generic_no_facets`, `test_zero_result_internal_may_carry_scope` |
 | AC7 search logging auditable but non-leaking by audience | `test_dc_ac7_search_audit_is_non_leaking`, `test_t10_log_search_query_fails_closed`, `test_t10_record_zero_result_gap_fails_closed` |
-| AC8 routing suggestions proposals only (no policy/lifecycle/visibility mutation) | `test_ac5_override_on_signal_changes_only_route_not_policy`, `test_t8_llm_output_only_channel_is_a_suggestion`, `test_rubric5_llm_is_assist_only_and_capped` |
+| AC8 routing suggestions proposals only; route overrides are HUMAN-BRISEN-only (no policy/lifecycle/visibility mutation) | `test_f1_apply_override_rejects_non_human_brisen[*]`, `test_f1_apply_override_to_signal_rejects_non_human_brisen[*]`, `test_f1_human_brisen_override_still_allowed`, `test_ac5_override_on_signal_changes_only_route_not_policy`, `test_t8_llm_output_only_channel_is_a_suggestion`, `test_rubric5_llm_is_assist_only_and_capped` |
 | AC9 LLM routing projection-safe inputs + schema-validated outputs | `test_t8_llm_router_receives_projection_safe_text_only`, `test_t8_llm_non_routetarget_output_is_rejected`, `test_rubric5_llm_cannot_override_confident_rule`, `test_rubric5_llm_cannot_override_risk_route`, `test_rubric5_llm_failure_falls_back_to_deterministic` |
 | AC10 abuse/failure/scale (bounded/paginated/time-limited; fail closed; no unbounded SQL) | `test_ac10_results_are_limit_bounded`, `test_ac10_pagination_offset`, `test_ac10_limit_hard_capped_to_page_max`, `test_ac10_candidate_scan_hard_capped`, `test_ac10_external_search_fails_closed_on_backend_error`, `test_ac10_load_search_candidates_fails_closed`, `test_ac10_load_search_candidates_clamps_limit` |
 
@@ -92,7 +92,7 @@ deputy-codex T1–T10 (exact labels, bus #3699):
 
 ```
 $ python3 -m pytest tests/test_search_routing.py -q
-71 passed, 1 warning in 0.09s
+80 passed, 1 warning in 0.09s
 
 $ bash scripts/check_singletons.sh
 OK: No singleton violations found.
@@ -108,7 +108,7 @@ files removed; not caused by this change.)
 ## Gate chain (next)
 
 1. ✅ Builder self-test — pytest + singleton green.
-2. → **deputy-codex** AC + threat gate vs #3683 (REQUEST_CHANGES blocks merge).
+2. deputy-codex G2 = REQUEST_CHANGES (1 blocker F1: route override not human-gated, #3704). **Fixed** — `_require_human_brisen_override` rejects AI/external before any override; 9 override tests incl. AI+external negatives. → re-request deputy-codex re-gate vs #3683.
 3. → **deputy** augmented chain (architect + codex-verifier).
 4. → **lead** `/security-review` (Tier-A partner-leak surface) → merge.
 5. → POST_DEPLOY_AC v1 after Render deploy (migration runs clean at startup).
