@@ -15,6 +15,7 @@ Director asked me to connect his iPad as a second screen (Sidecar). Diagnosis co
 - Switched it to "Extended or mirrored display" → **"Unable to connect — device timed out."** Failure is iPad-side handshake.
 - **Ball is in Director's court:** recommended USB-C cable (bypasses wireless handshake) OR restart iPad + keep unlocked + Low Power Mode off. If Director plugs cable in and pings, successor: System Settings → Displays → select "Dimitry's iPad (2)" → Use as → "Extended or mirrored display".
 - NOTE: macOS 26.3.1. `request_access` grant needed for "System Settings" (+ "UserNotificationCenter" to read the timeout dialog). The "Use as" popup mis-fires the computer-use frontmost-gate on click — reopen + click the row directly (keyboard arrows close the menu).
+- **SIDE-EFFECT FIXED:** the Sidecar attempt bumped the Studio Display to native 5120×2880 (everything microscopic). Reset to 2560×1440 (Default) via Displays pane. U32R59x untouched (1920×1080 Default). DO NOT retry the wireless iPad connect — it re-bumps resolution AND times out; cable only.
 
 ## PRIOR SIDE TASK — DONE (no follow-up unless Director asks)
 Laptop auto-lock ~15-20min FIXED earlier: Screen Saver Start = Never (`idleTime`=0). Open offer (battery never-sleep `sudo pmset -b sleep 0`) left to Director for battery health.
