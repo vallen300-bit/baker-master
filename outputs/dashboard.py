@@ -12622,6 +12622,28 @@ async def get_today(limit_per_lane: int = Query(5, ge=1, le=20)):
         raise HTTPException(status_code=500, detail=str(e))
 
 
+@app.get("/api/verified-items/{item_id}", tags=["dashboard-v2"], dependencies=[Depends(verify_api_key)])
+async def get_verified_item_detail_route(item_id: int):
+    """BAKER_DASHBOARD_V2_CARD_DETAIL_1 — bounded detail for ONE trusted item.
+
+    Returns the trusted card + bounded evidence metadata + the verification audit
+    timeline (actor_type / model / timestamps). Reads ONLY verified_items +
+    verification_events; never returns raw email/WhatsApp/ClaimsMax source bodies
+    (sanitized + length-bounded). Untrusted (candidate/dismissed) and missing ids
+    both return 404 so candidate rows cannot be enumerated. Auth-gated."""
+    try:
+        from orchestrator.verified_item_detail import get_verified_item_detail
+        result = get_verified_item_detail(item_id)
+        if result.get("status") in ("not_found", "not_trusted"):
+            raise HTTPException(status_code=404, detail="verified item not found")
+        return result
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"/api/verified-items/{item_id} failed: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 @app.get("/api/triage/candidates", tags=["dashboard-v2"], dependencies=[Depends(verify_api_key)])
 async def list_triage_candidates(
     matter_slug: str = Query(None),
