@@ -28,7 +28,7 @@ from policy.models import (
     Principal,
     Sensitivity,
 )
-from policy.sources import fixtures
+from policy.sources import fixtures, registry
 from policy.sources.models import (
     CollectionStatus,
     ProvenanceClass,
@@ -739,6 +739,41 @@ def test_zero_result_internal_may_carry_scope():
     # internal coverage tracking may name the scope (logged to zero_result_gaps)
     assert rs.is_zero_result
     assert "open_web" in (rs.zero_result_reason or "")
+
+
+# --- deputy-codex AC2 — invalid candidate metadata fails closed in search ---
+def test_dc_ac2_invalid_candidate_fails_closed():
+    # A non-gap registry row missing policy_object_id is registry-invalid; an external
+    # search over it must NOT yield a default/fallback payload — it fails closed.
+    bad = _wired(policy_object_id=None)
+    with pytest.raises(registry.RegistryInvalidError):
+        runner.search(NVIDIA, "", SearchMode.PARTNER_SAFE, candidates=[bad])
+
+
+# --- deputy-codex AC7 / T10 — search logging auditable but non-leaking by audience ---
+def test_dc_ac7_search_audit_is_non_leaking():
+    from policy.audit import ListAuditSink
+
+    sink = ListAuditSink()
+    runner.search(NVIDIA, "", SearchMode.PARTNER_SAFE, candidates=[_wired()], sink=sink)
+    assert sink.events  # something was audited
+    for ev in sink.events:
+        blob = " ".join(str(v) for v in (ev.object_id, ev.reason_code, dict(ev.detail)))
+        assert "SECRET internal name" not in blob
+        assert "vault:secret/path.md" not in blob
+        # external audit rows are flagged projected, never raw
+        if ev.event_type == "search_result" and ev.object_id:
+            assert ev.detail.get("projected") is True
+
+
+# --- deputy-codex T4 — cross-partner bleed blocked in search ---
+def test_dc_t4_cross_partner_bleed_blocked_in_search():
+    rec = _wired(
+        classification=Classification.PARTNER_SAFE_MOHG,
+        allowed_orgs=frozenset({Org.MOHG}),
+    )
+    assert runner.search(NVIDIA, "", SearchMode.PARTNER_SAFE, candidates=[rec]).is_zero_result
+    assert runner.search(MOHG, "", SearchMode.PARTNER_SAFE, candidates=[rec]).result_count == 1
 
 
 # --- deputy-codex fixture requirement — all 4 principals in one fixture set ---
