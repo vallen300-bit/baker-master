@@ -12550,6 +12550,20 @@ async def deadline_feedback_api(deadline_id: int, request: Request):
 # ---------------------------------------------------------------------------
 
 
+@app.get("/api/today", tags=["dashboard-v2"], dependencies=[Depends(verify_api_key)])
+async def get_today(limit_per_lane: int = Query(5, ge=1, le=20)):
+    """BAKER_DASHBOARD_V2_TODAY_1 — trusted Today surface. Reads ONLY
+    verified_items (verified|ratified) via the today_v2 service, grouped into
+    critical/promises/meetings/travel with evidence metadata only. Never reads
+    signal_candidates/alerts/deadlines and returns no raw source bodies."""
+    try:
+        from orchestrator.today_v2 import get_today_payload
+        return get_today_payload(limit_per_lane=limit_per_lane)
+    except Exception as e:
+        logger.error(f"/api/today failed: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 @app.get("/api/triage/candidates", tags=["dashboard-v2"], dependencies=[Depends(verify_api_key)])
 async def list_triage_candidates(
     matter_slug: str = Query(None),
