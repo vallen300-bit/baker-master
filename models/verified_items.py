@@ -644,6 +644,51 @@ def get_events(item_id: int, limit: int = 100) -> list[dict]:
         _put_conn(conn)
 
 
+def get_item(item_id: int) -> Optional[dict]:
+    """Fetch ONE ``verified_items`` row by id (all columns), or None.
+
+    Read helper for the card-detail surface (BAKER_DASHBOARD_V2_CARD_DETAIL_1).
+    Does NOT filter by state — the caller (detail service) decides trusted vs
+    not-trusted so it can return a distinct, safe response for each. Reads only
+    ``verified_items`` (never a raw source table). Fault-tolerant: None on a
+    degraded DB; rollback before return.
+    """
+    try:
+        item_id = int(item_id)
+    except (TypeError, ValueError):
+        return None
+    conn = _get_conn()
+    if not conn:
+        return None
+    try:
+        cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+        cur.execute(
+            """
+            SELECT id, state, item_type, claim, why_matters, next_action, owner,
+                   due_at, confidence, matter_slug, related_matters, people,
+                   source_type, source_trust, source_refs, verification_summary,
+                   counterargument, dismiss_reason, signal_candidate_id,
+                   created_by, extraction_model, source_model,
+                   created_at, updated_at
+            FROM verified_items
+            WHERE id = %s
+            """,
+            (item_id,),
+        )
+        row = cur.fetchone()
+        cur.close()
+        return dict(row) if row else None
+    except Exception as e:
+        try:
+            conn.rollback()
+        except Exception:
+            pass
+        logger.error(f"verified_items: get_item failed: {e}")
+        return None
+    finally:
+        _put_conn(conn)
+
+
 def list_today_items(limit: int = 200) -> list[dict]:
     """BAKER_DASHBOARD_V2_TODAY_1 — read-only helper for the trusted Today
     surface. Returns ONLY ``verified``/``ratified`` rows, ordered for Today
