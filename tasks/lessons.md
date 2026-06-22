@@ -985,3 +985,36 @@ complete (Inbox 34%, Sent 0.4%). Nobody noticed until the Director asked "is it 
 - Fix: added the future-import to baker_mcp_server.py + a STUBBED-mcp subprocess test case in
   tests/test_py39_union_imports.py so this layer is exercised, not skipped. After stubbing mcp and
   re-probing every source module, baker_mcp_server was the ONLY residual — sweep now actually complete.
+
+## Lesson #105 — wake handler spawns a DUPLICATE agent when live-session detection false-negatives; one owner per subsystem (2026-06-22)
+- INCIDENT: an addressed bus wake (#3685, lead→deputy) made Brisen Lab Wake.app spawn a SECOND
+  Terminal Claude Deputy while the first was still working. Two parallel instances of a binding agent =
+  conflicting-commit/clobber risk (same class as the 2026-05-11 parallel-AH1 conflicting-commit scar).
+- ROOT-CAUSE CLASS (not the exact instance — see honesty note): the handler's `findRunningPickerTab`
+  decides "is this agent already live?" by best-effort EXTERNAL inference — iterate Terminal tabs, match
+  a proc whose command ~/claude/ on the tab tty AND whose cwd EXACTLY equals the picker dir. Any miss
+  (App/Claude.app session = no tty; Cowork worktree cwd = `.claude/worktrees/...` ≠ exact dir; transient
+  busy-tab/tty query failure) returns {0,0,0,0} → spawn-fallback → duplicate. Detection-by-inference is
+  brittle by construction.
+- RULED OUT by evidence: Apple Events Automation grant (TCC kTCCServiceAppleEvents for
+  com.brisen.lab.wake = 2 / ALLOWED). PROVEN: the surviving Deputy was itself launched by
+  /tmp/brisen-lab-wake-aihead2claude.command → detection had returned no-match at the spawn instant.
+- HONESTY NOTE (fail-loud): my FIRST diagnosis ("Deputy was App-resident, no tty") was asserted with too
+  much confidence and was wrong per Director — both Deputies were Terminal. After the duplicate was
+  closed the failed instance was unrecoverable, so the EXACT miss-cause is not provable post-hoc. Do not
+  spin a second confident theory over unrecoverable state — state what is proven, flag what is not.
+- FIX (cause-agnostic, the right move when the exact cause can't be isolated): replace detection-by-
+  inference with SELF-REPORTED liveness. Each session writes ~/.brisen-lab/live/<alias>.json
+  {pid,tty,surface,started,last_seen} on SessionStart + periodic refresh; handler SKIPS spawn when the
+  heartbeat is fresh AND `kill -0 pid` succeeds (nudge if Terminal, no-op if App); stale/dead → spawn.
+  Survives App-vs-Terminal, worktree cwd, and busy state — covers every candidate cause at once.
+- DURABILITY FOOT-GUN: the live Brisen Lab Wake.app is 82 lines AHEAD of repo
+  tools/wake-handler/wake-handler.applescript — patches land in the installed .app and the source drifts,
+  so a rebuild-from-repo silently REGRESSES the fix. Always forward-port .app patches into the repo same
+  arc; treat drift as a release blocker.
+- PROCESS LESSON (the deeper one): Director dispatched TWO agents (AH1 + AH2) onto the SAME subsystem
+  (the wake handler) in parallel — AH2 had already shipped 3 handler fixes while AH1 was independently
+  diagnosing and had booted out the listener. Near-collision. RULE: ONE OWNER PER SUBSYSTEM. The first
+  agent to touch a single-file/single-binary subsystem owns it for that arc; others contribute via
+  diagnosis/second-opinion (e.g. deputy-codex), never parallel edits. Surface the conflict immediately
+  and re-assign — do not let two agents edit one handler.
