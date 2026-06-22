@@ -96,6 +96,14 @@ REQUIRED_EVIDENCE_FIELDS: tuple[str, ...] = (
     "counterargument",
 )
 
+# States a row may be CREATED in. `ratified` and `dismissed` are reachable ONLY
+# through audited transitions (transition_item), which enforce the ratify-actor
+# allowlist (AC5) and the structured dismiss reason (AC6). Allowing a direct
+# create into `ratified` would let a caller mint a ratified row whose creation
+# event records actor_type='system' — an anonymous ratification AC5 forbids.
+# `dismissed` is terminal and needs a reason, so it is creation-excluded too.
+CREATE_STATES: frozenset[str] = frozenset({"candidate", "verified"})
+
 
 def is_valid_transition(from_state: Optional[str], to_state: str) -> bool:
     """True if ``from_state -> to_state`` is a legal FSM edge.
@@ -251,14 +259,19 @@ def create_verified_item(
     (``from_state=NULL -> state``) is written in the SAME transaction (AC3 — the
     audit trail covers every state the row has ever held).
 
-    If ``state`` is given as ``verified``/``ratified`` directly, the evidence
-    packet must be complete (AC4) and, for ``ratified``, the actor (``created_by``
-    via ``actor_type='director'`` semantics) must be explicit — callers should
-    prefer creating a candidate then transitioning, so this only relaxes for
-    seeded/imported data. Returns the new id, or None on failure.
+    Creation is restricted to ``CREATE_STATES`` (``candidate`` or ``verified``).
+    ``verified`` is allowed for seeded/imported data but requires a complete
+    evidence packet (AC4). ``ratified`` and ``dismissed`` can ONLY be reached via
+    ``transition_item`` so the ratify-actor allowlist (AC5) and structured
+    dismiss reason (AC6) cannot be bypassed at creation time. Returns the new id,
+    or None on failure.
     """
-    if state not in STATES:
-        logger.error(f"verified_items: invalid create state {state!r}")
+    if state not in CREATE_STATES:
+        logger.error(
+            f"verified_items: cannot create directly in state {state!r}; "
+            f"allowed create states are {sorted(CREATE_STATES)} "
+            f"(use transition_item for ratified/dismissed)"
+        )
         return None
 
     packet = {
@@ -269,7 +282,7 @@ def create_verified_item(
         "verification_summary": verification_summary,
         "counterargument": counterargument,
     }
-    if state in ("verified", "ratified"):
+    if state == "verified":
         miss = missing_evidence_fields(packet)
         if miss:
             logger.error(

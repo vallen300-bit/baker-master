@@ -163,6 +163,36 @@ def test_dismiss_rejects_unstructured_reason(monkeypatch):
     assert r["ok"] is False and r["error"] == "bad_dismiss_reason"
 
 
+def test_create_states_vocab():
+    """Creation is restricted to candidate/verified (AC5 — ratified/dismissed
+    only via audited transitions)."""
+    assert vi.CREATE_STATES == frozenset({"candidate", "verified"})
+
+
+def test_create_rejects_direct_ratified(monkeypatch):
+    """AC5 — a complete-evidence row cannot be minted directly in `ratified`
+    (which would record an actor_type='system' creation event = anonymous
+    ratification). Rejected before the DB is reached."""
+    monkeypatch.setattr(vi, "_get_conn", lambda: pytest.fail("DB should not be reached"))
+    monkeypatch.setattr(vi, "_put_conn", lambda c: None)
+    item = vi.create_verified_item(
+        item_type="deadline", claim="direct-ratify attempt", created_by="system",
+        state="ratified",
+        source_refs=[{"table": "email_messages", "id": "1"}], confidence="high",
+        source_trust="director", verification_summary="x", counterargument="y",
+    )
+    assert item is None
+
+
+def test_create_rejects_direct_dismissed(monkeypatch):
+    """`dismissed` is terminal + needs a reason — not a creation state."""
+    monkeypatch.setattr(vi, "_get_conn", lambda: pytest.fail("DB should not be reached"))
+    monkeypatch.setattr(vi, "_put_conn", lambda c: None)
+    assert vi.create_verified_item(
+        item_type="alert", claim="x", created_by="system", state="dismissed",
+    ) is None
+
+
 def test_fault_tolerant_no_connection(monkeypatch):
     """Degraded DB returns structured/empty results, never raises."""
     monkeypatch.setattr(vi, "_get_conn", lambda: None)
@@ -432,7 +462,7 @@ def test_db_check_blocks_dismissed_without_reason(live_vi):
 
 def test_db_check_blocks_verified_without_evidence(live_vi):
     """Defence-in-depth: the table CHECK rejects a verified row missing the
-    evidence packet even via raw SQL."""
+    evidence packet even via raw SQL (source_refs defaults to empty array)."""
     conn = psycopg2.connect(live_vi)
     try:
         with conn.cursor() as cur:
@@ -442,5 +472,26 @@ def test_db_check_blocks_verified_without_evidence(live_vi):
                     "VALUES ('verified', 'alert', 'no evidence', 'system')"
                 )
         conn.rollback()
+    finally:
+        conn.close()
+
+
+def test_db_check_rejects_non_array_source_refs_for_verified(live_vi):
+    """Codex finding 2: a raw INSERT cannot satisfy the evidence CHECK with a
+    non-array source_refs ('{}'::jsonb object or a scalar). Each must raise
+    CheckViolation — not a non-array jsonb_array_length error."""
+    conn = psycopg2.connect(live_vi)
+    try:
+        for bad in ("'{}'::jsonb", "'5'::jsonb", "'\"x\"'::jsonb"):
+            with conn.cursor() as cur:
+                with pytest.raises(pg_errors.CheckViolation):
+                    cur.execute(
+                        "INSERT INTO verified_items "
+                        "(state, item_type, claim, created_by, confidence, "
+                        " source_trust, verification_summary, counterargument, source_refs) "
+                        f"VALUES ('verified', 'alert', 'bad refs', 'system', 'high', "
+                        f"'vip', 'checked', 'maybe', {bad})"
+                    )
+            conn.rollback()
     finally:
         conn.close()

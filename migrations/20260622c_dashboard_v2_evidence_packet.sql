@@ -102,15 +102,24 @@ CREATE TABLE IF NOT EXISTS verified_items (
     CONSTRAINT verified_items_dismiss_reason_required
         CHECK (state <> 'dismissed' OR dismiss_reason IS NOT NULL),
     -- AC4: verified/ratified rows must carry a complete evidence packet.
+    -- source_refs must be a NON-EMPTY JSON ARRAY (not just <> '[]', which a raw
+    -- INSERT could satisfy with '{}'::jsonb or a scalar). The CASE guards
+    -- jsonb_array_length so it is never called on a non-array value — Postgres
+    -- does not guarantee AND short-circuits, but CASE branch evaluation is
+    -- guaranteed conditional.
     CONSTRAINT verified_items_evidence_packet_required
         CHECK (
             state NOT IN ('verified', 'ratified')
             OR (
-                source_refs <> '[]'::jsonb
-                AND confidence IS NOT NULL
+                confidence IS NOT NULL
                 AND source_trust IS NOT NULL
                 AND verification_summary IS NOT NULL
                 AND counterargument IS NOT NULL
+                AND CASE
+                        WHEN jsonb_typeof(source_refs) = 'array'
+                        THEN jsonb_array_length(source_refs) > 0
+                        ELSE false
+                    END
             )
         )
 );
