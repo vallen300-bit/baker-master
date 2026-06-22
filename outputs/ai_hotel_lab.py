@@ -38,11 +38,13 @@ from policy.models import (
     Sensitivity,
 )
 from policy.projection import admin as projection_admin
+from policy.projection import admin_store
 from policy.projection.models import (
     AUDIENCE_ORG,
     AUDIENCE_PRINCIPAL_ROLE,
     EXTERNAL_AUDIENCES,
     AudienceRole,
+    ProjectionState,
 )
 from policy.projection.packets import (
     ProjectionCandidate,
@@ -51,6 +53,8 @@ from policy.projection.packets import (
     serve_external_packet,
     view_as,
 )
+from policy.projection.projector import build_projection_item
+from policy.projection.store import ProjectionStoreUnavailableError
 from policy.search.models import RouteTarget, SearchMode
 from policy.search.runner import search as policy_search
 from policy.sources.models import (
@@ -267,10 +271,54 @@ def _seed_candidates() -> List[ProjectionCandidate]:
     return cands
 
 
+def _apply_overlay(
+    cands: List[ProjectionCandidate], overlay: Mapping[str, "admin_store.AdminOverlayState"]
+) -> List[ProjectionCandidate]:
+    """Overlay the persisted admin state onto seed candidates (Step 5.1).
+
+    A persisted record is AUTHORITATIVE for revoke/stale on its source item; items
+    with no persisted record keep their seed defaults. Revoke is a HARD STOP and
+    supersedes stale (a single terminal state) — the same chokepoint then drives every
+    surface (packet / evidence / audit), so a revoked item is absent generically."""
+    for c in cands:
+        st = overlay.get(c.item.object_id)
+        if st is None:
+            continue
+        if st.revoked:
+            c.revoked = True
+            c.revoked_by = st.revoked_by or c.revoked_by
+            c.revoke_reason = st.revoke_reason or c.revoke_reason
+            c.stale = False
+        else:
+            c.stale = st.stale
+    return cands
+
+
 def _candidates() -> List[ProjectionCandidate]:
-    """Hook point — Sprint-0 returns the seed. A later brief swaps this for the
-    live projection store (``policy.projection.store.load_projection_items``)."""
-    return _seed_candidates()
+    """Seed candidates with the persisted admin overlay applied (INTERNAL-tolerant).
+
+    Step 5.1 wires the live projection-admin store: revoke/refresh decisions persisted
+    by the admin endpoint are overlaid here so every consumer (packet / evidence /
+    audit) sees the final admin state. On store outage the Brisen-internal view
+    degrades to seed defaults (Brisen's own data) rather than going dark; external
+    surfaces use ``_external_candidates`` which fails closed instead."""
+    try:
+        overlay = admin_store.load_admin_overlay()
+    except ProjectionStoreUnavailableError:
+        logger.warning("projection admin overlay unavailable — internal view uses seed defaults")
+        overlay = {}
+    return _apply_overlay(_seed_candidates(), overlay)
+
+
+def _external_candidates() -> List[ProjectionCandidate]:
+    """Seed + persisted overlay for an EXTERNAL surface (STRICT / fail-closed).
+
+    Raises ``ProjectionStoreUnavailableError`` if the overlay can't be loaded; the
+    caller returns a GENERIC unavailable packet — never a raw or last-known partner
+    body (T11). This guarantees a revoked item can never reappear because the store
+    had a transient error."""
+    overlay = admin_store.load_admin_overlay()
+    return _apply_overlay(_seed_candidates(), overlay)
 
 
 # --------------------------------------------------------------------------- #
@@ -295,13 +343,17 @@ def get_packet(role: str = Query("brisen")) -> Mapping:
       ids, counts, reasons, or source hints (AC2/AC3/T1/T2/T9).
     """
     audience = _resolve_audience(role)
-    cands = _candidates()
     if audience == AudienceRole.BRISEN_INTERNAL:
-        packet = build_internal_preview_packet(cands)
-    else:
-        # Server-backed view-as: the operator is Brisen; the packet is the partner's.
-        packet = view_as(_OPERATOR, audience, cands)
-    return packet.as_dict()
+        return build_internal_preview_packet(_candidates()).as_dict()
+    # Server-backed view-as: the operator is Brisen; the packet is the partner's.
+    try:
+        cands = _external_candidates()
+    except ProjectionStoreUnavailableError:
+        # Fail closed: generic empty packet (NO raw / last-known fallback) so a revoked
+        # item can never resurface on a store blip (T11).
+        logger.warning("admin overlay unavailable — serving generic empty packet to %s", role)
+        return view_as(_OPERATOR, audience, []).as_dict()
+    return view_as(_OPERATOR, audience, cands).as_dict()
 
 
 @router.get("/api/raw-signals")
@@ -336,18 +388,25 @@ def get_item_audit(projection_item_id: str, role: str = Query("brisen")) -> Mapp
     THEIR own packet; another audience's item is absent (404), never leaked
     (T3 cross-role isolation)."""
     audience = _resolve_audience(role)
-    cands = _candidates()
     if audience == AudienceRole.BRISEN_INTERNAL:
-        for c in cands:
+        for c in _candidates():
             if c.item.object_id == projection_item_id:
                 return {
                     "object_id": c.item.object_id,
                     "lifecycle_state": c.item.lifecycle_state.value,
                     "owner": c.item.owner,
                     "revoked": c.revoked,
+                    "revoked_by": c.revoked_by,
+                    "revoke_reason": c.revoke_reason,
                     "stale": c.stale,
                     "source_refs": list(c.item.source_refs),
                 }
+        raise HTTPException(status_code=404, detail="not found")
+    # External: audience-scoped safe summary, built from the persisted-overlay packet.
+    # Fail closed on store outage -> absent (404), never a leaked existence hint (T11).
+    try:
+        cands = _external_candidates()
+    except ProjectionStoreUnavailableError:
         raise HTTPException(status_code=404, detail="not found")
     principal = _external_principal(audience)
     summary = external_item_audit(principal, projection_item_id, cands)
@@ -561,8 +620,15 @@ def get_evidence(role: str = Query("brisen")) -> Mapping:
             for c in _candidates() if c.item.lifecycle_state in promoted
         ]
         return {"evidence": items, "internal": True}
-    # External: reuse the projection packet — already lifecycle/permission gated.
-    packet = view_as(_OPERATOR, audience, _candidates())
+    # External: reuse the projection packet — already lifecycle/permission gated, and
+    # built from the persisted overlay so revoked/stale items are absent. Fail closed
+    # to an empty lane on store outage (never a raw / last-known fallback, T11).
+    try:
+        cands = _external_candidates()
+    except ProjectionStoreUnavailableError:
+        logger.warning("admin overlay unavailable — empty external evidence lane for %s", role)
+        return {"evidence": [], "internal": False}
+    packet = view_as(_OPERATOR, audience, cands)
     flat = []
     for sec, items in packet.as_dict()["sections"].items():
         if isinstance(items, list):
@@ -571,36 +637,86 @@ def get_evidence(role: str = Query("brisen")) -> Mapping:
 
 
 # --------------------------------------------------------------------------- #
-# Projection admin (approve / revoke / refresh) — Brisen admin only.
-# The whole router is read-gated; mutation additionally requires a Brisen admin
-# principal. Sprint-0 operates on the in-memory seed; persistence is a later brief.
+# Projection admin (approve / revoke / refresh) — Brisen admin only (Step 5.1 LIVE).
+# The whole router is read-gated; mutation additionally requires a HUMAN Brisen admin
+# principal (server-set here; AI / external principals are rejected by
+# policy.projection.admin — AC7/T7). revoke/refresh now run against the PERSISTED
+# projection-admin store (no longer the in-memory seed), so the kill switch is durable
+# across restart (AC1) and idempotent (AC8) via the deterministic opaque record id.
 # --------------------------------------------------------------------------- #
 @router.post("/api/admin/{action}")
 def post_admin_action(action: str, projection_item_id: str = Query(...),
                       reason: str = Query("")) -> Mapping:
-    """approve / revoke / refresh on a projection item. Brisen admin only — AI and
-    external principals are rejected by policy.projection.admin (AC7)."""
+    """approve / revoke / refresh on a projection item (by source evidence object id).
+
+    Brisen human admin only. revoke persists a durable, audited REVOKED decision that
+    removes the item from EVERY partner surface generically; refresh recomputes
+    freshness from current evidence/policy and NEVER resurrects a revoked item (revoked
+    is a hard stop — un-revoke is a separate out-of-scope action). On store outage the
+    action is reported as NOT applied (503) — never silently dropped."""
     if action not in ("approve", "revoke", "refresh"):
         raise HTTPException(status_code=400, detail="unknown action")
     admin = Principal(org=Org.BRISEN, role="evidence_admin")
     target = next((c for c in _candidates() if c.item.object_id == projection_item_id), None)
     if target is None:
         raise HTTPException(status_code=404, detail="not found")
-    if action != "approve":
-        # revoke / refresh operate on PERSISTED ProjectionItems (Step 5.1, a separate
-        # follow-on after merge — codex-arch #3873). Sprint-0 has no persisted store,
-        # so the UI renders these controls DISABLED/read-only with this exact reason
-        # string; the endpoint returns it explicitly rather than a bare 501.
-        raise HTTPException(
-            status_code=501,
-            detail="Step 5.1 pending persisted projection-admin store",
-        )
+
+    if action == "approve":
+        if target.revoked:
+            # Revoke is a hard stop — approve must not silently un-hide a revoked item.
+            raise HTTPException(
+                status_code=409,
+                detail="revoked is a hard stop; a separate Brisen-human un-revoke is "
+                       "required (out of scope for Step 5.1)",
+            )
+        try:
+            log = projection_admin.approve_projection(
+                target.item, admin, rationale=reason or "approved via cockpit")
+        except Exception as e:
+            raise HTTPException(status_code=403, detail=f"admin action denied: {e}")
+        return {"ok": True, "action": action,
+                "event": getattr(log, "event_type", action),
+                "projection_state": ProjectionState.PROJECTED_SHARED_VIEW.value}
+
+    # --- revoke / refresh: build the matter-level (brisen_internal) admin record,
+    # mutate it through policy.projection.admin, then persist row + audit. The
+    # persisted overlay is then authoritative for every external surface. ---
+    pi = build_projection_item(
+        AudienceRole.BRISEN_INTERNAL, target.item,
+        route_target=target.route_target,
+        revoked=target.revoked, revoked_by=target.revoked_by,
+        revoke_reason=target.revoke_reason, stale=target.stale,
+        action_safe_text=target.action_safe_text,
+    )
+    if pi is None:  # internal READ denied this Brisen object -> cannot administer it
+        raise HTTPException(status_code=404, detail="not found")
+    prev_state = pi.projection_state.value
+
     try:
-        log = projection_admin.approve_projection(
-            target.item, admin, rationale=reason or "approved via cockpit")
+        if action == "revoke":
+            log = projection_admin.revoke_projection(
+                pi, admin,
+                reason=f"{reason or 'revoked via cockpit'} "
+                       f"(transition: {prev_state}->{ProjectionState.REVOKED.value})",
+            )
+        else:  # refresh — recompute; revoked stays REVOKED (refresh_projection only
+               # marks stale, it never clears REVOKED, so a revoked item is preserved).
+            log = projection_admin.refresh_projection(pi, admin, stale=target.stale)
+        admin_store.record_admin_action(pi, log)
+    except projection_admin.ProjectionAdminDenied as e:
+        raise HTTPException(status_code=403, detail=f"admin action denied: {e}")
+    except ProjectionStoreUnavailableError:
+        raise HTTPException(
+            status_code=503,
+            detail=f"projection store unavailable; {action} NOT applied",
+        )
     except Exception as e:
         raise HTTPException(status_code=403, detail=f"admin action denied: {e}")
-    return {"ok": True, "action": action, "event": getattr(log, "event_type", action)}
+
+    return {"ok": True, "action": action,
+            "projection_state": pi.projection_state.value,
+            "event": getattr(log, "event_type", action),
+            "revoked": pi.projection_state is ProjectionState.REVOKED}
 
 
 # --------------------------------------------------------------------------- #
@@ -763,7 +879,7 @@ function notice(txt){ return h('div',{class:'notice',text:txt}); }
 async function viewOverview(){
   const wrap=h('div'); const pkt=await api('packet'); if(!pkt){wrap.appendChild(h('div',{class:'empty',text:'No packet.'}));return wrap;}
   wrap.appendChild(notice(isExternal()
-    ? 'Partner view-as preview. This is the exact server-built partner packet — no raw internal data reaches this view. Partner-live access opens after revoke is wired (Step 5.1).'
+    ? 'Partner view-as preview. This is the exact server-built partner packet — no raw internal data reaches this view. Revoke is a durable, audited kill switch: a revoked item disappears from this view immediately.'
     : 'Brisen internal command view. Raw signals are amber and internal-only; verified evidence is promoted; partner projections are governed server-side.'));
   const p=panel('Evidence by section'); const items=sectionItems(pkt);
   if(!items.length) p.appendChild(h('div',{class:'empty',text:'No items available.'}));
@@ -814,10 +930,10 @@ async function viewProjection(){
       const id=i.source_evidence_item_id||i.object_id||'';
       const ctl=h('div',{},[
         h('button',{class:'btn live',text:'Approve',onclick:()=>adminAct('approve',id)}),
-        h('button',{class:'btn',text:'Revoke',disabled:true,title:'Step 5.1 pending persisted projection-admin store'}),
-        h('button',{class:'btn',text:'Refresh',disabled:true,title:'Step 5.1 pending persisted projection-admin store'}),
+        h('button',{class:'btn live',text:'Revoke',onclick:()=>adminAct('revoke',id)}),
+        h('button',{class:'btn live',text:'Refresh',onclick:()=>adminAct('refresh',id)}),
         h('button',{class:'btn',text:'Audit',onclick:()=>showAudit(id)}),
-        h('div',{class:'reason',text:'Revoke / Refresh: Step 5.1 pending persisted projection-admin store.'})
+        h('div',{class:'reason',text:'Brisen controls projection. Revoke is a durable, audited kill switch (item leaves every partner view); Refresh recomputes freshness. The server is the source of final state.'})
       ]);
       card.appendChild(ctl);
     }

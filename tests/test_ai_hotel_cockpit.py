@@ -11,10 +11,26 @@ import json
 import pytest
 
 from outputs import ai_hotel_lab as lab
+from policy.projection import admin_store
 from policy.projection.models import AudienceRole
 from policy.projection.packets import view_as
 
 EXTERNAL_ROLES = ["nvidia", "mohg", "venue"]
+
+
+@pytest.fixture(autouse=True)
+def fresh_admin_backend():
+    """Step 5.1: every test gets a clean, DB-free in-memory admin-overlay backend.
+
+    Default state is EMPTY (no persisted admin actions), so existing seed-driven
+    assertions are unchanged; Step-5.1 tests populate it via the live endpoint. The
+    backend is also the deterministic substitute for the live projection store, so the
+    full revoke/refresh state machine is exercised without a database."""
+    prev = admin_store.get_backend()
+    backend = admin_store.InMemoryAdminBackend()
+    admin_store.set_backend(backend)
+    yield backend
+    admin_store.set_backend(prev)
 
 # Concrete internal secrets seeded behind the boundary. NONE may appear in any
 # external payload (raw bodies, internal titles, owner identity, internal source
@@ -211,14 +227,13 @@ def test_ac2_brisen_internal_preview_has_full_fields_but_externals_do_not():
     assert "brisen-financing-strategy" not in json.dumps(lab.get_packet(role="nvidia"))
 
 
-# ── AC7 — revoke/refresh disabled with exact reason; approve live ─────────────
-def test_ac7_revoke_refresh_return_step51_reason():
-    from fastapi import HTTPException
-    for action in ("revoke", "refresh"):
-        with pytest.raises(HTTPException) as ei:
-            lab.post_admin_action(action, projection_item_id="nv-lighthouse-thesis")
-        assert ei.value.status_code == 501
-        assert ei.value.detail == "Step 5.1 pending persisted projection-admin store"
+# ── AC7 — revoke/refresh now LIVE against the persisted store; approve live ───
+def test_ac7_revoke_refresh_are_live_not_501():
+    rev = lab.post_admin_action("revoke", projection_item_id="nv-lighthouse-thesis")
+    assert rev["ok"] is True and rev["action"] == "revoke"
+    assert rev["projection_state"] == "revoked"
+    ref = lab.post_admin_action("refresh", projection_item_id="mohg-ops-standard")
+    assert ref["ok"] is True and ref["action"] == "refresh"
 
 
 def test_ac7_approve_is_live_and_audited():
@@ -234,8 +249,10 @@ def test_cockpit_page_renders_html():
     body = resp.body.decode()
     for marker in ("AI Hotel Lab", "View as NVIDIA", "Raw Signal Inbox",
                    "Verified Evidence", "Partner Projection", "Execution Roadmap",
-                   "Step 5.1 pending persisted projection-admin store"):
+                   "durable, audited kill switch"):
         assert marker in body
+    # The 501 placeholder copy is gone now that revoke/refresh are live.
+    assert "Step 5.1 pending persisted projection-admin store" not in body
 
 
 def test_cockpit_page_uses_no_innerhtml_assignment():
@@ -316,3 +333,142 @@ def test_unauthenticated_browser_is_challenged_not_served():
     if key:
         r2 = c.get("/ai-hotel-lab", headers={"X-Baker-Key": key})
         assert r2.status_code == 200 and "View as NVIDIA" in r2.text
+
+
+# ═══ Step 5.1 — persisted projection-admin store (revoke / refresh kill switch) ═══
+# Maps codex-arch AC1/AC3/AC5/AC8/AC9/AC12 + threat cases T1-T5, T7-T11 to named
+# tests, exercised against the in-memory admin backend (DB-free, deterministic).
+
+NV_THESIS_CLAIM = "AI-hospitality lighthouse thesis validated against operator workflow."
+VENUE_CLAIM = "Santa Clara site diligence supports the operating thesis."
+
+
+def _nvidia_blob():
+    return json.dumps(lab.get_packet(role="nvidia"))
+
+
+def test_s51_revoke_persists_and_item_vanishes_from_partner_packet():
+    # AC3/T1: a revoked item leaves the partner packet generically.
+    assert NV_THESIS_CLAIM in _nvidia_blob()                     # visible baseline
+    before = lab.get_packet(role="nvidia")["counts"]["visible"]
+    out = lab.post_admin_action("revoke", projection_item_id="nv-lighthouse-thesis",
+                                reason="superseded by v2")
+    assert out["ok"] is True and out["projection_state"] == "revoked"
+    assert NV_THESIS_CLAIM not in _nvidia_blob()                 # gone
+    assert lab.get_packet(role="nvidia")["counts"]["visible"] == before - 1
+
+
+def test_s51_revoked_absent_from_every_partner_surface():
+    # AC3/T1-T3: packet, evidence lane, and the full external token-scan all hide it,
+    # with no count/reason/source-hint leak.
+    lab.post_admin_action("revoke", projection_item_id="nv-lighthouse-thesis")
+    assert NV_THESIS_CLAIM not in json.dumps(lab.get_packet(role="nvidia"))
+    assert NV_THESIS_CLAIM not in json.dumps(lab.get_evidence(role="nvidia"))
+    assert NV_THESIS_CLAIM not in _external_blob("nvidia")
+    # T2: empty/blocked counts never reveal hidden material exists.
+    pkt = lab.get_packet(role="nvidia")
+    assert pkt["counts"]["blocked"] == 0 and pkt["counts"]["stale"] == 0
+
+
+def test_s51_revoke_survives_process_restart(fresh_admin_backend):
+    # AC1: durable across restart. The in-memory backend stands in for Postgres; a
+    # fresh _candidates() read (as a new process would do) still sees REVOKED.
+    lab.post_admin_action("revoke", projection_item_id="venue-site-diligence")
+    cand = next(c for c in lab._candidates() if c.item.object_id == "venue-site-diligence")
+    assert cand.revoked is True
+    assert VENUE_CLAIM not in json.dumps(lab.get_packet(role="venue"))
+
+
+def test_s51_revoke_is_idempotent(fresh_admin_backend):
+    # AC8/T8: revoking twice is safe — one persisted row, item stays revoked.
+    a = lab.post_admin_action("revoke", projection_item_id="nv-lighthouse-thesis")
+    b = lab.post_admin_action("revoke", projection_item_id="nv-lighthouse-thesis")
+    assert a["projection_state"] == b["projection_state"] == "revoked"
+    assert len(fresh_admin_backend.items) == 1   # one row per source item, not two
+
+
+def test_s51_refresh_never_resurrects_revoked():
+    # T5/T11: refresh after revoke recomputes but the item stays dead.
+    lab.post_admin_action("revoke", projection_item_id="nv-lighthouse-thesis")
+    out = lab.post_admin_action("refresh", projection_item_id="nv-lighthouse-thesis")
+    assert out["projection_state"] == "revoked"
+    assert NV_THESIS_CLAIM not in _nvidia_blob()
+
+
+def test_s51_refresh_recomputes_freshness_on_live_item(fresh_admin_backend):
+    # AC9: refresh on a non-revoked item recomputes + audits; item stays visible.
+    out = lab.post_admin_action("refresh", projection_item_id="nv-lighthouse-thesis")
+    assert out["ok"] is True
+    assert NV_THESIS_CLAIM in _nvidia_blob()                    # still live
+    assert fresh_admin_backend.audit[-1].event_type == "refresh"
+
+
+def test_s51_approve_blocked_on_revoked_item():
+    # T8: approve must not silently un-hide a revoked item (revoked is a hard stop).
+    from fastapi import HTTPException
+    lab.post_admin_action("revoke", projection_item_id="nv-lighthouse-thesis")
+    with pytest.raises(HTTPException) as ei:
+        lab.post_admin_action("approve", projection_item_id="nv-lighthouse-thesis")
+    assert ei.value.status_code == 409
+
+
+def test_s51_audit_records_actor_reason_and_transition(fresh_admin_backend):
+    # T9: persisted audit carries actor + reason + state transition.
+    lab.post_admin_action("revoke", projection_item_id="nv-lighthouse-thesis",
+                          reason="withdrawn for review")
+    assert fresh_admin_backend.audit, "revoke must append an audit row"
+    rec = fresh_admin_backend.audit[-1]
+    assert rec.event_type == "revoke"
+    assert rec.actor_org and rec.actor_role          # actor identity captured
+    assert rec.actor_is_ai is False                  # human admin only
+    assert "withdrawn for review" in rec.reason
+    assert "->revoked" in rec.reason                 # state transition captured
+
+
+def test_s51_ai_and_external_principals_cannot_admin():
+    # AC7/T7: the policy layer rejects a non-human / non-Brisen admin outright.
+    from policy.models import Org, Principal
+    from policy.projection import admin as padmin
+    from policy.projection.models import ProjectionItem, ProjectionState
+    from policy.search.routing import RouteTarget
+    pi = ProjectionItem(
+        projection_item_id="prj_test", audience_role=AudienceRole.BRISEN_INTERNAL,
+        source_evidence_item_id="x", lifecycle_state="shared_view",
+        dashboard_section=RouteTarget.EXECUTIVE_SUMMARY, display_title="t",
+        display_summary="s", evidence_confidence=0.8, confidence_reason="r",
+        source_label_safe="l", citation_or_provenance_safe="c", freshness="2026-06",
+        last_verified_at="2026-06",
+        projection_state=ProjectionState.PROJECTED_SHARED_VIEW)
+    ai = Principal(org=Org.BRISEN, role="evidence_admin", is_ai=True)
+    ext = Principal(org=Org.NVIDIA, role="ai_hospitality_lighthouse_lead")
+    for bad in (ai, ext):
+        with pytest.raises(padmin.ProjectionAdminDenied):
+            padmin.revoke_projection(pi, bad, reason="nope")
+
+
+def test_s51_external_fails_closed_on_store_outage(fresh_admin_backend):
+    # T11: if the overlay store is unreachable, the partner packet is GENERIC empty —
+    # never a raw / last-known fallback.
+    fresh_admin_backend.fail = True
+    pkt = lab.get_packet(role="nvidia")
+    assert pkt["counts"]["visible"] == 0
+    assert pkt["sections"] == {"_empty_state": "no_items_available"}
+    assert lab.get_evidence(role="nvidia")["evidence"] == []
+
+
+def test_s51_revoke_not_applied_on_store_outage(fresh_admin_backend):
+    # T11: a store write failure surfaces as 503 (action NOT applied) — never silent.
+    from fastapi import HTTPException
+    fresh_admin_backend.fail = True
+    with pytest.raises(HTTPException) as ei:
+        lab.post_admin_action("revoke", projection_item_id="nv-lighthouse-thesis")
+    assert ei.value.status_code == 503
+
+
+def test_s51_internal_view_shows_revoked_for_audit(fresh_admin_backend):
+    # AC5: revoked item stays visible to Brisen (audit view) while gone for partners.
+    lab.post_admin_action("revoke", projection_item_id="nv-lighthouse-thesis",
+                          reason="superseded")
+    aud = lab.get_item_audit("nv-lighthouse-thesis", role="brisen")
+    assert aud["revoked"] is True
+    assert aud["revoke_reason"] and "superseded" in aud["revoke_reason"]

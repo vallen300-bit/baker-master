@@ -69,6 +69,10 @@ def save_projection_item(
                         revoked_by = EXCLUDED.revoked_by,
                         revoke_reason = EXCLUDED.revoke_reason,
                         redaction_applied = EXCLUDED.redaction_applied,
+                        -- Step 5.1: a refresh recomputes freshness on the persisted
+                        -- admin record, so the freshness label tracks the last refresh.
+                        freshness = EXCLUDED.freshness,
+                        last_verified_at = EXCLUDED.last_verified_at,
                         updated_at = now()
                     """,
                     (
