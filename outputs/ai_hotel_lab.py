@@ -576,13 +576,13 @@ def post_admin_action(action: str, projection_item_id: str = Query(...),
     if target is None:
         raise HTTPException(status_code=404, detail="not found")
     if action != "approve":
-        # revoke / refresh operate on PERSISTED ProjectionItems. Sprint-0 has no
-        # projection store wired (later brief), so those states are shown read-only
-        # from the packet (AC7 display) rather than mutated here. Honest, not faked.
+        # revoke / refresh operate on PERSISTED ProjectionItems (Step 5.1, a separate
+        # follow-on after merge — codex-arch #3873). Sprint-0 has no persisted store,
+        # so the UI renders these controls DISABLED/read-only with this exact reason
+        # string; the endpoint returns it explicitly rather than a bare 501.
         raise HTTPException(
             status_code=501,
-            detail=f"{action} requires the persisted projection store (later brief); "
-                   "state is shown read-only from the packet in Sprint-0",
+            detail="Step 5.1 pending persisted projection-admin store",
         )
     try:
         log = projection_admin.approve_projection(
