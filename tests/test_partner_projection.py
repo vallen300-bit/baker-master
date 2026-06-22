@@ -146,6 +146,16 @@ def test_ac2_no_raw_text_leaks():
 # =========================================================================== #
 # AC3 — item includes confidence, visibility_reason, redaction, safe provenance
 # =========================================================================== #
+def test_ac2_missing_confidence_fails_closed():
+    # deputy-codex AC2 / T4: a shared_view item granted to NVIDIA but missing
+    # confidence metadata is denied by the engine -> blocked, no external body.
+    cand = ProjectionCandidate(_nv_item(confidence=None))
+    pkt = packets.build_external_packet(AudienceRole.NVIDIA_LIGHTHOUSE, [cand], generated_at="T0")
+    assert pkt.visible_count == 0
+    pi = projector.build_projection_item(AudienceRole.NVIDIA_LIGHTHOUSE, cand.item)
+    assert pi.projection_state is ProjectionState.BLOCKED_BY_POLICY
+
+
 def test_ac3_item_has_confidence_visibility_provenance():
     pkt = packets.build_external_packet(AudienceRole.NVIDIA_LIGHTHOUSE,
                                         [ProjectionCandidate(_nv_item())], generated_at="T0")
@@ -418,7 +428,26 @@ def test_rubric15_cache_served_when_unchanged():
 
 
 # =========================================================================== #
-# T10 store — fail closed on DB error
+# deputy-codex AC11 / T12 — projection audit audience-split (external safe-only)
+# =========================================================================== #
+def test_ac11_external_audit_safe_only():
+    cands = [ProjectionCandidate(_nv_item())]
+    pkt = packets.build_external_packet(AudienceRole.NVIDIA_LIGHTHOUSE, cands, generated_at="T0")
+    pid = next(i["projection_item_id"] for sec in pkt.sections.values()
+               if isinstance(sec, list) for i in sec)
+    audit = packets.external_item_audit(NVIDIA, pid, cands)
+    assert audit is not None
+    allowed = {"projection_item_id", "audience_role", "projection_state",
+               "evidence_status", "last_verified_at", "visibility_reason"}
+    assert set(audit.keys()) <= allowed
+    blob = str(audit)
+    for forbidden in ("source_evidence_item_id", "owner", "audit_trace_id",
+                      "po-nvidia-1", "reason_code", "SECRET"):
+        assert forbidden not in blob
+
+
+# =========================================================================== #
+# deputy-codex AC12 — failure + scale controls (bounded read, fail closed)
 # =========================================================================== #
 def _raising():
     raise RuntimeError("projection DB down")
@@ -433,6 +462,29 @@ def test_store_save_item_fails_closed():
 def test_store_load_items_fails_closed():
     with pytest.raises(store.ProjectionStoreUnavailableError):
         store.load_projection_items("nvidia_lighthouse", conn_factory=_raising)
+
+
+def test_ac12_load_projection_items_bounded():
+    captured = {}
+
+    class _Cur:
+        description = [("projection_item_id",)]
+        def __enter__(self): return self
+        def __exit__(self, *a): return False
+        def execute(self, sql, params=None):
+            captured["sql"], captured["params"] = sql, params
+        def fetchall(self): return []
+
+    class _Conn:
+        def __enter__(self): return self
+        def __exit__(self, *a): return False
+        def cursor(self): return _Cur()
+
+    rows = store.load_projection_items("nvidia_lighthouse", limit=10**9,
+                                       conn_factory=lambda: _Conn())
+    assert rows == []
+    assert "LIMIT" in captured["sql"]                 # bounded SQL
+    assert captured["params"][1] == 500               # clamped to the hard ceiling
 
 
 # =========================================================================== #

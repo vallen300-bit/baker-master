@@ -19,7 +19,7 @@ raw-table joins in external responses, no new promotion path.
 | `policy/projection/admin.py` | evidence-admin approve (via the Step-1 lifecycle gate) / revoke / refresh, each audited; human-Brisen-admin only |
 | `policy/projection/store.py` | parameterized SQL for 5 tables; non-mutating reads; fail-closed |
 | `migrations/20260622b_ai_hotel_projection.sql` | 5 tables, additive + idempotent (`IF NOT EXISTS`), enum CHECK, plain indexes |
-| `tests/test_partner_projection.py` | 31 tests, 1:1 to ACs / threats / done-rubric |
+| `tests/test_partner_projection.py` | 34 tests, 1:1 to ACs / threats / done-rubric |
 
 ## Done rubric (answered point by point)
 
@@ -38,7 +38,7 @@ raw-table joins in external responses, no new promotion path.
 13. **Serializer boundary (T9/AC10)** — `test_rubric13_serializer_boundary` (internal carries source id+owner; external never does).
 14. **Spoof (T10)** — `test_rubric14_spoof_org_role_denied` (server-side principal fixture).
 15. **Cache staleness (T11)** — `test_rubric15_cache_revalidated_on_change`, `test_rubric15_cache_served_when_unchanged`.
-16. **Migrations + green** — additive/idempotent, no `CREATE INDEX CONCURRENTLY`; `pytest tests/test_partner_projection.py` = **31 passed**; Steps 1-3 suites green (`test_policy_core` 113, `test_source_inventory` 38, `test_search_routing` 80); `check_singletons.sh` green.
+16. **Migrations + green** — additive/idempotent, no `CREATE INDEX CONCURRENTLY`; `pytest tests/test_partner_projection.py` = **34 passed**; Steps 1-3 suites green (`test_policy_core` 113, `test_source_inventory` 38, `test_search_routing` 80); `check_singletons.sh` green.
 17. **DONE invariant** — no external audience can see another audience's items or any raw internal field; projection exists only through the Step-1 engine + human-approved lifecycle; revoke/stale honored.
 
 ## Citation table
@@ -61,19 +61,40 @@ codex-arch product ACs + threat cases:
 | Threat: misclassified / revoke / stale | `test_rubric7`, `test_rubric8_revoke_and_stale` |
 | Threat: view-as parity | `test_rubric9_view_as_byte_identical` |
 
-deputy-codex #3738 threats (5 named in lead #3739; **deputy-codex owns the
-authoritative AC1-12/T1-12 text in #3738 and gates against it — exact AC#/T# numbering
-to be confirmed at gate**, b2 not a party to #3738):
+deputy-codex AC1–AC12 (exact labels relayed by lead, bus #3745; deputy-codex owns the
+authoritative text in #3738 and gates PR #404 against it):
+
+| deputy-codex AC | Test(s) |
+|---|---|
+| AC1 entrypoints policy-bound server-side (client can't widen) | `test_rubric4_direct_api_bypass_crafted_role`, `test_rubric14_spoof_org_role_denied`, `test_rubric5_external_routes_through_engine` |
+| AC2 derived-only; raw/research never serialize; missing metadata fails closed | `test_rubric2_external_fields_from_partner_projection`, `test_rubric2_removing_projection_yields_no_external_body`, `test_ac2_no_raw_text_leaks`, `test_rubric6_raw_and_research_never_project[*]`, `test_ac2_missing_confidence_fails_closed` |
+| AC3 audience isolation per item AND per packet | `test_rubric3_cross_role_isolation_packet_and_counts`, `test_rubric3_cross_role_isolation_item_audit`, `test_all_six_principals_same_fixture_set` |
+| AC4 external payload field allowlist | `test_rubric11_field_allowlist` |
+| AC5 no duplicate permission engine | `test_rubric5_external_routes_through_engine`, `test_rubric2_removing_projection_yields_no_external_body` |
+| AC6 never_external + sensitive hard-deny beats misclassification | `test_rubric7_never_external_blocked` |
+| AC7 direct API enumeration fails closed | `test_rubric4_direct_api_bypass_crafted_role`, `test_rubric4_crafted_candidates_other_audience_absent`, `test_rubric3_cross_role_isolation_item_audit` |
+| AC8 revocation + staleness live-gated | `test_rubric8_revoke_and_stale`, `test_rubric15_cache_revalidated_on_change` |
+| AC9 action links safe + non-mutating | `test_rubric12_action_link_no_urls`, `test_rubric12_view_is_non_mutating` |
+| AC10 preview/admin serializers SEPARATE; admin human-Brisen + audited | `test_rubric13_serializer_boundary`, `test_ac5_admin_actions_reject_non_human_admin`, `test_ac5_admin_approve_via_lifecycle_gate`, `test_ac5_revoke_audited_and_removes_from_external` |
+| AC11 audit complete but audience-split (external safe id/status only) | `test_ac11_external_audit_safe_only`, `test_rubric3_cross_role_isolation_item_audit` |
+| AC12 failure + scale controls (bounded; fail closed; no best-effort) | `test_store_save_item_fails_closed`, `test_store_load_items_fails_closed`, `test_ac12_load_projection_items_bounded` |
+
+deputy-codex T1–T12 (exact labels, bus #3745):
 
 | deputy-codex threat | Test(s) |
 |---|---|
-| AC4 field-allowlist | `test_rubric11_field_allowlist` |
-| T8/AC9 action-link no internal URLs + non-mutating | `test_rubric12_action_link_no_urls`, `test_rubric12_view_is_non_mutating` |
-| T9/AC10 serializer boundary | `test_rubric13_serializer_boundary` |
-| T10 spoof (server-side principal) | `test_rubric14_spoof_org_role_denied`, `test_rubric4_direct_api_bypass_crafted_role` |
-| T11 cache staleness | `test_rubric15_cache_revalidated_on_change`, `test_rubric15_cache_served_when_unchanged` |
-| fail-closed store (T10) | `test_store_save_item_fails_closed`, `test_store_load_items_fails_closed` |
-| 6-principal fixture incl never_external | `test_all_six_principals_same_fixture_set` |
+| T1 cross-role bleed | `test_rubric3_cross_role_isolation_packet_and_counts`, `test_rubric3_cross_role_isolation_item_audit` |
+| T2 raw body leak | `test_ac2_no_raw_text_leaks`, `test_rubric11_field_allowlist` |
+| T3 crafted context bypass | `test_rubric4_direct_api_bypass_crafted_role`, `test_rubric4_crafted_candidates_other_audience_absent` |
+| T4 misregistration leak | `test_rubric7_never_external_blocked`, `test_ac2_missing_confidence_fails_closed` |
+| T5 revoked/stale payload persistence | `test_rubric8_revoke_and_stale`, `test_rubric15_cache_revalidated_on_change` |
+| T6 policy bypass drift | `test_rubric5_external_routes_through_engine`, `test_rubric2_removing_projection_yields_no_external_body` |
+| T7 direct enumeration | `test_rubric4_*`, `test_rubric3_cross_role_isolation_item_audit` |
+| T8 action-link escalation (internal URLs / mutation) | `test_rubric12_action_link_no_urls`, `test_rubric12_view_is_non_mutating` |
+| T9 preview/admin serializer bleed | `test_rubric13_serializer_boundary` |
+| T10 simulated-user spoof (org/role tamper) | `test_rubric14_spoof_org_role_denied` |
+| T11 cache/index staleness | `test_rubric15_cache_revalidated_on_change`, `test_rubric15_cache_served_when_unchanged` |
+| T12 audit/status leak | `test_ac11_external_audit_safe_only`, `test_rubric3_cross_role_isolation_item_audit` |
 
 ## Reuse (no fork / no second engine)
 
@@ -86,7 +107,7 @@ to be confirmed at gate**, b2 not a party to #3738):
 
 ```
 $ python3 -m pytest tests/test_partner_projection.py -q
-31 passed, 1 warning in 0.06s
+34 passed, 1 warning in 0.08s
 
 $ python3 -m pytest tests/test_policy_core.py tests/test_source_inventory.py tests/test_search_routing.py -q
 231 passed
