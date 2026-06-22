@@ -274,3 +274,48 @@ def test_llm_call_still_routes_flash_string_to_flash(monkeypatch):
     resp = dash._llm_call("gemini-2.5-flash", messages=[{"role": "user", "content": "x"}])
     assert resp.text == "ok"
     assert flash_hit.get("hit")
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# BAKER_DASHBOARD_V2_VERIFIER_1 AC1 — trusted VERIFICATION floor (Opus-class only,
+# a SEPARATE, stricter floor than the extraction floor; must not weaken it).
+# ─────────────────────────────────────────────────────────────────────────────
+
+def test_verification_allows_opus_and_fable():
+    assert mp.is_allowed_for_trusted_verification("claude-opus-4-8")
+    assert mp.is_allowed_for_trusted_verification("claude-opus-4-7")
+    assert mp.is_allowed_for_trusted_verification("claude-fable-5")
+
+
+def test_verification_rejects_gemini_flash_sonnet_haiku_empty():
+    for m in ("gemini-2.5-pro", "gemini-2.5-flash", "claude-sonnet-4-6",
+              "claude-haiku-4-5-20251001", "", None, "unknown-model",
+              "claude-opus-flash"):  # 'flash' bar wins even with opus prefix
+        assert not mp.is_allowed_for_trusted_verification(m), m
+
+
+def test_trusted_verification_model_defaults_to_opus(monkeypatch):
+    monkeypatch.delenv("VERIFIER_MIN_MODEL", raising=False)
+    assert mp.trusted_verification_model() == "claude-opus-4-8"
+
+
+def test_trusted_verification_model_refuses_weak_override(monkeypatch):
+    monkeypatch.setenv("VERIFIER_MIN_MODEL", "gemini-2.5-pro")
+    resolved = mp.trusted_verification_model()
+    assert mp.is_allowed_for_trusted_verification(resolved)
+    assert resolved == "claude-opus-4-8"
+
+
+def test_assert_trusted_verification_model_raises_on_weak():
+    for m in ("gemini-2.5-pro", "claude-sonnet-4-6", "gemini-2.5-flash", ""):
+        with pytest.raises(mp.TrustedModelPolicyError):
+            mp.assert_trusted_verification_model(m, context="unit")
+    mp.assert_trusted_verification_model("claude-opus-4-8")  # no raise
+
+
+def test_extraction_floor_not_weakened_and_floors_are_distinct():
+    # Verification is STRICTER than extraction: Gemini Pro is fine for extraction
+    # but barred for verification. The extraction surface is unchanged.
+    assert mp.is_allowed_for_trusted("gemini-2.5-pro")             # extraction: allowed
+    assert not mp.is_allowed_for_trusted_verification("gemini-2.5-pro")  # verification: barred
+    assert not mp.is_allowed_for_trusted("gemini-2.5-flash")       # flash still barred for extraction
