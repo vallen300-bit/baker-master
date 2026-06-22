@@ -225,3 +225,26 @@ def test_ac7_approve_is_live_and_audited():
     out = lab.post_admin_action("approve", projection_item_id="brisen-financing-strategy")
     assert out["ok"] is True
     assert out["action"] == "approve"
+
+
+# ── AC1 — page shell renders; safe DOM only (no innerHTML XSS surface) ────────
+def test_cockpit_page_renders_html():
+    resp = lab.cockpit_page()
+    assert resp.status_code == 200
+    body = resp.body.decode()
+    for marker in ("AI Hotel Lab", "View as NVIDIA", "Raw Signal Inbox",
+                   "Verified Evidence", "Partner Projection", "Execution Roadmap",
+                   "Step 5.1 pending persisted projection-admin store"):
+        assert marker in body
+
+
+def test_cockpit_page_uses_no_innerhtml_assignment():
+    # Dynamic content is built via textContent/DOM; no innerHTML sink (XSS guard).
+    body = lab.cockpit_page().body.decode()
+    assert ".innerHTML" not in body
+
+
+def test_all_four_role_views_render_without_error():
+    # G1: render the 4 role views server-side (endpoint payloads resolve cleanly).
+    for role in ("brisen", "nvidia", "mohg", "venue"):
+        assert lab.get_packet(role=role)["audience_label"]

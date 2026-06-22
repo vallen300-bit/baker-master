@@ -25,6 +25,7 @@ import logging
 from typing import List, Mapping, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi.responses import HTMLResponse
 
 from policy.models import (
     Action,
@@ -590,3 +591,277 @@ def post_admin_action(action: str, projection_item_id: str = Query(...),
     except Exception as e:
         raise HTTPException(status_code=403, detail=f"admin action denied: {e}")
     return {"ok": True, "action": action, "event": getattr(log, "event_type", action)}
+
+
+# --------------------------------------------------------------------------- #
+# Cockpit SPA (Pattern B — serious operational light mode). The page is a thin
+# shell: ALL data is fetched from the /api endpoints above, which apply the policy
+# boundary server-side. The browser never reconstructs an external view. Dynamic
+# content is rendered via DOM API + textContent (never innerHTML) so values from
+# the backend cannot be interpreted as markup (defense-in-depth, no XSS surface).
+# --------------------------------------------------------------------------- #
+@router.get("", response_class=HTMLResponse, include_in_schema=False)
+@router.get("/", response_class=HTMLResponse, include_in_schema=False)
+def cockpit_page() -> HTMLResponse:
+    return HTMLResponse(_COCKPIT_HTML)
+
+
+_COCKPIT_HTML = r"""<!DOCTYPE html>
+<html lang="en"><head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>AI Hotel Lab — Cockpit</title>
+<style>
+  :root{
+    --paper:#f7f6f2; --ink:#1c2530; --muted:#5d6b7a; --line:#dcd9d0; --card:#fffefb;
+    --navy:#1a3a52; --navy-soft:#e7edf2; --amber:#b3760a; --amber-bg:#fdf3e0;
+    --verified:#1f6b46; --verified-bg:#e8f3ec; --gap:#9a3b3b; --gap-bg:#f7eaea;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;font:15px/1.5 -apple-system,BlinkMacSystemFont,"Segoe UI",Helvetica,Arial,sans-serif;color:var(--ink);background:var(--paper)}
+  header{background:var(--card);border-bottom:1px solid var(--line);padding:14px 20px;position:sticky;top:0;z-index:10}
+  .titlerow{display:flex;align-items:center;gap:14px;flex-wrap:wrap}
+  h1{font-size:18px;margin:0;letter-spacing:.3px}
+  .milestone{font-size:11px;color:var(--muted);border:1px solid var(--line);border-radius:3px;padding:2px 7px;text-transform:uppercase;letter-spacing:.5px}
+  .roles{margin-left:auto;display:flex;gap:6px;flex-wrap:wrap}
+  .roles button{font:inherit;font-size:13px;padding:6px 12px;border:1px solid var(--line);background:var(--paper);border-radius:4px;cursor:pointer;color:var(--ink)}
+  .roles button.active{background:var(--navy);color:#fff;border-color:var(--navy)}
+  .firstscreen{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:10px;margin-top:12px}
+  .stat{background:var(--paper);border:1px solid var(--line);border-radius:4px;padding:8px 10px}
+  .stat .k{font-size:10px;text-transform:uppercase;letter-spacing:.6px;color:var(--muted)}
+  .stat .v{font-size:14px;font-weight:600;margin-top:2px}
+  .searchbar{display:flex;gap:8px;margin-top:12px}
+  .searchbar input{flex:1;font:inherit;padding:8px 10px;border:1px solid var(--line);border-radius:4px;background:#fff}
+  .searchbar button{font:inherit;padding:8px 14px;border:1px solid var(--navy);background:var(--navy);color:#fff;border-radius:4px;cursor:pointer}
+  .layout{display:flex;min-height:60vh}
+  nav{width:230px;flex:0 0 230px;border-right:1px solid var(--line);padding:16px 0;background:var(--card)}
+  nav a{display:block;padding:8px 20px;color:var(--ink);text-decoration:none;font-size:14px;cursor:pointer;border-left:3px solid transparent}
+  nav a:hover{background:var(--navy-soft)} nav a.active{border-left-color:var(--navy);font-weight:600;background:var(--navy-soft)}
+  nav .seclabel{font-size:10px;text-transform:uppercase;letter-spacing:.6px;color:var(--muted);padding:14px 20px 4px}
+  main{flex:1;padding:20px;min-width:0}
+  .panel{background:var(--card);border:1px solid var(--line);border-radius:5px;padding:16px;margin-bottom:18px}
+  .panel h2{font-size:14px;margin:0 0 10px;text-transform:uppercase;letter-spacing:.5px;color:var(--navy)}
+  .item{border:1px solid var(--line);border-radius:4px;padding:10px 12px;margin-bottom:8px;background:#fff}
+  .item .claim{font-weight:600} .item .meta{font-size:12px;color:var(--muted);margin-top:4px}
+  .badge{display:inline-block;font-size:10px;text-transform:uppercase;letter-spacing:.5px;padding:2px 7px;border-radius:3px;margin-right:6px;font-weight:700}
+  .b-raw{background:var(--amber-bg);color:var(--amber);border:1px solid var(--amber)}
+  .b-verified{background:var(--verified-bg);color:var(--verified);border:1px solid var(--verified)}
+  .b-gap{background:var(--gap-bg);color:var(--gap);border:1px solid var(--gap)}
+  .b-state{background:var(--navy-soft);color:var(--navy);border:1px solid #b9c8d4}
+  .raw-card{border-left:4px solid var(--amber);background:var(--amber-bg)}
+  .verified-card{border-left:4px solid var(--verified)}
+  .btn{font:inherit;font-size:12px;padding:5px 10px;border:1px solid var(--line);background:var(--paper);border-radius:4px;cursor:pointer;margin-right:6px}
+  .btn.live{border-color:var(--verified);color:var(--verified)}
+  .btn[disabled]{opacity:.5;cursor:not-allowed}
+  .reason{font-size:11px;color:var(--muted);font-style:italic;margin-top:4px}
+  .empty{color:var(--muted);font-size:13px;padding:8px 0}
+  table{width:100%;border-collapse:collapse;font-size:13px} th,td{text-align:left;padding:6px 8px;border-bottom:1px solid var(--line)}
+  .notice{background:var(--navy-soft);border:1px solid #b9c8d4;border-radius:4px;padding:8px 12px;font-size:12px;color:var(--navy);margin-bottom:14px}
+  pre{white-space:pre-wrap;font-size:12px}
+  @media(max-width:760px){.layout{flex-direction:column}nav{width:auto;flex:none;border-right:none;border-bottom:1px solid var(--line);display:flex;overflow-x:auto}nav .seclabel{display:none}nav a{white-space:nowrap;border-left:none;border-bottom:3px solid transparent}}
+</style></head>
+<body>
+<header>
+  <div class="titlerow">
+    <h1>AI Hotel Lab</h1>
+    <span class="milestone">Internal cockpit · view-as milestone</span>
+    <div class="roles" id="roles">
+      <button data-role="brisen" class="active">Brisen (internal)</button>
+      <button data-role="nvidia">View as NVIDIA</button>
+      <button data-role="mohg">View as MOHG</button>
+      <button data-role="venue">View as Venue Owner</button>
+    </div>
+  </div>
+  <div class="firstscreen" id="firstscreen"></div>
+  <div class="searchbar">
+    <input id="q" placeholder="Advanced search — internal Baker/vault/field; web & authorities shown as gaps until wired"/>
+    <button id="searchbtn">Search</button>
+  </div>
+</header>
+<div class="layout">
+  <nav id="nav">
+    <div class="seclabel">Surfaces</div>
+    <a data-view="overview" class="active">Overview</a>
+    <a data-view="raw">Raw Signal Inbox</a>
+    <a data-view="evidence">Verified Evidence</a>
+    <a data-view="projection">Partner Projection</a>
+    <a data-view="sources">Source Registry / Coverage</a>
+    <a data-view="search">Advanced Search</a>
+    <div class="seclabel">Execution</div>
+    <a data-view="roadmap">Execution Roadmap</a>
+  </nav>
+  <main id="main"></main>
+</div>
+<script>
+const KEY = new URLSearchParams(location.search).get('key');
+let ROLE='brisen', VIEW='overview';
+const isExternal=()=>ROLE!=='brisen';
+// Safe DOM builder — values go in via textContent only; no innerHTML, no XSS surface.
+function h(tag, attrs, kids){
+  const e=document.createElement(tag);
+  attrs=attrs||{};
+  for(const k in attrs){
+    if(k==='class') e.className=attrs[k];
+    else if(k==='text') e.textContent=attrs[k];
+    else if(k==='onclick') e.onclick=attrs[k];
+    else if(k==='disabled'){ if(attrs[k]) e.setAttribute('disabled',''); }
+    else if(attrs[k]!=null) e.setAttribute(k,attrs[k]);
+  }
+  (kids||[]).forEach(c=>{ if(c==null)return; e.appendChild(typeof c==='object'?c:document.createTextNode(String(c))); });
+  return e;
+}
+function clear(n){ while(n.firstChild) n.removeChild(n.firstChild); }
+function badge(cls,txt){ return h('span',{class:'badge '+cls,text:txt}); }
+async function api(path){
+  const hd={}; if(KEY) hd['X-Baker-Key']=KEY;
+  const r=await fetch('/ai-hotel-lab/api/'+path+(path.includes('?')?'&':'?')+'role='+ROLE,{credentials:'same-origin',headers:hd});
+  if(!r.ok) return null; return r.json();
+}
+function setRole(role){
+  ROLE=role;
+  document.querySelectorAll('#roles button').forEach(b=>b.classList.toggle('active',b.dataset.role===role));
+  clear(document.getElementById('main')); clear(document.getElementById('firstscreen')); // AC3: clear prior-role state
+  render();
+}
+function setView(v){ VIEW=v; document.querySelectorAll('#nav a').forEach(a=>a.classList.toggle('active',a.dataset.view===v)); render(); }
+document.querySelectorAll('#roles button').forEach(b=>b.onclick=()=>setRole(b.dataset.role));
+document.querySelectorAll('#nav a').forEach(a=>a.onclick=()=>setView(a.dataset.view));
+document.getElementById('searchbtn').onclick=runSearch;
+
+function stat(k,v){ return h('div',{class:'stat'},[h('div',{class:'k',text:k}),h('div',{class:'v',text:String(v)})]); }
+async function renderFirstScreen(){
+  const fs=document.getElementById('firstscreen'); clear(fs);
+  const pkt=await api('packet'); if(!pkt){ fs.appendChild(stat('status','unavailable')); return; }
+  const c=pkt.counts||{};
+  [['Stage','Sprint-0 · Step 5 (cockpit)'],['Viewing as',pkt.audience_label],
+   ['Visible evidence',(c.visible||0)+' items'],['Action-linked',(c.action_linked||0)],
+   ['Evidence freshness',pkt.last_generated_at?pkt.last_generated_at.slice(0,10):'—'],
+   ['External sharing',isExternal()?'view-as preview (not partner-live)':'Brisen control']
+  ].forEach(s=>fs.appendChild(stat(s[0],s[1])));
+}
+function sectionItems(pkt){ const out=[]; for(const sec in (pkt.sections||{})){ const v=pkt.sections[sec]; if(Array.isArray(v)) v.forEach(i=>out.push({sec,i})); } return out; }
+function panel(title, extra){ const p=h('div',{class:'panel'},[h('h2',{text:title})]); if(extra)p.appendChild(extra); return p; }
+function notice(txt){ return h('div',{class:'notice',text:txt}); }
+
+async function viewOverview(){
+  const wrap=h('div'); const pkt=await api('packet'); if(!pkt){wrap.appendChild(h('div',{class:'empty',text:'No packet.'}));return wrap;}
+  wrap.appendChild(notice(isExternal()
+    ? 'Partner view-as preview. This is the exact server-built partner packet — no raw internal data reaches this view. Partner-live access opens after revoke is wired (Step 5.1).'
+    : 'Brisen internal command view. Raw signals are amber and internal-only; verified evidence is promoted; partner projections are governed server-side.'));
+  const p=panel('Evidence by section'); const items=sectionItems(pkt);
+  if(!items.length) p.appendChild(h('div',{class:'empty',text:'No items available.'}));
+  items.forEach(({sec,i})=>{
+    const meta=h('div',{class:'meta'},[
+      badge('b-state', i.dashboard_section||sec),
+      badge('b-verified', i.evidence_status||i.projection_state||'verified'),
+      ' confidence '+(i.evidence_confidence!=null?i.evidence_confidence:(i.confidence!=null?i.confidence:'—'))+' · '+(i.freshness||''),
+      i.action_safe_text?' · action: '+i.action_safe_text:''
+    ]);
+    p.appendChild(h('div',{class:'item verified-card'},[h('div',{class:'claim',text:i.display_title||i.claim||i.display_summary||'—'}),meta]));
+  });
+  wrap.appendChild(p); return wrap;
+}
+async function viewRaw(){
+  if(isExternal()) return panel('Raw Signal Inbox', h('div',{class:'empty',text:'Raw signals are internal-only and are not part of a partner view.'}));
+  const d=await api('raw-signals'); const sig=(d&&d.raw_signals)||[];
+  const p=panel('Raw Signal Inbox'); p.querySelector('h2').appendChild(badge('b-raw','internal only'));
+  if(!sig.length) p.appendChild(h('div',{class:'empty',text:'No raw signals.'}));
+  sig.forEach(s=>p.appendChild(h('div',{class:'item raw-card'},[
+    h('div',{class:'claim',text:s.claim||s.title||'—'}),
+    h('div',{class:'meta'},[badge('b-raw','raw · amber'),(s.section||'')+' · '+(s.source_type||'')+' · '+(s.freshness||'')]),
+    h('div',{class:'meta',text:s.raw_body||''})
+  ])));
+  return p;
+}
+async function viewEvidence(){
+  const d=await api('evidence'); const ev=(d&&d.evidence)||[]; const p=panel('Verified Evidence');
+  if(!ev.length) p.appendChild(h('div',{class:'empty',text:'No verified evidence available.'}));
+  ev.forEach(e=>p.appendChild(h('div',{class:'item verified-card'},[
+    h('div',{class:'claim',text:e.display_title||e.claim||e.display_summary||'—'}),
+    h('div',{class:'meta'},[badge('b-verified',e.lifecycle_state||e.evidence_status||'verified'),
+      ' confidence '+(e.confidence!=null?e.confidence:(e.evidence_confidence!=null?e.evidence_confidence:'—'))+' · '+(e.last_verified_at||e.last_reviewed||'')])
+  ])));
+  return p;
+}
+async function viewProjection(){
+  const wrap=h('div'); const pkt=await api('packet'); const items=pkt?sectionItems(pkt):[];
+  const p=panel('Partner Projection');
+  if(isExternal()) p.appendChild(notice('Brisen controls projection. Partners view; they do not approve or revoke.'));
+  if(!items.length) p.appendChild(h('div',{class:'empty',text:'No projected items.'}));
+  items.forEach(({i})=>{
+    const card=h('div',{class:'item'},[
+      h('div',{class:'claim',text:i.display_title||i.claim||'—'}),
+      h('div',{class:'meta'},[badge('b-state',i.projection_state||'projected'),i.dashboard_section||''])
+    ]);
+    if(!isExternal()){
+      const id=i.source_evidence_item_id||i.object_id||'';
+      const ctl=h('div',{},[
+        h('button',{class:'btn live',text:'Approve',onclick:()=>adminAct('approve',id)}),
+        h('button',{class:'btn',text:'Revoke',disabled:true,title:'Step 5.1 pending persisted projection-admin store'}),
+        h('button',{class:'btn',text:'Refresh',disabled:true,title:'Step 5.1 pending persisted projection-admin store'}),
+        h('button',{class:'btn',text:'Audit',onclick:()=>showAudit(id)}),
+        h('div',{class:'reason',text:'Revoke / Refresh: Step 5.1 pending persisted projection-admin store.'})
+      ]);
+      card.appendChild(ctl);
+    }
+    p.appendChild(card);
+  });
+  wrap.appendChild(p); wrap.appendChild(h('div',{id:'auditdrawer'})); return wrap;
+}
+async function viewSources(){
+  const d=await api('sources'); const s=(d&&d.sources)||[];
+  const tbl=h('table',{},[h('tr',{},[h('th',{text:'Domain'}),h('th',{text:'Source'}),h('th',{text:'Status'})])]);
+  s.forEach(r=>{ const st=r.collection_status||r.availability||'';
+    const cls=(st==='gap'||st==='not_available')?'b-gap':'b-verified';
+    const stcell=h('td',{},[badge(cls,st)]); if(r.never_external) stcell.appendChild(badge('b-state','never-external'));
+    tbl.appendChild(h('tr',{},[h('td',{text:r.domain}),h('td',{text:r.label}),stcell])); });
+  return panel('Source Registry / Coverage', tbl);
+}
+async function viewRoadmap(){
+  const d=await api('roadmap'); const r=(d&&d.roadmap)||[]; const p=panel('Execution Roadmap');
+  if(!r.length) p.appendChild(h('div',{class:'empty',text:'No roadmap items in this view.'}));
+  r.forEach(x=>p.appendChild(h('div',{class:'item'},[
+    h('div',{class:'claim'},[badge('b-gap','gap'),(x.label||'')+' ('+(x.domain||'')+')']),
+    h('div',{class:'meta',text:'owner '+(x.owner||'—')+' · '+(x.reason||'')}),
+    h('div',{class:'meta',text:'next: '+(x.next_action||'')})
+  ])));
+  return p;
+}
+async function viewSearch(){
+  const wrap=h('div'); wrap.appendChild(panel('Advanced Search', h('div',{class:'empty',text:'Use the search bar above. Results and honest source coverage (live vs gap) appear here.'})));
+  wrap.appendChild(h('div',{id:'searchresults'})); return wrap;
+}
+async function runSearch(){
+  const q=document.getElementById('q').value.trim(); if(!q) return; setView('search');
+  const d=await api('search?q='+encodeURIComponent(q)); const box=document.getElementById('searchresults'); if(!box) return; clear(box); if(!d) return;
+  const cov=h('table',{},[h('tr',{},[h('th',{text:'Domain'}),h('th',{text:'Status'})])]);
+  (d.coverage||[]).forEach(c=>{ const cls=c.status==='gap'?'b-gap':'b-verified';
+    cov.appendChild(h('tr',{},[h('td',{text:c.label||c.domain}),h('td',{},[badge(cls,c.status)])])); });
+  box.appendChild(panel('Coverage (honest)',cov));
+  const rp=panel('Results ('+d.result_count+')');
+  if(!d.results.length) rp.appendChild(h('div',{class:'empty',text:'No results'+(d.zero_result_route?' — routed to '+d.zero_result_route:'')+'. Unwired connectors are shown as gaps above, never fabricated as results.'}));
+  (d.results||[]).forEach(r=>rp.appendChild(h('div',{class:'item'},[
+    h('div',{class:'claim',text:r.result_ref}),
+    h('div',{class:'meta'},[badge(r.projected?'b-state':'b-verified',r.projected?'partner projection':'internal'),r.route_target||''])
+  ])));
+  box.appendChild(rp);
+}
+async function adminAct(action,id){
+  const hd={'Content-Type':'application/json'}; if(KEY) hd['X-Baker-Key']=KEY;
+  const r=await fetch('/ai-hotel-lab/api/admin/'+action+'?projection_item_id='+encodeURIComponent(id)+'&role='+ROLE,{method:'POST',credentials:'same-origin',headers:hd});
+  alert(action+': '+(r.ok?'done':('blocked ('+r.status+')'))); if(r.ok) render();
+}
+async function showAudit(id){
+  const d=await api('item/'+encodeURIComponent(id)+'/audit'); const box=document.getElementById('auditdrawer'); if(!box)return; clear(box);
+  box.appendChild(d? panel('Audit · '+id, h('pre',{text:JSON.stringify(d,null,2)}))
+                   : panel('Audit', h('div',{class:'empty',text:'Not available in this view.'})));
+}
+async function render(){
+  await renderFirstScreen();
+  const m=document.getElementById('main'); clear(m); m.appendChild(h('div',{class:'empty',text:'Loading…'}));
+  const fn={overview:viewOverview,raw:viewRaw,evidence:viewEvidence,projection:viewProjection,sources:viewSources,roadmap:viewRoadmap,search:viewSearch}[VIEW]||viewOverview;
+  const node=await fn(); clear(m); m.appendChild(node);
+}
+render();
+</script>
+</body></html>
+"""
