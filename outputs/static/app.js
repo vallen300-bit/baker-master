@@ -792,7 +792,7 @@ function switchTab(tabName) {
     var rightArea = document.querySelector('.right-area');
     if (rightArea) rightArea.classList.toggle('landing-active', tabName === 'morning-brief');
 
-    if (tabName === 'morning-brief') loadMorningBrief();
+    if (tabName === 'morning-brief') { loadMorningBrief(); if (window.loadTodayTrusted) loadTodayTrusted(); }
     else if (tabName === 'fires') loadFires();
     else if (tabName === 'matters') loadMattersTab();
     else if (tabName === 'deadlines') loadDeadlinesTab();
@@ -8039,6 +8039,8 @@ async function init() {
 
     // Load morning brief
     loadMorningBrief();
+    // BAKER_DASHBOARD_V2_CARD_DETAIL_1: trusted Today list (read-only, no-op if unmounted)
+    if (window.loadTodayTrusted) loadTodayTrusted();
 
     // PERSISTENT-DOCS-PANEL: Load generated files + init drop zones
     loadGeneratedFiles();
@@ -12155,3 +12157,300 @@ function _sentinelDispatchKebabLabel(alertId, label) {
     if (reasonMap[label])
         return sendSentinelFeedback(alertRow, 'dismiss', { dismiss_reason: reasonMap[label] });
 }
+
+/* ============================================================================
+ * BAKER_DASHBOARD_V2_CARD_DETAIL_1 — Trusted Today list + item detail drawer
+ * (b2, UI half of Workstream B).
+ *
+ *  - window.loadTodayTrusted()  renders a minimal READ-ONLY trusted Today card
+ *    list from GET /api/today (lanes + per-card claim/why/selected_reason/rank).
+ *    Legacy morning-brief surface is left fully intact (no cutover here).
+ *  - window.openVerifiedItemDrawer(itemId) fetches GET /api/verified-items/{id}
+ *    (auth-gated, X-Baker-Key via bakerFetch) and renders a right-side drawer
+ *    with loading / loaded / not-found / error states.
+ *
+ * Read-only, bounded metadata only. NO mutation controls, NO model calls, NO
+ * raw source-body fetch — the backend route already strips + length-bounds.
+ * Every dynamic string passes through esc(); body set via setSafeHTML().
+ * ==========================================================================*/
+(function () {
+    'use strict';
+
+    /* -------- detail drawer -------- */
+    var DRAWER_ID = 'vi-detail-drawer';
+    var SCRIM_ID = 'vi-detail-scrim';
+    var _escHandler = null;
+    var _lastFocus = null;
+
+    function _els() {
+        return {
+            scrim: document.getElementById(SCRIM_ID),
+            drawer: document.getElementById(DRAWER_ID),
+            body: document.getElementById(DRAWER_ID + '-body'),
+        };
+    }
+
+    function _ensureDom() {
+        if (document.getElementById(DRAWER_ID)) return _els();
+
+        var scrim = document.createElement('div');
+        scrim.id = SCRIM_ID;
+        scrim.className = 'vi-detail-scrim';
+        scrim.addEventListener('click', closeVerifiedItemDrawer);
+
+        var drawer = document.createElement('div');
+        drawer.id = DRAWER_ID;
+        drawer.className = 'vi-detail-drawer';
+        drawer.setAttribute('role', 'dialog');
+        drawer.setAttribute('aria-modal', 'true');
+        drawer.setAttribute('aria-label', 'Item detail');
+
+        var head = document.createElement('div');
+        head.className = 'vi-detail-head';
+        var closeBtn = document.createElement('button');
+        closeBtn.className = 'vi-detail-close';
+        closeBtn.setAttribute('aria-label', 'Close detail');
+        closeBtn.textContent = '×';
+        closeBtn.addEventListener('click', closeVerifiedItemDrawer);
+        head.appendChild(closeBtn);
+
+        var body = document.createElement('div');
+        body.id = DRAWER_ID + '-body';
+        body.className = 'vi-detail-body';
+
+        drawer.appendChild(head);
+        drawer.appendChild(body);
+        document.body.appendChild(scrim);
+        document.body.appendChild(drawer);
+        return _els();
+    }
+
+    function _open() {
+        var e = _ensureDom();
+        e.scrim.classList.add('open');
+        e.drawer.classList.add('open');
+        if (!_escHandler) {
+            _escHandler = function (ev) { if (ev.key === 'Escape') closeVerifiedItemDrawer(); };
+            document.addEventListener('keydown', _escHandler);
+        }
+    }
+
+    function closeVerifiedItemDrawer() {
+        var e = _els();
+        if (e.scrim) e.scrim.classList.remove('open');
+        if (e.drawer) e.drawer.classList.remove('open');
+        if (_escHandler) { document.removeEventListener('keydown', _escHandler); _escHandler = null; }
+        if (_lastFocus && _lastFocus.focus) { try { _lastFocus.focus(); } catch (_e) {} }
+        _lastFocus = null;
+    }
+
+    function _setBody(html) {
+        var e = _els();
+        if (e.body) setSafeHTML(e.body, html);
+    }
+
+    function _joinList(arr) {
+        if (!arr || !arr.length) return '';
+        var out = [];
+        for (var i = 0; i < arr.length; i++) {
+            var v = arr[i];
+            if (v === null || v === undefined) continue;
+            if (typeof v === 'object') out.push(v.name || v.slug || v.id || '');
+            else out.push(String(v));
+        }
+        return out.filter(Boolean).join(', ');
+    }
+
+    function _stateBadge(state) {
+        var s = (state || '').toLowerCase();
+        var cls = 'vi-badge';
+        if (s === 'ratified') cls += ' vi-badge-ratified';
+        else if (s === 'verified') cls += ' vi-badge-verified';
+        return '<span class="' + cls + '">' + esc(state || 'unknown') + '</span>';
+    }
+
+    function _row(label, value) {
+        if (value === null || value === undefined || value === '') return '';
+        return '<div class="vi-row"><div class="vi-row-label">' + esc(label) +
+               '</div><div class="vi-row-val">' + esc(String(value)) + '</div></div>';
+    }
+
+    function _renderLoading() {
+        _setBody('<div class="vi-detail-loading">Loading detail…</div>');
+    }
+
+    function _renderNotFound() {
+        _setBody('<div class="vi-detail-empty">' +
+            '<div class="vi-detail-empty-title">Not available</div>' +
+            '<div class="vi-detail-empty-sub">This item is not a trusted item, or no longer exists.</div>' +
+            '</div>');
+    }
+
+    function _renderError() {
+        _setBody('<div class="vi-detail-error">' +
+            '<div class="vi-detail-empty-title">Could not load detail</div>' +
+            '<div class="vi-detail-empty-sub">Something went wrong fetching this item. Close and try again.</div>' +
+            '</div>');
+    }
+
+    function _renderEvidence(item) {
+        var ev = item.evidence || {};
+        var cnt = (ev.source_refs_count != null) ? ev.source_refs_count : item.source_refs_count;
+        var bits = _row('Source type', ev.source_type || item.source_type) +
+                   _row('Source trust', ev.source_trust || item.source_trust) +
+                   _row('Extraction model', ev.extraction_model) +
+                   _row('Source model', ev.source_model) +
+                   _row('Source references', cnt);
+        if (!bits) return '';
+        return '<div class="vi-section"><div class="vi-section-title">Evidence</div>' + bits + '</div>';
+    }
+
+    function _renderTimeline(events) {
+        if (!events || !events.length) return '';
+        var rows = '';
+        for (var i = 0; i < events.length; i++) {
+            var ev = events[i] || {};
+            var actor = ev.actor_type ? esc(ev.actor_type) : 'system';
+            if (ev.model) actor += ' · ' + esc(ev.model);
+            var trans = esc(ev.from_state || '?') + ' → ' + esc(ev.to_state || '?');
+            var when = ev.created_at ? esc(String(ev.created_at)) : '';
+            var why = ev.rationale ? '<div class="vi-tl-why">' + esc(ev.rationale) + '</div>' : '';
+            rows += '<div class="vi-tl-item">' +
+                '<div class="vi-tl-line"><span class="vi-tl-trans">' + trans + '</span>' +
+                '<span class="vi-tl-when">' + when + '</span></div>' +
+                '<div class="vi-tl-actor">' + actor + '</div>' + why +
+                '</div>';
+        }
+        return '<div class="vi-section"><div class="vi-section-title">Audit timeline</div>' +
+               '<div class="vi-timeline">' + rows + '</div></div>';
+    }
+
+    function _renderLoaded(item) {
+        if (!item) { _renderNotFound(); return; }
+        var html = '<div class="vi-detail-header"><div class="vi-detail-badges">' + _stateBadge(item.state);
+        if (item.item_type) html += '<span class="vi-chip">' + esc(item.item_type) + '</span>';
+        if (item.lane) html += '<span class="vi-chip">' + esc(item.lane) + '</span>';
+        html += '</div><h2 class="vi-detail-claim">' + esc(item.claim || '(no title)') + '</h2></div>';
+
+        if (item.why_matters) {
+            html += '<div class="vi-section"><div class="vi-section-title">Why it matters</div>' +
+                    '<div class="vi-prose">' + esc(item.why_matters) + '</div></div>';
+        }
+        if (item.selected_reason) {
+            html += '<div class="vi-section"><div class="vi-section-title">Why selected</div>' +
+                    '<div class="vi-prose">' + esc(item.selected_reason) + '</div></div>';
+        }
+        var nextBits = _row('Next action', item.next_action) + _row('Owner', item.owner) +
+                       _row('Due', item.due_at) + _row('Confidence', item.confidence);
+        if (nextBits) {
+            html += '<div class="vi-section"><div class="vi-section-title">Next</div>' + nextBits + '</div>';
+        }
+        if (item.verification_summary || item.counterargument) {
+            html += '<div class="vi-section"><div class="vi-section-title">Verification</div>';
+            if (item.verification_summary) html += '<div class="vi-prose">' + esc(item.verification_summary) + '</div>';
+            if (item.counterargument) {
+                html += '<div class="vi-prose vi-counter"><span class="vi-counter-label">Counter:</span> ' +
+                        esc(item.counterargument) + '</div>';
+            }
+            html += '</div>';
+        }
+        var metaBits = _row('Matter', item.matter_slug) +
+                       _row('Related', _joinList(item.related_matters)) +
+                       _row('People', _joinList(item.people));
+        if (metaBits) html += '<div class="vi-section"><div class="vi-section-title">Context</div>' + metaBits + '</div>';
+
+        html += _renderEvidence(item);
+        html += _renderTimeline(item.verification_events);
+        _setBody(html);
+    }
+
+    function openVerifiedItemDrawer(itemId) {
+        if (itemId === null || itemId === undefined || itemId === '') return;
+        _lastFocus = document.activeElement;
+        _open();
+        _renderLoading();
+        bakerFetch('/api/verified-items/' + encodeURIComponent(itemId))
+            .then(function (r) {
+                if (r.status === 404 || r.status === 422) { _renderNotFound(); return null; }
+                if (!r.ok) { _renderError(); return null; }
+                return r.json();
+            })
+            .then(function (d) {
+                if (!d) return;
+                if (d.status === 'ok' && d.item) _renderLoaded(d.item);
+                else _renderNotFound();
+            })
+            .catch(function () { _renderError(); });
+    }
+
+    /* -------- minimal trusted Today list -------- */
+    var TODAY_LANES = [
+        { key: 'critical', label: 'Critical' },
+        { key: 'promises', label: 'Promises' },
+        { key: 'meetings', label: 'Meetings' },
+        { key: 'travel', label: 'Travel' },
+    ];
+
+    function _todayCard(card) {
+        var id = card && card.id;
+        var claim = esc((card && card.claim) || '(untitled)');
+        var badge = (card && card.state) ? _stateBadge(card.state) : '';
+        var why = card && card.why_matters
+            ? '<div class="vt-card-why">' + esc(card.why_matters) + '</div>' : '';
+        var sub = (card && (card.selected_reason || card.next_action)) || '';
+        var subHtml = sub ? '<div class="vt-card-sub">' + esc(sub) + '</div>' : '';
+        // Read-only card; the ONLY action is to open the detail drawer.
+        // Shows compact title + trusted state + reason; lane is the group header.
+        return '<div class="vt-card" role="button" tabindex="0" data-vi-id="' + esc(String(id)) + '">' +
+               '<div class="vt-card-top">' + badge +
+               '<div class="vt-card-claim">' + claim + '</div></div>' + why + subHtml + '</div>';
+    }
+
+    function _renderTodayList(mount, payload) {
+        var lanes = (payload && payload.lanes) || {};
+        var total = (payload && payload.counts && payload.counts.total) || 0;
+        if (!total) {
+            setSafeHTML(mount, '<div class="vt-empty">No trusted items today.</div>');
+            return;
+        }
+        var html = '';
+        for (var i = 0; i < TODAY_LANES.length; i++) {
+            var lane = TODAY_LANES[i];
+            var cards = lanes[lane.key] || [];
+            if (!cards.length) continue;
+            html += '<div class="vt-lane"><div class="vt-lane-title">' + esc(lane.label) +
+                    '<span class="vt-lane-count">' + cards.length + '</span></div>';
+            for (var j = 0; j < cards.length; j++) html += _todayCard(cards[j]);
+            html += '</div>';
+        }
+        setSafeHTML(mount, html);
+        // Delegate click/keyboard open to the drawer.
+        var nodes = mount.querySelectorAll('.vt-card[data-vi-id]');
+        for (var k = 0; k < nodes.length; k++) {
+            (function (node) {
+                var id = node.getAttribute('data-vi-id');
+                node.addEventListener('click', function () { openVerifiedItemDrawer(id); });
+                node.addEventListener('keydown', function (ev) {
+                    if (ev.key === 'Enter' || ev.key === ' ') { ev.preventDefault(); openVerifiedItemDrawer(id); }
+                });
+            })(nodes[k]);
+        }
+    }
+
+    function loadTodayTrusted() {
+        var mount = document.getElementById('today-trusted');
+        if (!mount) return;  // surface not mounted on this page — no-op, legacy untouched.
+        setSafeHTML(mount, '<div class="vt-loading">Loading trusted today…</div>');
+        bakerFetch('/api/today?limit_per_lane=5')
+            .then(function (r) { return r.ok ? r.json() : null; })
+            .then(function (d) {
+                if (!d) { setSafeHTML(mount, '<div class="vt-empty">Trusted today unavailable.</div>'); return; }
+                _renderTodayList(mount, d);
+            })
+            .catch(function () { setSafeHTML(mount, '<div class="vt-empty">Trusted today unavailable.</div>'); });
+    }
+
+    window.openVerifiedItemDrawer = openVerifiedItemDrawer;
+    window.closeVerifiedItemDrawer = closeVerifiedItemDrawer;
+    window.loadTodayTrusted = loadTodayTrusted;
+})();
