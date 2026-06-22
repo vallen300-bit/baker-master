@@ -174,18 +174,24 @@ def classify_research_trigger(message_body: str, sender_name: str) -> dict:
         # Inject active matters for business context
         matter_context = _get_matter_context_for_classification()
 
-        from orchestrator.gemini_client import call_flash
-        resp = call_flash(
+        # TRUSTED path — a positive classification creates a Director-visible
+        # research_proposal (a proposed action), so Gemini Pro floor
+        # (BAKER_DASHBOARD_V2_MODEL_LOCK_1 / AC5), never Flash.
+        from orchestrator.model_policy import call_trusted, trusted_extraction_model
+        resp = call_trusted(
             messages=[{"role": "user", "content": f"From: {sender_name}\n\n{message_body[:3000]}"}],
             max_tokens=400,
             system=_CLASSIFY_PROMPT + matter_context,
+            source_channel="whatsapp",
+            output_type="research_proposal",
+            context="research_trigger_classify",
         )
 
         # Log cost
         try:
             from orchestrator.cost_monitor import log_api_cost
             log_api_cost(
-                "gemini-2.5-flash", resp.usage.input_tokens,
+                trusted_extraction_model(), resp.usage.input_tokens,
                 resp.usage.output_tokens, source="research_trigger_classify",
             )
         except Exception:

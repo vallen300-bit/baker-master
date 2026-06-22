@@ -1314,9 +1314,12 @@ def handle_meeting_declaration(question: str, channel: str = "ask_baker") -> str
     _log_action("handle_meeting_declaration:ENTERED", f"q={question[:200]}, channel={channel}")
     try:
         from datetime import date
-        from orchestrator.gemini_client import call_flash
+        # TRUSTED path — extracted meeting persists in detected_meetings and shows on
+        # the Director dashboard/calendar, so Gemini Pro floor
+        # (BAKER_DASHBOARD_V2_MODEL_LOCK_1), never Flash.
+        from orchestrator.model_policy import call_trusted, trusted_extraction_model
         today = date.today().isoformat()
-        resp = call_flash(
+        resp = call_trusted(
             messages=[{"role": "user", "content": f"""Extract meeting details from this message:
 "{question}"
 
@@ -1338,10 +1341,12 @@ Status rules:
 - "pending": needs to be arranged"""}],
             max_tokens=300,
             system="You extract meeting details from messages. Return ONLY valid JSON, no markdown.",
+            output_type="meeting",
+            context="meeting_detect",
         )
         try:
             from orchestrator.cost_monitor import log_api_cost
-            log_api_cost("gemini-2.5-flash", resp.usage.input_tokens, resp.usage.output_tokens, source="meeting_detect")
+            log_api_cost(trusted_extraction_model(), resp.usage.input_tokens, resp.usage.output_tokens, source="meeting_detect")
         except Exception:
             pass
         raw = resp.text.strip()
@@ -1418,10 +1423,12 @@ def handle_critical_declaration(question: str, channel: str = "ask_baker") -> st
             listing = "\n".join(f"  {i+1}. {it['description'][:80]}" for i, it in enumerate(items))
             return f"You already have 5 critical items. Which one should I remove?\n\n{listing}\n\nSay \"remove #N\" to clear one first."
 
-        # Gemini Flash extraction
-        from orchestrator.gemini_client import call_flash
+        # TRUSTED path — creates a critical deadline (is_critical=True) on the
+        # Director dashboard, so Gemini Pro floor (BAKER_DASHBOARD_V2_MODEL_LOCK_1),
+        # never Flash.
+        from orchestrator.model_policy import call_trusted, trusted_extraction_model
         today = date.today().isoformat()
-        resp = call_flash(
+        resp = call_trusted(
             messages=[{"role": "user", "content": f"""Extract the critical item from this message:
 "{question}"
 
@@ -1435,10 +1442,12 @@ Return JSON:
 }}"""}],
             max_tokens=200,
             system="Extract the critical task. Return ONLY valid JSON, no markdown.",
+            output_type="critical_deadline",
+            context="critical_detect",
         )
         try:
             from orchestrator.cost_monitor import log_api_cost
-            log_api_cost("gemini-2.5-flash", resp.usage.input_tokens, resp.usage.output_tokens, source="critical_detect")
+            log_api_cost(trusted_extraction_model(), resp.usage.input_tokens, resp.usage.output_tokens, source="critical_detect")
         except Exception:
             pass
         raw = resp.text.strip()

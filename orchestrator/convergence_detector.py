@@ -58,19 +58,24 @@ def _extract_entities_for_matter(matter_name: str, texts: list) -> dict:
         combined += f"{i}. {t[:300]}\n"
 
     try:
-        from orchestrator.gemini_client import call_flash
-        resp = call_flash(
+        # TRUSTED path — entities feed convergence detection that creates
+        # Director-visible cross-matter alerts, so Gemini Pro floor
+        # (BAKER_DASHBOARD_V2_MODEL_LOCK_1), never Flash.
+        from orchestrator.model_policy import call_trusted, trusted_extraction_model
+        resp = call_trusted(
             messages=[{
                 "role": "user",
                 "content": f"{_ENTITY_EXTRACT_PROMPT}\n\nTexts:\n{combined}",
             }],
             max_tokens=800,
+            output_type="convergence_entities",
+            context="convergence_extract",
         )
 
         try:
             from orchestrator.cost_monitor import log_api_cost
             log_api_cost(
-                "gemini-2.5-flash", resp.usage.input_tokens,
+                trusted_extraction_model(), resp.usage.input_tokens,
                 resp.usage.output_tokens, source="convergence_extract",
             )
         except Exception:
@@ -222,19 +227,24 @@ def _analyze_convergences(convergences: list) -> list:
     conv_text = json.dumps(convergences[:10], indent=2)
 
     try:
-        from orchestrator.gemini_client import call_flash
-        resp = call_flash(
+        # TRUSTED path — convergence analysis becomes Director-visible
+        # "connecting dots" insights/alerts, so Gemini Pro floor
+        # (BAKER_DASHBOARD_V2_MODEL_LOCK_1), never Flash.
+        from orchestrator.model_policy import call_trusted, trusted_extraction_model
+        resp = call_trusted(
             messages=[{
                 "role": "user",
                 "content": f"{_ANALYSIS_PROMPT}\n\nConvergences:\n{conv_text}",
             }],
             max_tokens=1500,
+            output_type="convergence_insight",
+            context="convergence_analysis",
         )
 
         try:
             from orchestrator.cost_monitor import log_api_cost
             log_api_cost(
-                "gemini-2.5-flash", resp.usage.input_tokens,
+                trusted_extraction_model(), resp.usage.input_tokens,
                 resp.usage.output_tokens, source="convergence_analysis",
             )
         except Exception:

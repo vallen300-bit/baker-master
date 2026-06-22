@@ -851,7 +851,10 @@ def _generate_vip_draft(vip: dict, msg: dict, sender_name: str, wait_minutes: fl
     """Generate auto-draft proposals for an unanswered VIP message using Haiku."""
     try:
         import json
-        from orchestrator.gemini_client import call_flash
+        # TRUSTED path — produces a VIP auto-draft stored as a Director-reviewed
+        # pending_draft (a proposed action), so Gemini Pro floor
+        # (BAKER_DASHBOARD_V2_MODEL_LOCK_1 / AC5), never Flash.
+        from orchestrator.model_policy import call_trusted, trusted_extraction_model
 
         vip_role = vip.get("role") or vip.get("role_context") or ""
         vip_tier = vip.get("tier", 2)
@@ -866,14 +869,16 @@ def _generate_vip_draft(vip: dict, msg: dict, sender_name: str, wait_minutes: fl
             f"Message: {message_text}\n"
         )
 
-        resp = call_flash(
+        resp = call_trusted(
             messages=[{"role": "user", "content": context}],
             max_tokens=1500,
             system=_VIP_DRAFT_PROMPT,
+            output_type="vip_auto_draft",
+            context="vip_auto_draft",
         )
         try:
             from orchestrator.cost_monitor import log_api_cost
-            log_api_cost("gemini-2.5-flash", resp.usage.input_tokens, resp.usage.output_tokens, source="vip_auto_draft")
+            log_api_cost(trusted_extraction_model(), resp.usage.input_tokens, resp.usage.output_tokens, source="vip_auto_draft")
         except Exception:
             pass
         raw = resp.text.strip()

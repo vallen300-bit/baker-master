@@ -373,7 +373,10 @@ def _adapt_write_steps(plan: dict, read_results: list) -> dict:
     context = "\n\n".join(context_parts)
 
     try:
-        from orchestrator.gemini_client import call_flash
+        # TRUSTED path — refines write-action inputs (email drafts, ClickUp params)
+        # that directly determine what Baker writes/sends, so Gemini Pro floor
+        # (BAKER_DASHBOARD_V2_MODEL_LOCK_1), never Flash.
+        from orchestrator.model_policy import call_trusted, trusted_extraction_model
         adapt_prompt = (
             "Based on the information gathered below, refine the write action inputs. "
             "Return ONLY a JSON array of updated write steps with the same structure.\n\n"
@@ -381,13 +384,15 @@ def _adapt_write_steps(plan: dict, read_results: list) -> dict:
             f"Gathered context:\n{context[:3000]}\n\n"
             f"Write steps to refine:\n{json.dumps(write_steps, indent=2)}"
         )
-        resp = call_flash(
+        resp = call_trusted(
             messages=[{"role": "user", "content": adapt_prompt}],
             max_tokens=1024,
+            output_type="write_step_adaptation",
+            context="chain_adapt",
         )
         try:
             from orchestrator.cost_monitor import log_api_cost
-            log_api_cost("gemini-2.5-flash", resp.usage.input_tokens,
+            log_api_cost(trusted_extraction_model(), resp.usage.input_tokens,
                          resp.usage.output_tokens, source="chain_adapt")
         except Exception:
             pass

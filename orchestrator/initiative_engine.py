@@ -405,18 +405,23 @@ Return ONLY valid JSON:
 def _generate_initiatives(context_str: str) -> list:
     """Call Haiku to generate 2-3 initiatives based on today's signals."""
     try:
-        from orchestrator.gemini_client import call_flash
-        resp = call_flash(
+        # TRUSTED path — initiatives are Director-visible proposed actions
+        # (delivered via WhatsApp / proactive_initiatives), so Gemini Pro floor
+        # (BAKER_DASHBOARD_V2_MODEL_LOCK_1 / AC5), never Flash.
+        from orchestrator.model_policy import call_trusted, trusted_extraction_model
+        resp = call_trusted(
             messages=[{"role": "user", "content": context_str}],
             max_tokens=1500,
             system=_INITIATIVE_PROMPT,
+            output_type="initiative",
+            context="initiative_engine",
         )
 
         # Log cost
         try:
             from orchestrator.cost_monitor import log_api_cost
             log_api_cost(
-                "gemini-2.5-flash", resp.usage.input_tokens,
+                trusted_extraction_model(), resp.usage.input_tokens,
                 resp.usage.output_tokens, source="initiative_engine",
             )
         except Exception:

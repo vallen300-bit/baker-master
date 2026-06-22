@@ -149,7 +149,10 @@ def _generate_followup_draft(summary, title, participants, extracted_items,
         return None
 
     try:
-        from orchestrator.gemini_client import call_flash
+        # TRUSTED path — generates a follow-up email stored as a Director-reviewed
+        # pending_draft (a proposed action), so Gemini Pro floor
+        # (BAKER_DASHBOARD_V2_MODEL_LOCK_1 / AC5), never Flash.
+        from orchestrator.model_policy import call_trusted
 
         action_text = "\n".join(
             f"- {a.get('who', 'TBD')}: {a.get('text', '')} "
@@ -173,9 +176,11 @@ Rules:
 - End with "Please let me know if I've missed anything."
 - Do NOT include any information not discussed in the meeting"""
 
-        response = call_flash(
+        response = call_trusted(
             messages=[{"role": "user", "content": prompt}],
             max_tokens=1000,
+            output_type="meeting_followup_draft",
+            context="meeting_followup_draft",
         )
 
         draft_text = response.text.strip()

@@ -36,7 +36,9 @@ def extract_tasks_from_specialist(
         return []
 
     try:
-        from orchestrator.gemini_client import call_flash
+        # TRUSTED path — extracted tasks become Director-visible ClickUp tasks /
+        # deadlines, so Gemini Pro floor (BAKER_DASHBOARD_V2_MODEL_LOCK_1), never Flash.
+        from orchestrator.model_policy import call_trusted, trusted_extraction_model
 
         prompt = f"""Analyze this specialist response and extract ONLY clearly actionable tasks that the Director should create as follow-up items.
 
@@ -53,16 +55,18 @@ Specialist ({capability_slug}): {response[:3000]}
 Respond with JSON only:
 {{"tasks": [{{"title": "short imperative title", "description": "1 sentence context", "due_days": null}}]}}"""
 
-        resp = call_flash(
+        resp = call_trusted(
             messages=[{"role": "user", "content": prompt}],
             max_tokens=300,
+            output_type="task",
+            context="insight_to_task",
         )
 
         # Log cost
         try:
             from orchestrator.cost_monitor import log_api_cost
             log_api_cost(
-                "gemini-2.5-flash",
+                trusted_extraction_model(),
                 resp.usage.input_tokens,
                 resp.usage.output_tokens,
                 source="insight_to_task",

@@ -498,7 +498,10 @@ def extract_correction_from_feedback(task: dict):
             logger.debug(f"No comment on task #{task_id} — skipping correction extraction")
             return
 
-        from orchestrator.gemini_client import call_flash
+        # TRUSTED path — extracts a persisted learning rule from the Director's own
+        # feedback; it shapes future Director-visible specialist output, so Gemini
+        # Pro floor (BAKER_DASHBOARD_V2_MODEL_LOCK_1), never Flash.
+        from orchestrator.model_policy import call_trusted, trusted_extraction_model
 
         prompt = (
             "A Director gave feedback on an AI specialist's response. "
@@ -518,12 +521,14 @@ def extract_correction_from_feedback(task: dict):
             '"applies_to": "capability"|"all"} or null if no useful rule.'
         )
 
-        resp = call_flash(
+        resp = call_trusted(
             messages=[{"role": "user", "content": prompt}],
             max_tokens=300,
+            output_type="correction_rule",
+            context="correction_extraction",
         )
         log_api_cost(
-            "gemini-2.5-flash", resp.usage.input_tokens, resp.usage.output_tokens,
+            trusted_extraction_model(), resp.usage.input_tokens, resp.usage.output_tokens,
             source="correction_extraction", capability_id=cap_slug or "unknown",
         )
 
@@ -1453,7 +1458,10 @@ class CapabilityRunner:
             if not allowed:
                 return
 
-            from orchestrator.gemini_client import call_flash
+            # TRUSTED path — insights feed insight_to_task which creates ClickUp
+            # tasks + deadlines (Director-visible), so Gemini Pro floor
+            # (BAKER_DASHBOARD_V2_MODEL_LOCK_1), never Flash.
+            from orchestrator.model_policy import call_trusted, trusted_extraction_model
             _insight_system = (
                 "Extract 1-3 key factual findings from this specialist response. "
                 "Only extract concrete facts: amounts, dates, legal positions, decisions, deadlines. "
@@ -1464,13 +1472,16 @@ class CapabilityRunner:
             )
             _insight_content = f"Question: {question[:500]}\n\nResponse:\n{answer[:4000]}"
 
-            resp = call_flash(
+            resp = call_trusted(
                 messages=[{"role": "user", "content": _insight_content}],
                 max_tokens=500,
                 system=_insight_system,
+                source_channel=matter_slug or "",
+                output_type="insight",
+                context="auto_insight",
             )
             self._log_api_cost(
-                "gemini-2.5-flash", resp.usage.input_tokens, resp.usage.output_tokens,
+                trusted_extraction_model(), resp.usage.input_tokens, resp.usage.output_tokens,
                 source="auto_insight", capability_id=capability.slug,
                 matter_slug=matter_slug,
             )

@@ -184,9 +184,15 @@ def call_flash(messages: list, max_tokens: int = 2000, system: str = None,
                     response_format=response_format, thinking_budget=thinking_budget)
 
 
-def call_pro(messages: list, max_tokens: int = 2000, system: str = None) -> GeminiResponse:
-    """Convenience: call Gemini Pro (mid tier)."""
-    return generate(config.gemini.pro_model, messages, max_tokens, system)
+def call_pro(messages: list, max_tokens: int = 2000, system: str = None,
+             response_format: str = None, thinking_budget: int = None) -> GeminiResponse:
+    """Convenience: call Gemini Pro (mid tier).
+
+    response_format / thinking_budget added (BAKER_DASHBOARD_V2_MODEL_LOCK_1) so
+    trusted call sites that previously used call_flash(..., response_format="json")
+    can move to Pro without losing strict-JSON / thinking-cap behavior."""
+    return generate(config.gemini.pro_model, messages, max_tokens, system,
+                    response_format=response_format, thinking_budget=thinking_budget)
 
 
 def is_gemini_model(model: str) -> bool:
