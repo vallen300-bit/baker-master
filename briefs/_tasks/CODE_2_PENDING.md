@@ -1,5 +1,5 @@
 ---
-status: PENDING
+status: COMPLETE (merged PR #413, 2026-06-22)
 brief_id: AI_HOTEL_LAB_ADMIN_WRITE_SCOPE_1
 to: b2
 from: lead
