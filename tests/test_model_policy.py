@@ -95,6 +95,69 @@ def test_call_trusted_routes_to_pro_never_flash(monkeypatch):
     assert not flash.called
 
 
+def _generate_spy():
+    state = {"reached": False, "model": None}
+
+    def _gen(model, *args, **kwargs):
+        state["reached"] = True
+        state["model"] = model
+        return GeminiResponse("x", 1, 1)
+
+    return state, _gen
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# F1 (codex G-review #3764) — config/env bypass: config.gemini.pro_model is the
+# ACTUAL outbound model. If it is (mis)set to Flash, trusted paths must FAIL LOUD,
+# never silently dispatch Flash. Guarded at the call_pro boundary.
+# ─────────────────────────────────────────────────────────────────────────────
+
+def test_call_pro_raises_when_config_pro_model_is_flash(monkeypatch):
+    import orchestrator.gemini_client as gc
+    from config.settings import config
+    state, gen = _generate_spy()
+    monkeypatch.setattr(gc, "generate", gen)
+    monkeypatch.setattr(config.gemini, "pro_model", "gemini-2.5-flash")
+    with pytest.raises(mp.TrustedModelPolicyError):
+        gc.call_pro([{"role": "user", "content": "x"}])
+    assert not state["reached"]  # generate() must NOT be reached
+
+
+def test_call_trusted_raises_when_config_pro_model_is_flash(monkeypatch):
+    import orchestrator.gemini_client as gc
+    from config.settings import config
+    state, gen = _generate_spy()
+    monkeypatch.setattr(gc, "generate", gen)
+    monkeypatch.setattr(config.gemini, "pro_model", "gemini-2.5-flash")
+    with pytest.raises(mp.TrustedModelPolicyError):
+        mp.call_trusted([{"role": "user", "content": "x"}], context="unit")
+    assert not state["reached"]
+
+
+def test_llm_call_pro_raises_when_config_pro_model_is_flash(monkeypatch):
+    import orchestrator.gemini_client as gc
+    import outputs.dashboard as dash
+    from config.settings import config
+    state, gen = _generate_spy()
+    monkeypatch.setattr(gc, "generate", gen)
+    monkeypatch.setattr(config.gemini, "pro_model", "gemini-2.5-flash")
+    with pytest.raises(mp.TrustedModelPolicyError):
+        dash._llm_call("gemini-2.5-pro", messages=[{"role": "user", "content": "x"}])
+    assert not state["reached"]
+
+
+def test_call_pro_dispatches_pro_when_config_is_pro(monkeypatch):
+    # Positive control: a correctly-configured pro_model dispatches on Pro.
+    import orchestrator.gemini_client as gc
+    from config.settings import config
+    state, gen = _generate_spy()
+    monkeypatch.setattr(gc, "generate", gen)
+    monkeypatch.setattr(config.gemini, "pro_model", "gemini-2.5-pro")
+    gc.call_pro([{"role": "user", "content": "x"}])
+    assert state["reached"]
+    assert not mp.is_flash(state["model"])
+
+
 def test_call_trusted_refuses_when_floor_is_flash(monkeypatch):
     # Defense in depth: even if the floor somehow resolved to Flash, call_trusted
     # must refuse rather than silently run a barred model.
