@@ -166,6 +166,17 @@ called done.
 4. **G4 lead** — /security-review + squash-merge.
 5. **POST_DEPLOY_AC_VERDICT v1** + **AC11 browser screenshots** (4 role views) before DONE.
 
+## CODEX-ARCH ADMIN RULING (bus #3873 — BINDING)
+
+1. Step 5 may merge if APPROVE is server-side, audited, via the existing projection policy path.
+2. **REVOKE + REFRESH must NOT appear as active controls** — render disabled/read-only with explicit
+   reason: "Step 5.1 pending persisted projection-admin store". Bare 501 is not enough; the UI must show
+   the disabled state + reason.
+3. External partner access stays gated to **Brisen view-as / controlled demo** until revoke is live.
+4. Step 5 = cockpit UI + **honest admin-state surface** (internal / view-as milestone, NOT partner-live).
+5. Follow-on **Step 5.1 = AI_HOTEL_LAB_PROJECTION_ADMIN_STORE_1** (persisted revoke/refresh, audit history,
+   stale/revoked packet handling, tests) — opened by lead after Step 5 merges.
+
 ## DONE RUBRIC
 
 Met when: AC1-11 pass with named tests; G2/G3/G4 PASS; deputy-codex #3844 T# cases each mapped 1:1 to a
