@@ -142,11 +142,17 @@ Content ({source_channel}):
 {content}"""
 
 
-def _extract_flash(content, source_channel, source_id):
-    """T3: Single Gemini Flash call, literal extraction. (was _extract_haiku)"""
+def _extract_t3_trusted(content, source_channel, source_id):
+    """T3: Single literal extraction call. TRUSTED path — its items feed
+    signal_extractions (commitments/deadlines/decisions/action_items) consumed by
+    obligation_generator / deadline_manager / convergence_detector to create
+    Director-visible alerts, deadlines, and cards. Per BAKER_DASHBOARD_V2_MODEL_LOCK_1
+    it must run on Gemini Pro (policy floor), never Flash. (was _extract_flash /
+    _extract_haiku — model lifted from Flash; literal-extraction prompt unchanged so
+    cost is controlled by volume, not by lowering quality.)"""
     start = time.time()
     try:
-        from orchestrator.gemini_client import call_flash
+        from orchestrator.model_policy import call_trusted, trusted_extraction_model
 
         # Truncate very long content for T3
         text = content[:6000] if len(content) > 6000 else content
@@ -156,9 +162,12 @@ def _extract_flash(content, source_channel, source_id):
             content=text,
         )
 
-        resp = call_flash(
+        resp = call_trusted(
             messages=[{"role": "user", "content": prompt}],
             max_tokens=2000,
+            source_channel=source_channel,
+            output_type="signal_extraction",
+            context="t3_extraction",
         )
 
         result_text = resp.text.strip()
@@ -169,18 +178,18 @@ def _extract_flash(content, source_channel, source_id):
 
         try:
             from orchestrator.cost_monitor import log_api_cost
-            log_api_cost("gemini-2.5-flash", resp.usage.input_tokens, resp.usage.output_tokens, source="t3_extraction")
+            log_api_cost(trusted_extraction_model(), resp.usage.input_tokens, resp.usage.output_tokens, source="t3_extraction")
         except Exception:
             pass
 
         logger.info(
-            f"Flash extraction: {len(items)} items from {source_channel}:{source_id} "
+            f"T3 trusted extraction: {len(items)} items from {source_channel}:{source_id} "
             f"({elapsed_ms}ms)"
         )
         return items, elapsed_ms, 0.0005
 
     except Exception as e:
-        logger.error(f"Flash extraction failed for {source_channel}:{source_id}: {e}")
+        logger.error(f"T3 trusted extraction failed for {source_channel}:{source_id}: {e}")
         elapsed_ms = int((time.time() - start) * 1000)
         return [], elapsed_ms, 0.0
 
@@ -372,12 +381,17 @@ def _extract_agentic(content, source_channel, source_id):
 # ─────────────────────────────────────────────────
 
 def _extract_visual(image_data, source_channel, source_id, tier):
-    """Extract structured data from images (whiteboards, screenshots, etc.)."""
+    """Extract structured data from images (whiteboards, screenshots, etc.).
+
+    TRUSTED path — extracted_items feed signal_extractions / Director-visible
+    cards, so visual extraction runs on Gemini Pro (BAKER_DASHBOARD_V2_MODEL_LOCK_1),
+    not Flash. Gemini Pro is natively multimodal, so the image Part path is
+    unchanged."""
     start = time.time()
     try:
         import base64
 
-        from orchestrator.gemini_client import call_flash
+        from orchestrator.model_policy import call_trusted, trusted_extraction_model
 
         # Step 1: Vision — read and classify the image
         vision_prompt = """Analyze this image and:
@@ -411,17 +425,20 @@ Return JSON:
                 "source": {"type": "base64", "media_type": "image/jpeg", "data": encoded},
             }
 
-        resp = call_flash(
+        resp = call_trusted(
             messages=[{
                 "role": "user",
                 "content": [image_content, {"type": "text", "text": vision_prompt}],
             }],
             max_tokens=2000,
+            source_channel=source_channel,
+            output_type="signal_extraction",
+            context="visual_extraction",
         )
 
         try:
             from orchestrator.cost_monitor import log_api_cost
-            log_api_cost("gemini-2.5-flash", resp.usage.input_tokens, resp.usage.output_tokens, source="visual_extraction")
+            log_api_cost(trusted_extraction_model(), resp.usage.input_tokens, resp.usage.output_tokens, source="visual_extraction")
         except Exception:
             pass
 
@@ -501,7 +518,7 @@ def extract_specialist_output(task_id, specialist_slug, output_text):
 
     def _run():
         with _EXTRACTION_SEMAPHORE:
-            items, elapsed_ms, cost = _extract_flash(
+            items, elapsed_ms, cost = _extract_t3_trusted(
                 output_text[:8000], "specialist", f"{specialist_slug}-{task_id}"
             )
             if items:
@@ -651,8 +668,8 @@ def extract_signal(source_channel, source_id, content, tier,
                         token_cost=cost,
                     )
                 else:
-                    # T3: Haiku extraction
-                    items, elapsed_ms, cost = _extract_flash(
+                    # T3: trusted literal extraction (Gemini Pro floor)
+                    items, elapsed_ms, cost = _extract_t3_trusted(
                         content, source_channel, source_id
                     )
                     _store_extractions(
@@ -690,7 +707,7 @@ def extract_signal_sync(source_channel, source_id, content, tier,
         elif tier == 2:
             items, elapsed_ms, cost = _extract_pro(content, source_channel, source_id)
         else:
-            items, elapsed_ms, cost = _extract_flash(content, source_channel, source_id)
+            items, elapsed_ms, cost = _extract_t3_trusted(content, source_channel, source_id)
 
         _store_extractions(
             source_channel=source_channel,

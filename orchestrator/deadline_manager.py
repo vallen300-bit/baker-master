@@ -99,19 +99,25 @@ def extract_deadlines(
         logger.warning(f"deadline_extractor_filter: classify-error (non-fatal): {_fe}")
 
     try:
-        from orchestrator.gemini_client import call_flash
+        # TRUSTED path — extracted deadlines are inserted into the `deadlines`
+        # table and surface on the Director dashboard, so this runs on Gemini Pro
+        # (BAKER_DASHBOARD_V2_MODEL_LOCK_1 / AC3), never Flash.
+        from orchestrator.model_policy import call_trusted, trusted_extraction_model
         today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
-        resp = call_flash(
+        resp = call_trusted(
             messages=[{
                 "role": "user",
                 "content": f"Today's date: {today}\n\nContent to analyze:\n{content[:4000]}",
             }],
             max_tokens=1000,
             system=_EXTRACTION_SYSTEM,
+            source_channel=source_type,
+            output_type="deadline",
+            context="extract_deadlines",
         )
         try:
             from orchestrator.cost_monitor import log_api_cost
-            log_api_cost("gemini-2.5-flash", resp.usage.input_tokens, resp.usage.output_tokens, source="extract_deadlines")
+            log_api_cost(trusted_extraction_model(), resp.usage.input_tokens, resp.usage.output_tokens, source="extract_deadlines")
         except Exception:
             pass
         raw = resp.text.strip()
@@ -411,15 +417,19 @@ def _generate_deadline_proposal(deadline: dict, stage: str, hours_remaining: flo
         if source_snippet:
             context += f"Source context: {source_snippet}\n"
 
-        from orchestrator.gemini_client import call_flash
-        resp = call_flash(
+        # TRUSTED path — proposal JSON becomes structured_actions on a
+        # Director-visible alert, so Gemini Pro floor (BAKER_DASHBOARD_V2_MODEL_LOCK_1).
+        from orchestrator.model_policy import call_trusted, trusted_extraction_model
+        resp = call_trusted(
             messages=[{"role": "user", "content": context}],
             max_tokens=1500,
             system=_DEADLINE_PROPOSAL_PROMPT,
+            output_type="deadline_proposal",
+            context="deadline_proposal",
         )
         try:
             from orchestrator.cost_monitor import log_api_cost
-            log_api_cost("gemini-2.5-flash", resp.usage.input_tokens, resp.usage.output_tokens, source="deadline_proposal")
+            log_api_cost(trusted_extraction_model(), resp.usage.input_tokens, resp.usage.output_tokens, source="deadline_proposal")
         except Exception:
             pass
         raw = resp.text.strip()

@@ -56,7 +56,7 @@ class NoCacheHTMLStaticFiles(StaticFiles):
 from pydantic import BaseModel, Field
 
 from config.settings import config
-from orchestrator.gemini_client import is_gemini_model, call_flash, GeminiResponse
+from orchestrator.gemini_client import is_gemini_model, call_flash, call_pro, GeminiResponse
 # OOM-FIX: document_generator lazy-imported inside endpoint functions
 # (python-docx, openpyxl, reportlab, python-pptx = ~120 MB saved at startup)
 
@@ -67,10 +67,19 @@ def _llm_call(model: str, messages: list, max_tokens: int = 2000, system: str = 
 
     response_format / thinking_budget are Gemini-only knobs (ignored on the
     Anthropic branch). thinking_budget=0 disables 2.5-flash thinking so small
-    max_tokens calls don't truncate (AI_HOTEL_CAPTURE_CLASSIFY_1)."""
+    max_tokens calls don't truncate (AI_HOTEL_CAPTURE_CLASSIFY_1).
+
+    BAKER_DASHBOARD_V2_MODEL_LOCK_1: route by the *actual* gemini model string.
+    Previously every gemini-* model fell through to call_flash, so a trusted site
+    asking for "gemini-2.5-pro" silently ran on Flash — a policy bypass. Now a
+    non-flash gemini model goes to call_pro; only flash models go to call_flash."""
     if is_gemini_model(model):
-        return call_flash(messages=messages, max_tokens=max_tokens, system=system,
-                          response_format=response_format, thinking_budget=thinking_budget)
+        from orchestrator.model_policy import is_flash
+        if is_flash(model):
+            return call_flash(messages=messages, max_tokens=max_tokens, system=system,
+                              response_format=response_format, thinking_budget=thinking_budget)
+        return call_pro(messages=messages, max_tokens=max_tokens, system=system,
+                        response_format=response_format, thinking_budget=thinking_budget)
     else:
         client = anthropic.Anthropic(api_key=config.claude.api_key)
         kwargs = dict(model=model, max_tokens=max_tokens, messages=messages)
@@ -2706,7 +2715,12 @@ async def enrich_contacts_endpoint(
                 count=c.get("interaction_count", 0), subjects=subj_text or "(no data)",
             )
             try:
-                resp = _llm_call("gemini-2.5-flash",
+                # TRUSTED — writes tier/contact_type/role_context to vip_contacts,
+                # which populates the Director-visible People surface (named trusted
+                # in the Director ruling). Gemini Pro floor, never Flash
+                # (BAKER_DASHBOARD_V2_MODEL_LOCK_1). Borderline categorization call —
+                # see ship report DONE-rubric Q3.
+                resp = _llm_call("gemini-2.5-pro",
                     max_tokens=200,
                     messages=[{"role": "user", "content": prompt}],
                 )
@@ -6715,13 +6729,17 @@ def _get_morning_narrative(fire_count: int, deadline_count: int,
             api_key=config.claude.api_key,
             timeout=15.0,
         )
-        resp = _llm_call("gemini-2.5-flash",
+        # TRUSTED — morning narrative is the Director-facing digest card (AC5);
+        # Gemini Pro floor, never Flash (BAKER_DASHBOARD_V2_MODEL_LOCK_1).
+        resp = _llm_call("gemini-2.5-pro",
             max_tokens=200,
             messages=[{"role": "user", "content": prompt}],
         )
         try:
             from orchestrator.cost_monitor import log_api_cost
-            log_api_cost("gemini-2.5-flash", resp.usage.input_tokens, resp.usage.output_tokens, source="morning_narrative")
+            from orchestrator.model_policy import log_model_provenance
+            log_api_cost("gemini-2.5-pro", resp.usage.input_tokens, resp.usage.output_tokens, source="morning_narrative")
+            log_model_provenance(model="gemini-2.5-pro", trusted=True, source_channel="digest", output_type="morning_narrative", context="morning_narrative")
         except Exception:
             pass
         narrative = resp.text.strip()
@@ -6776,14 +6794,18 @@ def _generate_morning_proposals(client, top_fires: list, deadlines: list) -> lis
         if deadlines_text:
             context += f"\nUpcoming deadlines:\n{deadlines_text}"
 
-        resp = _llm_call("gemini-2.5-flash",
+        # TRUSTED — morning proposals are Director-visible suggested next steps
+        # (AC5); Gemini Pro floor, never Flash (BAKER_DASHBOARD_V2_MODEL_LOCK_1).
+        resp = _llm_call("gemini-2.5-pro",
             max_tokens=300,
             system=_MORNING_PROPOSALS_PROMPT,
             messages=[{"role": "user", "content": context}],
         )
         try:
             from orchestrator.cost_monitor import log_api_cost
-            log_api_cost("gemini-2.5-flash", resp.usage.input_tokens, resp.usage.output_tokens, source="morning_proposals")
+            from orchestrator.model_policy import log_model_provenance
+            log_api_cost("gemini-2.5-pro", resp.usage.input_tokens, resp.usage.output_tokens, source="morning_proposals")
+            log_model_provenance(model="gemini-2.5-pro", trusted=True, source_channel="digest", output_type="morning_proposal", context="morning_proposals")
         except Exception:
             pass
         raw = resp.text.strip()
@@ -9309,7 +9331,10 @@ async def quick_add_alert(body: dict):
             try:
                 import anthropic
                 client = anthropic.Anthropic(api_key=config.claude.api_key)
-                resp = _llm_call("gemini-2.5-flash",
+                # TRUSTED — enrichment becomes alerts.structured_actions on a
+                # Director-visible card; Gemini Pro floor, never Flash
+                # (BAKER_DASHBOARD_V2_MODEL_LOCK_1).
+                resp = _llm_call("gemini-2.5-pro",
                     max_tokens=800,
                     messages=[{"role": "user", "content": f"The Director flagged this issue: \"{title}\"\n\nGenerate a JSON object with: problem (1 sentence), cause (1 sentence), solution (1 sentence). Return ONLY valid JSON."}],
                 )
@@ -9319,7 +9344,9 @@ async def quick_add_alert(body: dict):
                 sa = _json.loads(raw)
                 store.update_alert_structured_actions(alert_id, sa)
                 from orchestrator.cost_monitor import log_api_cost
-                log_api_cost("gemini-2.5-flash", resp.usage.input_tokens, resp.usage.output_tokens, source="quick_add_enrich")
+                from orchestrator.model_policy import log_model_provenance
+                log_api_cost("gemini-2.5-pro", resp.usage.input_tokens, resp.usage.output_tokens, source="quick_add_enrich")
+                log_model_provenance(model="gemini-2.5-pro", trusted=True, source_channel="director_flag", output_type="alert_structured_actions", context="quick_add_enrich")
             except Exception as e:
                 logger.warning(f"Quick-add enrichment failed for alert {alert_id}: {e}")
         threading.Thread(target=_enrich, daemon=True).start()
@@ -12271,10 +12298,13 @@ async def add_meeting_quick(request: Request):
         if not text:
             return {"error": "Meeting description required"}
 
-        # Use Flash to parse meeting details from natural language
-        from orchestrator.gemini_client import call_flash
+        # TRUSTED — parsed meeting is inserted into detected_meetings and shows on
+        # the Director dashboard/calendar; Gemini Pro floor, never Flash
+        # (BAKER_DASHBOARD_V2_MODEL_LOCK_1).
+        from orchestrator.model_policy import call_trusted
         today = datetime.now().strftime('%Y-%m-%d')
-        resp = call_flash(
+        resp = call_trusted(
+            output_type="meeting", context="add_meeting",
             messages=[{"role": "user", "content": f"""Parse this meeting description into structured data. Today is {today}.
 
 Input: "{text}"

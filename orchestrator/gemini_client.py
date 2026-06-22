@@ -184,9 +184,27 @@ def call_flash(messages: list, max_tokens: int = 2000, system: str = None,
                     response_format=response_format, thinking_budget=thinking_budget)
 
 
-def call_pro(messages: list, max_tokens: int = 2000, system: str = None) -> GeminiResponse:
-    """Convenience: call Gemini Pro (mid tier)."""
-    return generate(config.gemini.pro_model, messages, max_tokens, system)
+def call_pro(messages: list, max_tokens: int = 2000, system: str = None,
+             response_format: str = None, thinking_budget: int = None) -> GeminiResponse:
+    """Convenience: call Gemini Pro (mid tier).
+
+    response_format / thinking_budget added (BAKER_DASHBOARD_V2_MODEL_LOCK_1) so
+    trusted call sites that previously used call_flash(..., response_format="json")
+    can move to Pro without losing strict-JSON / thinking-cap behavior.
+
+    F1 guard (BAKER_DASHBOARD_V2_MODEL_LOCK_1, codex G-review #3764): call_pro is
+    the Pro tier and the trusted-extraction dispatch boundary. The ACTUAL outbound
+    model is ``config.gemini.pro_model`` — a config/env knob. If that is (mis)set
+    to a Flash model, every trusted path routed through call_pro / call_trusted /
+    _llm_call would silently run on Flash, defeating the whole lock. The policy
+    floor (``trusted_extraction_model()``) is asserted upstream, but the actual
+    dispatched string was previously unvalidated. Validate the real outbound model
+    here and FAIL LOUD rather than silently dispatch Flash on a trusted path."""
+    from orchestrator.model_policy import assert_trusted_model
+    outbound = config.gemini.pro_model
+    assert_trusted_model(outbound, context="call_pro outbound (config.gemini.pro_model)")
+    return generate(outbound, messages, max_tokens, system,
+                    response_format=response_format, thinking_budget=thinking_budget)
 
 
 def is_gemini_model(model: str) -> bool:

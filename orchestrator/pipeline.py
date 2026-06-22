@@ -398,21 +398,26 @@ Rules:
 
 
 def _generate_structured_actions(claude_client, title: str, body: str, tier: int) -> dict:
-    """Generate structured actions JSON for an alert using Gemini Flash (fast + cheap)."""
+    """Generate structured actions JSON for an alert.
+
+    TRUSTED path — the result is stored in alerts.structured_actions and rendered
+    as a Director-visible actionable card, so it runs on Gemini Pro
+    (BAKER_DASHBOARD_V2_MODEL_LOCK_1 / AC4), never Flash."""
     try:
-        from orchestrator.gemini_client import call_flash
-        resp = call_flash(
+        from orchestrator.model_policy import call_trusted, trusted_extraction_model
+        resp = call_trusted(
             messages=[{
                 "role": "user",
                 "content": f"Alert (Tier {tier}): {title}\n\n{body}",
             }],
             max_tokens=2048,
             system=_STRUCTURED_ACTIONS_PROMPT,
+            output_type="alert_structured_actions",
+            context="structured_actions",
         )
-        # PHASE-4A: Log Flash cost
         try:
             from orchestrator.cost_monitor import log_api_cost
-            log_api_cost("gemini-2.5-flash", resp.usage.input_tokens,
+            log_api_cost(trusted_extraction_model(), resp.usage.input_tokens,
                          resp.usage.output_tokens, source="structured_actions")
         except Exception:
             pass
@@ -561,8 +566,14 @@ class SentinelPipeline:
     # -------------------------------------------------------
 
     # COST-OPT-WAVE2: 3-tier model routing for pipeline triggers
-    # Haiku: low-value background ingestion (document changes, RSS, task status changes)
-    _HAIKU_TRIGGER_TYPES = {
+    # Low-value background ingestion (document changes, RSS, task status changes).
+    # BAKER_DASHBOARD_V2_MODEL_LOCK_1 / AC4: these triggers still flow into the
+    # alert pipeline (generate() output can become a Director-visible alert), and
+    # we cannot prove the Flash result is barred from creating a trusted card,
+    # deadline, or commitment. Per AC4 the conservative resolution is to route them
+    # to Gemini Pro rather than Flash. Cost is to be reclaimed by reducing volume /
+    # batching in a later tranche, not by reinstating Flash on a trusted path.
+    _LOW_VALUE_TRIGGER_TYPES = {
         "dropbox_file_new", "dropbox_file_modified",
         "rss_article", "rss_article_new",
         "clickup_task_updated", "clickup_task_overdue", "clickup_task_created",
@@ -585,8 +596,10 @@ class SentinelPipeline:
         - Gemini Pro: emails, handoff notes (T2/T3)
         - Opus: T1 critical signals only
         """
-        if trigger_type in self._HAIKU_TRIGGER_TYPES:
-            model = "gemini-2.5-flash"
+        if trigger_type in self._LOW_VALUE_TRIGGER_TYPES:
+            # AC4: low-value triggers can still surface as alerts → Gemini Pro floor,
+            # never Flash, on this trusted path.
+            model = "gemini-2.5-pro"
         elif trigger_type in self._SONNET_TRIGGER_TYPES:
             # T1 emails still get Opus (VIP, legal, financial — they earned it)
             if trigger_tier == 1:
