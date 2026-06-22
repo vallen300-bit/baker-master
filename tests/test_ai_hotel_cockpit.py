@@ -465,6 +465,71 @@ def test_s51_revoke_not_applied_on_store_outage(fresh_admin_backend):
     assert ei.value.status_code == 503
 
 
+def test_s51_external_search_suppresses_revoked_source_item(fresh_admin_backend, monkeypatch):
+    # G2 #3970 F1 (T2/T10/AC3): /api/search must honor the revoke overlay. A search
+    # result whose object handle (result_ref) is a revoked source-evidence id must NOT
+    # reach an external role — while a visible neighbor in the same result set still
+    # returns (selective suppression, proving enforcement, not empty-only pass).
+    from types import SimpleNamespace
+    from policy.search.models import RouteTarget
+
+    def _ext_result(ref, claim):
+        return SimpleNamespace(
+            result_ref=ref, projected=True, body={"display_summary": claim, "claim": claim},
+            routing=SimpleNamespace(route_target=RouteTarget.MARKET_PROOF_COMPETITIVE_SET,
+                                    route_reason="rule"),
+            policy_reason_code="allow_partner_read")
+
+    def _fake_search(principal, q, mode, candidates=None):
+        return SimpleNamespace(
+            results=[_ext_result("nv-lighthouse-thesis", NV_THESIS_CLAIM),
+                     _ext_result("public-press-item", "Public hospitality press item.")],
+            zero_result_route=None)
+
+    monkeypatch.setattr(lab, "policy_search", _fake_search)
+
+    # Before revoke: both rows surface to NVIDIA.
+    refs_before = {r["result_ref"] for r in lab.get_search(q="lighthouse", role="nvidia")["results"]}
+    assert {"nv-lighthouse-thesis", "public-press-item"} <= refs_before
+
+    lab.post_admin_action("revoke", projection_item_id="nv-lighthouse-thesis")
+
+    res = lab.get_search(q="lighthouse", role="nvidia")
+    refs_after = {r["result_ref"] for r in res["results"]}
+    assert "nv-lighthouse-thesis" not in refs_after          # revoked row suppressed
+    assert "public-press-item" in refs_after                 # neighbor still visible
+    assert NV_THESIS_CLAIM not in json.dumps(res)            # revoked claim text gone
+
+
+def test_s51_internal_search_unaffected_by_revoke(fresh_admin_backend, monkeypatch):
+    # Revoke is a partner-surface control; the internal Brisen search keeps the row
+    # (revoked items remain visible to Brisen for triage/audit).
+    from types import SimpleNamespace
+    from policy.search.models import RouteTarget
+
+    def _fake_search(principal, q, mode, candidates=None):
+        return SimpleNamespace(
+            results=[SimpleNamespace(
+                result_ref="nv-lighthouse-thesis", projected=False,
+                body={"summary": "internal"},
+                routing=SimpleNamespace(route_target=RouteTarget.MARKET_PROOF_COMPETITIVE_SET,
+                                        route_reason="rule"),
+                policy_reason_code="allow")],
+            zero_result_route=None)
+
+    monkeypatch.setattr(lab, "policy_search", _fake_search)
+    lab.post_admin_action("revoke", projection_item_id="nv-lighthouse-thesis")
+    refs = {r["result_ref"] for r in lab.get_search(q="lighthouse", role="brisen")["results"]}
+    assert "nv-lighthouse-thesis" in refs
+
+
+def test_s51_external_search_fails_closed_on_store_outage(fresh_admin_backend):
+    # T11: store outage -> no external search results (never a possibly-revoked row).
+    fresh_admin_backend.fail = True
+    res = lab.get_search(q="lighthouse", role="nvidia")
+    assert res["result_count"] == 0 and res["results"] == []
+
+
 def test_s51_internal_view_shows_revoked_for_audit(fresh_admin_backend):
     # AC5: revoked item stays visible to Brisen (audit view) while gone for partners.
     lab.post_admin_action("revoke", projection_item_id="nv-lighthouse-thesis",

@@ -490,6 +490,18 @@ def _sources() -> List[SourceRecord]:
     return _seed_sources()
 
 
+def _external_coverage() -> List[Mapping]:
+    """Honest source-coverage map for an external role — only externally-available,
+    non-never-external sources, with status only (no internal ids / gap reasons). Safe
+    to serve even when item content is withheld (e.g. fail-closed search)."""
+    return [
+        {"domain": r.domain.value, "label": r.source_type,
+         "status": r.collection_status.value}
+        for r in _sources()
+        if r.external_projection_available and not r.is_never_external
+    ]
+
+
 @router.get("/api/sources")
 def get_sources(role: str = Query("brisen")) -> Mapping:
     """Source Registry / Coverage panel (AC6).
@@ -567,13 +579,33 @@ def get_search(q: str = Query(...), role: str = Query("brisen")) -> Mapping:
     gap/planned, never fabricated."""
     audience = _resolve_audience(role)
     internal = audience == AudienceRole.BRISEN_INTERNAL
+    revoked_ids: set = set()
     if internal:
         principal, mode = _OPERATOR, SearchMode.INTERNAL_GLOBAL
     else:
         principal, mode = _external_principal(audience), SearchMode.PARTNER_SAFE
+        # deputy-codex G2 #3970 (HIGH T2/T10/AC3): /api/search is a partner surface and
+        # MUST honor the persisted revoke overlay. An external search result whose
+        # underlying source-evidence id is revoked must be SUPPRESSED — otherwise a
+        # source row tied to a revoked item still returns the revoked claim. Fail closed
+        # on store outage: serve no external results (never leak a possibly-revoked row).
+        try:
+            overlay = admin_store.load_admin_overlay()
+        except ProjectionStoreUnavailableError:
+            logger.warning("admin overlay unavailable — empty external search for %s", role)
+            return {"query": q, "result_count": 0, "results": [],
+                    "zero_result_route": None, "coverage": _external_coverage()}
+        revoked_ids = {sid for sid, st in overlay.items() if st.revoked}
     try:
         rs = policy_search(principal, q, mode, candidates=_seed_sources())
-        results = [_serialize_result(r, internal=internal) for r in rs.results]
+        results = []
+        for r in rs.results:
+            # External: drop any result whose object handle is a revoked source-evidence
+            # id (selective suppression — visible neighbors still return). Internal keeps
+            # everything (Brisen's own surface).
+            if not internal and r.result_ref in revoked_ids:
+                continue
+            results.append(_serialize_result(r, internal=internal))
         # deputy-codex G2 #3879 (HIGH T2/T9): the zero-result ROUTE is an internal
         # routing/source-gap hint (e.g. "source_gap_unassigned_review"). It must NEVER
         # cross the boundary to an external role — external roles get a generic
