@@ -106,11 +106,9 @@ REQUIRED_EVIDENCE_FIELDS: tuple[str, ...] = (
 # create into `verified` recorded a creation event with actor_type='system' —
 # an UNAUDITED mint that bypassed the cortex/human verifier and broke the Verified
 # Operating Room invariant ("verified" == an Opus verifier checked it via the
-# audited transition; STOP cond 4). The sole runtime route to `verified` is now
-# create(candidate) -> transition_item(verified). The narrow, loudly-named
-# `allow_unaudited_verified_seed` kwarg on create_verified_item exists ONLY for
-# test fixtures that need to seed a verified row directly; no runtime/dashboard/
-# verifier code passes it.
+# audited transition; STOP cond 4). The sole route to `verified` is now
+# create(candidate) -> transition_item(verified) — and tests follow that same
+# audited path (no direct-create escape hatch exists).
 CREATE_STATES: frozenset[str] = frozenset({"candidate"})
 
 
