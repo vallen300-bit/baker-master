@@ -248,3 +248,38 @@ def test_all_four_role_views_render_without_error():
     # G1: render the 4 role views server-side (endpoint payloads resolve cleanly).
     for role in ("brisen", "nvidia", "mohg", "venue"):
         assert lab.get_packet(role=role)["audience_label"]
+
+
+# ── G2 #3879 BLOCKER 1 — external search must not leak the zero-result route ──
+@pytest.mark.parametrize("role", EXTERNAL_ROLES)
+def test_t9_external_search_has_no_zero_result_route_or_gap_hint(role):
+    res = lab.get_search(q="no-such-term-xyzzy lighthouse financing", role=role)
+    assert res["zero_result_route"] is None          # generic empty state, no route hint
+    blob = json.dumps(res)
+    for token in ("source_gap", "unassigned_review", "risk_permissions_review",
+                  "_gap_", "zero_result_reason"):
+        assert token not in blob, f"T9: {role} search leaked {token!r}"
+
+
+def test_internal_search_keeps_zero_result_route_for_triage():
+    # Internal Brisen retains the route to triage gaps (not a leak — internal surface).
+    res = lab.get_search(q="no-such-term-xyzzy", role="brisen")
+    assert "zero_result_route" in res  # present (may be a route value) for internal
+
+
+# ── G2 #3879 BLOCKER 2 (A.1) — cockpit page challenges unauth browsers ────────
+def test_unauthenticated_browser_is_challenged_not_served():
+    from fastapi.testclient import TestClient
+    from outputs import dashboard
+    c = TestClient(dashboard.app)
+    r = c.get("/ai-hotel-lab")
+    assert r.status_code == 401                       # challenged, not 500
+    assert "Access code" in r.text                    # PIN-login served
+    assert "View as NVIDIA" not in r.text             # cockpit NOT served to unauth
+    # data routes stay hard-gated regardless
+    assert c.get("/ai-hotel-lab/api/packet?role=nvidia").status_code == 401
+    # header client (and tests) are served the cockpit unchanged
+    key = getattr(dashboard, "_BAKER_API_KEY", "")
+    if key:
+        r2 = c.get("/ai-hotel-lab", headers={"X-Baker-Key": key})
+        assert r2.status_code == 200 and "View as NVIDIA" in r2.text

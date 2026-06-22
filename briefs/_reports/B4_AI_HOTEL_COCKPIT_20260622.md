@@ -72,6 +72,27 @@ Per gate plan, AC11 browser screenshots + T11/T12 visual proof land at **step 5
 (post-deploy on live Render)**; the auth decision above is the prerequisite for producing
 them (locally or live). Backend + tests + UI are otherwise gate-ready.
 
+## G2 rework round 1 (deputy-codex #3879 REQUEST_CHANGES → fixed)
+
+**Blocker 1 (HIGH, T2/T9) — external search leaked `zero_result_route`.** `get_search`
+returned the internal zero-result route (`source_gap_unassigned_review`) to external
+roles. Fixed at the cockpit API boundary: `zero_result_route` is now emitted only for
+internal Brisen; external roles get `null` (generic empty state, Step-4 F1 invariant).
+Tests: `test_t9_external_search_has_no_zero_result_route_or_gap_hint` (all 3 external
+roles), `test_internal_search_keeps_zero_result_route_for_triage`.
+
+**Blocker 2 (HIGH, T12/AC11 auth) — implemented A.1 (lead #3878).** The `aih_session`
+cookie path is widened `"/api/ai-hotel"` → `"/"` so one signed session covers the
+cockpit page + its API. The cockpit page route (now in dashboard.py, not the gated
+router) does non-raising auth: authed session/key → cockpit; unauthenticated browser →
+PIN-login challenge (reuses `/api/ai-hotel/pin-auth`), never the cockpit, never 500.
+`/ai-hotel-lab/api/*` stay hard-gated (401). Test:
+`test_unauthenticated_browser_is_challenged_not_served`. AC11 4-role browser/network
+screenshots are produced **post-deploy on live Render** (lead #3881), now unblocked.
+
+Re-verify: `tests/test_ai_hotel_cockpit.py` **46 passed**; Steps 1-4 **231 passed**;
+singletons OK.
+
 ## Done-state
 
 Harness-done (this PR) = backend + UI + 41 named tests green + singletons + Steps 1-4

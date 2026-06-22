@@ -457,10 +457,33 @@ from outputs.email_router import router as email_router
 app.include_router(email_router)
 
 # AI Hotel Lab cockpit (AI_HOTEL_LAB_COCKPIT_UI_1) — auth-gated like other AI-Hotel
-# surfaces. Read endpoints serve policy.projection packets server-side; the browser
-# never receives raw rows for an external role.
+# surfaces. The /ai-hotel-lab/api/* DATA routes are hard-gated (401) by
+# verify_ai_hotel_read_access; the browser never receives raw rows for an external role.
+from outputs import ai_hotel_lab as _ai_hotel_lab
 from outputs.ai_hotel_lab import router as ai_hotel_lab_router
 app.include_router(ai_hotel_lab_router, dependencies=[Depends(verify_ai_hotel_read_access)])
+
+
+def _ai_hotel_lab_authed(request: Request, x_baker_key: str | None) -> bool:
+    """Non-raising auth check for the cockpit PAGE (master key OR scoped session)."""
+    if _BAKER_API_KEY and x_baker_key and hmac.compare_digest(x_baker_key, _BAKER_API_KEY):
+        return True
+    return _ai_hotel_session_valid(request.cookies.get(_AI_HOTEL_SESSION_COOKIE))
+
+
+@app.get("/ai-hotel-lab", response_class=HTMLResponse, include_in_schema=False)
+@app.get("/ai-hotel-lab/", response_class=HTMLResponse, include_in_schema=False)
+async def ai_hotel_lab_page(
+    request: Request,
+    x_baker_key: str = Header(None, alias="X-Baker-Key"),
+):
+    """Cockpit page (A.1, lead #3878). An authenticated session/key is SERVED the
+    cockpit; an unauthenticated browser is CHALLENGED with the PIN-login page
+    (reuses /api/ai-hotel/pin-auth) — never the cockpit, never a 500. Header
+    X-Baker-Key clients and tests are served directly."""
+    if _ai_hotel_lab_authed(request, x_baker_key):
+        return _ai_hotel_lab.cockpit_page()
+    return _ai_hotel_lab.cockpit_login_page(status_code=401)
 
 app.add_middleware(
     CORSMiddleware,
@@ -502,7 +525,12 @@ async def ai_hotel_pin_auth(request: Request, payload: AIHotelPinAuthRequest):
         httponly=True,
         secure=True,
         samesite="strict",
-        path="/api/ai-hotel",
+        # AI_HOTEL_LAB_COCKPIT_UI_1 (A.1, lead #3878): widened from "/api/ai-hotel"
+        # so the one signed session covers BOTH the /ai-hotel-lab cockpit page and its
+        # /ai-hotel-lab/api/* + /api/ai-hotel/* calls. Path only controls which paths
+        # the browser SENDS the cookie on; the server still only honors it inside
+        # verify_ai_hotel_read_access (signed + scope ai-hotel:read), so no new exposure.
+        path="/",
     )
     return resp
 

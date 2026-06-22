@@ -510,7 +510,12 @@ def get_search(q: str = Query(...), role: str = Query("brisen")) -> Mapping:
     try:
         rs = policy_search(principal, q, mode, candidates=_seed_sources())
         results = [_serialize_result(r, internal=internal) for r in rs.results]
-        zero_route = rs.zero_result_route.value if rs.zero_result_route else None
+        # deputy-codex G2 #3879 (HIGH T2/T9): the zero-result ROUTE is an internal
+        # routing/source-gap hint (e.g. "source_gap_unassigned_review"). It must NEVER
+        # cross the boundary to an external role — external roles get a generic
+        # no-results state only. Internal keeps the route for triage.
+        zero_route = (rs.zero_result_route.value
+                      if (internal and rs.zero_result_route) else None)
     except Exception as e:  # fail closed — never fabricate results
         logger.warning("ai-hotel search failed (non-fatal): %s", e)
         results, zero_route = [], None
@@ -599,11 +604,19 @@ def post_admin_action(action: str, projection_item_id: str = Query(...),
 # boundary server-side. The browser never reconstructs an external view. Dynamic
 # content is rendered via DOM API + textContent (never innerHTML) so values from
 # the backend cannot be interpreted as markup (defense-in-depth, no XSS surface).
+#
+# The PAGE route itself is served by dashboard.py (where the AI-Hotel auth helpers
+# live): an authenticated session/key gets _COCKPIT_HTML; an unauthenticated browser
+# gets _COCKPIT_LOGIN_HTML (the PIN challenge, reusing /api/ai-hotel/pin-auth — A.1,
+# lead #3878). The /api/* routes in THIS router stay hard-gated (401) by
+# verify_ai_hotel_read_access. cockpit_page() is a convenience the page route calls.
 # --------------------------------------------------------------------------- #
-@router.get("", response_class=HTMLResponse, include_in_schema=False)
-@router.get("/", response_class=HTMLResponse, include_in_schema=False)
 def cockpit_page() -> HTMLResponse:
     return HTMLResponse(_COCKPIT_HTML)
+
+
+def cockpit_login_page(status_code: int = 401) -> HTMLResponse:
+    return HTMLResponse(_COCKPIT_LOGIN_HTML, status_code=status_code)
 
 
 _COCKPIT_HTML = r"""<!DOCTYPE html>
@@ -862,6 +875,48 @@ async function render(){
   const node=await fn(); clear(m); m.appendChild(node);
 }
 render();
+</script>
+</body></html>
+"""
+
+
+# PIN challenge served to an unauthenticated browser (A.1, lead #3878). Reuses the
+# existing /api/ai-hotel/pin-auth endpoint; on success the (now path-widened)
+# aih_session cookie is set and the page reloads into the cockpit. No cockpit data
+# is present on this page — it is a pure auth gate. textContent only (no innerHTML).
+_COCKPIT_LOGIN_HTML = r"""<!DOCTYPE html>
+<html lang="en"><head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>AI Hotel Lab — Access</title>
+<style>
+  body{margin:0;font:15px/1.5 -apple-system,BlinkMacSystemFont,"Segoe UI",Helvetica,Arial,sans-serif;
+       background:#f7f6f2;color:#1c2530;display:flex;min-height:100vh;align-items:center;justify-content:center}
+  .box{background:#fffefb;border:1px solid #dcd9d0;border-radius:6px;padding:28px;width:320px}
+  h1{font-size:17px;margin:0 0 4px} p{color:#5d6b7a;font-size:13px;margin:0 0 16px}
+  input{width:100%;font:inherit;padding:10px;border:1px solid #dcd9d0;border-radius:4px;margin-bottom:10px}
+  button{width:100%;font:inherit;padding:10px;border:1px solid #1a3a52;background:#1a3a52;color:#fff;border-radius:4px;cursor:pointer}
+  .msg{font-size:12px;color:#9a3b3b;margin-top:10px;min-height:16px}
+</style></head>
+<body>
+<div class="box">
+  <h1>AI Hotel Lab</h1>
+  <p>Internal cockpit — enter access code.</p>
+  <input id="pin" type="password" inputmode="numeric" autocomplete="off" placeholder="Access code" autofocus/>
+  <button id="go">Enter</button>
+  <div class="msg" id="msg"></div>
+</div>
+<script>
+async function submit(){
+  const pin=document.getElementById('pin').value.trim();
+  const msg=document.getElementById('msg'); msg.textContent='';
+  try{
+    const r=await fetch('/api/ai-hotel/pin-auth',{method:'POST',credentials:'same-origin',
+      headers:{'Content-Type':'application/json'},body:JSON.stringify({pin})});
+    if(r.ok){ location.reload(); } else { msg.textContent = r.status===401?'Incorrect code.':'Access unavailable.'; }
+  }catch(e){ msg.textContent='Network error.'; }
+}
+document.getElementById('go').onclick=submit;
+document.getElementById('pin').addEventListener('keydown',e=>{ if(e.key==='Enter') submit(); });
 </script>
 </body></html>
 """
