@@ -330,10 +330,16 @@ def _call_opus(system: str, user: str, *, model: str, max_tokens: int):
 
 
 def _existing_verified_item_id(conn, signal_candidate_id: int) -> Optional[int]:
+    """Dedup pre-check: has this candidate already been PROMOTED to a real
+    verified row? Filters to state IN ('verified','ratified') deliberately — a
+    promotion whose transition failed leaves an orphaned shell in state
+    'candidate' (claim already released, candidate retryable), and that shell must
+    NOT block a legitimate retry with a false ``already_verified``."""
     try:
         cur = conn.cursor()
         cur.execute(
-            "SELECT id FROM verified_items WHERE signal_candidate_id = %s LIMIT 1",
+            "SELECT id FROM verified_items WHERE signal_candidate_id = %s "
+            "AND state IN ('verified', 'ratified') LIMIT 1",
             (signal_candidate_id,),
         )
         r = cur.fetchone(); cur.close()
