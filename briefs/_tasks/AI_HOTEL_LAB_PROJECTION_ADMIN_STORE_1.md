@@ -1,7 +1,7 @@
 ---
 status: PENDING
 brief_id: AI_HOTEL_LAB_PROJECTION_ADMIN_STORE_1
-to: b4
+to: b2
 from: lead
 dispatched_by: lead
 dispatched_at: 2026-06-22
@@ -77,7 +77,7 @@ T11 failed refresh → raw fallback · T12 migration breaks Step-5 cockpit.
 ## Gate plan
 G1 pytest green → G2 **deputy-codex** security/threat gate against T1-T12 → G3 **deputy** AC sweep →
 G4 **lead** `/security-review` (Tier-A discipline, Lesson #52) → lead merge → Render auto-deploy →
-b4 `POST_DEPLOY_AC_VERDICT v1` to bus (live revoke+refresh on seeded item, AC12).
+b2 `POST_DEPLOY_AC_VERDICT v1` to bus (live revoke+refresh on seeded item, AC12).
 
 ## Reporting
 Heartbeat on substrate-lock + on each gate transition (bus, topic `ship|gate-rework|post-deploy-ac/
