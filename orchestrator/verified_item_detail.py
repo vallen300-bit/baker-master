@@ -37,8 +37,13 @@ from orchestrator.today_v2 import (
 
 logger = logging.getLogger("baker.verified_item_detail")
 
-# Max length for any string echoed inside evidence metadata / audit delta.
+# Max length for ANY string echoed in the detail payload (claim, why_matters,
+# verification_summary, source-ref metadata, audit rationale/delta — everything).
+# This is a HARD ceiling: a truncated string's FINAL length (marker included) is
+# exactly EXCERPT_MAX, never over (deputy-codex G0 F1 — the bound is required by
+# the brief's "bounded excerpts only" contract, and must not overshoot).
 EXCERPT_MAX = 280
+_TRUNC_MARKER = "…(truncated)"
 
 # Safe-to-surface scalar fields copied verbatim from the trusted row. These are
 # Baker's OWN structured fields (claim/why/analysis/metadata), never raw bodies.
@@ -58,10 +63,16 @@ _EVENT_FIELDS = (
 
 
 def _bound(value, max_len: int = EXCERPT_MAX):
-    """Recursively truncate any string > ``max_len`` (defence-in-depth)."""
+    """Recursively truncate any string so its FINAL length is <= ``max_len``.
+
+    The truncation marker is counted INTO the budget (truncate to
+    ``max_len - len(marker)`` then append), so a bounded string never exceeds
+    ``max_len`` — including the marker (deputy-codex G0 F1 secondary).
+    """
     if isinstance(value, str):
         if len(value) > max_len:
-            return value[:max_len] + "…(truncated)"
+            keep = max(0, max_len - len(_TRUNC_MARKER))
+            return value[:keep] + _TRUNC_MARKER
         return value
     if isinstance(value, dict):
         return {k: _bound(v, max_len) for k, v in value.items()}
@@ -83,15 +94,17 @@ def _selected_reason(row: dict) -> str:
 
 
 def _sanitize_event(event: dict) -> dict:
+    """Select safe event fields + strip raw-body keys from evidence_delta.
+
+    Length-bounding is NOT done here — the whole assembled item (this included)
+    runs through ``_bound`` once at the end of ``build_detail`` so no string in
+    the payload can escape the ceiling.
+    """
     out = {f: event.get(f) for f in _EVENT_FIELDS}
-    # bound free-text rationale
-    if isinstance(out.get("rationale"), str):
-        out["rationale"] = _bound(out["rationale"])
-    # evidence_delta is arbitrary jsonb — strip raw-body keys + bound strings.
     delta = event.get("evidence_delta")
     if isinstance(delta, (dict, list)):
         from orchestrator.today_v2 import _strip_raw  # reuse the canonical stripper
-        out["evidence_delta"] = _bound(_strip_raw(delta))
+        out["evidence_delta"] = _strip_raw(delta)
     else:
         out["evidence_delta"] = delta
     return out
@@ -107,7 +120,7 @@ def build_detail(row: dict, events: Optional[list] = None) -> dict:
     detail["selected_reason"] = _selected_reason(row)
 
     refs, count = sanitize_source_refs(row.get("source_refs"))
-    detail["source_refs"] = _bound(refs)
+    detail["source_refs"] = refs
     detail["source_refs_count"] = count
 
     # Evidence-packet metadata (model ids are safe + wanted by the brief).
@@ -123,7 +136,12 @@ def build_detail(row: dict, events: Optional[list] = None) -> dict:
     detail["verification_events"] = safe_events
     detail["verification_event_count"] = len(safe_events)
 
-    return {"status": "ok", "item": detail}
+    # Single wholesale length-bound pass (G0 F1): EVERY free-text scalar in the
+    # item — claim, why_matters, next_action, verification_summary,
+    # counterargument, source-ref metadata, event rationale/delta — is bounded to
+    # <= EXCERPT_MAX. No field can escape the ceiling. (counts/ids are ints; the
+    # `_*_count` keys and id stay numeric.)
+    return {"status": "ok", "item": _bound(detail)}
 
 
 def get_verified_item_detail(item_id: int) -> dict:

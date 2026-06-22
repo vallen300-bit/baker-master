@@ -44,12 +44,13 @@ def _events():
 
 # --- _bound ----------------------------------------------------------------
 
-def test_bound_truncates_long_strings():
+def test_bound_truncates_long_strings_within_ceiling():
     long = "x" * 1000
     out = d._bound({"a": long, "b": ["y" * 5, {"c": long}]})
-    assert out["a"].endswith("…(truncated)") and len(out["a"]) <= d.EXCERPT_MAX + 20
-    assert out["b"][0] == "yyyyy"
-    assert out["b"][1]["c"].endswith("…(truncated)")
+    # FINAL length (marker included) must be <= EXCERPT_MAX, never over (G0 F1).
+    assert out["a"].endswith("…(truncated)") and len(out["a"]) <= d.EXCERPT_MAX
+    assert out["b"][0] == "yyyyy"  # short strings untouched
+    assert out["b"][1]["c"].endswith("…(truncated)") and len(out["b"][1]["c"]) <= d.EXCERPT_MAX
 
 
 # --- build_detail (pure) ---------------------------------------------------
@@ -96,6 +97,32 @@ def test_build_detail_no_events_ok():
     item = d.build_detail(_row(), [])["item"]
     assert item["verification_events"] == []
     assert item["verification_event_count"] == 0
+
+
+def test_all_free_text_scalars_bounded_to_ceiling():
+    """G0 F1: every free-text scalar (esp. claim) is <= EXCERPT_MAX, including
+    oversized source-ref metadata + event rationale/delta."""
+    big = "Z" * 1000
+    row = _row(
+        claim=big, why_matters=big, next_action=big,
+        verification_summary=big, counterargument=big, owner=big,
+        source_refs=[{"table": big, "id": big, "note": big}],
+    )
+    events = [dict(id=3, from_state="candidate", to_state="verified",
+                   actor_type="cortex_tier_b", actor_id="v", model="claude-opus",
+                   rationale=big, evidence_delta={"why": big, "raw_body": "SECRET"},
+                   created_at="2026-06-22T01:00:00Z")]
+    item = d.build_detail(row, events)["item"]
+    for f in ("claim", "why_matters", "next_action", "verification_summary",
+              "counterargument", "owner"):
+        assert len(item[f]) <= d.EXCERPT_MAX, f"{f} exceeds ceiling: {len(item[f])}"
+    for v in item["source_refs"][0].values():
+        assert len(v) <= d.EXCERPT_MAX
+    ev = item["verification_events"][0]
+    assert len(ev["rationale"]) <= d.EXCERPT_MAX
+    assert len(ev["evidence_delta"]["why"]) <= d.EXCERPT_MAX
+    assert "raw_body" not in ev["evidence_delta"]  # raw key still stripped
+    assert "SECRET" not in repr(item)
 
 
 # --- get_verified_item_detail (monkeypatched DB) ---------------------------
