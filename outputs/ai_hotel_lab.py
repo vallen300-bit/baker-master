@@ -481,17 +481,22 @@ def get_roadmap(role: str = Query("brisen")) -> Mapping:
 
 
 def _serialize_result(res, *, internal: bool) -> Mapping:
-    """Serialize a SearchResult. body is already audience-scoped by policy.search;
-    policy_reason_code is internal-only (never leak a reason code externally, T2/T9)."""
+    """Serialize a SearchResult. body is already audience-scoped by policy.search.
+
+    INTERNAL-ONLY fields (deputy-codex G2 #3879 + lead G4 #3892, T9 source-hint leak):
+    route_target reveals the internal section taxonomy and route_reason reveals the
+    internal routing rules ("rule N: ... -> <section>", "llm assist: ..."), and
+    policy_reason_code is a denial/allow code. NONE of these may reach an external
+    role — they are emitted only for internal Brisen."""
     out = {
         "result_ref": res.result_ref,
         "projected": res.projected,
         "body": res.body,
-        "route_target": getattr(res.routing, "route_target", None)
-                        and res.routing.route_target.value,
-        "route_reason": getattr(res.routing, "route_reason", None),
     }
     if internal:
+        out["route_target"] = (getattr(res.routing, "route_target", None)
+                               and res.routing.route_target.value)
+        out["route_reason"] = getattr(res.routing, "route_reason", None)
         out["policy_reason_code"] = res.policy_reason_code
     return out
 

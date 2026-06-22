@@ -267,6 +267,39 @@ def test_internal_search_keeps_zero_result_route_for_triage():
     assert "zero_result_route" in res  # present (may be a route value) for internal
 
 
+# ── G4 #3892 (MEDIUM T9) — per-result routing metadata must not ship externally ──
+# External search over the connector seed yields 0 rows, so the POPULATED-result leak
+# path is exercised directly at the serializer (the exact leak site lead flagged).
+def _fake_search_result():
+    from types import SimpleNamespace
+    from policy.search.models import RouteTarget
+    return SimpleNamespace(
+        result_ref="obj-market-1", projected=True,
+        body={"display_summary": "partner-safe summary"},
+        routing=SimpleNamespace(
+            route_target=RouteTarget.MARKET_PROOF_COMPETITIVE_SET,
+            route_reason="rule 1: keyword match -> market_proof_competitive_set"),
+        policy_reason_code="allow_partner_projection",
+    )
+
+
+def test_t9_external_result_hides_route_target_reason_and_reason_code():
+    ext = lab._serialize_result(_fake_search_result(), internal=False)
+    assert "route_target" not in ext
+    assert "route_reason" not in ext
+    assert "policy_reason_code" not in ext
+    blob = json.dumps(ext)
+    for tok in ("market_proof_competitive_set", "rule 1", "keyword match", "allow_partner"):
+        assert tok not in blob, f"T9: external result leaked {tok!r}"
+
+
+def test_t9_internal_result_keeps_routing_for_triage():
+    intl = lab._serialize_result(_fake_search_result(), internal=True)
+    assert intl["route_target"] == "market_proof_competitive_set"
+    assert intl["route_reason"].startswith("rule 1")
+    assert intl["policy_reason_code"] == "allow_partner_projection"
+
+
 # ── G2 #3879 BLOCKER 2 (A.1) — cockpit page challenges unauth browsers ────────
 def test_unauthenticated_browser_is_challenged_not_served():
     from fastapi.testclient import TestClient

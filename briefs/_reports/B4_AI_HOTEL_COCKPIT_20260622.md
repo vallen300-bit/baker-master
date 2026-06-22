@@ -93,6 +93,21 @@ screenshots are produced **post-deploy on live Render** (lead #3881), now unbloc
 Re-verify: `tests/test_ai_hotel_cockpit.py` **46 passed**; Steps 1-4 **231 passed**;
 singletons OK.
 
+## G4 rework round 2 (lead /security-review #3892 — residual T9, fixed)
+
+lead's G4 caught a residual of blocker-1 that G2 passed: `_serialize_result` emitted
+`route_target` + `route_reason` on EVERY search result, including external roles —
+`route_reason` reveals internal routing rules ("rule N: … -> <section>", "llm assist…")
+and `route_target` reveals the internal section taxonomy (T9 source-hint leak). The
+blocker-1 fix had only masked the *zero-result* route. Fixed: `route_target`,
+`route_reason`, and `policy_reason_code` are now emitted only for internal Brisen
+(external results carry `result_ref` / `projected` / `body` — body already audience-
+scoped by `policy.search`). External search over the connector seed yields 0 rows, so
+the populated-result path is proven directly at the serializer:
+`test_t9_external_result_hides_route_target_reason_and_reason_code` +
+`test_t9_internal_result_keeps_routing_for_triage`. `tests/test_ai_hotel_cockpit.py`
+**48 passed**.
+
 ## Done-state
 
 Harness-done (this PR) = backend + UI + 41 named tests green + singletons + Steps 1-4
