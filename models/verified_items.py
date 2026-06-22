@@ -96,13 +96,22 @@ REQUIRED_EVIDENCE_FIELDS: tuple[str, ...] = (
     "counterargument",
 )
 
-# States a row may be CREATED in. `ratified` and `dismissed` are reachable ONLY
-# through audited transitions (transition_item), which enforce the ratify-actor
-# allowlist (AC5) and the structured dismiss reason (AC6). Allowing a direct
-# create into `ratified` would let a caller mint a ratified row whose creation
-# event records actor_type='system' — an anonymous ratification AC5 forbids.
-# `dismissed` is terminal and needs a reason, so it is creation-excluded too.
-CREATE_STATES: frozenset[str] = frozenset({"candidate", "verified"})
+# States a row may be CREATED in. ONLY `candidate`. `verified`, `ratified`, and
+# `dismissed` are reachable EXCLUSIVELY through audited transitions
+# (transition_item), which record the real actor — the verifier (cortex_tier_b /
+# human) for `verified`, the ratify-actor allowlist (AC5) for `ratified`, the
+# structured dismiss reason (AC6) for `dismissed`.
+#
+# `verified` was removed from this set (deputy-codex G0 F1, VERIFIER_1): a direct
+# create into `verified` recorded a creation event with actor_type='system' —
+# an UNAUDITED mint that bypassed the cortex/human verifier and broke the Verified
+# Operating Room invariant ("verified" == an Opus verifier checked it via the
+# audited transition; STOP cond 4). The sole runtime route to `verified` is now
+# create(candidate) -> transition_item(verified). The narrow, loudly-named
+# `allow_unaudited_verified_seed` kwarg on create_verified_item exists ONLY for
+# test fixtures that need to seed a verified row directly; no runtime/dashboard/
+# verifier code passes it.
+CREATE_STATES: frozenset[str] = frozenset({"candidate"})
 
 
 def is_valid_transition(from_state: Optional[str], to_state: str) -> bool:
@@ -255,41 +264,26 @@ def create_verified_item(
 ) -> Optional[int]:
     """Create a ``verified_items`` row and its creation audit event atomically.
 
-    A new object normally enters at ``state='candidate'``. The creation event
-    (``from_state=NULL -> state``) is written in the SAME transaction (AC3 — the
-    audit trail covers every state the row has ever held).
+    A new object enters at ``state='candidate'`` — the ONLY creation state. The
+    creation event (``from_state=NULL -> state``) is written in the SAME
+    transaction (AC3 — the audit trail covers every state the row has held).
 
-    Creation is restricted to ``CREATE_STATES`` (``candidate`` or ``verified``).
-    ``verified`` is allowed for seeded/imported data but requires a complete
-    evidence packet (AC4). ``ratified`` and ``dismissed`` can ONLY be reached via
-    ``transition_item`` so the ratify-actor allowlist (AC5) and structured
-    dismiss reason (AC6) cannot be bypassed at creation time. Returns the new id,
-    or None on failure.
+    ``verified`` / ``ratified`` / ``dismissed`` are reachable ONLY via
+    ``transition_item`` so the audited actor (verifier / ratify-actor / dismiss
+    reason) cannot be bypassed at creation time. A direct create into ``verified``
+    would record an ``actor_type='system'`` creation event — an UNAUDITED mint
+    that breaks the "verified == a verifier checked it" invariant (deputy-codex G0
+    F1 / STOP cond 4). The sole route to ``verified`` is create(candidate) ->
+    ``transition_item('verified', ...)``; tests follow that same audited path.
+    Returns the new id, or None on failure.
     """
     if state not in CREATE_STATES:
         logger.error(
             f"verified_items: cannot create directly in state {state!r}; "
-            f"allowed create states are {sorted(CREATE_STATES)} "
-            f"(use transition_item for ratified/dismissed)"
+            f"allowed create state is {sorted(CREATE_STATES)} "
+            f"(use transition_item for verified/ratified/dismissed)"
         )
         return None
-
-    packet = {
-        "source_refs": source_refs,
-        "claim": claim,
-        "confidence": confidence,
-        "source_trust": source_trust,
-        "verification_summary": verification_summary,
-        "counterargument": counterargument,
-    }
-    if state == "verified":
-        miss = missing_evidence_fields(packet)
-        if miss:
-            logger.error(
-                f"verified_items: cannot create directly in {state!r} — "
-                f"missing evidence fields: {miss}"
-            )
-            return None
 
     conn = _get_conn()
     if not conn:
