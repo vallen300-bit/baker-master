@@ -848,6 +848,8 @@ _COCKPIT_HTML = r"""<!DOCTYPE html>
   .panel h2{font-size:13px;margin:0 0 13px;text-transform:uppercase;letter-spacing:0;color:var(--blue)}
   .item{border-radius:8px;padding:14px 15px;margin-bottom:10px}
   .item:hover{background:var(--panel-hover);border-color:#cfc6b9}
+  .item.clickable{cursor:pointer}
+  .item.clickable:focus-visible{outline:3px solid rgba(9,105,218,.22);outline-offset:2px}
   .item .claim{font-weight:650;font-size:15px;line-height:1.35;color:var(--ink)}
   .item .meta{font-size:12px;color:var(--muted);margin-top:7px}
   .badge{display:inline-flex;align-items:center;min-height:21px;font-size:10px;text-transform:uppercase;letter-spacing:0;padding:2px 7px;border-radius:999px;margin-right:6px;font-weight:750}
@@ -868,6 +870,23 @@ _COCKPIT_HTML = r"""<!DOCTYPE html>
   th{color:var(--muted);font-size:11px;text-transform:uppercase;letter-spacing:0}
   .notice{background:var(--blue-soft);border:1px solid rgba(9,105,218,.18);border-radius:8px;padding:11px 13px;font-size:13px;color:#174B8B;margin-bottom:14px}
   pre{white-space:pre-wrap;font-size:12px;background:#fbfaf7;border:1px solid var(--line);border-radius:8px;padding:12px;overflow:auto}
+  .detail-layer{display:none;position:fixed;inset:0;z-index:50}
+  .detail-layer.open{display:block}
+  .detail-scrim{position:absolute;inset:0;background:rgba(23,23,23,.22)}
+  .detail-panel{
+    position:absolute;top:18px;right:18px;bottom:18px;width:min(480px,calc(100vw - 36px));
+    overflow:auto;background:var(--panel);border:1px solid var(--line);border-radius:8px;
+    box-shadow:0 28px 90px rgba(23,23,23,.22);padding:20px;
+  }
+  .detail-head{display:flex;align-items:flex-start;gap:12px;justify-content:space-between;margin-bottom:12px}
+  .detail-title{font-size:21px;line-height:1.18;font-weight:650;color:var(--ink)}
+  .detail-close{min-width:36px;min-height:36px;border:1px solid var(--line);border-radius:7px;background:var(--panel-hover);cursor:pointer;font-weight:650}
+  .detail-badges{display:flex;gap:6px;flex-wrap:wrap;margin:6px 0 16px}
+  .detail-summary{color:var(--text-2);font-size:14px;margin:0 0 16px}
+  .detail-grid{display:grid;grid-template-columns:1fr;gap:9px}
+  .detail-field{border-top:1px solid var(--line-2);padding-top:9px}
+  .detail-label{font-size:10px;text-transform:uppercase;color:var(--muted);font-weight:750}
+  .detail-value{font-size:13px;color:var(--ink);margin-top:3px;overflow-wrap:anywhere}
   @media(max-width:1040px){
     header{padding:18px 18px 14px}.hero{grid-template-columns:1fr}.firstscreen{grid-template-columns:repeat(3,minmax(140px,1fr))}
     .layout{display:block}nav{width:auto;display:flex;gap:6px;overflow-x:auto;border-right:none;border-bottom:1px solid var(--line);padding:12px}
@@ -876,6 +895,7 @@ _COCKPIT_HTML = r"""<!DOCTYPE html>
   @media(max-width:680px){
     h1{font-size:26px}.hero-main,.partner-gate{padding:17px}.firstscreen{grid-template-columns:1fr 1fr}
     .searchbar{display:block}.searchbar button{width:100%;margin-top:8px}
+    .detail-panel{top:auto;left:0;right:0;bottom:0;width:100%;max-height:82vh;border-radius:8px 8px 0 0}
   }
   @media(max-width:420px){.firstscreen{grid-template-columns:1fr}.roles button{width:100%;justify-content:center}}
 </style></head>
@@ -920,6 +940,7 @@ _COCKPIT_HTML = r"""<!DOCTYPE html>
   </nav>
   <main id="main"></main>
 </div>
+<div id="detaildrawer" class="detail-layer" aria-live="polite"></div>
 <script>
 const KEY = new URLSearchParams(location.search).get('key');
 let ROLE='brisen', VIEW='overview';
@@ -932,6 +953,7 @@ function h(tag, attrs, kids){
     if(k==='class') e.className=attrs[k];
     else if(k==='text') e.textContent=attrs[k];
     else if(k==='onclick') e.onclick=attrs[k];
+    else if(k==='onkeydown') e.onkeydown=attrs[k];
     else if(k==='disabled'){ if(attrs[k]) e.setAttribute('disabled',''); }
     else if(attrs[k]!=null) e.setAttribute(k,attrs[k]);
   }
@@ -972,6 +994,63 @@ async function renderFirstScreen(){
 function sectionItems(pkt){ const out=[]; for(const sec in (pkt.sections||{})){ const v=pkt.sections[sec]; if(Array.isArray(v)) v.forEach(i=>out.push({sec,i})); } return out; }
 function panel(title, extra){ const p=h('div',{class:'panel'},[h('h2',{text:title})]); if(extra)p.appendChild(extra); return p; }
 function notice(txt){ return h('div',{class:'notice',text:txt}); }
+function displayTitle(i){ return i.display_title||i.claim||i.display_summary||i.title||i.result_ref||i.label||i.source_type||'Detail'; }
+function addField(rows,label,value){
+  if(value==null || value==='') return;
+  if(Array.isArray(value)) value=value.join(', ');
+  if(typeof value==='object') value=JSON.stringify(value);
+  rows.push([label,String(value)]);
+}
+function itemDetail(surface,item,section){
+  const rows=[];
+  addField(rows,'Surface',surface);
+  addField(rows,'Section',item.dashboard_section||item.section||section);
+  addField(rows,'State',item.evidence_status||item.projection_state||item.lifecycle_state||item.collection_status||item.availability);
+  addField(rows,'Confidence',item.evidence_confidence!=null?item.evidence_confidence:item.confidence);
+  addField(rows,'Freshness',item.freshness||item.last_verified_at||item.last_reviewed);
+  addField(rows,'Source',item.source_label_safe||item.source_type);
+  addField(rows,'Action',item.action_safe_text||item.next_action);
+  addField(rows,'Visibility',item.visibility_reason);
+  if(!isExternal()){
+    addField(rows,'Owner',item.owner);
+    addField(rows,'Reviewer',item.reviewer);
+    addField(rows,'Audit trace',item.audit_trace_id);
+    addField(rows,'Object',item.object_id||item.source_evidence_item_id||item.source_id);
+    addField(rows,'Raw body',item.raw_body);
+    addField(rows,'Reason',item.reason||item.gap_reason);
+  }
+  return {
+    title:displayTitle(item),
+    summary:item.display_summary||item.body?.display_summary||item.raw_body||'',
+    badges:[
+      {cls:'b-state',text:item.dashboard_section||item.section||section||surface},
+      {cls:(item.evidence_status||item.lifecycle_state||item.projection_state||item.collection_status)==='raw_signal'?'b-raw':'b-verified',
+       text:item.evidence_status||item.lifecycle_state||item.projection_state||item.collection_status||item.availability||'available'}
+    ],
+    rows
+  };
+}
+function openDetail(detail){
+  const box=document.getElementById('detaildrawer'); clear(box);
+  const close=h('button',{class:'detail-close',text:'×',onclick:closeDetail,'aria-label':'Close detail'});
+  const fields=h('div',{class:'detail-grid'},(detail.rows||[]).map(([k,v])=>h('div',{class:'detail-field'},[
+    h('div',{class:'detail-label',text:k}), h('div',{class:'detail-value',text:v})
+  ])));
+  const panel=h('aside',{class:'detail-panel',role:'dialog','aria-modal':'true'},[
+    h('div',{class:'detail-head'},[h('div',{class:'detail-title',text:detail.title||'Detail'}),close]),
+    h('div',{class:'detail-badges'},(detail.badges||[]).filter(b=>b&&b.text).map(b=>badge(b.cls||'b-state',b.text))),
+    detail.summary?h('p',{class:'detail-summary',text:detail.summary}):null,
+    fields
+  ]);
+  box.appendChild(h('div',{class:'detail-scrim',onclick:closeDetail}));
+  box.appendChild(panel); box.classList.add('open'); close.focus();
+}
+function closeDetail(){ const box=document.getElementById('detaildrawer'); if(!box)return; clear(box); box.classList.remove('open'); }
+function cardKey(e,detail){ if(e.key==='Enter'||e.key===' '){ e.preventDefault(); openDetail(detail); } }
+function clickableCard(cls,kids,detail){
+  return h('div',{class:'item '+cls+' clickable',role:'button',tabindex:'0',onclick:()=>openDetail(detail),onkeydown:e=>cardKey(e,detail)},kids);
+}
+document.addEventListener('keydown',e=>{ if(e.key==='Escape') closeDetail(); });
 
 async function viewOverview(){
   const wrap=h('div'); const pkt=await api('packet'); if(!pkt){wrap.appendChild(h('div',{class:'empty',text:'No packet.'}));return wrap;}
@@ -987,7 +1066,7 @@ async function viewOverview(){
       ' confidence '+(i.evidence_confidence!=null?i.evidence_confidence:(i.confidence!=null?i.confidence:'—'))+' · '+(i.freshness||''),
       i.action_safe_text?' · action: '+i.action_safe_text:''
     ]);
-    p.appendChild(h('div',{class:'item verified-card'},[h('div',{class:'claim',text:i.display_title||i.claim||i.display_summary||'—'}),meta]));
+    p.appendChild(clickableCard('verified-card',[h('div',{class:'claim',text:i.display_title||i.claim||i.display_summary||'—'}),meta],itemDetail('Overview',i,sec)));
   });
   wrap.appendChild(p); return wrap;
 }
@@ -996,21 +1075,21 @@ async function viewRaw(){
   const d=await api('raw-signals'); const sig=(d&&d.raw_signals)||[];
   const p=panel('Raw Signal Inbox'); p.querySelector('h2').appendChild(badge('b-raw','internal only'));
   if(!sig.length) p.appendChild(h('div',{class:'empty',text:'No raw signals.'}));
-  sig.forEach(s=>p.appendChild(h('div',{class:'item raw-card'},[
+  sig.forEach(s=>p.appendChild(clickableCard('raw-card',[
     h('div',{class:'claim',text:s.claim||s.title||'—'}),
     h('div',{class:'meta'},[badge('b-raw','raw · amber'),(s.section||'')+' · '+(s.source_type||'')+' · '+(s.freshness||'')]),
     h('div',{class:'meta',text:s.raw_body||''})
-  ])));
+  ],itemDetail('Raw Signal Inbox',s,s.section))));
   return p;
 }
 async function viewEvidence(){
   const d=await api('evidence'); const ev=(d&&d.evidence)||[]; const p=panel('Verified Evidence');
   if(!ev.length) p.appendChild(h('div',{class:'empty',text:'No verified evidence available.'}));
-  ev.forEach(e=>p.appendChild(h('div',{class:'item verified-card'},[
+  ev.forEach(e=>p.appendChild(clickableCard('verified-card',[
     h('div',{class:'claim',text:e.display_title||e.claim||e.display_summary||'—'}),
     h('div',{class:'meta'},[badge('b-verified',e.lifecycle_state||e.evidence_status||'verified'),
       ' confidence '+(e.confidence!=null?e.confidence:(e.evidence_confidence!=null?e.evidence_confidence:'—'))+' · '+(e.last_verified_at||e.last_reviewed||'')])
-  ])));
+  ],itemDetail('Verified Evidence',e,e.section||e.dashboard_section))));
   return p;
 }
 async function viewProjection(){
@@ -1019,17 +1098,17 @@ async function viewProjection(){
   if(isExternal()) p.appendChild(notice('Brisen controls projection. Partners view; they do not approve or revoke.'));
   if(!items.length) p.appendChild(h('div',{class:'empty',text:'No projected items.'}));
   items.forEach(({i})=>{
-    const card=h('div',{class:'item'},[
+    const card=clickableCard('',[
       h('div',{class:'claim',text:i.display_title||i.claim||'—'}),
       h('div',{class:'meta'},[badge('b-state',i.projection_state||'projected'),i.dashboard_section||''])
-    ]);
+    ],itemDetail('Partner Projection',i,i.dashboard_section));
     if(!isExternal()){
       const id=i.source_evidence_item_id||i.object_id||'';
-      const ctl=h('div',{},[
-        h('button',{class:'btn live',text:'Approve',onclick:()=>adminAct('approve',id)}),
-        h('button',{class:'btn live',text:'Revoke',onclick:()=>adminAct('revoke',id)}),
-        h('button',{class:'btn live',text:'Refresh',onclick:()=>adminAct('refresh',id)}),
-        h('button',{class:'btn',text:'Audit',onclick:()=>showAudit(id)}),
+      const ctl=h('div',{onclick:e=>e.stopPropagation()},[
+        h('button',{class:'btn live',text:'Approve',onclick:e=>{e.stopPropagation();adminAct('approve',id);}}),
+        h('button',{class:'btn live',text:'Revoke',onclick:e=>{e.stopPropagation();adminAct('revoke',id);}}),
+        h('button',{class:'btn live',text:'Refresh',onclick:e=>{e.stopPropagation();adminAct('refresh',id);}}),
+        h('button',{class:'btn',text:'Audit',onclick:e=>{e.stopPropagation();showAudit(id);}}),
         h('div',{class:'reason',text:'Brisen controls projection. Revoke is a durable, audited kill switch (item leaves every partner view); Refresh recomputes freshness. The server is the source of final state.'})
       ]);
       card.appendChild(ctl);
@@ -1050,11 +1129,11 @@ async function viewSources(){
 async function viewRoadmap(){
   const d=await api('roadmap'); const r=(d&&d.roadmap)||[]; const p=panel('Execution Roadmap');
   if(!r.length) p.appendChild(h('div',{class:'empty',text:'No roadmap items in this view.'}));
-  r.forEach(x=>p.appendChild(h('div',{class:'item'},[
+  r.forEach(x=>p.appendChild(clickableCard('',[
     h('div',{class:'claim'},[badge('b-gap','gap'),(x.label||'')+' ('+(x.domain||'')+')']),
     h('div',{class:'meta',text:'owner '+(x.owner||'—')+' · '+(x.reason||'')}),
     h('div',{class:'meta',text:'next: '+(x.next_action||'')})
-  ])));
+  ],itemDetail('Execution Roadmap',x,x.domain))));
   return p;
 }
 async function viewSearch(){
@@ -1070,10 +1149,10 @@ async function runSearch(){
   box.appendChild(panel('Coverage (honest)',cov));
   const rp=panel('Results ('+d.result_count+')');
   if(!d.results.length) rp.appendChild(h('div',{class:'empty',text:'No results'+(d.zero_result_route?' — routed to '+d.zero_result_route:'')+'. Unwired connectors are shown as gaps above, never fabricated as results.'}));
-  (d.results||[]).forEach(r=>rp.appendChild(h('div',{class:'item'},[
+  (d.results||[]).forEach(r=>rp.appendChild(clickableCard('',[
     h('div',{class:'claim',text:r.result_ref}),
     h('div',{class:'meta'},[badge(r.projected?'b-state':'b-verified',r.projected?'partner projection':'internal'),r.route_target||''])
-  ])));
+  ],itemDetail('Search Result',r,r.route_target))));
   box.appendChild(rp);
 }
 async function adminAct(action,id){
