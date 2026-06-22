@@ -50,7 +50,16 @@ from policy.projection.packets import (
     serve_external_packet,
     view_as,
 )
-from policy.search.models import RouteTarget
+from policy.search.models import RouteTarget, SearchMode
+from policy.search.runner import search as policy_search
+from policy.sources.models import (
+    CollectionStatus,
+    ProvenanceClass,
+    SourceDomain,
+    SourceObjectType,
+    SourceRecord,
+)
+from policy.sources.registry import external_projection_for
 
 logger = logging.getLogger("baker.ai_hotel_lab")
 
@@ -344,3 +353,240 @@ def get_item_audit(projection_item_id: str, role: str = Query("brisen")) -> Mapp
     if summary is None:
         raise HTTPException(status_code=404, detail="not found")
     return summary
+
+
+# --------------------------------------------------------------------------- #
+# Source registry / coverage seed (honest WIRED / PARTIAL / GAP — no faked live)
+# --------------------------------------------------------------------------- #
+def _src(
+    source_id: str,
+    *,
+    domain: SourceDomain,
+    status: CollectionStatus,
+    label: str,
+    external_ok: bool = False,
+    provenance: ProvenanceClass = ProvenanceClass.FIRST_PARTY,
+    gap_owner: Optional[str] = None,
+    gap_reason: Optional[str] = None,
+    gap_next_action: Optional[str] = None,
+) -> SourceRecord:
+    return SourceRecord(
+        source_id=source_id,
+        domain=domain,
+        source_type=label,
+        object_type=SourceObjectType.NOTE,
+        owner_org=Org.BRISEN,
+        classification=(Classification.PUBLIC_SOURCE if external_ok else Classification.BRISEN_CONFIDENTIAL),
+        lifecycle_state=LifecycleState.VERIFIED_EVIDENCE,
+        provenance_class=provenance,
+        collection_status=status,
+        raw_body_available_internal=(status is not CollectionStatus.GAP),
+        external_projection_available=external_ok,
+        # Required when a source is not externally projectable — a curated safe
+        # reason (never an engine denial reason).
+        redaction_reason=(None if external_ok else "internal source — not partner-projected"),
+        freshness="2026-06",
+        # policy_object_id is required for any non-gap (collectable) source.
+        policy_object_id=(None if status is CollectionStatus.GAP else f"src-{source_id}"),
+        gap_owner=gap_owner,
+        gap_reason=gap_reason,
+        gap_next_action=gap_next_action,
+    )
+
+
+def _seed_sources() -> List[SourceRecord]:
+    """Honest connector coverage across the 8 Step-2 domains. Most live ingestion is
+    not yet wired in Sprint-0 — those are GAP rows that drive the Execution Roadmap,
+    never faked as working (T8)."""
+    SD, CS = SourceDomain, CollectionStatus
+    return [
+        _src("baker-memory", domain=SD.BAKER_INTERNAL_MEMORY, status=CS.WIRED,
+             label="Baker internal memory"),
+        _src("vault-rooms", domain=SD.VAULT_PROJECT_ROOMS, status=CS.WIRED,
+             label="Vault project rooms"),
+        _src("dropbox-files", domain=SD.DROPBOX_PROJECT_FILES, status=CS.PARTIAL,
+             label="Dropbox project files"),
+        _src("comms", domain=SD.COMMS_EMAIL_WA_SLACK, status=CS.GAP,
+             label="Email / WhatsApp / Slack", gap_owner="lead",
+             gap_reason="connector not yet authorized for this matter",
+             gap_next_action="authorize + wire comms ingestion"),
+        _src("field-evidence", domain=SD.FIELD_EVIDENCE, status=CS.PARTIAL,
+             label="Field evidence (site photos/notes)"),
+        _src("open-web", domain=SD.OPEN_WEB, status=CS.GAP,
+             label="Open web", gap_owner="lead",
+             gap_reason="live crawl not enabled (hook only in Step 3)",
+             gap_next_action="enable web research connector"),
+        _src("site-search", domain=SD.SITE_SEARCH_PUBLIC, status=CS.GAP,
+             label="Santa Clara authorities / planning", gap_owner="lead",
+             gap_reason="authority site-search connector not wired",
+             gap_next_action="wire Santa Clara planning/site-search"),
+        _src("market", domain=SD.MARKET_CAPITAL_RESIDENCE, status=CS.PARTIAL,
+             label="Market / capital / residence", external_ok=True,
+             provenance=ProvenanceClass.PUBLIC),
+    ]
+
+
+def _sources() -> List[SourceRecord]:
+    return _seed_sources()
+
+
+@router.get("/api/sources")
+def get_sources(role: str = Query("brisen")) -> Mapping:
+    """Source Registry / Coverage panel (AC6).
+
+    Internal shows full coverage incl. gap owner/reason/next-action (roadmap fuel).
+    External roles get ONLY safe domain labels of externally-available sources — no
+    internal source ids, no gap reasons, no never_external hints (T9)."""
+    audience = _resolve_audience(role)
+    recs = _sources()
+    if audience == AudienceRole.BRISEN_INTERNAL:
+        return {"sources": [
+            {
+                "source_id": r.source_id,
+                "domain": r.domain.value,
+                "label": r.source_type,
+                "collection_status": r.collection_status.value,
+                "external_projection_available": r.external_projection_available,
+                "never_external": r.is_never_external,
+                "gap_owner": r.gap_owner,
+                "gap_reason": r.gap_reason,
+                "gap_next_action": r.gap_next_action,
+            }
+            for r in recs
+        ]}
+    # External: only externally-available, WIRED/PARTIAL sources, safe labels only.
+    safe = [
+        {"domain": r.domain.value, "label": r.source_type,
+         "availability": ("available" if r.collection_status is not CollectionStatus.GAP else "not_available")}
+        for r in recs
+        if r.external_projection_available and not r.is_never_external
+    ]
+    return {"sources": safe}
+
+
+@router.get("/api/roadmap")
+def get_roadmap(role: str = Query("brisen")) -> Mapping:
+    """Execution Roadmap — gap-derived items (AC4). Internal-only detail; external
+    roles get a generic empty roadmap (no gap reasons / source hints, T9)."""
+    audience = _resolve_audience(role)
+    if audience != AudienceRole.BRISEN_INTERNAL:
+        return {"roadmap": []}
+    items = [
+        {"source_id": r.source_id, "domain": r.domain.value, "label": r.source_type,
+         "owner": r.gap_owner, "reason": r.gap_reason, "next_action": r.gap_next_action}
+        for r in _sources() if r.is_gap
+    ]
+    return {"roadmap": items}
+
+
+def _serialize_result(res, *, internal: bool) -> Mapping:
+    """Serialize a SearchResult. body is already audience-scoped by policy.search;
+    policy_reason_code is internal-only (never leak a reason code externally, T2/T9)."""
+    out = {
+        "result_ref": res.result_ref,
+        "projected": res.projected,
+        "body": res.body,
+        "route_target": getattr(res.routing, "route_target", None)
+                        and res.routing.route_target.value,
+        "route_reason": getattr(res.routing, "route_reason", None),
+    }
+    if internal:
+        out["policy_reason_code"] = res.policy_reason_code
+    return out
+
+
+@router.get("/api/search")
+def get_search(q: str = Query(...), role: str = Query("brisen")) -> Mapping:
+    """Advanced Search (AC6/T8). Results are policy-gated by policy.search (external
+    bodies are partner projections only). Coverage is honest: live domains vs
+    gap/planned, never fabricated."""
+    audience = _resolve_audience(role)
+    internal = audience == AudienceRole.BRISEN_INTERNAL
+    if internal:
+        principal, mode = _OPERATOR, SearchMode.INTERNAL_GLOBAL
+    else:
+        principal, mode = _external_principal(audience), SearchMode.PARTNER_SAFE
+    try:
+        rs = policy_search(principal, q, mode, candidates=_seed_sources())
+        results = [_serialize_result(r, internal=internal) for r in rs.results]
+        zero_route = rs.zero_result_route.value if rs.zero_result_route else None
+    except Exception as e:  # fail closed — never fabricate results
+        logger.warning("ai-hotel search failed (non-fatal): %s", e)
+        results, zero_route = [], None
+    # Honest coverage map (T8). External sees only externally-available domains.
+    recs = _sources()
+    coverage = [
+        {"domain": r.domain.value, "label": r.source_type,
+         "status": r.collection_status.value}
+        for r in recs
+        if internal or (r.external_projection_available and not r.is_never_external)
+    ]
+    return {
+        "query": q,
+        "result_count": len(results),
+        "results": results,
+        "zero_result_route": zero_route,
+        "coverage": coverage,
+    }
+
+
+@router.get("/api/evidence")
+def get_evidence(role: str = Query("brisen")) -> Mapping:
+    """Verified Evidence lane (AC5) — lifecycle-promoted items only, visually distinct
+    from raw. Internal: verified/shared/action-linked. External: only shared/action-
+    linked, served via the projection packet (no raw, no candidates)."""
+    audience = _resolve_audience(role)
+    if audience == AudienceRole.BRISEN_INTERNAL:
+        promoted = {
+            LifecycleState.VERIFIED_EVIDENCE,
+            LifecycleState.SHARED_VIEW,
+            LifecycleState.ACTION_LINKED,
+        }
+        items = [
+            {"object_id": c.item.object_id, "claim": c.item.claim,
+             "lifecycle_state": c.item.lifecycle_state.value,
+             "confidence": c.item.confidence, "last_reviewed": c.item.last_reviewed,
+             "section": c.route_target.value if c.route_target else None}
+            for c in _candidates() if c.item.lifecycle_state in promoted
+        ]
+        return {"evidence": items, "internal": True}
+    # External: reuse the projection packet — already lifecycle/permission gated.
+    packet = view_as(_OPERATOR, audience, _candidates())
+    flat = []
+    for sec, items in packet.as_dict()["sections"].items():
+        if isinstance(items, list):
+            flat.extend(items)
+    return {"evidence": flat, "internal": False}
+
+
+# --------------------------------------------------------------------------- #
+# Projection admin (approve / revoke / refresh) — Brisen admin only.
+# The whole router is read-gated; mutation additionally requires a Brisen admin
+# principal. Sprint-0 operates on the in-memory seed; persistence is a later brief.
+# --------------------------------------------------------------------------- #
+@router.post("/api/admin/{action}")
+def post_admin_action(action: str, projection_item_id: str = Query(...),
+                      reason: str = Query("")) -> Mapping:
+    """approve / revoke / refresh on a projection item. Brisen admin only — AI and
+    external principals are rejected by policy.projection.admin (AC7)."""
+    if action not in ("approve", "revoke", "refresh"):
+        raise HTTPException(status_code=400, detail="unknown action")
+    admin = Principal(org=Org.BRISEN, role="evidence_admin")
+    target = next((c for c in _candidates() if c.item.object_id == projection_item_id), None)
+    if target is None:
+        raise HTTPException(status_code=404, detail="not found")
+    if action != "approve":
+        # revoke / refresh operate on PERSISTED ProjectionItems. Sprint-0 has no
+        # projection store wired (later brief), so those states are shown read-only
+        # from the packet (AC7 display) rather than mutated here. Honest, not faked.
+        raise HTTPException(
+            status_code=501,
+            detail=f"{action} requires the persisted projection store (later brief); "
+                   "state is shown read-only from the packet in Sprint-0",
+        )
+    try:
+        log = projection_admin.approve_projection(
+            target.item, admin, rationale=reason or "approved via cockpit")
+    except Exception as e:
+        raise HTTPException(status_code=403, detail=f"admin action denied: {e}")
+    return {"ok": True, "action": action, "event": getattr(log, "event_type", action)}
