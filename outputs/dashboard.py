@@ -12508,6 +12508,119 @@ async def deadline_feedback_api(deadline_id: int, request: Request):
         raise HTTPException(status_code=500, detail=str(e))
 
 
+# ---------------------------------------------------------------------------
+# BAKER_DASHBOARD_V2_CANDIDATE_INGEST_1 — triage queue (AC6/AC7/AC9/AC10)
+# Candidates are a QUARANTINE layer. These endpoints expose the review queue +
+# manual dismiss/verify; nothing here feeds Today (AC8). Responses carry summary
+# + metadata + internal source refs only — never raw bodies (AC9).
+# ---------------------------------------------------------------------------
+
+
+@app.get("/api/triage/candidates", tags=["dashboard-v2"], dependencies=[Depends(verify_api_key)])
+async def list_triage_candidates(
+    matter_slug: str = Query(None),
+    source_type: str = Query(None),
+    candidate_type: str = Query(None),
+    source_trust: str = Query(None),
+    status: str = Query(None),
+    limit: int = Query(100, ge=1, le=1000),
+):
+    """AC6/AC7 — matter-aware candidate triage queue. Summaries + metadata +
+    internal source refs only (AC9)."""
+    try:
+        from orchestrator.candidate_ingest import list_candidates
+        rows = list_candidates(
+            matter_slug=matter_slug, source_type=source_type,
+            candidate_type=candidate_type, source_trust=source_trust,
+            status=status, limit=limit,
+        )
+        return {"status": "ok", "count": len(rows), "candidates": rows}
+    except Exception as e:
+        logger.error(f"/api/triage/candidates failed: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/api/triage/{candidate_id}/dismiss", tags=["dashboard-v2"], dependencies=[Depends(verify_api_key)])
+async def dismiss_triage_candidate(candidate_id: int, request: Request):
+    """AC10 — dismiss a candidate with a structured reason (one of the 10-value
+    DISMISS_REASONS set). Body: {"reason": "...", "actor_id": "..."}."""
+    try:
+        from orchestrator.candidate_ingest import dismiss_candidate
+        from models.verified_items import DISMISS_REASONS
+        payload = await request.json()
+        reason = payload.get("reason")
+        actor_id = payload.get("actor_id") or "director"
+        if reason not in DISMISS_REASONS:
+            raise HTTPException(
+                status_code=400,
+                detail=f"reason must be one of {sorted(DISMISS_REASONS)}",
+            )
+        res = dismiss_candidate(candidate_id, reason, actor_id)
+        if not res.get("ok"):
+            if res.get("error") == "not_found":
+                raise HTTPException(status_code=404, detail=f"candidate {candidate_id} not found")
+            raise HTTPException(status_code=400, detail=res)
+        return {"status": "ok", **res}
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"/api/triage/{candidate_id}/dismiss failed: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/api/triage/{candidate_id}/verify-manual", tags=["dashboard-v2"], dependencies=[Depends(verify_api_key)])
+async def verify_manual_triage_candidate(candidate_id: int, request: Request):
+    """AC6 — manually promote a candidate to a verified_items row with a supplied
+    evidence packet. The human verifier is recorded in verification_events (not
+    just created_by) via the audited transition path. Untrusted-legacy candidates
+    are refused (AC2.3). Body requires: item_type, claim, actor_type, actor_id,
+    confidence, source_trust, verification_summary, counterargument."""
+    try:
+        from orchestrator.candidate_ingest import promote_candidate_manual
+        payload = await request.json()
+        required = (
+            "item_type", "claim", "actor_type", "actor_id", "confidence",
+            "source_trust", "verification_summary", "counterargument",
+        )
+
+        def _blank(v):
+            return v is None or (isinstance(v, str) and not v.strip())
+
+        miss = [k for k in required if _blank(payload.get(k))]
+        if miss:
+            raise HTTPException(status_code=400, detail=f"missing required fields: {miss}")
+        res = promote_candidate_manual(
+            candidate_id,
+            item_type=payload["item_type"],
+            claim=payload["claim"],
+            actor_type=payload["actor_type"],
+            actor_id=payload["actor_id"],
+            confidence=payload["confidence"],
+            source_trust=payload["source_trust"],
+            verification_summary=payload["verification_summary"],
+            counterargument=payload["counterargument"],
+            why_matters=payload.get("why_matters"),
+            next_action=payload.get("next_action"),
+            owner=payload.get("owner"),
+            matter_slug=payload.get("matter_slug"),
+            people=payload.get("people"),
+        )
+        if not res.get("ok"):
+            err = res.get("error")
+            if err == "not_found":
+                raise HTTPException(status_code=404, detail=f"candidate {candidate_id} not found")
+            if err in ("not_promotable", "verifier_required", "missing_actor",
+                       "missing_evidence"):
+                raise HTTPException(status_code=400, detail=res)
+            raise HTTPException(status_code=500, detail=res)
+        return {"status": "ok", **res}
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"/api/triage/{candidate_id}/verify-manual failed: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 @app.get("/api/slug-registry", tags=["registry"], dependencies=[Depends(verify_api_key)])
 async def slug_registry_api(status: str = Query("active", regex="^(active|all)$")):
     """DEADLINE_FEEDBACK_LOOP_1: serve canonical slug list for the wrong-matter dropdown."""
