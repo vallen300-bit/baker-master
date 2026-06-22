@@ -593,28 +593,57 @@ def dismiss_candidate(candidate_id: int, reason: str, actor_id: str) -> dict:
         _put_conn(conn)
 
 
-def mark_promoted(candidate_id: int, verified_item_id: int) -> bool:
-    """Flag a candidate as promoted after a verified_items row is created from it.
-    Best-effort: a failure here does not invalidate the verified item."""
+def _claim_candidate_for_promotion(candidate_id: int) -> bool:
+    """Atomically claim a candidate for promotion: flip awaiting_verification ->
+    promoted in ONE conditional UPDATE. Returns True only if THIS call won the
+    claim. Prevents double-submit races + promotion of dismissed/already-promoted
+    candidates (codex G-review F1)."""
     conn = _get_conn()
     if not conn:
         return False
     try:
         cur = conn.cursor()
         cur.execute(
-            "UPDATE signal_candidates SET status = %s WHERE id = %s",
-            (STATUS_PROMOTED, candidate_id),
+            "UPDATE signal_candidates SET status = %s "
+            "WHERE id = %s AND status = %s RETURNING id",
+            (STATUS_PROMOTED, candidate_id, STATUS_AWAITING),
         )
+        row = cur.fetchone()
         conn.commit()
         cur.close()
-        return True
+        return row is not None
     except Exception as e:
         try:
             conn.rollback()
         except Exception:
             pass
-        logger.error(f"candidate_ingest: mark_promoted failed: {e}")
+        logger.error(f"candidate_ingest: _claim_candidate_for_promotion failed: {e}")
         return False
+    finally:
+        _put_conn(conn)
+
+
+def _release_candidate_claim(candidate_id: int) -> None:
+    """Revert a claim (promoted -> awaiting_verification) when the verified_items
+    create/transition fails after the claim. Best-effort."""
+    conn = _get_conn()
+    if not conn:
+        return
+    try:
+        cur = conn.cursor()
+        cur.execute(
+            "UPDATE signal_candidates SET status = %s "
+            "WHERE id = %s AND status = %s",
+            (STATUS_AWAITING, candidate_id, STATUS_PROMOTED),
+        )
+        conn.commit()
+        cur.close()
+    except Exception as e:
+        try:
+            conn.rollback()
+        except Exception:
+            pass
+        logger.error(f"candidate_ingest: _release_candidate_claim failed: {e}")
     finally:
         _put_conn(conn)
 
@@ -681,6 +710,14 @@ def promote_candidate_manual(
             "detail": f"source_trust={cand.get('source_trust')} cannot promote "
                       f"without re-extraction",
         }
+    # F1 (codex G-review) — only an awaiting candidate may be promoted; reject
+    # dismissed / already-promoted so triage stays a real quarantine and a
+    # double-submit cannot mint duplicate verified_items.
+    if cand.get("status") != STATUS_AWAITING:
+        return {
+            "ok": False, "error": "bad_candidate_status",
+            "detail": f"candidate status={cand.get('status')} (must be {STATUS_AWAITING})",
+        }
 
     source_refs = [{
         "table": cand.get("raw_source_table"),
@@ -698,6 +735,15 @@ def promote_candidate_manual(
     miss = missing_evidence_fields(packet)
     if miss:
         return {"ok": False, "error": "missing_evidence", "detail": miss}
+
+    # Atomically claim the candidate (awaiting -> promoted). If the claim is lost
+    # (concurrent verify-manual / a dismiss landed between our read and here),
+    # refuse — no verified_items row is created. Closes the double-submit race.
+    if not _claim_candidate_for_promotion(candidate_id):
+        return {
+            "ok": False, "error": "bad_candidate_status",
+            "detail": "candidate is no longer awaiting verification (claimed concurrently)",
+        }
 
     # 1) Create the durable shell in candidate state, carrying the full evidence
     #    packet so the promotion's AC4 check passes.
@@ -724,18 +770,20 @@ def promote_candidate_manual(
         rationale="manual verification via triage (candidate shell)",
     )
     if item_id is None:
+        _release_candidate_claim(candidate_id)  # undo the claim — nothing created
         return {"ok": False, "error": "create_failed"}
 
     # 2) Promote candidate -> verified, recording the explicit human verifier in
-    #    verification_events (guard #6).
+    #    verification_events (guard #6). The candidate is already status='promoted'
+    #    from the atomic claim above.
     tr = transition_item(
         item_id, "verified",
         actor_type=actor_type, actor_id=actor_id,
         rationale="manual verification via triage",
     )
     if not tr.get("ok"):
+        _release_candidate_claim(candidate_id)
         return {"ok": False, "error": "promote_failed", "detail": tr,
                 "verified_item_id": item_id}
-    mark_promoted(candidate_id, item_id)
     return {"ok": True, "verified_item_id": item_id, "candidate_id": candidate_id,
             "verify_event_id": tr.get("event_id")}

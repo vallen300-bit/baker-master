@@ -342,3 +342,59 @@ def test_list_candidates_filters(live_ci):
     for r in ao:
         assert "body" not in r and "raw_body" not in r
         assert set(r.keys()) <= set(ci._CANDIDATE_PUBLIC_COLS)
+
+
+def test_verify_manual_refuses_dismissed_candidate(live_ci):
+    """Codex F1 — a dismissed candidate cannot be promoted (quarantine integrity)."""
+    cand = ci.create_candidate("email", "f1-dismissed", "alert", "noise blast",
+                               "gemini-2.5-pro", matter_slug="ao")
+    assert ci.dismiss_candidate(cand["id"], "marketing", "director")["ok"]
+    res = ci.promote_candidate_manual(
+        cand["id"], item_type="alert", claim="c", actor_type="director",
+        actor_id="dvallen", confidence="high", source_trust="internal_system",
+        verification_summary="s", counterargument="c2",
+    )
+    assert res["ok"] is False and res["error"] == "bad_candidate_status"
+
+
+def test_verify_manual_no_double_promote(live_ci):
+    """Codex F1 — a second verify-manual on an already-promoted candidate is
+    refused, so no duplicate verified_items is minted for one signal_candidate."""
+    cand = ci.create_candidate("email", "f1-double", "deadline", "real obligation",
+                               "gemini-2.5-pro", matter_slug="hagenauer-rg7")
+    common = dict(
+        item_type="deadline", claim="Deliver SW spec.", actor_type="director",
+        actor_id="dvallen", confidence="high", source_trust="known_counterparty",
+        verification_summary="checked", counterargument="maybe non-binding",
+    )
+    first = ci.promote_candidate_manual(cand["id"], **common)
+    assert first["ok"], first
+    second = ci.promote_candidate_manual(cand["id"], **common)
+    assert second["ok"] is False and second["error"] == "bad_candidate_status"
+    # exactly one verified_items row references this candidate
+    conn = psycopg2.connect(live_ci)
+    try:
+        with conn.cursor() as cur:
+            cur.execute(
+                "SELECT count(*) FROM verified_items WHERE signal_candidate_id = %s",
+                (cand["id"],),
+            )
+            assert cur.fetchone()[0] == 1
+    finally:
+        conn.close()
+
+
+def test_list_candidates_created_window(live_ci):
+    """Codex F2 / AC7 — created-date window filter works at the service layer."""
+    from datetime import datetime, timedelta, timezone
+    ci.create_candidate("email", "window-1", "deadline", "windowed item",
+                        "gemini-2.5-pro", matter_slug="window-test")
+    now = datetime.now(timezone.utc)
+    future = (now + timedelta(days=1)).isoformat()
+    past = (now - timedelta(days=1)).isoformat()
+    # created_after in the future -> excluded
+    assert ci.list_candidates(matter_slug="window-test", created_after=future) == []
+    # created_after in the past AND created_before in the future -> included
+    got = ci.list_candidates(matter_slug="window-test", created_after=past,
+                             created_before=future)
+    assert any(r["matter_slug"] == "window-test" for r in got)

@@ -134,6 +134,33 @@ unique index present; the 3 triage routes register on app import.
 
 ---
 
+## codex G-review #3839 (REQUEST_CHANGES) — folded (commit pending)
+
+Cross-lane gate #3838 PASSED; deputy-codex G-review then raised 2 findings, both fixed on-branch:
+
+- **F1 (HIGH) — verify-manual ignored candidate lifecycle status.** A dismissed
+  or already-promoted candidate could still be promoted (duplicate
+  `verified_items`, weakened quarantine). Fix: `promote_candidate_manual` now (a)
+  rejects any candidate whose status is not `awaiting_verification`
+  (`bad_candidate_status`), and (b) **atomically claims** the candidate
+  (`UPDATE … SET status='promoted' WHERE id=%s AND status='awaiting_verification'
+  RETURNING id`) before creating the verified item — closing the double-submit
+  race; the claim is released (reverted to awaiting) if the create/transition
+  fails. New tests: `test_verify_manual_refuses_dismissed_candidate`,
+  `test_verify_manual_no_double_promote` (asserts exactly one `verified_items`
+  row per candidate).
+- **F2 (MEDIUM) — `/api/triage/candidates` missing the AC7 created-date window.**
+  The service supported `created_after`/`created_before`; the endpoint didn't
+  expose them. Fix: added both query params and passed them through. New test:
+  `test_list_candidates_created_window`.
+
+Codex positive checks retained: guard #6 design, model-floor reuse, raw-body
+allowlist.
+
+Re-run after fixes: `python3.12 -m pytest tests/test_candidate_ingest.py
+tests/test_verified_items.py` → **51 passed** (14 pure-logic + 8 live-PG ingest +
+29 verified_items regression) against isolated local PG 16.
+
 ## Gate
 
 Builder self-test PASS → deputy-codex G-review (MANDATORY, Director-directed) →

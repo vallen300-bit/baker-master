@@ -12523,16 +12523,19 @@ async def list_triage_candidates(
     candidate_type: str = Query(None),
     source_trust: str = Query(None),
     status: str = Query(None),
+    created_after: str = Query(None, description="ISO datetime lower bound (AC7 window)"),
+    created_before: str = Query(None, description="ISO datetime upper bound (AC7 window)"),
     limit: int = Query(100, ge=1, le=1000),
 ):
-    """AC6/AC7 — matter-aware candidate triage queue. Summaries + metadata +
-    internal source refs only (AC9)."""
+    """AC6/AC7 — matter-aware candidate triage queue with a created-date window.
+    Summaries + metadata + internal source refs only (AC9)."""
     try:
         from orchestrator.candidate_ingest import list_candidates
         rows = list_candidates(
             matter_slug=matter_slug, source_type=source_type,
             candidate_type=candidate_type, source_trust=source_trust,
-            status=status, limit=limit,
+            status=status, created_after=created_after,
+            created_before=created_before, limit=limit,
         )
         return {"status": "ok", "count": len(rows), "candidates": rows}
     except Exception as e:
