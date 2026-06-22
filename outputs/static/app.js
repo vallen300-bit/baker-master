@@ -761,11 +761,12 @@ const TAB_VIEW_MAP = {
     'presentations': 'viewPresentations',
     'browser': 'viewBrowser',
     'baker-data': 'viewBakerData',
+    'system': 'viewSystem',
     'ideas': 'viewIdeas',
     'kbl-pipeline': 'viewKBLPipeline',
 };
 
-const FUNCTIONAL_TABS = new Set(['morning-brief', 'fires', 'matters', 'deadlines', 'people', 'person-detail', 'tags', 'search', 'ask-baker', 'ask-specialist', 'ask-client-pm', 'travel', 'media', 'documents', 'dossiers', 'presentations', 'browser', 'baker-data', 'ideas', 'ao-dashboard', 'kbl-pipeline']);
+const FUNCTIONAL_TABS = new Set(['morning-brief', 'fires', 'matters', 'deadlines', 'people', 'person-detail', 'tags', 'search', 'ask-baker', 'ask-specialist', 'ask-client-pm', 'travel', 'media', 'documents', 'dossiers', 'presentations', 'browser', 'baker-data', 'system', 'ideas', 'ao-dashboard', 'kbl-pipeline']);
 
 function switchTab(tabName) {
     document.querySelectorAll('.nav-item[data-tab]').forEach(item => {
@@ -809,6 +810,7 @@ function switchTab(tabName) {
     else if (tabName === 'presentations') loadPresentationsTab();
     else if (tabName === 'browser') loadBrowserTab();
     else if (tabName === 'baker-data') loadBakerData();
+    else if (tabName === 'system') loadSystemConsole();
     else if (tabName === 'ideas') loadIdeasTab();
     else if (tabName === 'ao-dashboard') loadAOTab();
     else if (tabName === 'kbl-pipeline') loadKBLPipelineTab();
@@ -1028,6 +1030,9 @@ function _makeProposalHandler(actionType, instruction, proposal, btn, card) {
 }
 
 async function loadMorningBrief() {
+    // Compact System health/freshness strip — independent of the morning-brief
+    // payload so it still renders if the brief fetch fails (own try/catch inside).
+    renderSystemHealthStrip();
     try {
         var resp = await bakerFetch('/api/dashboard/morning-brief', { timeout: 25000 });
         if (!resp.ok) {
@@ -1613,6 +1618,432 @@ async function renderQualityWidget(container) {
         }
         container.appendChild(w);
     } catch (e) { console.warn('Quality widget failed:', e); }
+}
+
+// ═══ SYSTEM HEALTH CONSOLE (BAKER_DASHBOARD_V2_SYSTEM_HEALTH_CONSOLE_1) ═══
+//
+// Dedicated operational-health surface. Moves sentinel/scheduler/freshness/
+// verifier detail OUT of the Today cockpit into a `System` console, leaving only
+// a compact health/freshness strip on Today's first screen. Reuses the existing
+// read-only, auth-gated health endpoints — NO new aggregation route, NO write
+// controls, NO secrets/env-vars, NO raw logs. Overall status + last-checked are
+// computed client-side from the four endpoint payloads.
+
+var _SYS_META = {
+    green:   { label: 'Healthy',            color: '#2e9e5b' },
+    amber:   { label: 'Degraded',           color: '#d98a00' },
+    red:     { label: 'Attention needed',   color: '#e5484d' },
+    unknown: { label: 'Status unavailable', color: '#9e9e9e' },
+};
+
+function _sysWorst(statuses) {
+    // Pick the most severe status. red > amber > green > unknown, but a known
+    // green always beats an unknown so one failed fetch never masks healthy.
+    var rank = { red: 3, amber: 2, green: 1, unknown: 0 };
+    var best = 'unknown';
+    statuses.forEach(function(s) {
+        if ((rank[s] || 0) > (rank[best] || 0)) best = s;
+    });
+    return best;
+}
+
+function _sysSentinelStatus(p) {
+    if (!p || !p.ok) return 'unknown';
+    var s = (p.data && p.data.summary) || {};
+    if ((s.down || 0) > 0) return 'red';
+    if ((s.degraded || 0) > 0) return 'amber';
+    return 'green';
+}
+
+function _sysFreshnessStatus(p) {
+    if (!p || !p.ok) return 'unknown';
+    var src = (p.data && p.data.sources) || [];
+    var seen = [];
+    src.forEach(function(s) {
+        if (s.status === 'red' || s.status === 'amber' || s.status === 'green') seen.push(s.status);
+    });
+    return seen.length ? _sysWorst(seen) : 'unknown';
+}
+
+function _sysSchedulerStatus(p) {
+    if (!p || !p.ok) return 'unknown';
+    return (p.data && p.data.running) ? 'green' : 'red';
+}
+
+function _sysVerifierStatus(p) {
+    if (!p || !p.ok) return 'unknown';
+    var d = p.data || {};
+    if (d.verifier_model_allowed === false) return 'red';
+    if (d.verifier_model_allowed === true) return 'green';
+    return 'unknown';
+}
+
+function _setSystemNavDot(status) {
+    var dot = document.getElementById('systemNavDot');
+    if (!dot) return;
+    dot.style.cssText = 'margin-top:1px;display:inline-block;width:8px;height:8px;border-radius:50%;'
+        + 'background:' + (_SYS_META[status] || _SYS_META.unknown).color + ';';
+}
+
+// Single fetch+compute path shared by the Today strip and the System console.
+async function _loadSystemHealth() {
+    var endpoints = [
+        ['sentinel',  '/api/sentinel-health'],
+        ['freshness', '/api/data-freshness'],
+        ['scheduler', '/api/scheduler-status'],
+        ['verifier',  '/api/triage/verifier/health'],
+    ];
+    var out = { checkedAt: new Date(), parts: {} };
+    await Promise.all(endpoints.map(function(e) {
+        var key = e[0];
+        return bakerFetch(e[1], { timeout: 12000 }).then(function(r) {
+            if (!r.ok) { out.parts[key] = { ok: false, httpStatus: r.status }; return; }
+            return r.json().then(function(d) { out.parts[key] = { ok: true, data: d }; });
+        }).catch(function(err) {
+            out.parts[key] = { ok: false, error: String(err) };
+        });
+    }));
+    out.statuses = {
+        sentinel:  _sysSentinelStatus(out.parts.sentinel),
+        freshness: _sysFreshnessStatus(out.parts.freshness),
+        scheduler: _sysSchedulerStatus(out.parts.scheduler),
+        verifier:  _sysVerifierStatus(out.parts.verifier),
+    };
+    out.overall = _sysWorst([
+        out.statuses.sentinel, out.statuses.freshness,
+        out.statuses.scheduler, out.statuses.verifier,
+    ]);
+    return out;
+}
+
+// Compact one-line health/freshness strip for the Today first screen.
+async function renderSystemHealthStrip() {
+    var strip = document.getElementById('todayHealthStrip');
+    if (!strip) return;
+    _injectSystemConsoleCSS();
+
+    // Bind navigation once (click + keyboard) — strip opens the full console.
+    if (!strip.dataset.bound) {
+        strip.dataset.bound = '1';
+        strip.addEventListener('click', function() { switchTab('system'); });
+        strip.addEventListener('keydown', function(e) {
+            if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); switchTab('system'); }
+        });
+    }
+
+    try {
+        var h = await _loadSystemHealth();
+        var meta = _SYS_META[h.overall] || _SYS_META.unknown;
+        _setSystemNavDot(h.overall);
+
+        strip.textContent = '';
+        strip.style.borderLeftColor = meta.color;
+
+        var dot = document.createElement('span');
+        dot.className = 'ths-dot';
+        dot.style.backgroundColor = meta.color;
+        strip.appendChild(dot);
+
+        var label = document.createElement('span');
+        label.className = 'ths-label';
+        label.style.color = meta.color;
+        label.textContent = 'Baker: ' + meta.label;
+        strip.appendChild(label);
+
+        // Compact per-signal summary, only naming what is not green.
+        var bits = [];
+        var st = h.statuses;
+        if (st.freshness === 'green') bits.push('data fresh');
+        else if (st.freshness === 'unknown') bits.push('freshness n/a');
+        else bits.push('data ' + (st.freshness === 'red' ? 'stale' : 'lagging'));
+        if (st.scheduler === 'green') bits.push('scheduler live');
+        else if (st.scheduler === 'red') bits.push('scheduler down');
+        if (st.sentinel === 'red') bits.push('sentinels down');
+        else if (st.sentinel === 'amber') bits.push('sentinels degraded');
+        if (st.verifier === 'red') bits.push('verifier off-floor');
+
+        var detail = document.createElement('span');
+        detail.className = 'ths-detail';
+        detail.textContent = bits.join(' · ');
+        strip.appendChild(detail);
+
+        var cta = document.createElement('span');
+        cta.className = 'ths-cta';
+        cta.textContent = 'System →';
+        strip.appendChild(cta);
+
+        strip.hidden = false;
+    } catch (e) {
+        // Degrade cleanly — never block Today on a health failure.
+        console.warn('renderSystemHealthStrip failed:', e);
+        strip.textContent = '';
+        var muted = document.createElement('span');
+        muted.className = 'ths-detail';
+        muted.textContent = 'System status unavailable';
+        strip.appendChild(muted);
+        strip.style.borderLeftColor = _SYS_META.unknown.color;
+        _setSystemNavDot('unknown');
+        strip.hidden = false;
+    }
+}
+
+// Full System Health console.
+async function loadSystemConsole() {
+    _injectSystemConsoleCSS();
+    var container = document.getElementById('systemConsoleContent');
+    if (!container) return;
+
+    var refreshBtn = document.getElementById('systemRefreshBtn');
+    if (refreshBtn) refreshBtn.onclick = loadSystemConsole;
+
+    showLoading(container, 'Loading system health');
+
+    var h;
+    try {
+        h = await _loadSystemHealth();
+    } catch (e) {
+        container.textContent = '';
+        var err = document.createElement('div');
+        err.className = 'syscon-section';
+        err.textContent = 'Failed to load system health.';
+        container.appendChild(err);
+        return;
+    }
+
+    container.textContent = '';
+    _setSystemNavDot(h.overall);
+
+    container.appendChild(_sysOverallBanner(h));
+    container.appendChild(_sysFreshnessSection(h.parts.freshness, h.statuses.freshness));
+    container.appendChild(_sysSentinelSection(h.parts.sentinel, h.statuses.sentinel));
+    container.appendChild(_sysSchedulerSection(h.parts.scheduler, h.statuses.scheduler));
+    container.appendChild(_sysVerifierSection(h.parts.verifier, h.statuses.verifier));
+    container.appendChild(_sysLastCheckedSection(h));
+}
+
+function _sysSectionCard(title, status) {
+    var meta = _SYS_META[status] || _SYS_META.unknown;
+    var card = document.createElement('div');
+    card.className = 'syscon-section';
+
+    var header = document.createElement('div');
+    header.className = 'syscon-section-head';
+
+    var t = document.createElement('span');
+    t.className = 'syscon-section-title';
+    t.textContent = title;
+    header.appendChild(t);
+
+    var badge = document.createElement('span');
+    badge.className = 'syscon-badge';
+    badge.style.color = meta.color;
+    var bdot = document.createElement('span');
+    bdot.className = 'syscon-dot';
+    bdot.style.backgroundColor = meta.color;
+    badge.appendChild(bdot);
+    var btxt = document.createElement('span');
+    btxt.textContent = meta.label;
+    badge.appendChild(btxt);
+    header.appendChild(badge);
+
+    card.appendChild(header);
+    var body = document.createElement('div');
+    body.className = 'syscon-body';
+    card.appendChild(body);
+    return { card: card, body: body };
+}
+
+function _sysRow(label, value, color) {
+    var row = document.createElement('div');
+    row.className = 'syscon-row';
+    var l = document.createElement('span');
+    l.className = 'syscon-row-label';
+    l.textContent = label;
+    row.appendChild(l);
+    var v = document.createElement('span');
+    v.className = 'syscon-row-val';
+    if (color) v.style.color = color;
+    v.textContent = value;
+    row.appendChild(v);
+    return row;
+}
+
+function _sysMuted(text) {
+    var d = document.createElement('div');
+    d.className = 'syscon-muted';
+    d.textContent = text;
+    return d;
+}
+
+function _sysOverallBanner(h) {
+    var meta = _SYS_META[h.overall] || _SYS_META.unknown;
+    var banner = document.createElement('div');
+    banner.className = 'syscon-overall';
+    banner.style.borderLeftColor = meta.color;
+
+    var dot = document.createElement('span');
+    dot.className = 'syscon-overall-dot';
+    dot.style.backgroundColor = meta.color;
+    banner.appendChild(dot);
+
+    var txt = document.createElement('div');
+    var head = document.createElement('div');
+    head.className = 'syscon-overall-label';
+    head.style.color = meta.color;
+    head.textContent = 'Baker is ' + meta.label.toLowerCase();
+    txt.appendChild(head);
+
+    var sub = document.createElement('div');
+    sub.className = 'syscon-overall-sub';
+    var s = h.statuses;
+    sub.textContent = 'Freshness ' + s.freshness + ' · Sentinels ' + s.sentinel
+        + ' · Scheduler ' + s.scheduler + ' · Verifier ' + s.verifier;
+    txt.appendChild(sub);
+    banner.appendChild(txt);
+    return banner;
+}
+
+function _sysFreshnessSection(part, status) {
+    var sc = _sysSectionCard('Data freshness', status);
+    if (!part || !part.ok) {
+        sc.body.appendChild(_sysMuted('Freshness data unavailable.'));
+        return sc.card;
+    }
+    var src = (part.data && part.data.sources) || [];
+    if (src.length === 0) {
+        sc.body.appendChild(_sysMuted('No data sources reporting.'));
+        return sc.card;
+    }
+    var colorMap = { green: '#2e9e5b', amber: '#d98a00', red: '#e5484d', unknown: '#9e9e9e' };
+    src.forEach(function(s) {
+        var when = s.watermark || s.latest;
+        var val = (when ? fmtRelativeTime(when) : 'no timestamp')
+            + ' · ' + (Number(s.count) || 0).toLocaleString();
+        sc.body.appendChild(_sysRow(esc(s.source || 'source'), val, colorMap[s.status] || colorMap.unknown));
+    });
+    var total = (part.data && part.data.total_records) || 0;
+    sc.body.appendChild(_sysMuted('Total records: ' + Number(total).toLocaleString()));
+    return sc.card;
+}
+
+function _sysSentinelSection(part, status) {
+    var sc = _sysSectionCard('Sentinel health', status);
+    if (!part || !part.ok) {
+        sc.body.appendChild(_sysMuted('Sentinel data unavailable.'));
+        return sc.card;
+    }
+    var sentinels = (part.data && part.data.sentinels) || [];
+    var summary = (part.data && part.data.summary) || {};
+    if (sentinels.length === 0) {
+        sc.body.appendChild(_sysMuted('No sentinels registered.'));
+        return sc.card;
+    }
+    var colorMap = { healthy: '#2e9e5b', degraded: '#d98a00', down: '#e5484d', unknown: '#9e9e9e' };
+    sentinels.forEach(function(s) {
+        var detail = s.status;
+        if (s.consecutive_failures > 0) detail += ' · ' + s.consecutive_failures + ' fail';
+        else if (s.last_success) detail += ' · ' + fmtRelativeTime(s.last_success);
+        sc.body.appendChild(_sysRow(esc(s.source || 'sentinel'), detail, colorMap[s.status] || colorMap.unknown));
+    });
+    sc.body.appendChild(_sysMuted(
+        (summary.healthy || 0) + ' healthy · ' + (summary.degraded || 0)
+        + ' degraded · ' + (summary.down || 0) + ' down'));
+    return sc.card;
+}
+
+function _sysSchedulerSection(part, status) {
+    var sc = _sysSectionCard('Scheduler', status);
+    if (!part || !part.ok) {
+        sc.body.appendChild(_sysMuted('Scheduler data unavailable.'));
+        return sc.card;
+    }
+    var d = part.data || {};
+    sc.body.appendChild(_sysRow('Running', d.running ? 'yes' : 'no',
+        d.running ? '#2e9e5b' : '#e5484d'));
+    sc.body.appendChild(_sysRow('Registered jobs', String(d.job_count || 0)));
+    var jobs = (d.jobs || []).slice().sort(function(a, b) {
+        if (!a.next_run) return 1;
+        if (!b.next_run) return -1;
+        return new Date(a.next_run) - new Date(b.next_run);
+    }).slice(0, 6);
+    jobs.forEach(function(j) {
+        var when = j.next_run ? fmtRelativeTime(j.next_run) : 'not scheduled';
+        sc.body.appendChild(_sysRow(esc(j.name || j.id || 'job'), 'next ' + when));
+    });
+    return sc.card;
+}
+
+function _sysVerifierSection(part, status) {
+    var sc = _sysSectionCard('Verifier', status);
+    if (!part || !part.ok) {
+        sc.body.appendChild(_sysMuted('Verifier data unavailable.'));
+        return sc.card;
+    }
+    var d = part.data || {};
+    sc.body.appendChild(_sysRow('Model', esc(d.verifier_model || 'unknown')));
+    sc.body.appendChild(_sysRow('Meets trusted floor',
+        d.verifier_model_allowed === true ? 'yes'
+            : d.verifier_model_allowed === false ? 'no' : 'unknown',
+        d.verifier_model_allowed === true ? '#2e9e5b'
+            : d.verifier_model_allowed === false ? '#e5484d' : '#9e9e9e'));
+    if (typeof d.awaiting_candidates_count === 'number') {
+        sc.body.appendChild(_sysRow('Awaiting verification', String(d.awaiting_candidates_count)));
+    } else if (d.count_unavailable) {
+        sc.body.appendChild(_sysMuted('Awaiting count unavailable.'));
+    }
+    var tables = d.supported_source_tables || [];
+    if (tables.length) sc.body.appendChild(_sysMuted('Sources: ' + tables.map(esc).join(', ')));
+    return sc.card;
+}
+
+function _sysLastCheckedSection(h) {
+    var card = document.createElement('div');
+    card.className = 'syscon-meta';
+    var when = h.checkedAt instanceof Date ? h.checkedAt : new Date();
+    card.textContent = 'Last checked: ' + when.toLocaleTimeString('en-GB',
+        { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+    var failed = [];
+    ['sentinel', 'freshness', 'scheduler', 'verifier'].forEach(function(k) {
+        if (!h.parts[k] || !h.parts[k].ok) failed.push(k);
+    });
+    if (failed.length) card.textContent += ' · unreachable: ' + failed.join(', ');
+    return card;
+}
+
+function _injectSystemConsoleCSS() {
+    if (document.getElementById('syscon-css')) return;
+    var s = document.createElement('style');
+    s.id = 'syscon-css';
+    s.textContent = [
+        '.syscon-header{display:flex;justify-content:space-between;align-items:center;margin-bottom:14px}',
+        '.syscon-refresh-btn{background:none;border:1px solid var(--border);border-radius:6px;padding:5px 12px;font-size:12px;cursor:pointer;color:var(--text2);font-family:inherit}',
+        '.syscon-refresh-btn:hover{background:var(--card)}',
+        '.syscon-overall{display:flex;align-items:center;gap:12px;background:var(--card);border:1px solid var(--border);border-left:4px solid #9e9e9e;border-radius:8px;padding:14px 16px;margin-bottom:14px}',
+        '.syscon-overall-dot{flex:0 0 auto;width:12px;height:12px;border-radius:50%}',
+        '.syscon-overall-label{font-size:15px;font-weight:700}',
+        '.syscon-overall-sub{font-size:12px;color:var(--text3);margin-top:2px}',
+        '.syscon-section{background:var(--card);border:1px solid var(--border);border-radius:8px;padding:12px 16px;margin-bottom:12px}',
+        '.syscon-section-head{display:flex;justify-content:space-between;align-items:center;margin-bottom:8px}',
+        '.syscon-section-title{font-size:12px;font-weight:700;text-transform:uppercase;letter-spacing:0.4px;color:var(--text3)}',
+        '.syscon-badge{display:inline-flex;align-items:center;gap:6px;font-size:12px;font-weight:600}',
+        '.syscon-dot{display:inline-block;width:8px;height:8px;border-radius:50%}',
+        '.syscon-body{display:flex;flex-direction:column}',
+        '.syscon-row{display:flex;justify-content:space-between;gap:12px;font-size:13px;padding:5px 0;border-bottom:1px solid var(--border)}',
+        '.syscon-row:last-child{border-bottom:none}',
+        '.syscon-row-label{color:var(--text2);word-break:break-word}',
+        '.syscon-row-val{color:var(--text);white-space:nowrap;font-variant-numeric:tabular-nums}',
+        '.syscon-muted{font-size:11px;color:var(--text3);margin-top:6px}',
+        '.syscon-meta{font-size:11px;color:var(--text3);margin-top:4px;text-align:right}',
+        // Today compact strip
+        '.today-health-strip{display:flex;align-items:center;flex-wrap:wrap;gap:8px;background:var(--card);border:1px solid var(--border);border-left:3px solid #9e9e9e;border-radius:8px;padding:8px 12px;margin-bottom:14px;cursor:pointer;font-size:12px}',
+        '.today-health-strip:hover{background:var(--bg2,var(--card));filter:brightness(1.03)}',
+        '.ths-dot{flex:0 0 auto;width:9px;height:9px;border-radius:50%}',
+        '.ths-label{font-weight:700}',
+        '.ths-detail{color:var(--text3)}',
+        '.ths-cta{margin-left:auto;color:var(--blue);font-weight:600;white-space:nowrap}',
+        '@media (max-width:480px){.syscon-row-val{white-space:normal}.ths-cta{margin-left:0}}',
+    ].join('\n');
+    document.head.appendChild(s);
 }
 
 // ═══ MATTERS SUMMARY (sidebar) ═══
