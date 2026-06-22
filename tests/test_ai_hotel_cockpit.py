@@ -537,3 +537,82 @@ def test_s51_internal_view_shows_revoked_for_audit(fresh_admin_backend):
     aud = lab.get_item_audit("nv-lighthouse-thesis", role="brisen")
     assert aud["revoked"] is True
     assert aud["revoke_reason"] and "superseded" in aud["revoke_reason"]
+
+
+# ═══ AI_HOTEL_LAB_ADMIN_WRITE_SCOPE_1 — admin mutations behind ai-hotel:write ═══
+# HTTP-layer scope gate, proven via TestClient (the dependency seam only applies over
+# HTTP; direct post_admin_action() unit calls above are unaffected).
+
+ADMIN_URL = "/ai-hotel-lab/api/admin/revoke?projection_item_id=nv-lighthouse-thesis"
+PACKET_URL = "/ai-hotel-lab/api/packet?role=nvidia"
+
+
+@pytest.fixture
+def aws_client(monkeypatch):
+    """TestClient with a known master key + deterministic session secret, so read /
+    write scope tokens can be minted and the X-Baker-Key path is exercised."""
+    from fastapi.testclient import TestClient
+    from outputs import dashboard
+    monkeypatch.setattr(dashboard, "_BAKER_API_KEY", "test-master-key")
+    monkeypatch.setattr(dashboard, "_ai_hotel_session_secret", lambda: b"test-secret-aws1")
+    return TestClient(dashboard.app), dashboard
+
+
+def test_aws_ac1_read_only_token_denied_on_admin(aws_client):
+    c, dashboard = aws_client
+    read_cookie = dashboard._ai_hotel_sign_session()  # ai-hotel:read
+    r = c.post(ADMIN_URL, cookies={dashboard._AI_HOTEL_SESSION_COOKIE: read_cookie})
+    assert r.status_code == 403   # authenticated for reads, insufficient for mutation
+
+
+def test_aws_ac2_master_key_allowed_on_admin(aws_client):
+    c, dashboard = aws_client
+    r = c.post(ADMIN_URL, headers={"X-Baker-Key": "test-master-key"})
+    assert r.status_code == 200
+    assert r.json()["projection_state"] == "revoked"
+
+
+def test_aws_ac2_write_scope_cookie_allowed_on_admin(aws_client):
+    c, dashboard = aws_client
+    write_cookie = dashboard._ai_hotel_sign_session(dashboard._AI_HOTEL_WRITE_SCOPE)
+    r = c.post(ADMIN_URL, cookies={dashboard._AI_HOTEL_SESSION_COOKIE: write_cookie})
+    assert r.status_code == 200
+    assert r.json()["action"] == "revoke"
+
+
+def test_aws_ac3_reads_unaffected_by_read_token_and_master_key(aws_client):
+    c, dashboard = aws_client
+    # read scope cookie still serves reads
+    read_cookie = dashboard._ai_hotel_sign_session()
+    assert c.get(PACKET_URL, cookies={dashboard._AI_HOTEL_SESSION_COOKIE: read_cookie}).status_code == 200
+    # master key still serves reads
+    assert c.get(PACKET_URL, headers={"X-Baker-Key": "test-master-key"}).status_code == 200
+
+
+def test_aws_ac4_missing_credential_fails_closed_on_admin(aws_client):
+    c, dashboard = aws_client
+    assert c.post(ADMIN_URL).status_code == 401   # no cookie, no key → fail closed
+
+
+def test_aws_ac4_forged_scope_token_fails_closed(aws_client):
+    c, dashboard = aws_client
+    # A token claiming write scope but signed with the WRONG secret must not pass.
+    monkeypatch_secret = b"attacker-secret"
+    import hmac as _hmac, hashlib as _hashlib, json as _json
+    payload = {"scope": dashboard._AI_HOTEL_WRITE_SCOPE, "iat": 0, "exp": 9999999999, "nonce": "x"}
+    body = dashboard._ai_hotel_b64url(_json.dumps(payload).encode())
+    sig = _hmac.new(monkeypatch_secret, body.encode(), _hashlib.sha256).digest()
+    forged = f"{body}.{dashboard._ai_hotel_b64url(sig)}"
+    r = c.post(ADMIN_URL, cookies={dashboard._AI_HOTEL_SESSION_COOKIE: forged})
+    assert r.status_code in (401, 403)   # signature mismatch → not a valid scope
+
+
+def test_aws_ac4_expired_write_token_fails_closed(aws_client, monkeypatch):
+    c, dashboard = aws_client
+    import json as _json, hmac as _hmac, hashlib as _hashlib
+    payload = {"scope": dashboard._AI_HOTEL_WRITE_SCOPE, "iat": 0, "exp": 1, "nonce": "x"}
+    body = dashboard._ai_hotel_b64url(_json.dumps(payload).encode())
+    sig = _hmac.new(b"test-secret-aws1", body.encode(), _hashlib.sha256).digest()
+    expired = f"{body}.{dashboard._ai_hotel_b64url(sig)}"
+    r = c.post(ADMIN_URL, cookies={dashboard._AI_HOTEL_SESSION_COOKIE: expired})
+    assert r.status_code in (401, 403)   # expired → fail closed

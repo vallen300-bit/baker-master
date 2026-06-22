@@ -330,6 +330,16 @@ def _read_auth():  # pragma: no cover - overridden at include time
     return None
 
 
+# AI_HOTEL_LAB_ADMIN_WRITE_SCOPE_1: placeholder write-scope gate for the admin
+# mutation route. dashboard.py binds the real `verify_ai_hotel_write_access` to this
+# via `app.dependency_overrides` at include time (the module can't import dashboard —
+# circular). Standalone (no override) it is a no-op so the module stays importable and
+# direct unit calls to post_admin_action are unaffected; the HTTP write gate is proven
+# via TestClient. The inner policy-layer human-admin check is unchanged.
+def _write_auth():  # pragma: no cover - overridden at include time
+    return None
+
+
 # --------------------------------------------------------------------------- #
 # Endpoints — every external payload is built server-side via policy.projection.
 # --------------------------------------------------------------------------- #
@@ -676,7 +686,7 @@ def get_evidence(role: str = Query("brisen")) -> Mapping:
 # projection-admin store (no longer the in-memory seed), so the kill switch is durable
 # across restart (AC1) and idempotent (AC8) via the deterministic opaque record id.
 # --------------------------------------------------------------------------- #
-@router.post("/api/admin/{action}")
+@router.post("/api/admin/{action}", dependencies=[Depends(_write_auth)])
 def post_admin_action(action: str, projection_item_id: str = Query(...),
                       reason: str = Query("")) -> Mapping:
     """approve / revoke / refresh on a projection item (by source evidence object id).
