@@ -456,6 +456,12 @@ app.include_router(slack_interactivity_router, prefix="/webhook")
 from outputs.email_router import router as email_router
 app.include_router(email_router)
 
+# AI Hotel Lab cockpit (AI_HOTEL_LAB_COCKPIT_UI_1) — auth-gated like other AI-Hotel
+# surfaces. Read endpoints serve policy.projection packets server-side; the browser
+# never receives raw rows for an external role.
+from outputs.ai_hotel_lab import router as ai_hotel_lab_router
+app.include_router(ai_hotel_lab_router, dependencies=[Depends(verify_ai_hotel_read_access)])
+
 app.add_middleware(
     CORSMiddleware,
     allow_origins=_allowed_origins,
