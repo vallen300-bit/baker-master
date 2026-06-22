@@ -789,12 +789,20 @@ _COCKPIT_HTML = r"""<!DOCTYPE html>
 <style>
   :root{
     --canvas:#F7F6F2; --sidebar:#EFEEE8; --panel:#FFFFFF; --panel-hover:#FAF9F5;
+    --card:#FFFFFF; --card-hover:#FAF9F5;
     --ink:#171717; --text-2:#54524C; --muted:#767168; --faint:#9B958B;
-    --line:#DDD8CE; --line-2:#ECE8DE; --accent:#1D1D1D; --blue:#0969DA;
+    --line:#DDD8CE; --line-2:#ECE8DE; --accent:#1D1D1D; --blue:#0969DA; --id-blue:#0969DA;
+    --blue-line:rgba(9,105,218,.34);
+    --id-blue-line:rgba(9,105,218,.34);
+    --id-blue-weak:rgba(9,105,218,.10);
     --blue-soft:#E8F1FE; --amber:#B7791F; --amber-soft:#F8E9CA;
     --green:#4C8F2F; --green-soft:#E7F1E4; --red:#A4423F; --red-soft:#F4E5E3;
-    --shadow:0 18px 42px rgba(30,24,12,.08),0 1px 0 rgba(255,255,255,.9) inset;
+    --shadow:0 18px 36px rgba(31,28,20,.12),0 4px 10px rgba(31,28,20,.08),inset 0 1px 0 rgba(255,255,255,.72);
+    --shadow-hover:0 24px 46px rgba(31,28,20,.15),0 6px 14px rgba(31,28,20,.10),inset 0 1px 0 rgba(255,255,255,.82);
     --shadow-sm:0 10px 24px rgba(30,24,12,.06),0 1px 0 rgba(255,255,255,.9) inset;
+    --mono:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
+    --sans:-apple-system,BlinkMacSystemFont,"Segoe UI",Helvetica,Arial,sans-serif;
+    --sbw:250px;
   }
   *{box-sizing:border-box}
   html{background:var(--canvas)}
@@ -804,59 +812,69 @@ _COCKPIT_HTML = r"""<!DOCTYPE html>
   }
   button,input{font:inherit;letter-spacing:0}
   button:focus-visible,input:focus-visible,a:focus-visible{outline:3px solid rgba(9,105,218,.22);outline-offset:2px}
-  header{
-    background:#fffdf9;border-bottom:1px solid var(--line);padding:22px 26px 18px;
-  }
-  .hero{display:grid;grid-template-columns:minmax(360px,1.45fr) minmax(280px,.75fr);gap:16px;max-width:1480px;margin:0 auto}
-  .hero-main,.partner-gate,.searchbar,.stat,.panel,.item{background:var(--panel);border:1px solid var(--line);box-shadow:var(--shadow-sm)}
-  .hero-main{border-radius:8px;padding:22px 24px}
-  .eyebrow,.stat .k,nav .seclabel{color:var(--blue);font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:0}
-  h1{font-size:30px;line-height:1.12;margin:4px 0 8px;font-weight:650;letter-spacing:0}
-  .hero-copy{max-width:760px;color:var(--text-2);font-size:15px;margin:0}
-  .milestone{
-    display:inline-flex;align-items:center;gap:7px;margin-top:16px;font-size:12px;color:var(--text-2);
-    border:1px solid var(--line);border-radius:999px;padding:5px 10px;background:var(--panel-hover);
-  }
-  .milestone:before{content:"";width:7px;height:7px;border-radius:50%;background:var(--green);box-shadow:0 0 0 4px var(--green-soft)}
-  .partner-gate{border-radius:8px;padding:18px 20px}
-  .partner-gate .label{font-size:12px;color:var(--muted);font-weight:600}
-  .partner-gate .title{font-size:22px;line-height:1.14;font-weight:650;margin:6px 0;color:var(--ink)}
-  .partner-gate p{margin:0;color:var(--text-2);font-size:13px}
-  .roles{display:flex;gap:7px;flex-wrap:wrap;margin-top:18px}
+  .app{position:relative;display:grid;grid-template-columns:var(--sbw) 1fr;min-height:100vh}
+  .sidebar{background:var(--sidebar);border-right:1px solid var(--line);display:flex;flex-direction:column;position:sticky;top:0;height:100vh;overflow-y:auto}
+  .brand{padding:20px 18px 14px;display:flex;align-items:center;gap:11px}
+  .brand .mark{width:30px;height:30px;border-radius:8px;background:var(--accent);color:#fff;display:grid;place-items:center;flex:0 0 auto}
+  .brand .mark svg{width:17px;height:17px;stroke-width:2}
+  .brand .name{font-weight:650;font-size:15px;letter-spacing:0}
+  .brand .sub{font-size:10.5px;color:var(--muted);margin-top:2px;font-family:var(--mono)}
+  .navlabel{font-size:10px;text-transform:uppercase;letter-spacing:.13em;color:var(--faint);padding:16px 20px 8px;font-weight:700;font-family:var(--mono)}
+  .audience-box{padding-bottom:6px}
+  .roles{display:flex;flex-direction:column;gap:6px;margin:0 14px}
   .roles button{
-    min-height:36px;padding:7px 12px;border:1px solid var(--line);background:var(--panel);
-    border-radius:999px;cursor:pointer;color:var(--ink);box-shadow:0 1px 0 rgba(255,255,255,.8) inset;
+    min-height:34px;padding:7px 10px;border:1px solid var(--line);background:transparent;
+    border-radius:8px;cursor:pointer;color:var(--text-2);box-shadow:none;text-align:left;font-size:13px;
   }
-  .roles button:hover{background:var(--panel-hover);border-color:#c9c1b4}
+  .roles button:hover{background:var(--panel);border-color:var(--line);color:var(--ink)}
   .roles button.active{background:var(--accent);color:#fff;border-color:var(--accent)}
-  .firstscreen{max-width:1480px;margin:14px auto 0;display:grid;grid-template-columns:repeat(6,minmax(140px,1fr));gap:10px}
-  .stat{border-radius:8px;padding:12px 13px;min-height:82px}
-  .stat .k{color:var(--muted);font-size:10px}
-  .stat .v{font-size:14px;font-weight:650;line-height:1.28;margin-top:7px;color:var(--ink)}
-  .searchbar{max-width:1480px;margin:14px auto 0;display:flex;gap:10px;border-radius:8px;padding:10px}
-  .searchbar input{flex:1;min-width:0;padding:10px 12px;border:1px solid var(--line);border-radius:7px;background:#fff;color:var(--ink)}
-  .searchbar button{min-height:40px;padding:9px 16px;border:1px solid var(--accent);background:var(--accent);color:#fff;border-radius:7px;cursor:pointer;font-weight:650}
-  .searchbar button:hover{background:#000}
-  .layout{display:flex;min-height:60vh;max-width:1480px;margin:0 auto}
-  nav{width:250px;flex:0 0 250px;border-right:1px solid var(--line);padding:18px 12px;background:var(--sidebar)}
-  nav a{display:block;padding:9px 12px;color:var(--ink);text-decoration:none;font-size:14px;cursor:pointer;border-radius:7px;border:1px solid transparent;margin:2px 0}
-  nav a:hover{background:rgba(255,255,255,.55);border-color:var(--line)}
-  nav a.active{font-weight:650;background:var(--panel);border-color:var(--line);box-shadow:var(--shadow-sm)}
-  nav .seclabel{color:var(--muted);padding:16px 12px 6px}
-  main{flex:1;padding:24px;min-width:0}
-  .panel{border-radius:8px;padding:18px;margin-bottom:18px}
+  .side-search{margin:10px 14px 8px;display:grid;grid-template-columns:1fr auto;gap:6px}
+  .side-search input{min-width:0;padding:9px 10px;border:1px solid var(--line);border-radius:8px;font-size:13px;background:var(--canvas);color:var(--ink);font-family:inherit}
+  .side-search input::placeholder{color:var(--muted)}
+  .side-search input:focus{outline:none;border-color:var(--accent);box-shadow:0 0 0 3px rgba(29,29,29,.08)}
+  .side-search button{border:1px solid var(--accent);background:var(--accent);color:#fff;border-radius:8px;padding:0 10px;cursor:pointer;font-weight:700}
+  .side-search button:hover{background:#000}
+  nav{padding:0 8px 12px}
+  nav a{display:flex;align-items:center;gap:10px;width:100%;padding:9px 12px;color:var(--text-2);text-decoration:none;font-size:14px;cursor:pointer;border-radius:8px;border:1px solid transparent;margin:2px 0;position:relative}
+  nav a:hover{background:var(--panel);border-color:var(--line);color:var(--ink)}
+  nav a.active{font-weight:650;background:rgba(29,29,29,.08);border-color:transparent;color:var(--accent)}
+  nav a.active::before{content:"";position:absolute;left:-8px;top:8px;bottom:8px;width:3px;border-radius:2px;background:var(--accent)}
+  .sb-foot{margin-top:auto;padding:14px 20px 20px;font-size:11px;color:var(--muted);display:flex;align-items:center;gap:7px;font-family:var(--mono)}
+  .dot{width:6px;height:6px;border-radius:50%;background:var(--green);box-shadow:0 0 0 3px var(--green-soft);flex:0 0 auto}
+  .work{padding:44px 48px 90px;max-width:1000px;width:100%;min-width:0}
+  .main-top{display:flex;align-items:center;justify-content:space-between;gap:16px;margin:0 0 28px;padding-bottom:18px;border-bottom:1px solid var(--line)}
+  .draft-line{display:flex;align-items:center;gap:9px;color:var(--muted);font:600 11px/1 var(--mono);text-transform:uppercase;letter-spacing:.08em}
+  .control-note{font-size:12px;color:var(--muted);text-align:right;max-width:360px}
+  .kicker{display:inline-flex;align-items:center;width:max-content;font:700 11px/1 var(--mono);color:var(--blue);background:var(--blue-soft);border:1px solid var(--blue-line);border-radius:5px;margin-bottom:12px;text-transform:uppercase;letter-spacing:.14em;padding:5px 8px}
+  h1.sec{font-size:26px;line-height:1.18;margin:0 0 9px;letter-spacing:0;font-weight:650}
+  .sec-sub{color:var(--muted);font-size:14px;margin-bottom:24px;max-width:72ch;line-height:1.6}
+  .firstscreen{display:grid;grid-template-columns:1.35fr repeat(3,1fr);gap:12px;margin:0 0 24px}
+  .state-card{background:var(--panel);border:1px solid var(--line);border-radius:8px;padding:14px 15px;box-shadow:var(--shadow);transition:border-color .14s,box-shadow .14s,transform .14s;min-height:88px}
+  .state-card:hover{border-color:var(--blue-line);box-shadow:var(--shadow-hover);transform:translateY(-1px)}
+  .state-card .label{display:inline-flex;width:max-content;font:700 10px/1 var(--mono);letter-spacing:.1em;text-transform:uppercase;color:var(--blue);background:var(--blue-soft);border:1px solid var(--blue-line);border-radius:5px;margin-bottom:10px;padding:4px 7px}
+  .state-card .value{font-size:13px;line-height:1.45;color:var(--text-2)}
+  .state-card.primary .value{font-size:14px;color:var(--ink);font-weight:650}
+  main{min-width:0}
+  .panel{padding:0;margin-bottom:18px;background:transparent;border:0;box-shadow:none}
   .panel h2{font-size:13px;margin:0 0 13px;text-transform:uppercase;letter-spacing:0;color:var(--blue)}
-  .item{border-radius:8px;padding:14px 15px;margin-bottom:10px}
-  .item:hover{background:var(--panel-hover);border-color:#cfc6b9}
+  .panel-note{font-size:13px;color:var(--text-2);line-height:1.5;margin:-6px 0 14px;max-width:78ch}
+  .item{border-radius:8px;padding:16px 18px;margin:0 0 13px;background:var(--card);border:1px solid var(--line);box-shadow:var(--shadow);transition:border-color .14s,box-shadow .14s}
+  .item:hover{background:var(--card-hover);border-color:var(--id-blue-line);box-shadow:var(--shadow-hover)}
   .item.clickable{cursor:pointer}
   .item.clickable:focus-visible{outline:3px solid rgba(9,105,218,.22);outline-offset:2px}
   .item .claim{font-weight:650;font-size:15px;line-height:1.35;color:var(--ink)}
   .item .meta{font-size:12px;color:var(--muted);margin-top:7px}
-  .badge{display:inline-flex;align-items:center;min-height:21px;font-size:10px;text-transform:uppercase;letter-spacing:0;padding:2px 7px;border-radius:999px;margin-right:6px;font-weight:750}
+  .card-kicker{display:flex;gap:6px;flex-wrap:wrap;align-items:center;margin-bottom:8px}
+  .card-title{font-weight:650;font-size:16px;line-height:1.32;color:var(--ink)}
+  .card-summary{font-size:13px;color:var(--text-2);line-height:1.42;margin-top:6px;max-width:860px}
+  .card-action{font-size:13px;color:#174B8B;background:var(--blue-soft);border:1px solid rgba(9,105,218,.18);border-radius:7px;padding:8px 10px;margin-top:10px}
+  .card-footer{display:flex;gap:6px;flex-wrap:wrap;margin-top:11px}
+  .badge{display:inline-flex;align-items:center;min-height:21px;font-size:10px;text-transform:uppercase;letter-spacing:0;padding:2px 7px;border-radius:6px;margin-right:6px;font-weight:750}
   .b-raw{background:var(--amber-soft);color:var(--amber);border:1px solid rgba(183,121,31,.34)}
   .b-verified{background:var(--green-soft);color:var(--green);border:1px solid rgba(76,143,47,.3)}
   .b-gap{background:var(--red-soft);color:var(--red);border:1px solid rgba(164,66,63,.28)}
   .b-state{background:var(--blue-soft);color:var(--blue);border:1px solid rgba(9,105,218,.2)}
+  .b-neutral{background:var(--panel-hover);color:var(--text-2);border:1px solid var(--line)}
   .raw-card{border-left:4px solid var(--amber);background:#fffaf0}
   .verified-card{border-left:4px solid var(--green)}
   .btn{min-height:34px;padding:6px 11px;border:1px solid var(--line);background:var(--panel);border-radius:7px;cursor:pointer;margin:10px 6px 0 0;font-weight:600}
@@ -883,30 +901,46 @@ _COCKPIT_HTML = r"""<!DOCTYPE html>
   .detail-close{min-width:36px;min-height:36px;border:1px solid var(--line);border-radius:7px;background:var(--panel-hover);cursor:pointer;font-weight:650}
   .detail-badges{display:flex;gap:6px;flex-wrap:wrap;margin:6px 0 16px}
   .detail-summary{color:var(--text-2);font-size:14px;margin:0 0 16px}
+  .detail-section{border-top:1px solid var(--line-2);padding-top:12px;margin-top:12px}
+  .detail-section:first-of-type{border-top:none;padding-top:0}
+  .detail-section-title{font-size:10px;text-transform:uppercase;color:var(--muted);font-weight:750;margin-bottom:4px}
+  .detail-section-body{font-size:14px;color:var(--ink);line-height:1.45}
+  .detail-safe{background:var(--green-soft);border:1px solid rgba(76,143,47,.22);border-radius:8px;padding:10px 12px}
+  .detail-watch{background:var(--amber-soft);border:1px solid rgba(183,121,31,.24);border-radius:8px;padding:10px 12px}
   .detail-grid{display:grid;grid-template-columns:1fr;gap:9px}
   .detail-field{border-top:1px solid var(--line-2);padding-top:9px}
   .detail-label{font-size:10px;text-transform:uppercase;color:var(--muted);font-weight:750}
   .detail-value{font-size:13px;color:var(--ink);margin-top:3px;overflow-wrap:anywhere}
-  @media(max-width:1040px){
-    header{padding:18px 18px 14px}.hero{grid-template-columns:1fr}.firstscreen{grid-template-columns:repeat(3,minmax(140px,1fr))}
-    .layout{display:block}nav{width:auto;display:flex;gap:6px;overflow-x:auto;border-right:none;border-bottom:1px solid var(--line);padding:12px}
-    nav .seclabel{display:none}nav a{white-space:nowrap}main{padding:18px}
+  details.internal-audit{border-top:1px solid var(--line-2);margin-top:14px;padding-top:12px}
+  details.internal-audit summary{cursor:pointer;font-size:11px;text-transform:uppercase;color:var(--muted);font-weight:750}
+  details.projection-controls{margin-top:10px;border-top:1px solid var(--line-2);padding-top:10px}
+  details.projection-controls summary{cursor:pointer;font-size:11px;text-transform:uppercase;color:var(--muted);font-weight:750}
+  @media(max-width:1120px){
+    .firstscreen{grid-template-columns:repeat(2,minmax(140px,1fr))}
+    .work{padding:34px 34px 70px}
   }
-  @media(max-width:680px){
-    h1{font-size:26px}.hero-main,.partner-gate{padding:17px}.firstscreen{grid-template-columns:1fr 1fr}
-    .searchbar{display:block}.searchbar button{width:100%;margin-top:8px}
-    .detail-panel{top:auto;left:0;right:0;bottom:0;width:100%;max-height:82vh;border-radius:8px 8px 0 0}
-  }
-  @media(max-width:420px){.firstscreen{grid-template-columns:1fr}.roles button{width:100%;justify-content:center}}
 </style></head>
 <body>
-<header>
-  <section class="hero" aria-label="AI Hotel Lab status">
-    <div class="hero-main">
-      <div class="eyebrow">NVIDIA × Mandarin Oriental × Brisen</div>
-      <h1>AI Hotel Lab</h1>
-      <p class="hero-copy">Governed project room for the AI-hospitality lighthouse: partner-safe evidence, role-specific packets, source coverage, and Brisen-controlled activation.</p>
-      <span class="milestone">Partner-live capable · activation held</span>
+<div class="app" id="app">
+  <aside class="sidebar" id="sidebar">
+    <div class="brand">
+      <div class="mark" aria-hidden="true">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round">
+          <rect x="4" y="2" width="16" height="20" rx="1.5"></rect>
+          <path d="M9 22v-4h6v4"></path>
+          <line x1="9" y1="6" x2="9" y2="6.01"></line>
+          <line x1="15" y1="6" x2="15" y2="6.01"></line>
+          <line x1="9" y1="10" x2="9" y2="10.01"></line>
+          <line x1="15" y1="10" x2="15" y2="10.01"></line>
+        </svg>
+      </div>
+      <div>
+        <div class="name">AI Hotel Lab</div>
+        <div class="sub">Partner evidence cockpit</div>
+      </div>
+    </div>
+    <div class="audience-box">
+      <div class="navlabel">Audience</div>
       <div class="roles" id="roles">
         <button data-role="brisen" class="active">Brisen (internal)</button>
         <button data-role="nvidia">View as NVIDIA</button>
@@ -914,31 +948,35 @@ _COCKPIT_HTML = r"""<!DOCTYPE html>
         <button data-role="venue">View as Venue Owner</button>
       </div>
     </div>
-    <div class="partner-gate">
-      <div class="label">Control state</div>
-      <div class="title">Safe to demonstrate. Not opened externally.</div>
-      <p>Technical gates are clear. Real partner access remains held until the first audience, access mode, and visible scope are ratified.</p>
+    <div class="navlabel">Search</div>
+    <div class="side-search">
+      <input id="q" placeholder="Evidence, source, packet state"/>
+      <button id="searchbtn" aria-label="Search">Go</button>
     </div>
+    <nav id="nav">
+      <div class="navlabel">Surfaces</div>
+      <a data-view="overview" class="active">Overview</a>
+      <a data-view="raw">Raw Signal Inbox</a>
+      <a data-view="evidence">Verified Evidence</a>
+      <a data-view="projection">Partner Projection</a>
+      <a data-view="sources">Source Registry / Coverage</a>
+      <a data-view="search">Advanced Search</a>
+      <div class="navlabel">Execution</div>
+      <a data-view="roadmap">Execution Roadmap</a>
+    </nav>
+    <div class="sb-foot"><span class="dot"></span><span>Partner-live capable · activation held</span></div>
+  </aside>
+  <section class="work">
+    <div class="main-top">
+      <div class="draft-line"><span class="dot"></span><span>NVIDIA × Mandarin Oriental × Brisen</span></div>
+      <div class="control-note">Safe to demonstrate. Real partner access remains held until audience, access mode, and visible scope are ratified.</div>
+    </div>
+    <div class="kicker">Governed project room</div>
+    <h1 class="sec">AI Hotel Lab</h1>
+    <p class="sec-sub">Partner-safe evidence, role-specific packets, source coverage, and Brisen-controlled activation for the AI-hospitality lighthouse.</p>
+    <div class="firstscreen" id="firstscreen"></div>
+    <main id="main"></main>
   </section>
-  <div class="firstscreen" id="firstscreen"></div>
-  <div class="searchbar">
-    <input id="q" placeholder="Search governed evidence, source coverage, and partner-safe packet state"/>
-    <button id="searchbtn">Search</button>
-  </div>
-</header>
-<div class="layout">
-  <nav id="nav">
-    <div class="seclabel">Surfaces</div>
-    <a data-view="overview" class="active">Overview</a>
-    <a data-view="raw">Raw Signal Inbox</a>
-    <a data-view="evidence">Verified Evidence</a>
-    <a data-view="projection">Partner Projection</a>
-    <a data-view="sources">Source Registry / Coverage</a>
-    <a data-view="search">Advanced Search</a>
-    <div class="seclabel">Execution</div>
-    <a data-view="roadmap">Execution Roadmap</a>
-  </nav>
-  <main id="main"></main>
 </div>
 <div id="detaildrawer" class="detail-layer" aria-live="polite"></div>
 <script>
@@ -977,24 +1015,128 @@ function setView(v){ VIEW=v; document.querySelectorAll('#nav a').forEach(a=>a.cl
 document.querySelectorAll('#roles button').forEach(b=>b.onclick=()=>setRole(b.dataset.role));
 document.querySelectorAll('#nav a').forEach(a=>a.onclick=()=>setView(a.dataset.view));
 document.getElementById('searchbtn').onclick=runSearch;
+document.getElementById('q').addEventListener('keydown',e=>{ if(e.key==='Enter') runSearch(); });
 
-function stat(k,v){ return h('div',{class:'stat'},[h('div',{class:'k',text:k}),h('div',{class:'v',text:String(v)})]); }
+function stat(k,v,primary){
+  return h('div',{class:'state-card '+(primary?'primary':'')},[
+    h('div',{class:'label',text:k}),
+    h('div',{class:'value',text:String(v)})
+  ]);
+}
 async function renderFirstScreen(){
   const fs=document.getElementById('firstscreen'); clear(fs);
   const pkt=await api('packet'); if(!pkt){ fs.appendChild(stat('status','unavailable')); return; }
   const c=pkt.counts||{};
-  [['Thesis','AI-hospitality lighthouse governed by partner-safe evidence'],
+  [['Thesis','AI-hospitality lighthouse governed by partner-safe evidence',true],
    ['Status','Sprint-0 live · gates cleared'],
    ['Next action','Controlled demo before external access'],
-   ['Evidence freshness',pkt.last_generated_at?pkt.last_generated_at.slice(0,10):'—'],
-   ['External sharing',isExternal()?'View-as preview · not partner-live':'Brisen control'],
-   ['Visible packet',(c.visible||0)+' items · '+(c.action_linked||0)+' action-linked']
-  ].forEach(s=>fs.appendChild(stat(s[0],s[1])));
+   ['Evidence',(c.visible||0)+' items · '+(c.action_linked||0)+' action-linked · '+(pkt.last_generated_at?pkt.last_generated_at.slice(0,10):'freshness pending')]
+  ].forEach(s=>fs.appendChild(stat(s[0],s[1],s[2])));
 }
 function sectionItems(pkt){ const out=[]; for(const sec in (pkt.sections||{})){ const v=pkt.sections[sec]; if(Array.isArray(v)) v.forEach(i=>out.push({sec,i})); } return out; }
 function panel(title, extra){ const p=h('div',{class:'panel'},[h('h2',{text:title})]); if(extra)p.appendChild(extra); return p; }
+function panelNote(p,text){ if(text) p.appendChild(h('div',{class:'panel-note',text:text})); return p; }
 function notice(txt){ return h('div',{class:'notice',text:txt}); }
+const SECTION_LABELS={
+  nvidia_lighthouse:'NVIDIA lighthouse',
+  mandarin_oriental_operator_logic:'MOHG operating standards',
+  market_proof_competitive_set:'Market proof',
+  santa_clara_site_thesis:'Santa Clara site thesis',
+  business_case_financing:'Business case',
+  marketing_pr:'Public market context',
+  comms_email_wa_slack:'Comms source coverage',
+  open_web:'Open-web source coverage',
+  site_search_public:'Public authority search'
+};
+const STATE_LABELS={
+  projected_shared_view:'Partner-safe evidence',
+  action_linked_visible:'Partner-safe action',
+  projectable_candidate:'Internal candidate',
+  not_projectable:'Internal only',
+  stale_projection:'Needs refresh',
+  revoked:'Revoked',
+  shared_view:'Shared evidence',
+  action_linked:'Action ready',
+  verified_evidence:'Verified evidence',
+  raw_signal:'Raw signal',
+  gap:'Not wired yet',
+  wired:'Live source',
+  partial:'Partly wired',
+  available:'Available',
+  not_available:'Not available'
+};
+const STATE_COPY={
+  projected_shared_view:'Approved to appear in a controlled partner packet.',
+  action_linked_visible:'Approved to appear externally and tied to a next action.',
+  projectable_candidate:'Useful internally, but not opened to partners yet.',
+  not_projectable:'Keep internal until verified and approved.',
+  stale_projection:'Do not rely on this externally until the evidence is refreshed.',
+  revoked:'Withdrawn from partner views by the control process.',
+  shared_view:'Safe for the selected partner view.',
+  action_linked:'Safe for the selected partner view and tied to a next action.',
+  verified_evidence:'Reviewed evidence that can support Brisen decisions.',
+  raw_signal:'Unverified input. Use for triage, not for partner presentation.'
+};
+const SOURCE_LABELS={
+  research_artifact:'Research artifact',
+  meeting:'Joint working session',
+  press:'Public press source',
+  strategy_note:'Strategy note',
+  open_web:'Open-web signal',
+  site_evidence:'Site diligence evidence',
+  market_data:'Market data'
+};
+function prettyKey(v){
+  if(v==null || v==='') return 'Not set';
+  const s=String(v);
+  return SECTION_LABELS[s]||STATE_LABELS[s]||SOURCE_LABELS[s]||
+    s.replace(/_/g,' ').replace(/\b\w/g,c=>c.toUpperCase());
+}
+function rawState(item){
+  return item.evidence_status||item.projection_state||item.lifecycle_state||item.collection_status||item.availability||'available';
+}
+function sourceText(item){ return prettyKey(item.source_label_safe||item.source_type||item.label||'Evidence source'); }
+function confidenceValue(item){ return item.evidence_confidence!=null?item.evidence_confidence:item.confidence; }
+function confidenceText(item){
+  const c=confidenceValue(item);
+  if(c==null || c==='') return null;
+  const pct=Math.round(Number(c)*100);
+  if(!Number.isFinite(pct)) return 'Confidence '+c;
+  return (pct>=80?'High':pct>=65?'Moderate':'Watch')+' confidence · '+pct+'%';
+}
+function freshnessText(item){ return item.freshness||item.last_verified_at||item.last_reviewed||null; }
 function displayTitle(i){ return i.display_title||i.claim||i.display_summary||i.title||i.result_ref||i.label||i.source_type||'Detail'; }
+function meaningText(item,section){
+  const title=displayTitle(item);
+  if(item.display_summary && item.display_summary!==title) return item.display_summary;
+  if(/lighthouse thesis/i.test(title)) return 'Supports the core claim that the AI Hotel concept is grounded in real hotel-operator work, not a generic AI demo.';
+  if(/Reference-architecture pilot/i.test(title)) return 'Defines the next NVIDIA-facing pilot discussion: confirm the technical scope for the lighthouse site.';
+  if(/Service-standard alignment/i.test(title)) return 'Shows that AI-assisted operations can be aligned with Mandarin Oriental service standards.';
+  if(/Occupancy uplift/i.test(title)) return 'Potential market upside signal; useful internally, but it needs a refresh before partner use.';
+  if(/Unconfirmed competitor/i.test(title)) return 'Early market signal only. It should stay internal until confirmed.';
+  if(/Santa Clara site diligence/i.test(title)) return 'Supports the site-level case that the operating thesis can be tested at the selected location.';
+  if(/Prior site note/i.test(title)) return 'Withdrawn site note. Keep it only as control history, not as active evidence.';
+  if(/Financing structure/i.test(title)) return 'Internal business-case material for Brisen financing and negotiation posture.';
+  if(/Public hospitality-press/i.test(title)) return 'Public market context that can support a partner discussion without exposing internal work.';
+  if(item.gap_reason||item.reason) return 'A missing evidence connector or workflow gap that must be closed before the dashboard can rely on this source.';
+  return title;
+}
+function whyText(item,section){
+  const sec=item.dashboard_section||item.section||section||item.domain||'';
+  if(sec==='nvidia_lighthouse') return 'This helps position NVIDIA around the reference architecture and the concrete pilot path.';
+  if(sec==='mandarin_oriental_operator_logic') return 'This helps MOHG judge whether the AI workflow protects luxury service standards.';
+  if(sec==='santa_clara_site_thesis') return 'This supports site diligence and the location-specific operating case.';
+  if(sec==='business_case_financing') return 'This informs Brisen economics and negotiation strategy, so it remains internal.';
+  if(sec==='market_proof_competitive_set') return 'This tracks external proof, market pressure, and competitive risk.';
+  if(sec==='marketing_pr') return 'This gives safe public context for the broader AI-in-hospitality narrative.';
+  if(item.gap_reason||item.reason) return 'Without this source, the cockpit must show a gap rather than pretend the evidence exists.';
+  return 'This item supports the controlled AI Hotel evidence packet and the next project decision.';
+}
+function statusClass(state){
+  if(['raw_signal','stale_projection','gap','not_available'].includes(state)) return 'b-raw';
+  if(['revoked','not_projectable'].includes(state)) return 'b-gap';
+  return 'b-verified';
+}
 function addField(rows,label,value){
   if(value==null || value==='') return;
   if(Array.isArray(value)) value=value.join(', ');
@@ -1002,45 +1144,79 @@ function addField(rows,label,value){
   rows.push([label,String(value)]);
 }
 function itemDetail(surface,item,section){
-  const rows=[];
-  addField(rows,'Surface',surface);
-  addField(rows,'Section',item.dashboard_section||item.section||section);
-  addField(rows,'State',item.evidence_status||item.projection_state||item.lifecycle_state||item.collection_status||item.availability);
-  addField(rows,'Confidence',item.evidence_confidence!=null?item.evidence_confidence:item.confidence);
-  addField(rows,'Freshness',item.freshness||item.last_verified_at||item.last_reviewed);
-  addField(rows,'Source',item.source_label_safe||item.source_type);
-  addField(rows,'Action',item.action_safe_text||item.next_action);
-  addField(rows,'Visibility',item.visibility_reason);
+  const state=rawState(item);
+  const sec=item.dashboard_section||item.section||section||item.domain;
+  const action=item.action_safe_text||item.next_action;
+  const evidence=[sourceText(item),confidenceText(item),freshnessText(item)?'Freshness '+freshnessText(item):null].filter(Boolean).join(' · ');
+  const audit=[];
   if(!isExternal()){
-    addField(rows,'Owner',item.owner);
-    addField(rows,'Reviewer',item.reviewer);
-    addField(rows,'Audit trace',item.audit_trace_id);
-    addField(rows,'Object',item.object_id||item.source_evidence_item_id||item.source_id);
-    addField(rows,'Raw body',item.raw_body);
-    addField(rows,'Reason',item.reason||item.gap_reason);
+    addField(audit,'Internal section key',sec);
+    addField(audit,'Internal state key',state);
+    addField(audit,'Owner',item.owner);
+    addField(audit,'Reviewer',item.reviewer);
+    addField(audit,'Audit trace',item.audit_trace_id);
+    addField(audit,'Object id',item.object_id||item.source_evidence_item_id||item.source_id||item.result_ref);
+    addField(audit,'Raw body',item.raw_body);
+    addField(audit,'Gap reason',item.reason||item.gap_reason);
   }
   return {
     title:displayTitle(item),
-    summary:item.display_summary||item.body?.display_summary||item.raw_body||'',
+    meaning:meaningText(item,sec),
+    why:whyText(item,sec),
+    evidence:evidence,
+    sharing:STATE_COPY[state]||prettyKey(state),
+    action:action,
+    audit:audit,
     badges:[
-      {cls:'b-state',text:item.dashboard_section||item.section||section||surface},
-      {cls:(item.evidence_status||item.lifecycle_state||item.projection_state||item.collection_status)==='raw_signal'?'b-raw':'b-verified',
-       text:item.evidence_status||item.lifecycle_state||item.projection_state||item.collection_status||item.availability||'available'}
-    ],
-    rows
+      {cls:'b-state',text:prettyKey(sec||surface)},
+      {cls:statusClass(state),text:prettyKey(state)}
+    ]
   };
+}
+function cardBody(surface,item,section){
+  const detail=itemDetail(surface,item,section);
+  const state=rawState(item);
+  const foot=[];
+  if(confidenceText(item)) foot.push(badge('b-neutral',confidenceText(item)));
+  if(freshnessText(item)) foot.push(badge('b-neutral','Freshness '+freshnessText(item)));
+  foot.push(badge('b-neutral',sourceText(item)));
+  const kids=[
+    h('div',{class:'card-kicker'},detail.badges.map(b=>badge(b.cls,b.text))),
+    h('div',{class:'card-title',text:detail.title}),
+    h('div',{class:'card-summary',text:detail.meaning}),
+    detail.action?h('div',{class:'card-action',text:'Next action: '+detail.action}):null,
+    h('div',{class:'card-footer'},foot)
+  ];
+  return {detail,kids,cls:state==='raw_signal'?'raw-card':(statusClass(state)==='b-gap'?'':'verified-card')};
+}
+function detailSection(title,body,cls){
+  if(!body) return null;
+  return h('section',{class:'detail-section '+(cls||'')},[
+    h('div',{class:'detail-section-title',text:title}),
+    h('div',{class:'detail-section-body',text:body})
+  ]);
+}
+function auditBlock(rows){
+  if(!rows || !rows.length) return null;
+  return h('details',{class:'internal-audit'},[
+    h('summary',{text:'Internal audit fields'}),
+    h('div',{class:'detail-grid'},rows.map(([k,v])=>h('div',{class:'detail-field'},[
+      h('div',{class:'detail-label',text:k}), h('div',{class:'detail-value',text:v})
+    ])))
+  ]);
 }
 function openDetail(detail){
   const box=document.getElementById('detaildrawer'); clear(box);
   const close=h('button',{class:'detail-close',text:'×',onclick:closeDetail,'aria-label':'Close detail'});
-  const fields=h('div',{class:'detail-grid'},(detail.rows||[]).map(([k,v])=>h('div',{class:'detail-field'},[
-    h('div',{class:'detail-label',text:k}), h('div',{class:'detail-value',text:v})
-  ])));
   const panel=h('aside',{class:'detail-panel',role:'dialog','aria-modal':'true'},[
     h('div',{class:'detail-head'},[h('div',{class:'detail-title',text:detail.title||'Detail'}),close]),
     h('div',{class:'detail-badges'},(detail.badges||[]).filter(b=>b&&b.text).map(b=>badge(b.cls||'b-state',b.text))),
-    detail.summary?h('p',{class:'detail-summary',text:detail.summary}):null,
-    fields
+    detailSection('What this means',detail.meaning),
+    detailSection('Why it matters',detail.why),
+    detailSection('Evidence basis',detail.evidence,'detail-safe'),
+    detailSection('Sharing status',detail.sharing,'detail-safe'),
+    detail.action?detailSection('Next action',detail.action,'detail-watch'):null,
+    auditBlock(detail.audit)
   ]);
   box.appendChild(h('div',{class:'detail-scrim',onclick:closeDetail}));
   box.appendChild(panel); box.classList.add('open'); close.focus();
@@ -1050,109 +1226,133 @@ function cardKey(e,detail){ if(e.key==='Enter'||e.key===' '){ e.preventDefault()
 function clickableCard(cls,kids,detail){
   return h('div',{class:'item '+cls+' clickable',role:'button',tabindex:'0',onclick:()=>openDetail(detail),onkeydown:e=>cardKey(e,detail)},kids);
 }
+function projectCard(surface,item,section,extraClass){
+  const c=cardBody(surface,item,section);
+  return clickableCard((extraClass||c.cls),c.kids,c.detail);
+}
+function staticProjectCard(surface,item,section,extraClass){
+  const c=cardBody(surface,item,section);
+  const open=h('button',{class:'btn',text:'View details',onclick:e=>{e.stopPropagation();openDetail(c.detail);}});
+  return h('div',{class:'item '+(extraClass||c.cls)},[...c.kids,h('div',{onclick:e=>e.stopPropagation()},[open])]);
+}
 document.addEventListener('keydown',e=>{ if(e.key==='Escape') closeDetail(); });
 
 async function viewOverview(){
   const wrap=h('div'); const pkt=await api('packet'); if(!pkt){wrap.appendChild(h('div',{class:'empty',text:'No packet.'}));return wrap;}
   wrap.appendChild(notice(isExternal()
-    ? 'Partner preview uses the exact server-built packet. No raw internal data reaches this view. Revoke is a durable, audited kill switch: a revoked item disappears from this view immediately.'
-    : 'Brisen control view. Amber material is internal-only; verified evidence is promoted; partner packets are governed server-side.'));
-  const p=panel('Evidence by section'); const items=sectionItems(pkt);
+    ? 'Partner preview: this is the exact packet the selected partner would see. Internal material, gaps, and revoked items stay hidden.'
+    : 'Internal view: this includes Brisen-only material and partner-safe evidence. Use the role buttons to see exactly what each partner would see.'));
+  const p=panelNote(panel('Evidence packet'),'A readable inventory of the claims, proof points, and open issues behind the AI Hotel Lab. Click any card for the business meaning, evidence basis, and sharing status.');
+  const items=sectionItems(pkt);
   if(!items.length) p.appendChild(h('div',{class:'empty',text:'No items available.'}));
   items.forEach(({sec,i})=>{
-    const meta=h('div',{class:'meta'},[
-      badge('b-state', i.dashboard_section||sec),
-      badge('b-verified', i.evidence_status||i.projection_state||'verified'),
-      ' confidence '+(i.evidence_confidence!=null?i.evidence_confidence:(i.confidence!=null?i.confidence:'—'))+' · '+(i.freshness||''),
-      i.action_safe_text?' · action: '+i.action_safe_text:''
-    ]);
-    p.appendChild(clickableCard('verified-card',[h('div',{class:'claim',text:i.display_title||i.claim||i.display_summary||'—'}),meta],itemDetail('Overview',i,sec)));
+    p.appendChild(projectCard('Overview',i,sec));
   });
   wrap.appendChild(p); return wrap;
 }
 async function viewRaw(){
-  if(isExternal()) return panel('Raw Signal Inbox', h('div',{class:'empty',text:'Raw signals are internal-only and are not part of a partner view.'}));
+  if(isExternal()) return panel('Internal intake', h('div',{class:'empty',text:'Raw signals are internal-only and are not part of a partner view.'}));
   const d=await api('raw-signals'); const sig=(d&&d.raw_signals)||[];
-  const p=panel('Raw Signal Inbox'); p.querySelector('h2').appendChild(badge('b-raw','internal only'));
+  const p=panelNote(panel('Internal intake'), 'Unverified signals that may become evidence later. These are never partner-ready until reviewed and promoted.');
+  p.querySelector('h2').appendChild(badge('b-raw','internal only'));
   if(!sig.length) p.appendChild(h('div',{class:'empty',text:'No raw signals.'}));
-  sig.forEach(s=>p.appendChild(clickableCard('raw-card',[
-    h('div',{class:'claim',text:s.claim||s.title||'—'}),
-    h('div',{class:'meta'},[badge('b-raw','raw · amber'),(s.section||'')+' · '+(s.source_type||'')+' · '+(s.freshness||'')]),
-    h('div',{class:'meta',text:s.raw_body||''})
-  ],itemDetail('Raw Signal Inbox',s,s.section))));
+  sig.forEach(s=>p.appendChild(projectCard('Raw Signal Inbox',{...s,lifecycle_state:'raw_signal'},s.section,'raw-card')));
   return p;
 }
 async function viewEvidence(){
-  const d=await api('evidence'); const ev=(d&&d.evidence)||[]; const p=panel('Verified Evidence');
+  const d=await api('evidence'); const ev=(d&&d.evidence)||[];
+  const p=panelNote(panel('Reviewed evidence'),'Evidence that has moved beyond raw intake. Partner visibility still depends on the selected role and the sharing controls.');
   if(!ev.length) p.appendChild(h('div',{class:'empty',text:'No verified evidence available.'}));
-  ev.forEach(e=>p.appendChild(clickableCard('verified-card',[
-    h('div',{class:'claim',text:e.display_title||e.claim||e.display_summary||'—'}),
-    h('div',{class:'meta'},[badge('b-verified',e.lifecycle_state||e.evidence_status||'verified'),
-      ' confidence '+(e.confidence!=null?e.confidence:(e.evidence_confidence!=null?e.evidence_confidence:'—'))+' · '+(e.last_verified_at||e.last_reviewed||'')])
-  ],itemDetail('Verified Evidence',e,e.section||e.dashboard_section))));
+  ev.forEach(e=>p.appendChild(projectCard('Verified Evidence',e,e.section||e.dashboard_section)));
   return p;
 }
 async function viewProjection(){
   const wrap=h('div'); const pkt=await api('packet'); const items=pkt?sectionItems(pkt):[];
-  const p=panel('Partner Projection');
-  if(isExternal()) p.appendChild(notice('Brisen controls projection. Partners view; they do not approve or revoke.'));
+  const p=panelNote(panel('Partner packet preview'),'The selected role sees only the evidence approved for that audience. Brisen controls activation, revocation, and refresh; revoke remains a durable, audited kill switch.');
+  if(isExternal()) p.appendChild(notice('Partner view only: partners can read this packet, but cannot approve, revoke, or refresh evidence.'));
   if(!items.length) p.appendChild(h('div',{class:'empty',text:'No projected items.'}));
   items.forEach(({i})=>{
-    const card=clickableCard('',[
-      h('div',{class:'claim',text:i.display_title||i.claim||'—'}),
-      h('div',{class:'meta'},[badge('b-state',i.projection_state||'projected'),i.dashboard_section||''])
-    ],itemDetail('Partner Projection',i,i.dashboard_section));
     if(!isExternal()){
+      const card=staticProjectCard('Partner Projection',i,i.dashboard_section);
       const id=i.source_evidence_item_id||i.object_id||'';
-      const ctl=h('div',{onclick:e=>e.stopPropagation()},[
-        h('button',{class:'btn live',text:'Approve',onclick:e=>{e.stopPropagation();adminAct('approve',id);}}),
-        h('button',{class:'btn live',text:'Revoke',onclick:e=>{e.stopPropagation();adminAct('revoke',id);}}),
-        h('button',{class:'btn live',text:'Refresh',onclick:e=>{e.stopPropagation();adminAct('refresh',id);}}),
-        h('button',{class:'btn',text:'Audit',onclick:e=>{e.stopPropagation();showAudit(id);}}),
-        h('div',{class:'reason',text:'Brisen controls projection. Revoke is a durable, audited kill switch (item leaves every partner view); Refresh recomputes freshness. The server is the source of final state.'})
+      const ctl=h('details',{class:'projection-controls',onclick:e=>e.stopPropagation()},[
+        h('summary',{text:'Projection controls'}),
+        h('button',{class:'btn live',text:'Approve for packet',onclick:e=>{e.stopPropagation();adminAct('approve',id);}}),
+        h('button',{class:'btn live',text:'Revoke from packet',onclick:e=>{e.stopPropagation();adminAct('revoke',id);}}),
+        h('button',{class:'btn live',text:'Refresh evidence',onclick:e=>{e.stopPropagation();adminAct('refresh',id);}}),
+        h('button',{class:'btn',text:'View audit',onclick:e=>{e.stopPropagation();showAudit(id);}})
       ]);
       card.appendChild(ctl);
+      p.appendChild(card);
+    } else {
+      p.appendChild(projectCard('Partner Projection',i,i.dashboard_section));
     }
-    p.appendChild(card);
   });
   wrap.appendChild(p); wrap.appendChild(h('div',{id:'auditdrawer'})); return wrap;
 }
 async function viewSources(){
   const d=await api('sources'); const s=(d&&d.sources)||[];
-  const tbl=h('table',{},[h('tr',{},[h('th',{text:'Domain'}),h('th',{text:'Source'}),h('th',{text:'Status'})])]);
-  s.forEach(r=>{ const st=r.collection_status||r.availability||'';
-    const cls=(st==='gap'||st==='not_available')?'b-gap':'b-verified';
-    const stcell=h('td',{},[badge(cls,st)]); if(r.never_external) stcell.appendChild(badge('b-state','never-external'));
-    tbl.appendChild(h('tr',{},[h('td',{text:r.domain}),h('td',{text:r.label}),stcell])); });
-  return panel('Source Registry / Coverage', tbl);
+  const p=panelNote(panel('Evidence source coverage'),'Shows which evidence sources are available now, partly wired, or still missing. Gaps are shown honestly instead of being filled with unsupported claims.');
+  if(!s.length) p.appendChild(h('div',{class:'empty',text:'No source coverage available in this view.'}));
+  s.forEach(r=>{
+    const st=r.collection_status||r.availability||'available';
+    const item={
+      ...r,
+      title:r.label,
+      display_title:r.label||prettyKey(r.domain),
+      display_summary:(st==='gap'||st==='not_available')
+        ? 'This source is not wired yet, so the dashboard marks it as a gap instead of pretending it has evidence.'
+        : 'This source can support the evidence map for the selected view.',
+      source_type:r.label,
+      lifecycle_state:st,
+      section:r.domain,
+      next_action:r.gap_next_action,
+      reason:r.gap_reason
+    };
+    p.appendChild(projectCard('Source Coverage',item,r.domain,(st==='gap'||st==='not_available')?'raw-card':'verified-card'));
+  });
+  return p;
 }
 async function viewRoadmap(){
-  const d=await api('roadmap'); const r=(d&&d.roadmap)||[]; const p=panel('Execution Roadmap');
+  const d=await api('roadmap'); const r=(d&&d.roadmap)||[];
+  const p=panelNote(panel('Open evidence gaps'),'The work needed to make the dashboard stronger before broader partner use.');
   if(!r.length) p.appendChild(h('div',{class:'empty',text:'No roadmap items in this view.'}));
-  r.forEach(x=>p.appendChild(clickableCard('',[
-    h('div',{class:'claim'},[badge('b-gap','gap'),(x.label||'')+' ('+(x.domain||'')+')']),
-    h('div',{class:'meta',text:'owner '+(x.owner||'—')+' · '+(x.reason||'')}),
-    h('div',{class:'meta',text:'next: '+(x.next_action||'')})
-  ],itemDetail('Execution Roadmap',x,x.domain))));
+  r.forEach(x=>p.appendChild(projectCard('Execution Roadmap',{
+    ...x,
+    display_title:x.label||prettyKey(x.domain),
+    display_summary:'Open evidence-coverage workstream.',
+    lifecycle_state:'gap',
+    source_type:'coverage gap'
+  },x.domain,'raw-card')));
   return p;
 }
 async function viewSearch(){
-  const wrap=h('div'); wrap.appendChild(panel('Advanced Search', h('div',{class:'empty',text:'Use the search bar above. Results and honest source coverage (live vs gap) appear here.'})));
+  const wrap=h('div'); wrap.appendChild(panel('Search evidence and coverage', h('div',{class:'empty',text:'Use the search bar above. Results and honest source coverage appear here.'})));
   wrap.appendChild(h('div',{id:'searchresults'})); return wrap;
 }
 async function runSearch(){
   const q=document.getElementById('q').value.trim(); if(!q) return; setView('search');
   const d=await api('search?q='+encodeURIComponent(q)); const box=document.getElementById('searchresults'); if(!box) return; clear(box); if(!d) return;
-  const cov=h('table',{},[h('tr',{},[h('th',{text:'Domain'}),h('th',{text:'Status'})])]);
-  (d.coverage||[]).forEach(c=>{ const cls=c.status==='gap'?'b-gap':'b-verified';
-    cov.appendChild(h('tr',{},[h('td',{text:c.label||c.domain}),h('td',{},[badge(cls,c.status)])])); });
-  box.appendChild(panel('Coverage (honest)',cov));
+  const cov=panelNote(panel('Coverage checked'),'Search reports the sources it can and cannot use for the selected role.');
+  (d.coverage||[]).forEach(c=>cov.appendChild(projectCard('Search Coverage',{
+    ...c,
+    display_title:c.label||prettyKey(c.domain),
+    display_summary:c.status==='gap'?'This source is not wired yet, so search shows the gap honestly.':'This source is available to the selected search view.',
+    lifecycle_state:c.status,
+    source_type:c.label,
+    section:c.domain
+  },c.domain,c.status==='gap'?'raw-card':'verified-card')));
+  box.appendChild(cov);
   const rp=panel('Results ('+d.result_count+')');
-  if(!d.results.length) rp.appendChild(h('div',{class:'empty',text:'No results'+(d.zero_result_route?' — routed to '+d.zero_result_route:'')+'. Unwired connectors are shown as gaps above, never fabricated as results.'}));
-  (d.results||[]).forEach(r=>rp.appendChild(clickableCard('',[
-    h('div',{class:'claim',text:r.result_ref}),
-    h('div',{class:'meta'},[badge(r.projected?'b-state':'b-verified',r.projected?'partner projection':'internal'),r.route_target||''])
-  ],itemDetail('Search Result',r,r.route_target))));
+  if(!d.results.length) rp.appendChild(h('div',{class:'empty',text:'No results'+(d.zero_result_route?' — routed to internal coverage review':'')+'. Unwired connectors are shown as gaps above, never fabricated as results.'}));
+  (d.results||[]).forEach(r=>rp.appendChild(projectCard('Search Result',{
+    ...r,
+    display_title:r.body?.display_summary||r.result_ref,
+    display_summary:r.body?.display_summary||'Search result available for the selected view.',
+    lifecycle_state:r.projected?'shared_view':'verified_evidence',
+    section:r.route_target,
+    source_type:r.projected?'partner projection':'internal evidence'
+  },r.route_target)));
   box.appendChild(rp);
 }
 async function adminAct(action,id){
