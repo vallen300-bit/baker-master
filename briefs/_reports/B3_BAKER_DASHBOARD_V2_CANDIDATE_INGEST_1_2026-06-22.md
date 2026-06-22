@@ -161,6 +161,34 @@ Re-run after fixes: `python3.12 -m pytest tests/test_candidate_ingest.py
 tests/test_verified_items.py` → **51 passed** (14 pure-logic + 8 live-PG ingest +
 29 verified_items regression) against isolated local PG 16.
 
+## deputy-codex G-review #3842/#3843 + codex-arch re-gate #3848 — folded (commit pending)
+
+A second review pass (deputy-codex, concurrent with codex-arch's #3839) raised
+two more HIGHs + one MEDIUM not covered by 8c8b6aa. All three fixed on-branch:
+
+- **F1 (HIGH) — anonymous/unknown verifier accepted.** The old check rejected
+  only blank/`system`, so `actor_type='anonymous'` passed. Fix: a verifier
+  ALLOWLIST `VERIFIER_ACTOR_TYPES = {director, head_of_desk, cortex_tier_b}`
+  (mirrors `verified_items.RATIFY_ACTOR_TYPES`), enforced in BOTH
+  `promote_candidate_manual` AND the verify-manual endpoint. New tests:
+  `test_verifier_actor_allowlist_vocab`,
+  `test_verify_manual_rejects_non_allowlisted_verifier` (parametrized: system /
+  anonymous / unknown / blank / bot), `test_verify_manual_endpoint_rejects_non_allowlisted_actor`.
+- **F2 (HIGH) — Flash extraction could promote when stored trust is null.**
+  Promotion checked only `can_promote(source_trust)`; a row with `source_trust=NULL`
+  + `extraction_model='gemini-2.5-flash'` slipped through. Fix:
+  `promote_candidate_manual` also rejects when
+  `not is_allowed_for_trusted(cand.extraction_model)`, independent of stored
+  trust. New tests: `test_verify_manual_refuses_flash_extraction_even_when_trust_null`,
+  `test_verify_manual_allows_pro_extraction_when_trust_null`.
+- **F3 (MEDIUM) — `bad_candidate_status` returned HTTP 500.** A normal
+  double-click/already-dismissed conflict fell through to 500. Fix: the
+  verify-manual endpoint maps `bad_candidate_status` → **409 Conflict**. New test:
+  `test_verify_manual_endpoint_maps_bad_status_to_409`.
+
+Re-run after fixes: `python3.12 -m pytest tests/test_candidate_ingest.py
+tests/test_verified_items.py` → **60 passed** against isolated local PG 16.
+
 ## Gate
 
 Builder self-test PASS → deputy-codex G-review (MANDATORY, Director-directed) →

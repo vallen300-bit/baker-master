@@ -119,12 +119,21 @@ def test_dismiss_reason_gate(monkeypatch):
     assert r["ok"] is False and r["error"] == "bad_dismiss_reason"
 
 
-def test_verify_manual_requires_non_system_verifier(monkeypatch):
-    """Guard #6 — manual verification refuses actor_type='system' (would lose the
-    human verifier in the audit trail). Rejected before DB access."""
+def test_verifier_actor_allowlist_vocab():
+    """deputy-codex F1 — manual verifier must be an allowlisted actor (mirrors
+    RATIFY_ACTOR_TYPES), not just 'not system'."""
+    from models.verified_items import RATIFY_ACTOR_TYPES
+    assert ci.VERIFIER_ACTOR_TYPES == frozenset({"director", "head_of_desk", "cortex_tier_b"})
+    assert ci.VERIFIER_ACTOR_TYPES == RATIFY_ACTOR_TYPES
+
+
+@pytest.mark.parametrize("actor_type", ["system", "anonymous", "unknown", "", "bot"])
+def test_verify_manual_rejects_non_allowlisted_verifier(monkeypatch, actor_type):
+    """Guard #6 + deputy-codex F1 — any non-allowlisted verifier (system,
+    anonymous, unknown, blank, arbitrary) is refused before DB access."""
     monkeypatch.setattr(ci, "_get_conn", lambda: pytest.fail("DB must not be reached"))
     r = ci.promote_candidate_manual(
-        1, item_type="deadline", claim="c", actor_type="system", actor_id="x",
+        1, item_type="deadline", claim="c", actor_type=actor_type, actor_id="x",
         confidence="high", source_trust="director", verification_summary="s",
         counterargument="c2",
     )
@@ -161,6 +170,56 @@ def test_migration_d_down_commented_in_raw():
     for line in down.splitlines():
         if "DROP" in line:
             assert line.lstrip().startswith("--"), f"uncommented DROP in raw file: {line}"
+
+
+def test_verify_manual_endpoint_maps_bad_status_to_409(monkeypatch):
+    """F3 — the verify-manual endpoint maps an expected bad_candidate_status
+    (double-click / already-dismissed) to HTTP 409, not a 500."""
+    monkeypatch.setenv("BAKER_API_KEY", "test-key-f3")
+    try:
+        from fastapi.testclient import TestClient
+        import outputs.dashboard as dash
+    except Exception as e:  # pragma: no cover - env-dependent import
+        pytest.skip(f"dashboard app unavailable: {e}")
+    monkeypatch.setattr(dash, "_BAKER_API_KEY", "test-key-f3", raising=False)
+    # endpoint re-imports promote_candidate_manual from the module at call time,
+    # so patching the module attribute is sufficient. actor_type='director' clears
+    # the endpoint's verifier allowlist; the patched service then returns the
+    # conflict we want mapped.
+    monkeypatch.setattr(
+        ci, "promote_candidate_manual",
+        lambda *a, **k: {"ok": False, "error": "bad_candidate_status", "detail": "already promoted"},
+    )
+    client = TestClient(dash.app)
+    r = client.post(
+        "/api/triage/5/verify-manual",
+        headers={"X-Baker-Key": "test-key-f3"},
+        json={"item_type": "deadline", "claim": "c", "actor_type": "director",
+              "actor_id": "dvallen", "confidence": "high", "source_trust": "director",
+              "verification_summary": "s", "counterargument": "c2"},
+    )
+    assert r.status_code == 409
+
+
+def test_verify_manual_endpoint_rejects_non_allowlisted_actor(monkeypatch):
+    """F1 (endpoint boundary) — a non-allowlisted actor_type is a 400 at the
+    endpoint, before the service is even called."""
+    monkeypatch.setenv("BAKER_API_KEY", "test-key-f1")
+    try:
+        from fastapi.testclient import TestClient
+        import outputs.dashboard as dash
+    except Exception as e:  # pragma: no cover
+        pytest.skip(f"dashboard app unavailable: {e}")
+    monkeypatch.setattr(dash, "_BAKER_API_KEY", "test-key-f1", raising=False)
+    client = TestClient(dash.app)
+    r = client.post(
+        "/api/triage/5/verify-manual",
+        headers={"X-Baker-Key": "test-key-f1"},
+        json={"item_type": "deadline", "claim": "c", "actor_type": "anonymous",
+              "actor_id": "x", "confidence": "high", "source_trust": "director",
+              "verification_summary": "s", "counterargument": "c2"},
+    )
+    assert r.status_code == 400
 
 
 def test_morning_brief_does_not_read_signal_candidates():
@@ -382,6 +441,58 @@ def test_verify_manual_no_double_promote(live_ci):
             assert cur.fetchone()[0] == 1
     finally:
         conn.close()
+
+
+def _insert_raw_candidate(dsn, *, extraction_model, source_trust, dedup_key):
+    """Insert a candidate row directly (bypassing create_candidate's classifier)
+    so we can craft the null-source_trust cases deputy-codex F2 probes."""
+    conn = psycopg2.connect(dsn)
+    try:
+        with conn.cursor() as cur:
+            cur.execute(
+                "INSERT INTO signal_candidates "
+                "(raw_source_table, raw_source_id, candidate_type, summary, "
+                " extraction_model, source_trust, status, dedup_key) "
+                "VALUES ('email', %s, 'deadline', 'crafted row', %s, %s, "
+                "'awaiting_verification', %s) RETURNING id",
+                (dedup_key, extraction_model, source_trust, dedup_key),
+            )
+            cid = cur.fetchone()[0]
+            conn.commit()
+            return cid
+    finally:
+        conn.close()
+
+
+def test_verify_manual_refuses_flash_extraction_even_when_trust_null(live_ci):
+    """deputy-codex F2 — a candidate with NULL source_trust but a Flash
+    extraction_model cannot be promoted (the model gate fires regardless of
+    stored trust)."""
+    cid = _insert_raw_candidate(live_ci, extraction_model="gemini-2.5-flash",
+                                source_trust=None, dedup_key="f2-flash-null")
+    res = ci.promote_candidate_manual(
+        cid, item_type="deadline", claim="c", actor_type="director",
+        actor_id="dvallen", confidence="high", source_trust="known_counterparty",
+        verification_summary="s", counterargument="c2",
+    )
+    assert res["ok"] is False and res["error"] == "not_promotable"
+
+
+def test_verify_manual_allows_pro_extraction_when_trust_null(live_ci):
+    """deputy-codex F2 — a candidate with NULL source_trust but a Pro
+    extraction_model + a complete human evidence packet CAN be promoted."""
+    cid = _insert_raw_candidate(live_ci, extraction_model="gemini-2.5-pro",
+                                source_trust=None, dedup_key="f2-pro-null")
+    res = ci.promote_candidate_manual(
+        cid, item_type="deadline", claim="Real obligation.", actor_type="director",
+        actor_id="dvallen", confidence="high", source_trust="known_counterparty",
+        verification_summary="checked", counterargument="maybe non-binding",
+    )
+    assert res["ok"] is True
+    # human verifier still recorded in verification_events (guard #6 holds)
+    from models.verified_items import get_events
+    ve = [e for e in get_events(res["verified_item_id"]) if e["to_state"] == "verified"]
+    assert ve and ve[0]["actor_type"] == "director"
 
 
 def test_list_candidates_created_window(live_ci):

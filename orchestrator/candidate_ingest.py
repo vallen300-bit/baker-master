@@ -69,6 +69,14 @@ LOW_PRIORITY_TRUST: frozenset[str] = frozenset({"marketing_or_bulk", "public_sou
 # Trust tiers that cannot be promoted to verified without re-extraction (AC2.3).
 NON_PROMOTABLE_TRUST: frozenset[str] = frozenset({"untrusted_legacy"})
 
+# Allowlist of actor_types that may MANUALLY verify a candidate (deputy-codex
+# F1). Mirrors verified_items.RATIFY_ACTOR_TYPES — a real human/desk/Cortex
+# verifier, never an anonymous/system/unknown string. Guard #6 requires a real
+# verifier, not merely "not system".
+VERIFIER_ACTOR_TYPES: frozenset[str] = frozenset(
+    {"director", "head_of_desk", "cortex_tier_b"}
+)
+
 # Candidate lifecycle statuses on signal_candidates.status.
 STATUS_AWAITING = "awaiting_verification"
 STATUS_DISMISSED = "dismissed"
@@ -695,9 +703,11 @@ def promote_candidate_manual(
         transition_item,
     )
 
-    if not actor_type or str(actor_type).strip().lower() in ("", "system"):
+    if not actor_type or actor_type not in VERIFIER_ACTOR_TYPES:
         return {"ok": False, "error": "verifier_required",
-                "detail": "manual verification needs an explicit non-system verifier"}
+                "detail": f"manual verification requires an allowlisted verifier "
+                          f"actor_type ({sorted(VERIFIER_ACTOR_TYPES)}); got "
+                          f"{actor_type!r}"}
     if not actor_id or not str(actor_id).strip():
         return {"ok": False, "error": "missing_actor"}
 
@@ -709,6 +719,16 @@ def promote_candidate_manual(
             "ok": False, "error": "not_promotable",
             "detail": f"source_trust={cand.get('source_trust')} cannot promote "
                       f"without re-extraction",
+        }
+    # deputy-codex F2 — a barred (Flash/empty) extraction model can never be
+    # promoted to a trusted/verified surface, regardless of the stored
+    # source_trust (which may be NULL on rows written outside create_candidate).
+    # Needs Pro re-extraction first.
+    if not is_allowed_for_trusted(cand.get("extraction_model")):
+        return {
+            "ok": False, "error": "not_promotable",
+            "detail": f"extraction_model={cand.get('extraction_model')!r} is barred "
+                      f"(Flash/empty); needs Gemini Pro re-extraction before promotion",
         }
     # F1 (codex G-review) — only an awaiting candidate may be promoted; reject
     # dismissed / already-promoted so triage stays a real quarantine and a

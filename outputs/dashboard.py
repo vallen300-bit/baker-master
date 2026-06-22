@@ -12579,7 +12579,9 @@ async def verify_manual_triage_candidate(candidate_id: int, request: Request):
     are refused (AC2.3). Body requires: item_type, claim, actor_type, actor_id,
     confidence, source_trust, verification_summary, counterargument."""
     try:
-        from orchestrator.candidate_ingest import promote_candidate_manual
+        from orchestrator.candidate_ingest import (
+            promote_candidate_manual, VERIFIER_ACTOR_TYPES,
+        )
         payload = await request.json()
         required = (
             "item_type", "claim", "actor_type", "actor_id", "confidence",
@@ -12592,6 +12594,12 @@ async def verify_manual_triage_candidate(candidate_id: int, request: Request):
         miss = [k for k in required if _blank(payload.get(k))]
         if miss:
             raise HTTPException(status_code=400, detail=f"missing required fields: {miss}")
+        # deputy-codex F1 — enforce the verifier allowlist at the boundary too.
+        if payload.get("actor_type") not in VERIFIER_ACTOR_TYPES:
+            raise HTTPException(
+                status_code=400,
+                detail=f"actor_type must be one of {sorted(VERIFIER_ACTOR_TYPES)}",
+            )
         res = promote_candidate_manual(
             candidate_id,
             item_type=payload["item_type"],
@@ -12612,6 +12620,10 @@ async def verify_manual_triage_candidate(candidate_id: int, request: Request):
             err = res.get("error")
             if err == "not_found":
                 raise HTTPException(status_code=404, detail=f"candidate {candidate_id} not found")
+            # F3 — an already-dismissed/promoted/concurrently-claimed candidate is
+            # a conflict (normal double-click), not a server error.
+            if err == "bad_candidate_status":
+                raise HTTPException(status_code=409, detail=res)
             if err in ("not_promotable", "verifier_required", "missing_actor",
                        "missing_evidence"):
                 raise HTTPException(status_code=400, detail=res)
