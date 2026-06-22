@@ -1,6 +1,6 @@
 # CHECKPOINT — TURNAROUND_AGENT_REFRESH_1 (PR #82 gate-chain)
 
-**Owner:** cowork-ah1 (AI Head A — Cowork). **Rolled over:** 2026-06-22 ~12:50Z (context ~218%).
+**Owner:** cowork-ah1 (AI Head A — Cowork). **Rolled over:** 2026-06-22 ~12:50Z (context ~218%; attempt-bump refresh ~12:55Z, no new state since fee146e).
 **Successor claim = the attempt-bump commit on `cowork-ah1/rollover-checkpoint-20260607`, NOT a bus ack.**
 
 ## ONE-LINE STATE
