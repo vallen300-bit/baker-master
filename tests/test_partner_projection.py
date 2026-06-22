@@ -305,11 +305,15 @@ def test_rubric8_revoke_and_stale():
     pi = projector.build_projection_item(AudienceRole.NVIDIA_LIGHTHOUSE, _nv_item())
     admin.revoke_projection(pi, BR_ADMIN, reason="r", audit_recorder=audits.append)
     assert audits and audits[0].event_type == "revoke"  # audit retained
-    # stale
+    # stale: removed from external view; F1 -> NO external stale count is exposed
     stale_pkt = packets.build_external_packet(
         AudienceRole.NVIDIA_LIGHTHOUSE, [ProjectionCandidate(_nv_item(), stale=True)],
         generated_at="T0")
-    assert stale_pkt.stale_count == 1 and stale_pkt.visible_count == 0
+    assert stale_pkt.visible_count == 0 and stale_pkt.stale_count == 0
+    # the stale state is still computable internally/admin-side
+    pi_stale = projector.build_projection_item(
+        AudienceRole.NVIDIA_LIGHTHOUSE, _nv_item(), stale=True)
+    assert pi_stale.projection_state is ProjectionState.STALE_PROJECTION
 
 
 # =========================================================================== #
@@ -325,14 +329,41 @@ def test_rubric9_view_as_byte_identical():
 # =========================================================================== #
 # rubric10 — explicit empty state, never blank
 # =========================================================================== #
-def test_rubric10_empty_state_has_reason():
-    # only a never_external item -> no visible, explicit blocked reason
+def test_rubric10_empty_state_is_generic_external():
+    # deputy-codex F1 (#3762): the EXTERNAL empty state is GENERIC — never blank, but
+    # it must NOT reveal that hidden/blocked material exists or why.
     cand = ProjectionCandidate(
         _ev("po-ne2", Classification.PARTNER_SAFE_NVIDIA, [Org.NVIDIA],
             sensitivity=Sensitivity.FINANCIAL))
     pkt = packets.build_external_packet(AudienceRole.NVIDIA_LIGHTHOUSE, [cand], generated_at="T0")
-    assert "_empty_state" in pkt.sections
-    assert pkt.sections["_empty_state"] == ProjectionState.BLOCKED_BY_POLICY.value
+    assert "_empty_state" in pkt.sections                       # never blank
+    assert pkt.sections["_empty_state"] == "no_items_available" # generic, no reason
+    assert "blocked_by_policy" not in str(pkt.as_dict())
+
+
+# =========================================================================== #
+# deputy-codex F1 (#3762) — external packets reveal ZERO hidden counts/reasons
+# =========================================================================== #
+def test_f1_external_no_hidden_counts_or_reason():
+    # a never_external item + a not-yet-verified candidate for NVIDIA: both hidden.
+    cands = [
+        ProjectionCandidate(_ev("po-ne-f1", Classification.PARTNER_SAFE_NVIDIA,
+                                [Org.NVIDIA], sensitivity=Sensitivity.FINANCIAL)),
+        ProjectionCandidate(_ev("po-cand-f1", Classification.PARTNER_SAFE_NVIDIA,
+                                [Org.NVIDIA], lifecycle_state=LifecycleState.VERIFIED_EVIDENCE)),
+    ]
+    pkt = packets.build_external_packet(AudienceRole.NVIDIA_LIGHTHOUSE, cands, generated_at="T0")
+    assert pkt.visible_count == 0
+    assert pkt.blocked_count == 0 and pkt.stale_count == 0        # no hidden counts
+    d = pkt.as_dict()
+    assert d["counts"]["blocked"] == 0 and d["counts"]["stale"] == 0
+    blob = str(d)
+    for leak in ("blocked_by_policy", "blocked_by_missing_confirmation",
+                 "stale_projection", "po-ne-f1", "po-cand-f1"):
+        assert leak not in blob
+    # the detailed reason is still computable internally/admin-side (audience split)
+    pi = projector.build_projection_item(AudienceRole.NVIDIA_LIGHTHOUSE, cands[0].item)
+    assert pi.projection_state is ProjectionState.BLOCKED_BY_POLICY
 
 
 # =========================================================================== #
@@ -425,6 +456,56 @@ def test_rubric15_cache_served_when_unchanged():
     p2 = packets.serve_external_packet(NVIDIA, AudienceRole.NVIDIA_LIGHTHOUSE,
                                        [cand], generated_at="T1", cache=cache)
     assert p1 is p2  # unchanged underlying -> cached packet reused (revalidation passed)
+
+
+# =========================================================================== #
+# deputy-codex F2 (#3762) — cache fingerprint covers EVERY externally-serialized field
+# =========================================================================== #
+def test_f2_cache_invalidated_on_claim_change():
+    item = _nv_item(claim="OLD claim text")
+    cand = ProjectionCandidate(item)
+    cache: dict = {}
+    p1 = packets.serve_external_packet(NVIDIA, AudienceRole.NVIDIA_LIGHTHOUSE,
+                                       [cand], generated_at="T0", cache=cache)
+    assert "OLD claim text" in str(p1.as_dict())
+    item.claim = "NEW claim text"   # same lifecycle/classification/grants
+    p2 = packets.serve_external_packet(NVIDIA, AudienceRole.NVIDIA_LIGHTHOUSE,
+                                       [cand], generated_at="T0", cache=cache)
+    assert p1 is not p2
+    blob = str(p2.as_dict())
+    assert "NEW claim text" in blob and "OLD claim text" not in blob
+
+
+def test_f2_cache_invalidated_on_source_refs_change():
+    item = _nv_item()  # 2 source_refs -> "2 source(s)"
+    cand = ProjectionCandidate(item)
+    cache: dict = {}
+    p1 = packets.serve_external_packet(NVIDIA, AudienceRole.NVIDIA_LIGHTHOUSE,
+                                       [cand], generated_at="T0", cache=cache)
+    assert "2 source(s)" in str(p1.as_dict())
+    item.source_refs = item.source_refs + ("vault:extra", "vault:extra2")  # now 4
+    p2 = packets.serve_external_packet(NVIDIA, AudienceRole.NVIDIA_LIGHTHOUSE,
+                                       [cand], generated_at="T0", cache=cache)
+    assert p1 is not p2 and "4 source(s)" in str(p2.as_dict())
+
+
+def test_f2_cache_invalidated_on_action_text_and_route():
+    item = _nv_item(lifecycle_state=LifecycleState.ACTION_LINKED, action=True)
+    cand = ProjectionCandidate(item, route_target=RouteTarget.NVIDIA_LIGHTHOUSE,
+                               action_safe_text="action A")
+    cache: dict = {}
+    p1 = packets.serve_external_packet(NVIDIA, AudienceRole.NVIDIA_LIGHTHOUSE,
+                                       [cand], generated_at="T0", cache=cache)
+    assert "action A" in str(p1.as_dict())
+    cand.action_safe_text = "action B"
+    p2 = packets.serve_external_packet(NVIDIA, AudienceRole.NVIDIA_LIGHTHOUSE,
+                                       [cand], generated_at="T0", cache=cache)
+    assert p1 is not p2 and "action B" in str(p2.as_dict())
+    cand.route_target = RouteTarget.EXECUTIVE_SUMMARY
+    p3 = packets.serve_external_packet(NVIDIA, AudienceRole.NVIDIA_LIGHTHOUSE,
+                                       [cand], generated_at="T0", cache=cache)
+    assert p3 is not p2
+    assert RouteTarget.EXECUTIVE_SUMMARY.value in str(p3.as_dict())
 
 
 # =========================================================================== #

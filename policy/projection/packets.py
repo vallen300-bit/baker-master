@@ -161,21 +161,6 @@ def _assemble(
     return out
 
 
-def _empty_state_reason(items: List[ProjectionItem]) -> str:
-    """Explicit non-blank reason when an audience has no visible items (test 10)."""
-
-    states = {i.projection_state for i in items}
-    if ProjectionState.BLOCKED_BY_POLICY in states:
-        return ProjectionState.BLOCKED_BY_POLICY.value
-    if ProjectionState.BLOCKED_BY_MISSING_CONFIRMATION in states:
-        return ProjectionState.BLOCKED_BY_MISSING_CONFIRMATION.value
-    if ProjectionState.STALE_PROJECTION in states:
-        return ProjectionState.STALE_PROJECTION.value
-    if ProjectionState.PROJECTABLE_CANDIDATE in states:
-        return ProjectionState.BLOCKED_BY_MISSING_CONFIRMATION.value
-    return "no_items_for_audience"
-
-
 def build_external_packet(
     audience_role: AudienceRole,
     candidates: Iterable[ProjectionCandidate],
@@ -195,8 +180,6 @@ def build_external_packet(
 
     items = _assemble(audience_role, candidates, sink=sink)
     visible = [i for i in items if i.is_externally_visible]
-    blocked = [i for i in items if i.projection_state in EXTERNAL_BLOCKED_STATES]
-    stale = [i for i in items if i.projection_state is ProjectionState.STALE_PROJECTION]
     action_linked = [i for i in visible
                      if i.projection_state is ProjectionState.ACTION_LINKED_VISIBLE]
 
@@ -204,7 +187,12 @@ def build_external_packet(
     for i in visible:
         sections.setdefault(i.dashboard_section.value, []).append(_serialize_external_item(i))
     if not visible:
-        sections = {"_empty_state": _empty_state_reason(items)}
+        # deputy-codex F1 (#3762): an external empty state is GENERIC — it must NOT
+        # reveal that hidden/blocked/stale material exists or why. The detailed
+        # blocked/stale reason stays internal/admin only. (This overrides codex-arch's
+        # "blocked/stale counts" packet note for EXTERNAL audiences — the #3738
+        # security rubric is stricter and binding.)
+        sections = {"_empty_state": "no_items_available"}
 
     return ViewPacket(
         audience_role=audience_role,
@@ -212,9 +200,9 @@ def build_external_packet(
         is_external=True,
         sections=sections,
         visible_count=len(visible),
-        blocked_count=len(blocked),
-        stale_count=len(stale),
-        action_linked_count=len(action_linked),
+        blocked_count=0,   # F1: external never reveals hidden/blocked counts
+        stale_count=0,     # F1: external never reveals stale counts
+        action_linked_count=len(action_linked),   # visible action-linked only
         last_generated_at=generated_at,
         policy_version=POLICY_VERSION,
         projection_version=PROJECTION_VERSION,
@@ -375,10 +363,15 @@ def external_item_audit(
 
 
 def _fingerprint(audience_role: AudienceRole, candidates: List[ProjectionCandidate]) -> str:
-    """Stable fingerprint of the audience + underlying projection-relevant state.
+    """Stable fingerprint of the audience + EVERY externally-observable input.
 
-    Any change that could alter visibility (lifecycle, classification, sensitivity,
-    grants, revoke, stale) changes the fingerprint, forcing a rebuild (T11)."""
+    deputy-codex F2 (#3762): the fingerprint must change whenever anything that could
+    alter the EXTERNAL payload changes — not just visibility inputs. It therefore
+    covers every externally-serialized field (claim/title/summary, source_type/label,
+    source_refs/count, freshness, last_reviewed, route_target/section, action_safe_text)
+    in addition to the visibility inputs (lifecycle, classification, sensitivity,
+    grants, confidence, revoke, stale). Otherwise a cached packet could serve stale
+    partner text or a stale source count (T11)."""
 
     parts = [audience_role.value]
     for c in candidates:
@@ -391,6 +384,11 @@ def _fingerprint(audience_role: AudienceRole, candidates: List[ProjectionCandida
             sorted(getattr(o, "value", o) for o in it.allowed_orgs),
             it.confidence,
             c.revoked, c.stale,
+            # externally-serialized payload fields (F2):
+            it.claim, it.title, it.source_type, len(it.source_refs),
+            it.freshness, it.last_reviewed,
+            getattr(c.route_target, "value", c.route_target),
+            c.action_safe_text,
         )))
     blob = json.dumps(parts, sort_keys=True, default=str)
     return hashlib.sha256(blob.encode()).hexdigest()[:32]
