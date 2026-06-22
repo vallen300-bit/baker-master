@@ -2,7 +2,7 @@
 
 **Sprint:** AI Hotel Lab — Sprint-0, Build Step 3 of 5 (search / routing — controlled intelligence intake).
 **Dispatched_by:** lead (AH1). **Gate owner:** deputy-codex (AC + threat-model), deputy (augmented chain), lead (security-review + merge).
-**Source of truth:** codex-arch product framing (bus #3679, Director-confirmed GO) + deputy-codex Step-3 security rubric (bus #<RUBRIC_ID> — both binding).
+**Source of truth:** codex-arch product framing (bus #3679, Director-confirmed GO) + deputy-codex Step-3 security rubric (bus #3683 — both binding).
 **Builds on:** Step 1 LIVE policy engine `policy/` (66411ba) + Step 2 LIVE source registry `policy/sources/` (9f83b31). This step CONSUMES both; it must NOT duplicate the allow path or fork the source registry.
 **Harness-V2:** in scope — Context Contract + task class + done rubric + gate plan below.
 
@@ -121,7 +121,7 @@ lifecycle gate — no new promotion path.**
 
 ## ACCEPTANCE CRITERIA
 
-**Authoritative AC + threat rubric = deputy-codex bus #<RUBRIC_ID> (security side) + codex-arch #3679 8
+**Authoritative AC + threat rubric = deputy-codex bus #3683 (security side) + codex-arch #3679 8
 ACs (product side) — both binding.** codex-arch ACs (build to all 8):
 
 1. Internal role can search across Step-2 registered source domains and see permitted internal results.
@@ -139,13 +139,13 @@ ACs (product side) — both binding.** codex-arch ACs (build to all 8):
 **Governance invariants (codex-arch #3679):** AI proposes search/routing, human approves promotion;
 external users see only `shared_view`/`action_linked` objects permitted by policy; every
 route/projection/promotion is audited; route overrides never silently mutate policy; sensitive /
-never-external source classes fail closed. deputy-codex #<RUBRIC_ID> threats are binding on top of these.
+never-external source classes fail closed. deputy-codex #3683 threats are binding on top of these.
 
 ---
 
 ## DONE RUBRIC (answer in the ship report — not "tests pass")
 
-1. Citation table mapping codex-arch AC1–AC8 + deputy-codex T-rubric to named tests (1:1).
+1. Citation table mapping codex-arch AC1–AC8 + deputy-codex AC1–AC10 + T1–T10 to named tests (1:1).
 2. **Partner-safe-body test:** an external partner-safe search result body is proven to come from
    `partner_projection`, NOT raw source text (spy/mock; removing the projection call fails the test).
 3. **Direct-API bypass test:** external principal hitting the search endpoint/function with a crafted
@@ -156,10 +156,18 @@ never-external source classes fail closed. deputy-codex #<RUBRIC_ID> threats are
    promote); override audited; conflicting-route case resolved to `risk_permissions_review`/`source_gap`.
 6. **Raw-signal + promotion test:** save_raw_signal lands `lifecycle_state=raw_signal`; promotion to
    `shared_view` is human-ratified via the existing lifecycle gate (cannot skip).
-7. **Zero-results test:** zero-result query logs a `source_gap` candidate and never leaks the existence of
-   hidden material.
-8. Migrations additive + idempotent (`IF NOT EXISTS`), runner-safe (no `CREATE INDEX CONCURRENTLY` in the
-   per-file transaction). `pytest` green (cite count) + `bash scripts/check_singletons.sh` green.
+7. **Zero-results test:** external zero-result is generic — never leaks hidden source existence, counts,
+   domain facets, exact deny reason, or gap inventory; internal `zero_result_gaps` may log coverage (T3/AC6).
+8. **Staleness regression (deputy-codex T9):** demote/redact a source AFTER indexing, then prove external
+   search cannot return the stale partner-safe payload — search re-checks live policy/projection at
+   response time (or invalidates stale projection before serialization).
+9. **Prompt-injection test (deputy-codex T8/AC9):** malicious source text cannot make the LLM router
+   ignore policy or reveal hidden docs; router gets projection-safe inputs only, output is schema-validated
+   and cannot emit state-changing commands.
+10. **Abuse/scale controls (deputy-codex AC10):** queries parameterized, bounded, paginated, time-limited,
+    rate/size-guarded; vector/full-text failure fails closed for external; no unbounded SQL over registries.
+11. Migrations additive + idempotent (`IF NOT EXISTS`), runner-safe (no `CREATE INDEX CONCURRENTLY` in the
+    per-file transaction). `pytest` green (cite count) + `bash scripts/check_singletons.sh` green.
 9. **DONE means:** information can enter and be routed, but nothing becomes externally visible or trusted
    evidence except through the Step-1 policy engine + the human-ratified lifecycle gate.
 
@@ -168,7 +176,7 @@ never-external source classes fail closed. deputy-codex #<RUBRIC_ID> threats are
 ## GATE PLAN
 
 1. Builder self-test → `pytest` + singleton guard green.
-2. **deputy-codex** AC + threat-model gate vs #<RUBRIC_ID> (its owned scope) — REQUEST_CHANGES blocks merge until fixed + re-gated.
+2. **deputy-codex** AC + threat-model gate vs #3683 (its owned scope) — REQUEST_CHANGES blocks merge until fixed + re-gated.
 3. **deputy** augmented chain (architect + codex-verifier cross-vendor).
 4. **lead** /security-review (Tier-A — partner-leak surface) → merge.
 5. POST_DEPLOY_AC v1 after Render deploy (migration runs clean at startup).
