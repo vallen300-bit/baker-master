@@ -164,9 +164,10 @@ def test_dismiss_rejects_unstructured_reason(monkeypatch):
 
 
 def test_create_states_vocab():
-    """Creation is restricted to candidate/verified (AC5 — ratified/dismissed
-    only via audited transitions)."""
-    assert vi.CREATE_STATES == frozenset({"candidate", "verified"})
+    """Creation is restricted to `candidate` ONLY (deputy-codex G0 F1 — verified
+    was removed so the sole audited route to verified is transition_item;
+    ratified/dismissed likewise only via audited transitions)."""
+    assert vi.CREATE_STATES == frozenset({"candidate"})
 
 
 def test_create_rejects_direct_ratified(monkeypatch):
@@ -190,6 +191,23 @@ def test_create_rejects_direct_dismissed(monkeypatch):
     monkeypatch.setattr(vi, "_put_conn", lambda c: None)
     assert vi.create_verified_item(
         item_type="alert", claim="x", created_by="system", state="dismissed",
+    ) is None
+
+
+def test_create_rejects_direct_verified_without_seed_authorization(monkeypatch):
+    """deputy-codex G0 F1 / STOP cond 4 — a runtime create directly in `verified`
+    (no seed authorization) is refused before the DB is reached, even with a
+    complete evidence packet. The only audited route to `verified` is
+    transition_item; a direct create would record an anonymous actor_type='system'
+    mint that bypasses the cortex/human verifier."""
+    monkeypatch.setattr(vi, "_get_conn", lambda: pytest.fail("DB should not be reached"))
+    monkeypatch.setattr(vi, "_put_conn", lambda c: None)
+    assert "verified" not in vi.CREATE_STATES
+    assert vi.create_verified_item(
+        item_type="deadline", claim="direct-verified mint attempt", created_by="system",
+        state="verified",
+        source_refs=[{"table": "email_messages", "id": "1"}], confidence="high",
+        source_trust="director", verification_summary="x", counterargument="y",
     ) is None
 
 

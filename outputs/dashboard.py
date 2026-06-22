@@ -12684,6 +12684,68 @@ async def verify_manual_triage_candidate(candidate_id: int, request: Request):
         raise HTTPException(status_code=500, detail=str(e))
 
 
+# BAKER_DASHBOARD_V2_VERIFIER_1 — trusted Opus-class candidate verifier (AC6).
+# These are the ONLY surface for the auto-verifier: a health probe and a
+# single-candidate verify. No batch, no cron, no UI (AC8). The verifier model
+# floor is Opus-class only (AC1); raw source bodies stay prompt-only (AC7).
+@app.get("/api/triage/verifier/health", tags=["dashboard-v2"], dependencies=[Depends(verify_api_key)])
+async def triage_verifier_health():
+    """AC6 — verifier health: resolved verifier model + whether it passes the
+    Opus-class floor + the allowlisted source tables + (cheap) awaiting count.
+    Metadata only — no source text. Auth-gated like every dashboard-v2 route."""
+    try:
+        from orchestrator.candidate_verifier import get_verifier_health
+        return await asyncio.to_thread(get_verifier_health)
+    except Exception as e:
+        logger.error(f"/api/triage/verifier/health failed: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/api/triage/{candidate_id}/verify-auto", tags=["dashboard-v2"], dependencies=[Depends(verify_api_key)])
+async def verify_auto_triage_candidate(candidate_id: int, request: Request):
+    """AC6 — re-verify ONE candidate with an Opus-class model and, unless dry_run,
+    promote it to a trusted verified_items row via the audited Cortex path. The
+    model call is blocking, so it runs in a worker thread (asyncio.to_thread).
+    Optional body: {"actor_id": "...", "dry_run": bool}. Response is sanitized —
+    never any raw source body or prompt text (AC7)."""
+    try:
+        from orchestrator.candidate_verifier import verify_candidate
+        try:
+            payload = await request.json()
+            if not isinstance(payload, dict):
+                payload = {}
+        except Exception:
+            payload = {}  # empty/no body is fine — sensible defaults below
+
+        actor_id = payload.get("actor_id") or "cortex:dashboard-v2-verifier"
+        dry_run = bool(payload.get("dry_run", False))
+
+        res = await asyncio.to_thread(
+            verify_candidate, candidate_id, actor_id=actor_id, dry_run=dry_run,
+        )
+        if not res.get("ok"):
+            err = res.get("error")
+            if err in ("not_found", "source_not_found"):
+                raise HTTPException(status_code=404, detail=res)
+            # already-verified / wrong-status / concurrent claim = conflict, not error.
+            if err in ("bad_candidate_status", "already_verified"):
+                raise HTTPException(status_code=409, detail=res)
+            # cost breaker tripped or the provider is unreachable = unavailable.
+            if err in ("cost_hard_stop", "provider_unavailable"):
+                raise HTTPException(status_code=503, detail=res)
+            if err in ("unsupported_source", "verification_refused",
+                       "model_not_allowed", "missing_evidence", "bad_json"):
+                raise HTTPException(status_code=400, detail=res)
+            # promote_failed / internal_error / unknown -> 500 (already logged).
+            raise HTTPException(status_code=500, detail=res)
+        return {"status": "ok", **res}
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"/api/triage/{candidate_id}/verify-auto failed: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 @app.get("/api/slug-registry", tags=["registry"], dependencies=[Depends(verify_api_key)])
 async def slug_registry_api(status: str = Query("active", regex="^(active|all)$")):
     """DEADLINE_FEEDBACK_LOOP_1: serve canonical slug list for the wrong-matter dropdown."""

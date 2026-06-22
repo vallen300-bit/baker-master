@@ -807,3 +807,171 @@ def promote_candidate_manual(
                 "verified_item_id": item_id}
     return {"ok": True, "verified_item_id": item_id, "candidate_id": candidate_id,
             "verify_event_id": tr.get("event_id")}
+
+
+# Fixed actor_type for the trusted Cortex verifier promotion path (AC5.1). The
+# verifier service is Cortex Tier-B, never an anonymous/system actor.
+CORTEX_VERIFIER_ACTOR_TYPE = "cortex_tier_b"
+
+
+def promote_candidate_verified_by_cortex(
+    candidate_id: int,
+    *,
+    evidence: dict,
+    actor_id: str,
+    verifier_model: str,
+) -> dict:
+    """AC5 — promote a candidate to a trusted ``verified_items`` row from an
+    Opus-class verifier's evidence packet, through the audited candidate-shell ->
+    ``transition_item('verified')`` state machine.
+
+    This is the **automated** sibling of :func:`promote_candidate_manual`. The two
+    differ in three load-bearing ways (deputy hard flags 1, 2 + STOP conds 4, 5):
+
+      * the verifier RE-EXTRACTS with an Opus-class model, so an
+        ``untrusted_legacy`` candidate (or one whose original ``extraction_model``
+        was barred) MAY be promoted here — the Opus re-verification is the
+        re-extraction. ``promote_candidate_manual`` is intentionally NOT weakened
+        to accept those (it stays human-only, re-extraction-required);
+      * the trust gate is the **verifier-model** floor
+        (``assert_trusted_verification_model`` — Opus-class only), not the
+        extraction floor;
+      * the resulting ``verified_items.extraction_model`` is the *verifier* model
+        (AC5.8); the original candidate extraction model is preserved in
+        ``source_model`` and in the verified-transition ``evidence_delta`` (AC5.9).
+
+    There is no direct ``create_verified_item(state='verified')`` here: the shell
+    is created in ``state='candidate'`` then promoted via ``transition_item`` so
+    the ``candidate -> verified`` event records ``actor_type='cortex_tier_b'``, a
+    non-empty ``actor_id``, and ``model=<verifier_model>`` (audit requirement /
+    STOP cond 4).
+
+    ``evidence`` is the metadata-only packet built by
+    ``candidate_verifier._build_evidence_packet`` — it carries NO raw body / prompt
+    text (AC7). Returns ``{"ok": True, "verified_item_id", "verify_event_id",
+    "candidate_id"}`` or an error dict.
+    """
+    from models.verified_items import (
+        create_verified_item,
+        missing_evidence_fields,
+        transition_item,
+    )
+    from orchestrator import model_policy
+
+    actor_type = CORTEX_VERIFIER_ACTOR_TYPE
+    # AC5.1/AC5.2 — fixed Cortex Tier-B actor, non-empty actor_id.
+    if actor_type not in VERIFIER_ACTOR_TYPES:
+        return {"ok": False, "error": "verifier_required", "detail": actor_type}
+    if not actor_id or not str(actor_id).strip():
+        return {"ok": False, "error": "missing_actor"}
+
+    # AC5.3 — the trust gate for this path is the Opus-class VERIFIER floor, not
+    # the extraction floor. Gemini (incl. Pro), Flash, Sonnet, Haiku, empty -> out.
+    try:
+        model_policy.assert_trusted_verification_model(
+            verifier_model, context="promote_candidate_verified_by_cortex")
+    except model_policy.TrustedModelPolicyError as e:
+        return {"ok": False, "error": "model_not_allowed", "detail": str(e)}
+
+    if not isinstance(evidence, dict):
+        return {"ok": False, "error": "missing_evidence", "detail": "evidence_not_a_dict"}
+
+    # AC5.4/AC5.5 — candidate exists and is still awaiting verification.
+    cand = get_candidate(candidate_id)
+    if cand is None:
+        return {"ok": False, "error": "not_found", "detail": candidate_id}
+    if cand.get("status") != STATUS_AWAITING:
+        return {
+            "ok": False, "error": "bad_candidate_status",
+            "detail": f"candidate status={cand.get('status')} (must be {STATUS_AWAITING})",
+        }
+
+    # Dedup guard — never mint a second verified row for a candidate already
+    # promoted (cheap pre-check; the atomic claim below closes the race).
+    item_type = evidence.get("item_type") or cand.get("candidate_type") or "other"
+    confidence = evidence.get("confidence")
+    source_trust = evidence.get("source_trust") or cand.get("source_trust")
+    verification_summary = evidence.get("verification_summary")
+    counterargument = evidence.get("counterargument")
+
+    # source_refs come metadata-only from the verifier packet (AC7); fall back to
+    # the candidate's own origin ref if the packet somehow omitted them.
+    source_refs = evidence.get("source_refs") or [{
+        "table": cand.get("raw_source_table"),
+        "id": cand.get("raw_source_id"),
+        "candidate_id": candidate_id,
+    }]
+
+    packet = {
+        "source_refs": source_refs, "claim": evidence.get("claim"),
+        "confidence": confidence, "source_trust": source_trust,
+        "verification_summary": verification_summary, "counterargument": counterargument,
+    }
+    miss = missing_evidence_fields(packet)
+    if miss:
+        return {"ok": False, "error": "missing_evidence", "detail": miss}
+
+    # AC5.6 — atomically claim (awaiting -> promoted). Lost claim => refuse; no row.
+    if not _claim_candidate_for_promotion(candidate_id):
+        return {
+            "ok": False, "error": "bad_candidate_status",
+            "detail": "candidate is no longer awaiting verification (claimed concurrently)",
+        }
+
+    # AC5.9 — preserve the ORIGINAL machine-extraction model. Prefer the value the
+    # verifier captured in the packet; fall back to the candidate row.
+    original_extraction_model = (
+        evidence.get("candidate_extraction_model") or cand.get("extraction_model")
+    )
+
+    # AC5.7/AC5.8 — durable shell in `candidate` state carrying the full evidence
+    # packet; extraction_model is the VERIFIER model, source_model preserves the
+    # original candidate extraction model.
+    item_id = create_verified_item(
+        item_type=item_type,
+        claim=evidence.get("claim"),
+        created_by=f"{actor_type}:{actor_id}",
+        state="candidate",
+        why_matters=evidence.get("why_matters"),
+        next_action=evidence.get("next_action"),
+        owner=evidence.get("owner"),
+        due_at=evidence.get("due_at") if evidence.get("due_at") is not None
+        else cand.get("due_at"),
+        confidence=confidence,
+        matter_slug=evidence.get("matter_slug") or cand.get("matter_slug"),
+        related_matters=evidence.get("related_matters") or [],
+        people=evidence.get("people") or cand.get("people"),
+        source_type=evidence.get("source_type") or cand.get("raw_source_table"),
+        source_trust=source_trust,
+        source_refs=source_refs,
+        verification_summary=verification_summary,
+        counterargument=counterargument,
+        signal_candidate_id=candidate_id,
+        extraction_model=verifier_model,            # AC5.8 — verifier, not legacy
+        source_model=original_extraction_model,     # AC5.9 — original preserved
+        rationale="cortex verifier re-extraction (candidate shell)",
+    )
+    if item_id is None:
+        _release_candidate_claim(candidate_id)  # undo the claim — nothing created
+        return {"ok": False, "error": "create_failed"}
+
+    # AC5.10 — audited candidate -> verified, recording the Cortex Tier-B verifier,
+    # the verifier model, and the original extraction model in evidence_delta.
+    tr = transition_item(
+        item_id, "verified",
+        actor_type=actor_type, actor_id=actor_id,
+        rationale="cortex verifier promotion",
+        model=verifier_model,
+        evidence_delta={
+            "promoted_via": "cortex_verifier",
+            "verifier_model": verifier_model,
+            "candidate_extraction_model": original_extraction_model,
+            "candidate_id": candidate_id,
+        },
+    )
+    if not tr.get("ok"):
+        _release_candidate_claim(candidate_id)  # AC5.11 — release claim on failure
+        return {"ok": False, "error": "promote_failed", "detail": tr,
+                "verified_item_id": item_id}
+    return {"ok": True, "verified_item_id": item_id, "candidate_id": candidate_id,
+            "verify_event_id": tr.get("event_id")}

@@ -234,15 +234,20 @@ def test_get_today_payload_live_read_path(needs_live_pg, monkeypatch):
     assert tv.get_today_payload()["counts"]["total"] == 0
 
     # insert a verified deadline carrying a body-like source ref
+    # Seed via the AUDITED path (G0 F1 — verified is no longer a direct-create
+    # state): create the candidate shell, then transition it to verified.
     item_id = vi.create_verified_item(
         item_type="deadline", claim="Counterparty owes SW spec",
-        created_by="system", state="verified", confidence="high",
+        created_by="system", state="candidate", confidence="high",
         source_trust="known_counterparty",
         source_refs=[{"table": "email_messages", "id": "1", "body": "RAW SECRET"}],
         verification_summary="checked", counterargument="maybe non-binding",
         matter_slug="hagenauer-rg7",
     )
     assert isinstance(item_id, int)
+    tr = vi.transition_item(item_id, "verified", actor_type="cortex_tier_b",
+                            actor_id="test-seed")
+    assert tr["ok"]
 
     payload = tv.get_today_payload(limit_per_lane=5)
     assert payload["counts"]["promises"] == 1

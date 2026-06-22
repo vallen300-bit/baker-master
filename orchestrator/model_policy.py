@@ -88,6 +88,71 @@ def assert_trusted_model(model: str, *, context: str = "") -> None:
         )
 
 
+# --------------------------------------------------------------------------- #
+# Trusted VERIFICATION floor (BAKER_DASHBOARD_V2_VERIFIER_1, AC1)
+#
+# This is a SEPARATE, STRICTER floor than the extraction floor above. Extraction
+# (cheap models extract; even Gemini Pro is allowed there) only produces
+# candidates. Promotion candidate -> verified is where Baker starts to *stand
+# behind* an item, so verification requires an Opus-class Anthropic model.
+#
+# Gemini (incl. Pro), any Flash, Sonnet, Haiku, and empty/unknown models are all
+# barred from verifying/promoting. The extraction helpers above are intentionally
+# NOT reused or weakened — `is_allowed_for_trusted` stays the extraction surface.
+# --------------------------------------------------------------------------- #
+_DEFAULT_TRUSTED_VERIFICATION_MODEL = "claude-opus-4-8"
+# Approved Opus-class / strongest-Anthropic verifier model families. Fable is the
+# stronger successor line in Baker's active fleet (priced in cost_monitor since
+# 2026-06-09); both are accepted. Add new Opus-class families here, never weaken.
+_VERIFIER_ALLOWED_PREFIXES = ("claude-opus-", "claude-fable-")
+
+
+def is_allowed_for_trusted_verification(model: str) -> bool:
+    """True only if ``model`` is an approved Opus-class Anthropic verifier model.
+
+    Fails closed: empty/unknown -> False. Explicitly bars Gemini (incl. Pro),
+    any Flash, Sonnet, and Haiku as defence-in-depth before the allowlist check,
+    so a future model string that happens to share a prefix can never slip a
+    weaker model through.
+    """
+    if not model:
+        return False
+    m = model.strip().lower()
+    if m.startswith("gemini-") or "flash" in m or "sonnet" in m or "haiku" in m:
+        return False
+    return any(m.startswith(p) for p in _VERIFIER_ALLOWED_PREFIXES)
+
+
+def trusted_verification_model() -> str:
+    """Resolve the trusted-verification model floor.
+
+    Reads ``VERIFIER_MIN_MODEL`` each call (ops override without restart);
+    default ``claude-opus-4-8`` (matches kbl.anthropic_client's Opus default).
+    If the override is not an approved Opus-class verifier model the policy
+    refuses it and falls back to the safe default (logged LOUD)."""
+    model = os.getenv("VERIFIER_MIN_MODEL", _DEFAULT_TRUSTED_VERIFICATION_MODEL).strip()
+    if not is_allowed_for_trusted_verification(model):
+        logger.error(
+            "VERIFIER_MIN_MODEL=%r is not an approved Opus-class verifier model — "
+            "ignoring; falling back to %s for trusted verification.",
+            model, _DEFAULT_TRUSTED_VERIFICATION_MODEL,
+        )
+        return _DEFAULT_TRUSTED_VERIFICATION_MODEL
+    return model
+
+
+def assert_trusted_verification_model(model: str, *, context: str = "") -> None:
+    """Raise :class:`TrustedModelPolicyError` if ``model`` may not VERIFY/PROMOTE
+    a candidate (i.e. is not an approved Opus-class verifier model). Call this at
+    the promotion boundary before any candidate -> verified transition."""
+    if not is_allowed_for_trusted_verification(model):
+        raise TrustedModelPolicyError(
+            f"Model {model!r} is not an approved Opus-class verifier model "
+            f"({context or 'unspecified context'}); trusted verification requires "
+            f"an Opus-class model (floor {trusted_verification_model()})."
+        )
+
+
 def log_model_provenance(*, model: str, trusted: bool, source_channel: str = "",
                          output_type: str = "", context: str = "") -> None:
     """AC6 — record model provenance for a trusted extraction / candidate creation.
