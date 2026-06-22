@@ -920,6 +920,18 @@ def _register_jobs(scheduler: BackgroundScheduler):
     register_expected_job("kbl_bridge_tick", _bridge_tick_seconds)
     logger.info(f"Registered: kbl_bridge_tick (every {_bridge_tick_seconds}s)")
 
+    # BAKER_DASHBOARD_V2_PIPELINE_ACTIVATION_1: the workers that fill the V2
+    # surface — a candidate producer (alerts/deadlines -> signal_candidates) and a
+    # verifier queue drain. Both gated behind env flags that DEFAULT OFF, so this
+    # registers ZERO new jobs on a default deploy (AC1). The helper is itself
+    # fault-tolerant; wrap defensively so it can never break the rest of
+    # registration.
+    try:
+        from orchestrator.dashboard_v2_workers import register_dashboard_v2_workers
+        register_dashboard_v2_workers(scheduler)
+    except Exception as e:
+        logger.warning("dashboard_v2 worker registration failed (non-fatal): %s", e)
+
     # BRIDGE_HOT_MD_AND_TUNING_1: Saturday morning hot.md nudge.
     # Fires once weekly (Sat 06:00 UTC / 07:00 CET / 08:00 CEST). Sends a
     # short, action-oriented WhatsApp via the existing
