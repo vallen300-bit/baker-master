@@ -144,7 +144,7 @@ def test_verifier_stops_on_cost_breaker(monkeypatch):
     assert res["promoted"] == 1 and res["processed"] == 1  # 2nd call stopped the tick
 
 
-def test_verifier_counts_refused(monkeypatch):
+def test_verifier_counts_refused_and_parks(monkeypatch):
     _clear(monkeypatch)
     monkeypatch.setenv("DASHBOARD_V2_VERIFIER_ENABLED", "true")
     monkeypatch.setenv("DASHBOARD_V2_VERIFIER_MAX_PER_TICK", "3")
@@ -152,11 +152,71 @@ def test_verifier_counts_refused(monkeypatch):
     seq = iter([
         {"ok": True},
         {"ok": False, "error": "verification_refused", "reasons": ["verdict_reject"]},
-        {"ok": False, "error": "source_not_found"},
+        {"ok": False, "error": "source_not_found"},  # pre-model, no cost -> NOT parked
     ])
     monkeypatch.setattr(cv, "verify_candidate", lambda cid, **k: next(seq))
+    parked = []
+    monkeypatch.setattr(ci, "mark_candidate_auto_refused",
+                        lambda cid, **k: parked.append(cid) or {"ok": True, "parked": True})
     res = w.run_verifier_queue_tick()
     assert res["promoted"] == 1 and res["refused"] == 1 and res["errored"] == 1
+    # only the verification_refused candidate (id 2) is parked; source_not_found is not
+    assert parked == [2] and res["parked"] == 1
+
+
+def test_refused_candidate_parked_not_reverified_next_tick(monkeypatch):
+    """G2 F1 regression: a refused candidate is parked out of the awaiting queue,
+    so a SECOND tick does NOT call verify_candidate on it again (no repeat cost)."""
+    _clear(monkeypatch)
+    monkeypatch.setenv("DASHBOARD_V2_VERIFIER_ENABLED", "true")
+    monkeypatch.setenv("DASHBOARD_V2_VERIFIER_MAX_PER_TICK", "5")
+
+    # Stateful fake DB: id 7 starts awaiting; parking flips it to auto_refused.
+    state = {7: "awaiting_verification"}
+
+    def _list(**k):
+        st = k.get("status")
+        return [{"id": cid} for cid, s in state.items() if s == st]
+
+    verify_calls = []
+
+    def _verify(cid, **k):
+        verify_calls.append(cid)
+        return {"ok": False, "error": "verification_refused", "reasons": ["verdict_reject"]}
+
+    def _park(cid, **k):
+        if state.get(cid) == "awaiting_verification":
+            state[cid] = "auto_refused"
+            return {"ok": True, "parked": True}
+        return {"ok": True, "parked": False}
+
+    monkeypatch.setattr(ci, "list_candidates", _list)
+    monkeypatch.setattr(cv, "verify_candidate", _verify)
+    monkeypatch.setattr(ci, "mark_candidate_auto_refused", _park)
+
+    t1 = w.run_verifier_queue_tick()
+    t2 = w.run_verifier_queue_tick()
+
+    assert verify_calls == [7], "2nd tick must NOT re-verify the parked candidate"
+    assert t1["refused"] == 1 and t1["parked"] == 1
+    assert t2["processed"] == 0 and t2["refused"] == 0  # queue empty 2nd tick
+    assert state[7] == "auto_refused"
+
+
+def test_park_failure_is_contained(monkeypatch):
+    """A failed park (degraded DB) logs but never crashes the tick (AC4)."""
+    _clear(monkeypatch)
+    monkeypatch.setenv("DASHBOARD_V2_VERIFIER_ENABLED", "true")
+    monkeypatch.setenv("DASHBOARD_V2_VERIFIER_MAX_PER_TICK", "2")
+    monkeypatch.setattr(ci, "list_candidates", lambda **k: [{"id": 1}])
+    monkeypatch.setattr(cv, "verify_candidate",
+                        lambda cid, **k: {"ok": False, "error": "verification_refused"})
+
+    def _boom(cid, **k):
+        raise RuntimeError("park db down")
+    monkeypatch.setattr(ci, "mark_candidate_auto_refused", _boom)
+    res = w.run_verifier_queue_tick()  # must not raise
+    assert res["refused"] == 1 and res["parked"] == 0
 
 
 # --- AC4: fault tolerance -----------------------------------------------------

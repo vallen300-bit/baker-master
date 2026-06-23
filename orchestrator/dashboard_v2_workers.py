@@ -152,11 +152,12 @@ def run_verifier_queue_tick() -> dict:
         return {"skipped": True, "reason": "DASHBOARD_V2_VERIFIER_MAX_PER_TICK=0"}
 
     out = {"ok": True, "processed": 0, "promoted": 0, "refused": 0,
-           "errored": 0, "cost_stopped": False, "cap": cap}
+           "errored": 0, "parked": 0, "cost_stopped": False, "cap": cap}
     try:
-        from orchestrator.candidate_ingest import list_candidates
-        from orchestrator.candidate_verifier import verify_candidate
-        candidates = list_candidates(status="awaiting_verification", limit=cap)
+        from orchestrator import candidate_ingest
+        from orchestrator import candidate_verifier
+        candidates = candidate_ingest.list_candidates(
+            status="awaiting_verification", limit=cap)
     except Exception as e:
         logger.error("dashboard_v2 verifier tick: queue read failed: %s", e)
         return {"ok": False, "error": "queue_read_failed", "detail": str(e)[:200]}
@@ -166,7 +167,7 @@ def run_verifier_queue_tick() -> dict:
         if cid is None:
             continue
         try:
-            res = verify_candidate(cid)
+            res = candidate_verifier.verify_candidate(cid)
         except Exception as e:  # verify_candidate shouldn't raise, but contain it
             logger.error("dashboard_v2 verifier: candidate %s raised: %s", cid, e)
             out["errored"] += 1
@@ -181,8 +182,24 @@ def run_verifier_queue_tick() -> dict:
             logger.warning("dashboard_v2 verifier: cost hard-stop — ending tick early")
             break
         elif res.get("error") in ("verification_refused", "bad_json"):
+            # G2 F1 (cost-leak): the model WAS called and refused this candidate.
+            # Park it out of the awaiting queue so the next tick does NOT re-spend
+            # an Opus call on the same noisy row. Fault-tolerant — a failed park
+            # logs but never crashes the tick.
             out["refused"] += 1
+            try:
+                mark = candidate_ingest.mark_candidate_auto_refused(cid)
+                if mark.get("ok") and mark.get("parked"):
+                    out["parked"] += 1
+                else:
+                    logger.warning("dashboard_v2 verifier: park failed for %s: %s",
+                                   cid, mark)
+            except Exception as e:
+                logger.error("dashboard_v2 verifier: park raised for %s: %s", cid, e)
         else:
+            # Pre-model / transient errors (source_not_found, model_not_allowed,
+            # provider_unavailable, internal_error, promote_failed): no Opus cost
+            # was spent, so they are left awaiting for a later retry — NOT parked.
             out["errored"] += 1
     logger.info(
         "dashboard_v2 verifier tick: processed=%(processed)s promoted=%(promoted)s "
