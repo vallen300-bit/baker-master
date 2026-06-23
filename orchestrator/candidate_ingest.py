@@ -81,6 +81,13 @@ VERIFIER_ACTOR_TYPES: frozenset[str] = frozenset(
 STATUS_AWAITING = "awaiting_verification"
 STATUS_DISMISSED = "dismissed"
 STATUS_PROMOTED = "promoted"
+# Terminal park state for candidates the Opus verifier refused (verdict reject /
+# needs_human / low-confidence / bad JSON). Moves them OUT of the awaiting queue so
+# the verifier-queue worker cannot re-spend an Opus call on the same noisy row every
+# tick (BAKER_DASHBOARD_V2_PIPELINE_ACTIVATION_1 G2 F1 cost-leak). `status` is
+# unconstrained TEXT, so this needs no migration. Rows stay queryable for a future
+# human/Cortex re-examination surface; they are simply not auto-retried.
+STATUS_AUTO_REFUSED = "auto_refused"
 
 
 def classify_source_trust(
@@ -596,6 +603,41 @@ def dismiss_candidate(candidate_id: int, reason: str, actor_id: str) -> dict:
         except Exception:
             pass
         logger.error(f"candidate_ingest: dismiss_candidate failed: {e}")
+        return {"ok": False, "error": "db_error", "detail": str(e)}
+    finally:
+        _put_conn(conn)
+
+
+def mark_candidate_auto_refused(candidate_id: int, actor_id: str = "cortex:dashboard-v2-verifier") -> dict:
+    """Park a candidate the verifier refused into ``STATUS_AUTO_REFUSED``.
+
+    Guarded to transition ONLY from ``awaiting_verification`` (so it can never
+    clobber a ``promoted`` / ``dismissed`` row, and a concurrent promotion wins).
+    Returns ``{"ok": True, "parked": <bool>}`` — ``parked`` is False when the row
+    was not in the awaiting state (already terminal). Fault-tolerant: fails closed
+    on a degraded DB; never raises (callers are scheduler ticks). No model call,
+    no audit-event write (this is a queue-hygiene transition, not a promotion)."""
+    conn = _get_conn()
+    if not conn:
+        return {"ok": False, "error": "db_error", "detail": "no connection"}
+    try:
+        cur = conn.cursor()
+        cur.execute(
+            "UPDATE signal_candidates SET status = %s "
+            "WHERE id = %s AND status = %s RETURNING id",
+            (STATUS_AUTO_REFUSED, candidate_id, STATUS_AWAITING),
+        )
+        row = cur.fetchone()
+        conn.commit()
+        cur.close()
+        return {"ok": True, "id": candidate_id, "parked": row is not None,
+                "status": STATUS_AUTO_REFUSED if row is not None else None}
+    except Exception as e:
+        try:
+            conn.rollback()
+        except Exception:
+            pass
+        logger.error(f"candidate_ingest: mark_candidate_auto_refused failed: {e}")
         return {"ok": False, "error": "db_error", "detail": str(e)}
     finally:
         _put_conn(conn)
