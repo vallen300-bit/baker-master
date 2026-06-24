@@ -334,6 +334,12 @@ def bridge_alert_to_candidate(alert: dict) -> dict:
     without re-extraction). The alert row itself is NOT mutated (AC3 — bridge,
     don't replace).
     """
+    # Infra-health + marketing/auction noise never reaches the Director Today feed.
+    # Reuse the single shared noise definition (DRY — same filter as the V1 signal
+    # bridge in kbl/bridge/alerts_to_signal.py). One noise definition, both bridges.
+    from kbl.bridge.alerts_to_signal import _is_stoplist_noise
+    if _is_stoplist_noise(alert):
+        return {"ok": True, "created": False, "skipped_reason": "stoplist_noise"}
     alert_id = alert.get("id")
     title = alert.get("title") or ""
     body = alert.get("body") or ""
@@ -383,7 +389,7 @@ def bridge_pending_alerts(limit: int = 500) -> dict:
         cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
         cur.execute(
             """
-            SELECT id, title, body, matter_slug, structured_actions
+            SELECT id, title, body, matter_slug, structured_actions, source
             FROM alerts
             WHERE status = 'pending'
             ORDER BY id DESC

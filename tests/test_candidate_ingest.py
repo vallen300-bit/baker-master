@@ -119,6 +119,49 @@ def test_dismiss_reason_gate(monkeypatch):
     assert r["ok"] is False and r["error"] == "bad_dismiss_reason"
 
 
+@pytest.mark.parametrize(
+    "source,title",
+    [
+        ("scheduler_job_liveness", "SCHEDULER JOB STALE: gold_audit"),
+        # G3 #4162 blocker — the WAHA-UNREACHABLE '_poll' variant (live leak,
+        # alert id=25165) must also skip; it matches no title regex.
+        ("waha_session_poll", "WAHA UNREACHABLE"),
+    ],
+)
+def test_bridge_alert_skips_infra_stoplist_noise(monkeypatch, source, title):
+    """INFRA_ALERT_FILTER_1 — the V2 alert bridge reuses the shared stoplist so
+    infra-health alerts never reach the Director Today feed. Test the public
+    chokepoint: a stoplist source short-circuits BEFORE create_candidate (no DB)."""
+    monkeypatch.setattr(
+        ci, "create_candidate",
+        lambda *a, **k: pytest.fail("create_candidate must not be called for stoplist noise"),
+    )
+    res = ci.bridge_alert_to_candidate({"id": 1, "source": source, "title": title})
+    assert res["ok"] is True
+    assert res["created"] is False
+    assert res["skipped_reason"] == "stoplist_noise"
+
+
+def test_bridge_alert_bridges_real_matter_alert(monkeypatch):
+    """INFRA_ALERT_FILTER_1 — a real matter alert (non-stoplist source, real
+    title) passes the filter and reaches create_candidate (created=True)."""
+    captured = {}
+
+    def _fake_create_candidate(**kwargs):
+        captured.update(kwargs)
+        return {"ok": True, "created": True, "candidate_id": 99}
+
+    monkeypatch.setattr(ci, "create_candidate", _fake_create_candidate)
+    res = ci.bridge_alert_to_candidate(
+        {"id": 42, "source": "pipeline", "title": "Hassa settlement counter-offer received",
+         "matter_slug": "hagenauer-rg7"}
+    )
+    assert res["ok"] is True
+    assert res["created"] is True
+    assert captured["raw_source_table"] == "alerts"
+    assert captured["raw_source_id"] == "42"
+
+
 def test_verifier_actor_allowlist_vocab():
     """deputy-codex F1 — manual verifier must be an allowlisted actor (mirrors
     RATIFY_ACTOR_TYPES), not just 'not system'."""
