@@ -2,6 +2,7 @@
 <html lang="en">
 <head>
 <meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Templates Gallery — Brisen</title>
 <style>
   :root {
@@ -23,7 +24,12 @@
   header {
     padding: 40px 48px 24px;
     border-bottom: 1px solid var(--border);
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 24px;
   }
+  .header-copy { min-width: 0; }
   h1 {
     margin: 0 0 6px;
     font-size: 28px;
@@ -33,6 +39,31 @@
     margin: 0;
     color: var(--muted);
     font-size: 14px;
+  }
+  .back-link {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    min-height: 36px;
+    padding: 0 14px;
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    background: var(--card);
+    color: var(--accent);
+    font-size: 13px;
+    font-weight: 600;
+    text-decoration: none;
+    white-space: nowrap;
+    transition: border-color 0.15s ease, box-shadow 0.15s ease, transform 0.15s ease;
+  }
+  .back-link:hover {
+    border-color: var(--accent);
+    box-shadow: 0 6px 18px rgba(0,0,0,0.08);
+    transform: translateY(-1px);
+  }
+  .back-link:focus-visible {
+    outline: 2px solid var(--accent);
+    outline-offset: 3px;
   }
   main {
     padding: 32px 48px 64px;
@@ -126,12 +157,25 @@
     font-size: 12px;
     color: var(--muted);
   }
+  @media (max-width: 640px) {
+    header {
+      padding: 28px 22px 20px;
+      flex-direction: column;
+      align-items: stretch;
+    }
+    main { padding: 24px 22px 48px; }
+    footer { padding: 20px 22px; }
+    .back-link { width: 100%; }
+  }
 </style>
 </head>
 <body>
 <header>
-  <h1>Templates Gallery</h1>
-  <p class="tagline">Click any thumbnail to open a live sample. Pick by sight, not by number.</p>
+  <div class="header-copy">
+    <h1>Templates Gallery</h1>
+    <p class="tagline">Click any thumbnail to open a live sample. Pick by sight, not by number.</p>
+  </div>
+  <a class="back-link" href="https://brisen-lab.onrender.com">Back to Brisen Lab</a>
 </header>
 <main>
 
