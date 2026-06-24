@@ -1,14 +1,17 @@
 ---
-status: PENDING
-brief_id: BUS_ACK_RENDER_LEDGER_DEPLOY_1
+status: SHIPPED
+brief_id: BAKER_DASHBOARD_V2_INFRA_ALERT_FILTER_1
 to: b3
 from: lead
 dispatched_by: lead
-dispatched_at: 2026-06-11
+dispatched_at: 2026-06-24
 reply_target: lead (bus)
-task_class: ops/hook deploy + small script patch — no production (Render) deploy
-gate_plan: Phase 1 immediate -> codex G3 on PR #357 (already requested, bus #2897) -> lead merges -> Phase 2 deploy -> b3 POST_DEPLOY_AC_VERDICT on bus
-arc: BUS_ACK_RENDER_LEDGER_1 (PINNED §OPEN-2 fix — ack-only-what-renders)
+task_class: bug/quality fix (noise leak) — deterministic filter, no LLM, no migration, no endpoint
+pr: 419
+ship_report: briefs/_reports/B3_BAKER_DASHBOARD_V2_INFRA_ALERT_FILTER_1_2026-06-24.md
+gate_plan: G2 deputy-codex -> G3 deputy -> G4 AH1 /security-review + merge -> POST_DEPLOY_AC_VERDICT v1 -> AH1 Fix-3 cleanup
+arc: BAKER_DASHBOARD_V2 (infra-noise off Director Today feed)
+prior_brief: BUS_ACK_RENDER_LEDGER_DEPLOY_1 (shipped 2026-06-11, PR #357 — superseded in mailbox)
 ---
 
 # BUS_ACK_RENDER_LEDGER_DEPLOY_1 — finish + deploy the ack-only-what-renders fix
