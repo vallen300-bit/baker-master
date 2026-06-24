@@ -8,18 +8,18 @@ created: 2026-06-24
 author: codex-arch
 canonical: true
 rendered_companion: 2026-06-24-ao-project-room-overview-merged-canonical.html
-status: merged-canonical-review
+status: director-accepted-working-room
 source_rooms:
   - 2026-06-24-ao-project-room-overview
   - 2026-06-24-codex-arch-topic-room-overview
-review_note: "Do not supersede source rooms until Director review."
+review_note: "Director accepted this as the working room on 2026-06-24; source rooms are superseded provenance."
 ---
 
-# AO / Aelio Project Room - Merged Canonical Review Build
+# AO / Aelio Project Room - Merged Canonical Working Room
 
-This is the reconciled room from bus #4147. Codex Arch's operating-system room is
-the base; AO Desk's source-to-topic inventory is folded in as the project index
-and source map. The room remains a counterparty lane only: Baden-Baden, MOVIE,
+This is the Director-accepted reconciled room from bus #4147. Codex Arch's
+operating-system room is the base; AO Desk's source-to-topic inventory is folded
+in as the project index and source map. The room remains a counterparty lane only: Baden-Baden, MOVIE,
 Hagenauer, villa execution, and origination asset operations stay with their
 responsible desks.
 
@@ -280,7 +280,7 @@ query `AO Rome dinner`.
 
 | Date / window | Item | State |
 |---|---|---|
-| 2026-06-24 | Merged canonical review build | This artifact |
+| 2026-06-24 | Director-accepted merged canonical working room | This artifact |
 | 2026-06-24 | Irina Sudomoyeva EUR 440K sender route | Open / not closed; confirm transfer ability, bank receipt, and assignment to AO debt to MRCI |
 | 2026-06-29 | Signable Aukera / Anaberg loan agreement | Plaud go/no-go gate |
 | 2026-06-30 | Aukera EUR 15M close | Critical clock |
@@ -493,5 +493,5 @@ This room does not own:
 
 AO Desk's nine topic sections are preserved as the project index and source map.
 Codex Arch's eight operating panels remain the agent-readable structure. This
-merged build should become the final product only after Director review; do not
-supersede the two source rooms before then.
+merged build is the Director-accepted working room as of 2026-06-24. The two
+source rooms are preserved as superseded provenance only.
