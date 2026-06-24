@@ -1,5 +1,5 @@
 ---
-status: SHIPPED
+status: MERGED
 brief_id: BAKER_DASHBOARD_V2_INFRA_ALERT_FILTER_1
 to: b3
 from: lead
@@ -8,8 +8,11 @@ dispatched_at: 2026-06-24
 reply_target: lead (bus)
 task_class: bug/quality fix (noise leak) — deterministic filter, no LLM, no migration, no endpoint
 pr: 419
+merge_commit: 10987cf
+deploy: live (Render, finished 2026-06-24T21:21:39Z)
 ship_report: briefs/_reports/B3_BAKER_DASHBOARD_V2_INFRA_ALERT_FILTER_1_2026-06-24.md
-gate_plan: G2 deputy-codex -> G3 deputy -> G4 AH1 /security-review + merge -> POST_DEPLOY_AC_VERDICT v1 -> AH1 Fix-3 cleanup
+gates: G2 deputy-codex PASS #4159 / G3 deputy PASS reconfirm #4179 / G2-light #4182 / G4 lead NO FINDINGS #4184
+post_deploy_ac: POST_DEPLOY_AC_VERDICT v1 posted #4185 (lead) + #4186 (deputy cc) — ac_result PASS, done_state NOT_DONE (AC3 live re-run + AC5 Fix-3 are AH1-owned post-drain)
 arc: BAKER_DASHBOARD_V2 (infra-noise off Director Today feed)
 prior_brief: BUS_ACK_RENDER_LEDGER_DEPLOY_1 (shipped 2026-06-11, PR #357 — superseded in mailbox)
 ---
