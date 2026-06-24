@@ -1,5 +1,5 @@
 ---
-status: DISPATCHED
+status: IN_GATES
 brief_id: BAKER_DASHBOARD_V2_MARKETING_NOISE_FILTER_1
 to: b3
 from: lead
@@ -7,8 +7,11 @@ dispatched_by: lead
 dispatched_at: 2026-06-24
 reply_target: lead (bus)
 branch: b3/baker-dashboard-v2-marketing-noise-filter-1
+pr: 420
 task_class: bug/quality fix (noise leak) — deterministic title-pattern filter, no LLM, no migration, no endpoint
 full_brief: briefs/_tasks/BAKER_DASHBOARD_V2_MARKETING_NOISE_FILTER_1.md
+checkpoint: briefs/_checkpoints/BAKER_DASHBOARD_V2_MARKETING_NOISE_FILTER_1.checkpoint.md
+rollover: ENFORCED — B3 does not compact; checkpoint+respawn per the ON RESUME block below
 arc: BAKER_DASHBOARD_V2 (marketing/no-reply/survey noise off Director Today feed)
 prior_brief: BAKER_DASHBOARD_V2_INFRA_ALERT_FILTER_1 (shipped 2026-06-24, PR #419, merge 10987cf — superseded in mailbox)
 gate_plan: G2 deputy-codex (runtime+threat) -> G3 deputy (review) -> G4 lead /security-review -> merge. Dual-codex on prod PR (mirror #419).
@@ -16,6 +19,15 @@ harness_v2: applies — done rubric + POST_DEPLOY_AC_VERDICT v1 required (produc
 ---
 
 # DISPATCH — BAKER_DASHBOARD_V2_MARKETING_NOISE_FILTER_1
+
+## ⟳ ON RESUME (rollover — read FIRST if you are a fresh/respawned B3)
+This arc is **no-bloat rollover ENFORCED** (Director 2026-06-24). You do NOT compact.
+1. Read `briefs/_checkpoints/BAKER_DASHBOARD_V2_MARKETING_NOISE_FILTER_1.checkpoint.md` — it carries the ONLY 5 things you need (brief, branch/PR/status, last bus IDs/ack, exact next command). **Do not reconstruct old thread history.**
+2. Bump the checkpoint `attempt:` counter, commit + push it — **that commit is your claim** (not a bus ack). If `attempt:` was already bumped past what you'd write, another session claimed it → stand down.
+3. Run the checkpoint's "exact next command". Then continue normally.
+4. While working: the Stop hook warns at ~70% and hard-blocks at ~85%. On warning after a milestone, or ~60–90 min in, REFRESH the checkpoint (5 fields + next command) + push + `BAKER_ROLE=b3 scripts/respawn-request.sh lead BAKER_DASHBOARD_V2_MARKETING_NOISE_FILTER_1 briefs/_checkpoints/BAKER_DASHBOARD_V2_MARKETING_NOISE_FILTER_1.checkpoint.md <attempt> b3/baker-dashboard-v2-marketing-noise-filter-1 "<state>"`, then exit cleanly.
+
+---
 
 **Read the full brief in full before starting:** `briefs/_tasks/BAKER_DASHBOARD_V2_MARKETING_NOISE_FILTER_1.md`
 (self-contained — context, live proof rows, exact patterns, TDD cases, constraints, verification SQL).
