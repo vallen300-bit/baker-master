@@ -138,7 +138,6 @@ def test_legit_matter_titles_do_not_stop_list(title):
 
 # Real prod titles the filter MUST drop.
 MARKETING_NOISE_TITLES = [
-    "Quiet thread [ao_pm]: email: noreply-eh@highq.com — E+H Rechtsanwälte GmbH Daily site alert",
     "Quiet thread [movie_am]: email: MIO »OBSERVER« — Mandarin Oriental Wien - Ihr »OBSERVER« Pass",
     "Quiet thread [movie_am]: email: Atelier 7 - Brasserie — How was your experience at Atelier 7",
     "Quiet thread [movie_am]: email: MOVIE Reservations — RE: Your upcoming stay at Mandarin Oriental",
@@ -166,6 +165,16 @@ MATTER_SIGNAL_TITLES = [
     # (live alert id=25645, sender sergey0569@gmail.com). The reservation pattern is
     # sender-bound ("MOVIE Reservations"), so this human reply must NOT be dropped.
     "Quiet thread [movie_am]: email: sergey0569@gmail.com — Re: Your upcoming stay at Mandarin Oriental",
+    # G3 F1 (lead #4208) — institutional senders MUST NOT be clipped by the bulk
+    # axis. notifications@/no-reply collide with courts + banks, so those patterns
+    # were removed; a court Fristsetzung from notifications@gericht.at must pass.
+    "Quiet thread [movie_am]: email: notifications@gericht.at — Fristsetzung 58 Cg 78/25d",
+    # Accepted under-filter (G3 F1): the E+H daily-digest no-reply is no longer
+    # dropped — under-filtering bulk mail beats clipping a litigation notice.
+    "Quiet thread [ao_pm]: email: noreply-eh@highq.com — E+H Rechtsanwälte GmbH Daily site alert",
+    # G3 F2 (lead #4208) — promo patterns tightened; deal copy + prose must pass.
+    "8% off asking price on Balgerstrasse",   # contextless "N% off" — real deal copy
+    "use code review notes from Bauer",        # "use code" without a real (uppercase) code token
     # real matter correspondence
     "Quiet thread [movie_am]: email: Thomas Bauer — RG7 Schlussabrechnung",
     "Waiting on counterparty [ao_pm]: whatsapp_outbound: Director outbound — Merz deadline confirmed",

@@ -99,7 +99,16 @@ _PROMOTE_TITLE_TOKENS = (
 STOPLIST_TITLE_PATTERNS = (
     r"\bcomplimentary\b",
     r"\bredeem\b",
-    r"\b(?:sale|% off|% discount)\b",
+    r"\bsale\b",
+    r"\b% discount\b",
+    # G3 F2 scope-extension (lead #4210, brief-author + merge authority): the bare
+    # "% off" branch (formerly part of r"\b(?:sale|% off|% discount)\b") clipped
+    # real-estate deal copy — "8% off asking price on Balgerstrasse" is a LIVE MRCI
+    # Baden-Baden matter, same clip class as the gericht.at court notice. Tightened
+    # to require a bulk-commerce context word within 40 chars, so marketing "% off"
+    # stays caught while matter copy passes. This is the ONLY pre-existing
+    # STOPLIST_TITLE_PATTERNS line this brief touches (rest of the tuple unchanged).
+    r"\b% off\b.{0,40}\b(?:everything|sitewide|store[-\s]?wide|order|plan|subscription|monthly|annual|membership|booking|purchase|deal)\b",
     r"\bsotheby(?:'s)?\b",
     r"\bwill be available\b",
     r"\bMedal Engraving\b",
@@ -130,12 +139,15 @@ STOPLIST_TITLE_PATTERNS = (
 # Each class can NEVER be a genuine Director action: a no-reply address cannot receive
 # a reply; a newsletter / survey / promo is not a matter event.
 STOPLIST_MARKETING_PATTERNS = (
-    # -- automated / no-reply senders (address appears in the title) --
-    r"\bno[-_]?reply\b",            # noreply-eh@highq.com (E+H daily site-alert digest)
-    r"\bdo[-_]?not[-_]?reply\b",    # do-not-reply@, donotreply@
+    # -- automated bulk senders (UNAMBIGUOUS local-parts only) --
+    # G3 F1 fix (lead #4208): the generic no-reply / notifications@ axis collided
+    # with institutional senders (courts, banks) — e.g. notifications@gericht.at
+    # litigation notices. REMOVED r"\bno[-_]?reply\b", r"\bdo[-_]?not[-_]?reply\b",
+    # and r"\bnotifications?@". Accepted under-filter: the noreply-eh@highq.com E+H
+    # daily digest is no longer dropped — under-filtering bulk mail beats clipping a
+    # court Fristsetzung.
     r"\bmailer[-_]?daemon\b",
     r"\bbounce[\w.+-]*@",           # bounce / VERP return-path senders
-    r"\bnotifications?@",           # notification@ / notifications@ bulk senders
     r"\bnewsletter@",
     r"\bmarketing@",
     # -- newsletters / bulk editorial --
@@ -148,8 +160,16 @@ STOPLIST_MARKETING_PATTERNS = (
     r"\bsatisfaction survey\b",
     r"\b(?:take|complete) (?:our|the|a) (?:short )?survey\b",
     # -- promotions / discount CTAs (deadline_cadence mis-files these as deadlines) --
-    r"\b\d{1,3}\s*%\s*off\b",       # "50% off"
-    r"\buse code\b",                # "Use code 'FLIKISTART50'"
+    # G3 F2 fix (lead #4208): both broadened patterns were over-filtering. The bare
+    # "N% off" clipped deal copy ("8% off asking price on Balgerstrasse"); require a
+    # commerce context word within 40 chars. The bare "use code" clipped "use code
+    # review notes from Bauer"; require an actual code token. The token class is
+    # case-SENSITIVE via scoped (?-i:...) so real uppercase codes ("FLIKISTART50")
+    # match while lowercase prose ("review") does not — the parent compile is
+    # re.IGNORECASE, which would otherwise let [A-Z] match lowercase letters. This
+    # is a scoped-disable group flag, NOT the banned inline (?i)-after-| form.
+    r"\b\d{1,3}\s*%\s*off\b.{0,40}\b(?:plan|subscription|order|purchase|booking|membership|monthly|annual|deal)\b",
+    r'\buse (?:promo |discount )?code\s+(?-i:[\x27"A-Z0-9]{3,})',
     r"\b(?:promo|discount|coupon)\s+code\b",
     r"\blimited[-\s]time offer\b",
     # -- transactional reservation auto-mail (tight; retire if it ever clips real mail) --
