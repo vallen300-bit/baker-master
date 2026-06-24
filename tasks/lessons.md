@@ -1037,3 +1037,42 @@ complete (Inbox 34%, Sent 0.4%). Nobody noticed until the Director asked "is it 
   neighbors still return); fail-closed on store outage. Regression mirrors the gate probe (revoked row
   suppressed + visible neighbor + claim text gone). The fix lived at the cockpit layer (lowest blast
   radius) rather than the shared search runner/registry.
+
+## Lesson #106 — Wake "submit-gap": an addressed wake can STAGE a command in a b-code's input box but never submit it, and a separate heartbeat-ticker keeps the dashboard falsely green (2026-06-24)
+- INCIDENT: b3 "received" two addressed bus messages (#4164 + #4166, the latter my F1 G3 verdict on PR
+  #419 INFRA_ALERT_FILTER) but never woke to them; Director flagged it. b3 looked alive and green on the
+  dashboard the whole time.
+- DIAGNOSIS, layer by layer (each proven, not assumed):
+  - Wake pipeline HEALTHY: server emitted the wake_request, the SSE listener dispatched it (rc=0, no
+    "WAKE HANDLER REGRESSION"), the brisen-lab:// URL handler is correctly bound. The wake for #4166 fired
+    2s after post (12:58:35Z local-log = correct; the wake-listener log is LOCAL CEST, the bus is UTC —
+    don't misread a 2-hour offset as a missed wake).
+  - b3 session HEALTHY + IDLE, not hung: pid 88796 STAT S+ at 0.0% CPU; last turn completed 12:59:09Z
+    ("Churned for 33s"); transcript .jsonl silent ~12 min. Genuinely sleeping at the prompt on read().
+  - ROOT CAUSE: the wake nudge typed the bus-check command into b3's input box but the Enter never landed
+    — the command sat staged-but-UNSUBMITTED (`❯ /loop 5m check bus` visible in the box). No submit → no
+    drain → messages unread.
+  - FALSE-GREEN MASK: b3's heartbeat is a SEPARATE ticker process (`forge-agent/heartbeat-ticker.sh
+    <session_id> <alias> <parent_pid>`, ppid=1/orphaned) that pings as long as the parent claude PID
+    EXISTS, regardless of whether the session is responsive. Fresh dashboard heartbeat therefore does NOT
+    prove the session is processing. (Tickers also accumulate — multiple stale tickers per alias point at
+    one parent_pid.)
+- WHAT DID NOT WORK (don't repeat from a peer session): (1) ad-hoc System Events `key code 36` (Return)
+  — a bash-spawned osascript lacks the Accessibility/TCC grant the Wake.app holds, so the keystroke is
+  silently dropped (also risks hitting the wrong frontmost window). (2) Terminal `do script "" in tab`
+  (tty write) — arrives at the Ink/claude TUI as bracketed PASTE, treated as newline-in-box (Shift+Enter),
+  NOT a submit. Both produced ZERO transcript advance across 3 tries — which is itself the proof.
+- FIX THAT WORKED: re-fire the PERMISSIONED path — `open "brisen-lab://wake/<alias>?fg=1"`. The Wake.app
+  handler holds the Accessibility grant and uses the correct keystroke method, so it lands the submit. b3
+  submitted "check bus" and drained immediately (transcript advanced, TUI showed "Sublimating…").
+- RULES:
+  1. To unstick a submit-gapped b-code, NEVER hand-roll System Events/tty keystrokes from your own
+     session — re-fire `open "brisen-lab://wake/<alias>?fg=1"` (the Wake.app is the only process with the
+     grant). tty-writes paste, they don't submit.
+  2. Heartbeat-ticker liveness ≠ session responsiveness. When an agent "didn't wake," verify the actual
+     TUI state — `osascript 'tell app "Terminal" to contents of tab N of window id W'` for the staged
+     input box + the session `.jsonl` mtime/last turn — NOT the dashboard card colour.
+  3. The submit-gap is INTERMITTENT (the same wake mechanism succeeded on re-fire). Durable fix is the
+     .app wake lane (AH2): verify-submit-landed + auto-resubmit, and/or tie the heartbeat to session
+     responsiveness so a false-green card can't hide an idle session. Builds on Lesson #105 (wake handler,
+     one-owner-per-subsystem, .app-vs-repo drift).
