@@ -77,7 +77,7 @@ drop into the operating panels below.
 | Balgerstrasse 7 / MRC&I | Develop path and AO funding posture | Baden-Baden debrief, Dropbox Baden strategy decks; Plaud 2026-06-22 Anaberg meeting | 2026-05-28 Siegfried funding schedule; 2026-06-23 Merz new-construction thread; Plaud links Anaberg loan decision to Baugestrasse/Balgerstrasse financing, with approx. EUR 28M need and construction-permit urgency before November 2026 | Side-Asset Optionality; Decision Calendar |
 | MRCI protocol / Rheinstrasse PM | Signing, penalty risk, PM mandate status | Baden-Baden source set; MRCI / Lilienmatt files | 2026-05-27 Rome dinner briefing flags protocol signing 6+ weeks overdue and EUR 3M penalty risk; 2026-05-06 MRCI PM mandate details surfaced | Decision Calendar; Risk |
 | Irina Sudomoyeva / EUR 440K sender route | Potential funds to Germany; open but not closed; later assignment to AO debt to MRCI | Plaud 2026-06-01 Irina call transcript; Director context supplied 2026-06-24; MRCI / Lilienmatt document stack | Plaud records Irina Sudomoyeva, long-held personal account, no European status, signing/logistics, and "440"; Director identifies this as EUR 440,000. M365 found no direct Sudomoyeva hit, but found Constantinos / Conrad / Siegfried transfer-paperwork and shareholder-resolution precedent threads. | Document / Rights Stack; Decision Calendar; Evidence Confidence Map |
-| Villa Il Gabbiano | EUR 22.5M all-equity DD / pause-memo logic | `curated/2026-06-22-villa-gabbiano-earning-thesis-three-levers.md`, Dropbox target folders | 2026-06-14 / 15 / 22 emails add seller/price/risk facts: Margot Monica Sachs, Via della Mimosa 8, no bank financing, coastal-law extension issue, stale listing history | Side-Asset Optionality; Evidence Confidence Map |
+| Villa Il Gabbiano | EUR 22.5M all-equity DD / pause-memo logic | [Full Ultracode thesis](2026-06-22-villa-gabbiano-earning-thesis-three-levers-detailed.html) (1873-word internal working thesis; not AO-facing final memo) + [MD source](2026-06-22-villa-gabbiano-earning-thesis-three-levers-detailed.md) + source `curated/2026-06-22-villa-gabbiano-earning-thesis-three-levers.md`, Dropbox target folders | 2026-06-14 / 15 / 22 emails add seller/price/risk facts: Margot Monica Sachs, Via della Mimosa 8, no bank financing, coastal-law extension issue, stale listing history | Side-Asset Optionality; Evidence Confidence Map |
 | Apartment 8 / show apartment sale | Swiss buyer offer, trophy sale, reinvestment question | Plaud 2026-04-17 funding meeting; Rome dinner briefing | Plaud 2026-04-17 records 9.6M offer logic, possible negotiation to 10M, approx. 32K/sqm, Edita's concern about EUR 2M profit shortfall, and need to reinvest 300K-500K into a replacement show apartment | Capital-Call Machine; Relationship Control Panel |
 | AO profile / Rome dinner / comms | Relationship reset, silence risk, sensitive topics | `psychology`, `communication-rules`, `sensitive-issues`, `ao_pm_lessons`, Dropbox `Psycho Profile .docx`, `Meetings with ao` | 2026-05-27 Rome dinner emails: 44-day silence reset, EUR 4.5M then-outstanding capital, PA backstop, Apartment 8 trophy, Constantinos bereavement sensitivity | Relationship Control Panel |
 | MO Prague / CITIC | Brand co-investment filter and institutional-pivot sensitivity | Target / origination references; AO Israel 24 | No material M365 hit in this sweep; keep as optionality lane, not active execution | Side-Asset Optionality |
@@ -212,7 +212,7 @@ M365 queries `Aukera`, `Lilienmatt`, `Sadarov`, `project controller`, Plaud
 
 | Asset / target | AO-lane question | Desk boundary |
 |---|---|---|
-| Villa Il Gabbiano | Should AO pause before DD / preliminary? | AO room owns investment framing only |
+| Villa Il Gabbiano | Should AO pause before DD / preliminary? [Open full working thesis](2026-06-22-villa-gabbiano-earning-thesis-three-levers-detailed.html). | AO room owns investment framing only; internal working thesis, not final AO memo |
 | Lana / Lilienmatt tax | What must AO understand through Lana / Ilana? | Asset ops to Baden-Baden |
 | Balgerstrasse 7 / MRC&I | Did AO accept develop path and staged funding posture? | Baden-Baden executes |
 | Irina Sudomoyeva EUR 440K route | Can this become a clean, documented AO-to-MRCI debt / funding assignment? | AO room tracks evidence and decision; finance / legal must confirm documents and receipt |
@@ -240,7 +240,9 @@ M365 update:
    a new pending funds-to-Germany route. Treat as open, not closed, until receipt
    and assignment documents are confirmed.
 
-Primary files: `curated/2026-06-22-villa-gabbiano-earning-thesis-three-levers.md`,
+Primary files: `2026-06-22-villa-gabbiano-earning-thesis-three-levers-detailed.html`,
+`2026-06-22-villa-gabbiano-earning-thesis-three-levers-detailed.md`,
+`curated/2026-06-22-villa-gabbiano-earning-thesis-three-levers.md`,
 `2026-05-05-lana-tax-flat-and-650k-refund.md`,
 `curated/2026-05-04-ao-baden-baden-debrief.md`, Dropbox `AO Israel 24`,
 `AO_Cyprus`, `AO GF`, M365 queries `Gabbiano`, `Oskolkova`, `Balgerstrasse`,
