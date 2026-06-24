@@ -140,6 +140,11 @@ STOPLIST_SOURCES = frozenset(
         "sentinel_health",
         "waha_silence",
         "waha_session",
+        # Explicit '_poll' variant — the WAHA-UNREACHABLE liveness probe (G3 #4162:
+        # live leak via alert source=waha_session_poll). Kept as an EXPLICIT string,
+        # NOT a 'waha_*' prefix, so a future real 'waha_inbound' source is not
+        # auto-stoplisted.
+        "waha_session_poll",
         # Scheduler-liveness alerts are a cosmetic false alarm (per-instance
         # advisory-lock artifact, scheduler is alive — §A-LEAD-0621b). Their home
         # is the System Health console (PR #417), not the Director Today feed.

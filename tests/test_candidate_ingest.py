@@ -119,7 +119,16 @@ def test_dismiss_reason_gate(monkeypatch):
     assert r["ok"] is False and r["error"] == "bad_dismiss_reason"
 
 
-def test_bridge_alert_skips_infra_stoplist_noise(monkeypatch):
+@pytest.mark.parametrize(
+    "source,title",
+    [
+        ("scheduler_job_liveness", "SCHEDULER JOB STALE: gold_audit"),
+        # G3 #4162 blocker — the WAHA-UNREACHABLE '_poll' variant (live leak,
+        # alert id=25165) must also skip; it matches no title regex.
+        ("waha_session_poll", "WAHA UNREACHABLE"),
+    ],
+)
+def test_bridge_alert_skips_infra_stoplist_noise(monkeypatch, source, title):
     """INFRA_ALERT_FILTER_1 — the V2 alert bridge reuses the shared stoplist so
     infra-health alerts never reach the Director Today feed. Test the public
     chokepoint: a stoplist source short-circuits BEFORE create_candidate (no DB)."""
@@ -127,9 +136,7 @@ def test_bridge_alert_skips_infra_stoplist_noise(monkeypatch):
         ci, "create_candidate",
         lambda *a, **k: pytest.fail("create_candidate must not be called for stoplist noise"),
     )
-    res = ci.bridge_alert_to_candidate(
-        {"id": 1, "source": "scheduler_job_liveness", "title": "SCHEDULER JOB STALE: gold_audit"}
-    )
+    res = ci.bridge_alert_to_candidate({"id": 1, "source": source, "title": title})
     assert res["ok"] is True
     assert res["created"] is False
     assert res["skipped_reason"] == "stoplist_noise"
