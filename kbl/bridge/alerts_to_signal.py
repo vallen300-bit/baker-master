@@ -122,8 +122,45 @@ STOPLIST_TITLE_PATTERNS = (
     r"\bTK\s*Maxx\b",                                        # Batch #1 #6: discount-retail mis-match
 )
 
+# MARKETING_NOISE_FILTER_1: marketing / no-reply / newsletter / survey / promo.
+# Kept as a SEPARATE, individually-audited group (sibling of STOPLIST_TITLE_PATTERNS)
+# so a future brief can retire any single line if a matter-tag classifier subsumes it.
+# Matched against the alert TITLE, which for proactive_pm_sentinel / deadline_cadence
+# rows carries the sender + subject verbatim ("... email: <sender> — <subject>").
+# Each class can NEVER be a genuine Director action: a no-reply address cannot receive
+# a reply; a newsletter / survey / promo is not a matter event.
+STOPLIST_MARKETING_PATTERNS = (
+    # -- automated / no-reply senders (address appears in the title) --
+    r"\bno[-_]?reply\b",            # noreply-eh@highq.com (E+H daily site-alert digest)
+    r"\bdo[-_]?not[-_]?reply\b",    # do-not-reply@, donotreply@
+    r"\bmailer[-_]?daemon\b",
+    r"\bbounce[\w.+-]*@",           # bounce / VERP return-path senders
+    r"\bnotifications?@",           # notification@ / notifications@ bulk senders
+    r"\bnewsletter@",
+    r"\bmarketing@",
+    # -- newsletters / bulk editorial --
+    r"»\s*observer\s*«",            # MIO »OBSERVER« newsletter (distinctive guillemets)
+    r"\bnewsletter\b",
+    r"\bwebinar\b",
+    # -- satisfaction / feedback surveys --
+    r"\bhow was your (?:experience|stay|visit)\b",   # Atelier 7 — "How was your experience"
+    r"\brate your (?:experience|stay|recent|visit)\b",
+    r"\bsatisfaction survey\b",
+    r"\b(?:take|complete) (?:our|the|a) (?:short )?survey\b",
+    # -- promotions / discount CTAs (deadline_cadence mis-files these as deadlines) --
+    r"\b\d{1,3}\s*%\s*off\b",       # "50% off"
+    r"\buse code\b",                # "Use code 'FLIKISTART50'"
+    r"\b(?:promo|discount|coupon)\s+code\b",
+    r"\blimited[-\s]time offer\b",
+    # -- transactional reservation auto-mail (tight; retire if it ever clips real mail) --
+    r"\bRE:\s*your upcoming stay\b",  # "MOVIE Reservations — RE: Your upcoming stay"
+)
+
 # Compile once at import. ``_STOPLIST_RE.search(title)`` returns truthy on first match.
-_STOPLIST_RE = re.compile("|".join(STOPLIST_TITLE_PATTERNS), flags=re.IGNORECASE)
+_STOPLIST_RE = re.compile(
+    "|".join(STOPLIST_TITLE_PATTERNS + STOPLIST_MARKETING_PATTERNS),
+    flags=re.IGNORECASE,
+)
 
 # Auction is special-cased: a fixed-width lookbehind would be needed to express
 # the brief's "auction unless Brisen anywhere in title" rule inside a single

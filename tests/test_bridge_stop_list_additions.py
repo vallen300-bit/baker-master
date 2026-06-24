@@ -127,3 +127,55 @@ def test_existing_stoplist_patterns_unchanged(title):
 def test_legit_matter_titles_do_not_stop_list(title):
     """Matter-relevant titles must not accidentally match the new patterns."""
     assert bridge._is_stoplist_noise(_alert(title)) is False
+
+
+# --------------------------------------------------------------------------
+# MARKETING_NOISE_FILTER_1 — marketing / no-reply / newsletter / survey / promo.
+# Real prod alert titles (alerts.status='pending', 2026-06-24); sender + subject
+# sit verbatim inside the proactive_pm_sentinel / deadline_cadence title.
+# --------------------------------------------------------------------------
+
+
+# Real prod titles the filter MUST drop.
+MARKETING_NOISE_TITLES = [
+    "Quiet thread [ao_pm]: email: noreply-eh@highq.com — E+H Rechtsanwälte GmbH Daily site alert",
+    "Quiet thread [movie_am]: email: MIO »OBSERVER« — Mandarin Oriental Wien - Ihr »OBSERVER« Pass",
+    "Quiet thread [movie_am]: email: Atelier 7 - Brasserie — How was your experience at Atelier 7",
+    "Quiet thread [movie_am]: email: MOVIE Reservations — RE: Your upcoming stay at Mandarin Oriental",
+    "Due tomorrow: Use code 'FLIKISTART50' for 50% off any monthly plan.",
+]
+
+
+@pytest.mark.parametrize("title", MARKETING_NOISE_TITLES)
+def test_marketing_noise_is_stoplisted(title):
+    """proactive_pm_sentinel / deadline_cadence marketing rows must be dropped."""
+    assert (
+        bridge._is_stoplist_noise(
+            {"source": "proactive_pm_sentinel", "title": title}
+        )
+        is True
+    ), f"marketing noise failed to stop-list: {title!r}"
+
+
+# Real matter signal the filter MUST NOT drop (false-positive guards).
+MATTER_SIGNAL_TITLES = [
+    # genuine inbound prospect replies to MO Residences sales — REAL pipeline
+    "Quiet thread [movie_am]: email: Jernej Omahen — Re: Your Interest in Mandarin Oriental Residences, Vienna",
+    "Quiet thread [movie_am]: email: Ines Wöckl — Re: Your Interest in Mandarin Oriental Residences, Vienna",
+    # real matter correspondence
+    "Quiet thread [movie_am]: email: Thomas Bauer — RG7 Schlussabrechnung",
+    "Waiting on counterparty [ao_pm]: whatsapp_outbound: Director outbound — Merz deadline confirmed",
+    # Brisengroup sales-lead auto-sends — OUT of scope for v1 (Open Item); MUST stay until Director rules
+    "Quiet thread [movie_am]: email: Mykola Borsak | Brisengroup — Your Interest in Mandarin Oriental Residences",
+]
+
+
+@pytest.mark.parametrize("title", MATTER_SIGNAL_TITLES)
+def test_matter_signal_not_stoplisted(title):
+    """Real prospect replies + matter mail + out-of-scope sales rows must pass."""
+    assert (
+        bridge._is_stoplist_noise(
+            {"source": "proactive_pm_sentinel", "title": title}
+        )
+        is False
+    ), f"matter signal wrongly stop-listed: {title!r}"
