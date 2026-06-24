@@ -13,13 +13,14 @@ from pathlib import Path
 from typing import Optional
 
 
-def _emit(text: str) -> None:
-    print(json.dumps({
-        "hookSpecificOutput": {
-            "hookEventName": "Stop",
-            "additionalContext": text,
-        }
-    }))
+def _emit(text: str, *, block: bool) -> None:
+    # Stop hooks cannot use hookSpecificOutput.additionalContext; Claude's
+    # schema only accepts top-level Stop fields here.
+    out = {"systemMessage": text}
+    if block:
+        out["decision"] = "block"
+        out["reason"] = text
+    print(json.dumps(out))
 
 
 def _coerce_int(value: object) -> Optional[int]:
@@ -87,14 +88,16 @@ if percent >= 85:
         "commit + push it, post respawn request, then exit cleanly. "
         "Claim in the successor is the attempt-bump commit, not bus ack.".format(
             percent, tokens_est, window_tokens
-        )
+        ),
+        block=True,
     )
 else:
     _emit(
         "[rollover] context ~{}% ({} est tokens / {} window). "
         "Refresh the checkpoint before the next phase boundary; at 85% checkpoint and respawn.".format(
             percent, tokens_est, window_tokens
-        )
+        ),
+        block=False,
     )
 PY
 exit 0
