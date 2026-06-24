@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "updated_at": "2026-05-27",
+  "updated_at": "2026-06-24",
   "folders": [
     {
       "name": "TEMPLATES",
@@ -67,6 +67,13 @@
       "name": "AO",
       "slug": "ao",
       "presentations": [
+        {
+          "title": "AO / Aelio Project Room - Merged Canonical (24 Jun 2026)",
+          "file": "project-room.html",
+          "created": "2026-06-24",
+          "matter": "oskolkov",
+          "live": true
+        },
         {
           "title": "MOVIE ↔ AO Financing v009 — Source of Truth (EN, Edita 13 Apr 2026)",
           "file": "009_MOVIE_AO_Financing_Final_Reported_Eng_20260413.xlsx",

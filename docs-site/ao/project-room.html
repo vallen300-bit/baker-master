@@ -1,0 +1,406 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>AO / Aelio Project Room - Merged Canonical</title>
+  <style>
+    :root {
+      color-scheme: light;
+      --ink: #172026;
+      --muted: #5a6872;
+      --line: #d9e0e4;
+      --paper: #fbfbf8;
+      --band: #eef3f1;
+      --accent: #2e6f73;
+      --accent-2: #8b5f26;
+      --risk: #9b2f2f;
+      --ok: #2f6f45;
+      --panel: #ffffff;
+    }
+
+    * { box-sizing: border-box; }
+
+    body {
+      margin: 0;
+      background: var(--paper);
+      color: var(--ink);
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      line-height: 1.45;
+    }
+
+    header {
+      padding: 40px 32px 24px;
+      border-bottom: 1px solid var(--line);
+      background: linear-gradient(180deg, #ffffff 0%, var(--band) 100%);
+    }
+
+    main {
+      max-width: 1220px;
+      margin: 0 auto;
+      padding: 28px 24px 56px;
+    }
+
+    h1 {
+      max-width: 1040px;
+      margin: 0 auto 12px;
+      font-size: 34px;
+      line-height: 1.08;
+      letter-spacing: 0;
+      font-weight: 750;
+    }
+
+    .subtitle {
+      max-width: 1040px;
+      margin: 0 auto;
+      color: var(--muted);
+      font-size: 16px;
+    }
+
+    .anchors {
+      max-width: 1040px;
+      margin: 24px auto 0;
+      display: grid;
+      grid-template-columns: repeat(5, minmax(0, 1fr));
+      gap: 10px;
+    }
+
+    .metric {
+      background: rgba(255, 255, 255, 0.76);
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      padding: 12px;
+      min-height: 82px;
+    }
+
+    .metric strong {
+      display: block;
+      font-size: 18px;
+      line-height: 1.2;
+    }
+
+    .metric span {
+      color: var(--muted);
+      font-size: 12px;
+      text-transform: uppercase;
+      letter-spacing: .08em;
+    }
+
+    .notice {
+      max-width: 1040px;
+      margin: 18px auto 0;
+      border: 1px solid #e1c66f;
+      background: #fff9df;
+      border-radius: 8px;
+      padding: 12px 14px;
+      color: #5f4d12;
+      font-size: 14px;
+    }
+
+    .grid {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 16px;
+    }
+
+    section {
+      background: var(--panel);
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      padding: 18px;
+      min-height: 100%;
+    }
+
+    section.full {
+      grid-column: 1 / -1;
+    }
+
+    h2 {
+      margin: 0 0 10px;
+      font-size: 17px;
+      letter-spacing: .04em;
+      text-transform: uppercase;
+      color: var(--accent);
+    }
+
+    p {
+      margin: 0 0 12px;
+      color: var(--muted);
+    }
+
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      margin: 10px 0 4px;
+      font-size: 13px;
+    }
+
+    th, td {
+      border-bottom: 1px solid var(--line);
+      padding: 8px 6px;
+      text-align: left;
+      vertical-align: top;
+    }
+
+    th {
+      color: var(--muted);
+      font-size: 11px;
+      text-transform: uppercase;
+      letter-spacing: .08em;
+      font-weight: 700;
+    }
+
+    ul, ol {
+      margin: 8px 0 0 19px;
+      padding: 0;
+    }
+
+    li { margin: 4px 0; }
+
+    .tag {
+      display: inline-block;
+      border-radius: 999px;
+      padding: 2px 8px;
+      font-size: 12px;
+      font-weight: 650;
+      background: var(--band);
+      color: var(--accent);
+    }
+
+    .risk { color: var(--risk); font-weight: 700; }
+    .ok { color: var(--ok); font-weight: 700; }
+    .warn { color: var(--accent-2); font-weight: 700; }
+
+    .boundary {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 16px;
+    }
+
+    footer {
+      margin-top: 18px;
+      color: var(--muted);
+      font-size: 12px;
+    }
+
+    @media (max-width: 980px) {
+      header { padding: 28px 18px 20px; }
+      main { padding: 18px 14px 40px; }
+      h1 { font-size: 28px; }
+      .anchors, .grid, .boundary { grid-template-columns: 1fr; }
+      section.full { grid-column: auto; }
+    }
+  </style>
+</head>
+<body>
+  <header>
+    <h1>AO / Aelio Project Room</h1>
+    <p class="subtitle">Merged canonical review build from AO Desk source mapping, Codex Arch operating panels, M365 sweep, and Director-added Plaud meeting sources. Counterparty lane only; asset execution remains with the responsible desks.</p>
+    <div class="anchors">
+      <div class="metric"><span>Aelio channel</span><strong>EUR 50.448M</strong></div>
+      <div class="metric"><span>Full principal</span><strong>EUR 66.512M</strong></div>
+      <div class="metric"><span>Outstanding call</span><strong>EUR 2.13M</strong></div>
+      <div class="metric"><span>Aukera clock</span><strong>30 Jun 2026</strong></div>
+      <div class="metric"><span>Villa DD</span><strong>3 Jul 2026</strong></div>
+    </div>
+    <div class="notice"><strong>TODOIST IS REFERENCE-ONLY.</strong> Use names, figures, and dates only. Completion status is not live matter state.</div>
+  </header>
+
+  <main>
+    <div class="grid">
+      <section class="full">
+        <h2>Project Index</h2>
+        <p>Entry by project name for human and agent scanning; operating panels below remain the working structure.</p>
+        <table>
+          <tr><th>Project / lane</th><th>Open first</th><th>Source map</th><th>M365 / live evidence</th><th>Maps to</th></tr>
+          <tr><td>RG7 / MOVIE capital call</td><td>EUR 7M call; EUR 2.13M outstanding</td><td>FTC, 7M walkthrough, Feb 2025 CC, AO CF Oct24, 009 workbooks, Plaud 17 Apr meeting</td><td>15 Jun status email plus Plaud 17 Apr: immediate EUR 1.3M-EUR 3M funding need and Annaberg bridge-credibility logic</td><td>Capital-Call Machine; Exposure Stack</td></tr>
+          <tr><td>Participation Agreement / Aelio / RG7 rights</td><td>PA wet-ink; 48/45 gap</td><td>investment-channels, sensitive-issues, RG7 equity, 10_AO_RG7_2025</td><td>Dec-Feb-Mar Aelio loan / assignment / margin architecture</td><td>Document / Rights Stack</td></tr>
+          <tr><td>Aukera facility / Lilienmatt restructuring</td><td>EUR 15M close; Sadarov; 2025 FS; project controller; loan yes/no</td><td>gold G2-G9, restructuring, Aukera cycles, AO NOV 27, Plaud 22 Jun meeting</td><td>24 Jun Merz / Brandner threads plus Plaud: loan economics, drip-fed liquidity, 29 Jun signable-agreement gate</td><td>Restructuring Clock</td></tr>
+          <tr><td>Lana / Oskolkova tax</td><td>EUR 650K refund; tax pressure</td><td>Lana tax file; Baden-Baden debrief</td><td>May wire chain: EUR 102,915.18 tax plus EUR 5,179.67 Merz/bailiff</td><td>Side-Asset Optionality</td></tr>
+          <tr><td>Balgerstrasse 7 / MRC&amp;I</td><td>Develop path; AO funding posture</td><td>Baden-Baden source set; Plaud 22 Jun meeting</td><td>AO staged funding expectations; Plaud links Anaberg loan to approx. EUR 28M Balgerstrasse/Baugestrasse financing need and permit urgency</td><td>Side-Asset Optionality; Decision Calendar</td></tr>
+          <tr><td>Irina Sudomoyeva / EUR 440K sender route</td><td>Potential funds to Germany; open but not closed; later assignment to AO debt to MRCI</td><td>Plaud 1 Jun transcript; Director context; MRCI / Lilienmatt document stack</td><td>Plaud records Irina, long-held personal account, no European status, signing logistics, and "440"; Director identifies EUR 440,000. M365 found no direct Sudomoyeva hit but found transfer-paperwork / shareholder-resolution precedent threads.</td><td>Document Stack; Decision Calendar; Evidence Confidence</td></tr>
+          <tr><td>Villa Il Gabbiano</td><td>EUR 22.5M DD / pause-memo logic</td><td>Villa thesis; target folders</td><td>Seller / address / financing-risk / coastal-law support</td><td>Side-Asset Optionality; Evidence Confidence</td></tr>
+          <tr><td>Apartment 8 / show apartment sale</td><td>Swiss buyer offer and reinvestment question</td><td>Plaud 17 Apr meeting; Rome dinner briefing</td><td>9.6M offer, possible 10M, approx. 32K/sqm, EUR 2M profit shortfall concern, replacement show apartment need</td><td>Capital-Call Machine; Relationship Control</td></tr>
+          <tr><td>AO profile / Rome dinner / comms</td><td>Relationship reset; silence risk</td><td>psychology, communication-rules, sensitive-issues, ao_pm_lessons</td><td>27 May dinner briefing: 44-day silence, Apartment 8 trophy, PA backstop</td><td>Relationship Control Panel</td></tr>
+          <tr><td>MO Prague / CITIC</td><td>Brand co-investment filter</td><td>Target / origination references</td><td>No material M365 hit in this sweep</td><td>Side-Asset Optionality</td></tr>
+          <tr><td>Hotel refinancing / sale strategy</td><td>Refinancing pressure and sale-pricing route</td><td>Plaud 22 Jun meeting</td><td>Hotel forecasts unreliable; AI forecasting need; external term sheets for approx. EUR 82M facility; Laura Rank meeting 30 Jun</td><td>Relationship Control; Evidence Confidence</td></tr>
+          <tr><td>Cyprus / AO GF legacy archive</td><td>History, source-of-funds, old positions</td><td>AO GF, AO_RG7_pre-2025, AO_Landing, AO_Cyprus</td><td>No new live driver; history only</td><td>Exposure; Document Stack</td></tr>
+        </table>
+      </section>
+
+      <section>
+        <h2>1. Exposure Stack</h2>
+        <p><span class="tag">Safe quote</span> Use EUR 66.5M for total principal; EUR 50.448M is Aelio channel only.</p>
+        <table>
+          <tr><th>Layer</th><th>Read</th><th>Status</th></tr>
+          <tr><td>Hayford / direct</td><td>EUR 16.063M</td><td>Ratified</td></tr>
+          <tr><td>Aelio / Cyprus</td><td>EUR 50.448M</td><td>M365-supported</td></tr>
+          <tr><td>Full principal</td><td>EUR 66.512M</td><td>Director decision D-001</td></tr>
+          <tr><td>Quasi-equity</td><td>AO 48% / DV 45% net</td><td>Open 3% tension</td></tr>
+          <tr><td>Registered equity</td><td>AO 0%</td><td>Structural fact</td></tr>
+        </table>
+      </section>
+
+      <section>
+        <h2>2. Capital-Call Machine</h2>
+        <p>EUR 7M is AO's 48% share of the Q2 2026 funding gap, rounded for contingency and field-tested in Baden-Baden.</p>
+        <table>
+          <tr><th>Item</th><th>State</th><th>Rule</th></tr>
+          <tr><td>April EUR 2.5M</td><td class="ok">Paid</td><td>Lock as settled</td></tr>
+          <tr><td>May EUR 2.5M</td><td class="warn">EUR 130K short</td><td>Roll into June chase</td></tr>
+          <tr><td>June EUR 2.0M</td><td class="risk">Outstanding</td><td>Track as live ask</td></tr>
+          <tr><td>Total outstanding</td><td class="risk">EUR 2.13M</td><td>Keep separate from side matters</td></tr>
+        </table>
+        <p>M365 anchor: 15 Jun 2026 Aelio status email.</p>
+      </section>
+
+      <section>
+        <h2>3. Document / Rights Stack</h2>
+        <table>
+          <tr><th>Issue</th><th>Why it matters</th><th>Rule</th></tr>
+          <tr><td>Participation Agreement</td><td>Aelio / LCG participation</td><td>Wet-ink unresolved</td></tr>
+          <tr><td>48% vs 45% net</td><td>Core economic tension</td><td>Do not raise proactively</td></tr>
+          <tr><td>25% signed vs 45% draft</td><td>RF1 dormant grenade</td><td>Open only if AO raises</td></tr>
+          <tr><td>Aelio loan / SHL / bonds</td><td>Creditor architecture</td><td>Keep shield intact</td></tr>
+          <tr><td>Irina Sudomoyeva EUR 440K sender route</td><td>Potential funds to Germany, later assigned to AO debt to MRCI</td><td>Pending only; require receipt, signed documents, and MRCI accounting treatment before booking as closed</td></tr>
+        </table>
+      </section>
+
+      <section>
+        <h2>4. Restructuring Clock</h2>
+        <table>
+          <tr><th>Dependency</th><th>Current read</th><th>Risk</th></tr>
+          <tr><td>Aukera EUR 15M</td><td>Close 30 Jun 2026</td><td class="risk">Hard clock</td></tr>
+          <tr><td>2025 Lilienmatt FS</td><td>Still outstanding</td><td>Timeline blocker</td></tr>
+          <tr><td>Sadarov loan</td><td>Needs AO payment proof or written AO-LM agreement</td><td>Tax / accounting blocker</td></tr>
+          <tr><td>Kopp project controller</td><td>Lender-mandated scope unresolved</td><td>Disbursement condition</td></tr>
+          <tr><td>Annex 4 / division declaration</td><td>Object / land-register inconsistencies</td><td>Documentation blocker</td></tr>
+          <tr><td>Signable agreement gate</td><td>No signable agreement by 29 Jun means deal off per Plaud notes</td><td class="risk">Immediate decision gate</td></tr>
+          <tr><td>Loan economics</td><td>Costlier loan; drip-fed EUR 2.5M-EUR 2.6M; possible value only if tied to refinancing / Balgerstrasse benefits</td><td>Strategic yes/no</td></tr>
+        </table>
+      </section>
+
+      <section>
+        <h2>5. Side-Asset Optionality</h2>
+        <table>
+          <tr><th>Asset</th><th>AO-lane question</th><th>Boundary</th></tr>
+          <tr><td>Villa Il Gabbiano</td><td>Pause before DD / preliminary?</td><td>AO framing only</td></tr>
+          <tr><td>Lana / Oskolkova tax</td><td>What must AO understand through Lana / Ilana?</td><td>Baden-Baden executes</td></tr>
+          <tr><td>Balgerstrasse 7 / MRC&amp;I</td><td>Develop path and funding posture?</td><td>Baden-Baden executes</td></tr>
+          <tr><td>Irina Sudomoyeva EUR 440K route</td><td>Can this become a clean documented AO-to-MRCI debt / funding assignment?</td><td>AO room tracks evidence; finance / legal confirms receipt and documents</td></tr>
+          <tr><td>MO Prague / CITIC</td><td>Brand co-investment filter?</td><td>Origination / MOVIE</td></tr>
+        </table>
+      </section>
+
+      <section>
+        <h2>6. Relationship Control Panel</h2>
+        <table>
+          <tr><th>Rule</th><th>Meaning</th></tr>
+          <tr><td>No silence before ask</td><td>Prompt Director before 14 days</td></tr>
+          <tr><td>Language</td><td>"We / our project", not sole-owner phrasing</td></tr>
+          <tr><td>Framing</td><td>Hunt, trophy, opportunity, momentum</td></tr>
+          <tr><td>Avoid</td><td>Maintenance, defects, institutional replacement, legal binary</td></tr>
+          <tr><td>Sensitivity</td><td>Do not expose private knowledge unless AO / Constantinos opens it</td></tr>
+        </table>
+        <p>M365 anchor: 27 May Rome dinner briefing.</p>
+      </section>
+
+      <section>
+        <h2>7. Decision Calendar</h2>
+        <table>
+          <tr><th>Date / window</th><th>Item</th><th>State</th></tr>
+          <tr><td>24 Jun 2026</td><td>Merged canonical review build</td><td>This artifact</td></tr>
+          <tr><td>24 Jun 2026</td><td>Irina Sudomoyeva EUR 440K sender route</td><td class="warn">Open / not closed; confirm transfer ability, receipt, and assignment</td></tr>
+          <tr><td>29 Jun 2026</td><td>Signable Aukera / Anaberg loan agreement</td><td class="risk">Plaud go/no-go gate</td></tr>
+          <tr><td>30 Jun 2026</td><td>Aukera EUR 15M close</td><td class="risk">Critical</td></tr>
+          <tr><td>30 Jun 2026</td><td>Laura Rank hotel sale-strategy meeting</td><td>Route to MOVIE / hotel desk</td></tr>
+          <tr><td>3 Jul 2026</td><td>Villa Il Gabbiano DD decision</td><td>Pause-memo context</td></tr>
+          <tr><td>Autumn 2026</td><td>Balgerstrasse building permission</td><td>Baden-Baden clock</td></tr>
+          <tr><td>31 Dec 2027</td><td>Hayford loan term</td><td>Background clock</td></tr>
+        </table>
+      </section>
+
+      <section>
+        <h2>8. Evidence Confidence Map</h2>
+        <table>
+          <tr><th>Claim class</th><th>Status</th><th>Use rule</th></tr>
+          <tr><td>GOLD G1-G11 / RF1-RF4</td><td class="ok">Director-ratified</td><td>Safe internal anchor</td></tr>
+          <tr><td>EUR 7M walkthrough</td><td class="ok">Field-tested</td><td>Safe AO-facing explanation</td></tr>
+          <tr><td>M365 / Outlook</td><td class="ok">Material live data found</td><td>Read full emails before external use</td></tr>
+          <tr><td>Sadarov loan</td><td class="warn">Live blocker</td><td>Do not assert solved</td></tr>
+          <tr><td>Plaud 17 Apr / 1 Jun / 22 Jun meetings</td><td class="ok">Director-supplied notes and extracted transcripts</td><td>Use for issue routing; verify before external use</td></tr>
+          <tr><td>Irina Sudomoyeva EUR 440K route</td><td class="warn">Director context plus Plaud 1 Jun; no direct Sudomoyeva M365 hit found</td><td>Pending/open item only; do not treat as cash received, debt reduction, or assignment without documents</td></tr>
+          <tr><td>AO-direct WhatsApp</td><td class="warn">Pending pull</td><td>Do not infer silence</td></tr>
+          <tr><td>Todoist</td><td class="risk">Reference-only</td><td>Ignore completion status</td></tr>
+        </table>
+      </section>
+
+      <section class="full">
+        <h2>M365 / Outlook Sweep Addendum</h2>
+        <p>Search run 24 Jun 2026 across M365-ingested source=graph records and live Graph where available. Terms: Oskolkov, Aelio, Aelios, Aukera, Lilienmatt, Gabbiano, Balgerstrasse, MRCI, Sadarov, Oskolkova, project controller, AO Rome dinner, Irina / Sudomoyeva variants, 440 variants, Conrad Constantinos, MRC+I Constantinos Conrad, Germany funds Constantinos Conrad, and assignment MRCI Constantinos.</p>
+        <table>
+          <tr><th>Topic</th><th>Material addition</th></tr>
+          <tr><td>Aukera / Lilienmatt</td><td>Live blockers: loan draft, Annex 4, Annex 10, land charge deed, division declaration, purchase agreements, AML, Kopp, ETL, reliance letter, timeline.</td></tr>
+          <tr><td>Sadarov</td><td>Loan reclassification remains a live accounting / tax blocker until payment proof or written AO-LM loan path is verified.</td></tr>
+          <tr><td>Aelio / capital calls</td><td>15 Jun status confirms paid EUR 4.87M, outstanding EUR 2.13M.</td></tr>
+          <tr><td>Oskolkova / Lana tax</td><td>May wires: EUR 102,915.18 tax plus EUR 5,179.67 Merz/bailiff; Ilana account used after bank block.</td></tr>
+          <tr><td>Balgerstrasse / MRC&amp;I</td><td>Staged AO funding expectations, autumn 2026 building-permit clock, MRCI protocol penalty-risk context.</td></tr>
+          <tr><td>Villa Il Gabbiano</td><td>Seller, address, no-bank-financing, coastal-law and stale-listing support.</td></tr>
+          <tr><td>Rome dinner / comms</td><td>44-day silence reset, Apartment 8 trophy, PA backstop, private Constantinos sensitivity.</td></tr>
+          <tr><td>Irina / EUR 440K sender route</td><td>No direct Sudomoyeva email hit found. Supporting context: June 2026 Conrad / Constantinos MRC+I and Lilienmatt shareholder-resolution emails plus January 2025 transfer-paperwork threads stating German inbound transfers need coordinated papers, resolutions, and bank announcement.</td></tr>
+        </table>
+      </section>
+
+      <section class="full">
+        <h2>Plaud Source Addendum</h2>
+        <p>Director-added sources: 04-17 Weekly Meeting: Funding, Annaberg Transaction, and Apartment Sale; 06-01 consultation on closing a non-resident bank account and withdrawing funds; and 06-22 Meeting: Anaberg Loan Strategy, Cash Flow, Construction Scope, Refinancing, and Hotel Sale Plan.</p>
+        <p>Transcript companions: <a href="2026-04-17-plaud-weekly-funding-annaberg-apartment-sale-transcript.md">17 Apr Markdown transcript</a>, <a href="2026-04-17-plaud-weekly-funding-annaberg-apartment-sale-transcript.html">17 Apr HTML transcript</a>, <a href="2026-06-01-plaud-irina-sudomoyeva-funds-to-germany-transcript.md">1 Jun Markdown transcript</a>, <a href="2026-06-01-plaud-irina-sudomoyeva-funds-to-germany-transcript.html">1 Jun HTML transcript</a>, <a href="2026-06-22-plaud-anaberg-loan-strategy-transcript.md">22 Jun Markdown transcript</a>, and <a href="2026-06-22-plaud-anaberg-loan-strategy-transcript.html">22 Jun HTML transcript</a>.</p>
+        <table>
+          <tr><th>Topic</th><th>Material addition</th></tr>
+          <tr><td>April funding gap</td><td>17 Apr meeting records immediate need around EUR 1.3M, broader EUR 2M-EUR 3M bridge logic, and Annaberg progress as credibility for support.</td></tr>
+          <tr><td>Apartment 8 / show apartment sale</td><td>17 Apr meeting records 9.6M offer, possible 10M, approx. 32K/sqm, EUR 2M profit shortfall concern, and 300K-500K replacement show-apartment need.</td></tr>
+          <tr><td>Contractor security strain</td><td>17 Apr meeting records subcontractor security demands and need to avoid blunt no-money messaging.</td></tr>
+          <tr><td>Anaberg / Annaberg loan decision</td><td>22 Jun meeting: loan is disputed; Edita sees expensive drip-fed liquidity and pressure; Balazs sees completion certainty and refinancing optionality.</td></tr>
+          <tr><td>Cash flow</td><td>August-December inflows around EUR 2.4M-EUR 2.5M; EUR 600K Siegfried repayment reduces fresh usable cash to about EUR 1.9M.</td></tr>
+          <tr><td>Construction scope</td><td>Complete contracted works and sold-unit obligations, prepare one show apartment, keep unsold units white box unless buyer demand justifies fit-out.</td></tr>
+          <tr><td>RG7 / Balgerstrasse link</td><td>Anaberg loan decision is linked to RG7 completion cash and Balgerstrasse/Baugestrasse financing, including approx. EUR 28M need and permit urgency before November 2026.</td></tr>
+          <tr><td>Refinancing</td><td>Use external bank term sheets to create pressure for better refinancing terms.</td></tr>
+          <tr><td>Legal / restructuring</td><td>Drawdown depends on restructuring, Oskolkov equity sale for EUR 1, retained loan qualification, and tax confirmation.</td></tr>
+          <tr><td>Hotel route</td><td>Hotel forecasting, F&amp;B, AI forecasting, and sale-strategy content route to MOVIE / hotel desk; AO room keeps only refinancing context.</td></tr>
+          <tr><td>Irina Sudomoyeva / EUR 440K pending route</td><td>1 Jun Plaud transcript records Irina Sudomoyeva, long-held personal account, no European status, document-signing / DHL logistics, and "440" at 00:05:52. Director context identifies EUR 440,000 to Germany, later assigned to AO debt to MRCI; open, not closed as of 24 Jun 2026.</td></tr>
+        </table>
+      </section>
+
+      <section class="full">
+        <h2>Room Boundary</h2>
+        <div class="boundary">
+          <div>
+            <p><strong>This room owns</strong></p>
+            <ol>
+              <li>AO / Aelio exposure and capital-call relationship.</li>
+              <li>Participation Agreement / quasi-equity posture.</li>
+              <li>AO-facing restructuring implications.</li>
+              <li>AO psychology, communication rules, and attention cadence.</li>
+              <li>AO-side optionality and evidence routing.</li>
+            </ol>
+          </div>
+          <div>
+            <p><strong>This room does not own</strong></p>
+            <ol>
+              <li>Baden-Baden asset execution.</li>
+              <li>MOVIE hotel operations.</li>
+              <li>Hagenauer claims or defect recovery.</li>
+              <li>Villa diligence execution beyond AO-facing investment logic.</li>
+              <li>Institutional fundraising strategy that would alarm AO.</li>
+            </ol>
+          </div>
+        </div>
+      </section>
+    </div>
+
+    <footer>
+      Merged canonical review build. Source rooms are preserved until Director review.
+    </footer>
+  </main>
+</body>
+</html>
