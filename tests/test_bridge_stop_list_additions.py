@@ -162,6 +162,10 @@ MATTER_SIGNAL_TITLES = [
     # genuine inbound prospect replies to MO Residences sales — REAL pipeline
     "Quiet thread [movie_am]: email: Jernej Omahen — Re: Your Interest in Mandarin Oriental Residences, Vienna",
     "Quiet thread [movie_am]: email: Ines Wöckl — Re: Your Interest in Mandarin Oriental Residences, Vienna",
+    # real human reply sharing the reservation subject — G2 F1 over-filter guard
+    # (live alert id=25645, sender sergey0569@gmail.com). The reservation pattern is
+    # sender-bound ("MOVIE Reservations"), so this human reply must NOT be dropped.
+    "Quiet thread [movie_am]: email: sergey0569@gmail.com — Re: Your upcoming stay at Mandarin Oriental",
     # real matter correspondence
     "Quiet thread [movie_am]: email: Thomas Bauer — RG7 Schlussabrechnung",
     "Waiting on counterparty [ao_pm]: whatsapp_outbound: Director outbound — Merz deadline confirmed",

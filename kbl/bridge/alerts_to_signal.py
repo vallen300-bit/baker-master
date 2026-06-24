@@ -153,7 +153,11 @@ STOPLIST_MARKETING_PATTERNS = (
     r"\b(?:promo|discount|coupon)\s+code\b",
     r"\blimited[-\s]time offer\b",
     # -- transactional reservation auto-mail (tight; retire if it ever clips real mail) --
-    r"\bRE:\s*your upcoming stay\b",  # "MOVIE Reservations — RE: Your upcoming stay"
+    # G2 F1 fix (deputy-codex #4201): sender-bound, NOT subject-bound. A bare
+    # "RE: your upcoming stay" subject is shared by REAL human replies (live alert
+    # id=25645, sender sergey0569@gmail.com). Require the literal automated sender
+    # so only the MOVIE Reservations desk auto-mail is dropped.
+    r"\bMOVIE Reservations\b.*\bupcoming stay\b",  # sender-bound — the automated reservation desk only
 )
 
 # Compile once at import. ``_STOPLIST_RE.search(title)`` returns truthy on first match.
