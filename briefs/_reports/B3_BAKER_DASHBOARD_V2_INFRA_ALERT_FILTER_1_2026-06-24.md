@@ -2,7 +2,12 @@
 
 - **Brief:** `briefs/_tasks/BAKER_DASHBOARD_V2_INFRA_ALERT_FILTER_1.md`
 - **PR:** #419 — `b3/baker-dashboard-v2-infra-alert-filter-1` → `main`
-- **Commit:** c9da449
+- **Commit:** 950d422 (initial c9da449 + G3 fix)
+- **Gate history:** G2 deputy-codex PASS (#4159) → G3 deputy REQUEST_CHANGES 1 LOW (#4162/#4164/#4166) → fixed @ 950d422, re-gating (G2-light + G3 reconfirm)
+
+## G3 fix (waha_session_poll leak)
+
+deputy G3 found a real leak: `waha_session_poll` (the WAHA-UNREACHABLE liveness `_poll` variant) was missing from `STOPLIST_SOURCES` — only `waha_session`/`waha_silence` were present. Live proof: alert id=25165 (`source=waha_session_poll`, title "WAHA UNREACHABLE", pending) matched neither the source set nor any title regex → would bridge to the Director feed, failing AC#3. Fix: explicit string `waha_session_poll` added to `STOPLIST_SOURCES` (kept explicit, not a `waha_*` prefix, so a future real `waha_inbound` isn't auto-stoplisted). Infra-skip test parametrized to cover it. The brief's census ("waha_session=1") missed this `_poll` near-miss. Scope held: `deadline_cadence` coupon leak + `proactive_pm_sentinel` volume left out per lead #4164 (separate noise class, future brief).
 - **Dispatched by:** lead (verbal fire 2026-06-24; brief was PRE-AUTHORIZED / DISPATCHABLE, recommended owner B3)
 - **Task class:** Bug / quality fix (noise leak). Deterministic filter — no LLM, no endpoint, no migration.
 
