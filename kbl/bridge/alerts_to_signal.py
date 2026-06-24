@@ -140,6 +140,10 @@ STOPLIST_SOURCES = frozenset(
         "sentinel_health",
         "waha_silence",
         "waha_session",
+        # Scheduler-liveness alerts are a cosmetic false alarm (per-instance
+        # advisory-lock artifact, scheduler is alive — §A-LEAD-0621b). Their home
+        # is the System Health console (PR #417), not the Director Today feed.
+        "scheduler_job_liveness",
     ]
 )
 
