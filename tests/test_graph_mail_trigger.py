@@ -424,6 +424,21 @@ def test_fetch_path_url_encodes_message_id():
     assert "/Hg+" not in path                       # raw chars no longer in the path
 
 
+def test_fetch_path_no_contentbytes_in_collection_select():
+    """M365_GRAPH_ATTACHMENT_FETCH_DIAG_1 (bus #4348): contentBytes in a $select on
+    the /attachments COLLECTION makes Graph 400 ('Could not find a property named
+    contentBytes'), silently dropping attachments. The fetch must NOT send $select;
+    a bare collection GET returns full fileAttachment objects incl contentBytes."""
+    client = _fake_client()
+    client.get.return_value = {"value": []}
+    gmt._fetch_attachments_page(client, "AAMkRealMessageId==")
+    params = client.get.call_args_list[0].kwargs.get("params") or {}
+    assert "$select" not in params                  # no $select on the collection at all
+    # belt-and-suspenders: contentBytes never named in any outgoing param
+    assert "contentBytes" not in str(params)
+    assert params.get("$top") == 50                 # $top is still fine
+
+
 def test_store_key_falls_back_to_message_id_without_conversation():
     """No conversationId -> store under the message id (mirrors thread_id = conv or id)."""
     client = _fake_client()

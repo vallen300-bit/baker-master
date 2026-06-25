@@ -293,6 +293,57 @@ def test_get_failure_returns_none_no_raise():
         assert client.get("/me/messages") is None  # never raises
 
 
+def _err_response(status=400, body='{"error":{"code":"ErrorX"}}', url="https://graph.microsoft.com/v1.0/x"):
+    """A mock Response whose raise_for_status() raises a real HTTPError w/ .response."""
+    import requests as _rq
+
+    resp = mock.MagicMock()
+    resp.status_code = status
+    resp.text = body
+    resp.url = url
+    err = _rq.exceptions.HTTPError("boom")
+    err.response = resp
+    resp.raise_for_status.side_effect = err
+    return resp
+
+
+# M365_GRAPH_ATTACHMENT diagnosis: get() (v1.0-relative, non-redacted) failures
+# must surface the HTTP status + final URL + Graph error body — the bare exception
+# class name swallowed the smoking gun. Message ids are not secrets; the bearer
+# lives in request headers, never the response body.
+def test_get_failure_logs_status_url_and_body(caplog):
+    client = GraphClient(_ready_cfg())
+    att_url = "https://graph.microsoft.com/v1.0/users/svc%40x.com/messages/AAMkID%3D%3D/attachments"
+    with mock.patch(MSAL_PATH) as m_msal, mock.patch(REQUESTS_PATH) as m_requests:
+        m_msal.return_value.acquire_token_for_client.return_value = {"access_token": TOKEN}
+        m_requests.get.return_value = _err_response(
+            status=400, body='{"error":{"code":"ErrorInvalidIdMalformed"}}', url=att_url
+        )
+        with caplog.at_level(logging.ERROR):
+            assert client.get("/users/svc%40x.com/messages/AAMkID%3D%3D/attachments") is None
+    assert "status=400" in caplog.text
+    assert "ErrorInvalidIdMalformed" in caplog.text
+    assert att_url in caplog.text
+    assert TOKEN not in caplog.text
+
+
+# get_url() (delta/next links) stays redacted even when the HTTP error carries a
+# response body/url — never leak the delta token via status-body logging.
+def test_get_url_failure_redacts_even_with_response_body(caplog):
+    client = GraphClient(_ready_cfg())
+    delta_url = "https://graph.microsoft.com/v1.0/me/messages/delta?$deltatoken=SENSITIVE_DELTA_abc123"
+    with mock.patch(MSAL_PATH) as m_msal, mock.patch(REQUESTS_PATH) as m_requests:
+        m_msal.return_value.acquire_token_for_client.return_value = {"access_token": TOKEN}
+        m_requests.get.return_value = _err_response(
+            status=400, body="SENSITIVE_DELTA_abc123 in body", url=delta_url
+        )
+        with caplog.at_level(logging.ERROR):
+            assert client.get_url(delta_url) is None
+    assert "redacted" in caplog.text
+    assert "SENSITIVE_DELTA_abc123" not in caplog.text
+    assert delta_url not in caplog.text
+
+
 # M365_GRAPH_ATTACHMENT_ID_FORM_FIX_1: get(extra_headers=...) merges non-auth
 # headers (e.g. Prefer: IdType="ImmutableId") on top of the bearer, and the
 # bearer is set LAST so a caller can never strip or override it.
