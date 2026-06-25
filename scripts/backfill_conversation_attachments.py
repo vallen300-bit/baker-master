@@ -200,11 +200,12 @@ def run_missing(execute: bool, msg_ids: list[str] | None = None,
         return 3
 
     updated = duplicate = skipped = failed = 0
-    fetched_bytes = 0
+    fetched_bytes = 0      # actual bytes fetched this run
+    planned_bytes = 0      # committed bytes (by known size_bytes) — the budget gate
+    processed = 0          # rows actually fetched (>=1 guaranteed for forward progress)
+    stop = False
     for mid, group in by_msg.items():
-        if byte_budget and fetched_bytes >= byte_budget:
-            logger.info("byte_budget %d reached (fetched %d) — stopping; re-run to continue.",
-                        byte_budget, fetched_bytes)
+        if stop:
             break
         page, _imm = gmt._fetch_attachments_page(client, mid)
         if page is None:
@@ -220,6 +221,18 @@ def run_missing(execute: bool, msg_ids: list[str] | None = None,
                 logger.warning("row id=%s (%s): no matching Graph attachment — skipped",
                                row["id"], row.get("filename"))
                 continue
+            # PER-ROW byte-budget gate (G2 F1 #4465): decide BEFORE fetching, using
+            # the row's KNOWN size_bytes, so a multi-row / large-row message can
+            # never overshoot the chunk budget mid-group (OOM guard). The first row
+            # of a run is always allowed (processed==0) so a single oversized
+            # attachment still makes progress; the rest resume in the next job.
+            row_size = row.get("size_bytes") or 0
+            if byte_budget and processed > 0 and planned_bytes + row_size > byte_budget:
+                logger.info("byte_budget %d would be exceeded by next row "
+                            "(planned %d + %d) — stopping at boundary; re-run to continue.",
+                            byte_budget, planned_bytes, row_size)
+                stop = True
+                break
             raw = gmt.fetch_attachment_raw_value(client, mid, att.get("id"), max_retries=5)
             if raw is None:
                 failed += 1
@@ -227,7 +240,9 @@ def run_missing(execute: bool, msg_ids: list[str] | None = None,
                              row["id"], row.get("filename"))
                 continue
             payload, ct = raw
+            planned_bytes += row_size
             fetched_bytes += len(payload)
+            processed += 1
             status = update_attachment_payload(
                 row["id"], "graph", payload, mime_type=ct,
                 provider_attachment_id=att.get("id"),
@@ -244,7 +259,8 @@ def run_missing(execute: bool, msg_ids: list[str] | None = None,
                 logger.warning("row id=%s: update status=%s", row["id"], status)
 
     logger.info("byte-residue backfill done: updated=%d duplicate-removed=%d skipped=%d failed=%d "
-                "fetched~%d bytes", updated, duplicate, skipped, failed, fetched_bytes)
+                "fetched~%d bytes (planned %d)", updated, duplicate, skipped, failed,
+                fetched_bytes, planned_bytes)
     return 1 if failed else 0
 
 

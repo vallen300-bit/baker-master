@@ -462,6 +462,34 @@ def test_run_missing_duplicate_deletes_empty(monkeypatch):
     assert deleted == [9]
 
 
+def test_run_missing_per_row_byte_budget_stops_at_boundary(monkeypatch):
+    """G2 F1 #4465: budget enforced PER ROW (before fetch, by known size), so a
+    multi-row message can't overshoot. 3x100B rows, budget 150 -> only the first
+    row is fetched (first-row progress), the second trips the gate and stops."""
+    rows = [
+        {"id": 1, "message_id": "MID", "filename": "a.pdf", "mime_type": "application/pdf", "size_bytes": 100},
+        {"id": 2, "message_id": "MID", "filename": "b.pdf", "mime_type": "application/pdf", "size_bytes": 100},
+        {"id": 3, "message_id": "MID", "filename": "c.pdf", "mime_type": "application/pdf", "size_bytes": 100},
+    ]
+    monkeypatch.setattr(bf, "_load_byte_empty_rows", lambda *a, **k: rows)
+    client = _client(ready=True)
+    monkeypatch.setattr(gc, "GraphClient", lambda *a, **k: client)
+    page = {"value": [_att("A1", "a.pdf", content_bytes=None, size=100),
+                      _att("A2", "b.pdf", content_bytes=None, size=100),
+                      _att("A3", "c.pdf", content_bytes=None, size=100)]}
+    monkeypatch.setattr(gmt, "_fetch_attachments_page", lambda c, mid: (page, False))
+    fetched = []
+    monkeypatch.setattr(gmt, "fetch_attachment_raw_value",
+                        lambda c, mid, aid, max_retries=0: fetched.append(aid) or (b"x" * 100, "application/pdf"))
+    updates = []
+    monkeypatch.setattr(store, "update_attachment_payload",
+                        lambda *a, **k: updates.append(a[0]) or "updated")
+    bf.run_missing(execute=True, byte_budget=150)
+    # Stopped at the boundary: only row 1 fetched+updated, NOT all three (200B+ overshoot).
+    assert fetched == ["A1"]
+    assert updates == [1]
+
+
 def test_run_missing_dormant_client_aborts(monkeypatch):
     monkeypatch.setattr(bf, "_load_byte_empty_rows",
                         lambda *a, **k: [{"id": 1, "message_id": "MID", "filename": "a.pdf",
