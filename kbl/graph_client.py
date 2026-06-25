@@ -144,6 +144,7 @@ class GraphClient:
         timeout: int,
         log_url: str,
         extra_headers: dict | None = None,
+        redact_url: bool = True,
     ) -> dict | None:
         """Shared GET path. Never raises; never logs the token or full delta URL.
 
@@ -151,6 +152,15 @@ class GraphClient:
         bearer (e.g. ``Prefer: IdType="ImmutableId"`` for immutable-id-form
         message reads). The Authorization header is always set last so a caller
         can never override / strip the bearer.
+
+        redact_url: when True (get_url / opaque delta+next links), failures log
+        ONLY the redacted marker — never the URL, status body, or final URL, since
+        delta/next tokens are sensitive. When False (get / v1.0-relative paths),
+        failures additionally log the HTTP status + final URL + Graph error body.
+        These carry no secrets (message ids are not credentials; the bearer lives
+        in request headers, never the response body) and are the diagnostic that
+        tells us WHY a fetch failed instead of a bare exception class name
+        (M365_GRAPH_ATTACHMENT diagnosis: smoking-gun was a swallowed status/body).
         """
         # Host-pin BEFORE acquiring a token: never attach the app bearer to a
         # non-Graph URL (latent credential leak via get_url). On reject: no token
@@ -177,7 +187,25 @@ class GraphClient:
             return resp.json()
         except Exception as e:
             # log_url is redacted for get_url; never echo the bearer.
-            logger.error("Graph GET %s failed: %s", log_url, type(e).__name__)
+            if redact_url:
+                logger.error("Graph GET %s failed: %s", log_url, type(e).__name__)
+                return None
+            # Non-redacted (v1.0-relative) path: surface the actual cause —
+            # HTTP status, the EXACT final URL requests built, and Graph's error
+            # body (its error JSON, e.g. {"error":{"code":...}}). No secrets here.
+            resp_obj = getattr(e, "response", None)
+            status = getattr(resp_obj, "status_code", None)
+            final_url = getattr(resp_obj, "url", None)
+            body = None
+            if resp_obj is not None:
+                try:
+                    body = resp_obj.text[:1000]
+                except Exception:
+                    body = None
+            logger.error(
+                "Graph GET %s failed: %s status=%s url=%s body=%s",
+                log_url, type(e).__name__, status, final_url, body,
+            )
             return None
 
     def get(
@@ -192,7 +220,12 @@ class GraphClient:
         extra_headers forwards non-auth request headers (see ``_request``).
         """
         return self._request(
-            f"{self.cfg.base_url}{path}", params, timeout, log_url=path, extra_headers=extra_headers
+            f"{self.cfg.base_url}{path}",
+            params,
+            timeout,
+            log_url=path,
+            extra_headers=extra_headers,
+            redact_url=False,
         )
 
     def get_url(self, url: str, timeout: int = 8) -> dict | None:
