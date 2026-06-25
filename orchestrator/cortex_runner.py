@@ -78,7 +78,8 @@ async def _post_to_brisen_lab_bus(
 ) -> None:
     """Internal: POST a single envelope to brisen-lab /msg/{recipient}. Never raises.
 
-    Canonical wire contract (per `~/Desktop/baker-code/scripts/bus_post.sh`):
+    Canonical wire contract (per `scripts/bus_post.sh` in any fresh repo clone;
+    not the stale ~/Desktop/baker-code copy — INSTALL_TOOLING_FASTFOLLOW_1 FIX 2):
     - URL: POST {base}/msg/{recipient}  (recipient slug in path)
     - Body: {"kind": "dispatch", "body": <text>, "to": [<recipient>],
             "tier_required": "B", "topic": <topic>}
