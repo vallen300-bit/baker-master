@@ -64,8 +64,12 @@ def test_graph_live_poll_captures_file_attachment(monkeypatch):
 
     assert stored == 1
     client.get.assert_called_once()
+    # M365_GRAPH_ATTACHMENT_CONVERSATIONID_KEYING_1 (Option a, #4317): READ by the
+    # real per-message id, but STORE under thread_id (conversationId) so the row
+    # matches email_messages + baker_email_attachment_read.
+    assert "graph-message-1" in client.get.call_args.args[0]   # fetch used the real message id
     assert calls == [{
-        "message_id": "graph-message-1",
+        "message_id": "graph-thread-1",                        # stored under the conversationId
         "filename": "memo.pdf",
         "mime_type": "application/pdf",
         "payload_bytes": b"memo-bytes",
