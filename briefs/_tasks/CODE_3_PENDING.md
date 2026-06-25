@@ -1,5 +1,5 @@
 ---
-status: IN_GATES
+status: MERGED
 brief_id: BAKER_DASHBOARD_V2_MARKETING_NOISE_FILTER_1
 to: b3
 from: lead
@@ -8,6 +8,10 @@ dispatched_at: 2026-06-24
 reply_target: lead (bus)
 branch: b3/baker-dashboard-v2-marketing-noise-filter-1
 pr: 420
+merge_commit: 5266d9b
+merged_at: 2026-06-25
+gates: G2 #4197 / G2-light #4214 / G3 #4198 / G3-spot #4215 all PASS; G4 lead /security-review NO FINDINGS
+post_deploy: deploy live (health green 07:07Z); Today feed already 0 marketing (verifier refused pre-filter); 5 awaiting candidates self-park; no feed dismissal needed
 task_class: bug/quality fix (noise leak) — deterministic title-pattern filter, no LLM, no migration, no endpoint
 full_brief: briefs/_tasks/BAKER_DASHBOARD_V2_MARKETING_NOISE_FILTER_1.md
 checkpoint: briefs/_checkpoints/BAKER_DASHBOARD_V2_MARKETING_NOISE_FILTER_1.checkpoint.md
