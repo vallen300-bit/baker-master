@@ -599,6 +599,75 @@ def _read(args: dict) -> str:
     return json.dumps({"provider": "store", "message": data})
 
 
+def _r2_get_bytes(object_key: str):
+    """Download bytes for an R2-stored attachment, or None. Fault-tolerant."""
+    if not object_key:
+        return None
+    try:
+        from kbl.object_storage import get_object
+        res = get_object(object_key)
+        if res.get("ok"):
+            return res.get("data")
+        logger.warning(f"R2 get failed for {object_key}: {res.get('error')}")
+    except Exception as e:
+        logger.warning(f"R2 get exception for {object_key}: {e}")
+    return None
+
+
+def _ondemand_fetch_and_persist(target: dict, message_id: str):
+    """F2 belt-and-suspenders: for a not-yet-backfilled graph attachment row
+    (metadata_only, data NULL), fetch the bytes live via $value and
+    persist-on-first-read (UPDATE the exact row in place), returning the bytes.
+
+    Graph-only, true-empty (size 0) skipped, fully fault-tolerant — any failure
+    returns None and the caller reports the existing 'unavailable' state. The
+    backfill is the bulk path; this just makes a single read self-heal.
+    """
+    if (target.get("source") or "") != "graph":
+        return None
+    if (target.get("size_bytes") or 0) <= 0:
+        return None  # true-empty: nothing to fetch
+    try:
+        from kbl.graph_client import GraphClient
+        from config.settings import GraphConfig
+        import triggers.graph_mail_trigger as gmt
+        client = GraphClient(GraphConfig())
+        if not client.is_ready():
+            return None
+        # For graph, the row's message_id IS the addressable AAMk per-message id.
+        page, _imm = gmt._fetch_attachments_page(client, message_id)
+        if not page:
+            return None
+        want = target.get("filename") or ""
+        att = None
+        for a in page.get("value", []):
+            if a.get("isInline"):
+                continue
+            if (a.get("name") or "") == want:
+                att = a
+                break
+        if att is None:
+            return None
+        graph_att_id = att.get("id")
+        raw = gmt.fetch_attachment_raw_value(client, message_id, graph_att_id)
+        if raw is None:
+            return None
+        payload, fetched_ct = raw
+        try:
+            from kbl.attachment_store import update_attachment_payload
+            update_attachment_payload(
+                target["id"], target.get("source"), payload,
+                mime_type=fetched_ct or target.get("mime_type"),
+                provider_attachment_id=graph_att_id,
+            )
+        except Exception as e:
+            logger.warning(f"persist-on-first-read failed (non-fatal): {e}")
+        return payload
+    except Exception as e:
+        logger.warning(f"on-demand attachment fetch failed: {e}")
+        return None
+
+
 def _attachment_read(args: dict) -> str:
     """Read attachment bytes/text from the email_attachments store.
 
@@ -709,32 +778,43 @@ def _attachment_read(args: dict) -> str:
         target = rows[index - 1]
         match_count = len(rows)
 
-    # Payloads >5MB persist metadata-only (data=NULL) — bytes are not available.
-    if target.get("storage") == "metadata_only":
+    # Byte resolution across the three storage classes (M365_LARGE_ATTACHMENT_FETCH_1):
+    #   'db'  -> Neon inline BYTEA
+    #   'r2'  -> Cloudflare R2 object (object_key); bytes are NOT in Neon
+    #   'metadata_only' -> not yet backfilled; on-demand fetch + persist (F2)
+    # Distinguish a store OUTAGE (backend_unavailable) from a genuine miss.
+    storage = target.get("storage")
+    file_bytes = None
+    full_source = target.get("source")
+
+    if storage == "db":
+        try:
+            full = get_attachment_read(target["id"])
+        except AttachmentStoreUnavailable as e:
+            return _outage(e)
+        if full is not None and full.get("data") is not None:
+            file_bytes = full["data"]
+            full_source = full.get("source") or full_source
+
+    if file_bytes is None and storage == "r2" and target.get("object_key"):
+        file_bytes = _r2_get_bytes(target.get("object_key"))
+
+    if file_bytes is None:
+        # metadata_only (not backfilled) OR a class change between list and read:
+        # try the live on-demand fetch + persist-on-first-read. True-empty
+        # (size 0) / referenceAttachment return None and fall through.
+        file_bytes = _ondemand_fetch_and_persist(target, message_id)
+
+    if file_bytes is None:
         return json.dumps({
-            "error": "attachment stored metadata-only (payload >5MB not persisted); bytes unavailable",
+            "error": "attachment payload unavailable (true-empty, reference-only, or fetch failed)",
             "message_id": message_id,
             "filename": target.get("filename"),
             "size_bytes": target.get("size_bytes"),
-            "storage": "metadata_only",
+            "storage": storage,
         })
 
-    # Byte fetch — distinguish a store OUTAGE (backend_unavailable) from a
-    # genuine miss/NULL payload (true 'unavailable'). get_attachment_read RAISES
-    # on outage; None means the row genuinely isn't there.
-    try:
-        full = get_attachment_read(target["id"])
-    except AttachmentStoreUnavailable as e:
-        return _outage(e)
-    if full is None or full.get("data") is None:
-        return json.dumps({
-            "error": "attachment payload unavailable (store miss or NULL data)",
-            "message_id": message_id,
-            "filename": target.get("filename"),
-        })
-
-    file_bytes = full["data"]
-    filename_out = full.get("filename") or filename or f"attachment_{target['id']}"
+    filename_out = target.get("filename") or filename or f"attachment_{target['id']}"
 
     # Extract text via the SAME pipeline baker_gmail_attachment_read uses.
     from pathlib import Path
@@ -749,19 +829,19 @@ def _attachment_read(args: dict) -> str:
             text_error = str(e)
             logger.warning(f"attachment text extraction failed ({filename_out}): {e}")
 
-    mime_type = full.get("mime_type")
+    mime_type = target.get("mime_type")
     if not mime_type:
         guessed, _ = mimetypes.guess_type(filename_out)
         mime_type = guessed or "application/octet-stream"
 
     result: dict[str, Any] = {
         "message_id": message_id,
-        "source": full.get("source"),
+        "source": full_source,
         "filename": filename_out,
         "mime_type": mime_type,
-        "size_bytes": full.get("size_bytes"),
-        "content_sha256": full.get("content_sha256"),
-        "storage": full.get("storage"),
+        "size_bytes": target.get("size_bytes"),
+        "content_sha256": target.get("content_sha256"),
+        "storage": storage,
         "attachment_index": index,
         "match_count": match_count,
         "text": text,

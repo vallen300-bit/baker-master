@@ -157,6 +157,34 @@ def put_object(key: str, data: bytes | bytearray | memoryview, content_type: str
         return _error("put_failed", detail=type(exc).__name__)
 
 
+def get_object(key: str) -> dict[str, Any]:
+    """Download an object's bytes server-side. Structured error on any failure.
+
+    Returns ``{"ok": True, "data": bytes, "content_type": str, "size_bytes": int}``
+    on success, or ``{"ok": False, "error": ...}``. Used by the attachment read
+    path to resolve ``storage='r2'`` rows (whose bytes are NOT in Neon) so text
+    extraction can run on the real payload. Fault-tolerant: never raises.
+    """
+    if not storage_enabled():
+        return _error("disabled", detail="R2 config missing")
+    try:
+        key = _validate_key(key)
+        resp = _client().get_object(Bucket=_env("R2_BUCKET"), Key=key)
+        body = resp["Body"].read()
+        return {
+            "ok": True,
+            "data": body,
+            "content_type": resp.get("ContentType"),
+            "size_bytes": len(body),
+            "key": key,
+        }
+    except ValueError as exc:
+        return _error(str(exc))
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("object_storage get_object failed: %s", type(exc).__name__)
+        return _error("get_failed", detail=type(exc).__name__)
+
+
 def generate_presigned_put(
     key: str,
     content_type: str,

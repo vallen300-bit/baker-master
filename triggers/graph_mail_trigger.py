@@ -83,34 +83,102 @@ def _to_thread(m: dict) -> dict | None:
     }
 
 
+def fetch_attachment_raw_value(
+    client: GraphClient,
+    real_message_id: str,
+    attachment_id: str,
+    max_retries: int = 0,
+):
+    """F4 (BAKER_M365_LARGE_ATTACHMENT_FETCH_1): shared raw-byte attachment fetch.
+
+    GET /users/{u}/messages/{realid}/attachments/{attid}/$value -> raw bytes,
+    for BOTH fileAttachment (incl. >5 MiB, where the collection omits
+    contentBytes) AND message/rfc822 itemAttachment (.eml MIME). Returns
+    ``(payload_bytes, content_type)`` or ``None`` (referenceAttachment $value 405,
+    or any fetch failure — caller leaves/records the row metadata_only).
+
+    ``max_retries`` forwards to ``get_bytes`` 429/503 backoff (the backfill passes
+    >0 to honor Retry-After; forward ingest passes 0 — a poll must not block).
+
+    DELIBERATELY SEPARATE from ``_fetch_attachments_page`` (deputy-codex F4): that
+    path carries the documented ``$select=contentBytes`` 400 quirk and must not be
+    broadened. This is a single-attachment $value GET, no $select. URL-encodes the
+    user, message id, and attachment id (base64 ids carry '/' '+').
+    """
+    if not real_message_id or not attachment_id:
+        return None
+    user = quote(client.cfg.mail_user, safe="")
+    mid = quote(real_message_id, safe="")
+    aid = quote(attachment_id, safe="")
+    path = f"/users/{user}/messages/{mid}/attachments/{aid}/$value"
+    return client.get_bytes(path, max_retries=max_retries)
+
+
 def _insert_live_attachment(
     *,
     message_id: str,
     filename: str,
     mime_type: str,
     payload_bytes: bytes,
+    provider_attachment_id: str | None = None,
 ):
-    """Best-effort live attachment persistence; never breaks Graph ingest."""
+    """Best-effort routed persistence (>5MiB->R2, <=5MiB->Neon); never breaks ingest.
+
+    (Name retained from the pre-R2 helper — same role, now size-routed + carrying
+    provider_attachment_id — so the live-poll parity + capture tests keep patching
+    one stable seam.)"""
     global _attachment_store_missing_logged
     if not payload_bytes:
         return None
     try:
-        from kbl.attachment_store import insert_attachment
+        from kbl.attachment_store import insert_attachment_routed
     except (ImportError, ModuleNotFoundError) as e:
         if not _attachment_store_missing_logged:
             logger.warning("Graph attachment store unavailable (non-fatal): %s", type(e).__name__)
             _attachment_store_missing_logged = True
         return None
     try:
-        return insert_attachment(
+        return insert_attachment_routed(
             message_id=message_id,
             source="graph",
             filename=filename,
             mime_type=mime_type,
             payload_bytes=payload_bytes,
+            provider_attachment_id=provider_attachment_id,
         )
     except Exception as e:
         logger.warning("Graph attachment persist failed (non-fatal): %s", type(e).__name__)
+        return None
+
+
+def _persist_attachment_meta(
+    *,
+    message_id: str,
+    filename: str,
+    mime_type: str,
+    size_bytes,
+    provider_attachment_id: str,
+):
+    """Record a byte-empty attachment row (referenceAttachment / fetch failure) so
+    the attachment is never a SILENT drop — it shows as metadata_only, eligible
+    for a later on-demand read-path or backfill fetch. Best-effort."""
+    if not provider_attachment_id:
+        return None
+    try:
+        from kbl.attachment_store import insert_attachment_meta
+    except (ImportError, ModuleNotFoundError):
+        return None
+    try:
+        return insert_attachment_meta(
+            message_id=message_id,
+            source="graph",
+            filename=filename,
+            mime_type=mime_type,
+            size_bytes=size_bytes,
+            meta_key=provider_attachment_id,
+        )
+    except Exception as e:
+        logger.warning("Graph attachment meta-record failed (non-fatal): %s", type(e).__name__)
         return None
 
 
@@ -179,21 +247,43 @@ def _capture_graph_attachments(client: GraphClient, m: dict) -> int:
         for att in page.get("value", []):
             if att.get("isInline"):
                 continue
+            graph_att_id = att.get("id")
+            name = att.get("name", "")
+            ctype = att.get("contentType") or "application/octet-stream"
+            payload = None
             encoded = att.get("contentBytes")
-            if not encoded:
+            if encoded:
+                try:
+                    payload = base64.b64decode(encoded)
+                except Exception as e:
+                    logger.warning("Graph attachment decode failed (non-fatal): %s", type(e).__name__)
+                    payload = None
+            if payload is None:
+                # F1: contentBytes absent (large fileAttachment / rfc822
+                # itemAttachment) OR decode failed — DO NOT silently skip. Fetch
+                # the raw bytes by $value (F4 shared helper). This is the fix for
+                # the 2,628-row byte-empty residue going forward.
+                raw = fetch_attachment_raw_value(client, fetch_id, graph_att_id) if graph_att_id else None
+                if raw is not None:
+                    payload, fetched_ct = raw
+                    if fetched_ct:
+                        ctype = fetched_ct
+            if payload is None:
+                # $value unavailable (referenceAttachment 405 / fetch failure):
+                # record metadata_only so the attachment is NEVER a silent drop.
+                _persist_attachment_meta(
+                    message_id=store_key, filename=name, mime_type=ctype,
+                    size_bytes=att.get("size"), provider_attachment_id=graph_att_id,
+                )
                 continue
-            try:
-                payload = base64.b64decode(encoded)
-            except Exception as e:
-                logger.warning("Graph attachment decode failed (non-fatal): %s", type(e).__name__)
-                continue
-            att_id = _insert_live_attachment(
+            att_row_id = _insert_live_attachment(
                 message_id=store_key,
-                filename=att.get("name", ""),
-                mime_type=att.get("contentType") or "application/octet-stream",
+                filename=name,
+                mime_type=ctype,
                 payload_bytes=payload,
+                provider_attachment_id=graph_att_id,
             )
-            if att_id:
+            if att_row_id:
                 stored += 1
         if stored == 0:
             # Fetch SUCCEEDED but nothing persisted — surfaced (not silent), yet
