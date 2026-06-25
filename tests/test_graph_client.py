@@ -293,6 +293,35 @@ def test_get_failure_returns_none_no_raise():
         assert client.get("/me/messages") is None  # never raises
 
 
+# M365_GRAPH_ATTACHMENT_ID_FORM_FIX_1: get(extra_headers=...) merges non-auth
+# headers (e.g. Prefer: IdType="ImmutableId") on top of the bearer, and the
+# bearer is set LAST so a caller can never strip or override it.
+def test_get_extra_headers_merge_without_clobbering_bearer():
+    client = GraphClient(_ready_cfg())
+    with mock.patch(MSAL_PATH) as m_msal, mock.patch(REQUESTS_PATH) as m_requests:
+        m_msal.return_value.acquire_token_for_client.return_value = {"access_token": TOKEN}
+        m_requests.get.return_value = _ok_response({"value": []})
+
+        # Caller even tries to override Authorization — must NOT win.
+        client.get(
+            "/me/messages",
+            extra_headers={"Prefer": 'IdType="ImmutableId"', "Authorization": "Bearer EVIL"},
+        )
+        sent = m_requests.get.call_args.kwargs["headers"]
+        assert sent["Prefer"] == 'IdType="ImmutableId"'
+        assert sent["Authorization"] == f"Bearer {TOKEN}"   # bearer preserved, EVIL ignored
+
+
+def test_get_without_extra_headers_sends_only_bearer():
+    client = GraphClient(_ready_cfg())
+    with mock.patch(MSAL_PATH) as m_msal, mock.patch(REQUESTS_PATH) as m_requests:
+        m_msal.return_value.acquire_token_for_client.return_value = {"access_token": TOKEN}
+        m_requests.get.return_value = _ok_response({"value": []})
+        client.get("/me/messages")
+        sent = m_requests.get.call_args.kwargs["headers"]
+        assert sent == {"Authorization": f"Bearer {TOKEN}"}
+
+
 # ---------------------------------------------------------------------------
 # 7. get_url() (finding 3): opaque URL passed unchanged; never logged
 # ---------------------------------------------------------------------------

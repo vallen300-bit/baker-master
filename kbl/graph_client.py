@@ -137,8 +137,21 @@ class GraphClient:
             logger.error("Graph token acquisition exception: %s", type(e).__name__)
             return None
 
-    def _request(self, url: str, params: dict | None, timeout: int, log_url: str) -> dict | None:
-        """Shared GET path. Never raises; never logs the token or full delta URL."""
+    def _request(
+        self,
+        url: str,
+        params: dict | None,
+        timeout: int,
+        log_url: str,
+        extra_headers: dict | None = None,
+    ) -> dict | None:
+        """Shared GET path. Never raises; never logs the token or full delta URL.
+
+        extra_headers: optional non-auth request headers merged on top of the
+        bearer (e.g. ``Prefer: IdType="ImmutableId"`` for immutable-id-form
+        message reads). The Authorization header is always set last so a caller
+        can never override / strip the bearer.
+        """
         # Host-pin BEFORE acquiring a token: never attach the app bearer to a
         # non-Graph URL (latent credential leak via get_url). On reject: no token
         # acquired, no requests.get, and the rejected URL is NOT logged.
@@ -150,9 +163,12 @@ class GraphClient:
         if not token:
             return None
         try:
+            headers = dict(extra_headers) if extra_headers else {}
+            # Auth set LAST — caller-supplied headers can never strip the bearer.
+            headers["Authorization"] = f"Bearer {token}"
             resp = requests.get(
                 url,
-                headers={"Authorization": f"Bearer {token}"},
+                headers=headers,
                 # Pass-through unchanged (None for get_url opaque delta URLs).
                 params=params,
                 timeout=timeout,
@@ -164,9 +180,20 @@ class GraphClient:
             logger.error("Graph GET %s failed: %s", log_url, type(e).__name__)
             return None
 
-    def get(self, path: str, params: dict | None = None, timeout: int = 8) -> dict | None:
-        """GET a v1.0-relative path (e.g. '/me/messages'). Never raises."""
-        return self._request(f"{self.cfg.base_url}{path}", params, timeout, log_url=path)
+    def get(
+        self,
+        path: str,
+        params: dict | None = None,
+        timeout: int = 8,
+        extra_headers: dict | None = None,
+    ) -> dict | None:
+        """GET a v1.0-relative path (e.g. '/me/messages'). Never raises.
+
+        extra_headers forwards non-auth request headers (see ``_request``).
+        """
+        return self._request(
+            f"{self.cfg.base_url}{path}", params, timeout, log_url=path, extra_headers=extra_headers
+        )
 
     def get_url(self, url: str, timeout: int = 8) -> dict | None:
         """GET an opaque absolute Graph URL (Phase-2 @odata.nextLink / deltaLink).
