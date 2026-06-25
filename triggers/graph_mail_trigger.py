@@ -23,29 +23,21 @@ _SELECT = "id,conversationId,subject,from,receivedDateTime,body,isDraft,hasAttac
 _ATTACHMENT_SELECT = "id,name,contentType,size,contentBytes,isInline"
 _attachment_store_missing_logged = False
 
-# M365_GRAPH_ATTACHMENT_ID_FORM_FIX_1: messages whose id is in immutable-id form
-# (base64url: contains '-' or '_') are NOT addressable by a default-namespace
-# by-id read. Graph resolves them only when the request carries
-# Prefer: IdType="ImmutableId". Standard (AAMk) ids use base64 ('+'/'/') and must
-# be read WITHOUT the header. We detect the form per-message and set the header
-# only for immutable ids, so the working AAMk path is never regressed.
+# M365_GRAPH_ATTACHMENT_ID_FORM_FIX_1: a message id's namespace (standard vs
+# immutable) is NOT reliably derivable from its prefix OR character class —
+# live-data probe (G2 codex F1) found AAMk ids WITH '-'/'_' (standard) and AAQk
+# ids WITHOUT them (immutable). So we do NOT classify. Instead the by-id
+# attachment fetch is ATTEMPT-THEN-FALLBACK: try the id in its native namespace
+# first (never regresses the working standard path), and only on failure retry
+# once carrying Prefer: IdType="ImmutableId" (catches immutable-form ids). This
+# is namespace-agnostic by construction.
 _IMMUTABLE_ID_HEADER = {"Prefer": 'IdType="ImmutableId"'}
 
 # Surfaced, never-silently-dropped counter: incremented whenever a message with
 # hasAttachments=true yields zero persisted attachment rows because the by-id
-# Graph fetch FAILED (not because the message is genuinely attachment-empty).
-# Exposed for the regression test + any future health probe.
+# Graph fetch FAILED on BOTH attempts (not because the message is genuinely
+# attachment-empty). Exposed for the regression test + any future health probe.
 _attachment_fetch_failures = 0
-
-
-def _is_immutable_message_id(message_id: str) -> bool:
-    """True if message_id is in Graph immutable-id form (base64url: '-'/'_').
-
-    Standard Exchange ids are base64 and use '+' and '/'; immutable ids are
-    base64url and use '-' and '_'. The presence of a base64url-only char is the
-    canonical discriminator (Microsoft Graph immutable-id contract).
-    """
-    return ("-" in message_id) or ("_" in message_id)
 
 
 def attachment_fetch_failures() -> int:
@@ -115,35 +107,47 @@ def _insert_live_attachment(
         return None
 
 
+def _fetch_attachments_page(client: GraphClient, message_id: str):
+    """By-id attachment fetch, ATTEMPT-THEN-FALLBACK (G2 codex F1).
+
+    Returns (page_or_None, used_immutable). Tries the id in its NATIVE namespace
+    first (no Prefer — never regresses standard AAMk ids); only if that returns
+    None retries once with Prefer: IdType="ImmutableId" (catches immutable AAQk
+    ids). Namespace-agnostic: no prefix/char-class guessing. None iff BOTH fail.
+    """
+    path = f"/users/{client.cfg.mail_user}/messages/{message_id}/attachments"
+    params = {"$select": _ATTACHMENT_SELECT, "$top": 50}
+    page = client.get(path, params=params)                       # attempt 1: native
+    if page is not None:
+        return page, False
+    page = client.get(path, params=params, extra_headers=_IMMUTABLE_ID_HEADER)  # attempt 2: immutable
+    return page, True
+
+
 def _capture_graph_attachments(client: GraphClient, m: dict) -> int:
     """Store Graph file attachments for a live message, non-fatally.
 
-    M365_GRAPH_ATTACHMENT_ID_FORM_FIX_1: sets Prefer: IdType="ImmutableId" when
-    the message id is in immutable form, so the by-id attachment read succeeds
-    (it silently failed before, dropping attachments while the body persisted).
-    A failed fetch on a hasAttachments=true message is surfaced LOUDLY (ERROR +
-    counter), never silently dropped.
+    M365_GRAPH_ATTACHMENT_ID_FORM_FIX_1: the by-id attachment read is
+    attempt-then-fallback (native, then Prefer: IdType="ImmutableId") so both
+    standard and immutable-form ids resolve without classifying the id. A fetch
+    that fails on BOTH attempts for a hasAttachments=true message is surfaced
+    LOUDLY (ERROR + counter), never silently dropped.
     """
     global _attachment_fetch_failures
     if not m.get("hasAttachments") or not m.get("id"):
         return 0
     message_id = m.get("id")
-    extra_headers = _IMMUTABLE_ID_HEADER if _is_immutable_message_id(message_id) else None
     try:
-        page = client.get(
-            f"/users/{client.cfg.mail_user}/messages/{message_id}/attachments",
-            params={"$select": _ATTACHMENT_SELECT, "$top": 50},
-            extra_headers=extra_headers,
-        )
+        page, used_immutable = _fetch_attachments_page(client, message_id)
         if page is None:
-            # Fetch FAILED for a message that declares attachments — this is the
-            # silent-skip class bug (Lesson #107). Surface it loudly; do NOT let
-            # it look like a true-empty message.
+            # Both native + ImmutableId failed for a message that declares
+            # attachments — silent-skip class bug (Lesson #107). Surface loudly;
+            # do NOT let it look like a true-empty message.
             _attachment_fetch_failures += 1
             logger.error(
-                "Graph attachment fetch FAILED (hasAttachments=true, 0 stored): "
-                "id_form=%s — attachments NOT persisted, surfaced (count=%d)",
-                "immutable" if extra_headers else "standard",
+                "Graph attachment fetch FAILED on both native + ImmutableId "
+                "(hasAttachments=true, 0 stored) — attachments NOT persisted, "
+                "surfaced (count=%d)",
                 _attachment_fetch_failures,
             )
             return 0
@@ -173,8 +177,8 @@ def _capture_graph_attachments(client: GraphClient, m: dict) -> int:
             # signature images), so WARNING + no failure-counter bump.
             logger.warning(
                 "Graph attachments: hasAttachments=true but 0 file rows stored "
-                "(fetch ok — likely all-inline). id_form=%s",
-                "immutable" if extra_headers else "standard",
+                "(fetch ok via %s namespace — likely all-inline).",
+                "immutable" if used_immutable else "native",
             )
         return stored
     except Exception as e:

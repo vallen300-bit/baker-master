@@ -62,11 +62,12 @@ def run(ids: list[str], execute: bool) -> int:
     mode = "EXECUTE (persisting)" if execute else "DRY-RUN (no writes)"
     logger.info("AAQk attachment backfill — %s — %d message id(s)", mode, len(ids))
 
-    # Dry-run is read-only and needs no live client — preview id forms anywhere.
+    # Dry-run is read-only and needs no live client — list the targets. The fetch
+    # itself is attempt-then-fallback (native, then ImmutableId), so there is no
+    # id-form to classify up front.
     if not execute:
         for mid in ids:
-            form = "immutable" if gmt._is_immutable_message_id(mid) else "standard"
-            logger.info("[dry] id_form=%s would re-capture attachments for %s", form, mid[:24] + "...")
+            logger.info("[dry] would re-capture attachments (native->ImmutableId fallback) for %s", mid[:24] + "...")
         return 0
 
     from kbl.graph_client import GraphClient
@@ -84,7 +85,6 @@ def run(ids: list[str], execute: bool) -> int:
 
     failures = 0
     for mid in ids:
-        form = "immutable" if gmt._is_immutable_message_id(mid) else "standard"
         before = gmt.attachment_fetch_failures()
         # hasAttachments=True forces the capture path; a true-empty doc simply
         # stores 0 and is surfaced as benign by the capture helper.
@@ -92,9 +92,9 @@ def run(ids: list[str], execute: bool) -> int:
         after = gmt.attachment_fetch_failures()
         if after > before:
             failures += 1
-            logger.error("id_form=%s FETCH FAILED for %s — see surfaced ERROR above", form, mid[:24] + "...")
+            logger.error("FETCH FAILED for %s — see surfaced ERROR above", mid[:24] + "...")
         else:
-            logger.info("id_form=%s stored=%d for %s", form, stored, mid[:24] + "...")
+            logger.info("stored=%d for %s", stored, mid[:24] + "...")
 
     if failures:
         logger.error("backfill finished with %d/%d failure(s)", failures, len(ids))
