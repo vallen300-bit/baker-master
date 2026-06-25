@@ -196,3 +196,59 @@ def attachment_exists(message_id: str, sha256: str) -> bool:
     except Exception as e:
         logger.error("attachment_exists failed for %s: %s", message_id, e)
         return False
+
+
+def list_attachments(message_id: str, source: str | None = None):
+    """List attachment METADATA rows for a message_id (no payload bytes).
+
+    Read surface for BAKER_M365_ATTACHMENT_READ_SURFACE_1: the store is the only
+    place M365/Graph attachment bytes are durably held, but nothing enumerated
+    them. Returns a list of dicts ordered by id (stable, deterministic for
+    1-based indexing), or [] when none / on failure. Optional ``source`` filter
+    ('graph' | 'bluewin' | 'email' | 'exchange'). Payload bytes are intentionally
+    NOT selected here — fetch a specific row's bytes via ``get_attachment(id)``.
+    """
+    if not message_id:
+        return []
+    try:
+        with get_conn() as conn:
+            with conn.cursor() as cur:
+                if source:
+                    cur.execute(
+                        """
+                        SELECT id, message_id, source, filename, mime_type,
+                               size_bytes, content_sha256, storage
+                          FROM email_attachments
+                         WHERE message_id = %s AND source = %s
+                         ORDER BY id
+                        """,
+                        (message_id, source),
+                    )
+                else:
+                    cur.execute(
+                        """
+                        SELECT id, message_id, source, filename, mime_type,
+                               size_bytes, content_sha256, storage
+                          FROM email_attachments
+                         WHERE message_id = %s
+                         ORDER BY id
+                        """,
+                        (message_id,),
+                    )
+                rows = cur.fetchall()
+                return [
+                    {
+                        "id": r[0],
+                        "message_id": r[1],
+                        "source": r[2],
+                        "filename": r[3],
+                        "mime_type": r[4],
+                        "size_bytes": r[5],
+                        "content_sha256": r[6],
+                        "storage": r[7],
+                    }
+                    for r in rows
+                ]
+    except Exception as e:
+        logger.error("list_attachments failed for %s: %s", message_id, e)
+        return []
