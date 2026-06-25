@@ -370,6 +370,55 @@ def test_reply_hint_prefers_claude_project_dir(stubs_dir, base_env, tmp_path):
 
 
 # ---------------------------------------------------------------------------
+# FIX 2 / G2-F1: even when CLAUDE_PROJECT_DIR *is* the stale Desktop clone,
+# the resolver must reject it and fall through to the per-role clone.
+# ---------------------------------------------------------------------------
+
+def test_reply_hint_rejects_desktop_clone_as_project_dir(stubs_dir, base_env, tmp_path):
+    """CLAUDE_PROJECT_DIR pointing at a ~/Desktop/baker-code clone (the legacy
+    AH path, still operational) must NOT be chosen even though its bus_post.sh
+    is executable — the resolver skips it and picks the per-role clone."""
+    desktop = tmp_path / "Desktop" / "baker-code"
+    (desktop / "scripts").mkdir(parents=True)
+    _make_stub(desktop / "scripts" / "bus_post.sh", "#!/bin/bash\nexit 0\n")
+    # A per-role clone also exists → it must win.
+    role_clone = tmp_path / "bm-b2" / "scripts"
+    role_clone.mkdir(parents=True)
+    _make_stub(role_clone / "bus_post.sh", "#!/bin/bash\nexit 0\n")
+
+    sample = {
+        "messages": [
+            {
+                "id": 9,
+                "thread_id": "t-9",
+                "parent_id": None,
+                "from_terminal": "lead",
+                "to_terminals": ["b2"],
+                "topic": "bus/smoke",
+                "kind": "dispatch",
+                "body_preview": "hi",
+                "created_at": "2026-05-11T10:00:00Z",
+                "wake_attempted_at": None,
+                "acknowledged_at": None,
+                "deleted_at": None,
+                "tier_required": "B",
+            }
+        ]
+    }
+    _make_stub(stubs_dir / "op", "#!/bin/bash\necho 'fake-key-1234'\n")
+    _make_stub(stubs_dir / "curl", f"#!/bin/bash\ncat <<'EOF'\n{json.dumps(sample)}\nEOF\nexit 0\n")
+
+    env = dict(base_env, BAKER_ROLE="b2", CLAUDE_PROJECT_DIR=str(desktop))
+    result = _run_hook(env, tmp_path)
+
+    assert result.returncode == 0, result.stderr
+    payload = json.loads(result.stdout)
+    ctx = payload["hookSpecificOutput"]["additionalContext"]
+    assert "Desktop/baker-code" not in ctx, f"resolver picked the stale Desktop clone:\n{ctx}"
+    assert f"{tmp_path}/bm-b2/scripts/bus_post.sh" in ctx, f"resolver should fall through to per-role clone:\n{ctx}"
+
+
+# ---------------------------------------------------------------------------
 # Happy path 2: state file from previous run is consumed as `since` cursor
 # ---------------------------------------------------------------------------
 

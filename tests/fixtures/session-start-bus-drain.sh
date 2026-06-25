@@ -217,7 +217,10 @@ for _bp in \
     "${CLAUDE_PROJECT_DIR:-}/scripts/bus_post.sh" \
     "${HOME}/bm-${SLUG}/scripts/bus_post.sh" \
     "${HOME}/bm-aihead1/scripts/bus_post.sh"; do
-  case "$_bp" in "/scripts/bus_post.sh") continue ;; esac  # CLAUDE_PROJECT_DIR unset
+  case "$_bp" in
+    "/scripts/bus_post.sh") continue ;;                    # CLAUDE_PROJECT_DIR unset
+    */Desktop/baker-code/scripts/bus_post.sh) continue ;;  # G2-F1: reject the stale Desktop clone even when it IS the cwd
+  esac
   if [ -x "$_bp" ]; then BUS_POST_HINT="$_bp"; break; fi
 done
 # Last resort (nothing resolved on disk): name the per-role clone path — still
