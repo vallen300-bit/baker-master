@@ -73,7 +73,12 @@ def _extract_text(filepath: Path) -> str:
 
 
 def _extract_pdf(filepath: Path) -> str:
-    """Extract text from PDF using pdfplumber."""
+    """Extract text from PDF using pdfplumber, with an OCR fallback for scans.
+
+    A digital (text-layer) PDF is read by pdfplumber. A scanned / image-only PDF
+    has no text layer, so pdfplumber returns "" — in that case only we fall back
+    to OCR (PyMuPDF raster + Gemini vision via tools.ingest.pdf_ocr).
+    """
     try:
         import pdfplumber
     except ImportError:
@@ -88,7 +93,27 @@ def _extract_pdf(filepath: Path) -> str:
             text = page.extract_text()
             if text:
                 pages.append(text)
-    return "\n\n".join(pages)
+    extracted = "\n\n".join(pages)
+    if extracted.strip():
+        return extracted
+
+    # BAKER_M365_ATTACHMENT_PDF_OCR_FALLBACK_1: no text layer ⇒ scanned/image PDF.
+    # Fall back to OCR so baker_email_attachment_read (and the ingest path) return
+    # readable text instead of "". OCR fires ONLY on this empty branch — a digital
+    # PDF returned above and never pays for vision. Fully fault-tolerant: any OCR
+    # failure degrades to "" (honest no-text), never crashes the caller.
+    try:
+        from tools.ingest.pdf_ocr import ocr_pdf_file
+        result = ocr_pdf_file(filepath)
+        if result.text:
+            logger.info("pdf OCR fallback recovered %d chars (truncated=%s) for %s",
+                        len(result.text), result.truncated, getattr(filepath, "name", filepath))
+            return result.text
+        logger.info("pdf OCR fallback found no legible text (reason=%s) for %s",
+                    result.reason, getattr(filepath, "name", filepath))
+    except Exception as ocr_err:
+        logger.warning("pdf OCR fallback errored (non-fatal): %s", type(ocr_err).__name__)
+    return ""
 
 
 def _extract_csv(filepath: Path) -> str:
