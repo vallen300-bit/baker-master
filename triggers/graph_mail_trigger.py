@@ -127,18 +127,26 @@ def _fetch_attachments_page(client: GraphClient, message_id: str):
 def _capture_graph_attachments(client: GraphClient, m: dict) -> int:
     """Store Graph file attachments for a live message, non-fatally.
 
-    M365_GRAPH_ATTACHMENT_ID_FORM_FIX_1: the by-id attachment read is
-    attempt-then-fallback (native, then Prefer: IdType="ImmutableId") so both
-    standard and immutable-form ids resolve without classifying the id. A fetch
-    that fails on BOTH attempts for a hasAttachments=true message is surfaced
-    LOUDLY (ERROR + counter), never silently dropped.
+    M365_GRAPH_ATTACHMENT_ID_FORM_FIX_1:
+    - The by-id attachment READ uses the real per-message id (m['id']) and is
+      attempt-then-fallback (native, then Prefer: IdType="ImmutableId"). A fetch
+      that fails on BOTH attempts for a hasAttachments=true message is surfaced
+      LOUDLY (ERROR + counter), never silently dropped.
+    - The STORE KEY (conversationId-keying, Option (a) #4317) is thread_id =
+      (conversationId or id), MATCHING email_messages.message_id and the
+      baker_email_attachment_read lookup (email_trigger.py:933 keys every email
+      source by thread_id). Persisting attachments under the real per-message id
+      would key them by a value the read tool never queries — the systemic
+      mismatch that made captured attachments unreachable.
     """
     global _attachment_fetch_failures
-    if not m.get("hasAttachments") or not m.get("id"):
+    fetch_id = m.get("id")
+    if not m.get("hasAttachments") or not fetch_id:
         return 0
-    message_id = m.get("id")
+    # Read by the real message id; store under thread_id (conversationId-or-id).
+    store_key = m.get("conversationId") or fetch_id
     try:
-        page, used_immutable = _fetch_attachments_page(client, message_id)
+        page, used_immutable = _fetch_attachments_page(client, fetch_id)
         if page is None:
             # Both native + ImmutableId failed for a message that declares
             # attachments — silent-skip class bug (Lesson #107). Surface loudly;
@@ -164,7 +172,7 @@ def _capture_graph_attachments(client: GraphClient, m: dict) -> int:
                 logger.warning("Graph attachment decode failed (non-fatal): %s", type(e).__name__)
                 continue
             att_id = _insert_live_attachment(
-                message_id=message_id,
+                message_id=store_key,
                 filename=att.get("name", ""),
                 mime_type=att.get("contentType") or "application/octet-stream",
                 payload_bytes=payload,
