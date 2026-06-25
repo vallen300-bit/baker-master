@@ -52,6 +52,24 @@ def test_resolve_returns_none_on_fetch_failure():
     assert bf._resolve_messages(client, "AAQkConv==") is None
 
 
+def test_resolve_follows_nextlink_pagination():
+    """G2 F2: a thread spanning >1 page is fully read via @odata.nextLink."""
+    client = _client()
+    client.get.return_value = {"value": [{"id": "m1"}], "@odata.nextLink": "NEXT"}
+    client.get_url.return_value = {"value": [{"id": "m2"}]}        # page 2, no further link
+    out = bf._resolve_messages(client, "AAQkConv==")
+    assert [m["id"] for m in out] == ["m1", "m2"]                  # both pages merged
+    client.get_url.assert_called_once_with("NEXT")
+
+
+def test_resolve_nextlink_failure_returns_none_not_truncated():
+    """Mid-pagination None is a FAILURE (None), never a silent partial list."""
+    client = _client()
+    client.get.return_value = {"value": [{"id": "m1"}], "@odata.nextLink": "NEXT"}
+    client.get_url.return_value = None                            # page 2 fetch fails
+    assert bf._resolve_messages(client, "AAQkConv==") is None
+
+
 def test_backfill_stores_attachments_under_conversation_id():
     """End-to-end (mocked): resolve conv -> message with attachment -> store under conversationId."""
     client = _client()

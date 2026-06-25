@@ -63,10 +63,15 @@ def _load_ids(args) -> list[str]:
 
 
 def _resolve_messages(client, conv_id: str) -> list | None:
-    """List messages in a conversation. Returns list (maybe empty) or None on fetch failure.
+    """List ALL messages in a conversation. Returns list (maybe empty) or None on failure.
 
     OData string literal: single quotes wrap the value; embedded single quotes are
     doubled (none expected in a Graph conversationId). requests URL-encodes params.
+
+    Follows @odata.nextLink to exhaustion (G2 F2): live threads exceed the 50/page
+    cap, so reading only page 1 would SILENTLY miss messages -> missed attachments
+    (the silent-skip class). A None mid-pagination returns None (surfaced as a
+    resolve FAILURE, never a silent truncation).
     """
     safe_cid = conv_id.replace("'", "''")
     page = client.get(
@@ -79,7 +84,17 @@ def _resolve_messages(client, conv_id: str) -> list | None:
     )
     if page is None:
         return None
-    return page.get("value", [])
+    messages = list(page.get("value", []))
+    nxt = page.get("@odata.nextLink")
+    guard = 0
+    while nxt and guard < 50:                 # bounded pagination
+        guard += 1
+        page = client.get_url(nxt)
+        if page is None:                       # mid-pagination failure -> fail loud, don't truncate
+            return None
+        messages.extend(page.get("value", []))
+        nxt = page.get("@odata.nextLink")
+    return messages
 
 
 def run(ids: list[str], execute: bool) -> int:
