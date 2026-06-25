@@ -2,9 +2,9 @@
 brief_id: BAKER_DASHBOARD_V2_MARKETING_NOISE_FILTER_1
 worker: b3
 attempt: 0
-status: in_gates
-updated_by: b3 (refresh — post G3 rework + % off scope-extension)
-updated_at: 2026-06-24
+status: merged_done
+updated_by: lead (arc closed — PR #420 merged @ 5266d9b, deploy live)
+updated_at: 2026-06-25
 ---
 
 # ROLLOVER CHECKPOINT — BAKER_DASHBOARD_V2_MARKETING_NOISE_FILTER_1

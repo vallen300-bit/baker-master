@@ -1076,3 +1076,35 @@ complete (Inbox 34%, Sent 0.4%). Nobody noticed until the Director asked "is it 
      .app wake lane (AH2): verify-submit-landed + auto-resubmit, and/or tie the heartbeat to session
      responsiveness so a false-green card can't hide an idle session. Builds on Lesson #105 (wake handler,
      one-owner-per-subsystem, .app-vs-repo drift).
+
+## Lesson #107 — "no-reply = noise" is FALSE for institutional senders; deterministic noise filters must be adversarially probed against LIVE matter slugs before merge (2026-06-25)
+- CONTEXT: BAKER_DASHBOARD_V2_MARKETING_NOISE_FILTER_1 (PR #420) extended the shared `_is_stoplist_noise`
+  title-regex to drop marketing/no-reply/survey/promo mail off the Director Today feed. The brief's stated
+  premise — "a no-reply address can never be a genuine matter event" — was WRONG for institutional senders,
+  and the over-broad promo patterns clipped real deal copy. Two gates caught two LIVE-matter clips that the
+  brief author (AH1) shipped:
+  - G2 (deputy-codex) F1 HIGH: `\bRE:\s*your upcoming stay\b` was SUBJECT-bound, so it dropped a real human
+    reply (live alert id=25645, `sergey0569@gmail.com`). Fix: SENDER-bind (`MOVIE Reservations` + `upcoming stay`).
+  - G3 (deputy) F1: `\bno[-_]?reply\b` + `\bnotifications?@` dropped `notifications@gericht.at — Fristsetzung`
+    (Austrian court ERV e-filing) — intersects the LIVE litigation matter. Courts + banks legitimately send
+    from no-reply/notifications@. Fix: REMOVE the generic no-reply axis; keep only unambiguous bulk local-parts
+    (`newsletter@`, `marketing@`, `mailer-daemon`, `bounce@`). Accepted under-filter over clipping a court notice.
+  - G3 F2: bare `\d+% off` clipped "8% off asking price on Balgerstrasse" (LIVE MRCI deal); bare `use code`
+    clipped "use code review notes". Fix: require a commerce-context word within 40 chars; require a real
+    (case-sensitive) code token. NB: under a parent `re.IGNORECASE` compile, `[A-Z]` ALSO matches lowercase —
+    a case-sensitive token needs scoped `(?-i:...)`, which is NOT the banned inline-`(?i)`-after-`|` form.
+- RULES:
+  1. Deterministic noise/stop-list filters are over-filter risks FIRST. Before merge, adversarially probe each
+     pattern against the LIVE matter vocabulary (court/bank/registry senders, deal copy, matter slugs), not just
+     the marketing examples you're trying to catch. "It drops the spam" is half the test; "it spares the matter"
+     is the other half.
+  2. Sender-class premises ("no-reply = bulk", "notifications@ = automated") are FALSE for institutional/
+     transactional senders. Bind to the specific bulk-marketing sender (local-part / display name), never a
+     generic automated-sender shape. When in doubt, UNDER-filter — a missed spam card costs nothing; a clipped
+     court Fristsetzung or live-deal email is a real matter-signal loss (the "auto-cleanup kills user data" class).
+  3. Brief author owns the snippet bug: AH1's reservation pattern AND the `use code` IGNORECASE bug shipped in
+     the brief and were caught by the gates. Spec patterns against real prod titles + write the NEGATIVE
+     (matter-signal pass-through) cases as the load-bearing tests, not an afterthought.
+  4. Mitigant that made these MEDIUM not HIGH: the filter only suppresses the dashboard NUDGE candidate — the
+     email-ingest + deadline pipelines are untouched, so no deadline/email is actually lost. Filter at the
+     surface, never at ingestion, so an over-filter is recoverable.
