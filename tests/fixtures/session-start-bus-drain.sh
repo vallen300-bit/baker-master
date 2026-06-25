@@ -204,11 +204,32 @@ RESP="$(curl -sS --max-time 4 -G -H "X-Terminal-Key: ${KEY}" \
     exit 0
 }
 
+# --- resolve a FRESH bus_post.sh for the reply hint (INSTALL_TOOLING_FASTFOLLOW_1
+#     FIX 2, Director-ratified Option (b) via lead #4358) ---
+# Never point at ~/Desktop/baker-code/scripts/bus_post.sh: that clone lags
+# origin/main and its sibling agent_identity_generated.sh — which bus_post.sh
+# sources via its own $0 dirname — carries a stale slug list that rejects
+# newly-added slugs (the baden-baden-desk foot-gun). Prefer the agent's OWN
+# running clone (no cross-clone coupling), then its per-role clone, then a fresh
+# fleet clone.
+BUS_POST_HINT=""
+for _bp in \
+    "${CLAUDE_PROJECT_DIR:-}/scripts/bus_post.sh" \
+    "${HOME}/bm-${SLUG}/scripts/bus_post.sh" \
+    "${HOME}/bm-aihead1/scripts/bus_post.sh"; do
+  case "$_bp" in "/scripts/bus_post.sh") continue ;; esac  # CLAUDE_PROJECT_DIR unset
+  if [ -x "$_bp" ]; then BUS_POST_HINT="$_bp"; break; fi
+done
+# Last resort (nothing resolved on disk): name the per-role clone path — still
+# actionable, still not the stale Desktop clone.
+[ -n "$BUS_POST_HINT" ] || BUS_POST_HINT="${HOME}/bm-${SLUG}/scripts/bus_post.sh"
+
 # Parse + render via python3 with env vars on the python3 invocation itself.
 # B1 fold: env vars on python3, not on _emit pipe-tail (that's a separate subprocess).
 # RESP plumbed via env-var instead of stdin so stdout flows cleanly into _emit.
 RENDERED="$(RESP="$RESP" SLUG="$SLUG" STATE_FILE="$STATE_FILE" LEDGER_FILE="$LEDGER_FILE" \
             DAEMON_URL="$DAEMON_URL" BAKER_ROLE="${BAKER_ROLE:-}" SINCE="$SINCE" \
+            BUS_POST_HINT="$BUS_POST_HINT" \
             python3 -c '
 import json, os, sys, tempfile
 
@@ -257,7 +278,8 @@ for m in shown:
         lines.append("     (... {} more line(s); full body via GET /event/{}/full)".format(len(body_lines) - 1, m["id"]))
     lines.append("")
 lines.append("To ACK: POST {}/msg/<id>/ack with X-Terminal-Key header.".format(daemon_url))
-lines.append("To reply: BAKER_ROLE={} ~/Desktop/baker-code/scripts/bus_post.sh <recipient> \"<body>\" <topic>".format(baker_role))
+bus_post = os.environ.get("BUS_POST_HINT") or "{}/bm-{}/scripts/bus_post.sh".format(os.environ.get("HOME", "~"), slug)
+lines.append("To reply: BAKER_ROLE={} {} <recipient> \"<body>\" <topic>".format(baker_role, bus_post))
 
 # B2 fold: atomic state-file write via tempfile.mkstemp + os.replace.
 # On failure: leave canonical state file unchanged (re-drain next session beats

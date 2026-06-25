@@ -303,6 +303,12 @@ def test_happy_path_renders_and_writes_state(stubs_dir, base_env, tmp_path):
     # ACK + reply hints.
     assert "POST" in ctx and "/ack" in ctx
     assert "bus_post.sh" in ctx
+    # INSTALL_TOOLING_FASTFOLLOW_1 FIX 2: reply hint must NOT point at the stale
+    # ~/Desktop/baker-code clone (lags origin/main → stale slug list). With
+    # HOME=tmp_path, BAKER_ROLE=b2 and no CLAUDE_PROJECT_DIR set, the resolver
+    # falls through to the per-role clone path.
+    assert "Desktop/baker-code" not in ctx, f"reply hint still points at stale Desktop clone:\n{ctx}"
+    assert "bm-b2/scripts/bus_post.sh" in ctx, f"reply hint should name the per-role clone:\n{ctx}"
 
     # State file exists, atomic-named, holds newest timestamp.
     state_file = tmp_path / ".brisen-lab-bus-last-seen-b2.txt"
@@ -317,6 +323,50 @@ def test_happy_path_renders_and_writes_state(stubs_dir, base_env, tmp_path):
     ledger_file = tmp_path / ".brisen-lab-bus-rendered-b2.txt"
     assert ledger_file.exists(), "rendered-ID ledger should have been written"
     assert ledger_file.read_text().splitlines() == ["100", "101"]
+
+
+# ---------------------------------------------------------------------------
+# FIX 2: reply hint prefers the agent's OWN running clone via CLAUDE_PROJECT_DIR.
+# ---------------------------------------------------------------------------
+
+def test_reply_hint_prefers_claude_project_dir(stubs_dir, base_env, tmp_path):
+    """When CLAUDE_PROJECT_DIR/scripts/bus_post.sh exists, the reply hint names
+    it (the agent's own fresh clone) rather than the stale Desktop clone."""
+    clone = tmp_path / "myclone"
+    (clone / "scripts").mkdir(parents=True)
+    bp = clone / "scripts" / "bus_post.sh"
+    _make_stub(bp, "#!/bin/bash\nexit 0\n")
+
+    sample = {
+        "messages": [
+            {
+                "id": 7,
+                "thread_id": "t-7",
+                "parent_id": None,
+                "from_terminal": "lead",
+                "to_terminals": ["b2"],
+                "topic": "bus/smoke",
+                "kind": "dispatch",
+                "body_preview": "hello",
+                "created_at": "2026-05-11T10:00:00Z",
+                "wake_attempted_at": None,
+                "acknowledged_at": None,
+                "deleted_at": None,
+                "tier_required": "B",
+            }
+        ]
+    }
+    _make_stub(stubs_dir / "op", "#!/bin/bash\necho 'fake-key-1234'\n")
+    _make_stub(stubs_dir / "curl", f"#!/bin/bash\ncat <<'EOF'\n{json.dumps(sample)}\nEOF\nexit 0\n")
+
+    env = dict(base_env, BAKER_ROLE="b2", CLAUDE_PROJECT_DIR=str(clone))
+    result = _run_hook(env, tmp_path)
+
+    assert result.returncode == 0, result.stderr
+    payload = json.loads(result.stdout)
+    ctx = payload["hookSpecificOutput"]["additionalContext"]
+    assert f"{clone}/scripts/bus_post.sh" in ctx, f"reply hint should name the running clone:\n{ctx}"
+    assert "Desktop/baker-code" not in ctx
 
 
 # ---------------------------------------------------------------------------
