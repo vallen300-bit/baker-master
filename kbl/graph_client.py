@@ -11,6 +11,7 @@ from __future__ import annotations
 import hashlib
 import logging
 import pathlib
+import time
 from urllib.parse import urlparse
 
 import requests
@@ -227,6 +228,89 @@ class GraphClient:
             extra_headers=extra_headers,
             redact_url=False,
         )
+
+    @staticmethod
+    def _retry_after_seconds(resp_obj, attempt: int, base_delay: float, cap: float = 60.0) -> float:
+        """Backoff for a 429/503: honor the Retry-After header if present
+        (seconds form), else exponential ``base_delay * 2**attempt``, capped."""
+        if resp_obj is not None:
+            ra = resp_obj.headers.get("Retry-After") if getattr(resp_obj, "headers", None) else None
+            if ra:
+                try:
+                    return min(float(int(ra)), cap)
+                except (TypeError, ValueError):
+                    pass
+        return min(base_delay * (2 ** attempt), cap)
+
+    def get_bytes(
+        self,
+        path: str,
+        timeout: int = 30,
+        extra_headers: dict | None = None,
+        max_retries: int = 0,
+        base_delay: float = 1.0,
+    ) -> tuple[bytes, str | None] | None:
+        """GET a v1.0-relative path expecting RAW BYTES (not JSON). Never raises.
+
+        For ``/messages/{id}/attachments/{id}/$value`` — returns the attachment's
+        raw bytes (fileAttachment file bytes; rfc822 itemAttachment .eml MIME).
+        Returns ``(content_bytes, content_type)`` on 2xx, or ``None`` on any
+        non-retryable failure (e.g. referenceAttachment $value 405 — caller
+        leaves the row metadata_only). No base64 inflation: ``resp.content`` is
+        the exact bytes.
+
+        ``max_retries`` (>0, used by the backfill) retries 429/503 ONLY, with
+        exponential backoff that honors the ``Retry-After`` header. Forward ingest
+        passes 0 (a transient 429 records metadata_only and the backfill recovers
+        it later — a poll cycle must not block on backoff).
+
+        Same host-pin + bearer discipline as ``_request``; a longer default
+        timeout (large PDFs). HTTP status + final URL + Graph error body are
+        logged on failure (no secrets) so a skip is diagnosable, never silent.
+        """
+        url = f"{self.cfg.base_url}{path}"
+        # Host-pin BEFORE acquiring a token (latent credential-leak guard).
+        p = urlparse(url)
+        if p.scheme != "https" or p.hostname != "graph.microsoft.com":
+            logger.error("Graph GET(bytes) rejected: non-Graph URL (%s)", path)
+            return None
+        token = self._acquire_token()
+        if not token:
+            return None
+        headers = dict(extra_headers) if extra_headers else {}
+        headers["Authorization"] = f"Bearer {token}"
+        attempt = 0
+        while True:
+            try:
+                # requests strips Authorization on cross-host redirects (Graph
+                # $value may 302 to pre-authed blob storage) — safe by default.
+                resp = requests.get(url, headers=headers, timeout=timeout)
+                resp.raise_for_status()
+                return resp.content, resp.headers.get("Content-Type")
+            except Exception as e:
+                resp_obj = getattr(e, "response", None)
+                status = getattr(resp_obj, "status_code", None)
+                if status in (429, 503) and attempt < max_retries:
+                    delay = self._retry_after_seconds(resp_obj, attempt, base_delay)
+                    logger.warning(
+                        "Graph GET(bytes) %s -> %s; backoff %.1fs (attempt %d/%d)",
+                        path, status, delay, attempt + 1, max_retries,
+                    )
+                    time.sleep(delay)
+                    attempt += 1
+                    continue
+                final_url = getattr(resp_obj, "url", None)
+                body = None
+                if resp_obj is not None:
+                    try:
+                        body = resp_obj.text[:500]
+                    except Exception:
+                        body = None
+                logger.error(
+                    "Graph GET(bytes) %s failed: %s status=%s url=%s body=%s",
+                    path, type(e).__name__, status, final_url, body,
+                )
+                return None
 
     def get_url(self, url: str, timeout: int = 8) -> dict | None:
         """GET an opaque absolute Graph URL (Phase-2 @odata.nextLink / deltaLink).
