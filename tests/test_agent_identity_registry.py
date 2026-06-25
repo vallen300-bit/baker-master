@@ -56,6 +56,17 @@ def test_bus_sets_include_clerk_haiku_and_exclude_reserved_or_legacy_architect()
     assert "architect" not in VALID_BUS_SLUGS
 
 
+def test_baden_baden_desk_promoted_active_on_bus():
+    """BADEN_BADEN_DESK_ON_BUS_1: AG-305 promoted seeded->active matter-desk.
+    Canonical slug, AG-id, and zshrc BAKER_ROLE form all resolve; in both bus sets."""
+    assert resolve_agent("baden-baden-desk").slug == "baden-baden-desk"
+    assert resolve_agent("AG-305").slug == "baden-baden-desk"
+    assert resolve_agent("BADEN_BADEN_DESK").slug == "baden-baden-desk"
+    assert identity_label("baden-baden-desk") == "AG-305 Baden-Baden Desk [baden-baden-desk]"
+    assert "baden-baden-desk" in VALID_BUS_SLUGS
+    assert "baden-baden-desk" in BUS_AGENT_SLUGS
+
+
 def test_snapshot_terminals_include_generated_registry_agents():
     assert "codex-arch:/Users/dimitry/baker-vault" in SNAPSHOT_TERMINALS
     assert "clerk:/Users/dimitry/bm-clerk" in SNAPSHOT_TERMINALS
