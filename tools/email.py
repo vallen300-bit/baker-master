@@ -625,8 +625,25 @@ def _attachment_read(args: dict) -> str:
     else:
         index = 1
 
-    from kbl.attachment_store import list_attachments, get_attachment
-    rows = list_attachments(message_id, source)
+    from kbl.attachment_store import (
+        list_attachments,
+        get_attachment,
+        AttachmentStoreUnavailable,
+    )
+    try:
+        rows = list_attachments(message_id, source)
+    except AttachmentStoreUnavailable as e:
+        # Store OUTAGE — never report this as attachment_count:0 / 'no attachments
+        # found'. Surface loudly so a caller does not read it as 'no attachments'
+        # (mirrors baker_email_search's backend_unavailable shape).
+        logger.warning(f"attachment store backend unavailable: {e}")
+        return json.dumps({
+            "message_id": message_id,
+            "source": source,
+            "backend_unavailable": True,
+            "error": str(e),
+            "notice": "attachment store unavailable — retry; do NOT read as 'no attachments'.",
+        })
 
     # LIST mode — enumerate the message's attachments (metadata only).
     if not filename and not index_provided:

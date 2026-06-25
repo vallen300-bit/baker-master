@@ -67,10 +67,13 @@ def _call(args):
     return json.loads(dispatch_email(ATTACH_TOOL, args))
 
 
-def _patch_store(monkeypatch, *, list_rows=None, full_by_id=None, list_raises=False):
+def _patch_store(monkeypatch, *, list_rows=None, full_by_id=None,
+                 list_raises=False, list_outage=False):
     import kbl.attachment_store as store
 
     def fake_list(message_id, source=None):
+        if list_outage:
+            raise store.AttachmentStoreUnavailable("simulated store outage")
         if list_raises:
             raise RuntimeError("boom")
         rows = list_rows if list_rows is not None else []
@@ -294,3 +297,37 @@ def test_dispatch_never_raises_on_store_error(monkeypatch):
     _patch_store(monkeypatch, list_raises=True)
     out = _call({"message_id": "M1"})
     assert "error" in out  # surfaced as JSON, not an exception
+
+
+# ── G3 F1: store outage must NOT masquerade as a true-empty ──────────────────
+
+def test_list_mode_outage_surfaces_not_false_empty(monkeypatch):
+    _patch_store(monkeypatch, list_outage=True)
+    out = _call({"message_id": "M1"})
+    assert out.get("backend_unavailable") is True
+    # The false-empty signature must be ABSENT — outage != "no attachments".
+    assert out.get("attachment_count") in (None,)
+    assert "attachments" not in out
+
+
+def test_fetch_mode_outage_surfaces_not_false_empty(monkeypatch):
+    _patch_store(monkeypatch, list_outage=True)
+    out = _call({"message_id": "M1", "filename": "doc.pdf"})
+    assert out.get("backend_unavailable") is True
+    # Must NOT be the "no attachments found" false-empty.
+    assert "no attachments" not in (out.get("error") or "")
+
+
+def test_store_helper_raises_typed_outage_on_backend_failure(monkeypatch):
+    """list_attachments must RAISE (not return []) when the DB connection fails."""
+    import kbl.attachment_store as store
+
+    class _Boom:
+        def __enter__(self):
+            raise RuntimeError("connection refused")
+        def __exit__(self, *a):
+            return False
+
+    monkeypatch.setattr(store, "get_conn", lambda: _Boom())
+    with pytest.raises(store.AttachmentStoreUnavailable):
+        store.list_attachments("M1")

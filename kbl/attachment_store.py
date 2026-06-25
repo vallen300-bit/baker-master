@@ -27,6 +27,16 @@ logger = logging.getLogger(__name__)
 MAX_INLINE_BYTES = 5 * 1024 * 1024  # 5MB
 
 
+class AttachmentStoreUnavailable(Exception):
+    """Raised by the READ surface (list_attachments) when the backing store is
+    unreachable, so a genuine outage is never silently flattened to an empty
+    result. Mirrors memory.retriever.SearchBackendUnavailable. The write helpers
+    (insert_attachment/insert_attachment_meta/get_attachment/attachment_exists)
+    keep their swallow-to-None/False contract — they run on the ingest path where
+    a non-fatal skip is intended; only the read path must distinguish
+    outage-empty from true-empty."""
+
+
 def insert_attachment(
     message_id: str,
     source: str,
@@ -204,9 +214,14 @@ def list_attachments(message_id: str, source: str | None = None):
     Read surface for BAKER_M365_ATTACHMENT_READ_SURFACE_1: the store is the only
     place M365/Graph attachment bytes are durably held, but nothing enumerated
     them. Returns a list of dicts ordered by id (stable, deterministic for
-    1-based indexing), or [] when none / on failure. Optional ``source`` filter
-    ('graph' | 'bluewin' | 'email' | 'exchange'). Payload bytes are intentionally
-    NOT selected here — fetch a specific row's bytes via ``get_attachment(id)``.
+    1-based indexing), or [] when the message genuinely has no attachments.
+    Optional ``source`` filter ('graph' | 'bluewin' | 'email' | 'exchange').
+    Payload bytes are intentionally NOT selected here — fetch a specific row's
+    bytes via ``get_attachment(id)``.
+
+    Raises ``AttachmentStoreUnavailable`` on a backend outage so the caller can
+    distinguish 'store down' from 'no attachments' (a swallowed [] would
+    re-create the silent false-empty class — cf. the M365 mail blindspot).
     """
     if not message_id:
         return []
@@ -250,5 +265,7 @@ def list_attachments(message_id: str, source: str | None = None):
                     for r in rows
                 ]
     except Exception as e:
-        logger.error("list_attachments failed for %s: %s", message_id, e)
-        return []
+        # Do NOT swallow to [] — that masks a store outage as 'no attachments'
+        # (false-empty, the M365-blindspot failure class). Surface it loudly.
+        logger.error("list_attachments backend failure for %s: %s", message_id, e)
+        raise AttachmentStoreUnavailable(str(e)) from e
