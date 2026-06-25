@@ -6,6 +6,16 @@ land via `triggers.email_trigger._process_email_threads`). This is the surface
 that sees Director's `dvallen@brisengroup.com` mail AFTER the ~2026-06-03 M365
 migration.
 
+`baker_email_attachment_read` (BAKER_M365_ATTACHMENT_READ_SURFACE_1) exposes the
+attachment BYTES that the Graph mail trigger already persists into the
+`email_attachments` store (kbl/attachment_store.py) but which had no read surface
+— so the desk could read M365 mail bodies yet not pull attachment bytes. It lists
+attachments for a message_id and returns extracted text (+ optional base64 bytes)
+for a named/indexed attachment. Source-aware (graph | bluewin | email). It does
+NOT re-fetch from Graph — read-only over the durable store. Auth is the same
+transport-level X-Baker-Key gate as every MCP tool (POST /mcp -> _mcp_verify_key,
+fail-closed 401); there is no separate unauthenticated path.
+
 Why this exists (M365_MAIL_BLINDSPOT_DIAGNOSE_FIX_1): `baker_gmail_*` is
 Gmail-OAuth-only — it queries the legacy Gmail account and is STRUCTURALLY BLIND
 to brisengroup mail post-migration, returning a silent empty. graph_mail ingests
@@ -29,8 +39,10 @@ own tokenized query against `email_messages` via the shared retriever connection
 """
 from __future__ import annotations
 
+import base64
 import json
 import logging
+import mimetypes
 import re
 from typing import Any
 
@@ -43,6 +55,12 @@ _DEFAULT_PROVIDER = "store"
 _MAX_RESULTS_HARD_CAP = 50
 _SNIPPET_CAP = 8_000
 _BODY_CAP = 50_000
+
+# Extensions the gmail attachment pipeline can extract text from. Mirrors
+# scripts.extract_gmail._ATTACHMENT_EXTENSIONS; declared locally so importing
+# this module stays light (the extractor pulls heavy google/office deps and is
+# imported lazily only when a text-bearing attachment is actually fetched).
+_ATTACH_TEXT_EXTS = {".pdf", ".docx", ".xlsx", ".csv", ".txt", ".md", ".json"}
 
 # Fields each query token is matched against (OR within a token; AND across tokens).
 _MATCH_FIELDS = ("subject", "sender_name", "sender_email", "full_body")
@@ -123,6 +141,70 @@ EMAIL_TOOLS: list[Tool] = [
                     "enum": ["store", "graph"],
                     "description": "store = email_messages (default); graph = live M365.",
                     "default": "store",
+                },
+            },
+            "required": ["message_id"],
+        },
+    ),
+    Tool(
+        name="baker_email_attachment_read",
+        description=(
+            "Read attachment BYTES/TEXT for a stored email (Gmail OR Outlook/M365 "
+            "Graph), from the durable email_attachments store. THIS is how you pull "
+            "attachment bytes for dvallen@brisengroup.com / M365 mail — "
+            "baker_email_read returns only the body, and baker_gmail_attachment_read "
+            "is Gmail-OAuth-only (blind to M365). Two modes: (1) LIST — omit both "
+            "filename and attachment_index to enumerate a message's attachments "
+            "(filename/mime/size/index); (2) FETCH — give filename (exact, "
+            "case-sensitive; attachment_index disambiguates duplicates) OR "
+            "attachment_index alone (1-based position) to get extracted text, plus "
+            "base64 bytes when include_bytes=true. Read-only over the store — does "
+            "NOT re-fetch from Graph. Payloads >5MB are metadata-only (bytes "
+            "unavailable). Use the message_id from baker_email_search/baker_email_read."
+        ),
+        inputSchema={
+            "type": "object",
+            "properties": {
+                "message_id": {
+                    "type": "string",
+                    "description": (
+                        "message_id from baker_email_search / baker_email_read "
+                        "(the stored mail's id; same id the attachment rows are "
+                        "keyed by)."
+                    ),
+                },
+                "filename": {
+                    "type": "string",
+                    "description": (
+                        "Attachment filename, exact case-sensitive match. Omit "
+                        "(with no attachment_index) to LIST the message's "
+                        "attachments instead of fetching one."
+                    ),
+                },
+                "attachment_index": {
+                    "type": "integer",
+                    "description": (
+                        "1-based index. With filename: tiebreaker among duplicates "
+                        "(default 1). Without filename: selects the Nth attachment "
+                        "in the message (id order). Omit entirely (with no filename) "
+                        "for LIST mode."
+                    ),
+                    "minimum": 1,
+                },
+                "source": {
+                    "type": "string",
+                    "description": (
+                        "Optional ingest-source filter: 'graph' (Outlook/M365), "
+                        "'bluewin', 'email' (Gmail), 'exchange'. Omit for all sources."
+                    ),
+                },
+                "include_bytes": {
+                    "type": "boolean",
+                    "description": (
+                        "If true, include base64-encoded raw bytes alongside "
+                        "extracted text. Default false (text only)."
+                    ),
+                    "default": False,
                 },
             },
             "required": ["message_id"],
@@ -517,6 +599,181 @@ def _read(args: dict) -> str:
     return json.dumps({"provider": "store", "message": data})
 
 
+def _attachment_read(args: dict) -> str:
+    """Read attachment bytes/text from the email_attachments store.
+
+    Two modes (see the tool description): LIST when neither filename nor
+    attachment_index is given; FETCH otherwise. Fault-tolerant — every store
+    call already returns []/None on failure, and this wrapper never raises.
+    """
+    message_id = str(args.get("message_id", "") or "").strip()
+    filename = str(args.get("filename", "") or "").strip()
+    raw_index = args.get("attachment_index")
+    source = str(args.get("source") or "").strip().lower() or None
+    include_bytes = bool(args.get("include_bytes", False))
+
+    if not message_id:
+        return json.dumps({"error": "message_id is required"})
+
+    index_provided = raw_index is not None
+    if index_provided:
+        if not isinstance(raw_index, int) or isinstance(raw_index, bool) or raw_index < 1:
+            return json.dumps({
+                "error": f"attachment_index must be a positive integer (got {raw_index!r})",
+            })
+        index = raw_index
+    else:
+        index = 1
+
+    from kbl.attachment_store import (
+        list_attachments,
+        get_attachment_read,
+        AttachmentStoreUnavailable,
+    )
+
+    def _outage(e):
+        logger.warning(f"attachment store backend unavailable: {e}")
+        return json.dumps({
+            "message_id": message_id,
+            "source": source,
+            "backend_unavailable": True,
+            "error": str(e),
+            "notice": "attachment store unavailable — retry; do NOT read as 'no attachments'.",
+        })
+
+    # Store OUTAGE on the LIST read — never report as attachment_count:0 /
+    # 'no attachments found' (mirrors baker_email_search's backend_unavailable).
+    try:
+        rows = list_attachments(message_id, source)
+    except AttachmentStoreUnavailable as e:
+        return _outage(e)
+
+    # LIST mode — enumerate the message's attachments (metadata only).
+    if not filename and not index_provided:
+        return json.dumps({
+            "message_id": message_id,
+            "source": source,
+            "attachment_count": len(rows),
+            "attachments": [
+                {
+                    "index": i + 1,
+                    "filename": r.get("filename"),
+                    "mime_type": r.get("mime_type"),
+                    "size_bytes": r.get("size_bytes"),
+                    "storage": r.get("storage"),
+                    "source": r.get("source"),
+                }
+                for i, r in enumerate(rows)
+            ],
+        })
+
+    if not rows:
+        return json.dumps({
+            "error": "no attachments found for message_id",
+            "message_id": message_id,
+            "source": source,
+        })
+
+    # FETCH mode — select the target row.
+    if filename:
+        matches = [r for r in rows if (r.get("filename") or "") == filename]
+        if not matches:
+            return json.dumps({
+                "error": f"filename not found in message: {filename}",
+                "message_id": message_id,
+                "available_filenames": sorted(
+                    {r.get("filename") for r in rows if r.get("filename")}
+                ),
+            })
+        if index > len(matches):
+            return json.dumps({
+                "error": (
+                    f"attachment_index {index} out of range "
+                    f"({len(matches)} attachment(s) named {filename!r})"
+                ),
+                "filename": filename,
+                "match_count": len(matches),
+            })
+        target = matches[index - 1]
+        match_count = len(matches)
+    else:
+        if index > len(rows):
+            return json.dumps({
+                "error": (
+                    f"attachment_index {index} out of range "
+                    f"({len(rows)} attachment(s) on message)"
+                ),
+                "message_id": message_id,
+                "attachment_count": len(rows),
+            })
+        target = rows[index - 1]
+        match_count = len(rows)
+
+    # Payloads >5MB persist metadata-only (data=NULL) — bytes are not available.
+    if target.get("storage") == "metadata_only":
+        return json.dumps({
+            "error": "attachment stored metadata-only (payload >5MB not persisted); bytes unavailable",
+            "message_id": message_id,
+            "filename": target.get("filename"),
+            "size_bytes": target.get("size_bytes"),
+            "storage": "metadata_only",
+        })
+
+    # Byte fetch — distinguish a store OUTAGE (backend_unavailable) from a
+    # genuine miss/NULL payload (true 'unavailable'). get_attachment_read RAISES
+    # on outage; None means the row genuinely isn't there.
+    try:
+        full = get_attachment_read(target["id"])
+    except AttachmentStoreUnavailable as e:
+        return _outage(e)
+    if full is None or full.get("data") is None:
+        return json.dumps({
+            "error": "attachment payload unavailable (store miss or NULL data)",
+            "message_id": message_id,
+            "filename": target.get("filename"),
+        })
+
+    file_bytes = full["data"]
+    filename_out = full.get("filename") or filename or f"attachment_{target['id']}"
+
+    # Extract text via the SAME pipeline baker_gmail_attachment_read uses.
+    from pathlib import Path
+    ext = Path(filename_out).suffix.lower()
+    text = ""
+    text_error = None
+    if ext in _ATTACH_TEXT_EXTS:
+        try:
+            from scripts.extract_gmail import _extract_text_from_bytes
+            text = _extract_text_from_bytes(file_bytes, filename_out, ext) or ""
+        except Exception as e:
+            text_error = str(e)
+            logger.warning(f"attachment text extraction failed ({filename_out}): {e}")
+
+    mime_type = full.get("mime_type")
+    if not mime_type:
+        guessed, _ = mimetypes.guess_type(filename_out)
+        mime_type = guessed or "application/octet-stream"
+
+    result: dict[str, Any] = {
+        "message_id": message_id,
+        "source": full.get("source"),
+        "filename": filename_out,
+        "mime_type": mime_type,
+        "size_bytes": full.get("size_bytes"),
+        "content_sha256": full.get("content_sha256"),
+        "storage": full.get("storage"),
+        "attachment_index": index,
+        "match_count": match_count,
+        "text": text,
+        "text_extracted": bool(text),
+    }
+    if text_error:
+        result["text_error"] = text_error
+    if include_bytes:
+        result["bytes_base64"] = base64.standard_b64encode(file_bytes).decode("ascii")
+    return json.dumps(result)
+
+
 def dispatch_email(name: str, args: dict) -> str:
     """Route an MCP email tool call. Returns a JSON string."""
     try:
@@ -524,6 +781,8 @@ def dispatch_email(name: str, args: dict) -> str:
             return _search(args)
         if name == "baker_email_read":
             return _read(args)
+        if name == "baker_email_attachment_read":
+            return _attachment_read(args)
         return json.dumps({"error": f"unknown email tool: {name}"})
     except Exception as e:  # fault-tolerant: never raise to the MCP layer
         logger.error(f"dispatch_email({name}) failed: {e}")
