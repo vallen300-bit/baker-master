@@ -253,3 +253,112 @@ def test_check_success_advances_watermark_and_calls_sink():
     set_wm.assert_called_once()
     ok.assert_called_once_with("graph_mail")
     fail.assert_not_called()
+
+
+# ---------------------------------------------------------------------------
+# M365_GRAPH_ATTACHMENT_ID_FORM_FIX_1 — AAQk immutable-id attachment-skip fix.
+#
+# Root cause (b2 bus #4257): messages whose id is immutable-form (base64url,
+# '-'/'_') had attachments silently dropped because the by-id Graph attachment
+# fetch was issued WITHOUT Prefer: IdType="ImmutableId". Fix: detect id form,
+# set the header for immutable ids, and surface any fetch failure loudly.
+# ---------------------------------------------------------------------------
+
+# A real immutable-id-form id (base64url: contains '-' and '_') and a standard
+# (base64) id (uses '+' and '/'), mirroring the AAQk vs AAMk forms in the brief.
+_IMMUTABLE_ID = "AAQkAGI2T-Hg_x9Q1Zr0nBcVg8w=="
+_STANDARD_ID = "AAMkAGI2THg+x9Q/1Zr0nBcVg8w=="
+
+
+@pytest.fixture(autouse=True)
+def _reset_attachment_counter():
+    gmt._attachment_fetch_failures = 0
+    yield
+    gmt._attachment_fetch_failures = 0
+
+
+def _att(name="doc.pdf", ctype="application/pdf", content=b"PDFDATA", inline=False):
+    import base64 as _b64
+    return {
+        "id": "att-1",
+        "name": name,
+        "contentType": ctype,
+        "size": len(content),
+        "contentBytes": _b64.b64encode(content).decode(),
+        "isInline": inline,
+    }
+
+
+def test_id_form_discriminator():
+    # base64url chars => immutable; base64 (+,/) => standard.
+    assert gmt._is_immutable_message_id(_IMMUTABLE_ID) is True
+    assert gmt._is_immutable_message_id(_STANDARD_ID) is False
+
+
+def test_immutable_id_sets_prefer_header_and_persists():
+    """AC1 (test-shaped): immutable-id message -> Prefer header sent, attachment persists."""
+    client = _fake_client()
+    client.get.return_value = {"value": [_att()]}
+    m = {"id": _IMMUTABLE_ID, "hasAttachments": True}
+    with mock.patch.object(gmt, "_insert_live_attachment", return_value="row-1") as ins:
+        stored = gmt._capture_graph_attachments(client, m)
+    assert stored == 1
+    ins.assert_called_once()
+    # The by-id attachment fetch MUST carry Prefer: IdType="ImmutableId".
+    assert client.get.call_args.kwargs.get("extra_headers") == {"Prefer": 'IdType="ImmutableId"'}
+    assert gmt.attachment_fetch_failures() == 0
+
+
+def test_standard_id_no_prefer_header():
+    """No regression: standard (AAMk) id fetched WITHOUT the immutable header."""
+    client = _fake_client()
+    client.get.return_value = {"value": [_att()]}
+    m = {"id": _STANDARD_ID, "hasAttachments": True}
+    with mock.patch.object(gmt, "_insert_live_attachment", return_value="row-1"):
+        stored = gmt._capture_graph_attachments(client, m)
+    assert stored == 1
+    assert client.get.call_args.kwargs.get("extra_headers") is None
+
+
+def test_failed_fetch_is_surfaced_not_silent(caplog):
+    """AC2: a None (failed) by-id fetch on hasAttachments=true is surfaced, never silent."""
+    client = _fake_client()
+    client.get.return_value = None            # simulate AAQk by-id failure
+    m = {"id": _IMMUTABLE_ID, "hasAttachments": True}
+    import logging
+    with caplog.at_level(logging.ERROR):
+        stored = gmt._capture_graph_attachments(client, m)
+    assert stored == 0
+    assert gmt.attachment_fetch_failures() == 1            # surfaced via counter
+    assert any("FAILED" in r.message for r in caplog.records)   # surfaced via ERROR log
+
+
+def test_exception_during_capture_is_surfaced(caplog):
+    """AC2: an exception mid-capture also counts + logs, never silently returns 0."""
+    client = _fake_client()
+    client.get.side_effect = RuntimeError("boom")
+    m = {"id": _IMMUTABLE_ID, "hasAttachments": True}
+    import logging
+    with caplog.at_level(logging.ERROR):
+        stored = gmt._capture_graph_attachments(client, m)
+    assert stored == 0
+    assert gmt.attachment_fetch_failures() == 1
+
+
+def test_all_inline_is_benign_no_failure_count(caplog):
+    """Successful fetch, only inline parts -> 0 stored, surfaced as WARNING, NOT a failure."""
+    client = _fake_client()
+    client.get.return_value = {"value": [_att(inline=True)]}
+    m = {"id": _IMMUTABLE_ID, "hasAttachments": True}
+    with mock.patch.object(gmt, "_insert_live_attachment", return_value="row-1"):
+        stored = gmt._capture_graph_attachments(client, m)
+    assert stored == 0
+    assert gmt.attachment_fetch_failures() == 0            # benign, not a failure
+
+
+def test_no_attachments_flag_skips_fetch():
+    """hasAttachments=false -> no Graph call at all."""
+    client = _fake_client()
+    m = {"id": _IMMUTABLE_ID, "hasAttachments": False}
+    assert gmt._capture_graph_attachments(client, m) == 0
+    client.get.assert_not_called()

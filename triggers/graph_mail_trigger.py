@@ -23,6 +23,35 @@ _SELECT = "id,conversationId,subject,from,receivedDateTime,body,isDraft,hasAttac
 _ATTACHMENT_SELECT = "id,name,contentType,size,contentBytes,isInline"
 _attachment_store_missing_logged = False
 
+# M365_GRAPH_ATTACHMENT_ID_FORM_FIX_1: messages whose id is in immutable-id form
+# (base64url: contains '-' or '_') are NOT addressable by a default-namespace
+# by-id read. Graph resolves them only when the request carries
+# Prefer: IdType="ImmutableId". Standard (AAMk) ids use base64 ('+'/'/') and must
+# be read WITHOUT the header. We detect the form per-message and set the header
+# only for immutable ids, so the working AAMk path is never regressed.
+_IMMUTABLE_ID_HEADER = {"Prefer": 'IdType="ImmutableId"'}
+
+# Surfaced, never-silently-dropped counter: incremented whenever a message with
+# hasAttachments=true yields zero persisted attachment rows because the by-id
+# Graph fetch FAILED (not because the message is genuinely attachment-empty).
+# Exposed for the regression test + any future health probe.
+_attachment_fetch_failures = 0
+
+
+def _is_immutable_message_id(message_id: str) -> bool:
+    """True if message_id is in Graph immutable-id form (base64url: '-'/'_').
+
+    Standard Exchange ids are base64 and use '+' and '/'; immutable ids are
+    base64url and use '-' and '_'. The presence of a base64url-only char is the
+    canonical discriminator (Microsoft Graph immutable-id contract).
+    """
+    return ("-" in message_id) or ("_" in message_id)
+
+
+def attachment_fetch_failures() -> int:
+    """Read the surfaced attachment-fetch-failure counter (test/health hook)."""
+    return _attachment_fetch_failures
+
 
 def _html_to_text(html: str) -> str:
     import re
@@ -87,18 +116,37 @@ def _insert_live_attachment(
 
 
 def _capture_graph_attachments(client: GraphClient, m: dict) -> int:
-    """Store Graph file attachments for a live message, non-fatally."""
+    """Store Graph file attachments for a live message, non-fatally.
+
+    M365_GRAPH_ATTACHMENT_ID_FORM_FIX_1: sets Prefer: IdType="ImmutableId" when
+    the message id is in immutable form, so the by-id attachment read succeeds
+    (it silently failed before, dropping attachments while the body persisted).
+    A failed fetch on a hasAttachments=true message is surfaced LOUDLY (ERROR +
+    counter), never silently dropped.
+    """
+    global _attachment_fetch_failures
     if not m.get("hasAttachments") or not m.get("id"):
         return 0
+    message_id = m.get("id")
+    extra_headers = _IMMUTABLE_ID_HEADER if _is_immutable_message_id(message_id) else None
     try:
         page = client.get(
-            f"/users/{client.cfg.mail_user}/messages/{m['id']}/attachments",
+            f"/users/{client.cfg.mail_user}/messages/{message_id}/attachments",
             params={"$select": _ATTACHMENT_SELECT, "$top": 50},
+            extra_headers=extra_headers,
         )
         if page is None:
-            logger.warning("Graph attachment fetch returned None (non-fatal)")
+            # Fetch FAILED for a message that declares attachments — this is the
+            # silent-skip class bug (Lesson #107). Surface it loudly; do NOT let
+            # it look like a true-empty message.
+            _attachment_fetch_failures += 1
+            logger.error(
+                "Graph attachment fetch FAILED (hasAttachments=true, 0 stored): "
+                "id_form=%s — attachments NOT persisted, surfaced (count=%d)",
+                "immutable" if extra_headers else "standard",
+                _attachment_fetch_failures,
+            )
             return 0
-        message_id = m.get("id")
         stored = 0
         for att in page.get("value", []):
             if att.get("isInline"):
@@ -119,9 +167,26 @@ def _capture_graph_attachments(client: GraphClient, m: dict) -> int:
             )
             if att_id:
                 stored += 1
+        if stored == 0:
+            # Fetch SUCCEEDED but nothing persisted — surfaced (not silent), yet
+            # distinct from the FAILED path above: this is benign (all-inline /
+            # signature images), so WARNING + no failure-counter bump.
+            logger.warning(
+                "Graph attachments: hasAttachments=true but 0 file rows stored "
+                "(fetch ok — likely all-inline). id_form=%s",
+                "immutable" if extra_headers else "standard",
+            )
         return stored
     except Exception as e:
-        logger.warning("Graph attachment capture failed (non-fatal): %s", type(e).__name__)
+        # An exception on a hasAttachments=true message also dropped attachments —
+        # surface loudly + count, same class as the None-fetch failure above.
+        _attachment_fetch_failures += 1
+        logger.error(
+            "Graph attachment capture FAILED (hasAttachments=true): %s — "
+            "attachments NOT persisted, surfaced (count=%d)",
+            type(e).__name__,
+            _attachment_fetch_failures,
+        )
         return 0
 
 
