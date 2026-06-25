@@ -390,3 +390,33 @@ def test_no_attachments_flag_skips_fetch():
     m = {"id": _AAQK_NO_DASH, "hasAttachments": False}
     assert gmt._capture_graph_attachments(client, m) == 0
     client.get.assert_not_called()
+
+
+# --- Option (a) conversationId keying (#4317) -------------------------------
+# Attachments are READ by the real per-message id but STORED under thread_id
+# (conversationId-or-id), matching email_messages.message_id + the read tool.
+
+def test_store_key_is_conversation_id_when_present():
+    """Read by real id; persist under conversationId (matches email_messages keying)."""
+    client = _fake_client()
+    client.get.return_value = {"value": [_att()]}
+    real_id = "AAMkRealMessageId=="
+    conv_id = "AAQkConversationId=="
+    m = {"id": real_id, "conversationId": conv_id, "hasAttachments": True}
+    with mock.patch.object(gmt, "_insert_live_attachment", return_value="row-1") as ins:
+        gmt._capture_graph_attachments(client, m)
+    # FETCH used the real per-message id (in the URL path)...
+    assert real_id in client.get.call_args_list[0].args[0]
+    # ...but the STORE key is the conversationId.
+    assert ins.call_args.kwargs["message_id"] == conv_id
+
+
+def test_store_key_falls_back_to_message_id_without_conversation():
+    """No conversationId -> store under the message id (mirrors thread_id = conv or id)."""
+    client = _fake_client()
+    client.get.return_value = {"value": [_att()]}
+    real_id = "AAMkRealMessageId=="
+    m = {"id": real_id, "hasAttachments": True}     # no conversationId
+    with mock.patch.object(gmt, "_insert_live_attachment", return_value="row-1") as ins:
+        gmt._capture_graph_attachments(client, m)
+    assert ins.call_args.kwargs["message_id"] == real_id
