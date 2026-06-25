@@ -21,7 +21,13 @@ logger = logging.getLogger(__name__)
 _SOURCE = "graph_mail_poll"          # watermark/cursor key
 _FOLDER = "Inbox"
 _SELECT = "id,conversationId,subject,from,receivedDateTime,body,isDraft,hasAttachments"
-_ATTACHMENT_SELECT = "id,name,contentType,size,contentBytes,isInline"
+# M365_GRAPH_ATTACHMENT_FETCH_DIAG_1: do NOT use $select on the /attachments
+# COLLECTION. Graph 400s with "Could not find a property named contentBytes"
+# when contentBytes is named in a collection $select (confirmed on Render, bus
+# #4348) — the very bug that left hasAttachments=true messages with 0 stored.
+# Requesting the collection WITHOUT $select returns full fileAttachment objects
+# (id, name, contentType, size, isInline AND contentBytes), which is exactly
+# what _capture_graph_attachments needs. $top is fine; $select is not.
 _attachment_store_missing_logged = False
 
 # M365_GRAPH_ATTACHMENT_ID_FORM_FIX_1: a message id's namespace (standard vs
@@ -124,7 +130,9 @@ def _fetch_attachments_page(client: GraphClient, message_id: str):
     user = quote(client.cfg.mail_user, safe="")
     mid = quote(message_id, safe="")
     path = f"/users/{user}/messages/{mid}/attachments"
-    params = {"$select": _ATTACHMENT_SELECT, "$top": 50}
+    # NO $select: contentBytes in a collection $select makes Graph 400 (bus #4348).
+    # Bare collection GET returns full fileAttachment objects incl contentBytes.
+    params = {"$top": 50}
     page = client.get(path, params=params)                       # attempt 1: native
     if page is not None:
         return page, False
