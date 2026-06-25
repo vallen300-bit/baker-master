@@ -9,6 +9,7 @@ from __future__ import annotations
 import base64
 import logging
 from datetime import datetime, timezone
+from urllib.parse import quote
 
 from kbl.graph_client import GraphClient
 from config.settings import GraphConfig
@@ -114,8 +115,15 @@ def _fetch_attachments_page(client: GraphClient, message_id: str):
     first (no Prefer — never regresses standard AAMk ids); only if that returns
     None retries once with Prefer: IdType="ImmutableId" (catches immutable AAQk
     ids). Namespace-agnostic: no prefix/char-class guessing. None iff BOTH fail.
+
+    URL-ENCODES the message id (and mail_user, belt-and-suspenders per codex-arch
+    #4337): standard AAMk ids are base64 and contain '/' and '+', which break the
+    URL path route when interpolated raw (a '/' splits the path -> Graph 400/404
+    -> attachments silently dropped). quote(..., safe="") percent-encodes them.
     """
-    path = f"/users/{client.cfg.mail_user}/messages/{message_id}/attachments"
+    user = quote(client.cfg.mail_user, safe="")
+    mid = quote(message_id, safe="")
+    path = f"/users/{user}/messages/{mid}/attachments"
     params = {"$select": _ATTACHMENT_SELECT, "$top": 50}
     page = client.get(path, params=params)                       # attempt 1: native
     if page is not None:

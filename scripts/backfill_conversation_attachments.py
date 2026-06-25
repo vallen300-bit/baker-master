@@ -33,6 +33,7 @@ from __future__ import annotations
 import argparse
 import logging
 import sys
+from urllib.parse import quote
 from pathlib import Path
 
 _PROJECT_ROOT = Path(__file__).resolve().parent.parent
@@ -74,8 +75,9 @@ def _resolve_messages(client, conv_id: str) -> list | None:
     resolve FAILURE, never a silent truncation).
     """
     safe_cid = conv_id.replace("'", "''")
+    user = quote(client.cfg.mail_user, safe="")
     page = client.get(
-        f"/users/{client.cfg.mail_user}/messages",
+        f"/users/{user}/messages",
         params={
             "$filter": f"conversationId eq '{safe_cid}'",
             "$select": "id,hasAttachments,subject",

@@ -405,10 +405,23 @@ def test_store_key_is_conversation_id_when_present():
     m = {"id": real_id, "conversationId": conv_id, "hasAttachments": True}
     with mock.patch.object(gmt, "_insert_live_attachment", return_value="row-1") as ins:
         gmt._capture_graph_attachments(client, m)
-    # FETCH used the real per-message id (in the URL path)...
-    assert real_id in client.get.call_args_list[0].args[0]
+    # FETCH used the real per-message id (percent-encoded in the URL path)...
+    from urllib.parse import quote as _q
+    assert _q(real_id, safe="") in client.get.call_args_list[0].args[0]
     # ...but the STORE key is the conversationId.
     assert ins.call_args.kwargs["message_id"] == conv_id
+
+
+def test_fetch_path_url_encodes_message_id():
+    """codex-arch #4337: base64 ids ('/', '+') must be percent-encoded in the path,
+    else a '/' splits the URL route and the attachment fetch fails."""
+    client = _fake_client()
+    client.get.return_value = {"value": []}
+    real_id = "AAMkAGI2/Hg+x9Q=="                 # base64 standard: contains '/' and '+'
+    gmt._fetch_attachments_page(client, real_id)
+    path = client.get.call_args_list[0].args[0]
+    assert "%2F" in path and "%2B" in path         # '/' and '+' percent-encoded
+    assert "/Hg+" not in path                       # raw chars no longer in the path
 
 
 def test_store_key_falls_back_to_message_id_without_conversation():
