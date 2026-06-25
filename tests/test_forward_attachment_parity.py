@@ -73,6 +73,9 @@ def test_graph_live_poll_captures_file_attachment(monkeypatch):
         "filename": "memo.pdf",
         "mime_type": "application/pdf",
         "payload_bytes": b"memo-bytes",
+        # M365_LARGE_ATTACHMENT_FETCH_1: routed persist now carries the Graph
+        # attachment id (None here — this fixture's attachment has no 'id').
+        "provider_attachment_id": None,
     }]
 
 

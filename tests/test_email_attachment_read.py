@@ -220,7 +220,10 @@ def test_fetch_no_attachments_on_message(monkeypatch):
 # ── metadata-only (>5MB) + payload gaps ─────────────────────────────────────
 
 def test_metadata_only_bytes_unavailable(monkeypatch):
-    # get_attachment must NOT be consulted for a metadata_only row.
+    # get_attachment (the Neon-inline read) must NOT be consulted for a
+    # metadata_only row. M365_LARGE_ATTACHMENT_FETCH_1: such a row now attempts an
+    # on-demand $value fetch first; with Graph dormant in the test env that
+    # returns None and the row reports unavailable (no bytes leaked).
     _patch_store(
         monkeypatch,
         list_rows=[_meta(11, "huge.pdf", storage="metadata_only", size=99_000_000)],
@@ -229,7 +232,7 @@ def test_metadata_only_bytes_unavailable(monkeypatch):
     out = _call({"message_id": "M1", "filename": "huge.pdf", "include_bytes": True})
     assert out["storage"] == "metadata_only"
     assert "bytes_base64" not in out
-    assert "metadata-only" in out["error"]
+    assert "unavailable" in out["error"]
 
 
 def test_payload_null_data(monkeypatch):
