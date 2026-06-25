@@ -29,10 +29,13 @@ TOPIC="$1"
 BODY="$2"
 RECIPIENT="${3:-lead}"   # reply-to-sender; default lead for backward compat
 
-# Locate canonical bus_post.sh — try common paths in order.
+# Locate canonical bus_post.sh — try FRESH code clones in order. Never the
+# ~/Desktop/baker-code clone: it lags origin/main and its sourced
+# agent_identity_generated.sh rejects newly-added slugs
+# (INSTALL_TOOLING_FASTFOLLOW_1 FIX 2).
 for P in \
     "${HOME}/bm-aihead1/scripts/bus_post.sh" \
-    "${HOME}/Desktop/baker-code/scripts/bus_post.sh"; do
+    "${HOME}/bm-b1/scripts/bus_post.sh"; do
   if [[ -x "$P" ]]; then
     BUS_POST="$P"
     break
