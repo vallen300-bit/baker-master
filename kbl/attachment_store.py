@@ -149,6 +149,8 @@ def insert_attachment_meta(
     mime_type: str | None,
     size_bytes: int | None,
     meta_key: str,
+    provider_attachment_id: str | None = None,
+    real_message_id: str | None = None,
 ):
     """Persist a metadata-only attachment row (no payload available/stored).
 
@@ -158,6 +160,11 @@ def insert_attachment_meta(
     sha256("meta:" + meta_key) so re-inserts on the same provider id hit
     the same (message_id, content_sha256) ON CONFLICT path as payload
     inserts. Returns the row id (int) or None on failure.
+
+    ``provider_attachment_id`` + ``real_message_id`` (M365_LARGE_ATTACHMENT_FETCH_1
+    G3 F1): persist the REAL addressable AAMk message id + Graph attachment id so
+    the read-path on-demand self-heal can address Graph directly even when
+    ``message_id`` is a conversationId (AAQk) store key rather than a fetchable id.
     """
     if not message_id or not source or not meta_key:
         logger.warning("insert_attachment_meta: missing message_id/source/meta_key")
@@ -170,12 +177,14 @@ def insert_attachment_meta(
                     """
                     INSERT INTO email_attachments
                         (message_id, source, filename, mime_type, size_bytes,
-                         content_sha256, storage, data)
-                    VALUES (%s, %s, %s, %s, %s, %s, 'metadata_only', NULL)
+                         content_sha256, storage, data, provider_attachment_id,
+                         real_message_id)
+                    VALUES (%s, %s, %s, %s, %s, %s, 'metadata_only', NULL, %s, %s)
                     ON CONFLICT (message_id, content_sha256) DO NOTHING
                     RETURNING id
                     """,
-                    (message_id, source, filename, mime_type, size_bytes, sha256),
+                    (message_id, source, filename, mime_type, size_bytes, sha256,
+                     provider_attachment_id, real_message_id),
                 )
                 row = cur.fetchone()
                 if row is not None:
@@ -460,7 +469,8 @@ def list_attachments(message_id: str, source: str | None = None):
                     cur.execute(
                         """
                         SELECT id, message_id, source, filename, mime_type,
-                               size_bytes, content_sha256, storage, object_key
+                               size_bytes, content_sha256, storage, object_key,
+                               real_message_id, provider_attachment_id
                           FROM email_attachments
                          WHERE message_id = %s AND source = %s
                          ORDER BY id
@@ -471,7 +481,8 @@ def list_attachments(message_id: str, source: str | None = None):
                     cur.execute(
                         """
                         SELECT id, message_id, source, filename, mime_type,
-                               size_bytes, content_sha256, storage, object_key
+                               size_bytes, content_sha256, storage, object_key,
+                               real_message_id, provider_attachment_id
                           FROM email_attachments
                          WHERE message_id = %s
                          ORDER BY id
@@ -490,6 +501,8 @@ def list_attachments(message_id: str, source: str | None = None):
                         "content_sha256": r[6],
                         "storage": r[7],
                         "object_key": r[8],
+                        "real_message_id": r[9],
+                        "provider_attachment_id": r[10],
                     }
                     for r in rows
                 ]

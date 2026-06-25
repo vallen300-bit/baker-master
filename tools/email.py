@@ -634,22 +634,34 @@ def _ondemand_fetch_and_persist(target: dict, message_id: str):
         client = GraphClient(GraphConfig())
         if not client.is_ready():
             return None
-        # For graph, the row's message_id IS the addressable AAMk per-message id.
-        page, _imm = gmt._fetch_attachments_page(client, message_id)
-        if not page:
-            return None
-        want = target.get("filename") or ""
-        att = None
-        for a in page.get("value", []):
-            if a.get("isInline"):
-                continue
-            if (a.get("name") or "") == want:
-                att = a
-                break
-        if att is None:
-            return None
-        graph_att_id = att.get("id")
-        raw = gmt.fetch_attachment_raw_value(client, message_id, graph_att_id)
+        # G3 F1 (#4473): address Graph by the REAL addressable message id, NOT the
+        # row's store key. Forward-ingest rows key message_id by the conversationId
+        # (AAQk) — GET /messages/{conversationId} is invalid — so use the stored
+        # real_message_id. The existing 2,618 rows key message_id by the AAMk id
+        # and have no real_message_id, so fall back to message_id there.
+        real_msg = target.get("real_message_id") or message_id
+        graph_att_id = target.get("provider_attachment_id")
+        if graph_att_id:
+            # Direct $value fetch — the attachment id is stored, no listing needed.
+            raw = gmt.fetch_attachment_raw_value(client, real_msg, graph_att_id)
+        else:
+            # No stored attachment id (the existing AAMk-keyed rows): list the real
+            # message's attachments and match by filename.
+            page, _imm = gmt._fetch_attachments_page(client, real_msg)
+            if not page:
+                return None
+            want = target.get("filename") or ""
+            att = None
+            for a in page.get("value", []):
+                if a.get("isInline"):
+                    continue
+                if (a.get("name") or "") == want:
+                    att = a
+                    break
+            if att is None:
+                return None
+            graph_att_id = att.get("id")
+            raw = gmt.fetch_attachment_raw_value(client, real_msg, graph_att_id)
         if raw is None:
             return None
         payload, fetched_ct = raw

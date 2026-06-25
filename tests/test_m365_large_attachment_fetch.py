@@ -414,6 +414,67 @@ def test_read_true_empty_unavailable(monkeypatch, _email_mod):
     assert "unavailable" in out["error"]
 
 
+def test_ondemand_self_heal_addresses_real_message_id_for_conv_keyed_row(monkeypatch, _email_mod):
+    """G3 F1 #4473: a forward-ingest row keyed (message_id) by a conversationId
+    (AAQk) must self-heal by addressing Graph with the stored real_message_id
+    (AAMk) + provider_attachment_id — NOT the conversationId store key."""
+    em = _email_mod
+    monkeypatch.setattr(gc, "GraphClient", lambda *a, **k: _client(ready=True))
+    seen = {}
+
+    def fake_raw(c, real_msg, att_id, max_retries=0):
+        seen["real_msg"] = real_msg
+        seen["att_id"] = att_id
+        return (b"HEALED", "application/pdf")
+
+    monkeypatch.setattr(gmt, "fetch_attachment_raw_value", fake_raw)
+    listed = mock.MagicMock()
+    monkeypatch.setattr(gmt, "_fetch_attachments_page", listed)  # must NOT be called
+    monkeypatch.setattr(store, "update_attachment_payload", lambda *a, **k: "updated")
+    target = {
+        "id": 5, "source": "graph", "filename": "d.pdf", "mime_type": "application/pdf",
+        "size_bytes": 9_000_000, "storage": "metadata_only",
+        "message_id": "AAQkConversationId==",       # store key = conversationId
+        "real_message_id": "AAMkRealMessageId==",    # the addressable id
+        "provider_attachment_id": "ATT-9",
+    }
+    out = em._ondemand_fetch_and_persist(target, "AAQkConversationId==")
+    assert out == b"HEALED"
+    assert seen["real_msg"] == "AAMkRealMessageId=="   # addressed by REAL id, not conversationId
+    assert seen["att_id"] == "ATT-9"
+    listed.assert_not_called()                         # direct $value fetch, no listing
+
+
+def test_ondemand_self_heal_lists_for_aamk_row_without_att_id(monkeypatch, _email_mod):
+    """Existing 2,618 rows: message_id IS the AAMk id, no provider_attachment_id —
+    self-heal lists by that message_id and matches by filename (the fallback)."""
+    em = _email_mod
+    monkeypatch.setattr(gc, "GraphClient", lambda *a, **k: _client(ready=True))
+    page = {"value": [_att("ATT-1", "d.pdf", content_bytes=None, size=9_000_000)]}
+    listed = {}
+
+    def fake_list(c, mid):
+        listed["mid"] = mid
+        return page, False
+
+    monkeypatch.setattr(gmt, "_fetch_attachments_page", fake_list)
+    seen = {}
+    monkeypatch.setattr(
+        gmt, "fetch_attachment_raw_value",
+        lambda c, real_msg, att_id, max_retries=0: seen.update(real_msg=real_msg, att_id=att_id) or (b"OK", "x/y"),
+    )
+    monkeypatch.setattr(store, "update_attachment_payload", lambda *a, **k: "updated")
+    target = {
+        "id": 1, "source": "graph", "filename": "d.pdf", "mime_type": "application/pdf",
+        "size_bytes": 9_000_000, "storage": "metadata_only",
+        "message_id": "AAMkRealId==", "real_message_id": None, "provider_attachment_id": None,
+    }
+    out = em._ondemand_fetch_and_persist(target, "AAMkRealId==")
+    assert out == b"OK"
+    assert listed["mid"] == "AAMkRealId=="     # listed by the AAMk message_id (fallback)
+    assert seen["att_id"] == "ATT-1"
+
+
 # ══════════════════════════════════════════════════════════════════════════
 # backfill run_missing — message-id UPDATE-in-place mode
 # ══════════════════════════════════════════════════════════════════════════

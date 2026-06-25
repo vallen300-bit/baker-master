@@ -158,10 +158,15 @@ def _persist_attachment_meta(
     mime_type: str,
     size_bytes,
     provider_attachment_id: str,
+    real_message_id: str | None = None,
 ):
     """Record a byte-empty attachment row (referenceAttachment / fetch failure) so
     the attachment is never a SILENT drop — it shows as metadata_only, eligible
-    for a later on-demand read-path or backfill fetch. Best-effort."""
+    for a later on-demand read-path or backfill fetch. Best-effort.
+
+    Persists ``real_message_id`` (the addressable AAMk id) + provider_attachment_id
+    so the read-path self-heal can fetch Graph directly even though ``message_id``
+    here is the conversationId store key (G3 F1)."""
     if not provider_attachment_id:
         return None
     try:
@@ -176,6 +181,8 @@ def _persist_attachment_meta(
             mime_type=mime_type,
             size_bytes=size_bytes,
             meta_key=provider_attachment_id,
+            provider_attachment_id=provider_attachment_id,
+            real_message_id=real_message_id,
         )
     except Exception as e:
         logger.warning("Graph attachment meta-record failed (non-fatal): %s", type(e).__name__)
@@ -271,9 +278,12 @@ def _capture_graph_attachments(client: GraphClient, m: dict) -> int:
             if payload is None:
                 # $value unavailable (referenceAttachment 405 / fetch failure):
                 # record metadata_only so the attachment is NEVER a silent drop.
+                # store_key may be the conversationId; real_message_id=fetch_id is
+                # the addressable AAMk id the read-path self-heal needs (G3 F1).
                 _persist_attachment_meta(
                     message_id=store_key, filename=name, mime_type=ctype,
                     size_bytes=att.get("size"), provider_attachment_id=graph_att_id,
+                    real_message_id=fetch_id,
                 )
                 continue
             att_row_id = _insert_live_attachment(

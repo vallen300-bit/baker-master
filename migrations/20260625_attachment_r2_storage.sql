@@ -22,6 +22,13 @@ BEGIN;
 ALTER TABLE email_attachments ADD COLUMN IF NOT EXISTS object_key TEXT;
 ALTER TABLE email_attachments ADD COLUMN IF NOT EXISTS fetched_at TIMESTAMPTZ;
 ALTER TABLE email_attachments ADD COLUMN IF NOT EXISTS provider_attachment_id TEXT;
+-- real_message_id: the REAL addressable AAMk per-message id (deputy-codex G3
+-- F1-HIGH). Forward-ingest rows are keyed (message_id) by conversationId (AAQk),
+-- which is NOT a fetchable message id — so the read-path on-demand self-heal must
+-- address Graph by this real id, not the conversationId store key. Existing rows
+-- already key message_id by the AAMk id, so this stays NULL for them and the
+-- self-heal falls back to message_id.
+ALTER TABLE email_attachments ADD COLUMN IF NOT EXISTS real_message_id TEXT;
 
 -- Find r2-stored rows fast when reconciling / verifying object coverage.
 CREATE INDEX IF NOT EXISTS idx_email_attachments_storage
@@ -32,6 +39,7 @@ COMMIT;
 -- == migrate:down ==
 -- BEGIN;
 -- DROP INDEX IF EXISTS idx_email_attachments_storage;
+-- ALTER TABLE email_attachments DROP COLUMN IF EXISTS real_message_id;
 -- ALTER TABLE email_attachments DROP COLUMN IF EXISTS provider_attachment_id;
 -- ALTER TABLE email_attachments DROP COLUMN IF EXISTS fetched_at;
 -- ALTER TABLE email_attachments DROP COLUMN IF EXISTS object_key;
