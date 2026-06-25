@@ -627,15 +627,11 @@ def _attachment_read(args: dict) -> str:
 
     from kbl.attachment_store import (
         list_attachments,
-        get_attachment,
+        get_attachment_read,
         AttachmentStoreUnavailable,
     )
-    try:
-        rows = list_attachments(message_id, source)
-    except AttachmentStoreUnavailable as e:
-        # Store OUTAGE — never report this as attachment_count:0 / 'no attachments
-        # found'. Surface loudly so a caller does not read it as 'no attachments'
-        # (mirrors baker_email_search's backend_unavailable shape).
+
+    def _outage(e):
         logger.warning(f"attachment store backend unavailable: {e}")
         return json.dumps({
             "message_id": message_id,
@@ -644,6 +640,13 @@ def _attachment_read(args: dict) -> str:
             "error": str(e),
             "notice": "attachment store unavailable — retry; do NOT read as 'no attachments'.",
         })
+
+    # Store OUTAGE on the LIST read — never report as attachment_count:0 /
+    # 'no attachments found' (mirrors baker_email_search's backend_unavailable).
+    try:
+        rows = list_attachments(message_id, source)
+    except AttachmentStoreUnavailable as e:
+        return _outage(e)
 
     # LIST mode — enumerate the message's attachments (metadata only).
     if not filename and not index_provided:
@@ -716,7 +719,13 @@ def _attachment_read(args: dict) -> str:
             "storage": "metadata_only",
         })
 
-    full = get_attachment(target["id"])
+    # Byte fetch — distinguish a store OUTAGE (backend_unavailable) from a
+    # genuine miss/NULL payload (true 'unavailable'). get_attachment_read RAISES
+    # on outage; None means the row genuinely isn't there.
+    try:
+        full = get_attachment_read(target["id"])
+    except AttachmentStoreUnavailable as e:
+        return _outage(e)
     if full is None or full.get("data") is None:
         return json.dumps({
             "error": "attachment payload unavailable (store miss or NULL data)",

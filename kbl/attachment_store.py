@@ -149,8 +149,40 @@ def insert_attachment_meta(
         return None
 
 
+_ATTACHMENT_BY_ID_SQL = """
+    SELECT id, message_id, source, filename, mime_type,
+           size_bytes, content_sha256, storage, data, created_at
+      FROM email_attachments
+     WHERE id = %s
+     LIMIT 1
+"""
+
+
+def _map_attachment_row(row):
+    """Map a get-by-id row tuple to a dict, or None when the row is absent."""
+    if row is None:
+        return None
+    data = bytes(row[8]) if row[8] is not None else None
+    return {
+        "id": row[0],
+        "message_id": row[1],
+        "source": row[2],
+        "filename": row[3],
+        "mime_type": row[4],
+        "size_bytes": row[5],
+        "content_sha256": row[6],
+        "storage": row[7],
+        "data": data,
+        "created_at": row[9],
+    }
+
+
 def get_attachment(att_id: int):
     """Return the attachment row as a dict, or None if missing / on failure.
+
+    Ingest/forward-parity callers rely on the swallow-to-None contract (a
+    backend hiccup is a non-fatal skip there). The READ surface must instead
+    distinguish outage from a true miss — use ``get_attachment_read``.
 
     Keys: id, message_id, source, filename, mime_type, size_bytes,
     content_sha256, storage, data (bytes or None), created_at.
@@ -158,35 +190,31 @@ def get_attachment(att_id: int):
     try:
         with get_conn() as conn:
             with conn.cursor() as cur:
-                cur.execute(
-                    """
-                    SELECT id, message_id, source, filename, mime_type,
-                           size_bytes, content_sha256, storage, data, created_at
-                      FROM email_attachments
-                     WHERE id = %s
-                     LIMIT 1
-                    """,
-                    (att_id,),
-                )
-                row = cur.fetchone()
-                if row is None:
-                    return None
-                data = bytes(row[8]) if row[8] is not None else None
-                return {
-                    "id": row[0],
-                    "message_id": row[1],
-                    "source": row[2],
-                    "filename": row[3],
-                    "mime_type": row[4],
-                    "size_bytes": row[5],
-                    "content_sha256": row[6],
-                    "storage": row[7],
-                    "data": data,
-                    "created_at": row[9],
-                }
+                cur.execute(_ATTACHMENT_BY_ID_SQL, (att_id,))
+                return _map_attachment_row(cur.fetchone())
     except Exception as e:
         logger.error("get_attachment failed for id=%s: %s", att_id, e)
         return None
+
+
+def get_attachment_read(att_id: int):
+    """READ-surface twin of ``get_attachment``: same row dict on success, None
+    ONLY when the row genuinely does not exist, but RAISES
+    ``AttachmentStoreUnavailable`` on a backend outage.
+
+    This is the byte-fetch counterpart to ``list_attachments``' outage contract:
+    a swallowed None would let a store outage read as 'payload missing' (the
+    false-empty class). The read tool maps the typed outage to
+    {backend_unavailable: true}; a real None stays a true 'payload unavailable'.
+    """
+    try:
+        with get_conn() as conn:
+            with conn.cursor() as cur:
+                cur.execute(_ATTACHMENT_BY_ID_SQL, (att_id,))
+                return _map_attachment_row(cur.fetchone())
+    except Exception as e:
+        logger.error("get_attachment_read backend failure for id=%s: %s", att_id, e)
+        raise AttachmentStoreUnavailable(str(e)) from e
 
 
 def attachment_exists(message_id: str, sha256: str) -> bool:

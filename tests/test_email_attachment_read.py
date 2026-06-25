@@ -68,7 +68,7 @@ def _call(args):
 
 
 def _patch_store(monkeypatch, *, list_rows=None, full_by_id=None,
-                 list_raises=False, list_outage=False):
+                 list_raises=False, list_outage=False, read_outage=False):
     import kbl.attachment_store as store
 
     def fake_list(message_id, source=None):
@@ -81,11 +81,15 @@ def _patch_store(monkeypatch, *, list_rows=None, full_by_id=None,
             rows = [r for r in rows if r.get("source") == source]
         return rows
 
-    def fake_get(att_id):
+    def fake_read(att_id):
+        if read_outage:
+            raise store.AttachmentStoreUnavailable("simulated byte-read outage")
         return (full_by_id or {}).get(att_id)
 
     monkeypatch.setattr(store, "list_attachments", fake_list)
-    monkeypatch.setattr(store, "get_attachment", fake_get)
+    # The tool fetches bytes via get_attachment_read (outage-raising twin).
+    monkeypatch.setattr(store, "get_attachment_read", fake_read)
+    monkeypatch.setattr(store, "get_attachment", fake_read)
 
 
 # ── registration ────────────────────────────────────────────────────────────
@@ -331,3 +335,47 @@ def test_store_helper_raises_typed_outage_on_backend_failure(monkeypatch):
     monkeypatch.setattr(store, "get_conn", lambda: _Boom())
     with pytest.raises(store.AttachmentStoreUnavailable):
         store.list_attachments("M1")
+
+
+# ── G2 codex F1: byte-fetch outage must NOT masquerade as 'payload missing' ──
+
+def test_fetch_byte_read_outage_surfaces_backend_unavailable(monkeypatch):
+    # list succeeds (row visible) but the byte read hits a store outage.
+    _patch_store(
+        monkeypatch,
+        list_rows=[_meta(11, "doc.pdf")],
+        read_outage=True,
+    )
+    out = _call({"message_id": "M1", "filename": "doc.pdf"})
+    assert out.get("backend_unavailable") is True
+    # Must NOT be the genuine-miss false-empty.
+    assert "payload unavailable" not in (out.get("error") or "")
+
+
+def test_fetch_genuine_miss_is_not_backend_unavailable(monkeypatch):
+    # list succeeds, byte read returns None (row genuinely absent) — true miss.
+    _patch_store(
+        monkeypatch,
+        list_rows=[_meta(11, "doc.pdf")],
+        full_by_id={},  # get_attachment_read -> None
+    )
+    out = _call({"message_id": "M1", "filename": "doc.pdf"})
+    assert "backend_unavailable" not in out
+    assert "payload unavailable" in (out.get("error") or "")
+
+
+def test_get_attachment_read_raises_on_backend_failure(monkeypatch):
+    """get_attachment_read RAISES on outage; get_attachment swallows to None."""
+    import kbl.attachment_store as store
+
+    class _Boom:
+        def __enter__(self):
+            raise RuntimeError("connection refused")
+        def __exit__(self, *a):
+            return False
+
+    monkeypatch.setattr(store, "get_conn", lambda: _Boom())
+    with pytest.raises(store.AttachmentStoreUnavailable):
+        store.get_attachment_read(11)
+    # Ingest-side twin keeps the swallow contract.
+    assert store.get_attachment(11) is None
