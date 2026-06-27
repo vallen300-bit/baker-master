@@ -3155,6 +3155,31 @@ async def scheduler_status():
     return get_scheduler_status()
 
 
+def _scheduler_live_from_status() -> tuple[bool, int, int | None]:
+    """Return scheduler liveness, combining local APScheduler state with DB proof.
+
+    On Render, the request-serving process can observe _scheduler as None while
+    another in-process/backend thread is actively firing jobs and writing
+    scheduler_executions. Treat a fresh scheduler_executions row as the stronger
+    liveness signal so /health does not report "stopped" while jobs are firing.
+    """
+    try:
+        status = get_scheduler_status()
+    except Exception:
+        status = {}
+    running = bool(status.get("running", False))
+    job_count = int(status.get("job_count", 0) or 0)
+    exec_age = None
+    try:
+        from triggers.state import trigger_state
+        exec_age = trigger_state.seconds_since_last_scheduler_execution()
+    except Exception:
+        exec_age = None
+    if not running and exec_age is not None and exec_age < _WATCHDOG_EXEC_FRESH_WINDOW_S:
+        running = True
+    return running, job_count, int(exec_age) if exec_age is not None else None
+
+
 @app.get("/api/health/scheduler", tags=["health"], include_in_schema=False)
 async def scheduler_heartbeat_health():
     """SCHEDULER-WATCHDOG-1: Public endpoint for frontend heartbeat polling."""
@@ -3163,19 +3188,18 @@ async def scheduler_heartbeat_health():
         from triggers.state import get_watermark_failure_count
         hb = trigger_state.get_watermark("scheduler_heartbeat")
         age = (datetime.now(timezone.utc) - hb).total_seconds()
-        status = get_scheduler_status()
         # SCHEDULER_WATCHDOG_HARDEN_1 (lead #2566) — DB-derived liveness signal that
         # SURVIVES restarts (unlike the per-process watermark_set_failures counter,
         # which resets to 0 on the spurious restart it was meant to expose). When the
         # heartbeat watermark freezes while the scheduler is live, heartbeat_age_seconds
         # climbs but last_job_execution_age_seconds stays small — the divergence makes
         # the gauge failure observable without Render stderr.
-        exec_age = trigger_state.seconds_since_last_scheduler_execution()
+        scheduler_running, job_count, exec_age = _scheduler_live_from_status()
         return {
             "alive": age < 720,
             "heartbeat_age_seconds": int(age),
-            "scheduler_running": status.get("running", False),
-            "job_count": status.get("job_count", 0),
+            "scheduler_running": scheduler_running,
+            "job_count": job_count,
             # SCHEDULER_STALL_CODEFIX_1 — surface silent watermark-write failures so a
             # frozen heartbeat is visible before it trips the 12-min watchdog.
             "watermark_set_failures": get_watermark_failure_count(),
@@ -3183,7 +3207,7 @@ async def scheduler_heartbeat_health():
             # unreadable; a small value alongside a large heartbeat_age_seconds means
             # "gauge stale, scheduler live" (watchdog will suppress the restart).
             "last_job_execution_age_seconds": (
-                int(exec_age) if exec_age is not None else None
+                exec_age if exec_age is not None else None
             ),
         }
     except Exception as e:
@@ -4095,15 +4119,7 @@ async def health_check():
     except Exception:
         db_ok = False
 
-    scheduler_ok = False
-    job_count = 0
-    try:
-        from triggers.embedded_scheduler import _scheduler
-        if _scheduler and _scheduler.running:
-            scheduler_ok = True
-            job_count = len(_scheduler.get_jobs())
-    except Exception:
-        pass
+    scheduler_ok, job_count, scheduler_exec_age = _scheduler_live_from_status()
 
     # Sentinel health summary
     sentinels_healthy = 0
@@ -4155,6 +4171,7 @@ async def health_check():
         "database": "connected" if db_ok else "disconnected",
         "scheduler": "running" if scheduler_ok else "stopped",
         "scheduled_jobs": job_count,
+        "scheduler_last_job_execution_age_seconds": scheduler_exec_age,
         "sentinels_healthy": sentinels_healthy,
         "sentinels_down": sentinels_down,
         "sentinels_down_list": sentinels_down_list,
