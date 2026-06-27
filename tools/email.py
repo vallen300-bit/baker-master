@@ -56,17 +56,53 @@ _MAX_RESULTS_HARD_CAP = 50
 _SNIPPET_CAP = 8_000
 _BODY_CAP = 50_000
 
-# Extensions the gmail attachment pipeline can extract text from. Mirrors
-# scripts.extract_gmail._ATTACHMENT_EXTENSIONS; declared locally so importing
-# this module stays light (the extractor pulls heavy google/office deps and is
-# imported lazily only when a text-bearing attachment is actually fetched).
-_ATTACH_TEXT_EXTS = {".pdf", ".docx", ".xlsx", ".csv", ".txt", ".md", ".json"}
-
 # Fields each query token is matched against (OR within a token; AND across tokens).
 _MATCH_FIELDS = ("subject", "sender_name", "sender_email", "full_body")
 
 
 EMAIL_TOOLS: list[Tool] = [
+    Tool(
+        name="baker_attachment_read",
+        description=(
+            "Universal desk attachment reader. Use this before any desk says it "
+            "cannot read an attachment. Reads stored email attachments for Gmail, "
+            "Outlook/M365 Graph, Bluewin, and Exchange from email_attachments. "
+            "LIST mode: provide message_id only. FETCH mode: provide filename or "
+            "attachment_index. The service chooses PDF text extraction, scanned-PDF "
+            "OCR fallback, image vision, DOCX, XLSX, CSV, JSON, or plain text and "
+            "returns text plus extraction_status/extraction_method. If extraction "
+            "fails, route the candidate to Unsorted or human hold instead of "
+            "silently proceeding."
+        ),
+        inputSchema={
+            "type": "object",
+            "properties": {
+                "message_id": {
+                    "type": "string",
+                    "description": "Stored email message_id that owns the attachment rows.",
+                },
+                "filename": {
+                    "type": "string",
+                    "description": "Exact filename. Omit with no attachment_index to list attachments.",
+                },
+                "attachment_index": {
+                    "type": "integer",
+                    "description": "1-based attachment index. Used alone or as duplicate-filename tiebreaker.",
+                    "minimum": 1,
+                },
+                "source": {
+                    "type": "string",
+                    "description": "Optional source filter: graph, bluewin, email, exchange.",
+                },
+                "include_bytes": {
+                    "type": "boolean",
+                    "description": "If true, include base64 raw bytes. Default false.",
+                    "default": False,
+                },
+            },
+            "required": ["message_id"],
+        },
+    ),
     Tool(
         name="baker_email_search",
         description=(
@@ -828,23 +864,13 @@ def _attachment_read(args: dict) -> str:
 
     filename_out = target.get("filename") or filename or f"attachment_{target['id']}"
 
-    # Extract text via the SAME pipeline baker_gmail_attachment_read uses.
-    from pathlib import Path
-    ext = Path(filename_out).suffix.lower()
-    text = ""
-    text_error = None
-    if ext in _ATTACH_TEXT_EXTS:
-        try:
-            from scripts.extract_gmail import _extract_text_from_bytes
-            text = _extract_text_from_bytes(file_bytes, filename_out, ext) or ""
-        except Exception as e:
-            text_error = str(e)
-            logger.warning(f"attachment text extraction failed ({filename_out}): {e}")
-
     mime_type = target.get("mime_type")
     if not mime_type:
         guessed, _ = mimetypes.guess_type(filename_out)
         mime_type = guessed or "application/octet-stream"
+
+    from tools.attachment_read_service import extract_attachment_text
+    extracted = extract_attachment_text(file_bytes, filename_out, mime_type)
 
     result: dict[str, Any] = {
         "message_id": message_id,
@@ -856,11 +882,13 @@ def _attachment_read(args: dict) -> str:
         "storage": storage,
         "attachment_index": index,
         "match_count": match_count,
-        "text": text,
-        "text_extracted": bool(text),
+        "text": extracted.get("text", ""),
+        "text_extracted": bool(extracted.get("text_extracted")),
+        "extraction_status": extracted.get("extraction_status"),
+        "extraction_method": extracted.get("extraction_method"),
     }
-    if text_error:
-        result["text_error"] = text_error
+    if extracted.get("text_error"):
+        result["text_error"] = extracted.get("text_error")
     if include_bytes:
         result["bytes_base64"] = base64.standard_b64encode(file_bytes).decode("ascii")
     return json.dumps(result)
@@ -873,7 +901,7 @@ def dispatch_email(name: str, args: dict) -> str:
             return _search(args)
         if name == "baker_email_read":
             return _read(args)
-        if name == "baker_email_attachment_read":
+        if name in {"baker_email_attachment_read", "baker_attachment_read"}:
             return _attachment_read(args)
         return json.dumps({"error": f"unknown email tool: {name}"})
     except Exception as e:  # fault-tolerant: never raise to the MCP layer
