@@ -38,10 +38,26 @@ ATTACH_TOOL = "baker_email_attachment_read"
 def _stub_extractor(monkeypatch):
     """Stub scripts.extract_gmail._extract_text_from_bytes so the text branch
     doesn't pull heavy deps. Default: echo a deterministic marker."""
-    fake = types.ModuleType("scripts.extract_gmail")
-    fake._extract_text_from_bytes = lambda b, fn, ext: f"TEXT[{fn}]"  # type: ignore[attr-defined]
-    monkeypatch.setitem(sys.modules, "scripts.extract_gmail", fake)
-    return fake
+    import tools.attachment_read_service as svc
+
+    def fake_extract(b, fn, mime_type=None):
+        if fn.lower().endswith((".pdf", ".docx", ".xlsx", ".csv", ".txt", ".md", ".json")):
+            return {
+                "text": f"TEXT[{fn}]",
+                "text_extracted": True,
+                "extraction_status": "extracted",
+                "extraction_method": "test_text",
+            }
+        return {
+            "text": "",
+            "text_extracted": False,
+            "extraction_status": "unsupported",
+            "extraction_method": "unsupported",
+            "text_error": "unsupported attachment type",
+        }
+
+    monkeypatch.setattr(svc, "extract_attachment_text", fake_extract)
+    return svc
 
 
 def _meta(id_, filename, *, source="graph", storage="db", size=1234,
@@ -96,11 +112,15 @@ def _patch_store(monkeypatch, *, list_rows=None, full_by_id=None,
 
 def test_registered_in_email_surface():
     assert ATTACH_TOOL in EMAIL_TOOL_NAMES
+    assert "baker_attachment_read" in EMAIL_TOOL_NAMES
     tool = next(t for t in EMAIL_TOOLS if t.name == ATTACH_TOOL)
     assert tool.inputSchema["required"] == ["message_id"]
     props = tool.inputSchema["properties"]
     for key in ("message_id", "filename", "attachment_index", "source", "include_bytes"):
         assert key in props
+
+    universal = next(t for t in EMAIL_TOOLS if t.name == "baker_attachment_read")
+    assert universal.inputSchema["required"] == ["message_id"]
 
 
 # ── input validation / fail-closed ──────────────────────────────────────────
@@ -151,6 +171,8 @@ def test_fetch_by_filename_returns_text(monkeypatch):
     assert out["filename"] == "Darlehensvertrag.pdf"
     assert out["text_extracted"] is True
     assert out["text"] == "TEXT[Darlehensvertrag.pdf]"
+    assert out["extraction_status"] == "extracted"
+    assert out["extraction_method"] == "test_text"
     assert out["source"] == "graph"
     assert out["match_count"] == 1
     assert "bytes_base64" not in out  # default include_bytes false
@@ -266,9 +288,14 @@ def test_source_filter_passthrough(monkeypatch):
 # ── non-fatal extraction failure ────────────────────────────────────────────
 
 def test_extraction_failure_is_nonfatal(monkeypatch):
-    def boom(b, fn, ext):
-        raise ValueError("corrupt pdf")
-    sys.modules["scripts.extract_gmail"]._extract_text_from_bytes = boom  # type: ignore[attr-defined]
+    import tools.attachment_read_service as svc
+    monkeypatch.setattr(svc, "extract_attachment_text", lambda *a, **k: {
+        "text": "",
+        "text_extracted": False,
+        "extraction_status": "error",
+        "extraction_method": "pdf_text_or_ocr",
+        "text_error": "corrupt pdf",
+    })
     _patch_store(
         monkeypatch,
         list_rows=[_meta(11, "bad.pdf")],
@@ -289,7 +316,32 @@ def test_non_text_extension_skips_extraction(monkeypatch):
     out = _call({"message_id": "M1", "filename": "image.png", "include_bytes": True})
     assert out["text"] == ""
     assert out["text_extracted"] is False
+    assert out["extraction_status"] == "unsupported"
     assert base64.b64decode(out["bytes_base64"]) == b"\x89PNG"
+
+
+def test_image_attachment_can_use_universal_service(monkeypatch):
+    import tools.attachment_read_service as svc
+    monkeypatch.setattr(svc, "extract_attachment_text", lambda *a, **k: {
+        "text": "OCR IMAGE TEXT",
+        "text_extracted": True,
+        "extraction_status": "extracted",
+        "extraction_method": "image_vision",
+    })
+    _patch_store(
+        monkeypatch,
+        list_rows=[_meta(11, "scan.png", mime="image/png")],
+        full_by_id={11: _full(11, "scan.png", data=b"\x89PNG", mime="image/png")},
+    )
+    out = _call({"message_id": "M1", "filename": "scan.png"})
+    assert out["text"] == "OCR IMAGE TEXT"
+    assert out["extraction_method"] == "image_vision"
+
+
+def test_universal_attachment_read_dispatches(monkeypatch):
+    _patch_store(monkeypatch, list_rows=[_meta(11, "a.pdf")])
+    out = json.loads(dispatch_email("baker_attachment_read", {"message_id": "M1"}))
+    assert out["attachment_count"] == 1
 
 
 # ── dispatch routing + never-raise ──────────────────────────────────────────
