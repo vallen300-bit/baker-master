@@ -3,7 +3,7 @@ brief_id: BREACH_DETECT_PHASE1_1
 attempt: 1
 branch: b3/breach-detect-phase1-1
 pr: 433
-status: G3-REWORK PUSHED (4bb554c) — re-requested G3 codex; then G4 lead /security-review
+status: DONE — PR #433 merged (squash d34ccef); post-deploy AC v1 all-4 PASS (bus #4545 lead / #4546 deputy). Arc closed; do NOT resume.
 dispatched_by: lead
 reply_target: lead (bus)
 updated: 2026-06-28
