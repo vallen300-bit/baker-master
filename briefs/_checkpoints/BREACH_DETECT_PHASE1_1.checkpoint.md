@@ -3,7 +3,7 @@ brief_id: BREACH_DETECT_PHASE1_1
 attempt: 1
 branch: b3/breach-detect-phase1-1
 pr: 433
-status: SHIPPED — awaiting G3 codex / G4 lead /security-review
+status: G3-REWORK PUSHED (4bb554c) — re-requested G3 codex; then G4 lead /security-review
 dispatched_by: lead
 reply_target: lead (bus)
 updated: 2026-06-28
@@ -42,7 +42,11 @@ tests/test_scheduler_liveness_sentinel.py (file convention: new cron jobs need a
 - Alarm rate-limit: in-memory per-(key_fp,flag) window gate as the cheap hot-path primary; DB-claim mirror optional/fail-open. Over-alarming on a breach is acceptable; under-alarming is not.
 - Do NOT touch verify_api_key / _mcp_verify_key / CORS / scheduler_watchdog_middleware.
 
+## G3 rework log (#4531, codex #4530) — DONE @ 4bb554c
+- F1-MED freeze-time audit gap: record_freeze_block() writes ONE metadata row (status 503, anomaly_flags=blocked_by_freeze) BEFORE the 503. Test asserts row written on frozen path.
+- F2-MED Slack false "delivered": parse resp.json(), require ok is True; else fail-loud + return False. New ok=false test.
+- tests now 9 passed.
+
 ## Exact next command
-SHIPPED — PR #433 open, ship-posted to lead (bus). Build + tests complete (56 passed / 1 live-PG skip).
-Next: await G3 codex + G4 lead /security-review. On request_changes → NEW commit (never amend) → push → reply on thread.
-On merge → emit POST_DEPLOY_AC_VERDICT v1 (live freeze probe + bulk-read alarm probe).
+G3-rework pushed (4bb554c). Re-requested G3 from codex via lead (bus). Await G3 re-verdict → G4 lead /security-review → merge.
+On further request_changes → NEW commit (never amend) → push → reply. On merge → emit POST_DEPLOY_AC_VERDICT v1.
