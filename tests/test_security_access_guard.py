@@ -112,8 +112,12 @@ def _clean_state(monkeypatch):
 # Case 1 — freeze gate
 # --------------------------------------------------------------------------- #
 def test_freeze_blocks_protected_but_exempts_health_and_security(monkeypatch):
-    # Audit path is irrelevant to this case; keep it DB-free.
+    # Pass-through audit (exempt routes) is irrelevant here; isolate the freeze path.
     monkeypatch.setattr(guard, "record_and_evaluate", lambda *a, **k: None)
+    # Capture the freeze-block audit row (F1-MED): blocked attempts MUST be logged.
+    fake = _FakeConn()
+    monkeypatch.setattr(guard, "_get_store_conn", lambda: fake)
+    monkeypatch.setattr(guard, "_put_store_conn", lambda conn: None)
     monkeypatch.setenv("BAKER_SECURITY_FREEZE", "1")
     client = TestClient(_build_app())
 
@@ -123,6 +127,14 @@ def test_freeze_blocks_protected_but_exempts_health_and_security(monkeypatch):
 
     assert client.get("/health").status_code == 200
     assert client.get("/api/security/status").status_code == 200
+
+    # F1-MED: exactly one audit row for the blocked attempt, flagged + 503,
+    # metadata-only. Exempt routes wrote nothing (record_and_evaluate stubbed).
+    inserts = [(s, p) for (s, p) in fake.executed if "INSERT INTO security_access_log" in s]
+    assert len(inserts) == 1, f"freeze-block must be audited, got {len(inserts)} rows"
+    meta = dict(zip(guard.ACCESS_LOG_COLUMNS, inserts[0][1]))
+    assert meta["anomaly_flags"] == "blocked_by_freeze"
+    assert meta["status_code"] == 503
 
 
 def test_freeze_env_backstop_independent_of_db(monkeypatch):
@@ -222,6 +234,9 @@ def test_alarm_bypasses_director_block_flags(monkeypatch):
         class _R:
             status_code = 200
 
+            def json(self):
+                return {"ok": True}
+
         return _R()
 
     import requests
@@ -230,6 +245,26 @@ def test_alarm_bypasses_director_block_flags(monkeypatch):
     sent = guard.security_alarm_send("breach tripwire test", dedupe_key="")
     assert sent is True
     assert "slack.com" in posted.get("url", "")
+
+
+def test_alarm_slack_api_error_is_not_delivered(monkeypatch):
+    """F2-MED: HTTP 200 with Slack ok=false must be reported as NOT delivered."""
+    monkeypatch.setenv("SLACK_BOT_TOKEN", "xoxb-test")
+
+    def _fake_post(url, headers=None, json=None, timeout=None):
+        class _R:
+            status_code = 200
+
+            def json(self):
+                return {"ok": False, "error": "channel_not_found"}
+
+        return _R()
+
+    import requests
+
+    monkeypatch.setattr(requests, "post", _fake_post)
+    sent = guard.security_alarm_send("breach tripwire test", dedupe_key="")
+    assert sent is False  # not falsely reported as delivered
 
 
 # --------------------------------------------------------------------------- #

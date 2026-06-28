@@ -444,6 +444,28 @@ def build_access_meta(request, response, latency_ms: int) -> dict:
     }
 
 
+class _SyntheticResponse:
+    """Stand-in for a Response object when none exists yet (freeze-gate 503,
+    which short-circuits before call_next). Carries only status + empty headers
+    so build_access_meta produces a metadata-only row."""
+
+    def __init__(self, status_code: int):
+        self.status_code = status_code
+        self.headers: dict = {}
+
+
+def record_freeze_block(request) -> None:
+    """Audit an access attempt rejected by the freeze gate. During a breach
+    lockdown this is the single highest-value trail (who keeps knocking), so it
+    must be logged BEFORE the 503 returns. Metadata-only, fail-OPEN."""
+    try:
+        meta = build_access_meta(request, _SyntheticResponse(503), latency_ms=0)
+        meta["anomaly_flags"] = "blocked_by_freeze"
+        record_access(meta)
+    except Exception as e:
+        logger.warning("freeze-block audit failed (non-fatal): %s", e)
+
+
 # ── audit write (metadata-only, fail-OPEN) ──────────────────────────────────
 def record_access(meta: dict) -> None:
     conn = _get_store_conn()
@@ -603,15 +625,26 @@ def security_alarm_send(text: str, dedupe_key: str = "") -> bool:
             json={"channel": SLACK_CHANNEL, "text": text},
             timeout=5,
         )
-        ok = getattr(resp, "status_code", 0) == 200
-        if ok:
+        http_ok = getattr(resp, "status_code", 0) == 200
+        # Slack Web API signals failure via JSON ok=false/error EVEN ON HTTP 200
+        # (invalid_auth / channel_not_found / missing_scope). HTTP 200 alone is
+        # NOT delivery — parse the body and require ok is True, else fail LOUD.
+        data = {}
+        try:
+            data = resp.json() if hasattr(resp, "json") else {}
+        except Exception:
+            data = {}
+        api_ok = bool(data.get("ok")) if isinstance(data, dict) else False
+        if http_ok and api_ok:
             logger.warning("security alarm sent to Slack %s", SLACK_CHANNEL)
-        else:
-            logger.error(
-                "security alarm Slack post failed: status=%s",
-                getattr(resp, "status_code", "?"),
-            )
-        return ok
+            return True
+        err = (data.get("error") if isinstance(data, dict) else None) or (
+            f"http={getattr(resp, 'status_code', '?')}"
+        )
+        logger.error(
+            "SECURITY ALARM NOT DELIVERED — Slack rejected (error=%s): %s", err, text
+        )
+        return False
     except Exception as e:
         logger.error("security alarm send raised: %s", e)
         return False
@@ -690,6 +723,9 @@ async def security_guard_middleware(request, call_next):
         # A DB-path error here must not hard-block; the env backstop covers intent.
         frozen, reason = False, ""
     if frozen and not path.startswith(FREEZE_EXEMPT_PREFIXES):
+        # Log the blocked attempt BEFORE returning 503 — the freeze-time trail is
+        # the most valuable evidence during a breach lockdown (F1-MED).
+        record_freeze_block(request)
         from fastapi.responses import JSONResponse
 
         return JSONResponse({"error": "service_frozen", "reason": reason}, status_code=503)
