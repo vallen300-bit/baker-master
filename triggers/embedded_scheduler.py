@@ -150,6 +150,25 @@ def _job_listener(event):
         logger.warning(f"_job_listener DB path failed ({event.job_id}): {e}")
 
 
+def dispatcher_tick_enabled() -> bool:
+    """DISPATCHER_CLICKUP_BUS_RELAY_MVP_1 default-off scheduler gate."""
+    import os
+
+    raw = os.environ.get("DISPATCHER_ENABLED", "false")
+    return raw.strip().lower() in {"1", "true", "yes", "on"}
+
+
+def dispatcher_tick_interval_seconds() -> int:
+    """Bound Dispatcher tick cadence to a conservative interval."""
+    import os
+
+    try:
+        minutes = int(os.environ.get("DISPATCHER_TICK_MINUTES", "15"))
+    except (TypeError, ValueError):
+        minutes = 15
+    return max(5, min(minutes, 60)) * 60
+
+
 def _register_jobs(scheduler: BackgroundScheduler):
     """Register all Sentinel trigger jobs.
 
@@ -269,6 +288,26 @@ def _register_jobs(scheduler: BackgroundScheduler):
     logger.info(
         f"Registered: clickup_poll (daily at {_clickup_hour:02d}:{_clickup_minute:02d} UTC)"
     )
+
+    # DISPATCHER_CLICKUP_BUS_RELAY_MVP_1: ClickUp timetable -> bus owner relay.
+    # Default-off until Dispatcher has a bus key and the post-deploy smoke passes.
+    if dispatcher_tick_enabled():
+        from triggers.dispatcher_tick import run_dispatcher_tick
+
+        _dispatcher_interval = dispatcher_tick_interval_seconds()
+        scheduler.add_job(
+            run_dispatcher_tick,
+            IntervalTrigger(seconds=_dispatcher_interval),
+            id="dispatcher_tick",
+            name="Dispatcher ClickUp-to-bus tick",
+            coalesce=True,
+            max_instances=1,
+            replace_existing=True,
+        )
+        register_expected_job("dispatcher_tick", _dispatcher_interval)
+        logger.info(f"Registered: dispatcher_tick (every {_dispatcher_interval}s)")
+    else:
+        logger.info("dispatcher_tick disabled via DISPATCHER_ENABLED - skipping registration")
 
     # STATE_FILE_REFRESH_1: nightly drift audit at 03:00 UTC (3h before vault_scanner
     # at 06:00 UTC to spread filesystem load + ClickUp writes across the night).

@@ -21,7 +21,7 @@ PY_DATA_PATH = REPO_ROOT / "orchestrator" / "agent_identity_data.py"
 SH_DATA_PATH = REPO_ROOT / "scripts" / "agent_identity_generated.sh"
 DRAIN_HOOK_PATH = REPO_ROOT / "tests" / "fixtures" / "session-start-bus-drain.sh"
 
-SYSTEM_RECIPIENT_SLUGS = ("director", "daemon")
+SYSTEM_RECIPIENT_SLUGS = ("director", "daemon", "dispatcher")
 # System slugs that are NOT fleet agents (no picker / RACI, so not in the
 # registry) but ARE allowed to SEND on the bus. `daemon` is the server-side
 # sentinel/scheduler sender (e.g. cursor_stall_sentinel posts job-stall alerts as
@@ -29,7 +29,7 @@ SYSTEM_RECIPIENT_SLUGS = ("director", "daemon")
 # These are emitted into the role-resolution maps (Python ROLE_TO_SLUG, shell
 # agent_identity_resolve_role, drain-hook case) so bus_post.sh BAKER_ROLE=daemon
 # resolves instead of exiting 1. (codex G3 follow-up FIX 1.)
-SYSTEM_SENDER_SLUGS = ("daemon",)
+SYSTEM_SENDER_SLUGS = ("daemon", "dispatcher")
 GENERATED_BLOCK_BEGIN = "# BEGIN GENERATED AGENT IDENTITY ROLE MAP"
 GENERATED_BLOCK_END = "# END GENERATED AGENT IDENTITY ROLE MAP"
 

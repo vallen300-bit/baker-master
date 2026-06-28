@@ -4,14 +4,14 @@
 # SHA256: b664ecc827285b6d2c5d2af4c1188f16c6af7c315ae0d93aa89ceeb7dda22ab9
 # Regenerate with: python3 scripts/generate_agent_identity_artifacts.py --write
 
-AGENT_IDENTITY_SYSTEM_RECIPIENT_SLUGS=(director daemon)
+AGENT_IDENTITY_SYSTEM_RECIPIENT_SLUGS=(director daemon dispatcher)
 AGENT_IDENTITY_BUS_AGENT_SLUGS=(lead cowork-ah1 deputy deputy-codex cortex aid b1 b2 b3 b4 researcher codex codex-arch clerk clerk-haiku russo-ai deep55 hag-desk origination-desk ao-desk movie-desk baden-baden-desk CM-1 CM-2 CM-3 CM-4 hag-filer)
-AGENT_IDENTITY_VALID_SLUGS=(director daemon lead cowork-ah1 deputy deputy-codex cortex aid b1 b2 b3 b4 researcher codex codex-arch clerk clerk-haiku russo-ai deep55 hag-desk origination-desk ao-desk movie-desk baden-baden-desk CM-1 CM-2 CM-3 CM-4 hag-filer)
+AGENT_IDENTITY_VALID_SLUGS=(director daemon dispatcher lead cowork-ah1 deputy deputy-codex cortex aid b1 b2 b3 b4 researcher codex codex-arch clerk clerk-haiku russo-ai deep55 hag-desk origination-desk ao-desk movie-desk baden-baden-desk CM-1 CM-2 CM-3 CM-4 hag-filer)
 AGENT_IDENTITY_SNAPSHOT_TERMINALS=(lead:/Users/dimitry/bm-aihead1 cowork-ah1:/Users/dimitry/bm-aihead1 deputy:/Users/dimitry/bm-aihead2 deputy-codex:/Users/dimitry/bm-aihead2 aid:/Users/dimitry/baker-vault b1:/Users/dimitry/bm-b1,/Users/dimitry/bm-b1-brisen-lab b2:/Users/dimitry/bm-b2,/Users/dimitry/bm-b2-brisen-lab b3:/Users/dimitry/bm-b3,/Users/dimitry/bm-b3-brisen-lab b4:/Users/dimitry/bm-b4,/Users/dimitry/bm-b4-brisen-lab researcher:/Users/dimitry/baker-vault codex:/Users/dimitry/baker-vault codex-arch:/Users/dimitry/baker-vault clerk:/Users/dimitry/bm-clerk clerk-haiku:/Users/dimitry/bm-clerk russo-ai:/Users/dimitry/baker-vault deep55:/Users/dimitry/baker-vault hag-desk:/Users/dimitry/baker-vault origination-desk:/Users/dimitry/baker-vault ao-desk:/Users/dimitry/baker-vault movie-desk:/Users/dimitry/baker-vault baden-baden-desk:/Users/dimitry/baker-vault CM-1:/Users/dimitry/baker-vault CM-2:/Users/dimitry/baker-vault CM-3:/Users/dimitry/baker-vault CM-4:/Users/dimitry/baker-vault hag-filer:/Users/dimitry/baker-vault)
 
 agent_identity_is_valid_slug() {
   case "${1:-}" in
-    director|daemon|lead|cowork-ah1|deputy|deputy-codex|cortex|aid|b1|b2|b3|b4|researcher|codex|codex-arch|clerk|clerk-haiku|russo-ai|deep55|hag-desk|origination-desk|ao-desk|movie-desk|baden-baden-desk|CM-1|CM-2|CM-3|CM-4|hag-filer) return 0 ;;
+    director|daemon|dispatcher|lead|cowork-ah1|deputy|deputy-codex|cortex|aid|b1|b2|b3|b4|researcher|codex|codex-arch|clerk|clerk-haiku|russo-ai|deep55|hag-desk|origination-desk|ao-desk|movie-desk|baden-baden-desk|CM-1|CM-2|CM-3|CM-4|hag-filer) return 0 ;;
     *) return 1 ;;
   esac
 }
@@ -46,6 +46,7 @@ agent_identity_resolve_role() {
     AG-404|ag-404|CM-4|CM_4|cm-4) printf '%s\n' CM-4 ;;
     AG-405|ag-405|hag-filer|HAG-FILER|hag_filer|HAG_FILER) printf '%s\n' hag-filer ;;
     daemon|DAEMON) printf '%s\n' daemon ;;
+    dispatcher|DISPATCHER) printf '%s\n' dispatcher ;;
     *) return 1 ;;
   esac
 }

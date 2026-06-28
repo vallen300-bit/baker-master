@@ -92,6 +92,15 @@ def test_daemon_resolves_as_bus_sender_director_does_not():
     assert "daemon" not in BUS_AGENT_SLUGS
 
 
+def test_dispatcher_resolves_as_system_bus_participant_not_terminal_agent():
+    assert "dispatcher" in SYSTEM_SENDER_SLUGS
+    assert ROLE_TO_SLUG.get("dispatcher") == "dispatcher"
+    assert ROLE_TO_SLUG.get("DISPATCHER") == "dispatcher"
+    assert "dispatcher" in VALID_BUS_SLUGS
+    assert "dispatcher" not in BUS_AGENT_SLUGS
+    assert all(not item.startswith("dispatcher:") for item in SNAPSHOT_TERMINALS)
+
+
 def test_shell_resolve_role_handles_daemon():
     script = REPO_ROOT / "scripts" / "agent_identity_generated.sh"
     out = subprocess.run(
