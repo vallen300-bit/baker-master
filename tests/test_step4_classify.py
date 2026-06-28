@@ -357,6 +357,7 @@ def test_rule_precedence_scope_before_noise_band() -> None:
 
 def _classify_conn(
     triage_score: int = 60,
+    triage_confidence: float | None = 0.8,
     primary_matter: str | None = "movie",
     related_matters: list[str] | None = None,
     resolved_thread_paths: list[str] | None = None,
@@ -380,6 +381,7 @@ def _classify_conn(
                     resolved_thread_paths
                     if resolved_thread_paths is not None
                     else [],
+                    triage_confidence,
                 )
             else:
                 cur.fetchone.return_value = None

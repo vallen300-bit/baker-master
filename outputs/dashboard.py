@@ -5133,6 +5133,38 @@ async def get_ingestion_surfaces(refresh: bool = Query(False)):
         }
 
 
+@app.get("/api/router/second-look", tags=["router"], dependencies=[Depends(verify_api_key)])
+async def api_router_second_look(
+    status: str = Query("open", pattern="^(open|released|suppressed|escalated|closed)$"),
+    limit: int = Query(100, ge=1, le=500),
+):
+    """Metadata-only read surface for router gray cases. No raw signal bodies."""
+    store = _get_store()
+    conn = store._get_conn()
+    if not conn:
+        raise HTTPException(status_code=503, detail="Database unavailable")
+    try:
+        from kbl.router_second_look import list_items
+        items = list_items(conn, status=status, limit=limit)
+        conn.commit()
+        return {"items": items, "status": status, "limit": limit}
+    except ValueError as e:
+        try:
+            conn.rollback()
+        except Exception:
+            pass
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception:
+        try:
+            conn.rollback()
+        except Exception:
+            pass
+        logger.exception("router second-look list failed")
+        raise HTTPException(status_code=500, detail="router_second_look_list_failed")
+    finally:
+        store._put_conn(conn)
+
+
 @app.get("/", include_in_schema=False)
 async def root():
     """Serve the dashboard frontend."""

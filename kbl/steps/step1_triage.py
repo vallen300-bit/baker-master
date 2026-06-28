@@ -56,6 +56,7 @@ Out of scope (future tickets):
 from __future__ import annotations
 
 import json
+import logging
 import os
 import time
 import urllib.error
@@ -67,8 +68,11 @@ from typing import Any, Optional
 from kbl import slug_registry
 from kbl.exceptions import OllamaUnavailableError, TriageParseError
 from kbl.loop import load_hot_md, load_recent_feedback, render_ledger
+from kbl.router_second_look import record_low_confidence_if_needed_isolated
 
 # ---------------------------- constants ----------------------------
+
+logger = logging.getLogger(__name__)
 
 _TEMPLATE_PATH = (
     Path(__file__).resolve().parent.parent / "prompts" / "step1_triage.txt"
@@ -569,6 +573,16 @@ def _run_triage_attempt(
     threshold = _get_triage_threshold()
     next_state = _next_state_for(result, threshold)
     _write_triage_result(conn, signal_id, result, next_state)
+    try:
+        record_low_confidence_if_needed_isolated(
+            conn,
+            signal_id=signal_id,
+            primary_matter=result.primary_matter,
+            triage_score=result.triage_score,
+            triage_confidence=result.triage_confidence,
+        )
+    except Exception as e:
+        logger.warning("router second-look low-confidence record failed: %s", e)
     _write_cost_ledger(
         conn,
         signal_id=signal_id,
