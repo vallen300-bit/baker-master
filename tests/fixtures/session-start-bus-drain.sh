@@ -81,6 +81,7 @@ case "${BAKER_ROLE:-}" in
     AG-404|ag-404|CM-4|CM_4|cm-4) SLUG=CM-4 ;;
     AG-405|ag-405|hag-filer|HAG-FILER|hag_filer|HAG_FILER) SLUG=hag-filer ;;
     daemon|DAEMON) SLUG=daemon ;;
+    dispatcher|DISPATCHER) SLUG=dispatcher ;;
     *)
         # No BAKER_ROLE → silent no-op. Cwd-based fallback intentionally NOT
         # mirrored here to avoid auto-draining for sessions not meant to be on
