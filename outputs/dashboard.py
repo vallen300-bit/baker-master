@@ -631,6 +631,88 @@ async def scheduler_watchdog_middleware(request, call_next):
     return await call_next(request)
 
 
+# ============================================================
+# BREACH_DETECT_PHASE1_1 — central security middleware + admin routes.
+# Defined AFTER scheduler_watchdog_middleware (above) so Starlette runs it
+# OUTERMOST: the freeze gate + read-audit wrap every request. All logic lives in
+# security/access_guard.py (keeps this module lean + unit-testable); this is the
+# thin registration wrapper that pins the middleware ordering.
+# ============================================================
+@app.middleware("http")
+async def security_guard_middleware(request, call_next):
+    from security import access_guard as _guard
+    return await _guard.security_guard_middleware(request, call_next)
+
+
+@app.post("/api/security/freeze")
+async def api_security_freeze(payload: dict = Body(default=None), _auth=Depends(verify_api_key)):
+    """Engage the global freeze switch — instant 503 on all protected routes, no
+    redeploy. Reachable while frozen (path is freeze-exempt)."""
+    from security import access_guard as _guard
+    reason = str((payload or {}).get("reason", ""))[:500]
+    try:
+        _guard.set_freeze(True, reason=reason, set_by="api")
+    except Exception as e:
+        return JSONResponse(
+            {"error": "freeze_failed", "detail": str(e)}, status_code=500
+        )
+    try:
+        _guard.security_alarm_send(
+            f"🔒 *Baker FREEZE engaged* via /api/security/freeze. reason={reason or '(none)'}"
+        )
+    except Exception:
+        pass
+    return {"global_freeze": True, "reason": reason}
+
+
+@app.post("/api/security/unfreeze")
+async def api_security_unfreeze(payload: dict = Body(default=None), _auth=Depends(verify_api_key)):
+    """Lift the global freeze. Note: the BAKER_SECURITY_FREEZE env backstop, if
+    set, still wins in is_frozen() until the env var is cleared + restart."""
+    from security import access_guard as _guard
+    reason = str((payload or {}).get("reason", ""))[:500]
+    try:
+        _guard.set_freeze(False, reason=reason, set_by="api")
+    except Exception as e:
+        return JSONResponse(
+            {"error": "unfreeze_failed", "detail": str(e)}, status_code=500
+        )
+    try:
+        _guard.security_alarm_send("🔓 *Baker FREEZE lifted* via /api/security/unfreeze.")
+    except Exception:
+        pass
+    return {"global_freeze": False}
+
+
+@app.get("/api/security/status")
+async def api_security_status(_auth=Depends(verify_api_key)):
+    """Current freeze state + the last 20 anomaly-flagged audit rows."""
+    from security import access_guard as _guard
+    return {
+        "freeze": _guard.get_freeze_status(),
+        "recent_anomalies": _guard.recent_anomalies(20),
+    }
+
+
+def _ensure_security_tables() -> None:
+    """Bootstrap the security_access_log + security_freeze tables at startup
+    (belt-and-suspenders alongside the SQL migration). Uses a fresh pooled conn."""
+    try:
+        from security import access_guard as _guard
+        from memory.store_back import SentinelStoreBack
+        store = SentinelStoreBack._get_global_instance()
+        conn = store._get_conn()
+        if conn is None:
+            logger.warning("security tables bootstrap skipped: no DB connection")
+            return
+        try:
+            _guard.ensure_security_schema(conn)
+        finally:
+            store._put_conn(conn)
+    except Exception as e:
+        logger.warning("security tables bootstrap failed (non-fatal): %s", e)
+
+
 def _check_scheduler_heartbeat():
     """If heartbeat stale >12 min on TWO consecutive reads, restart + log warning (throttled).
 
@@ -1876,6 +1958,7 @@ async def startup():
     logger.info("Baker Dashboard starting...")
     _init_store()
     _run_migrations()
+    _ensure_security_tables()  # BREACH_DETECT_PHASE1_1 — idempotent bootstrap
     _ensure_vault_mirror()
     _start_scheduler()
 
