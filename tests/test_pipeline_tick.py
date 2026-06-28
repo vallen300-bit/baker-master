@@ -1521,6 +1521,7 @@ def test_main_primary_hit_skips_all_reclaims(monkeypatch) -> None:
 from kbl.pipeline_tick import (
     _RUNNING_ORPHAN_STALE_INTERVAL,
     reset_stale_running_orphans,
+    suppress_stale_processing_noise,
 )
 
 
@@ -1651,6 +1652,52 @@ def test_reset_stale_running_orphans_returns_zero_when_empty() -> None:
     assert conn.rollback.call_count == 0
 
 
+def test_suppress_stale_processing_noise_terminal_routes_known_noise() -> None:
+    """COST_CUTS_1 — stale plain ``processing`` rows from known noisy legacy
+    alert classes are terminal-routed instead of reset to pending, preventing
+    another Step 1 extraction spend."""
+    conn, executed = _reset_conn(rowcount=3)
+
+    n = suppress_stale_processing_noise(conn)
+
+    assert n == 3
+    assert conn.commit.call_count == 1
+    assert conn.rollback.call_count == 0
+
+    update_sql, params = next(
+        (sql, p) for sql, p in executed if sql.strip().startswith("update signal_queue")
+    )
+    assert "status = 'routed_inbox'" in update_sql
+    assert "source = 'legacy_alert'" in update_sql
+    assert "status = 'processing'" in update_sql
+    assert "signal_type = any" in update_sql
+    assert _RUNNING_ORPHAN_STALE_INTERVAL in update_sql
+    assert params == ([
+        "alert:pipeline",
+        "alert:scheduler_job_liveness",
+        "alert:deadline_cadence",
+    ],)
+
+
+def test_suppress_stale_processing_noise_where_clause_leaves_live_or_real_rows_untouched() -> None:
+    """Safety proof: the suppressor's SQL cannot match fresh, non-legacy, or
+    non-noise rows because all three guards live in the UPDATE predicate."""
+    conn, executed = _reset_conn(rowcount=0)
+
+    n = suppress_stale_processing_noise(conn)
+
+    assert n == 0
+    update_sql, _ = next(
+        (sql, p) for sql, p in executed if sql.strip().startswith("update signal_queue")
+    )
+    assert "source = 'legacy_alert'" in update_sql
+    assert "status = 'processing'" in update_sql
+    assert "signal_type = any" in update_sql
+    assert "started_at < now() - interval" in update_sql
+    assert "status = 'pending'" not in update_sql
+    assert "source <>" not in update_sql
+
+
 def test_main_calls_reset_before_claim_chain(monkeypatch) -> None:
     """Call ordering contract: ``reset_stale_running_orphans`` must fire
     BEFORE ``claim_one_signal`` so rows flipped in this tick are eligible
@@ -1665,6 +1712,10 @@ def test_main_calls_reset_before_claim_chain(monkeypatch) -> None:
 
     call_log: list[str] = []
 
+    def _record_suppress(c):
+        call_log.append("suppress")
+        return 0
+
     def _record_reset(c):
         call_log.append("reset")
         return 0
@@ -1674,6 +1725,7 @@ def test_main_calls_reset_before_claim_chain(monkeypatch) -> None:
         return None
 
     with patch("kbl.pipeline_tick.get_conn", return_value=fake_conn_ctx), \
+         patch("kbl.pipeline_tick.suppress_stale_processing_noise", side_effect=_record_suppress) as m_suppress, \
          patch("kbl.pipeline_tick.reset_stale_running_orphans", side_effect=_record_reset) as m_reset, \
          patch("kbl.pipeline_tick.claim_one_signal", side_effect=_record_primary) as m_primary, \
          patch("kbl.pipeline_tick.claim_one_opus_failed", return_value=None), \
@@ -1684,10 +1736,11 @@ def test_main_calls_reset_before_claim_chain(monkeypatch) -> None:
         rc = _pipeline_main()
 
     assert rc == 0
-    # Reset fires once, before the claim chain starts.
+    # Suppression + reset fire once, before the claim chain starts.
+    assert m_suppress.call_count == 1
     assert m_reset.call_count == 1
     assert m_primary.call_count == 1
-    assert call_log == ["reset", "primary"]
+    assert call_log == ["suppress", "reset", "primary"]
 
 
 def test_main_reset_and_reclaim_in_same_tick(monkeypatch) -> None:

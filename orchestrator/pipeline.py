@@ -643,7 +643,17 @@ class SentinelPipeline:
 
         try:
             from orchestrator.cost_monitor import log_api_cost
-            log_api_cost(model, input_tokens, output_tokens, source="pipeline")
+            log_api_cost(
+                model,
+                input_tokens,
+                output_tokens,
+                source="pipeline",
+                capability_id=trigger_type,
+                task_id=(
+                    f"tier:{trigger_tier}"
+                    if trigger_tier is not None else None
+                ),
+            )
         except Exception:
             pass
         return raw_text

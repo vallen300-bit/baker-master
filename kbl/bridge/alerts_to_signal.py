@@ -129,6 +129,12 @@ STOPLIST_TITLE_PATTERNS = (
     r"\bretail\s+market\s+update\b",                        # Batch #1 #6: German Property Tax mis-match
     r"\bretail[-\s]+chain\s+turnover\b",                    # Batch #1 #6: retail-chain copy
     r"\bTK\s*Maxx\b",                                        # Batch #1 #6: discount-retail mis-match
+    # COST_CUTS_1: recurring Fireflies ingestion-health alerts were being
+    # bridged into signal_queue and then re-extracted by the costly pipeline.
+    # These are infra diagnostics, not Director action signals.
+    r"\bcorrupted\s+fireflies\s+transcript(?:s)?\b",
+    r"\bfireflies\s+(?:data\s+)?(?:feed|api|integration)\s+unstable\b",
+    r"\bempty\s+meeting\s+transcript\b",
 )
 
 # MARKETING_NOISE_FILTER_1: marketing / no-reply / newsletter / survey / promo.
