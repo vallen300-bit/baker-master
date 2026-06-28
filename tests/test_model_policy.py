@@ -210,9 +210,11 @@ def test_extract_deadlines_uses_pro_not_flash(monkeypatch):
 
 def test_pipeline_low_value_triggers_route_to_pro_not_flash(monkeypatch):
     import orchestrator.gemini_client as gc
+    import orchestrator.cost_monitor as cm
     from orchestrator.pipeline import SentinelPipeline
 
     captured = {}
+    cost_rows = []
 
     def _capture_generate(model, messages, max_tokens=8192, system=None, **kwargs):
         captured["model"] = model
@@ -221,6 +223,7 @@ def test_pipeline_low_value_triggers_route_to_pro_not_flash(monkeypatch):
     flash = _FlashSpy()
     monkeypatch.setattr(gc, "call_flash", flash)
     monkeypatch.setattr(gc, "generate", _capture_generate)
+    monkeypatch.setattr(cm, "log_api_cost", lambda *a, **kw: cost_rows.append((a, kw)))
 
     pipe = SentinelPipeline.__new__(SentinelPipeline)  # bypass __init__ (no DB/clients)
     prompt = {
@@ -234,6 +237,9 @@ def test_pipeline_low_value_triggers_route_to_pro_not_flash(monkeypatch):
         pipe.generate(prompt, trigger_type=trig, trigger_tier=3)
         assert captured["model"] == "gemini-2.5-pro", trig
         assert not mp.is_flash(captured["model"]), trig
+        assert cost_rows[-1][1]["source"] == "pipeline"
+        assert cost_rows[-1][1]["capability_id"] == trig
+        assert cost_rows[-1][1]["task_id"] == "tier:3"
     assert not flash.called
 
 
