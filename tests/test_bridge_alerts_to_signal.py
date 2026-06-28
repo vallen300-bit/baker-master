@@ -198,6 +198,9 @@ def test_map_alert_with_missing_tier_defaults_to_low_priority():
         "Forbes Under 30 nominations",
         "Wine o'clock starts now",
         "Use code TAKEITOUTSIDE for 10% off",
+        "Info: Corrupted Fireflies Transcript Detected",
+        "Fireflies Data Feed Unstable",
+        "Known Technical Issue: Empty Meeting Transcript",
     ],
 )
 def test_stoplist_title_patterns_all_match(title):
@@ -213,7 +216,7 @@ def test_stoplist_auction_negative_lookahead_lets_brisen_through():
 @pytest.mark.parametrize(
     "src",
     ["dropbox_batch", "cadence_tracker", "sentinel_health",
-     "waha_silence", "waha_session"],
+     "waha_silence", "waha_session", "scheduler_job_liveness"],
 )
 def test_stoplist_sources_drop_unconditionally(src):
     assert bridge._is_stoplist_noise(_alert(source=src)) is True

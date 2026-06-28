@@ -218,6 +218,46 @@ RETURNING id, status
 """
 
 
+_STALE_PROCESSING_NOISE_TYPES = (
+    "alert:pipeline",
+    "alert:scheduler_job_liveness",
+    "alert:deadline_cadence",
+)
+
+_STALE_PROCESSING_NOISE_SQL = f"""
+UPDATE signal_queue
+   SET status = 'routed_inbox',
+       processed_at = NOW(),
+       result = COALESCE(result, 'suppressed_stale_processing_noise')
+ WHERE source = 'legacy_alert'
+   AND status = 'processing'
+   AND signal_type = ANY(%s)
+   AND started_at < NOW() - INTERVAL '{_RUNNING_ORPHAN_STALE_INTERVAL}'
+RETURNING id, signal_type
+"""
+
+
+def suppress_stale_processing_noise(conn) -> int:
+    """Terminal-route stale initial-claim noise rows.
+
+    ``claim_one_signal`` commits ``status='processing'`` before Step 1 runs.
+    If the first step crashes before it can advance to ``awaiting_resolve`` or
+    terminal-route, the row is otherwise stranded forever. The generic reclaim
+    path intentionally handles only later ``*_running`` states; blindly resetting
+    plain ``processing`` to ``pending`` would re-run Step 1 and recreate the
+    spend leak.
+
+    This suppressor is deliberately narrow: only legacy alert classes identified
+    by COST_CUTS_1 as recurring infra/feed noise are terminal-routed. Real
+    matter-bearing primary rows are left untouched for explicit operator review.
+    """
+    with conn.cursor() as cur:
+        cur.execute(_STALE_PROCESSING_NOISE_SQL, (list(_STALE_PROCESSING_NOISE_TYPES),))
+        n = cur.rowcount
+    conn.commit()
+    return n
+
+
 def reset_stale_running_orphans(conn) -> int:
     """Flip stale ``*_running`` rows back to the corresponding
     ``awaiting_*`` state. Returns the number of rows reset.
@@ -827,6 +867,17 @@ def main() -> int:
         return 0
 
     with get_conn() as conn:
+        try:
+            n_suppressed = suppress_stale_processing_noise(conn)
+        except Exception:
+            conn.rollback()
+            raise
+        if n_suppressed:
+            _local.info(
+                "[pipeline_tick] suppressed %d stale processing noise row(s)",
+                n_suppressed,
+            )
+
         # Crash-recovery reset: flip stale ``*_running`` rows back to
         # ``awaiting_*`` so PR #39's chain can pick them up. This commits
         # before the claim chain runs — a row reset on this pass becomes
