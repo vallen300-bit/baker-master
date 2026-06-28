@@ -287,6 +287,24 @@ def _register_jobs(scheduler: BackgroundScheduler):
     )
     logger.info("Registered: state_drift_audit (daily at 03:00 UTC)")
 
+    # BREACH_DETECT_PHASE1_1 (addendum #4518): nightly retention prune of
+    # security_access_log so the read-audit table never grows unbounded. Bounded
+    # batched DELETE (ts indexed); window via BAKER_SECURITY_LOG_RETENTION_DAYS
+    # (default 90). CronTrigger -> intentionally NOT paired with
+    # register_expected_job (V1 liveness invariant = interval jobs only).
+    from security.access_guard import prune_access_log
+    scheduler.add_job(
+        prune_access_log,
+        CronTrigger(hour=4, minute=15, timezone="UTC"),
+        id="security_access_log_prune",
+        name="Security access-log retention prune (daily)",
+        coalesce=True,
+        max_instances=1,
+        replace_existing=True,
+        misfire_grace_time=3600,
+    )
+    logger.info("Registered: security_access_log_prune (daily at 04:15 UTC)")
+
     # Dropbox polling — every 30 minutes
     from triggers.dropbox_trigger import run_dropbox_poll
     scheduler.add_job(

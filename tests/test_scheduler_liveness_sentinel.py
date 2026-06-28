@@ -312,6 +312,7 @@ _CRON_JOB_IDS = [
     "tier_b_counter_reset",
     "vault_scanner_daily",
     "expire_stale_alerts",
+    "security_access_log_prune",
 ]
 
 
