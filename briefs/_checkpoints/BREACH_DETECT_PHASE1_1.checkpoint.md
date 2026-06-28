@@ -1,0 +1,34 @@
+---
+brief_id: BREACH_DETECT_PHASE1_1
+attempt: 1
+branch: b3/breach-detect-phase1-1
+pr: (none yet)
+dispatched_by: lead
+reply_target: lead (bus)
+updated: 2026-06-28
+---
+
+# CHECKPOINT — BREACH_DETECT_PHASE1_1
+
+## What's done
+- Oriented; bus drained; dispatch #4516 acked.
+- Cleaned a stale abandoned interactive rebase (m365 replay; already merged via PR #430) — tree clean, main @ 10e1e6e.
+- Branch `b3/breach-detect-phase1-1` cut off main.
+- Step 0 anti-shadow pre-check: CLEAN (no security_access_log / security_freeze / /api/security / BAKER_SECURITY_FREEZE / access_guard symbols). No `security/` dir.
+- Read all reference code: cost_monitor (Slack alarm `_send_*_alert` :611/:639, claim `_claim_tier_alert` :530, bootstrap :96, conn pattern :258), dashboard (auth :188, mcp :1982, client-ip :204, app/cors :487/:546, scheduler middleware :620, startup :1866), migration runner (config/migration_runner.py — schema_migrations tracked, lock check only verifies LISTED files so a NEW migration not in lock is safe), migration format (-- == migrate:up/down ==).
+
+## What's left
+- TDD FIRST: write tests/test_security_access_guard.py (4 vertical cases) BEFORE impl.
+- Implement security/access_guard.py (schema, is_frozen fail-closed+env backstop, record_access metadata-only, evaluate_tripwire, security_alarm_send rate-limited, security_guard_middleware coroutine).
+- Wire thin @app.middleware after dashboard.py:620 (outermost) + startup ensure_security_schema call + 3 /api/security/* routes.
+- migrations/20260628_security_access_log.sql (mirror DDL, up/down).
+- G2 self-review → G3 codex → G4 /security-review (lead) → merge. Emit POST_DEPLOY_AC_VERDICT v1.
+
+## Key design decisions
+- Middleware logic lives in access_guard.security_guard_middleware (testable on a minimal app); dashboard.py keeps only the thin @app.middleware("http") wrapper defined AFTER :620 so it stays outermost. Keeps dashboard lean + unit-testable without importing the 11.7k-line module.
+- Metadata-only column set is a module constant ACCESS_LOG_COLUMNS; test asserts no body/secret/raw-key column.
+- Alarm rate-limit: in-memory per-(key_fp,flag) window gate as the cheap hot-path primary; DB-claim mirror optional/fail-open. Over-alarming on a breach is acceptable; under-alarming is not.
+- Do NOT touch verify_api_key / _mcp_verify_key / CORS / scheduler_watchdog_middleware.
+
+## Exact next command
+Write tests/test_security_access_guard.py (4 TDD cases), run `pytest tests/test_security_access_guard.py -v` (expect fail/red), then implement security/access_guard.py.
