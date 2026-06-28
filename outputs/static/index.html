@@ -129,6 +129,9 @@
             <span class="nav-label">Presentations</span>
             <span class="nav-count" id="presentationsCount"></span>
         </div>
+        <div class="nav-item" data-tab="wip" role="button" tabindex="0">
+            <span class="nav-label">Work in progress</span>
+        </div>
         <a class="nav-item nav-item-external" href="/static/ai-hotel.html" target="_blank" rel="noopener noreferrer">
             <span class="nav-label">AI Hotel</span>
         </a>
@@ -545,6 +548,12 @@
             </div>
         </div>
 
+        <!-- VIEW: Work in progress (BRISEN_LAB_WIP_MATERIALS_PANEL_1) -->
+        <div class="view" id="viewWip">
+            <iframe id="wipFrame" title="Work in progress"
+                    style="width:100%;height:calc(100vh - 80px);border:0;background:#0a0a0f;"></iframe>
+        </div>
+
         <!-- VIEW: Browser Monitor -->
         <div class="view" id="viewBrowser">
             <div class="section-label">Browser Monitor</div>
@@ -618,7 +627,7 @@
   })();
 </script>
 
-<script src="/static/app.js?v=131"></script>
+<script src="/static/app.js?v=132"></script>
 <script>
 // PWA-DESKTOP-1: Register service worker for installability
 if ('serviceWorker' in navigator) {
