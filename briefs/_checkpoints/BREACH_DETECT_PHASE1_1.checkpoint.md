@@ -2,7 +2,8 @@
 brief_id: BREACH_DETECT_PHASE1_1
 attempt: 1
 branch: b3/breach-detect-phase1-1
-pr: (none yet)
+pr: 433
+status: SHIPPED — awaiting G3 codex / G4 lead /security-review
 dispatched_by: lead
 reply_target: lead (bus)
 updated: 2026-06-28
@@ -42,4 +43,6 @@ tests/test_scheduler_liveness_sentinel.py (file convention: new cron jobs need a
 - Do NOT touch verify_api_key / _mcp_verify_key / CORS / scheduler_watchdog_middleware.
 
 ## Exact next command
-Write tests/test_security_access_guard.py (4 TDD cases), run `pytest tests/test_security_access_guard.py -v` (expect fail/red), then implement security/access_guard.py.
+SHIPPED — PR #433 open, ship-posted to lead (bus). Build + tests complete (56 passed / 1 live-PG skip).
+Next: await G3 codex + G4 lead /security-review. On request_changes → NEW commit (never amend) → push → reply on thread.
+On merge → emit POST_DEPLOY_AC_VERDICT v1 (live freeze probe + bulk-read alarm probe).
