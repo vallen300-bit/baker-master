@@ -7980,6 +7980,172 @@ async def clerk_edit(session_id: str):
     return HTMLResponse(_clerk_edit_html({"session_id": session_id}))
 
 
+# ── BRISEN_LAB_WIP_MATERIALS_PANEL_1 — cockpit "Work in progress" panel ──────
+# Read-only browser over the vault mirror's wiki/_wip/<topic>/ subtree. Auth is
+# ?key= (via _mcp_verify_key) so the page + file serve work inside an iframe /
+# opened tab where request headers can't be set. Path safety lives in
+# wip_materials.safe_path (reuses vault_mirror._normalize_and_resolve). No DB.
+
+_WIP_PAGE_TEMPLATE = """<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Work in progress — Brisen Lab</title>
+<style>
+  :root { --bg:#0f1115; --panel:#171a21; --line:#262b35; --text:#e6e8ec;
+          --muted:#8a92a0; --blue:#4f8cff; --blue-bg:#1b2740; }
+  * { box-sizing:border-box; }
+  html,body { margin:0; height:100%; }
+  body { background:var(--bg); color:var(--text);
+         font:14px/1.45 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif; }
+  .wip-wrap { display:flex; flex-direction:column; height:100vh; }
+  .wip-bar { display:flex; align-items:center; gap:10px; flex-wrap:wrap;
+             padding:12px 16px; border-bottom:1px solid var(--line); background:var(--panel); }
+  .wip-bar label { color:var(--muted); font-weight:600; }
+  .wip-bar select { background:var(--bg); color:var(--text); border:1px solid var(--line);
+                    border-radius:8px; padding:8px 10px; font-size:14px; min-width:200px; max-width:100%; }
+  .wip-status { color:var(--muted); font-size:13px; margin-left:auto; }
+  .wip-main { display:flex; flex:1; min-height:0; }
+  .wip-files { list-style:none; margin:0; padding:8px; width:300px; max-width:42%;
+               overflow:auto; border-right:1px solid var(--line); background:var(--panel); }
+  .wip-files li { display:flex; flex-direction:column; padding:2px 4px; }
+  .wip-file { color:var(--text); text-decoration:none; padding:8px 10px; border-radius:8px;
+              word-break:break-word; cursor:pointer; }
+  .wip-file:hover { background:var(--blue-bg); }
+  .wip-file.active { background:var(--blue-bg); color:var(--blue); font-weight:600; }
+  .wip-mod { color:var(--muted); font-size:11px; padding:0 10px 4px; }
+  .wip-content { flex:1; min-width:0; border:0; background:#fff; }
+  .wip-empty { color:var(--muted); padding:24px; }
+  @media (max-width:640px) {
+    .wip-main { flex-direction:column; }
+    .wip-files { width:100%; max-width:none; max-height:38%; border-right:0;
+                 border-bottom:1px solid var(--line); }
+  }
+</style>
+</head>
+<body>
+<div class="wip-wrap">
+  <div class="wip-bar">
+    <label for="wipTopic">Work in progress</label>
+    <select id="wipTopic" aria-label="Topic">
+      <option value="">— select a topic —</option>
+      __OPTIONS__
+    </select>
+    <span id="wipStatus" class="wip-status"></span>
+  </div>
+  <div class="wip-main">
+    <ul id="wipFiles" class="wip-files"></ul>
+    <iframe id="wipContent" class="wip-content" title="Work-in-progress document"></iframe>
+  </div>
+</div>
+<script>
+(function(){
+  var KEY = new URLSearchParams(location.search).get('key') || '';
+  var filesEl = document.getElementById('wipFiles');
+  var contentEl = document.getElementById('wipContent');
+  var statusEl = document.getElementById('wipStatus');
+  var topicEl = document.getElementById('wipTopic');
+  function setStatus(t){ statusEl.textContent = t || ''; }
+  function clearContent(){ contentEl.removeAttribute('src'); }
+  function loadFiles(topic){
+    filesEl.textContent=''; clearContent();
+    if(!topic){ setStatus('Select a topic.'); return; }
+    setStatus('Loading\\u2026');
+    fetch('/wip/list?topic='+encodeURIComponent(topic)+'&key='+encodeURIComponent(KEY))
+      .then(function(r){ if(!r.ok){ throw new Error(r.status); } return r.json(); })
+      .then(function(data){
+        var files = (data && data.files) || [];
+        if(!files.length){ setStatus('No materials yet.'); return; }
+        setStatus(files.length+' file'+(files.length===1?'':'s'));
+        files.forEach(function(f){
+          var li=document.createElement('li');
+          var a=document.createElement('a');
+          a.href='#'; a.className='wip-file'; a.textContent=f.name;
+          a.addEventListener('click',function(e){
+            e.preventDefault();
+            var act=filesEl.querySelectorAll('.wip-file');
+            for(var i=0;i<act.length;i++){ act[i].classList.remove('active'); }
+            a.classList.add('active');
+            contentEl.src=f.href;
+          });
+          li.appendChild(a);
+          if(f.modified){ var s=document.createElement('span'); s.className='wip-mod';
+                          s.textContent=String(f.modified).slice(0,10); li.appendChild(s); }
+          filesEl.appendChild(li);
+        });
+      })
+      .catch(function(){ setStatus('Error loading files.'); });
+  }
+  topicEl.addEventListener('change',function(){ loadFiles(topicEl.value); });
+})();
+</script>
+</body>
+</html>"""
+
+
+@app.get("/wip", include_in_schema=False, response_class=HTMLResponse)
+async def wip_page(request: Request):
+    """Server-rendered WIP-materials browser page (?key= gated)."""
+    if not _mcp_verify_key(request):
+        return HTMLResponse("Unauthorized", status_code=401)
+    import html as _html
+    import wip_materials
+    try:
+        topics = wip_materials.list_topics()
+    except Exception:
+        logger.exception("wip_page: list_topics failed")
+        topics = []
+    options = "\n      ".join(
+        '<option value="{0}">{0}</option>'.format(_html.escape(t, quote=True))
+        for t in topics
+    )
+    page = _WIP_PAGE_TEMPLATE.replace("__OPTIONS__", options)
+    return HTMLResponse(page)
+
+
+@app.get("/wip/list", include_in_schema=False)
+async def wip_list(request: Request, topic: str = Query(...)):
+    """JSON file listing for a topic, each with a key-bearing href (?key= gated)."""
+    if not _mcp_verify_key(request):
+        return JSONResponse({"error": "unauthorized"}, status_code=401)
+    import wip_materials
+    from urllib.parse import quote
+    key = request.query_params.get("key") or request.headers.get("x-baker-key", "")
+    try:
+        files = wip_materials.list_files(topic)
+    except Exception:
+        logger.exception("wip_list: list_files failed for topic=%r", topic)
+        files = []
+    for f in files:
+        f["href"] = (
+            "/wip/file?topic=" + quote(topic, safe="")
+            + "&name=" + quote(f["name"], safe="")
+            + "&key=" + quote(key, safe="")
+        )
+    return JSONResponse({"files": files})
+
+
+@app.get("/wip/file", include_in_schema=False)
+async def wip_file(
+    request: Request, topic: str = Query(...), name: str = Query(...)
+):
+    """Serve a single WIP file inside WIP_ROOT (?key= gated). 404 on any miss."""
+    if not _mcp_verify_key(request):
+        return JSONResponse({"error": "unauthorized"}, status_code=401)
+    import wip_materials
+    try:
+        path = wip_materials.safe_path(topic, name)
+    except Exception:
+        logger.exception("wip_file: safe_path raised topic=%r name=%r", topic, name)
+        path = None
+    if path is None:
+        raise HTTPException(status_code=404, detail="wip_file_not_found")
+    if path.suffix.lower() == ".md":
+        return FileResponse(str(path), media_type="text/plain; charset=utf-8")
+    return FileResponse(str(path), media_type="text/html")
+
+
 @app.post("/api/clerk/save/{session_id}", tags=["clerk"], dependencies=[Depends(verify_api_key)])
 async def clerk_save(session_id: str, req: ClerkSaveRequest):
     row = _clerk_fetch_session(session_id)

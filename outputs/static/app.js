@@ -759,6 +759,7 @@ const TAB_VIEW_MAP = {
     'dossiers': 'viewDossiers',
     'ao-dashboard': 'viewAO',
     'presentations': 'viewPresentations',
+    'wip': 'viewWip',
     'browser': 'viewBrowser',
     'baker-data': 'viewBakerData',
     'system': 'viewSystem',
@@ -808,6 +809,7 @@ function switchTab(tabName) {
     else if (tabName === 'documents') loadDocumentsTab();
     else if (tabName === 'dossiers') loadDossiersTab();
     else if (tabName === 'presentations') loadPresentationsTab();
+    else if (tabName === 'wip') loadWipTab();
     else if (tabName === 'browser') loadBrowserTab();
     else if (tabName === 'baker-data') loadBakerData();
     else if (tabName === 'system') loadSystemConsole();
@@ -9445,6 +9447,17 @@ function _pollDossierTabStatus(proposalId) {
 // ═══ HTML PRESENTATIONS TAB (HTML-PRESENTATIONS-TAB-1) ═══
 
 var BRISEN_DOCS_BASE = 'https://brisen-docs.onrender.com';
+
+// BRISEN_LAB_WIP_MATERIALS_PANEL_1 — embed the server-rendered /wip page
+// in-cockpit. The page is ?key= gated (iframe can't set headers); it self-drives
+// topic select -> file list -> file render. src is set lazily, once.
+function loadWipTab() {
+    var frame = document.getElementById('wipFrame');
+    if (!frame || frame.getAttribute('data-loaded') === '1') return;
+    var key = (typeof BAKER_CONFIG !== 'undefined' && BAKER_CONFIG.apiKey) || '';
+    frame.src = '/wip?key=' + encodeURIComponent(key);
+    frame.setAttribute('data-loaded', '1');
+}
 
 async function loadPresentationsTab() {
     var container = document.getElementById('presentationsContent');
