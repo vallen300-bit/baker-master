@@ -43,6 +43,7 @@ from typing import Any, Optional
 
 from kbl.exceptions import ClassifyError
 from kbl.loop import load_hot_md
+from kbl.router_second_look import record_item_isolated
 
 logger = logging.getLogger(__name__)
 
@@ -220,8 +221,8 @@ def _coerce_list(value: Any) -> list[Any]:
 
 def _fetch_signal_row(
     conn: Any, signal_id: int
-) -> tuple[int, Optional[str], list[str], list[str]]:
-    """Return ``(triage_score, primary_matter, related_matters,
+) -> tuple[int, Optional[float], Optional[str], list[str], list[str]]:
+    """Return ``(triage_score, triage_confidence, primary_matter, related_matters,
     resolved_thread_paths)``. Raises ``LookupError`` when absent.
 
     ``triage_score`` is NUMERIC in the schema; cast to int for the
@@ -230,18 +231,19 @@ def _fetch_signal_row(
     with conn.cursor() as cur:
         cur.execute(
             "SELECT triage_score, primary_matter, related_matters, "
-            "       resolved_thread_paths "
+            "       resolved_thread_paths, triage_confidence "
             "FROM signal_queue WHERE id = %s",
             (signal_id,),
         )
         row = cur.fetchone()
     if row is None:
         raise LookupError(f"signal_queue row not found: id={signal_id}")
-    score_raw, primary_matter, related_raw, resolved_raw = row
+    score_raw, primary_matter, related_raw, resolved_raw, confidence_raw = row
     score = int(score_raw) if score_raw is not None else 0
+    confidence = float(confidence_raw) if confidence_raw is not None else None
     related = [str(s) for s in _coerce_list(related_raw)]
     resolved = [str(s) for s in _coerce_list(resolved_raw)]
-    return score, primary_matter, related, resolved
+    return score, confidence, primary_matter, related, resolved
 
 
 def _mark_running(conn: Any, signal_id: int) -> None:
@@ -346,7 +348,7 @@ def classify(signal_id: int, conn: Any) -> ClassifyDecision:
             set to ``classify_failed`` before the exception bubbles so
             the operator sees the halt surface.
     """
-    score, primary_matter, related, resolved = _fetch_signal_row(conn, signal_id)
+    score, confidence, primary_matter, related, resolved = _fetch_signal_row(conn, signal_id)
     _mark_running(conn, signal_id)
 
     # Inv 3: fresh read per invocation. Not module-level cached.
@@ -385,6 +387,19 @@ def classify(signal_id: int, conn: Any) -> ClassifyDecision:
             primary_matter,
             sorted(allowed),
         )
+        try:
+            record_item_isolated(
+                conn,
+                signal_id=signal_id,
+                trigger_step="step4_classify",
+                reason_code="scope_gate_skip",
+                primary_matter=primary_matter,
+                triage_score=score,
+                triage_confidence=confidence,
+                payload={"allowed_scope": sorted(allowed)},
+            )
+        except Exception as e:
+            logger.warning("router second-look scope-gate record failed: %s", e)
 
     _write_decision(conn, signal_id, decision, cross_link_hint, _STATE_NEXT)
     return decision
