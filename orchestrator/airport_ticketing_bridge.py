@@ -1,0 +1,740 @@
+"""Airport Ticketing Bridge.
+
+Turns raw Sentinel arrivals into candidate AIRPORT_TICKET records and wakes the
+owning desk for check-in. The bridge is deliberately non-substantive: it routes
+source-grounded tickets, but it does not decide legal, finance, CP, or nudge
+outcomes.
+"""
+from __future__ import annotations
+
+import hashlib
+import json
+import logging
+import os
+import re
+import urllib.error
+import urllib.request
+from dataclasses import dataclass
+from datetime import datetime, timedelta, timezone
+from typing import Any, Optional
+
+from orchestrator.dispatcher import RESERVED_RECIPIENTS, resolve_owner_slug
+
+logger = logging.getLogger("sentinel.airport_ticketing")
+
+_ENABLED_ENV = "AIRPORT_TICKETING_BRIDGE_ENABLED"
+_KEYWORDS_ENV = "AIRPORT_TICKETING_KEYWORDS"
+_DESK_ENV = "AIRPORT_TICKETING_DESK"
+_MATTER_ENV = "AIRPORT_TICKETING_MATTER_SLUG"
+_FLIGHT_ENV = "AIRPORT_TICKETING_FLIGHT"
+_LOOKBACK_HOURS_ENV = "AIRPORT_TICKETING_LOOKBACK_HOURS"
+_MAX_POSTS_ENV = "AIRPORT_TICKETING_MAX_POSTS_PER_TICK"
+_BUS_URL_ENV = "AIRPORT_TICKETING_BUS_URL"
+_KEY_ENV = "AIRPORT_TICKETING_TERMINAL_KEY"
+_DEFAULT_BUS_URL = "https://brisen-lab.onrender.com"
+_DEFAULT_KEYWORDS = ("aukera", "annaberg", "lilienmatt")
+_DEFAULT_DESK = "baden-baden-desk"
+_DEFAULT_MATTER = "lilienmatt"
+_DEFAULT_FLIGHT = "aukera-annaberg-financing"
+_DEFAULT_LOOKBACK_HOURS = 48
+_DEFAULT_MAX_POSTS = 5
+
+VALID_CHECK_IN_OUTCOMES = frozenset(
+    {"VALID", "FAKE", "DUPLICATE", "WRONG_TERMINAL", "URGENT", "NEEDS_LUGGAGE_READ"}
+)
+VALID_URGENCY = frozenset({"low", "normal", "high", "urgent"})
+
+
+@dataclass(frozen=True)
+class EmailArrival:
+    message_id: str
+    thread_id: str
+    sender_name: str
+    sender_email: str
+    subject: str
+    full_body: str
+    received_date: Optional[datetime]
+    source: str
+    attachments: tuple[dict[str, Any], ...] = ()
+
+
+@dataclass(frozen=True)
+class AirportTicket:
+    ticket_id: str
+    dedup_key: str
+    created_at: datetime
+    source_channel: str
+    source_id: str
+    source_received_at: Optional[datetime]
+    originator: str
+    suspected_matter_slug: str
+    suspected_flight: str
+    proposed_desk_slug: str
+    urgency_hint: str
+    luggage: tuple[str, ...]
+    why_ticketed: tuple[str, ...]
+    known_limits: tuple[str, ...]
+
+    def payload(self) -> dict[str, Any]:
+        return {
+            "contract": "AIRPORT_TICKET v1",
+            "ticket_id": self.ticket_id,
+            "created_at": self.created_at.isoformat(),
+            "source_channel": self.source_channel,
+            "source_id": self.source_id,
+            "source_received_at": (
+                self.source_received_at.isoformat() if self.source_received_at else None
+            ),
+            "originator": self.originator,
+            "suspected_matter_slug": self.suspected_matter_slug,
+            "suspected_flight": self.suspected_flight,
+            "proposed_desk_slug": self.proposed_desk_slug,
+            "urgency_hint": self.urgency_hint,
+            "luggage": list(self.luggage),
+            "why_ticketed": list(self.why_ticketed),
+            "known_limits": list(self.known_limits),
+        }
+
+
+def bridge_enabled() -> bool:
+    raw = os.environ.get(_ENABLED_ENV, "false")
+    return raw.strip().lower() in {"1", "true", "yes", "on"}
+
+
+def max_posts_per_tick() -> int:
+    try:
+        value = int(os.environ.get(_MAX_POSTS_ENV, str(_DEFAULT_MAX_POSTS)))
+    except (TypeError, ValueError):
+        return _DEFAULT_MAX_POSTS
+    return max(0, min(value, 25))
+
+
+def lookback_hours() -> int:
+    try:
+        value = int(os.environ.get(_LOOKBACK_HOURS_ENV, str(_DEFAULT_LOOKBACK_HOURS)))
+    except (TypeError, ValueError):
+        return _DEFAULT_LOOKBACK_HOURS
+    return max(1, min(value, 24 * 14))
+
+
+def active_keywords() -> tuple[str, ...]:
+    raw = os.environ.get(_KEYWORDS_ENV, "")
+    values = [part.strip().lower() for part in raw.split(",") if part.strip()]
+    return tuple(values) if values else _DEFAULT_KEYWORDS
+
+
+def _desk_slug() -> str:
+    return os.environ.get(_DESK_ENV, _DEFAULT_DESK).strip() or _DEFAULT_DESK
+
+
+def _matter_slug() -> str:
+    return os.environ.get(_MATTER_ENV, _DEFAULT_MATTER).strip() or _DEFAULT_MATTER
+
+
+def _flight_name() -> str:
+    return os.environ.get(_FLIGHT_ENV, _DEFAULT_FLIGHT).strip() or _DEFAULT_FLIGHT
+
+
+def _json_param(payload: dict[str, Any]) -> Any:
+    try:
+        import psycopg2.extras
+
+        return psycopg2.extras.Json(payload)
+    except Exception:
+        return json.dumps(payload)
+
+
+def _utc_now() -> datetime:
+    return datetime.now(timezone.utc)
+
+
+def _normalize_text(value: str, *, limit: int = 500) -> str:
+    text = re.sub(r"\s+", " ", value or "").strip()
+    return text[:limit]
+
+
+def _ticket_id(source_channel: str, source_id: str, desk_slug: str) -> str:
+    raw = f"AIRPORT_TICKET v1|{source_channel}|{source_id}|{desk_slug}"
+    digest = hashlib.sha256(raw.encode("utf-8")).hexdigest()[:20]
+    return f"airport-ticket-v1-{digest}"
+
+
+def _dedup_key(source_channel: str, source_id: str, desk_slug: str) -> str:
+    return f"airport-ticket:v1:{source_channel}:{source_id}:{desk_slug}"
+
+
+def _urgency_for(arrival: EmailArrival, matched_keywords: list[str]) -> str:
+    text = f"{arrival.subject} {arrival.full_body[:1000]}".lower()
+    urgent_terms = ("urgent", "absolute priority", "today", "closing", "sign", "notary")
+    if any(term in text for term in urgent_terms):
+        return "urgent"
+    if matched_keywords:
+        return "high"
+    return "normal"
+
+
+def _originator(arrival: EmailArrival) -> str:
+    name = _normalize_text(arrival.sender_name, limit=120)
+    email = _normalize_text(arrival.sender_email, limit=160)
+    if name and email:
+        return f"{name} <{email}>"
+    return name or email or "unknown"
+
+
+def build_email_ticket(
+    arrival: EmailArrival,
+    *,
+    now: Optional[datetime] = None,
+    keywords: tuple[str, ...] | None = None,
+) -> Optional[AirportTicket]:
+    keys = keywords or active_keywords()
+    haystack = f"{arrival.subject} {arrival.full_body}".lower()
+    matched = [kw for kw in keys if kw and kw.lower() in haystack]
+    if not matched:
+        return None
+
+    desk_slug = resolve_owner_slug(_desk_slug()) or _desk_slug()
+    if not desk_slug or desk_slug in RESERVED_RECIPIENTS:
+        logger.warning("airport ticketing invalid proposed desk: %s", desk_slug)
+        return None
+
+    created_at = now or _utc_now()
+    ticket_id = _ticket_id("email", arrival.message_id, desk_slug)
+    body_preview = _normalize_text(arrival.full_body, limit=260)
+    luggage = [
+        f"email subject: {arrival.subject or '(no subject)'}",
+        f"transport source: {arrival.source or 'unknown'}",
+        f"thread_id: {arrival.thread_id or arrival.message_id}",
+    ]
+    if body_preview:
+        luggage.append(f"body_preview: {body_preview}")
+    for att in arrival.attachments:
+        filename = _normalize_text(str(att.get("filename") or "unnamed"), limit=220)
+        mime_type = _normalize_text(str(att.get("mime_type") or "unknown"), limit=120)
+        size = att.get("size_bytes")
+        suffix = f", {size} bytes" if size is not None else ""
+        luggage.append(f"attachment: {filename} ({mime_type}{suffix})")
+
+    why = [f"matched active flight keyword(s): {', '.join(sorted(set(matched)))}"]
+    if arrival.received_date:
+        why.append(f"received_at: {arrival.received_date.isoformat()}")
+
+    return AirportTicket(
+        ticket_id=ticket_id,
+        dedup_key=_dedup_key("email", arrival.message_id, desk_slug),
+        created_at=created_at,
+        source_channel="email",
+        source_id=arrival.message_id,
+        source_received_at=arrival.received_date,
+        originator=_originator(arrival),
+        suspected_matter_slug=_matter_slug(),
+        suspected_flight=_flight_name(),
+        proposed_desk_slug=desk_slug,
+        urgency_hint=_urgency_for(arrival, matched),
+        luggage=tuple(luggage),
+        why_ticketed=tuple(why),
+        known_limits=(
+            "Ticketing Bridge did not read or interpret attachments.",
+            "Ticketing Bridge did not decide condition precedent status.",
+            "Owning desk must check in as VALID, FAKE, DUPLICATE, WRONG_TERMINAL, URGENT, or NEEDS_LUGGAGE_READ.",
+        ),
+    )
+
+
+def ensure_airport_ticket_table(conn: Any) -> None:
+    with conn.cursor() as cur:
+        cur.execute(
+            """
+            CREATE TABLE IF NOT EXISTS airport_tickets (
+                id BIGSERIAL PRIMARY KEY,
+                ticket_id TEXT NOT NULL UNIQUE,
+                dedup_key TEXT NOT NULL UNIQUE,
+                status TEXT NOT NULL DEFAULT 'candidate',
+                source_channel TEXT NOT NULL,
+                source_id TEXT NOT NULL,
+                source_received_at TIMESTAMPTZ,
+                originator TEXT,
+                suspected_matter_slug TEXT,
+                suspected_flight TEXT,
+                proposed_desk_slug TEXT NOT NULL,
+                urgency_hint TEXT NOT NULL DEFAULT 'normal',
+                ticket JSONB NOT NULL DEFAULT '{}'::jsonb,
+                bus_message_id BIGINT,
+                bus_thread_id TEXT,
+                last_sent_at TIMESTAMPTZ,
+                check_in_outcome TEXT,
+                check_in_at TIMESTAMPTZ,
+                check_in_by TEXT,
+                failure_reason TEXT,
+                created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                CONSTRAINT airport_tickets_status_check
+                    CHECK (status IN ('candidate', 'sent', 'failed', 'checked_in', 'rejected')),
+                CONSTRAINT airport_tickets_source_channel_check
+                    CHECK (source_channel IN ('email', 'whatsapp', 'plaud', 'clickup', 'calendar', 'other')),
+                CONSTRAINT airport_tickets_urgency_check
+                    CHECK (urgency_hint IN ('low', 'normal', 'high', 'urgent')),
+                CONSTRAINT airport_tickets_check_in_outcome_check
+                    CHECK (
+                        check_in_outcome IS NULL OR
+                        check_in_outcome IN (
+                            'VALID',
+                            'FAKE',
+                            'DUPLICATE',
+                            'WRONG_TERMINAL',
+                            'URGENT',
+                            'NEEDS_LUGGAGE_READ'
+                        )
+                    )
+            )
+            """
+        )
+        cur.execute(
+            """
+            CREATE INDEX IF NOT EXISTS idx_airport_tickets_source
+                ON airport_tickets (source_channel, source_id)
+            """
+        )
+        cur.execute(
+            """
+            CREATE INDEX IF NOT EXISTS idx_airport_tickets_desk_status
+                ON airport_tickets (proposed_desk_slug, status, last_sent_at DESC)
+            """
+        )
+
+
+def fetch_email_arrivals(
+    conn: Any,
+    *,
+    since: datetime,
+    limit: int = 50,
+    keywords: tuple[str, ...] | None = None,
+) -> list[EmailArrival]:
+    keys = keywords or active_keywords()
+    if not keys:
+        return []
+    clauses: list[str] = []
+    params: list[Any] = [since]
+    for keyword in keys:
+        pattern = f"%{keyword}%"
+        clauses.append("(subject ILIKE %s OR full_body ILIKE %s)")
+        params.extend([pattern, pattern])
+    params.append(max(1, min(int(limit), 200)))
+    where = " OR ".join(clauses)
+
+    with conn.cursor() as cur:
+        cur.execute(
+            f"""
+            SELECT message_id, thread_id, sender_name, sender_email,
+                   subject, full_body, received_date, source
+            FROM email_messages
+            WHERE received_date >= %s
+              AND ({where})
+            ORDER BY received_date DESC
+            LIMIT %s
+            """,
+            tuple(params),
+        )
+        rows = cur.fetchall()
+
+    message_ids = [row[0] for row in rows if row and row[0]]
+    attachment_map = _fetch_email_attachments(conn, message_ids)
+    arrivals: list[EmailArrival] = []
+    for row in rows:
+        received = row[6]
+        if isinstance(received, datetime) and received.tzinfo is None:
+            received = received.replace(tzinfo=timezone.utc)
+        arrivals.append(
+            EmailArrival(
+                message_id=str(row[0] or ""),
+                thread_id=str(row[1] or row[0] or ""),
+                sender_name=str(row[2] or ""),
+                sender_email=str(row[3] or ""),
+                subject=str(row[4] or ""),
+                full_body=str(row[5] or ""),
+                received_date=received if isinstance(received, datetime) else None,
+                source=str(row[7] or ""),
+                attachments=tuple(attachment_map.get(str(row[0] or ""), ())),
+            )
+        )
+    return arrivals
+
+
+def _fetch_email_attachments(conn: Any, message_ids: list[str]) -> dict[str, list[dict[str, Any]]]:
+    if not message_ids:
+        return {}
+    with conn.cursor() as cur:
+        cur.execute(
+            """
+            SELECT message_id, filename, mime_type, size_bytes
+            FROM email_attachments
+            WHERE message_id = ANY(%s)
+            ORDER BY message_id, filename
+            """,
+            (message_ids,),
+        )
+        rows = cur.fetchall()
+    out: dict[str, list[dict[str, Any]]] = {}
+    for message_id, filename, mime_type, size_bytes in rows:
+        out.setdefault(str(message_id), []).append(
+            {"filename": filename, "mime_type": mime_type, "size_bytes": size_bytes}
+        )
+    return out
+
+
+def reserve_ticket(conn: Any, ticket: AirportTicket) -> dict[str, Any]:
+    payload = ticket.payload()
+    with conn.cursor() as cur:
+        cur.execute(
+            """
+            SELECT id, status, bus_message_id
+            FROM airport_tickets
+            WHERE dedup_key = %s
+            LIMIT 1
+            """,
+            (ticket.dedup_key,),
+        )
+        existing = cur.fetchone()
+        if existing:
+            status = existing[1]
+            bus_message_id = existing[2]
+            if status == "failed" and bus_message_id is None:
+                cur.execute(
+                    """
+                    UPDATE airport_tickets
+                    SET status = 'candidate',
+                        ticket = %s,
+                        failure_reason = NULL,
+                        updated_at = NOW()
+                    WHERE id = %s
+                    RETURNING id
+                    """,
+                    (_json_param(payload), existing[0]),
+                )
+                row = cur.fetchone()
+                return {"reserved": True, "id": row[0], "retry": True}
+            return {
+                "reserved": False,
+                "id": existing[0],
+                "status": status,
+                "bus_message_id": bus_message_id,
+            }
+
+        cur.execute(
+            """
+            INSERT INTO airport_tickets
+                (ticket_id, dedup_key, source_channel, source_id, source_received_at,
+                 originator, suspected_matter_slug, suspected_flight,
+                 proposed_desk_slug, urgency_hint, ticket)
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+            ON CONFLICT (dedup_key) DO NOTHING
+            RETURNING id
+            """,
+            (
+                ticket.ticket_id,
+                ticket.dedup_key,
+                ticket.source_channel,
+                ticket.source_id,
+                ticket.source_received_at,
+                ticket.originator,
+                ticket.suspected_matter_slug,
+                ticket.suspected_flight,
+                ticket.proposed_desk_slug,
+                ticket.urgency_hint,
+                _json_param(payload),
+            ),
+        )
+        row = cur.fetchone()
+        if not row:
+            return {"reserved": False, "id": None}
+        cur.execute(
+            """
+            INSERT INTO baker_actions
+                (action_type, target_task_id, payload, trigger_source, success)
+            VALUES (%s, %s, %s, %s, TRUE)
+            """,
+            (
+                "airport_ticket.created",
+                ticket.ticket_id,
+                _json_param(
+                    {
+                        "ticket_id": ticket.ticket_id,
+                        "source_channel": ticket.source_channel,
+                        "source_id": ticket.source_id,
+                        "proposed_desk_slug": ticket.proposed_desk_slug,
+                    }
+                ),
+                "airport_ticketing_bridge",
+            ),
+        )
+    return {"reserved": True, "id": row[0]}
+
+
+def _bridge_key() -> str:
+    return (
+        os.environ.get(_KEY_ENV, "").strip()
+        or os.environ.get("BRISEN_LAB_TERMINAL_KEY_TICKETING", "").strip()
+        or os.environ.get("BRISEN_LAB_TERMINAL_KEY_DISPATCHER", "").strip()
+        or os.environ.get("BRISEN_LAB_TERMINAL_KEY", "").strip()
+    )
+
+
+def _request_json(
+    method: str,
+    url: str,
+    *,
+    key: str,
+    payload: Optional[dict[str, Any]] = None,
+    timeout: int = 15,
+) -> dict[str, Any]:
+    data = json.dumps(payload).encode("utf-8") if payload is not None else None
+    headers = {"X-Terminal-Key": key}
+    if payload is not None:
+        headers["Content-Type"] = "application/json"
+    req = urllib.request.Request(url, data=data, headers=headers, method=method)
+    try:
+        with urllib.request.urlopen(req, timeout=timeout) as resp:
+            raw = resp.read().decode("utf-8")
+            return json.loads(raw) if raw else {}
+    except urllib.error.HTTPError as e:
+        body = e.read().decode("utf-8", errors="replace")[:300]
+        return {"ok": False, "error": f"http_{e.code}", "body": body}
+    except Exception as e:
+        return {"ok": False, "error": str(e)}
+
+
+def _bus_message_id(result: dict[str, Any]) -> Optional[int]:
+    for key in ("id", "message_id", "event_id"):
+        value = result.get(key)
+        if value is not None:
+            try:
+                return int(value)
+            except (TypeError, ValueError):
+                return None
+    event = result.get("event")
+    if isinstance(event, dict) and event.get("id") is not None:
+        try:
+            return int(event["id"])
+        except (TypeError, ValueError):
+            return None
+    message = result.get("message")
+    if isinstance(message, dict) and message.get("id") is not None:
+        try:
+            return int(message["id"])
+        except (TypeError, ValueError):
+            return None
+    return None
+
+
+def format_ticket_for_bus(ticket: AirportTicket) -> str:
+    luggage = "\n".join(f"- {item}" for item in ticket.luggage) or "- none"
+    why = "\n".join(f"- {item}" for item in ticket.why_ticketed) or "- none"
+    limits = "\n".join(f"- {item}" for item in ticket.known_limits) or "- none"
+    return (
+        f"TO: {ticket.proposed_desk_slug}\n"
+        "FROM: ticketing-desk\n"
+        f"RE: AIRPORT_TICKET {ticket.suspected_flight}\n\n"
+        "AIRPORT_TICKET v1\n"
+        f"ticket_id: {ticket.ticket_id}\n"
+        f"created_at: {ticket.created_at.isoformat()}\n"
+        f"source_channel: {ticket.source_channel}\n"
+        f"source_id: {ticket.source_id}\n"
+        f"originator: {ticket.originator}\n"
+        f"suspected_matter_slug: {ticket.suspected_matter_slug}\n"
+        f"suspected_flight: {ticket.suspected_flight}\n"
+        f"proposed_desk_slug: {ticket.proposed_desk_slug}\n"
+        f"urgency_hint: {ticket.urgency_hint}\n"
+        "luggage:\n"
+        f"{luggage}\n"
+        "why_ticketed:\n"
+        f"{why}\n"
+        "known_limits:\n"
+        f"{limits}\n\n"
+        "Check-in required: reply with VALID, FAKE, DUPLICATE, WRONG_TERMINAL, "
+        "URGENT, or NEEDS_LUGGAGE_READ."
+    )
+
+
+def post_ticket_to_bus(ticket: AirportTicket) -> dict[str, Any]:
+    recipient = resolve_owner_slug(ticket.proposed_desk_slug)
+    if not recipient or recipient in RESERVED_RECIPIENTS:
+        return {"ok": False, "error": "invalid_recipient"}
+    key = _bridge_key()
+    if not key:
+        return {"ok": False, "error": "ticketing_key_missing"}
+    base = os.environ.get(_BUS_URL_ENV, _DEFAULT_BUS_URL).rstrip("/")
+    payload = {
+        "kind": "dispatch",
+        "body": format_ticket_for_bus(ticket),
+        "to": [recipient],
+        "tier_required": "B",
+        "topic": f"airport-ticketing/{ticket.suspected_flight}",
+    }
+    result = _request_json("POST", f"{base}/msg/{recipient}", key=key, payload=payload)
+    if result.get("error"):
+        return result
+    result["ok"] = True
+    return result
+
+
+def mark_ticket_sent(
+    conn: Any,
+    *,
+    ticket: AirportTicket,
+    ticket_row_id: int,
+    bus_message_id: Optional[int],
+    bus_thread_id: Optional[str],
+) -> None:
+    with conn.cursor() as cur:
+        cur.execute(
+            """
+            UPDATE airport_tickets
+            SET status = 'sent',
+                bus_message_id = %s,
+                bus_thread_id = %s,
+                last_sent_at = NOW(),
+                failure_reason = NULL,
+                updated_at = NOW()
+            WHERE id = %s
+            """,
+            (bus_message_id, bus_thread_id, ticket_row_id),
+        )
+        cur.execute(
+            """
+            INSERT INTO baker_actions
+                (action_type, target_task_id, payload, trigger_source, success)
+            VALUES (%s, %s, %s, %s, TRUE)
+            """,
+            (
+                "airport_ticket.bus_sent",
+                ticket.ticket_id,
+                _json_param(
+                    {
+                        "ticket_id": ticket.ticket_id,
+                        "bus_message_id": bus_message_id,
+                        "bus_thread_id": bus_thread_id,
+                        "proposed_desk_slug": ticket.proposed_desk_slug,
+                    }
+                ),
+                "airport_ticketing_bridge",
+            ),
+        )
+
+
+def mark_ticket_failed(
+    conn: Any,
+    *,
+    ticket: AirportTicket,
+    ticket_row_id: int,
+    error: str,
+) -> None:
+    with conn.cursor() as cur:
+        cur.execute(
+            """
+            UPDATE airport_tickets
+            SET status = 'failed',
+                failure_reason = %s,
+                updated_at = NOW()
+            WHERE id = %s
+            """,
+            (error[:500], ticket_row_id),
+        )
+        cur.execute(
+            """
+            INSERT INTO baker_actions
+                (action_type, target_task_id, payload, trigger_source, success, error_message)
+            VALUES (%s, %s, %s, %s, FALSE, %s)
+            """,
+            (
+                "airport_ticket.bus_failed",
+                ticket.ticket_id,
+                _json_param({"ticket_id": ticket.ticket_id, "error": error[:500]}),
+                "airport_ticketing_bridge",
+                error[:500],
+            ),
+        )
+
+
+def issue_ticket(ticket: AirportTicket, conn: Any) -> dict[str, Any]:
+    reserved = reserve_ticket(conn, ticket)
+    if not reserved.get("reserved"):
+        return {"skipped": True, "reason": "duplicate", "id": reserved.get("id")}
+    ticket_row_id = int(reserved["id"])
+    result = post_ticket_to_bus(ticket)
+    if not result.get("ok"):
+        error = str(result.get("error") or "unknown")
+        mark_ticket_failed(conn, ticket=ticket, ticket_row_id=ticket_row_id, error=error)
+        return {"ok": False, "reason": "bus_failed", "error": error}
+
+    message_id = _bus_message_id(result)
+    mark_ticket_sent(
+        conn,
+        ticket=ticket,
+        ticket_row_id=ticket_row_id,
+        bus_message_id=message_id,
+        bus_thread_id=result.get("thread_id"),
+    )
+    return {"ok": True, "id": ticket_row_id, "bus_message_id": message_id}
+
+
+def run_tick(*, now: Optional[datetime] = None) -> dict[str, Any]:
+    if not bridge_enabled():
+        return {"skipped": True, "reason": f"{_ENABLED_ENV} off"}
+    cap = max_posts_per_tick()
+    if cap <= 0:
+        return {"skipped": True, "reason": f"{_MAX_POSTS_ENV}=0"}
+
+    try:
+        from memory.store_back import SentinelStoreBack
+
+        store = SentinelStoreBack._get_global_instance()
+    except Exception as e:
+        logger.warning("airport ticketing store unavailable: %s", e)
+        return {"skipped": True, "reason": "store_unavailable"}
+
+    conn = store._get_conn()
+    if not conn:
+        return {"skipped": True, "reason": "database_unavailable"}
+
+    issued = 0
+    skipped = 0
+    failed = 0
+    current = now or _utc_now()
+    try:
+        ensure_airport_ticket_table(conn)
+        since = current - timedelta(hours=lookback_hours())
+        arrivals = fetch_email_arrivals(conn, since=since, limit=cap * 4)
+        for arrival in arrivals:
+            if issued >= cap:
+                break
+            ticket = build_email_ticket(arrival, now=current)
+            if ticket is None:
+                skipped += 1
+                continue
+            try:
+                result = issue_ticket(ticket, conn)
+                conn.commit()
+            except Exception as e:
+                try:
+                    conn.rollback()
+                except Exception:
+                    pass
+                logger.warning("airport ticketing issue failed: %s", e)
+                failed += 1
+                continue
+            if result.get("ok"):
+                issued += 1
+            elif result.get("skipped"):
+                skipped += 1
+            else:
+                failed += 1
+        return {"ok": True, "issued": issued, "skipped": skipped, "failed": failed}
+    except Exception as e:
+        try:
+            conn.rollback()
+        except Exception:
+            pass
+        logger.warning("airport ticketing tick failed: %s", e)
+        return {"ok": False, "error": str(e)}
+    finally:
+        store._put_conn(conn)

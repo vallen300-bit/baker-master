@@ -169,6 +169,25 @@ def dispatcher_tick_interval_seconds() -> int:
     return max(5, min(minutes, 60)) * 60
 
 
+def airport_ticketing_tick_enabled() -> bool:
+    """Airport Ticketing Bridge is default-off until bus key + smoke are ready."""
+    import os
+
+    raw = os.environ.get("AIRPORT_TICKETING_BRIDGE_ENABLED", "false")
+    return raw.strip().lower() in {"1", "true", "yes", "on"}
+
+
+def airport_ticketing_tick_interval_seconds() -> int:
+    """Bound Ticketing Bridge cadence; fast enough for desk wake, not chatty."""
+    import os
+
+    try:
+        minutes = int(os.environ.get("AIRPORT_TICKETING_TICK_MINUTES", "10"))
+    except (TypeError, ValueError):
+        minutes = 10
+    return max(5, min(minutes, 60)) * 60
+
+
 def _register_jobs(scheduler: BackgroundScheduler):
     """Register all Sentinel trigger jobs.
 
@@ -308,6 +327,28 @@ def _register_jobs(scheduler: BackgroundScheduler):
         logger.info(f"Registered: dispatcher_tick (every {_dispatcher_interval}s)")
     else:
         logger.info("dispatcher_tick disabled via DISPATCHER_ENABLED - skipping registration")
+
+    # AIRPORT_TICKETING_BRIDGE_MVP_1: Sentinel arrivals -> candidate desk tickets.
+    # Default-off; bridge only issues tickets and bus-wakes the desk for check-in.
+    if airport_ticketing_tick_enabled():
+        from triggers.airport_ticketing_tick import run_airport_ticketing_tick
+
+        _airport_ticketing_interval = airport_ticketing_tick_interval_seconds()
+        scheduler.add_job(
+            run_airport_ticketing_tick,
+            IntervalTrigger(seconds=_airport_ticketing_interval),
+            id="airport_ticketing_tick",
+            name="Airport Ticketing Bridge tick",
+            coalesce=True,
+            max_instances=1,
+            replace_existing=True,
+        )
+        register_expected_job("airport_ticketing_tick", _airport_ticketing_interval)
+        logger.info(f"Registered: airport_ticketing_tick (every {_airport_ticketing_interval}s)")
+    else:
+        logger.info(
+            "airport_ticketing_tick disabled via AIRPORT_TICKETING_BRIDGE_ENABLED - skipping registration"
+        )
 
     # STATE_FILE_REFRESH_1: nightly drift audit at 03:00 UTC (3h before vault_scanner
     # at 06:00 UTC to spread filesystem load + ClickUp writes across the night).
