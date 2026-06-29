@@ -75,6 +75,34 @@ def test_parse_checkin_verdict_rejects_and_never_raises():
         assert corr.parse_checkin_verdict(c) is None  # type: ignore[arg-type]
 
 
+def test_parse_checkin_verdict_strictness_regressions():
+    """F1 bounce (codex-arch #4642): the old prefix+findall parser accepted
+    these. The anchored, order-strict fullmatch parser must reject them all."""
+    cases = [
+        # v10 must NOT match the v1 prefix (future-protocol misread).
+        "CHECK_IN_VERDICT v10 sig=42 outcome=VALID by=desk",
+        # leading junk token between the version and sig=.
+        "CHECK_IN_VERDICT v1 garbage sig=42 outcome=VALID by=desk",
+        # trailing extra token after a fully-valid line.
+        "CHECK_IN_VERDICT v1 sig=42 outcome=VALID by=desk extra",
+        # duplicate outcome= (last-wins could flip BOGUS -> VALID).
+        "CHECK_IN_VERDICT v1 sig=42 outcome=BOGUS outcome=VALID by=desk",
+        "CHECK_IN_VERDICT v1 sig=42 outcome=VALID outcome=VALID by=desk",
+        # wrong field order (order-strict).
+        "CHECK_IN_VERDICT v1 outcome=VALID sig=42 by=desk",
+        "CHECK_IN_VERDICT v1 sig=42 by=desk outcome=VALID",
+        # extra whitespace between fields (single-space contract).
+        "CHECK_IN_VERDICT v1  sig=42 outcome=VALID by=desk",
+        # leading junk before the marker.
+        "noise CHECK_IN_VERDICT v1 sig=42 outcome=VALID by=desk",
+        # whitespace-only body must not raise (IndexError guard).
+        "   ",
+        "\n\n",
+    ]
+    for c in cases:
+        assert corr.parse_checkin_verdict(c) is None
+
+
 def test_parse_checkin_verdict_accepts_every_enum_outcome():
     for outcome in (
         "VALID",

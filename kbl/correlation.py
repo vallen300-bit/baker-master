@@ -16,14 +16,30 @@ from kbl.db import get_conn
 
 _SIG_RE = re.compile(r"sig-(\d+)")
 
-_OUTCOMES = {
+# The six canonical check-in outcomes. Single source of truth — the verdict
+# regex below builds its `outcome=` alternation from this tuple so the two
+# never drift.
+_OUTCOMES = (
     "VALID",
     "FAKE",
     "DUPLICATE",
     "WRONG_TERMINAL",
     "NEEDS_LUGGAGE",
     "CHECK_IN_MISSED",
-}
+)
+
+# Order-strict, fully-anchored (via re.fullmatch) verdict line. Exactly:
+#   CHECK_IN_VERDICT v1 sig=<digits> outcome=<enum> by=<slug>
+# single-space separated, in this order, with NO extra/leading/trailing tokens
+# and NO duplicate fields. fullmatch + the literal `v1 ` (trailing space) reject
+# `v10`, junk tokens, duplicate `outcome=`, and reordered fields. The `by` slug
+# is a simple linear class (ReDoS-safe — no nested quantifiers).
+_VERDICT_RE = re.compile(
+    r"CHECK_IN_VERDICT v1 "
+    r"sig=(?P<sig>\d+) "
+    r"outcome=(?P<outcome>" + "|".join(_OUTCOMES) + r") "
+    r"by=(?P<by>[A-Za-z0-9][A-Za-z0-9_-]*)"
+)
 
 
 def corr_id(signal_id: int) -> str:
@@ -56,25 +72,27 @@ def checkin_reply_topic(owner_slug: str, signal_id: int) -> str:
 def parse_checkin_verdict(body: str) -> dict | None:
     """Parse the first body line ``CHECK_IN_VERDICT v1 sig=<id> outcome=<X> by=<slug>``.
 
-    Never raises. Returns None for empty/garbled/wrong-version/unknown-outcome/
-    missing-key bodies; the caller treats None as UNKNOWN.
+    Strict + order-strict: the line must match ``_VERDICT_RE`` exactly (whole
+    line, fields in order, single-space separated, no extra/duplicate tokens).
+    Field ORDER is enforced for protocol hygiene (gate ruling, codex-arch #4642).
+    Never raises. Returns None for empty/whitespace/garbled/wrong-version (incl.
+    ``v10``)/unknown-outcome/missing-or-extra-field bodies; the caller treats
+    None as UNKNOWN.
     """
     if not body:
         return None
-    line = body.strip().splitlines()[0].strip()
-    if not line.startswith("CHECK_IN_VERDICT v1"):
+    stripped = body.strip()
+    if not stripped:
         return None
-    kv = dict(re.findall(r"(\w+)=(\S+)", line))
-    if "sig" not in kv or "by" not in kv:
+    line = stripped.splitlines()[0].strip()
+    m = _VERDICT_RE.fullmatch(line)
+    if not m:
         return None
-    try:
-        sig = int(kv["sig"])
-    except ValueError:
-        return None
-    outcome = kv.get("outcome", "")
-    if outcome not in _OUTCOMES:
-        return None
-    return {"sig": sig, "outcome": outcome, "by": kv["by"]}
+    return {
+        "sig": int(m.group("sig")),
+        "outcome": m.group("outcome"),
+        "by": m.group("by"),
+    }
 
 
 def resolve_signal(signal_id: int) -> dict | None:
