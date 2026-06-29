@@ -1,19 +1,28 @@
 """BACKFILL_VERIFY_1: unit tests for the verification harness pure logic.
 
 No network, no DB — counts/sample/verdict logic only (live collectors are
-exercised at RUN time against the real mailboxes/store)."""
+exercised at RUN time against the real mailboxes/store).
+
+INGESTION_COMPLETENESS_P0_MEASURE_1 adds baseline-mode tests at the bottom
+(compute_lag / evaluate_presence_checks / build_baseline_report / run_baseline),
+likewise mocked-core only."""
+from datetime import datetime, timedelta, timezone
 import hashlib
 
 import pytest
 
 import scripts.verify_backfill as vb
 from scripts.verify_backfill import (
+    build_baseline_report,
     build_verdict,
     compare_counts,
+    compute_lag,
     deterministic_order_key,
     evaluate_attachment_checks,
     evaluate_message_checks,
+    evaluate_presence_checks,
     pick_imap_allowlist,
+    run_baseline,
     run_verification,
     source_ok,
 )
@@ -382,3 +391,224 @@ def test_source_ok_false_on_collector_failures():
     res = _passing_results()["bluewin"]
     res["collector_failures"] = ["mailbox count collection failed: boom"]
     assert source_ok(res) is False
+
+
+# ======================================================================
+# INGESTION_COMPLETENESS_P0_MEASURE_1 — baseline-mode pure logic + run_baseline
+# ======================================================================
+
+_NOW = datetime(2026, 6, 29, 18, 0, 0, tzinfo=timezone.utc)
+
+
+# ---------------------------------------------------------------- compute_lag
+
+def test_compute_lag_within_poll_interval():
+    res = compute_lag(_NOW - timedelta(seconds=120), _NOW, 300, "ingest")
+    assert res["lag_seconds"] == 120
+    assert res["poll_interval_s"] == 300
+    assert res["within_interval"] is True
+
+
+def test_compute_lag_exceeds_poll_interval_fails_loud():
+    res = compute_lag(_NOW - timedelta(seconds=1800), _NOW, 300, "ingest")
+    assert res["lag_seconds"] == 1800
+    assert res["within_interval"] is False
+    assert "EXCEEDS" in res["note"]
+
+
+def test_compute_lag_none_timestamp_is_unmeasurable_not_crash():
+    res = compute_lag(None, _NOW, 300, "ingest")
+    assert res["lag_seconds"] is None
+    assert res["within_interval"] is None
+    assert "unmeasurable" in res["note"]
+
+
+def test_compute_lag_event_driven_source_has_no_poll_verdict():
+    # whatsapp is webhook-driven: poll_interval None -> within_interval None.
+    res = compute_lag(_NOW - timedelta(seconds=60), _NOW, None, "ingest")
+    assert res["lag_seconds"] == 60
+    assert res["within_interval"] is None
+    assert "event-driven" in res["note"]
+
+
+# ------------------------------------------------------- evaluate_presence_checks
+
+def test_presence_checks_pass_all_present_nonempty():
+    rows = [{"id": f"rec{i}", "present": True, "body_len": 100} for i in range(5)]
+    res = evaluate_presence_checks(rows)
+    assert res["ok"] is True
+    assert res["passed"] == [f"rec{i}" for i in range(5)]
+
+
+def test_presence_checks_absent_fails_loud():
+    res = evaluate_presence_checks([{"id": "rec1", "present": False, "body_len": 0}])
+    assert res["ok"] is False
+    assert "ABSENT in store" in res["failures"][0]
+
+
+def test_presence_checks_present_but_empty_body_fails():
+    res = evaluate_presence_checks([{"id": "rec1", "present": True, "body_len": 0}])
+    assert res["ok"] is False
+    assert "EMPTY body" in res["failures"][0]
+
+
+def test_presence_checks_extra_fail_surfaced():
+    res = evaluate_presence_checks(
+        [{"id": "wa1", "present": True, "body_len": 5, "extra_fail": "chat_id null"}])
+    assert res["ok"] is False
+    assert "chat_id null" in res["failures"][0]
+
+
+def test_presence_checks_zero_rows_is_fail():
+    assert evaluate_presence_checks([])["ok"] is False
+
+
+def test_presence_checks_present_defaults_true():
+    # store-row samples omit `present` (they're already in the store).
+    res = evaluate_presence_checks([{"id": "wa1", "body_len": 10}])
+    assert res["ok"] is True
+
+
+# ----------------------------------------------------- run_baseline (mocked-core)
+
+class _DummyBaselineConn:
+    def cursor(self):
+        raise AssertionError("run_baseline must use mocked collectors, not raw cursor")
+
+    def rollback(self):
+        pass
+
+    def close(self):
+        pass
+
+
+def _patch_baseline_collectors(monkeypatch):
+    monkeypatch.setattr(vb, "_db_conn", lambda: _DummyBaselineConn())
+    monkeypatch.setattr(vb, "_poll_intervals",
+                        lambda: {"bluewin": 300, "graph": 300, "plaud": 900, "whatsapp": None})
+    # email
+    monkeypatch.setattr(vb, "imap_folder_counts", lambda: ({"INBOX": 100, "Sent": 50}, {}))
+    monkeypatch.setattr(vb, "graph_folder_counts", lambda: {"Inbox": 100, "Sent Items": 50})
+    monkeypatch.setattr(vb, "store_count", lambda conn, source: 149)
+    monkeypatch.setattr(
+        vb, "spot_check_messages",
+        lambda conn, source, n, seed: [
+            {"message_id": f"{source}-m{i}", "body_len": 10, "searchable": True}
+            for i in range(n)])
+    # plaud
+    monkeypatch.setattr(vb, "plaud_truth", lambda: (200, [f"rec{i}" for i in range(200)]))
+    monkeypatch.setattr(vb, "meeting_store_count", lambda conn, source="plaud": 199)
+    monkeypatch.setattr(
+        vb, "plaud_sample",
+        lambda conn, ids, n, seed: [{"id": i, "present": True, "body_len": 500}
+                                    for i in ids[:n]])
+    # whatsapp
+    monkeypatch.setattr(vb, "whatsapp_truth_count",
+                        lambda *a, **k: ({"chatA@c.us": 300, "chatB@c.us": 200}, []))
+    monkeypatch.setattr(vb, "whatsapp_store_count", lambda conn: 510)
+    monkeypatch.setattr(
+        vb, "whatsapp_sample",
+        lambda conn, n, seed: [{"id": f"wa{i}", "present": True, "body_len": 20}
+                               for i in range(n)])
+    # lag (all sources) — newest row 60s ago
+    monkeypatch.setattr(vb, "latest_timestamp",
+                        lambda conn, source, which: _NOW - timedelta(seconds=60))
+
+
+def test_run_baseline_all_four_sources_healthy(monkeypatch):
+    _patch_baseline_collectors(monkeypatch)
+    records = run_baseline(vb.BASELINE_SOURCES, "seed", now=_NOW)
+    assert set(records) == set(vb.BASELINE_SOURCES)
+    for source, rec in records.items():
+        assert rec["collector_failures"] == [], f"{source} had collector failures"
+        assert rec["completeness"]["ok"] is True
+        assert rec["sample"]["ok"] is True
+    # explicit numbers preserved
+    assert records["plaud"]["completeness"]["ratio"] == 0.995
+    assert records["whatsapp"]["completeness"]["store_count"] == 510
+    assert records["whatsapp"]["completeness"]["mailbox_total"] == 500
+
+
+def test_run_baseline_lag_poll_verdict_per_source(monkeypatch):
+    _patch_baseline_collectors(monkeypatch)
+    records = run_baseline(vb.BASELINE_SOURCES, "seed", now=_NOW)
+    # 60s lag vs 300s/900s polls -> WITHIN; whatsapp webhook -> None (N/A)
+    assert records["bluewin"]["lag"]["ingest"]["within_interval"] is True
+    assert records["plaud"]["lag"]["ingest"]["within_interval"] is True
+    assert records["whatsapp"]["lag"]["ingest"]["within_interval"] is None
+    assert records["bluewin"]["lag"]["ingest"]["lag_seconds"] == 60
+
+
+def test_run_baseline_whatsapp_flags_source_column_not_migrated(monkeypatch):
+    _patch_baseline_collectors(monkeypatch)
+    records = run_baseline(("whatsapp",), "seed", now=_NOW)
+    notes = " ".join(records["whatsapp"]["scope_notes"])
+    assert "whatsapp_messages.source column" in notes
+    assert "NOT migrated" in notes
+    assert "OUT OF SCOPE" in notes  # all-time labelled out of scope
+
+
+def test_run_baseline_never_raises_on_truth_collector_failure(monkeypatch):
+    _patch_baseline_collectors(monkeypatch)
+
+    def boom():
+        raise RuntimeError("plaud token expired")
+    monkeypatch.setattr(vb, "plaud_truth", boom)
+
+    records = run_baseline(("plaud",), "seed", now=_NOW)  # must NOT raise
+    rec = records["plaud"]
+    assert any("plaud truth collection failed" in e for e in rec["collector_failures"])
+    # report still renders in full
+    out = build_baseline_report(records, "abc1234", "seed")
+    assert "source=plaud" in out
+
+
+def test_run_baseline_never_raises_on_db_connect_failure(monkeypatch):
+    _patch_baseline_collectors(monkeypatch)
+
+    def no_db():
+        raise RuntimeError("DATABASE_URL not set")
+    monkeypatch.setattr(vb, "_db_conn", no_db)
+
+    records = run_baseline(vb.BASELINE_SOURCES, "seed", now=_NOW)  # must NOT raise
+    for source, rec in records.items():
+        assert any("db connection failed" in e for e in rec["collector_failures"])
+
+
+def test_run_baseline_whatsapp_failed_chats_surfaced(monkeypatch):
+    _patch_baseline_collectors(monkeypatch)
+    monkeypatch.setattr(
+        vb, "whatsapp_truth_count",
+        lambda *a, **k: ({"chatA@c.us": 300}, ["chatB@c.us", "chatC@c.us"]))
+    records = run_baseline(("whatsapp",), "seed", now=_NOW)
+    assert any("2 chat(s) failed" in e for e in records["whatsapp"]["collector_failures"])
+
+
+# ------------------------------------------------- build_baseline_report shape
+
+def _baseline_records(monkeypatch):
+    _patch_baseline_collectors(monkeypatch)
+    return run_baseline(vb.BASELINE_SOURCES, "seed", now=_NOW)
+
+
+def test_baseline_report_has_all_sources_and_summary(monkeypatch):
+    out = build_baseline_report(_baseline_records(monkeypatch), "abc1234", "seed")
+    for source in vb.BASELINE_SOURCES:
+        assert f"source={source}" in out
+    assert "SUMMARY (per source):" in out
+    assert "read-only measurement" in out
+
+
+def test_baseline_report_lists_explicit_completeness_numbers(monkeypatch):
+    out = build_baseline_report(_baseline_records(monkeypatch), "abc1234", "seed")
+    assert "store=510 truth=500" in out          # whatsapp explicit numbers
+    assert "gap=" in out                          # gap_count present (AC5)
+    assert "lag[ingest]:" in out                  # per-source lag (AC4)
+    assert "lag[content]:" in out
+
+
+def test_baseline_report_renders_collector_failures_loud(monkeypatch):
+    records = _baseline_records(monkeypatch)
+    records["plaud"]["collector_failures"] = ["plaud truth collection failed: boom"]
+    out = build_baseline_report(records, "abc1234", "seed")
+    assert "FAIL collector: plaud truth collection failed: boom" in out

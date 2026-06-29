@@ -17,10 +17,21 @@ Per-folder caveat (surfaced, not hidden): email_messages has no folder column
 listed explicitly in the output so lead can attribute any gap to a folder.
 
 Usage:
-    python scripts/verify_backfill.py                  # both sources, print verdict
+    python scripts/verify_backfill.py                  # both email sources, print verdict
     python scripts/verify_backfill.py --source bluewin # one source
     python scripts/verify_backfill.py --post           # also bus-post verdict to lead,deputy
     python scripts/verify_backfill.py --seed myseed    # reproducible spot-check sample
+
+INGESTION_COMPLETENESS_P0_MEASURE_1 — baseline mode (additive; email verdict
+path above is unchanged). Reuses the parametric core (compare_counts /
+deterministic_order_key) to measure completeness + per-source lag across all 4
+ingest sources (bluewin, graph, plaud, whatsapp). READ-ONLY: no fix, no
+backfill, no migration, no deploy. The only write is the optional --post-baseline
+bus report to lead.
+
+    python scripts/verify_backfill.py --baseline                 # all 4 sources
+    python scripts/verify_backfill.py --baseline-source plaud    # one source
+    python scripts/verify_backfill.py --baseline --post-baseline # report -> lead bus
 """
 from __future__ import annotations
 
@@ -30,6 +41,7 @@ import json
 import os
 import subprocess
 import sys
+from datetime import datetime, timezone
 from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
@@ -50,6 +62,46 @@ SENT_NAME_CANDIDATES = ("sent", "sentitems", "sentmessages",
                         "inbox.sent", "inbox.sentitems", "inbox.sentmessages")
 
 BLUEWIN_IMAP_HOST = os.getenv("BLUEWIN_IMAP_HOST", "imaps.bluewin.ch")
+
+# --------------------------------------------------------------------------
+# INGESTION_COMPLETENESS_P0_MEASURE_1 — baseline across all 4 ingest sources
+# (additive; the email verdict path above is unchanged). Plaud + WhatsApp
+# reuse the parametric core (compare_counts / deterministic_order_key); a
+# per-source lag metric is added for all four. READ-ONLY everywhere.
+# --------------------------------------------------------------------------
+
+# The full source set the baseline measures. NOT folded into SOURCES (which
+# drives the email-only verdict path); a non-email source there would be fed to
+# the IMAP/Graph collectors and break. Each baseline source routes by kind.
+BASELINE_SOURCES = ("bluewin", "graph", "plaud", "whatsapp")
+SOURCE_KIND = {"bluewin": "email", "graph": "email",
+               "plaud": "plaud", "whatsapp": "whatsapp"}
+
+# Store-side table + timestamp columns per source (grounded in store_back.py
+# bootstrap DDL: email_messages:1715, meeting_transcripts:1491, whatsapp_messages:1790).
+STORE_TABLES = {
+    "bluewin":  {"table": "email_messages",     "content_ts": "received_date", "ingest_ts": "ingested_at", "source_col": "source"},
+    "graph":    {"table": "email_messages",     "content_ts": "received_date", "ingest_ts": "ingested_at", "source_col": "source"},
+    "plaud":    {"table": "meeting_transcripts", "content_ts": "meeting_date",  "ingest_ts": "ingested_at", "source_col": "source"},
+    # whatsapp_messages has NO source column (flagged, not migrated — see ship report).
+    "whatsapp": {"table": "whatsapp_messages",  "content_ts": "timestamp",     "ingest_ts": "ingested_at", "source_col": None},
+}
+
+# Fallback poll intervals (seconds) if config.triggers is unreadable at RUN time.
+# Live values are read from config.triggers.* in _poll_intervals(). whatsapp is
+# webhook-driven (WAHA push) — no poll interval, so the Nirodha "lag < poll
+# interval" clause is N/A for it (reported as webhook latency, not poll lag).
+FALLBACK_POLL_INTERVALS = {"bluewin": 300, "graph": 300, "plaud": 900, "whatsapp": None}
+
+# WhatsApp truth is a SUM over chats (WAHA exposes no aggregate count). Both
+# bounds are parametric + surfaced: the WAHA-side count is a lower bound capped
+# by per-chat fetch depth, over a NoWeb in-memory window. Forward-from-enrollment
+# only; all-time completeness is OUT OF SCOPE (source-limited, see brief).
+DEFAULT_WA_CHAT_LIMIT = 500    # chats to iterate
+DEFAULT_WA_MSG_LIMIT = 1000    # messages fetched per chat (bounds the per-chat count)
+
+PLAUD_SAMPLE_N = 10            # random recordings checked present + body non-empty
+WA_SAMPLE_N = 10              # random stored WA rows checked for body + chat_id
 
 
 # --------------------------------------------------------------------------
@@ -247,6 +299,137 @@ def build_verdict(results: dict, commit: str, brief: str = "BACKFILL_VERIFY_1") 
 
 
 # --------------------------------------------------------------------------
+# Baseline pure logic (INGESTION_COMPLETENESS_P0_MEASURE_1) — unit-tested
+# --------------------------------------------------------------------------
+
+def _fmt_secs(s) -> str:
+    """Human-readable seconds: '900s (15.0m)' / '90061s (1.0d)'. None -> 'n/a'."""
+    if s is None:
+        return "n/a"
+    s = int(s)
+    if s < 90:
+        return f"{s}s"
+    if s < 5400:
+        return f"{s}s ({s/60:.1f}m)"
+    if s < 172800:
+        return f"{s}s ({s/3600:.1f}h)"
+    return f"{s}s ({s/86400:.1f}d)"
+
+
+def compute_lag(max_ts, now, poll_interval_s, label: str = "ingest") -> dict:
+    """Recency lag for one source's newest stored timestamp vs `now`.
+
+    `max_ts` / `now` are tz-aware datetimes (or None). `poll_interval_s` is the
+    source's poll interval in seconds, or None for event-driven sources (WAHA
+    webhook) where the 'lag < poll interval' clause does not apply.
+
+    Returns explicit numbers; `within_interval` is the machine-checkable Nirodha
+    verdict (True/False/None). Never raises on a None timestamp — a source with
+    no rows is a loud `within_interval=None` with a reason, not a crash."""
+    if max_ts is None:
+        return {"label": label, "max_ts": None, "lag_seconds": None,
+                "poll_interval_s": poll_interval_s, "within_interval": None,
+                "note": "no rows / null timestamp — lag unmeasurable"}
+    lag = (now - max_ts).total_seconds()
+    if poll_interval_s is None:
+        within, note = None, "event-driven (no poll interval) — webhook latency, not poll lag"
+    else:
+        within = lag <= poll_interval_s
+        note = "lag <= poll interval" if within else "lag EXCEEDS poll interval"
+    return {"label": label, "max_ts": max_ts.isoformat(), "lag_seconds": round(lag),
+            "poll_interval_s": poll_interval_s, "within_interval": within, "note": note}
+
+
+def evaluate_presence_checks(rows: list) -> dict:
+    """Judge presence/integrity spot-check rows (Plaud + WhatsApp samples).
+
+    Each row: dict with `id`, optional `present` (bool, default True),
+    `body_len` (int), optional `extra_fail` (str — e.g. 'chat_id null').
+    Failures are listed loud, one line per failed id (mirrors AC4 style)."""
+    passes, failures = [], []
+    for r in rows:
+        rid = r["id"]
+        if r.get("present", True) is False:
+            failures.append(f"{rid}: sampled from source truth but ABSENT in store")
+            continue
+        if r.get("body_len", 0) <= 0:
+            failures.append(f"{rid}: present but EMPTY body")
+            continue
+        if r.get("extra_fail"):
+            failures.append(f"{rid}: {r['extra_fail']}")
+            continue
+        passes.append(rid)
+    return {"checked": len(rows), "passed": passes, "failures": failures,
+            "ok": len(rows) > 0 and not failures}
+
+
+def build_baseline_report(records: dict, commit: str, seed: str,
+                          brief: str = "INGESTION_COMPLETENESS_P0_MEASURE_1") -> str:
+    """Render the consolidated 4-source baseline (AC5): per source
+    {completeness%, lag, gap_count, sample_result}, explicit numbers, loud
+    failures, scope notes preserved. Pure: never touches network/DB."""
+    lines = [f"INGESTION COMPLETENESS BASELINE — {brief}",
+             f"commit: {commit}   seed: {seed}",
+             "read-only measurement: no INSERT/UPDATE, no migration, no deploy",
+             ""]
+    summary = []
+    for source in sorted(records, key=lambda s: BASELINE_SOURCES.index(s)
+                         if s in BASELINE_SOURCES else 99):
+        rec = records[source]
+        kind = rec.get("kind", SOURCE_KIND.get(source, "?"))
+        c = rec["completeness"]
+        lag = rec["lag"]
+        ing = lag.get("ingest", {})
+        con = lag.get("content", {})
+        smp = rec["sample"]
+        store, truth = c["store_count"], c["mailbox_total"]
+        gap = truth - store
+        lines.append(f"== source={source} (kind={kind}) ==")
+        for err in rec.get("collector_failures", []):
+            lines.append(f"  FAIL collector: {err}")
+        # completeness
+        comp_verdict = "PASS" if c["ok"] else "FAIL"
+        lines.append(
+            f"  completeness: store={store} truth={truth} ratio={c['ratio']} "
+            f"gap={gap} (tolerance {c['tolerance']}) -> {comp_verdict}")
+        # lag (ingest = liveness; content = newest item we hold)
+        lines.append(
+            f"  lag[ingest]:  newest={ing.get('max_ts')} lag={_fmt_secs(ing.get('lag_seconds'))} "
+            f"vs poll={_fmt_secs(ing.get('poll_interval_s'))} -> "
+            f"{_lag_tag(ing.get('within_interval'))} ({ing.get('note','')})")
+        lines.append(
+            f"  lag[content]: newest={con.get('max_ts')} lag={_fmt_secs(con.get('lag_seconds'))}")
+        # sample
+        smp_verdict = "PASS" if smp["ok"] else "FAIL"
+        lines.append(
+            f"  sample: {len(smp['passed'])}/{smp['checked']} present+nonempty -> {smp_verdict}")
+        for p in smp["passed"]:
+            lines.append(f"    PASS {p}")
+        for f in smp["failures"]:
+            lines.append(f"    FAIL {f}")
+        for note in rec.get("scope_notes", []):
+            lines.append(f"  scope: {note}")
+        lines.append("")
+        summary.append(
+            f"{source}: store={store}/{truth} ratio={c['ratio']} gap={gap} "
+            f"ingest_lag={_fmt_secs(ing.get('lag_seconds'))} "
+            f"sample={len(smp['passed'])}/{smp['checked']} "
+            f"[{comp_verdict}/{smp_verdict}]")
+    lines.append("SUMMARY (per source):")
+    for s in summary:
+        lines.append(f"  {s}")
+    return "\n".join(lines)
+
+
+def _lag_tag(within) -> str:
+    if within is True:
+        return "WITHIN"
+    if within is False:
+        return "EXCEEDS"
+    return "N/A"
+
+
+# --------------------------------------------------------------------------
 # Live collectors (read-only; exercised at RUN time, mocked in tests)
 # --------------------------------------------------------------------------
 
@@ -403,6 +586,159 @@ def spot_check_attachments(conn, source: str, n: int, seed: str) -> list:
 
 
 # --------------------------------------------------------------------------
+# Baseline live collectors (read-only; mocked in tests, run at RUN time)
+# --------------------------------------------------------------------------
+
+def _poll_intervals() -> dict:
+    """Live poll intervals from config.triggers.* (seconds); fall back to the
+    documented constants if config is unreadable. whatsapp stays None (webhook)."""
+    try:
+        from config.settings import config
+        return {
+            "bluewin": int(config.triggers.email_check_interval),
+            "graph": int(config.triggers.graph_mail_check_interval),
+            "plaud": int(config.triggers.plaud_scan_interval),
+            "whatsapp": None,
+        }
+    except Exception:
+        return dict(FALLBACK_POLL_INTERVALS)
+
+
+def _count(conn, sql: str, params: tuple = ()) -> int:
+    """Run a COUNT(*) read-only and return the int (rolls back on error)."""
+    try:
+        cur = conn.cursor()
+        cur.execute(sql, params)
+        n = cur.fetchone()[0]
+        cur.close()
+        return int(n)
+    except Exception as e:
+        conn.rollback()
+        raise RuntimeError(f"count failed [{sql}]: {e}") from e
+
+
+def meeting_store_count(conn, source: str = "plaud") -> int:
+    """Stored transcript count for a source (default plaud)."""
+    return _count(conn, "SELECT COUNT(*) FROM meeting_transcripts WHERE source = %s",
+                  (source,))
+
+
+def whatsapp_store_count(conn) -> int:
+    """Stored WhatsApp message count (no source column on whatsapp_messages)."""
+    return _count(conn, "SELECT COUNT(*) FROM whatsapp_messages")
+
+
+def latest_timestamp(conn, source: str, which: str = "ingest"):
+    """MAX(ts) for a source's store table; `which` in {ingest, content}.
+
+    Table + column names come from the code-controlled STORE_TABLES map (never
+    user input), so the f-string interpolation is injection-safe. Returns a
+    tz-aware datetime or None (empty table / all-null column)."""
+    spec = STORE_TABLES[source]
+    col = spec["ingest_ts"] if which == "ingest" else spec["content_ts"]
+    where, params = "", ()
+    if spec["source_col"]:
+        where = f"WHERE {spec['source_col']} = %s"
+        params = (source,)
+    try:
+        cur = conn.cursor()
+        cur.execute(f"SELECT MAX({col}) FROM {spec['table']} {where}", params)
+        ts = cur.fetchone()[0]
+        cur.close()
+        return ts
+    except Exception as e:
+        conn.rollback()
+        raise RuntimeError(f"latest_timestamp({source},{which}) failed: {e}") from e
+
+
+def plaud_truth() -> tuple:
+    """Read-only upstream truth for Plaud: (data_file_total, [recording_ids]).
+
+    Truth = `data_file_total` from GET /file/simple/web (the authoritative count;
+    fetch_plaud_recordings() returns only data_file_list and discards the total).
+    Falls back to len(list) if the field is absent. GET only — no writes."""
+    from triggers.plaud_trigger import _plaud_api
+    data = _plaud_api("/file/simple/web")
+    if not data or not isinstance(data, dict):
+        raise RuntimeError("Plaud API returned no data (token unset/expired or domain missing)")
+    lst = data.get("data_file_list") or []
+    total = data.get("data_file_total")
+    if total is None:
+        total = len(lst)
+    ids = [str(r.get("id")) for r in lst if isinstance(r, dict) and r.get("id") is not None]
+    return int(total), ids
+
+
+def plaud_sample(conn, ids: list, n: int, seed: str) -> list:
+    """Deterministic sample of n recording ids; check present in store + body
+    non-empty. Reuses deterministic_order_key so the sample is reproducible."""
+    if not ids:
+        return []
+    ordered = sorted(set(ids), key=lambda i: deterministic_order_key(i, seed))
+    picked = ordered[:n]
+    try:
+        cur = conn.cursor()
+        cur.execute(
+            "SELECT id, COALESCE(LENGTH(full_transcript), 0) "
+            "FROM meeting_transcripts WHERE source = 'plaud' AND id = ANY(%s)",
+            (picked,))
+        found = {r[0]: r[1] for r in cur.fetchall()}
+        cur.close()
+    except Exception as e:
+        conn.rollback()
+        raise RuntimeError(f"plaud_sample failed: {e}") from e
+    return [{"id": rid, "present": rid in found, "body_len": found.get(rid, 0)}
+            for rid in picked]
+
+
+def whatsapp_truth_count(chat_limit: int = DEFAULT_WA_CHAT_LIMIT,
+                         per_chat_msg_limit: int = DEFAULT_WA_MSG_LIMIT) -> tuple:
+    """WhatsApp upstream truth = SUM of per-chat message counts (WAHA exposes no
+    aggregate). Read-only (GET). Returns (per_chat:{chat_id:count}, failed:[ids]).
+
+    BOUNDED: each chat counts at most `per_chat_msg_limit` messages, over WAHA's
+    NoWeb in-memory window — a lower bound, forward-from-enrollment only. Every
+    per-chat fetch is individually wrapped; a failing chat lands in `failed`,
+    never crashes the sum (never hot-path a full-history fetch)."""
+    from triggers.waha_client import list_chats, fetch_messages
+    chats = list_chats(limit=chat_limit)
+    per_chat, failed = {}, []
+    for c in chats:
+        cid = c.get("id") if isinstance(c, dict) else None
+        if not cid:
+            continue
+        try:
+            msgs = fetch_messages(cid, limit=per_chat_msg_limit)
+            per_chat[cid] = len(msgs)
+        except Exception:
+            failed.append(cid)
+    return per_chat, failed
+
+
+def whatsapp_sample(conn, n: int, seed: str) -> list:
+    """Deterministic sample of n stored WA rows; check body non-empty + chat_id
+    present. (No clean WAHA<->store id join, so this is a store-integrity check.)"""
+    try:
+        cur = conn.cursor()
+        cur.execute(
+            "SELECT id, chat_id, COALESCE(LENGTH(full_text), 0) "
+            "FROM whatsapp_messages ORDER BY md5(id || %s) LIMIT %s",
+            (seed, n))
+        sampled = cur.fetchall()
+        cur.close()
+    except Exception as e:
+        conn.rollback()
+        raise RuntimeError(f"whatsapp_sample failed: {e}") from e
+    rows = []
+    for rid, chat_id, body_len in sampled:
+        row = {"id": rid, "present": True, "body_len": body_len}
+        if not chat_id:
+            row["extra_fail"] = "chat_id null"
+        rows.append(row)
+    return rows
+
+
+# --------------------------------------------------------------------------
 # Orchestration
 # --------------------------------------------------------------------------
 
@@ -485,6 +821,154 @@ def run_verification(sources: tuple, seed: str, imap_folders: list | None = None
     return results
 
 
+def run_baseline(sources: tuple, seed: str, now=None,
+                 wa_chat_limit: int = DEFAULT_WA_CHAT_LIMIT,
+                 wa_msg_limit: int = DEFAULT_WA_MSG_LIMIT,
+                 plaud_sample_n: int = PLAUD_SAMPLE_N,
+                 wa_sample_n: int = WA_SAMPLE_N,
+                 imap_folders: list | None = None,
+                 graph_folders: list | None = None) -> dict:
+    """Collect a completeness + lag baseline for each requested source. Routes
+    each source by kind: email -> existing IMAP/Graph collectors; plaud/whatsapp
+    -> the new adapters. Reuses compare_counts for completeness on every kind.
+
+    NEVER raises (mirrors run_verification's contract): db connect, every
+    truth/store/sample/lag collector is individually wrapped; a failure becomes
+    a loud per-source `collector_failures` entry and the baseline still renders
+    in full. `now` is injectable for deterministic tests."""
+    now = now or datetime.now(timezone.utc)
+    intervals = _poll_intervals()
+    records = {}
+    conn = None
+    db_error = None
+    try:
+        conn = _db_conn()
+    except Exception as e:
+        db_error = f"db connection failed: {e}"
+    try:
+        for source in sources:
+            kind = SOURCE_KIND.get(source, "?")
+            errors = []
+            completeness = _empty_counts()
+            sample = _empty_checks()
+            scope_notes = []
+            lag = {"ingest": compute_lag(None, now, intervals.get(source), "ingest"),
+                   "content": compute_lag(None, now, None, "content")}
+
+            if kind == "email":
+                folders, allowlist = None, None
+                try:
+                    if source == "bluewin":
+                        folders, flags_map = imap_folder_counts()
+                        allowlist = imap_folders or pick_imap_allowlist(folders, flags_map)
+                    else:
+                        folders = graph_folder_counts()
+                        allowlist = graph_folders or list(DEFAULT_GRAPH_FOLDERS)
+                except Exception as e:
+                    errors.append(f"mailbox count collection failed: {e}")
+                if db_error:
+                    errors.append(db_error)
+                else:
+                    if folders is not None:
+                        try:
+                            completeness = compare_counts(
+                                folders, store_count(conn, source), allowlist=allowlist)
+                        except Exception as e:
+                            errors.append(f"store count failed: {e}")
+                            completeness = compare_counts(folders, -1, allowlist=allowlist)
+                    try:
+                        msg_rows = spot_check_messages(conn, source, plaud_sample_n, seed)
+                        sample = evaluate_presence_checks(
+                            [{"id": r["message_id"], "present": True,
+                              "body_len": r.get("body_len", 0)} for r in msg_rows])
+                    except Exception as e:
+                        errors.append(f"email sample failed: {e}")
+                scope_notes.append(
+                    "completeness reuses the existing IMAP/Graph email collectors "
+                    "(allowlisted INBOX+sent); email verdict path unchanged")
+
+            elif kind == "plaud":
+                truth_total, ids = None, []
+                try:
+                    truth_total, ids = plaud_truth()
+                except Exception as e:
+                    errors.append(f"plaud truth collection failed: {e}")
+                if db_error:
+                    errors.append(db_error)
+                else:
+                    store_n = None
+                    try:
+                        store_n = meeting_store_count(conn, "plaud")
+                    except Exception as e:
+                        errors.append(f"plaud store count failed: {e}")
+                    if truth_total is not None:
+                        completeness = compare_counts(
+                            {"plaud:all": truth_total},
+                            store_n if store_n is not None else -1)
+                    try:
+                        sample = evaluate_presence_checks(
+                            plaud_sample(conn, ids, plaud_sample_n, seed))
+                    except Exception as e:
+                        errors.append(f"plaud sample failed: {e}")
+                scope_notes.append(
+                    "truth = Plaud data_file_total (full-history API) -> >=98% all-time achievable")
+
+            elif kind == "whatsapp":
+                per_chat, failed = {}, []
+                try:
+                    per_chat, failed = whatsapp_truth_count(wa_chat_limit, wa_msg_limit)
+                except Exception as e:
+                    errors.append(f"whatsapp truth collection failed: {e}")
+                if failed:
+                    errors.append(
+                        f"{len(failed)} chat(s) failed per-chat fetch — excluded from truth sum")
+                if db_error:
+                    errors.append(db_error)
+                else:
+                    store_n = None
+                    try:
+                        store_n = whatsapp_store_count(conn)
+                    except Exception as e:
+                        errors.append(f"whatsapp store count failed: {e}")
+                    if per_chat:
+                        completeness = compare_counts(
+                            per_chat, store_n if store_n is not None else -1)
+                    try:
+                        sample = evaluate_presence_checks(
+                            whatsapp_sample(conn, wa_sample_n, seed))
+                    except Exception as e:
+                        errors.append(f"whatsapp sample failed: {e}")
+                scope_notes.append(
+                    f"WAHA truth bounded by per-chat limit {wa_msg_limit} over NoWeb "
+                    "in-memory window -> FORWARD-FROM-ENROLLMENT only (lower bound)")
+                scope_notes.append(
+                    "ALL-TIME completeness OUT OF SCOPE (source-limited; iPhone export "
+                    "is the only all-time path)")
+                scope_notes.append(
+                    "FLAG: candidate whatsapp_messages.source column for "
+                    "waha-vs-iphone-export parity — NOT migrated (measurement-only brief)")
+
+            if not db_error:
+                for which in ("ingest", "content"):
+                    try:
+                        ts = latest_timestamp(conn, source, which)
+                        pi = intervals.get(source) if which == "ingest" else None
+                        lag[which] = compute_lag(ts, now, pi, which)
+                    except Exception as e:
+                        errors.append(f"lag[{which}] failed: {e}")
+
+            records[source] = {"kind": kind, "completeness": completeness, "lag": lag,
+                               "sample": sample, "collector_failures": errors,
+                               "scope_notes": scope_notes}
+    finally:
+        if conn is not None:
+            try:
+                conn.close()
+            except Exception:
+                pass
+    return records
+
+
 def _git_head() -> str:
     try:
         return subprocess.run(
@@ -506,6 +990,18 @@ def post_verdict(body: str) -> None:
     )
 
 
+def post_baseline(body: str) -> None:
+    """The single permitted write in baseline mode: bus-post the consolidated
+    completeness baseline to lead (INGESTION_COMPLETENESS_P0_MEASURE_1)."""
+    env = dict(os.environ, BAKER_ROLE="b3")
+    subprocess.run(
+        [sys.executable, str(REPO_ROOT / "scripts" / "bus_post.py"),
+         "--to", "lead", "--body", body,
+         "--topic", "baseline/ingestion-completeness-p0-measure-1"],
+        env=env, check=True, timeout=120,
+    )
+
+
 def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument("--source", choices=SOURCES, help="verify one source only")
@@ -520,7 +1016,34 @@ def main() -> int:
     ap.add_argument("--post", action="store_true",
                     help="bus-post the verdict to lead,deputy (the only write)")
     ap.add_argument("--json", action="store_true", help="also dump raw results JSON")
+    # INGESTION_COMPLETENESS_P0_MEASURE_1 — baseline across all 4 ingest sources.
+    ap.add_argument("--baseline", action="store_true",
+                    help="run the 4-source completeness+lag baseline "
+                         "(email + plaud + whatsapp) instead of the email verdict")
+    ap.add_argument("--baseline-source", choices=BASELINE_SOURCES, default=None,
+                    help="restrict --baseline to one source")
+    ap.add_argument("--wa-chat-limit", type=int, default=DEFAULT_WA_CHAT_LIMIT,
+                    help="WhatsApp: max chats to iterate for the truth sum")
+    ap.add_argument("--wa-msg-limit", type=int, default=DEFAULT_WA_MSG_LIMIT,
+                    help="WhatsApp: max messages fetched per chat (bounds the count)")
+    ap.add_argument("--post-baseline", action="store_true",
+                    help="bus-post the baseline report to lead (the only write in "
+                         "baseline mode)")
     args = ap.parse_args()
+
+    if args.baseline or args.baseline_source:
+        b_sources = (args.baseline_source,) if args.baseline_source else BASELINE_SOURCES
+        records = run_baseline(b_sources, args.seed,
+                               wa_chat_limit=args.wa_chat_limit,
+                               wa_msg_limit=args.wa_msg_limit)
+        report = build_baseline_report(records, _git_head(), args.seed)
+        print(report)
+        if args.json:
+            printable = json.loads(json.dumps(records, default=str))
+            print(json.dumps(printable, indent=2))
+        if args.post_baseline:
+            post_baseline(report)
+        return 0
 
     sources = (args.source,) if args.source else SOURCES
     imap_allow = [f.strip() for f in args.imap_folders.split(",") if f.strip()] \
