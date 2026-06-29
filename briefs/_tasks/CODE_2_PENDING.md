@@ -1,79 +1,166 @@
 ---
-brief_id: MOVIE_DESK_ON_BUS_1
 status: PENDING
+brief_id: CORRELATION_ID_PRIMITIVE_1
 to: b2
 from: lead
 dispatched_by: lead
-dispatched_at: 2026-06-27
+dispatched_at: 2026-06-29
+branch: correlation-id-primitive-1
 reply_target: lead (bus)
-task_class: infra-install (3-repo)
-recommended_effort: high
-picker_path: /Users/dimitry/Vallen Dropbox/Dimitry vallen/bm-movie-desk
-canonical_slug: movie-desk
-Harness-V2: applies — Context Contract + done rubric + gate plan below
-gate_plan: G1 pytest -> G2 deputy-codex (slug-list completeness / partial-install) -> G3 deputy AC -> G4 lead /security-review -> merge -> lead Tier-B post-merge -> AC12 smoke
+effort: medium
+task_class: small-feature — read-only correlation primitive (helpers + parser + one read-only resolver; no write / no migration / no deploy)
+gate_plan: G1 py_compile + pytest fixtures green -> codex-arch 2nd-pair (parser strictness + resolver placement) -> codex G3 (effort medium; no-write assertion, never-raise, LIMIT 1, rollback) -> lead /security-review G4 (no secret/PII in parsed bodies, ReDoS-safe regex) -> lead merge -> NO deploy.
+design_source: cowork-ah1 spec bus #4623 + outputs/correlation-id-primitive-spec.md; Director go via codex-arch #4625; folded by lead from cowork-ah1 dispatch-ready #4627.
 ---
 
-# BRIEF_MOVIE_DESK_ON_BUS_1 — put MOVIE Desk on the Brisen Lab bus + dashboard card
+# BRIEF: CORRELATION_ID_PRIMITIVE_1 — bus↔signal_queue thread-back identity (read-only)
+
+## Context
+
+The Baker bus has no `ticket_id`/`signal_id` field (schema = id/thread_id/parent_id/
+topic/body only), so a desk reply cannot be tied back to the signal that triggered
+it. This blocks the whole airport check-in loop (cowork-ah1 review #4612, Director-
+accepted pivot #4620/#4625). This brief builds ONLY the minimal, read-only
+correlation primitive: mint a stable id from `signal_queue.id`, carry it in the bus
+topic slug, parse a one-line structured reply, and resolve it back to the signal row.
+No SLA, no control, no writes. Spec source: cowork-ah1 #4623 +
+`outputs/correlation-id-primitive-spec.md`.
+
+## Estimated time: ~2–3h
+## Complexity: Low
+## Prerequisites: none (read-only; no migration, no env flip, no deploy)
 
 ## Context Contract
-MOVIE Desk (Mandarin Oriental Vienna asset-management + disposal agent) is **half-installed**: it already has a picker folder and a "MOVIE Desk" Terminal profile, but it is **NOT on the bus** (no key, no registry entry, no card, no drain). This brief completes the bus install end-to-end.
+- **Owner:** Code Brisen (**b2**).
+- **Task class:** small-feature — pure helpers + parser + one read-only resolver.
+- **Interfaces:** `signal_queue` (read), bus topic/body conventions (string), the
+  canonical DB connection in `kbl/db.py`.
+- **Activation state:** library only; nothing calls it in prod yet (the future
+  monitor/Dispatcher consumes it). No scheduler, no env, no deploy.
+- **Authority:** read-only. No writes to any table. No Director messages, no sends.
 
-**Canonical slug: `movie-desk`** (kebab, matches `ao-desk` / `hag-desk` / `origination-desk` / `baden-baden-desk`). The existing zshrc launcher uses `BAKER_ROLE=MOVIE_DESK` + `FORGE_TERMINAL=movie_desk` — treat those as ALIASES that must resolve to `movie-desk`, not as new slugs.
-
-**Read FIRST:** `~/baker-vault/_ops/processes/install-agent-to-brisen-lab-sop.md` (the 14-row wiring map + foot-guns). Follow it, with the two deltas below.
-
-### AC0 pre-flight — ALREADY RUN by lead (verify, do not re-derive):
-- Picker EXISTS: `~/Vallen Dropbox/Dimitry vallen/bm-movie-desk/` (CLAUDE.md + `.claude/skills/movie-desk/` present). **Wire to this existing Dropbox path — do NOT create `~/bm-movie-desk`.** (AID_ON_BUS_1 defect-3 class.)
-- Terminal profile "MOVIE Desk" EXISTS in `com.apple.Terminal.plist` (Row 3 substantially done — verify name parity with card alias).
-- zshrc `moviedesk()` EXISTS (Dropbox cd, BAKER_ROLE=MOVIE_DESK, FORGE_TERMINAL=movie_desk).
-- MISSING: bus key, registry entry, drain-hook mapping, forge-pusher entry, front-end card, server slug-lists, wake-handler/listener entries.
-
-### DELTA 1 — SOP Rows 5/6 are STALE. The bus_post.sh whitelist moved to a central registry.
-Slug validation is now generated from `~/baker-vault/_ops/registries/agent_registry.yml` into `scripts/agent_identity_generated.sh` (header: "Do not edit by hand. Regenerate with: python3 scripts/generate_agent_identity_artifacts.py --write").
-- **Do NOT hand-edit `agent_identity_generated.sh` or bus_post.sh case statements.**
-- Add `movie-desk` to `agent_registry.yml`: bus-agent slug + valid slug + snapshot-terminal (repo-path `/Users/dimitry/baker-vault`, like the other desks) + role-resolve aliases (`MOVIE_DESK`, `movie_desk`, `moviedesk`, `MOVIE-DESK` → `movie-desk`). Assign the next free `AG-3xx` id (ao-desk=AG-303; pick the next unused).
-- Regenerate the artifact via the documented script; commit BOTH the yml and the regenerated `agent_identity_generated.sh`. Confirm the SHA256 header matches.
-- This replaces SOP Row 5 + Row 6. Row 7 drain-hook in `~/.claude/hooks/session-start-bus-drain.sh` (and its baker-master fixture `tests/fixtures/session-start-bus-drain.sh`): check whether it reads the registry or still has a hardcoded BAKER_ROLE case; if hardcoded, add `MOVIE_DESK`/`movie-desk`.
-
-### DELTA 2 — Snapshot terminal alias parity.
-Card `data-alias`, forge-pusher `TERMINALS` entry, FORGE_TERMINAL, and registry snapshot-terminal MUST all be the SAME string = `movie-desk`. The existing zshrc has `FORGE_TERMINAL=movie_desk` (underscore) — **lead will fix the zshrc to `movie-desk` (local AH1 file, Tier-B).** Everything you wire uses `movie-desk`.
+### Surface contract: N/A — pure backend primitive (helpers + parser + read-only
+resolver). No UI, no route, no dashboard card.
 
 ## Engineering Craft Gates
-- Diagnose: N/A — additive install, not a bug fix.
-- Prototype: N/A — wiring pattern is fully specified by the SOP; no design uncertainty.
-- TDD/verification: applies — extend `tests/test_a3_a8_a9_bus.py` (brisen-lab) to assert `bus_badge_change` SSE + `/api/v2/terminals` include `movie-desk`; add the `movie-desk` case to `tests/test_forge_snapshot_push.sh` (baker-master). Write the test assertions alongside each repo change, not after.
+- Diagnose: N/A — net-new primitive, not a bug.
+- Prototype: N/A — the format is locked by the spec; no design uncertainty.
+- TDD/verification: **applies** — write the fixture tests for `corr_id` round-trip,
+  topic extraction, and `CHECK_IN_VERDICT` parse FIRST (they are pure-string, no DB),
+  then implement. The resolver is verified with a stubbed connection, not a live DB.
 
-## Scope — all 14 SOP rows, movie-desk specifics
-Enumerate EVERY row in your ship report (`Row X: done @ <ref>` or `Row X: N/A — <reason>`).
-- **Builder owns (repo PRs):** registry (Delta 1), Row 7 (if hardcoded fixture), Row 10 (front-end card in `.row-desks` + app.js TERMINALS/LABELS), Row 11 (FOUR server places: bus.py KNOWN_CARD_SLUGS, bus.py _build_terminals_response loop, app.py TERMINALS, tests), Row 12 (forge_snapshot_push.sh `movie-desk:/Users/dimitry/baker-vault`), Row 13a/13b (wake-handler both maps; cwdForAlias → the Dropbox picker path EXACT), Row 14 (wake-listener ALLOWED_ALIASES), plus regression tests.
-- **Lead owns post-merge (Tier-B, do NOT attempt):** Row 3 verify, Row 8 (1P key), Row 9 (Render env + redeploy), zshrc fix, drain-hook + wake-listener + forge-pusher redeploys, AC12 smoke.
+## Problem
+No deterministic way to map a desk bus reply back to its originating signal. The id
+must come from something that exists today (`signal_queue.id`) and ride a carrier
+every sender can set (the topic slug — `bus_post.sh` sets only `topic`).
 
-## Three-repo PR sequencing (per SOP)
-1. **baker-vault PR** — agent_registry.yml + regenerated artifact (+ any `_ops/agents/movie-desk/` files if needed). Config; merge first.
-2. **baker-master PR** — forge_snapshot_push.sh + drain-hook fixture (if hardcoded) + tests.
-3. **brisen-lab PR** — front-end (index.html `.row-desks` card + app.js TERMINALS/LABELS) + server (bus.py x2 + app.py) + wake-handler + wake-listener + tests.
-Brisen-lab clone for b2: `~/bm-b2-brisen-lab`.
+## Implementation — new module `kbl/correlation.py`
 
-## Key Constraints / Do NOT touch
-- Do NOT create `~/bm-movie-desk` — wire to the existing Dropbox picker.
-- Do NOT hand-edit generated artifacts — edit the yml source + regenerate.
-- Do NOT touch other desks' slugs/cards/keys.
-- Card alias, data-alias, forge TERMINALS, FORGE_TERMINAL, registry snapshot-terminal = the single string `movie-desk`.
+1. **Token mint/parse (pure):**
+   ```python
+   import re
+   _SIG_RE = re.compile(r"sig-(\d+)")
 
-## Done rubric (answer each, not "tests pass")
-1. `movie-desk` in registry + artifact regenerated, SHA header correct; slug validates (no "unknown slug").
-2. Pre-flight grep covers the new slug in all 4 server sites: `grep -nE '"lead".*"deputy".*"b1"' ~/bm-b2-brisen-lab/{bus.py,app.py}`.
-3. Card slot present in `static/index.html` `.row-desks` (renders after lead deploys).
-4. Wake-handler has BOTH fnMap + cwdForAlias (cwdForAlias → the Dropbox picker path, exact).
-5. Wake-listener ALLOWED_ALIASES includes `movie-desk` (canonical repo file).
+   def corr_id(signal_id: int) -> str:
+       return f"sig-{int(signal_id)}"
 
-## Ship gate (literal pytest output in PR description — NO pass-by-inspection)
-- `pytest tests/test_a3_a8_a9_bus.py -v` (brisen-lab)
-- `bash tests/test_forge_snapshot_push.sh` (baker-master)
+   def parse_corr_id(text: str) -> int | None:
+       if not text:
+           return None
+       m = _SIG_RE.search(text)
+       return int(m.group(1)) if m else None
+   ```
+   `parse_corr_id` works on either a topic (`checkin/<owner>/sig-123`) or a body;
+   first match wins; `sig-abc` / no token → `None`.
 
-## ON RESUME (long-arc rollover)
-If `briefs/_checkpoints/MOVIE_DESK_ON_BUS_1.checkpoint.md` exists, resume from its "next concrete step" — do not restart. At ~85% context, checkpoint + push + request respawn.
+2. **Topic builders (pure):**
+   ```python
+   def checkin_topic(owner_slug: str, signal_id: int) -> str:
+       return f"checkin/{owner_slug}/{corr_id(signal_id)}"
 
-## Reporting
-Bus-post `lead` on: claim, each PR opened, each merge-ready, blockers, scope-ambiguity. Plain technical prose (B-codes are NOT Director-facing register). Enumerate all 14 rows in the final ship report.
+   def checkin_reply_topic(owner_slug: str, signal_id: int) -> str:
+       return f"checkin-reply/{owner_slug}/{corr_id(signal_id)}"
+   ```
+
+3. **Reply contract parser (pure, never-raise):** first body line is
+   `CHECK_IN_VERDICT v1 sig=<id> outcome=<X> by=<slug>`.
+   ```python
+   _OUTCOMES = {"VALID","FAKE","DUPLICATE","WRONG_TERMINAL","NEEDS_LUGGAGE","CHECK_IN_MISSED"}
+
+   def parse_checkin_verdict(body: str) -> dict | None:
+       if not body:
+           return None
+       line = body.strip().splitlines()[0].strip()
+       if not line.startswith("CHECK_IN_VERDICT v1"):
+           return None
+       kv = dict(re.findall(r"(\w+)=(\S+)", line))
+       try:
+           sig = int(kv.get("sig", ""))
+       except ValueError:
+           return None
+       outcome = kv.get("outcome", "")
+       if "sig" not in kv or outcome not in _OUTCOMES or "by" not in kv:
+           return None
+       return {"sig": sig, "outcome": outcome, "by": kv["by"]}
+   ```
+   Missing/garbled/unknown-outcome → `None` (caller treats as UNKNOWN). Never raises.
+
+4. **Read-only resolver (the only DB touch):**
+   ```python
+   from kbl.db import get_conn  # use the canonical pooled connection helper
+
+   def resolve_signal(signal_id: int) -> dict | None:
+       conn = get_conn()
+       try:
+           with conn.cursor() as cur:
+               cur.execute(
+                   "SELECT id, status, matter_slug FROM signal_queue WHERE id=%s LIMIT 1",
+                   (signal_id,),
+               )
+               row = cur.fetchone()
+           if not row:
+               return None
+           return {"id": row[0], "status": row[1], "matter_slug": row[2]}
+       except Exception:
+           conn.rollback()
+           return None
+   ```
+   Builder: confirm the exact `kbl/db.py` accessor name + cursor style (RealDict vs
+   tuple) before finalizing; keep `LIMIT 1`, the try/except, and the rollback.
+
+## Key Constraints (what NOT to change)
+- **No writes.** `grep` the diff for INSERT/UPDATE/DELETE → must be zero.
+- **No SLA / monitor / scheduler** — downstream (Dispatcher / BUILD-B), not here.
+- **No `airport_tickets` coupling** — reserve the `at-<id>` token only; do not wire.
+- **No dependency on `parent_id`** — topic slug is the floor carrier. (`bus_post.py`
+  may also set `parent_id`, but this primitive must work without it.)
+- **No bus-daemon / schema change** — existing `topic` + `body` only.
+
+## Acceptance Tests — `tests/test_correlation.py` (fixtures, no DB/network)
+1. `corr_id(123) == "sig-123"`.
+2. `parse_corr_id("checkin/baden-baden-desk/sig-123") == 123`; `parse_corr_id("checkin-reply/x/sig-7")==7`; `parse_corr_id("no-token") is None`; `parse_corr_id("sig-abc") is None`.
+3. `checkin_topic("ao-desk", 9) == "checkin/ao-desk/sig-9"`; reply variant mirrors.
+4. `parse_checkin_verdict("CHECK_IN_VERDICT v1 sig=42 outcome=VALID by=baden-baden-desk\nfree prose")` → `{"sig":42,"outcome":"VALID","by":"baden-baden-desk"}`.
+5. `parse_checkin_verdict` returns `None` for: wrong version (`v2`), missing `sig`, non-int `sig`, outcome not in enum, empty/None body — and NEVER raises.
+6. `resolve_signal`: with a stubbed `get_conn` returning a row → dict; returning no
+   row → `None`; raising on execute → `None` AND `rollback()` was called. SQL string
+   contains `LIMIT 1`.
+
+## Out of Scope (do NOT build)
+SLA scheduler, monitor tick, escalation logic, `airport_tickets` wiring, desk-on-bus
+install, `parent_id` enforcement, bus daemon changes, any `signal_queue` write, any
+prod caller. This is the identity primitive only — everything else builds ON it later.
+
+## Files
+- NEW `kbl/correlation.py` — helpers + parser + read-only resolver.
+- NEW `tests/test_correlation.py` — the 6 acceptance tests above.
+
+## Gate Plan
+1. cowork-ah1 / codex-arch second-pair on parser strictness + resolver placement.
+2. codex G3 correctness/security (no-write assertion, never-raise, LIMIT 1, rollback).
+3. AH1 `/security-review` G4 (no secret/PII in parsed bodies; ReDoS-safe regex).
+4. No deploy — library lands on `main`, nothing calls it in prod yet.
+
+## Reply
+Ship report to **lead** via bus (`bus_post.sh lead "<SHIP ...>" "ship/correlation-id-primitive-1"`),
+PR number + branch + commit, G1 self-check results, and the no-write grep result.
