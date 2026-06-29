@@ -2625,6 +2625,134 @@ async def whatsapp_messages_endpoint(
 
 
 # ============================================================
+# EMAIL_READ_REST_FALLBACK_1: X-Baker-Key email search/read so desks
+# aren't blind to brisengroup.com mail when the claude.ai Baker MCP drops
+# mid-session (bus #4588). Mirrors GET /api/whatsapp/messages (PR #218).
+# Logic is single-sourced from tools.email.dispatch_email — NO SQL here,
+# so the email_messages schema (PK is message_id, the outlier table —
+# lesson #211) stays owned in one place.
+# ============================================================
+def _format_email_search_md(data: dict) -> str:
+    if data.get("backend_unavailable"):
+        return ("⚠️ Email search backend unavailable — retry; do NOT read this "
+                "as 'no mail'.")
+    matches = data.get("matches")
+    if matches is None and isinstance(data.get("results"), dict):
+        # provider=all: matches live nested under results.{store,graph}.
+        matches = []
+        for sub in data["results"].values():
+            if isinstance(sub, dict):
+                if sub.get("backend_unavailable"):
+                    return ("⚠️ Email search backend unavailable — retry; do NOT "
+                            "read this as 'no mail'.")
+                matches.extend(sub.get("matches") or [])
+    matches = matches or []
+    if not matches:
+        return f"No emails matched: {data.get('query', '')}"
+    lines = [f"# Email search: {data.get('query', '')} ({len(matches)} match(es))", ""]
+    for m in matches:
+        lines.append(
+            f"- **{m.get('subject') or '(no subject)'}** — "
+            f"{m.get('sender') or '?'} — {m.get('date') or '?'}"
+        )
+        src = m.get("source") or m.get("provider") or "?"
+        lines.append(f"  `{m.get('message_id')}` [{src}]")
+        snip = (m.get("snippet") or "").strip().replace("\n", " ")
+        if snip:
+            lines.append(f"  {snip[:300]}")
+    return "\n".join(lines)
+
+
+def _format_email_read_md(data: dict) -> str:
+    if data.get("error"):
+        return (f"⚠️ {data['error']} "
+                f"(message_id: {data.get('message_id', '?')})"
+                + (f" — {data['hint']}" if data.get("hint") else ""))
+    # store read wraps the row under "message"; graph read returns fields at top level.
+    msg = data.get("message") or data
+    sender = msg.get("sender_name") or msg.get("sender_email") or msg.get("sender") or "?"
+    dt = msg.get("received_date") or msg.get("date") or "?"
+    source = msg.get("source") or msg.get("provider") or "?"
+    body = msg.get("full_body") or msg.get("body") or "(empty body)"
+    return "\n".join([
+        f"# {msg.get('subject') or '(no subject)'}",
+        f"From: {sender}",
+        f"Date: {dt}  |  Source: {source}",
+        f"Message-ID: {msg.get('message_id')}",
+        "",
+        body,
+    ])
+
+
+@app.get("/api/emails/search", tags=["emails"], dependencies=[Depends(verify_api_key)])
+async def emails_search_endpoint(
+    query: str = Query(..., min_length=1,
+                       description="Tokenized search; ANDs tokens across "
+                                   "subject/sender/body; supports Gmail-style "
+                                   "after:/before: date operators"),
+    provider: Literal["store", "graph", "all"] = Query(
+        "store", description="store = merged email_messages (reliable, default); "
+                             "graph = live M365 (freshest, pre-ingestion); all = both"),
+    source: Optional[str] = Query(None,
+                       description="optional exact ingest-source filter (e.g. graph, gmail, bluewin, email)"),
+    limit: int = Query(10, ge=1, le=50),
+    fmt: Literal["json", "md"] = Query("json", alias="format"),
+):
+    """Read-only email search — REST fallback for the Baker MCP (EMAIL_READ_REST_FALLBACK_1).
+
+    Reuses tools.email.dispatch_email so query logic + email_messages schema stay
+    single-sourced. provider=graph gives live M365 freshness when an email is too
+    recent to be ingested into the store yet.
+    """
+    from tools.email import dispatch_email
+    try:
+        raw = dispatch_email("baker_email_search", {
+            "query": query,
+            "max_results": limit,
+            "provider": provider,
+            "source": (source or None),
+        })
+        data = json.loads(raw)
+    except Exception as e:
+        logger.error(f"emails_search_endpoint failed: {e}")
+        return JSONResponse(status_code=500,
+                            content={"status": "error", "message": str(e)})
+    if fmt == "md":
+        return PlainTextResponse(content=_format_email_search_md(data))
+    return JSONResponse(content=data)
+
+
+@app.get("/api/emails/read", tags=["emails"], dependencies=[Depends(verify_api_key)])
+async def emails_read_endpoint(
+    message_id: str = Query(..., min_length=1,
+                       description="email_messages.message_id (Gmail/Graph string ID)"),
+    provider: Literal["store", "graph"] = Query(
+        "store", description="store = merged email_messages (default); "
+                             "graph = live M365 read for a very recent message"),
+    fmt: Literal["json", "md"] = Query("json", alias="format"),
+):
+    """Read-only single-email read by message_id — REST mirror of baker_email_read.
+
+    On a store miss, the underlying tool returns a hint to retry provider=graph
+    for a message too recent to be ingested. See EMAIL_READ_REST_FALLBACK_1.
+    """
+    from tools.email import dispatch_email
+    try:
+        raw = dispatch_email("baker_email_read", {
+            "message_id": message_id,
+            "provider": provider,
+        })
+        data = json.loads(raw)
+    except Exception as e:
+        logger.error(f"emails_read_endpoint failed: {e}")
+        return JSONResponse(status_code=500,
+                            content={"status": "error", "message": str(e)})
+    if fmt == "md":
+        return PlainTextResponse(content=_format_email_read_md(data))
+    return JSONResponse(content=data)
+
+
+# ============================================================
 # BAKER_CAPTURE_BLINDSPOTS_1: iPhone WhatsApp export ingest
 # ============================================================
 # Pre-2026-05-20 Director outbound on WhatsApp was never captured (WAHA
