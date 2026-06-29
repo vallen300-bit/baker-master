@@ -1,58 +1,42 @@
 ---
-status: COMPLETE
-brief_id: BACKFILL_VERIFY_1
+status: PENDING
+brief_id: EMAIL_READ_REST_FALLBACK_1
 to: b4
 from: lead
 dispatched_by: lead
-dispatched_at: 2026-06-10
+dispatched_at: 2026-06-29
+branch: email-read-rest-fallback-1
 reply_target: lead (bus)
-task_class: verification harness + arc close-out (read-mostly)
-gate_plan: G1 harness pytest -> lead review -> RUN after b1+b2 runs complete -> POST_DEPLOY_AC_VERDICT v1 to lead + cc deputy
-arc: EMAIL_HISTORY_BACKFILL (lane 5 of 5 — closes the arc; blocked-on: b1+b2 background runs finishing)
+effort: medium
+task_class: additive backend REST endpoints (read-only) + live-prod verification
+gate_plan: G1 py_compile + grep no-dup-route -> codex gate-3 -> lead merge -> POST_DEPLOY_AC_VERDICT v1 to lead
+full_brief: briefs/BRIEF_EMAIL_READ_REST_FALLBACK_1.md
 ---
 
-# BACKFILL_VERIFY_1 — backfill verification harness + arc close-out
+# EMAIL_READ_REST_FALLBACK_1 — X-Baker-Key REST email search/read (MCP-drop fallback)
 
-## Context
+## Read this first
+The complete, copy-pasteable implementation is in **`briefs/BRIEF_EMAIL_READ_REST_FALLBACK_1.md`** (on main, committed alongside this dispatch). Implement exactly as written there. This envelope carries only dispatch metadata + acceptance gates.
 
-Director-ratified 2026-06-10 backfill arc: b3 attachment store, b1 bluewin IMAP backfill, b2 Graph backfill, deputy-codex forward-parity. Backfill runs are long + background; "done" for the ARC = store contents match mailbox contents, proven. That proof is YOUR lane. Done-rubrics-stop-gate discipline applies: counts + spot-checks, no "looks complete".
+## Context (one paragraph)
+On 2026-06-29 the claude.ai Baker MCP dropped mid-session in a desk picker → the desk was blind to brisengroup.com email while two live Balazs/Annaberg emails needed reading (bus #4588, Director-routed). Backend was healthy throughout. There is no REST email-read fallback today (only ingestion POSTs). This adds one, mirroring the proven `GET /api/whatsapp/messages` (PR #218). Director escalated to a session goal.
 
-## Problem
-
-Nobody verifies a backfill that verifies itself. Independent harness needed: mailbox-side counts vs store-side counts + random deep spot-checks + a machine-checkable verdict.
-
-## Files Modified
-
-- scripts/verify_backfill.py — NEW (read-only against IMAP, Graph, and DB)
-- tests/test_verify_backfill.py — NEW (mocked counts/verdict logic)
-
-## Design constraints (locked)
-
-- Counts: IMAP SELECT-EXAMINE per folder vs SELECT COUNT(*) email_messages WHERE source='bluewin'; Graph folder totalItemCount vs source='graph'. Tolerance: store >= 98% of mailbox count per folder (some messages unparseable — list failures, don't hide them).
-- Spot-checks: 10 random historical messages per source — present in store, body non-empty, searchable via the email search path; 5 random attachments per source — sha256(data) == content_sha256, size matches.
-- Output: single verdict block POST_DEPLOY_AC_VERDICT v1 (per _ops/skills/post-deploy-ac-bus-gate/SKILL.md) — PASS/FAIL per AC, posted to lead AND cc deputy (new convention 2026-06-10).
-- Read-only everywhere: no writes except the verdict bus post. SELECT-only DB access.
-
-## Run protocol
-
-- Build + test harness NOW; RUN only after b1 + b2 post "run finished" (poll email_backfill_progress: done_count stable + cursor exhausted). If runs still going when your build is done: ship the harness PR, bus "harness ready, runs in flight", end session — re-dispatch will trigger the run.
-
-## Verification
-
-pytest literal green on harness logic (mocked).
+## Scope (locked — do NOT exceed)
+- ADD exactly two routes to `outputs/dashboard.py` after the WhatsApp messages endpoint (~line 2624): `GET /api/emails/search` + `GET /api/emails/read`, both `Depends(verify_api_key)`.
+- ADD two small md formatters (`_format_email_search_md`, `_format_email_read_md`).
+- Logic is single-sourced from `tools.email.dispatch_email("baker_email_search"|"baker_email_read", {...})` — **write NO new SQL** against `email_messages` (its PK is `message_id`, the outlier table — lesson #211; keep that owned in `tools/email.py`).
+- Read-only. No migrations, no new env vars, no new deps, no edits to `tools/email.py` or the WhatsApp endpoint.
 
 ## Acceptance criteria
+- AC1: `python3 -c "import py_compile; py_compile.compile('outputs/dashboard.py', doraise=True)"` passes.
+- AC2: `grep -nE '@app.get\("/api/emails/(search|read)"' outputs/dashboard.py` → exactly one each (no shadow — lesson #11).
+- AC3: Live prod (post-deploy) — `GET /api/emails/search?query=Annaberg&format=md` with X-Baker-Key returns ≥1 match incl. the Balazs "Annaberg Status - Closing actions" email (message_id `...rb0De3zfU=`).
+- AC4: Live prod — `GET /api/emails/read?message_id=<that id>&format=md` returns the body (or the `provider=graph` store-miss hint; `&provider=graph` then returns it).
+- AC5: Auth gate — no X-Baker-Key → 401/403, never 200. Bad `provider=bogus` → 422.
 
-- AC1: harness compares counts per folder per source with explicit numbers in output.
-- AC2: spot-checks executed with named message-ids + attachment hashes (reproducible).
-- AC3: verdict block emitted in exact POST_DEPLOY_AC_VERDICT v1 shape, to lead + cc deputy.
-- AC4: failures listed loud (no silent tolerance eating).
+## Done rubric
+Build-done = PR merged + AC1/AC2 green. Arc-done = `POST_DEPLOY_AC_VERDICT v1` posted to lead with AC3-AC5 PASS (per `post-deploy-ac-bus-gate` SKILL). Two separate done-states — never conflate.
 
-## Done rubric / done-state class
-
-Harness-done = PR merged + pytest literal. Arc-done = verdict posted with overall PASS. Two separate done-states — never conflate in ship reports.
-
-## Context-economy rules (HARD — no auto-compaction exists)
-
-- Read ONLY: post-deploy-ac-bus-gate SKILL.md, b3 schema block in CODE_3_PENDING.md, your new files. Do NOT read b1/b2 scripts — independence is the point.
+## Context-economy (HARD — no auto-compaction)
+- Read ONLY: `briefs/BRIEF_EMAIL_READ_REST_FALLBACK_1.md`, the WhatsApp endpoint block (`outputs/dashboard.py:2543`) as template, `tools/email.py:897` `dispatch_email`. Do not read more of the 11.7k-line dashboard than needed.
 - Output to /tmp; tails only. Context >70%: commit, push, bus handoff, STOP.
