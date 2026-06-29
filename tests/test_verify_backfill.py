@@ -612,3 +612,52 @@ def test_baseline_report_renders_collector_failures_loud(monkeypatch):
     records["plaud"]["collector_failures"] = ["plaud truth collection failed: boom"]
     out = build_baseline_report(records, "abc1234", "seed")
     assert "FAIL collector: plaud truth collection failed: boom" in out
+
+
+# ----------------------------------- F1 read-only guarantee (codex #4629 regression)
+
+def test_plaud_truth_path_never_imports_trigger_state(monkeypatch):
+    """F1 regression: exercising the Plaud truth-collector must NOT import
+    triggers.plaud_trigger / triggers.state, whose module-global TriggerState()
+    runs CREATE TABLE / ALTER TABLE DDL at import time — a read-only violation.
+    The local _plaud_get must reach truth via config.settings + httpx only."""
+    import sys
+    import httpx
+    from config.settings import config
+
+    # Start from a clean slate so we observe whether plaud_truth pulls them in.
+    for mod in ("triggers.state", "triggers.plaud_trigger"):
+        sys.modules.pop(mod, None)
+
+    class _FakeResp:
+        def raise_for_status(self):
+            pass
+
+        def json(self):
+            return {"data_file_total": 3,
+                    "data_file_list": [{"id": 1}, {"id": 2}, {"id": 3}]}
+
+    class _FakeClient:
+        def __init__(self, *a, **k):
+            pass
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *a):
+            return False
+
+        def get(self, *a, **k):
+            return _FakeResp()
+
+    monkeypatch.setattr(httpx, "Client", _FakeClient)
+    monkeypatch.setattr(config.plaud, "api_domain", "https://api.example")
+    monkeypatch.setattr(config.plaud, "api_token", "bearer testtoken")
+
+    total, ids = vb.plaud_truth()
+
+    assert total == 3
+    assert ids == ["1", "2", "3"]
+    # The DDL-at-import modules must NOT have been imported by the Plaud path.
+    assert "triggers.state" not in sys.modules
+    assert "triggers.plaud_trigger" not in sys.modules

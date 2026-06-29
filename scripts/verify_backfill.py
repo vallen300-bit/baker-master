@@ -651,14 +651,46 @@ def latest_timestamp(conn, source: str, which: str = "ingest"):
         raise RuntimeError(f"latest_timestamp({source},{which}) failed: {e}") from e
 
 
+def _plaud_get(path: str, timeout: int = 30) -> dict | None:
+    """Minimal read-only GET to the Plaud web API — a self-contained local copy so
+    the verifier never imports triggers.plaud_trigger. That import chain
+    (triggers.plaud_trigger -> triggers.state, whose module-global TriggerState()
+    runs CREATE TABLE / ALTER TABLE / CREATE INDEX + commit at import time) would
+    violate the read-only guarantee the moment DATABASE_URL is present (F1, codex
+    #4629). This helper imports only config.settings + httpx — neither touches the
+    DB. Mirrors triggers.plaud_trigger._plaud_api's auth shape. GET only — no writes."""
+    import httpx
+    from config.settings import config
+
+    domain = config.plaud.api_domain
+    if not domain:
+        raise RuntimeError("PLAUD_API_DOMAIN not set")
+    token = config.plaud.api_token
+    if not token:
+        raise RuntimeError("PLAUD_TOKEN not set — Plaud truth-collector disabled")
+    # Token from localStorage may already include a "bearer " prefix — use as-is.
+    auth = token if token.lower().startswith("bearer ") else f"Bearer {token}"
+    headers = {"Authorization": auth, "Content-Type": "application/json"}
+    url = f"{domain}{path}"
+    try:
+        with httpx.Client(timeout=timeout) as client:
+            resp = client.get(url, headers=headers)
+            resp.raise_for_status()
+            return resp.json()
+    except Exception as e:
+        raise RuntimeError(f"Plaud GET {path} failed: {e}") from e
+
+
 def plaud_truth() -> tuple:
     """Read-only upstream truth for Plaud: (data_file_total, [recording_ids]).
 
     Truth = `data_file_total` from GET /file/simple/web (the authoritative count;
     fetch_plaud_recordings() returns only data_file_list and discards the total).
-    Falls back to len(list) if the field is absent. GET only — no writes."""
-    from triggers.plaud_trigger import _plaud_api
-    data = _plaud_api("/file/simple/web")
+    Falls back to len(list) if the field is absent. GET only — no writes.
+
+    Uses the local _plaud_get (NOT triggers.plaud_trigger) so exercising the Plaud
+    truth path never triggers triggers.state's import-time DDL (F1, codex #4629)."""
+    data = _plaud_get("/file/simple/web")
     if not data or not isinstance(data, dict):
         raise RuntimeError("Plaud API returned no data (token unset/expired or domain missing)")
     lst = data.get("data_file_list") or []
