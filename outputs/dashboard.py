@@ -2636,7 +2636,17 @@ def _format_email_search_md(data: dict) -> str:
     if data.get("backend_unavailable"):
         return ("⚠️ Email search backend unavailable — retry; do NOT read this "
                 "as 'no mail'.")
-    matches = data.get("matches", []) or []
+    matches = data.get("matches")
+    if matches is None and isinstance(data.get("results"), dict):
+        # provider=all: matches live nested under results.{store,graph}.
+        matches = []
+        for sub in data["results"].values():
+            if isinstance(sub, dict):
+                if sub.get("backend_unavailable"):
+                    return ("⚠️ Email search backend unavailable — retry; do NOT "
+                            "read this as 'no mail'.")
+                matches.extend(sub.get("matches") or [])
+    matches = matches or []
     if not matches:
         return f"No emails matched: {data.get('query', '')}"
     lines = [f"# Email search: {data.get('query', '')} ({len(matches)} match(es))", ""]
@@ -2645,8 +2655,9 @@ def _format_email_search_md(data: dict) -> str:
             f"- **{m.get('subject') or '(no subject)'}** — "
             f"{m.get('sender') or '?'} — {m.get('date') or '?'}"
         )
-        lines.append(f"  `{m.get('message_id')}` [{m.get('source') or '?'}]")
-        snip = (m.get('snippet') or '').strip().replace("\n", " ")
+        src = m.get("source") or m.get("provider") or "?"
+        lines.append(f"  `{m.get('message_id')}` [{src}]")
+        snip = (m.get("snippet") or "").strip().replace("\n", " ")
         if snip:
             lines.append(f"  {snip[:300]}")
     return "\n".join(lines)
@@ -2657,12 +2668,16 @@ def _format_email_read_md(data: dict) -> str:
         return (f"⚠️ {data['error']} "
                 f"(message_id: {data.get('message_id', '?')})"
                 + (f" — {data['hint']}" if data.get("hint") else ""))
-    msg = data.get("message", {}) or {}
-    body = msg.get("full_body") or "(empty body)"
+    # store read wraps the row under "message"; graph read returns fields at top level.
+    msg = data.get("message") or data
+    sender = msg.get("sender_name") or msg.get("sender_email") or msg.get("sender") or "?"
+    dt = msg.get("received_date") or msg.get("date") or "?"
+    source = msg.get("source") or msg.get("provider") or "?"
+    body = msg.get("full_body") or msg.get("body") or "(empty body)"
     return "\n".join([
         f"# {msg.get('subject') or '(no subject)'}",
-        f"From: {msg.get('sender_name') or msg.get('sender_email') or '?'}",
-        f"Date: {msg.get('received_date') or '?'}  |  Source: {msg.get('source') or '?'}",
+        f"From: {sender}",
+        f"Date: {dt}  |  Source: {source}",
         f"Message-ID: {msg.get('message_id')}",
         "",
         body,
@@ -2679,7 +2694,7 @@ async def emails_search_endpoint(
         "store", description="store = merged email_messages (reliable, default); "
                              "graph = live M365 (freshest, pre-ingestion); all = both"),
     source: Optional[str] = Query(None,
-                       description="Optional exact source filter: gmail | graph | exchange"),
+                       description="optional exact ingest-source filter (e.g. graph, gmail, bluewin, email)"),
     limit: int = Query(10, ge=1, le=50),
     fmt: Literal["json", "md"] = Query("json", alias="format"),
 ):
