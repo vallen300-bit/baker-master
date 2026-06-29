@@ -54,6 +54,20 @@ def test_non_matching_email_does_not_ticket():
     assert bridge.build_email_ticket(other) is None
 
 
+def test_automated_clickup_notification_email_does_not_ticket():
+    arrival = _arrival()
+    automated = bridge.EmailArrival(
+        **{
+            **arrival.__dict__,
+            "sender_name": "Dimitry Vallen's Workspace",
+            "sender_email": "notifications@tasks.clickup.com",
+            "subject": "[Overdue] 2. Write financing working brief (room deliverable)",
+            "full_body": "Aukera Annaberg financing task is overdue.",
+        }
+    )
+    assert bridge.build_email_ticket(automated) is None
+
+
 def test_format_ticket_for_bus_includes_check_in_contract():
     ticket = bridge.build_email_ticket(
         _arrival(),
