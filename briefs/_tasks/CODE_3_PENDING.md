@@ -1,5 +1,5 @@
 ---
-status: PENDING
+status: MERGED
 brief_id: INGESTION_COMPLETENESS_P0_MEASURE_1
 to: b3
 from: lead
