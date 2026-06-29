@@ -1,5 +1,5 @@
 ---
-status: PENDING
+status: MERGED
 brief_id: CORRELATION_ID_PRIMITIVE_1
 to: b2
 from: lead
