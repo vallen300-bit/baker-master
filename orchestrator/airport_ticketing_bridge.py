@@ -38,6 +38,14 @@ _DEFAULT_MATTER = "lilienmatt"
 _DEFAULT_FLIGHT = "aukera-annaberg-financing"
 _DEFAULT_LOOKBACK_HOURS = 48
 _DEFAULT_MAX_POSTS = 5
+_SKIP_EMAIL_SENDER_PATTERNS = (
+    "noreply@",
+    "no-reply@",
+    "notifications@",
+    "notification@",
+    "@clickup.com",
+    "@todoist.com",
+)
 
 VALID_CHECK_IN_OUTCOMES = frozenset(
     {"VALID", "FAKE", "DUPLICATE", "WRONG_TERMINAL", "URGENT", "NEEDS_LUGGAGE_READ"}
@@ -181,12 +189,22 @@ def _originator(arrival: EmailArrival) -> str:
     return name or email or "unknown"
 
 
+def _is_automated_email_arrival(arrival: EmailArrival) -> bool:
+    sender = (arrival.sender_email or "").strip().lower()
+    if not sender:
+        return False
+    return any(pattern in sender for pattern in _SKIP_EMAIL_SENDER_PATTERNS)
+
+
 def build_email_ticket(
     arrival: EmailArrival,
     *,
     now: Optional[datetime] = None,
     keywords: tuple[str, ...] | None = None,
 ) -> Optional[AirportTicket]:
+    if _is_automated_email_arrival(arrival):
+        return None
+
     keys = keywords or active_keywords()
     haystack = f"{arrival.subject} {arrival.full_body}".lower()
     matched = [kw for kw in keys if kw and kw.lower() in haystack]
