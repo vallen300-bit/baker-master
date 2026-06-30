@@ -1,5 +1,8 @@
 ---
-status: PENDING
+status: SHIPPED_AWAITING_GATES
+pr: 442
+head_sha: 8a168eb
+shipped_at: 2026-07-01
 brief_id: BOX5_TICKETING_RUNNER_1
 to: b4
 from: lead
