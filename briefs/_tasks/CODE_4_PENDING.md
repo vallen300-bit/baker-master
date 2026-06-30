@@ -1,5 +1,9 @@
 ---
-status: PENDING
+status: SHIPPED_AWAITING_GATES
+pr: 439
+head_sha: 00d3fd4
+shipped_at: 2026-06-30
+rework_rounds: 3 (codex G3: F1+F2 fixed r1; F3 fixed r2; F4+self-audit fixed r3)
 brief_id: PROJECT_NUMBER_REGISTRY_1
 to: b4
 from: lead
