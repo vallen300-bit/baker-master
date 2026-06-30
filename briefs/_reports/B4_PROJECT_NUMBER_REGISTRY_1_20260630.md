@@ -78,3 +78,30 @@ Codex confirmed F1 + F2 fixed; raised one new P2. Fixed on the same branch.
 
 Re-gate G1 all green: py_compile clean; check_singletons OK; **pytest 13 passed** live against local PG 16.
 Re-gate chain on return: codex G3 re-gate → lead merge (G4 holds).
+
+---
+
+## Rework round 3 — codex G3 re-gate#2: F3 PASS, new F4 + self-audit (bus #4699) → fixed, HEAD `00d3fd4`
+Codex confirmed F3 fixed (F1/F2 hold); raised one new P2 (F4). Lead also asked me to break the one-finding-per-round cycle with a fresh adversarial whole-module read. Both done on the same branch + same push.
+
+- **F4 [P2]** `resolve_project_number` was non-deterministic on multi-number text: it built the lookup keys into a `set` (lost text order), then `match_key = ANY(%s) LIMIT 1` with no `ORDER BY`, so the DB returned an arbitrary match (probe: `'AO-MOV-002 then BB-AUK-001'` could return either). Fix per lead's contract decision (return type stays single `Optional[dict]`; conflict detection is Box 5's job): (1) build an **ordered, de-duped** key list from `_NUMBER_RE.finditer` preserving first-occurrence text order; (2) one bounded query `WHERE status='active' AND match_key = ANY(%s) LIMIT len(keys)`; (3) in Python pick the row whose `match_key` (now selected via a dedicated `_HARD_SELECT`, index 8) has the smallest text index. An earlier **unregistered** regex hit is skipped, so the first *registered* match wins. Docstring tightened. Regressions: `test_resolve_project_number_text_order_deterministic` (forward + reverse), `test_resolve_project_number_returns_first_registered_not_first_regex_hit`.
+
+### Self-audit (fresh adversarial read of the whole module) — what I found + fixed
+- **JSONB shape on read** — `resolve_by_alias` iterated `(r[6] or [])` directly; if the global psycopg2 jsonb typecaster were ever unset, `r[6]` arrives as a `str` and `for a in "<str>"` would iterate characters (silent wrong behaviour). Added `_as_list()` (None→[], str→`json.loads`, non-list→[]); applied in `_row_to_dict` (participants + aliases) and the alias scan. **Fixed.**
+- **Soft-lane ordering** — both soft-lane scans had no `ORDER BY`, so when active rows exceed the cap (`resolve_by_participant` LIMIT 10; `resolve_by_alias` LIMIT 200 → `[:10]`) the returned subset was non-deterministic. Added `ORDER BY project_number` to both. Regression: `test_resolve_by_participant_deterministic_order`. **Fixed.**
+- **`status='retired'` rows** — confirmed the `status='active'` filter holds across all three resolvers; no public path sets `retired` today, but added a regression that flips a row to `retired` via SQL and asserts all three resolvers exclude it. **Confirmed + locked by test.**
+- **`_match_key` vs canonical consistency** — the hard lane previously relied on the round-trip invariant (`_match_key(stored project_number) == stored match_key`) to map a hit back; now it maps via the row's **actual `match_key` column** (`_HARD_SELECT` index 8), removing the implicit dependency. **Hardened.**
+- **empty / dup keys** — the new ordered-key builder skips empty keys and de-dups (`if k and k not in seen`); a repeated number in one text resolves once. **Covered.**
+- No other correctness/contract/edge gaps found on this read.
+
+Re-gate G1 all green: py_compile clean (module + tests); check_singletons OK; **pytest 17 passed** live against local PG 16 (all 4 new tests included), 17 skipped without `TEST_DATABASE_URL`:
+```
+collected 17 items
+... (13 prior) ...
+test_resolve_project_number_text_order_deterministic PASSED              [ 82%]
+test_resolve_project_number_returns_first_registered_not_first_regex_hit PASSED [ 88%]
+test_resolvers_exclude_retired_rows PASSED                               [ 94%]
+test_resolve_by_participant_deterministic_order PASSED                   [100%]
+========================= 17 passed, 1 warning in 0.27s =========================
+```
+Re-gate chain on return: codex G3 re-gate#2 → lead merge (G4 holds). Ship report → cowork-ah1; re-gate-ready ping → lead.
