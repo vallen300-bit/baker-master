@@ -1,9 +1,9 @@
 ---
 status: SHIPPED_AWAITING_GATES
 pr: 439
-head_sha: 57f8817
+head_sha: 8d6726e
 shipped_at: 2026-06-30
-rework_rounds: 1 (codex G3 F1+F2 fixed)
+rework_rounds: 2 (codex G3: F1+F2 fixed r1; F3 fixed r2)
 brief_id: PROJECT_NUMBER_REGISTRY_1
 to: b4
 from: lead

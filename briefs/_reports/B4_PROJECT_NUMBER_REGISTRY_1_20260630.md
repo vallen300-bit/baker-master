@@ -68,3 +68,13 @@ Re-gate G1 all green: py_compile clean; check_singletons OK; **pytest 11 passed*
 collected 11 items ... 11 passed, 1 warning in 0.09s
 ```
 Re-gate chain on return: codex G3 re-gate (effort medium) → lead merge (G4 holds).
+
+---
+
+## Rework round 2 — codex G3 re-gate: F1+F2 PASS, new F3 (bus #4694) → fixed, HEAD `8d6726e`
+Codex confirmed F1 + F2 fixed; raised one new P2. Fixed on the same branch.
+
+- **F3 [P2]** `register_project` used `_NUMBER_RE.match()` (prefix match), so `'BB-AUK-001 extra'` was accepted and stored with `match_key='BBAUK001EXTRA'` — but `resolve_project_number` keys off the matched DESK/MATTER/digit groups (`'BBAUK001'`), so the stored row was **unreachable by the hard lane** (violates the brief's "store display 'BB-AUK-001' + match_key 'BBAUK001'" contract). Fix: (1) validate with `_NUMBER_RE.fullmatch()` — trailing junk now raises `ValueError`; (2) canonicalize the stored display form + match_key from the matched groups (`f"{g1}-{g2}-{g3}".upper()`), so they always round-trip; (3) removed the now-dead `_desk_code_of` helper. Regressions: `test_register_rejects_trailing_junk`, `test_register_canonicalizes_and_round_trips`.
+
+Re-gate G1 all green: py_compile clean; check_singletons OK; **pytest 13 passed** live against local PG 16.
+Re-gate chain on return: codex G3 re-gate → lead merge (G4 holds).
