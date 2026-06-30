@@ -51,11 +51,6 @@ def _match_key(raw: str) -> str:
     return re.sub(r"[^A-Z0-9]", "", (raw or "").upper())
 
 
-def _desk_code_of(project_number: str) -> Optional[str]:
-    m = _NUMBER_RE.match(project_number.strip())
-    return m.group(1).upper() if m else None
-
-
 def ensure_project_registry_table(conn: Any) -> None:
     """Idempotent boot — safe to call on every use; survives Render restart."""
     with conn.cursor() as cur:
@@ -97,9 +92,13 @@ def register_project(
     prefix is unknown."""
     if not slug_registry.is_canonical(matter_slug):
         raise ValueError(f"matter_slug {matter_slug!r} is not canonical (slugs.yml)")
-    if not _NUMBER_RE.match(project_number.strip()):
+    # fullmatch (not match): trailing text/junk must be rejected, never stored —
+    # else 'BB-AUK-001 extra' would persist with a match_key the hard lane (which
+    # keys off the DESK/MATTER/digit groups) could never reach.
+    m = _NUMBER_RE.fullmatch(project_number.strip())
+    if m is None:
         raise ValueError(f"project_number {project_number!r} is not DESK-MATTER-### form")
-    desk_code = _desk_code_of(project_number)
+    desk_code = m.group(1).upper()
     if desk_code not in DESK_CODES:
         raise ValueError(f"unknown desk code {desk_code!r} (allowed: {sorted(DESK_CODES)})")
     # Prefix is the routing authority — desk_owner must not contradict it.
@@ -110,7 +109,12 @@ def register_project(
             f"(prefix routes to {expected_owner!r}); the prefix is authoritative"
         )
 
-    key = _match_key(project_number)
+    # Canonicalize the stored display form + match_key from the matched groups so
+    # they always round-trip: display 'BB-AUK-001' <-> match_key 'BBAUK001'. The
+    # hard lane keys off the same groups, so a tolerant input ('BB-AUK001') still
+    # resolves to its canonical row.
+    canonical_number = f"{m.group(1)}-{m.group(2)}-{m.group(3)}".upper()
+    key = _match_key(canonical_number)
     try:
         ensure_project_registry_table(conn)
         with conn.cursor() as cur:
@@ -131,14 +135,14 @@ def register_project(
                     updated_at      = NOW()
                 """,
                 (
-                    project_number.strip().upper(), key, desk_code, desk_owner, matter_slug,
+                    canonical_number, key, desk_code, desk_owner, matter_slug,
                     clickup_list_id,
                     json.dumps(participants or []),
                     json.dumps(aliases or []),
                 ),
             )
         conn.commit()
-        return project_number.strip().upper()
+        return canonical_number
     except Exception:
         conn.rollback()
         raise

@@ -152,6 +152,34 @@ def test_register_rejects_desk_owner_prefix_mismatch(store):
             )
 
 
+def test_register_rejects_trailing_junk(store):
+    """Codex G3 F3: register uses fullmatch — trailing text is rejected, not
+    silently stored (which would persist a row the hard lane can never reach)."""
+    with get_conn() as conn:
+        with pytest.raises(ValueError):
+            reg.register_project(
+                conn,
+                project_number="BB-AUK-001 extra",
+                desk_owner="baden-baden-desk",
+                matter_slug=CANONICAL_SLUG,
+            )
+
+
+def test_register_canonicalizes_and_round_trips(store):
+    """Codex G3 F3: stored display form + match_key are canonicalized from the
+    matched groups, so a tolerant input ('BB-AUK001') round-trips — the hard lane
+    resolves it via the canonical 'BB-AUK-001'."""
+    returned = _register(
+        project_number="BB-AUK001",
+        desk_owner="baden-baden-desk",
+        matter_slug=CANONICAL_SLUG,
+    )
+    assert returned == "BB-AUK-001"
+    got = reg.resolve_project_number("re: BB-AUK-001 update")
+    assert got is not None
+    assert got["project_number"] == "BB-AUK-001"
+
+
 # --- soft-lane primitives ---------------------------------------------------
 
 
