@@ -40,6 +40,19 @@ if [ -n "$ROGUE_TIERB" ]; then
   ERRORS=$((ERRORS + 1))
 fi
 
+# CLICKUP-SINGLETON-GUARD: ClickUpClient() — shared per-cycle write cap (10/cycle)
+# + 100-req/min rate limiter live on the singleton. A direct ClickUpClient() gets
+# fresh counters, silently bypassing both. Same singleton policy.
+ROGUE_CLICKUP=$(grep -rn 'ClickUpClient()' --include='*.py' \
+  --exclude-dir=tests --exclude-dir=scripts --exclude-dir=briefs --exclude-dir=.claude \
+  . 2>/dev/null | grep -v '_get_global_instance\|_allow_direct\|_instance = cls()' || true)
+
+if [ -n "$ROGUE_CLICKUP" ]; then
+  echo "ERROR: Direct ClickUpClient() instantiation found (use _get_global_instance()):"
+  echo "$ROGUE_CLICKUP"
+  ERRORS=$((ERRORS + 1))
+fi
+
 if [ $ERRORS -gt 0 ]; then
   echo ""
   echo "FAILED: $ERRORS singleton violation(s) found."

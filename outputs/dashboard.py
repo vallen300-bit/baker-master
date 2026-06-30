@@ -13855,7 +13855,7 @@ async def create_clickup_from_alert(request: Request):
         alert_id = body.get("alert_id")
 
         from clickup_client import ClickUpClient
-        client = ClickUpClient()
+        client = ClickUpClient._get_global_instance()
         result = client.create_task(
             list_id="901521426367",  # Handoff Notes
             name=name[:200],

@@ -466,7 +466,7 @@ def write_proposed_actions_to_clickup(
 
     try:
         from clickup_client import ClickUpClient
-        client = ClickUpClient()
+        client = ClickUpClient._get_global_instance()
         task = client.create_task(
             list_id=list_id,
             name=f"Cortex proposal — {cycle_id[:8]} ({triaga_outcome})",
