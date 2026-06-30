@@ -1,8 +1,11 @@
 ---
-status: SHIPPED_AWAITING_GATES
+status: MERGED
 pr: 439
-head_sha: 00d3fd4
+merge_commit: 8284537
+head_sha: deea5da
 shipped_at: 2026-06-30
+merged_at: 2026-06-30
+gates: codex G3 PASS (#4708, after 3 rework rounds) + lead G4 /security-review clean; no deploy (library only)
 rework_rounds: 3 (codex G3: F1+F2 fixed r1; F3 fixed r2; F4+self-audit fixed r3)
 brief_id: PROJECT_NUMBER_REGISTRY_1
 to: b4
