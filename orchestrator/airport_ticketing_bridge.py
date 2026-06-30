@@ -319,6 +319,19 @@ def ensure_airport_ticket_table(conn: Any) -> None:
                 ON airport_tickets (proposed_desk_slug, status, last_sent_at DESC)
             """
         )
+        # BOX5_RECEIPT_TTL_1: nudge-state columns for the stale-ticket TTL sweep.
+        # Mirrors migrations/20260630_airport_tickets_nudge_state.sql so an
+        # already-bootstrapped DB (where CREATE TABLE IF NOT EXISTS no-ops) still
+        # gains the columns — the documented migration-vs-bootstrap drift fix.
+        cur.execute(
+            "ALTER TABLE airport_tickets ADD COLUMN IF NOT EXISTS last_nudged_at TIMESTAMPTZ"
+        )
+        cur.execute(
+            "ALTER TABLE airport_tickets ADD COLUMN IF NOT EXISTS nudge_count INTEGER NOT NULL DEFAULT 0"
+        )
+        cur.execute(
+            "ALTER TABLE airport_tickets ADD COLUMN IF NOT EXISTS escalated_at TIMESTAMPTZ"
+        )
 
 
 def fetch_email_arrivals(

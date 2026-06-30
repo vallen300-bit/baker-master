@@ -188,6 +188,25 @@ def airport_ticketing_tick_interval_seconds() -> int:
     return max(5, min(minutes, 60)) * 60
 
 
+def airport_checkin_tick_enabled() -> bool:
+    """BOX5_RECEIPT_TTL_1 receipt loop is default-off; lead flips the flag."""
+    import os
+
+    raw = os.environ.get("AIRPORT_CHECKIN_SWEEP_ENABLED", "false")
+    return raw.strip().lower() in {"1", "true", "yes", "on"}
+
+
+def airport_checkin_tick_interval_seconds() -> int:
+    """Bound check-in/TTL cadence; fast enough to read receipts, not chatty."""
+    import os
+
+    try:
+        minutes = int(os.environ.get("AIRPORT_CHECKIN_SWEEP_MINUTES", "10"))
+    except (TypeError, ValueError):
+        minutes = 10
+    return max(5, min(minutes, 60)) * 60
+
+
 def _register_jobs(scheduler: BackgroundScheduler):
     """Register all Sentinel trigger jobs.
 
@@ -348,6 +367,29 @@ def _register_jobs(scheduler: BackgroundScheduler):
     else:
         logger.info(
             "airport_ticketing_tick disabled via AIRPORT_TICKETING_BRIDGE_ENABLED - skipping registration"
+        )
+
+    # BOX5_RECEIPT_TTL_1: read desk check-in replies + TTL-nudge stale tickets.
+    # Separate, independently-switchable job from the issue-side tick above.
+    # Default-off; single-replica inherited from scheduler_lease (lock 8800100).
+    if airport_checkin_tick_enabled():
+        from triggers.airport_checkin_tick import run_airport_checkin_tick
+
+        _airport_checkin_interval = airport_checkin_tick_interval_seconds()
+        scheduler.add_job(
+            run_airport_checkin_tick,
+            IntervalTrigger(seconds=_airport_checkin_interval),
+            id="airport_checkin_tick",
+            name="Airport check-in reader + TTL nudge",
+            coalesce=True,
+            max_instances=1,
+            replace_existing=True,
+        )
+        register_expected_job("airport_checkin_tick", _airport_checkin_interval)
+        logger.info(f"Registered: airport_checkin_tick (every {_airport_checkin_interval}s)")
+    else:
+        logger.info(
+            "airport_checkin_tick disabled via AIRPORT_CHECKIN_SWEEP_ENABLED - skipping registration"
         )
 
     # STATE_FILE_REFRESH_1: nightly drift audit at 03:00 UTC (3h before vault_scanner
