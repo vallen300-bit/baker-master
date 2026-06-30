@@ -26,7 +26,9 @@ logger = logging.getLogger("baker.project_registry")
 
 # Desk-code -> desk-slug classifier map (first segment of DESK-MATTER-###).
 # PLACEHOLDER values — confirm canonical desk slugs before non-pilot use.
-# desk_owner stored per-row is authoritative; this map only validates the prefix.
+# The desk prefix is the routing authority (see module docstring): desk_owner
+# MUST equal DESK_CODES[prefix] — a contradicting desk_owner is rejected, never
+# silently stored, so a BB number can never be owned by a non-BB desk.
 DESK_CODES: dict[str, str] = {
     "BB": "baden-baden-desk",
     "AO": "ao-desk",
@@ -100,6 +102,13 @@ def register_project(
     desk_code = _desk_code_of(project_number)
     if desk_code not in DESK_CODES:
         raise ValueError(f"unknown desk code {desk_code!r} (allowed: {sorted(DESK_CODES)})")
+    # Prefix is the routing authority — desk_owner must not contradict it.
+    expected_owner = DESK_CODES[desk_code]
+    if desk_owner != expected_owner:
+        raise ValueError(
+            f"desk_owner {desk_owner!r} contradicts desk prefix {desk_code!r} "
+            f"(prefix routes to {expected_owner!r}); the prefix is authoritative"
+        )
 
     key = _match_key(project_number)
     try:
@@ -201,7 +210,6 @@ def resolve_by_alias(text: str) -> list[dict]:
     signals Box 5 combines; NEVER sufficient alone. Bounded scan (200 active)."""
     if not text:
         return []
-    hay = f" {text.lower()} "
     out: list[dict] = []
     try:
         with get_conn() as conn:
@@ -211,8 +219,12 @@ def resolve_by_alias(text: str) -> list[dict]:
                 rows = cur.fetchall()
         for r in rows:
             for a in (r[6] or []):  # aliases JSONB
-                a = (a or "").strip().lower()
-                if a and f" {a} " in hay:
+                a = (a or "").strip()
+                # True word boundary (not space-padding) so an alias still
+                # matches against punctuation: 'Annaberg:', '(Annaberg)',
+                # 'Aukera-Annaberg'. re.escape handles punctuation + multi-word
+                # aliases ('aukera annaberg').
+                if a and re.search(r"\b" + re.escape(a) + r"\b", text, re.IGNORECASE):
                     out.append(_row_to_dict(r))
                     break
     except Exception as e:

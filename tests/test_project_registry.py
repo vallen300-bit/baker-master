@@ -138,6 +138,20 @@ def test_register_rejects_bad_format(store):
             )
 
 
+def test_register_rejects_desk_owner_prefix_mismatch(store):
+    """Codex G3 F1: the desk prefix is the routing authority — a desk_owner that
+    contradicts the prefix is rejected, never silently stored. A BB number can
+    never be owned by a non-BB desk."""
+    with get_conn() as conn:
+        with pytest.raises(ValueError):
+            reg.register_project(
+                conn,
+                project_number="BB-AUK-001",
+                desk_owner="movie-desk",  # contradicts BB prefix
+                matter_slug=CANONICAL_SLUG,
+            )
+
+
 # --- soft-lane primitives ---------------------------------------------------
 
 
@@ -167,3 +181,24 @@ def test_resolve_by_alias_soft(store):
     hits = reg.resolve_by_alias("notes on Annaberg this week")
     assert isinstance(hits, list)
     assert any(h["project_number"] == "BB-AUK-001" for h in hits)
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        "Annaberg: update",
+        "(Annaberg)",
+        "Aukera-Annaberg update",
+    ],
+)
+def test_resolve_by_alias_matches_through_punctuation(store, text):
+    """Codex G3 F2: alias matching uses a true word boundary, not space-padding,
+    so real subjects with punctuation still hit the soft lane (no false holds)."""
+    _register(
+        project_number="BB-AUK-001",
+        desk_owner="baden-baden-desk",
+        matter_slug=CANONICAL_SLUG,
+        aliases=["annaberg", "aukera annaberg"],
+    )
+    hits = reg.resolve_by_alias(text)
+    assert any(h["project_number"] == "BB-AUK-001" for h in hits), text
