@@ -54,3 +54,17 @@ Build-done only (PR merged + AC1–AC5 green). NO live AC / no `POST_DEPLOY_AC_V
 
 ## Next gates
 G3 codex-verifier (effort medium) → G4 lead `/security-review` → lead merge.
+
+---
+
+## Rework round 1 — codex G3 FAIL (bus #4688) → fixed, HEAD `57f8817`
+Codex G3 returned FAIL with 2 real findings; lead's G4 `/security-review` already PASSED and holds (logic fixes, no new security surface). Both fixed on the same branch (PR #439 updates in place):
+
+- **F1 [P1]** `register_project` accepted a `desk_owner` contradicting the DESK prefix (probe: `BB-AUK-001` + `desk_owner=movie-desk` was accepted) — reintroduces wrong-desk routing. Fix: enforce `desk_owner == DESK_CODES[prefix]`, else `ValueError`; corrected the stale "desk_owner is authoritative" comment (prefix is the routing authority). Regression: `test_register_rejects_desk_owner_prefix_mismatch`.
+- **F2 [P2]** `resolve_by_alias` used space-padding, not word boundaries (probe: `'Annaberg:'`, `'(Annaberg)'`, `'Aukera-Annaberg'` did not match → dropped from soft lane → false holds). Fix: `re.search(r"\b" + re.escape(alias) + r"\b", text, re.IGNORECASE)`. Regression: `test_resolve_by_alias_matches_through_punctuation` (3 parametrized cases).
+
+Re-gate G1 all green: py_compile clean; check_singletons OK; **pytest 11 passed** live against local PG 16:
+```
+collected 11 items ... 11 passed, 1 warning in 0.09s
+```
+Re-gate chain on return: codex G3 re-gate (effort medium) → lead merge (G4 holds).
