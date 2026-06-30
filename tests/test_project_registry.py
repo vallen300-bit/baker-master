@@ -230,3 +230,76 @@ def test_resolve_by_alias_matches_through_punctuation(store, text):
     )
     hits = reg.resolve_by_alias(text)
     assert any(h["project_number"] == "BB-AUK-001" for h in hits), text
+
+
+# --- F4: deterministic text-order hard lane ---------------------------------
+
+
+def test_resolve_project_number_text_order_deterministic(store):
+    """Codex G3 F4: with several registered numbers in one text, the
+    earliest-occurring one wins — deterministically, regardless of which DB row
+    the planner would return first."""
+    _register(
+        project_number="AO-MOV-002", desk_owner="ao-desk", matter_slug=CANONICAL_SLUG,
+    )
+    _register(
+        project_number="BB-AUK-001", desk_owner="baden-baden-desk",
+        matter_slug=CANONICAL_SLUG,
+    )
+    fwd = reg.resolve_project_number("AO-MOV-002 then BB-AUK-001")
+    rev = reg.resolve_project_number("BB-AUK-001 then AO-MOV-002")
+    assert fwd is not None and fwd["project_number"] == "AO-MOV-002"
+    assert rev is not None and rev["project_number"] == "BB-AUK-001"
+
+
+def test_resolve_project_number_returns_first_registered_not_first_regex_hit(store):
+    """Codex G3 F4: an earlier unregistered regex hit is skipped — the first
+    *registered* match in text order is returned, not merely the first regex hit."""
+    _register(
+        project_number="BB-AUK-001", desk_owner="baden-baden-desk",
+        matter_slug=CANONICAL_SLUG,
+    )
+    got = reg.resolve_project_number("ref ZZ-XX-99 see BB-AUK-001")
+    assert got is not None and got["project_number"] == "BB-AUK-001"
+
+
+# --- self-audit regressions (codex G3 re-gate#2) ----------------------------
+
+
+def test_resolvers_exclude_retired_rows(store):
+    """Self-audit: a row flipped to status='retired' is excluded by all three
+    resolvers (the status='active' filter holds across hard + soft lanes)."""
+    _register(
+        project_number="BB-AUK-001", desk_owner="baden-baden-desk",
+        matter_slug=CANONICAL_SLUG,
+        participants=[{"channel": "email", "value": "x@brisengroup.com"}],
+        aliases=["annaberg"],
+    )
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                "UPDATE project_registry SET status = 'retired' "
+                "WHERE project_number = %s",
+                ("BB-AUK-001",),
+            )
+        conn.commit()
+    assert reg.resolve_project_number("re: BB-AUK-001 update") is None
+    assert reg.resolve_by_participant("email", "x@brisengroup.com") == []
+    assert reg.resolve_by_alias("notes on annaberg") == []
+
+
+def test_resolve_by_participant_deterministic_order(store):
+    """Self-audit (soft-lane ordering): multiple projects sharing a participant
+    come back in a deterministic order (ORDER BY project_number)."""
+    shared = [{"channel": "email", "value": "shared@brisengroup.com"}]
+    _register(
+        project_number="BB-AUK-001", desk_owner="baden-baden-desk",
+        matter_slug=CANONICAL_SLUG, participants=shared,
+    )
+    _register(
+        project_number="AO-MOV-002", desk_owner="ao-desk",
+        matter_slug=CANONICAL_SLUG, participants=shared,
+    )
+    nums = [h["project_number"] for h in
+            reg.resolve_by_participant("email", "shared@brisengroup.com")]
+    assert nums == ["AO-MOV-002", "BB-AUK-001"]  # sorted, deterministic

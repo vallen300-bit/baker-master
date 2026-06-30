@@ -148,11 +148,29 @@ def register_project(
         raise
 
 
+def _as_list(v: Any) -> list:
+    """Normalise a JSONB column to a list. psycopg2's default jsonb typecaster
+    returns parsed Python objects, but normalise defensively: None -> [], a str is
+    json-decoded (keeps reads correct if the global jsonb caster is ever unset —
+    otherwise ``for a in "<str>"`` would iterate characters), anything non-list
+    -> []. Self-audit (codex G3 re-gate#2): JSONB shape on read."""
+    if v is None:
+        return []
+    if isinstance(v, str):
+        try:
+            parsed = json.loads(v)
+        except (ValueError, TypeError):
+            return []
+        return parsed if isinstance(parsed, list) else []
+    return v if isinstance(v, list) else []
+
+
 def _row_to_dict(row: tuple) -> dict:
     return {
         "project_number": row[0], "desk_code": row[1], "desk_owner": row[2],
         "matter_slug": row[3], "clickup_list_id": row[4],
-        "participants": row[5], "aliases": row[6], "status": row[7],
+        "participants": _as_list(row[5]), "aliases": _as_list(row[6]),
+        "status": row[7],
     }
 
 
@@ -161,27 +179,62 @@ _SELECT = (
     "participants, aliases, status FROM project_registry "
 )
 
+# Hard lane needs each row's match_key (trailing, index 8) to map a DB hit back to
+# its position in the text-ordered key list (F4 determinism). _row_to_dict reads
+# indices 0-7 only, so the extra column is harmless to it.
+_HARD_SELECT = (
+    "SELECT project_number, desk_code, desk_owner, matter_slug, clickup_list_id, "
+    "participants, aliases, status, match_key FROM project_registry "
+)
+
 
 def resolve_project_number(text: str) -> Optional[dict]:
     """HARD LANE: extract DESK-MATTER-### codes from free text (subject/body) and
-    return the first ACTIVE registered match, else None. A regex hit absent from
-    the registry is rejected (false-positive guard — codex guardrail)."""
+    return the first registered ACTIVE match in TEXT ORDER, else None.
+
+    When several registered numbers appear, the earliest-occurring one wins,
+    deterministically — a regex hit absent from the registry is skipped (so the
+    first *registered* match is returned, not merely the first regex hit). Conflict
+    detection across multiple registered numbers is Box 5's responsibility
+    (downstream), not this primitive's. A regex hit absent from the registry is
+    rejected as a clearance (false-positive guard — codex guardrail).
+
+    F4 (codex G3 re-gate#2): the prior version collected keys into a set (lost text
+    order) and used ``LIMIT 1`` with no ORDER BY, so multi-number text resolved
+    non-deterministically. Now keys preserve first-occurrence order and the winner
+    is chosen in Python by smallest text index."""
     if not text:
         return None
-    keys = {_match_key(f"{m.group(1)}{m.group(2)}{m.group(3)}")
-            for m in _NUMBER_RE.finditer(text)}
-    if not keys:
+    # Ordered, de-duped match keys — preserve first-occurrence text order.
+    ordered_keys: list[str] = []
+    seen: set[str] = set()
+    for m in _NUMBER_RE.finditer(text):
+        k = _match_key(f"{m.group(1)}{m.group(2)}{m.group(3)}")
+        if k and k not in seen:
+            seen.add(k)
+            ordered_keys.append(k)
+    if not ordered_keys:
         return None
     try:
         with get_conn() as conn:
             ensure_project_registry_table(conn)
             with conn.cursor() as cur:
+                # match_key is UNIQUE, so at most len(ordered_keys) rows match;
+                # LIMIT len keeps the query bounded without ever truncating a hit.
                 cur.execute(
-                    _SELECT + "WHERE status = 'active' AND match_key = ANY(%s) LIMIT 1",
-                    (list(keys),),
+                    _HARD_SELECT
+                    + "WHERE status = 'active' AND match_key = ANY(%s) LIMIT %s",
+                    (ordered_keys, len(ordered_keys)),
                 )
-                row = cur.fetchone()
-        return _row_to_dict(row) if row else None
+                rows = cur.fetchall()
+        if not rows:
+            return None
+        by_key = {r[8]: r for r in rows}  # r[8] = match_key (unique)
+        for k in ordered_keys:
+            r = by_key.get(k)
+            if r is not None:
+                return _row_to_dict(r)
+        return None
     except Exception as e:
         logger.warning(f"resolve_project_number failed: {e}")
         return None
@@ -198,7 +251,8 @@ def resolve_by_participant(channel: str, value: str) -> list[dict]:
             ensure_project_registry_table(conn)
             with conn.cursor() as cur:
                 cur.execute(
-                    _SELECT + "WHERE status = 'active' AND participants @> %s::jsonb LIMIT 10",
+                    _SELECT + "WHERE status = 'active' AND participants @> %s::jsonb "
+                    "ORDER BY project_number LIMIT 10",
                     (needle,),
                 )
                 rows = cur.fetchall()
@@ -219,10 +273,15 @@ def resolve_by_alias(text: str) -> list[dict]:
         with get_conn() as conn:
             ensure_project_registry_table(conn)
             with conn.cursor() as cur:
-                cur.execute(_SELECT + "WHERE status = 'active' LIMIT 200")
+                # ORDER BY makes the bounded 200-row window (and the [:10] slice
+                # below) deterministic when active rows exceed the cap — self-audit
+                # (codex G3 re-gate#2): soft-lane ordering.
+                cur.execute(
+                    _SELECT + "WHERE status = 'active' ORDER BY project_number LIMIT 200"
+                )
                 rows = cur.fetchall()
         for r in rows:
-            for a in (r[6] or []):  # aliases JSONB
+            for a in _as_list(r[6]):  # aliases JSONB
                 a = (a or "").strip()
                 # True word boundary (not space-padding) so an alias still
                 # matches against punctuation: 'Annaberg:', '(Annaberg)',
