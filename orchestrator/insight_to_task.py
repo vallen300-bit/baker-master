@@ -128,7 +128,7 @@ def create_tasks_from_insights(
         # Create ClickUp task in BAKER Handoff Notes list
         try:
             from clickup_client import ClickUpClient
-            client = ClickUpClient()
+            client = ClickUpClient._get_global_instance()
 
             due_date_ms = None
             if due_days and isinstance(due_days, (int, float)):
