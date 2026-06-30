@@ -128,12 +128,23 @@ def _ack(base: str, message_id: int, key: str) -> None:
         logger.warning("airport check-in ack failed id=%s: %s", message_id, e)
 
 
-def _write_checkin(conn: Any, *, parent_id: int, thread_id: Optional[str],
-                   outcome: str, desk_slug: str) -> int:
-    """Guarded receipt write. Returns rows affected (0 if not a 'sent' ticket).
+# Join a reply to its ticket via the bus ids the bridge persisted on send.
+_MATCH_JOIN = "(bus_message_id = %s OR (%s IS NOT NULL AND bus_thread_id = %s))"
 
-    status='sent' precondition makes a re-applied reply a no-op (idempotent) and
-    stops a reply from downgrading a candidate/failed/already-checked-in row.
+
+def _write_checkin(conn: Any, *, parent_id: int, thread_id: Optional[str],
+                   outcome: str, desk_slug: str) -> str:
+    """Guarded receipt write. Returns one of:
+
+    - ``"written"``   — a 'sent' ticket was updated this pass (caller ACKs).
+    - ``"resolved"``  — 0-row write, but a matching ticket already carries a
+                        durable check-in (``check_in_at`` set: an idempotent replay
+                        of an already checked-in/rejected ticket). Caller MUST ACK,
+                        else the reply is re-read forever (F1, brief lines 28+624).
+    - ``"none"``      — no ticket matches the reply (caller leaves it for next tick).
+
+    The status='sent' precondition makes a re-applied reply a no-op and stops a
+    reply from downgrading a candidate/failed/already-checked-in row.
     """
     target_status = _OUTCOME_TO_STATUS[outcome]
     with conn.cursor() as cur:
@@ -147,28 +158,38 @@ def _write_checkin(conn: Any, *, parent_id: int, thread_id: Optional[str],
                 updated_at = NOW()
             WHERE status = 'sent'
               AND check_in_at IS NULL
-              AND (bus_message_id = %s OR (%s IS NOT NULL AND bus_thread_id = %s))
+              AND """ + _MATCH_JOIN + """
             RETURNING ticket_id
             """,
             (outcome, desk_slug[:200], target_status, parent_id, thread_id, thread_id),
         )
         row = cur.fetchone()
-        if not row:
-            return 0
+        if row:
+            cur.execute(
+                """
+                INSERT INTO baker_actions
+                    (action_type, target_task_id, payload, trigger_source, success)
+                VALUES (%s, %s, %s, %s, TRUE)
+                """,
+                (
+                    "airport_ticket.checked_in",
+                    row[0],
+                    _json_param({"outcome": outcome, "by": desk_slug, "status": target_status}),
+                    "airport_checkin_reader",
+                ),
+            )
+            return "written"
+        # 0-row write: classify in the same transaction so the caller knows whether
+        # to ACK (idempotent replay of an already-resolved ticket) or to leave the
+        # reply un-acked (no matching ticket).
         cur.execute(
-            """
-            INSERT INTO baker_actions
-                (action_type, target_task_id, payload, trigger_source, success)
-            VALUES (%s, %s, %s, %s, TRUE)
-            """,
-            (
-                "airport_ticket.checked_in",
-                row[0],
-                _json_param({"outcome": outcome, "by": desk_slug, "status": target_status}),
-                "airport_checkin_reader",
-            ),
+            "SELECT check_in_at FROM airport_tickets WHERE " + _MATCH_JOIN + " LIMIT 1",
+            (parent_id, thread_id, thread_id),
         )
-    return 1
+        match = cur.fetchone()
+    if match is not None and match[0] is not None:
+        return "resolved"
+    return "none"
 
 
 def run_checkin_reader(conn: Any) -> dict[str, Any]:
@@ -176,7 +197,7 @@ def run_checkin_reader(conn: Any) -> dict[str, Any]:
     base, key, slug = _bus_base(), _bridge_key(), _ticketing_slug()
     if not key:
         return {"ok": False, "reason": "ticketing_key_missing", "checked_in": 0}
-    checked_in = parsed_none = unmatched = errors = 0
+    checked_in = already = parsed_none = unmatched = errors = 0
     messages = _fetch_inbox(base, slug, key, _poll_limit())
     for msg in messages:
         try:
@@ -192,16 +213,22 @@ def run_checkin_reader(conn: Any) -> dict[str, Any]:
             if outcome is None:
                 parsed_none += 1
                 continue  # ambiguous/none: never guess; leave un-acked for human/next look
-            affected = _write_checkin(
+            state = _write_checkin(
                 conn, parent_id=int(parent_id), thread_id=msg.get("thread_id"),
                 outcome=outcome, desk_slug=sender,
             )
             conn.commit()  # commit BEFORE ack so a crash re-reads idempotently
-            if affected:
+            if state == "written":
                 checked_in += 1
                 _ack(base, mid, key)
+            elif state == "resolved":
+                # Idempotent replay: the ticket already carries a durable check-in.
+                # The write is a 0-row no-op, but we MUST still ACK or this reply is
+                # re-read forever (F1 — brief lines 28 + 624).
+                already += 1
+                _ack(base, mid, key)
             else:
-                unmatched += 1
+                unmatched += 1  # no matching ticket: leave un-acked for next tick
         except Exception as e:
             try:
                 conn.rollback()
@@ -210,8 +237,8 @@ def run_checkin_reader(conn: Any) -> dict[str, Any]:
             errors += 1
             logger.warning("airport check-in reply failed id=%s: %s", msg.get("id"), e)
             continue  # one bad reply never stops the batch
-    return {"ok": True, "checked_in": checked_in, "parsed_none": parsed_none,
-            "unmatched": unmatched, "errors": errors}
+    return {"ok": True, "checked_in": checked_in, "already": already,
+            "parsed_none": parsed_none, "unmatched": unmatched, "errors": errors}
 
 
 # --- Part 2 — stale-ticket TTL / nudge sweep --------------------------------
@@ -254,6 +281,29 @@ def _select_stale(conn: Any, *, ttl_min: int, cooldown_min: int,
             FOR UPDATE SKIP LOCKED
             """,
             (max_nudges, ttl_min, cooldown_min, cap),
+        )
+        cols = [c[0] for c in cur.description]
+        return [dict(zip(cols, r)) for r in cur.fetchall()]
+
+
+def _select_escalatable(conn: Any, *, max_nudges: int, cap: int) -> list[dict[str, Any]]:
+    """Rows that hit the nudge ceiling but have NOT been escalated yet. Kept
+    separate from the nudge scan so a transient escalation-POST failure leaves
+    escalated_at NULL and the row is retried next sweep (F2) — never stranded."""
+    with conn.cursor() as cur:
+        cur.execute(
+            """
+            SELECT id, ticket_id, proposed_desk_slug
+            FROM airport_tickets
+            WHERE status = 'sent'
+              AND check_in_at IS NULL
+              AND nudge_count >= %s
+              AND escalated_at IS NULL
+            ORDER BY last_sent_at ASC
+            LIMIT %s
+            FOR UPDATE SKIP LOCKED
+            """,
+            (max_nudges, cap),
         )
         cols = [c[0] for c in cur.description]
         return [dict(zip(cols, r)) for r in cur.fetchall()]
@@ -358,24 +408,6 @@ def run_ttl_nudge(conn: Any) -> dict[str, Any]:
                 )
             conn.commit()
             nudged += 1
-
-            if next_n >= max_nudges:
-                esc = _escalate_post(base, key, ticket_id=row["ticket_id"],
-                                     desk_slug=row["proposed_desk_slug"])
-                if not esc.get("error"):
-                    with conn.cursor() as cur:
-                        cur.execute(
-                            """
-                            INSERT INTO baker_actions
-                                (action_type, target_task_id, payload, trigger_source, success)
-                            VALUES (%s, %s, %s, %s, TRUE)
-                            """,
-                            ("airport_ticket.escalated", row["ticket_id"],
-                             _json_param({"to": _ESCALATION_SLUG, "nudge_count": next_n}),
-                             "airport_checkin_reader"),
-                        )
-                    conn.commit()
-                    escalated += 1
         except Exception as e:
             try:
                 conn.rollback()
@@ -383,6 +415,57 @@ def run_ttl_nudge(conn: Any) -> dict[str, Any]:
                 pass
             errors += 1
             logger.warning("airport ttl-nudge row failed id=%s: %s", row.get("id"), e)
+            continue
+
+    # Pass 2 — escalate at-max-but-unescalated rows. Decoupled from the nudge pass
+    # so a failed escalation POST leaves escalated_at NULL and is retried next
+    # sweep (F2: never strand a row at nudge_count>=max without escalating). The
+    # escalated_at guard makes this exactly-once on success.
+    try:
+        esc_rows = _select_escalatable(conn, max_nudges=max_nudges, cap=cap)
+    except Exception as e:
+        try:
+            conn.rollback()
+        except Exception:
+            pass
+        logger.warning("airport escalation select failed: %s", e)
+        esc_rows = []
+    for row in esc_rows:
+        try:
+            esc = _escalate_post(base, key, ticket_id=row["ticket_id"],
+                                 desk_slug=row["proposed_desk_slug"])
+            if esc.get("error"):
+                errors += 1
+                conn.rollback()  # release locks; row stays eligible (escalated_at NULL)
+                continue
+            with conn.cursor() as cur:
+                cur.execute(
+                    """
+                    UPDATE airport_tickets
+                    SET escalated_at = NOW(), updated_at = NOW()
+                    WHERE id = %s AND escalated_at IS NULL
+                    """,
+                    (row["id"],),
+                )
+                cur.execute(
+                    """
+                    INSERT INTO baker_actions
+                        (action_type, target_task_id, payload, trigger_source, success)
+                    VALUES (%s, %s, %s, %s, TRUE)
+                    """,
+                    ("airport_ticket.escalated", row["ticket_id"],
+                     _json_param({"to": _ESCALATION_SLUG}),
+                     "airport_checkin_reader"),
+                )
+            conn.commit()
+            escalated += 1
+        except Exception as e:
+            try:
+                conn.rollback()
+            except Exception:
+                pass
+            errors += 1
+            logger.warning("airport escalation row failed id=%s: %s", row.get("id"), e)
             continue
     return {"ok": True, "nudged": nudged, "escalated": escalated, "errors": errors}
 

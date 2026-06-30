@@ -20,6 +20,11 @@
 
 ALTER TABLE airport_tickets ADD COLUMN IF NOT EXISTS last_nudged_at TIMESTAMPTZ;
 ALTER TABLE airport_tickets ADD COLUMN IF NOT EXISTS nudge_count INTEGER NOT NULL DEFAULT 0;
+-- escalated_at decouples the one-shot escalation from the nudge count so a
+-- transient escalation-POST failure cannot strand a row at nudge_count>=max with
+-- the escalation silently dropped (codex G3 F2). NULL = not yet escalated; the
+-- escalation pass re-scans at-max-but-unescalated rows until it succeeds.
+ALTER TABLE airport_tickets ADD COLUMN IF NOT EXISTS escalated_at TIMESTAMPTZ;
 
 
 -- == migrate:down ==
@@ -28,3 +33,4 @@ ALTER TABLE airport_tickets ADD COLUMN IF NOT EXISTS nudge_count INTEGER NOT NUL
 --
 -- ALTER TABLE airport_tickets DROP COLUMN IF EXISTS last_nudged_at;
 -- ALTER TABLE airport_tickets DROP COLUMN IF EXISTS nudge_count;
+-- ALTER TABLE airport_tickets DROP COLUMN IF EXISTS escalated_at;

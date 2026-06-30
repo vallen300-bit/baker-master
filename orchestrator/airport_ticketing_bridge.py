@@ -329,6 +329,9 @@ def ensure_airport_ticket_table(conn: Any) -> None:
         cur.execute(
             "ALTER TABLE airport_tickets ADD COLUMN IF NOT EXISTS nudge_count INTEGER NOT NULL DEFAULT 0"
         )
+        cur.execute(
+            "ALTER TABLE airport_tickets ADD COLUMN IF NOT EXISTS escalated_at TIMESTAMPTZ"
+        )
 
 
 def fetch_email_arrivals(

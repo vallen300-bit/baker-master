@@ -51,9 +51,10 @@ class FakeBus:
     """Stub for ``_request_json``: serves a canned inbox + bodies, records POSTs
     (re-nudge / escalate) and ACKs. Routes purely on (method, url)."""
 
-    def __init__(self, inbox=None, bodies=None):
+    def __init__(self, inbox=None, bodies=None, fail_escalation=False):
         self.inbox = inbox or []
         self.bodies = bodies or {}
+        self.fail_escalation = fail_escalation
         self.posts: list[dict] = []
         self.acks: list[int] = []
 
@@ -70,6 +71,8 @@ class FakeBus:
         if method == "POST" and "/msg/" in url:
             recipient = url.rsplit("/msg/", 1)[1]
             self.posts.append({"to": recipient, "payload": payload})
+            if self.fail_escalation and recipient == "lead":
+                return {"ok": False, "error": "http_503"}
             return {"ok": True, "message_id": 90000 + len(self.posts)}
         return {"ok": True}
 
@@ -127,7 +130,7 @@ def _insert_ticket(conn, *, ticket_id, status="sent", bus_message_id=None,
 
 def _ticket(conn, ticket_id) -> dict:
     cols = ["status", "check_in_outcome", "check_in_by", "check_in_at",
-            "nudge_count", "last_nudged_at", "last_sent_at"]
+            "nudge_count", "last_nudged_at", "last_sent_at", "escalated_at"]
     with conn.cursor() as cur:
         cur.execute(
             f"SELECT {', '.join(cols)} FROM airport_tickets WHERE ticket_id = %s",
@@ -169,11 +172,15 @@ def test_reader_writes_receipt_acks_and_is_idempotent(pg, monkeypatch):
     assert 5001 in bus.acks
     assert _audit_count(pg, "airport_ticket.checked_in") == 1
 
-    # Re-applying the same reply is a no-op (status no longer 'sent').
+    # F1: re-applying the same reply is a 0-row no-op, but the resolved replay is
+    # STILL ACKed (else the bus reply is re-read forever). Not 'unmatched'.
+    bus.acks.clear()
     out2 = reader.run_checkin_reader(pg)
     assert out2["checked_in"] == 0
-    assert out2["unmatched"] == 1
-    assert _audit_count(pg, "airport_ticket.checked_in") == 1
+    assert out2["already"] == 1
+    assert out2["unmatched"] == 0
+    assert 5001 in bus.acks  # idempotent replay was acked, not stranded
+    assert _audit_count(pg, "airport_ticket.checked_in") == 1  # no second receipt
 
 
 def test_reader_rejected_outcome_maps_to_rejected(pg, monkeypatch):
@@ -220,6 +227,8 @@ def test_reader_unmatched_parent_no_write(pg, monkeypatch):
     out = reader.run_checkin_reader(pg)
     assert out["unmatched"] == 1
     assert out["checked_in"] == 0
+    assert out["already"] == 0
+    assert bus.acks == []  # no matching ticket -> left un-acked for next tick
     assert _ticket(pg, "TK4")["status"] == "sent"  # untouched
 
 
@@ -286,13 +295,48 @@ def test_ttl_nudge_escalates_at_max_then_stops(pg, monkeypatch):
     out = reader.run_ttl_nudge(pg)
     assert out["nudged"] == 1
     assert out["escalated"] == 1
-    assert _ticket(pg, "TKN2")["nudge_count"] == 3
+    t = _ticket(pg, "TKN2")
+    assert t["nudge_count"] == 3
+    assert t["escalated_at"] is not None
     assert any(p["to"] == "lead" for p in bus.posts)
     assert _audit_count(pg, "airport_ticket.escalated") == 1
 
-    # nudge_count now == max -> falls out of the scan; no further nudge.
+    # Escalated + at max -> falls out of both scans; no further nudge or escalation.
     out2 = reader.run_ttl_nudge(pg)
     assert out2["nudged"] == 0
+    assert out2["escalated"] == 0
+
+
+def test_ttl_nudge_escalation_failure_is_retryable(pg, monkeypatch):
+    """F2: a transient escalation-POST failure must NOT strand the row at
+    nudge_count>=max — escalated_at stays NULL and the next sweep retries the
+    escalation (with no extra desk re-ping)."""
+    _insert_ticket(
+        pg, ticket_id="TKN4", last_sent_at=_now() - timedelta(hours=2),
+        last_nudged_at=_now() - timedelta(hours=2), nudge_count=2,
+        ticket={"proposed_desk_slug": "baden-baden-desk"},
+    )
+    bad_bus = FakeBus(fail_escalation=True)
+    monkeypatch.setattr(reader, "_request_json", bad_bus)
+
+    out = reader.run_ttl_nudge(pg)
+    assert out["nudged"] == 1        # the final re-ping still happened
+    assert out["escalated"] == 0     # escalation POST failed
+    assert out["errors"] >= 1
+    t = _ticket(pg, "TKN4")
+    assert t["nudge_count"] == 3
+    assert t["escalated_at"] is None  # NOT stranded — still eligible to escalate
+    assert _audit_count(pg, "airport_ticket.escalated") == 0
+
+    # Retry with a healthy bus: escalates, and does NOT re-ping the desk again.
+    good_bus = FakeBus()
+    monkeypatch.setattr(reader, "_request_json", good_bus)
+    out2 = reader.run_ttl_nudge(pg)
+    assert out2["nudged"] == 0                                   # count==max, no re-ping
+    assert out2["escalated"] == 1
+    assert [p["to"] for p in good_bus.posts] == ["lead"]         # only the escalation
+    assert _ticket(pg, "TKN4")["escalated_at"] is not None
+    assert _audit_count(pg, "airport_ticket.escalated") == 1
 
 
 def test_ttl_nudge_skips_checked_in(pg, monkeypatch):
