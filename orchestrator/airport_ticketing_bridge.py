@@ -109,6 +109,41 @@ def bridge_enabled() -> bool:
     return raw.strip().lower() in {"1", "true", "yes", "on"}
 
 
+# BOX5_TICKETING_RUNNER_1 — runner kill-switch + cursor + gauge constants.
+_FAST_LANE_ENV = "BOX5_FAST_LANE_ENABLED"
+# DISTINCT watermark key — must never collide with the live email poll
+# ('email_poll' / 'email_poll_checked'), or the runner would rewind that cursor.
+_WATERMARK_SOURCE = "airport_ticketing:email"
+_STUCK_ARRIVAL_MINUTES = 30
+# Sentinel desk for REJECT_NOISE rows (build_email_ticket returned None, so no real
+# desk owns the arrival). reserve_noise_row keys the dedup on this so repeated noise
+# de-dups; the row exists only to carry the terminal_status.
+_NOISE_DESK = "unrouted"
+
+
+def fast_lane_enabled() -> bool:
+    """When False, every non-deterministic-clear arrival routes to the safe default
+    terminal_status='TICKET' (full desk review). Freeze-by-flag kill switch
+    (blocker 7b); default closed, no deploy needed to freeze a misroute. BRIEF-C has
+    no fast lane yet — this only future-proofs D/E, but it is read + honored now."""
+    raw = os.environ.get(_FAST_LANE_ENV, "false")
+    return raw.strip().lower() in {"1", "true", "yes", "on"}
+
+
+def trigger_state_get_watermark(source: str) -> datetime:
+    """Lazy wrapper over the trigger_state singleton (avoids a module-load import
+    cycle; single monkeypatch point for tests)."""
+    from triggers.state import trigger_state
+
+    return trigger_state.get_watermark(source)
+
+
+def trigger_state_set_watermark(source: str, timestamp: datetime) -> None:
+    from triggers.state import trigger_state
+
+    trigger_state.set_watermark(source, timestamp)
+
+
 def max_posts_per_tick() -> int:
     try:
         value = int(os.environ.get(_MAX_POSTS_ENV, str(_DEFAULT_MAX_POSTS)))
@@ -777,7 +812,160 @@ def issue_ticket(ticket: AirportTicket, conn: Any) -> dict[str, Any]:
     return {"ok": True, "id": ticket_row_id, "bus_message_id": message_id}
 
 
+def write_terminal_status(
+    conn: Any,
+    *,
+    ticket_row_id: int,
+    terminal_status: str,
+    terminal_reason: str,
+    raw_source_id: str,
+) -> bool:
+    """Single idempotent terminal write — the ONLY path that writes terminal_status.
+
+    Returns True iff THIS call wrote the terminal outcome (rowcount == 1). The
+    ``AND terminal_status IS NULL`` guard makes re-runs and lease-expired reclaims
+    no-ops (0 rows). dedup_key UNIQUE guards duplicate ROWS; this guards duplicate
+    terminal WRITES. Caller wraps in a per-row try/except + rollback.
+    """
+    cur = conn.cursor()
+    try:
+        cur.execute(
+            """
+            UPDATE airport_tickets
+               SET terminal_status = %s,
+                   terminal_reason = %s,
+                   processed_at = NOW(),
+                   terminal_outcome_written_at = NOW(),
+                   raw_source_table = 'email_messages',
+                   raw_source_id = %s
+             WHERE id = %s
+               AND terminal_status IS NULL
+            RETURNING id, ticket_id
+            """,
+            (terminal_status, terminal_reason, raw_source_id, ticket_row_id),
+        )
+        won = cur.fetchone()
+        if won is None:
+            return False
+        cur.execute(
+            """
+            INSERT INTO baker_actions
+                (action_type, target_task_id, payload, trigger_source, success)
+            VALUES ('airport_ticket.terminal_written', %s, %s,
+                    'airport_ticketing_bridge', TRUE)
+            """,
+            (
+                won[1],
+                _json_param(
+                    {
+                        "ticket_id": won[1],
+                        "terminal_status": terminal_status,
+                        "terminal_reason": terminal_reason,
+                    }
+                ),
+            ),
+        )
+        return True
+    finally:
+        cur.close()
+
+
+def _claim_for_terminal(conn: Any, ticket_row_id: int) -> Optional[int]:
+    """Intra-tick row claim. Returns the id iff this tick won the row (not already
+    locked by a concurrent overlapping tick). Single-replica is inherited from
+    scheduler_lease 8800100 — this is row-level overlap safety only, NOT a lease."""
+    cur = conn.cursor()
+    try:
+        cur.execute(
+            """
+            SELECT id
+              FROM airport_tickets
+             WHERE id = %s
+               AND terminal_status IS NULL
+             LIMIT 1
+             FOR UPDATE SKIP LOCKED
+            """,
+            (ticket_row_id,),
+        )
+        row = cur.fetchone()
+        return int(row[0]) if row else None
+    finally:
+        cur.close()
+
+
+def reserve_noise_row(conn: Any, arrival: EmailArrival) -> Optional[int]:
+    """Shape (i): reserve a minimal airport_tickets row for a REJECT_NOISE arrival
+    (build_email_ticket returned None) so the single status-guarded terminal write
+    has a target. Keyed by dedup_key on the noise sentinel desk, so repeated noise
+    de-dups and the terminal write stays idempotent. Returns the row id, or None if
+    no id could be obtained (caller skips, never crashes)."""
+    dedup = _dedup_key("email", arrival.message_id, _NOISE_DESK)
+    cur = conn.cursor()
+    try:
+        cur.execute(
+            """
+            INSERT INTO airport_tickets
+                (ticket_id, dedup_key, source_channel, source_id,
+                 source_received_at, proposed_desk_slug)
+            VALUES (%s, %s, 'email', %s, %s, %s)
+            ON CONFLICT (dedup_key) DO NOTHING
+            RETURNING id
+            """,
+            (
+                f"airport-noise:{arrival.message_id}",
+                dedup,
+                arrival.message_id,
+                arrival.received_date,
+                _NOISE_DESK,
+            ),
+        )
+        row = cur.fetchone()
+        if row:
+            return int(row[0])
+        # dedup collision (already reserved on a prior tick) -> fetch the existing id.
+        cur.execute(
+            "SELECT id FROM airport_tickets WHERE dedup_key = %s LIMIT 1",
+            (dedup,),
+        )
+        existing = cur.fetchone()
+        return int(existing[0]) if existing else None
+    finally:
+        cur.close()
+
+
+def _count_stuck_arrivals(conn: Any) -> int:
+    """Journey gauge (NOT scheduler liveness): arrivals that never reached a
+    terminal disposition. source_received_at is a real existing column."""
+    cur = conn.cursor()
+    try:
+        cur.execute(
+            """
+            SELECT COUNT(*)
+              FROM airport_tickets
+             WHERE terminal_status IS NULL
+               AND source_received_at < NOW() - (%s || ' minutes')::interval
+            """,
+            (_STUCK_ARRIVAL_MINUTES,),
+        )
+        row = cur.fetchone()
+        return int(row[0]) if row else 0
+    finally:
+        cur.close()
+
+
+def _advance(cur_max: Optional[datetime], candidate: Optional[datetime]) -> Optional[datetime]:
+    """Track the max received_date processed this tick (UTC-coerced)."""
+    if candidate is None:
+        return cur_max
+    if candidate.tzinfo is None:
+        candidate = candidate.replace(tzinfo=timezone.utc)
+    if cur_max is None or candidate > cur_max:
+        return candidate
+    return cur_max
+
+
 def run_tick(*, now: Optional[datetime] = None) -> dict[str, Any]:
+    # (a) MASTER GATE — ships dark behind AIRPORT_TICKETING_BRIDGE_ENABLED.
     if not bridge_enabled():
         return {"skipped": True, "reason": f"{_ENABLED_ENV} off"}
     cap = max_posts_per_tick()
@@ -796,39 +984,155 @@ def run_tick(*, now: Optional[datetime] = None) -> dict[str, Any]:
     if not conn:
         return {"skipped": True, "reason": "database_unavailable"}
 
-    issued = 0
-    skipped = 0
-    failed = 0
+    # existing counters + NEW journey counters
+    issued = skipped = failed = 0
+    claimed = terminal_written = lease_skipped = 0
+    deterministic_cleared = defaulted_ticket = 0
+    fast_lane = fast_lane_enabled()  # honored now; only future-proofs D/E
     current = now or _utc_now()
+    max_received: Optional[datetime] = None
     try:
-        ensure_airport_ticket_table(conn)
-        since = current - timedelta(hours=lookback_hours())
+        ensure_airport_ticket_table(conn)  # idempotent; also ensures BRIEF-B terminal cols
+
+        # (b) CURSOR — per-source watermark replaces the constant lookback. Keep the
+        #     lookback as a FLOOR so a fresh/blank cursor cannot scan unbounded. The
+        #     watermark uses a DISTINCT key, never the live email poll.
+        floor = current - timedelta(hours=lookback_hours())
+        try:
+            wm = trigger_state_get_watermark(_WATERMARK_SOURCE)
+        except Exception as e:
+            logger.warning("airport ticketing watermark read failed, using floor: %s", e)
+            wm = floor
+        since = max(wm, floor)
+
         arrivals = fetch_email_arrivals(conn, since=since, limit=cap * 4)
+
         for arrival in arrivals:
             if issued >= cap:
                 break
-            ticket = build_email_ticket(arrival, now=current)
-            if ticket is None:
-                skipped += 1
-                continue
+            # (c) PER-ROW FAULT ISOLATION — one bad row never crashes the tick, and
+            #     an exception NEVER auto-clears (blocker D3): it routes to `failed`,
+            #     never to a deterministic clear.
             try:
+                ticket = build_email_ticket(arrival, now=current)
+
+                # (d) DETERMINISTIC CLEAR — REJECT_NOISE (automated sender / no active
+                #     keyword): build_email_ticket returns None for exactly these.
+                if ticket is None:
+                    noise_id = reserve_noise_row(conn, arrival)
+                    if noise_id is not None and write_terminal_status(
+                        conn,
+                        ticket_row_id=noise_id,
+                        terminal_status="REJECT_NOISE",
+                        terminal_reason="automated_sender_or_no_active_keyword",
+                        raw_source_id=arrival.message_id,
+                    ):
+                        terminal_written += 1
+                        deterministic_cleared += 1
+                    skipped += 1
+                    conn.commit()
+                    max_received = _advance(max_received, arrival.received_date)
+                    continue
+
+                # (e) RESERVE — DUPLICATE deterministic clear via dedup_key collision.
                 result = issue_ticket(ticket, conn)
+                row_id = result.get("id")
+
+                if (
+                    result.get("skipped")
+                    and result.get("reason") == "duplicate"
+                    and row_id
+                ):
+                    claim = _claim_for_terminal(conn, row_id)
+                    if claim is None:
+                        lease_skipped += 1
+                        conn.commit()
+                        max_received = _advance(max_received, arrival.received_date)
+                        continue
+                    claimed += 1
+                    if write_terminal_status(
+                        conn,
+                        ticket_row_id=row_id,
+                        terminal_status="DUPLICATE",
+                        terminal_reason="dedup_key_collision",
+                        raw_source_id=arrival.message_id,
+                    ):
+                        terminal_written += 1
+                        deterministic_cleared += 1
+                    skipped += 1
+                    conn.commit()
+                    max_received = _advance(max_received, arrival.received_date)
+                    continue
+
+                # (f) SAFE DEFAULT — TICKET (full desk review). With no D/E fast lane
+                #     built (and/or fast_lane False), every non-clear arrival lands
+                #     here. A None row_id (reserve race) is a no-op, never a crash.
+                if not row_id:
+                    lease_skipped += 1
+                    conn.commit()
+                    max_received = _advance(max_received, arrival.received_date)
+                    continue
+
+                claim = _claim_for_terminal(conn, row_id)
+                if claim is None:
+                    lease_skipped += 1
+                    conn.commit()
+                    max_received = _advance(max_received, arrival.received_date)
+                    continue
+                claimed += 1
+                if write_terminal_status(
+                    conn,
+                    ticket_row_id=row_id,
+                    terminal_status="TICKET",
+                    terminal_reason="safe_default_desk_review",
+                    raw_source_id=arrival.message_id,
+                ):
+                    terminal_written += 1
+                    defaulted_ticket += 1
+                if result.get("ok"):
+                    issued += 1
+                elif result.get("reason") == "bus_failed":
+                    failed += 1
                 conn.commit()
-            except Exception as e:
+                max_received = _advance(max_received, arrival.received_date)
+
+            except Exception as exc:  # ERROR NEVER AUTO-CLEARS (blocker D3)
                 try:
                     conn.rollback()
                 except Exception:
                     pass
-                logger.warning("airport ticketing issue failed: %s", e)
                 failed += 1
+                logger.warning("airport_ticketing run_tick row failed: %s", exc)
                 continue
-            if result.get("ok"):
-                issued += 1
-            elif result.get("skipped"):
-                skipped += 1
-            else:
-                failed += 1
-        return {"ok": True, "issued": issued, "skipped": skipped, "failed": failed}
+
+        # (g) ADVANCE CURSOR only on a clean tick, only to the max received_date
+        #     actually processed. A tick that threw before here does not advance.
+        if max_received is not None:
+            try:
+                trigger_state_set_watermark(_WATERMARK_SOURCE, max_received)
+            except Exception as e:
+                logger.warning("airport ticketing watermark advance failed: %s", e)
+
+        stuck_arrivals = _count_stuck_arrivals(conn)
+        stats = {
+            "ok": True,
+            "issued": issued,
+            "skipped": skipped,
+            "failed": failed,
+            "claimed": claimed,
+            "terminal_written": terminal_written,
+            "lease_skipped": lease_skipped,
+            "deterministic_cleared": deterministic_cleared,
+            "defaulted_ticket": defaulted_ticket,
+            "stuck_arrivals": stuck_arrivals,
+            # Read + surfaced for observability. In BRIEF-C the fast lane is not
+            # built, so this flag has NO behavioral branch yet — it only gates the
+            # future D/E lanes (project-number / manifest). Deterministic clears
+            # (DUPLICATE / REJECT_NOISE) and the safe-default TICKET run regardless.
+            "fast_lane": fast_lane,
+        }
+        logger.info("airport_ticketing run_tick stats: %s", stats)
+        return stats
     except Exception as e:
         try:
             conn.rollback()
