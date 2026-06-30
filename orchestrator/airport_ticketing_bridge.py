@@ -332,6 +332,75 @@ def ensure_airport_ticket_table(conn: Any) -> None:
         cur.execute(
             "ALTER TABLE airport_tickets ADD COLUMN IF NOT EXISTS escalated_at TIMESTAMPTZ"
         )
+    # Additive terminal-classification axis (BOX5_SCHEMA_FOUNDATION_1 / BRIEF-B).
+    # Mirrors migrations/20260630_airport_tickets_terminal_columns.sql. The
+    # CREATE TABLE IF NOT EXISTS above never migrates an already-created prod
+    # table, so we ALTER here; this also re-asserts the constraint on every
+    # Render restart so the migration can't be silently reverted.
+    ensure_airport_ticket_terminal_columns(conn)
+
+
+def ensure_airport_ticket_terminal_columns(conn: Any) -> None:
+    """Additive terminal-classification axis on airport_tickets (BRIEF-B).
+
+    CREATE TABLE IF NOT EXISTS does NOT migrate an already-created prod table, so
+    we ALTER here and mirror migrations/20260630_airport_tickets_terminal_columns.sql
+    verbatim (Lesson #50 migration-vs-bootstrap drift). Re-asserted on every Render
+    restart so the migration can't be silently reverted.
+
+    terminal_status is ORTHOGONAL to the live `status` lifecycle and to
+    `check_in_outcome` — new axis, new column, new CHECK. Do NOT touch those two.
+
+    All columns nullable (or NOT NULL with a list DEFAULT) -> safe on a populated
+    table; no backfill required.
+    """
+    try:
+        with conn.cursor() as cur:
+            # Terminal-result fields written later by the runner (BRIEF-C) and the
+            # fast lanes (BRIEF-D/E). BRIEF-B only creates the columns.
+            cur.execute("ALTER TABLE airport_tickets ADD COLUMN IF NOT EXISTS terminal_status TEXT")
+            cur.execute("ALTER TABLE airport_tickets ADD COLUMN IF NOT EXISTS terminal_reason TEXT")
+            cur.execute("ALTER TABLE airport_tickets ADD COLUMN IF NOT EXISTS project_code TEXT")
+            cur.execute("ALTER TABLE airport_tickets ADD COLUMN IF NOT EXISTS matter_slug TEXT")
+            cur.execute("ALTER TABLE airport_tickets ADD COLUMN IF NOT EXISTS desk_owner TEXT")
+            cur.execute("ALTER TABLE airport_tickets ADD COLUMN IF NOT EXISTS source_refs JSONB NOT NULL DEFAULT '[]'::jsonb")
+            cur.execute("ALTER TABLE airport_tickets ADD COLUMN IF NOT EXISTS confidence NUMERIC(3,2)")
+            cur.execute("ALTER TABLE airport_tickets ADD COLUMN IF NOT EXISTS model_used TEXT")
+            cur.execute("ALTER TABLE airport_tickets ADD COLUMN IF NOT EXISTS cost_tier TEXT")
+            cur.execute("ALTER TABLE airport_tickets ADD COLUMN IF NOT EXISTS classification_version TEXT")
+            cur.execute("ALTER TABLE airport_tickets ADD COLUMN IF NOT EXISTS registry_version TEXT")
+            cur.execute("ALTER TABLE airport_tickets ADD COLUMN IF NOT EXISTS manifest_match_signals JSONB NOT NULL DEFAULT '[]'::jsonb")
+            cur.execute("ALTER TABLE airport_tickets ADD COLUMN IF NOT EXISTS raw_source_table TEXT")
+            cur.execute("ALTER TABLE airport_tickets ADD COLUMN IF NOT EXISTS raw_source_id TEXT")
+            cur.execute("ALTER TABLE airport_tickets ADD COLUMN IF NOT EXISTS processed_at TIMESTAMPTZ")
+            cur.execute("ALTER TABLE airport_tickets ADD COLUMN IF NOT EXISTS terminal_outcome_written_at TIMESTAMPTZ")
+
+            # terminal_status CHECK — EXACTLY 6 states. VISIBLE_HOLD is DELIBERATELY
+            # EXCLUDED (locked decision #4677.7): it gets its own owner + TTL +
+            # escalation + sweep brief; adding it here would make it prematurely
+            # writable. Do NOT "fix" this omission. DROP-then-ADD mirrors the
+            # signal_queue precedent so re-runs are clean (idempotent).
+            cur.execute("ALTER TABLE airport_tickets DROP CONSTRAINT IF EXISTS airport_tickets_terminal_status_check")
+            cur.execute(
+                """
+                ALTER TABLE airport_tickets ADD CONSTRAINT airport_tickets_terminal_status_check
+                    CHECK (
+                        terminal_status IS NULL OR
+                        terminal_status IN (
+                            'DUPLICATE',
+                            'REJECT_NOISE',
+                            'REJECT_LOW_RELEVANCE',
+                            'FAST_TICKET',
+                            'TICKET',
+                            'FILE_UNSORTED'
+                        )
+                    )
+                """
+            )
+        conn.commit()
+    except Exception:
+        conn.rollback()
+        raise
 
 
 def fetch_email_arrivals(

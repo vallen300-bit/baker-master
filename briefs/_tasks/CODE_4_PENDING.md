@@ -1,5 +1,8 @@
 ---
-status: PENDING
+status: SHIPPED_AWAITING_GATES
+pr: 441
+head_sha: 8ffd790
+shipped_at: 2026-06-30
 brief_id: BOX5_SCHEMA_FOUNDATION_1
 to: b4
 from: lead
