@@ -1,8 +1,11 @@
 ---
-status: SHIPPED_AWAITING_GATES
+status: MERGED
 pr: 441
-head_sha: 8ffd790
+merge_commit: ddb2ea4
+head_sha: 873c491
 shipped_at: 2026-06-30
+merged_at: 2026-06-30
+gates: codex G3 PASS (#4735, clean first pass) + lead G4 /security-review clean; additive schema, deployed; seed NOT run (Director annaberg confirm pending)
 brief_id: BOX5_SCHEMA_FOUNDATION_1
 to: b4
 from: lead
