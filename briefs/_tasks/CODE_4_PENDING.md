@@ -1,47 +1,40 @@
 ---
-status: MERGED
-pr: 440
-merge_commit: 63a2dd8
-head_sha: 97fa4d8
-shipped_at: 2026-06-30
-merged_at: 2026-06-30
-gates: codex G3 PASS (#4729, after 1 rework round — 2 P1s) + lead G4 /security-review clean; deployed DARK (AIRPORT_CHECKIN_SWEEP_ENABLED=false), activation pending Director GO
-brief_id: BOX5_RECEIPT_TTL_1
+status: PENDING
+brief_id: BOX5_SCHEMA_FOUNDATION_1
 to: b4
 from: lead
 dispatched_by: cowork-ah1
 dispatched_at: 2026-06-30
-branch: box5-receipt-ttl-1
+branch: box5-schema-foundation-1
 reply_target: cowork-ah1 (bus) for ship report; gate verdicts to lead
 effort: medium
-task_class: additive + tiny idempotent ALTER (new scheduler check-in reader + TTL/nudge sweep); ships DARK behind AIRPORT_CHECKIN_SWEEP_ENABLED (default false)
-gate_plan: G1 builder self-check (pytest 3 new files + py_compile + check_singletons) -> codex G3 (bus, effort medium) -> lead G4 /security-review -> lead merge. Deploy = lead flips AIRPORT_CHECKIN_SWEEP_ENABLED post-merge (Director GO for ACTIVATION); POST_DEPLOY_AC_VERDICT v1 after flag-on.
-full_brief: briefs/BRIEF_BOX5_RECEIPT_TTL_1.md
+task_class: additive schema (airport_tickets terminal columns + own CHECK) + gated one-off BB pilot seed script (NOT auto-run)
+gate_plan: G1 builder self-check -> codex G3 (bus, effort medium) -> lead G4 /security-review -> lead merge. Migration applies on boot (additive, idempotent); seed is one-off + Director-gated (annaberg confirm) — do NOT run it. No deploy flag (pure additive schema).
+full_brief: briefs/BRIEF_BOX5_SCHEMA_FOUNDATION_1.md
 ---
 
-# BOX5_RECEIPT_TTL_1 — Airport-ticket check-in reader + stale-ticket TTL nudge (Box 5 Build Order 1-2)
+# BOX5_SCHEMA_FOUNDATION_1 — airport_tickets terminal columns + gated BB pilot seed (Box 5 Build Order 3-4)
 
 ## Read this first
-The complete, copy-pasteable implementation is in **`briefs/BRIEF_BOX5_RECEIPT_TTL_1.md`** (673 lines, on main, committed alongside this dispatch). Implement exactly as written there. This envelope carries only dispatch metadata + acceptance gates. Brief authored via /write-brief + signature-verify by cowork-ah1; do not redesign.
+Complete copy-pasteable impl in **`briefs/BRIEF_BOX5_SCHEMA_FOUNDATION_1.md`** (433 lines, on main, committed alongside this dispatch). Implement exactly. Brief authored + verifier-checked by cowork-ah1; do not redesign. This envelope = dispatch metadata + gates only.
 
 ## Context (one paragraph)
-Baker OS V2 / Box 5 Build Order steps 1-2, the #439-INDEPENDENT receipt loop. Part 1: a check-in reply-reader polls the ticketing slug's bus inbox, maps desk replies to tickets (bus_message_id=parent_id, fallback bus_thread_id=thread_id), writes check_in_outcome/at/by + flips status sent->checked_in/rejected, ACKs AFTER the write commits (crash-safe dedup). Part 2: a stale-ticket TTL/nudge sweep re-pings the owning desk for sent+unacked tickets, escalates to lead after N nudges (FOR UPDATE SKIP LOCKED + cooldown = no double-nudge). Keeps matter desks asleep until a boarding pass or escalation exists.
+Box 5 Build Order 3-4, the schema foundation (no runner, no fast-lane logic). PR #440 (receipt/TTL) already merged — this builds ON it. Part 1: additive `airport_tickets` terminal columns — a dedicated `terminal_status` column with its OWN CHECK over exactly 6 states (DUPLICATE, REJECT_NOISE, REJECT_LOW_RELEVANCE, FAST_TICKET, TICKET, FILE_UNSORTED — VISIBLE_HOLD deliberately EXCLUDED, its own later brief) + 15 result fields, via new `ensure_airport_ticket_terminal_columns` mirrored in `ensure_airport_ticket_table` + versioned `migrations/20260630_airport_tickets_terminal_columns.sql`. Live `status` + `check_in_outcome` CHECKs are an ORTHOGONAL axis — UNTOUCHED. Part 2: idempotent gated BB pilot seed via new `scripts/seed_bb_pilot_registry.py` calling #439's `register_project`.
 
 ## Scope (locked — do NOT exceed)
-- NEW `orchestrator/airport_checkin_reader.py` (`run_checkin_sweep`) + thin `triggers/airport_checkin_tick.py` wrapper + ~6-line registration block in `triggers/embedded_scheduler.py`.
-- ONE additive idempotent migration: `ALTER TABLE airport_tickets ADD COLUMN IF NOT EXISTS last_nudged_at TIMESTAMPTZ; ADD COLUMN IF NOT EXISTS nudge_count INTEGER NOT NULL DEFAULT 0;` — mirrored inside `ensure_airport_ticket_table` (dodge migration-vs-bootstrap drift). Receipt columns already exist — untouched.
-- Ships DARK behind `AIRPORT_CHECKIN_SWEEP_ENABLED` (default false). Single-replica via existing `scheduler_lease` (lock 8800100) — NO new lock.
-- 3 new test files. No edits to the existing ticket-issue path.
+- Part 1: additive terminal columns + own CHECK, mirrored in `ensure_airport_ticket_table` + versioned migration. Do NOT touch live `status`/`check_in_outcome` CHECKs or indexes.
+- Part 2: `scripts/seed_bb_pilot_registry.py` — one-off, gated, NOT auto-run on boot. Calls `register_project` (PR #439). matter_slug=**annaberg** (the Baden-Baden project vehicle; "AUK" is the human mnemonic, NOT the aukera lender — matches #439's seed_bb_pilot).
+- Additive only. No new env, no deps, every SELECT LIMIT, rollback in except. No collision with PR #440's columns (last_nudged_at/nudge_count/escalated_at) — those are merged; add only the terminal-status set.
 
 ## Acceptance criteria
-- AC1: `python3 -c "import py_compile; py_compile.compile('orchestrator/airport_checkin_reader.py', doraise=True)"` + the tick wrapper compile clean.
-- AC2: `pytest` the 3 new test files → all pass (live-PG auto-skip without TEST_DATABASE_URL; CI runs live).
-- AC3: `bash scripts/check_singletons.sh` OK.
-- AC4: With flag false, scheduler logs "skipping registration" — jobs do NOT register (dark-ship proof).
-- AC5: ACK-after-commit ordering verified by test (crash before ACK → re-read is idempotent, no double-write).
+- AC1: `py_compile` clean (migration-runner-applied migration + the seed script).
+- AC2: `pytest` new tests pass (live-PG auto-skip without TEST_DATABASE_URL; CI live).
+- AC3: `bash scripts/check_singletons.sh` OK; `bash scripts/check_applied_migrations.sh` OK.
+- AC4: terminal_status CHECK rejects an out-of-set value; the 6 valid states accepted; VISIBLE_HOLD rejected (excluded by design).
+- AC5: migration + bootstrap mirror both add the same columns (no migration-vs-bootstrap drift); live `status`/`check_in_outcome` axis unchanged.
 
 ## Done rubric
-Build-done = PR merged + AC1-AC5 green. Arc-done (separate) = lead flips `AIRPORT_CHECKIN_SWEEP_ENABLED=true` (Director GO for activation) → `POST_DEPLOY_AC_VERDICT v1` with live receipt-loop + TTL-nudge proof. Two done-states — do not conflate.
+Build-done = PR merged + AC1-AC5 green + migration applies clean on boot. Seed is NOT run by this build — seed execution is a separate Director-gated step (annaberg matter confirm). No deploy flag (pure additive schema; columns unused until the runner brief consumes them).
 
 ## Context-economy (HARD — no auto-compaction)
-- Read ONLY the files named in the brief's Context Contract. Output to /tmp; tails only. Context >70%: commit, push, bus handoff, STOP.
+- Read ONLY the files in the brief's Context Contract. Output to /tmp; tails only. Context >70%: commit, push, bus handoff, STOP.
