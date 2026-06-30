@@ -4318,6 +4318,24 @@ async def documents_ocr_extract_missing(
     }
 
 
+@app.get("/livez", tags=["system"], include_in_schema=False)
+@app.get("/healthz", tags=["system"], include_in_schema=False)
+async def liveness_probe():
+    """Cheap liveness probe for the Render HTTP health check.
+
+    Deliberately does NO I/O — no DB, Qdrant, sentinel, vault or object-store
+    calls. It only answers "is this process's event loop responsive?". The rich
+    `/health` endpoint below remains for monitoring/dashboard consumers.
+
+    Rationale (incident 2026-06-30T08:48Z): Render's 5s health probe pointed at
+    the heavy `/health` was starved while a 23s dashboard request saturated the
+    single instance, so Render restarted a live process — an 78s self-inflicted
+    outage worse than the transient blip. A probe that depends only on the event
+    loop restarts on a real wedge but not on transient DB/Qdrant slowness.
+    """
+    return {"status": "ok"}
+
+
 @app.get("/health", tags=["system"], include_in_schema=False)
 async def health_check():
     """Public health endpoint for Render + monitoring. No auth required."""
