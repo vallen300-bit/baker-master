@@ -1,5 +1,8 @@
 ---
-status: PENDING
+status: SHIPPED_AWAITING_GATES
+pr: 439
+head_sha: c8334d0
+shipped_at: 2026-06-30
 brief_id: PROJECT_NUMBER_REGISTRY_1
 to: b4
 from: lead
