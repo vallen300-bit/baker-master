@@ -69,7 +69,7 @@ def test_active_creates_task_with_correct_list_id(monkeypatch, tmp_path: Path):
     fake_client = mock.MagicMock()
     fake_client.create_task.return_value = fake_task
     fake_module = mock.MagicMock()
-    fake_module.ClickUpClient.return_value = fake_client
+    fake_module.ClickUpClient._get_global_instance.return_value = fake_client
 
     with mock.patch.dict("sys.modules", {"clickup_client": fake_module}):
         result = write_proposed_actions_to_clickup(
@@ -96,7 +96,7 @@ def test_tag_only_matter_routes_to_parent(monkeypatch, tmp_path: Path):
     fake_client = mock.MagicMock()
     fake_client.create_task.return_value = fake_task
     fake_module = mock.MagicMock()
-    fake_module.ClickUpClient.return_value = fake_client
+    fake_module.ClickUpClient._get_global_instance.return_value = fake_client
 
     with mock.patch.dict("sys.modules", {"clickup_client": fake_module}):
         write_proposed_actions_to_clickup(
