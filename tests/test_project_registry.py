@@ -303,3 +303,45 @@ def test_resolve_by_participant_deterministic_order(store):
     nums = [h["project_number"] for h in
             reg.resolve_by_participant("email", "shared@brisengroup.com")]
     assert nums == ["AO-MOV-002", "BB-AUK-001"]  # sorted, deterministic
+
+
+# --- BOX5_SCHEMA_FOUNDATION_1: BB pilot seed -------------------------------
+
+
+def test_seed_bb_pilot_registry_constants_consistent():
+    """Pure check: the seed's desk_owner must equal the desk derived from its
+    project number's prefix (BB -> baden-baden-desk), and its matter_slug must be
+    the resolved 'annaberg' (not the 'aukera' lender). Catches a silent drift
+    between the seed constants and #439's DESK_CODES authority."""
+    import scripts.seed_bb_pilot_registry as seed
+    assert seed.PROJECT_NUMBER == "BB-AUK-001"
+    assert seed.MATTER_SLUG == "annaberg"
+    prefix = seed.PROJECT_NUMBER.split("-", 1)[0]
+    assert prefix == "BB"
+    assert seed.DESK_OWNER == reg.DESK_CODES[prefix] == "baden-baden-desk"
+
+
+def test_seed_mechanism_one_row_desk_routing_idempotent(store):
+    """Mirror of the seed's register_project call (the fixture-vault canonical slug
+    stands in for the real 'annaberg' — same validation path, CI-safe). Proves
+    done-rubric #8 structurally: one BBAUK001 row, BB desk routing, idempotent."""
+    for _ in range(2):  # second run upserts -> still exactly one row
+        _register(
+            project_number="BB-AUK-001",
+            desk_owner="baden-baden-desk",
+            matter_slug=CANONICAL_SLUG,
+            aliases=["annaberg", "aukera annaberg"],
+        )
+    got = reg.resolve_project_number("re: BB-AUK-001 funding")
+    assert got is not None
+    assert got["project_number"] == "BB-AUK-001"
+    assert got["desk_code"] == "BB"
+    assert got["desk_owner"] == "baden-baden-desk"
+    assert got["status"] == "active"
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                "SELECT count(*) FROM project_registry WHERE match_key = %s",
+                ("BBAUK001",),
+            )
+            assert cur.fetchone()[0] == 1
