@@ -1,8 +1,11 @@
 ---
-status: SHIPPED_AWAITING_GATES
+status: MERGED
 pr: 440
-head_sha: 5dc0f79
+merge_commit: 63a2dd8
+head_sha: 97fa4d8
 shipped_at: 2026-06-30
+merged_at: 2026-06-30
+gates: codex G3 PASS (#4729, after 1 rework round — 2 P1s) + lead G4 /security-review clean; deployed DARK (AIRPORT_CHECKIN_SWEEP_ENABLED=false), activation pending Director GO
 brief_id: BOX5_RECEIPT_TTL_1
 to: b4
 from: lead
