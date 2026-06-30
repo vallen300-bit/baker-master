@@ -60,3 +60,16 @@ Build-done only (PR merged + AC1–AC5 green). **No deploy in this PR** — arc-
 
 ## Gate chain
 G1 (builder, done) → codex G3 (bus, effort medium) → lead G4 `/security-review` → lead merge. Do NOT flip the flag (lead's call post-merge).
+
+---
+
+## Rework round 1 — codex G3 FAIL: 2 P1 reliability bugs (bus #4725) → fixed, code SHA `5dc0f79`
+Both were genuine fault-tolerance defects. My earlier "AC5 proven" was wrong — the replay test asserted `unmatched` instead of the ACK; corrected.
+
+- **F1 [P1] Replay ACK idempotency broken.** A reply mapping to an already-checked-in ticket affected 0 rows; the code only ACKed on a fresh write, so the 0-row path counted `unmatched` and never ACKed → a crash after commit-before-ack made that bus reply re-read forever. **Fix:** `_write_checkin` now returns `"written" | "resolved" | "none"`; on 0 rows it classifies in the same transaction (does a matching ticket already carry a durable `check_in_at`?). `run_checkin_reader` ACKs on both `written` and `resolved` (idempotent replay), leaving only true `none` (no matching ticket) un-acked. New `already` counter. Regression `test_reader_writes_receipt_acks_and_is_idempotent` now asserts the replay **is** ACKed (`5001 in acks`) with no second receipt; `test_reader_unmatched_parent_no_write` asserts a true no-match is left un-acked.
+- **F2 [P1] Final escalation lost on transient POST failure.** The inline path bumped `nudge_count` to max + committed, then escalated only on success; a failed escalation POST left the row at `nudge_count>=max` with no escalation, and the `nudge_count < max` scan excluded it forever → escalation silently dropped. **Fix (codex option b):** new additive `escalated_at` column (migration + mirrored bootstrap). Escalation is now a **separate pass** over `status='sent' AND check_in_at IS NULL AND nudge_count>=max AND escalated_at IS NULL` (`FOR UPDATE SKIP LOCKED`). Success sets `escalated_at` + audit (exactly-once via the guard); failure increments `errors` + rolls back, leaving `escalated_at` NULL so the next sweep retries — with no extra desk re-ping (the nudge scan already excludes a maxed row). Regression `test_ttl_nudge_escalation_failure_is_retryable`: a failed escalation leaves the row eligible; the healthy retry escalates with only the `lead` POST and no re-ping.
+
+**Migration note:** the additive migration now carries **3** idempotent `ADD COLUMN IF NOT EXISTS` columns (`last_nudged_at`, `nudge_count`, `escalated_at`) — `escalated_at` is the codex-sanctioned F2 fix, mirrored in `ensure_airport_ticket_table`. Still one migration file, still additive/idempotent, issue path untouched.
+
+Re-gate G1 all green: py_compile clean; check_singletons OK; **pytest 41 passed** live against local PG 16 (was 40; +1 escalation-retry test); 23 passed / 8 skipped without `TEST_DATABASE_URL`.
+Re-gate chain on return: codex G3 re-gate → lead G4 → merge.

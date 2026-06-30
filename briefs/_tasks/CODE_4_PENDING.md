@@ -1,7 +1,7 @@
 ---
 status: SHIPPED_AWAITING_GATES
 pr: 440
-head_sha: b6c621c
+head_sha: 5dc0f79
 shipped_at: 2026-06-30
 brief_id: BOX5_RECEIPT_TTL_1
 to: b4
