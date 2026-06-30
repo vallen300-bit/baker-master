@@ -1,46 +1,42 @@
 ---
-status: MERGED
-pr: 441
-merge_commit: ddb2ea4
-head_sha: 873c491
-shipped_at: 2026-06-30
-merged_at: 2026-06-30
-gates: codex G3 PASS (#4735, clean first pass) + lead G4 /security-review clean; additive schema, deployed; seed NOT run (Director annaberg confirm pending)
-brief_id: BOX5_SCHEMA_FOUNDATION_1
+status: PENDING
+brief_id: BOX5_TICKETING_RUNNER_1
 to: b4
 from: lead
 dispatched_by: cowork-ah1
-dispatched_at: 2026-06-30
-branch: box5-schema-foundation-1
+dispatched_at: 2026-07-01
+branch: box5-ticketing-runner-1
 reply_target: cowork-ah1 (bus) for ship report; gate verdicts to lead
-effort: medium
-task_class: additive schema (airport_tickets terminal columns + own CHECK) + gated one-off BB pilot seed script (NOT auto-run)
-gate_plan: G1 builder self-check -> codex G3 (bus, effort medium) -> lead G4 /security-review -> lead merge. Migration applies on boot (additive, idempotent); seed is one-off + Director-gated (annaberg confirm) — do NOT run it. No deploy flag (pure additive schema).
-full_brief: briefs/BRIEF_BOX5_SCHEMA_FOUNDATION_1.md
+effort: medium-high (builder — concurrency/idempotency/error-routing); codex G3 effort medium (focus the reliability matrix, NOT xhigh)
+task_class: EXTEND existing airport_ticketing run_tick (per-source cursor + FOR UPDATE SKIP LOCKED claim + status-guarded single terminal write); ships DARK behind 2 kill-switches
+gate_plan: G1 builder self-check incl. the 8-case idempotency/concurrency/error-routing test matrix (write FIRST) -> codex G3 (bus, effort medium, focus reliability) -> lead G4 /security-review -> lead merge. Dark ship, no activation. C MUST merge before D/E dispatch (they plug into C's classify hook in the same file).
+full_brief: briefs/BRIEF_BOX5_TICKETING_RUNNER_1.md
 ---
 
-# BOX5_SCHEMA_FOUNDATION_1 — airport_tickets terminal columns + gated BB pilot seed (Box 5 Build Order 3-4)
+# BOX5_TICKETING_RUNNER_1 — extend run_tick into the Box 5 ticketing runner (Build Order 5)
 
 ## Read this first
-Complete copy-pasteable impl in **`briefs/BRIEF_BOX5_SCHEMA_FOUNDATION_1.md`** (433 lines, on main, committed alongside this dispatch). Implement exactly. Brief authored + verifier-checked by cowork-ah1; do not redesign. This envelope = dispatch metadata + gates only.
+Complete copy-pasteable impl in **`briefs/BRIEF_BOX5_TICKETING_RUNNER_1.md`** (492 lines, on main, committed alongside). Implement exactly. Brief authored + verifier-checked by cowork-ah1; do not redesign. Prereqs all merged: #439 registry, #440 receipt/TTL, #441 terminal schema.
 
 ## Context (one paragraph)
-Box 5 Build Order 3-4, the schema foundation (no runner, no fast-lane logic). PR #440 (receipt/TTL) already merged — this builds ON it. Part 1: additive `airport_tickets` terminal columns — a dedicated `terminal_status` column with its OWN CHECK over exactly 6 states (DUPLICATE, REJECT_NOISE, REJECT_LOW_RELEVANCE, FAST_TICKET, TICKET, FILE_UNSORTED — VISIBLE_HOLD deliberately EXCLUDED, its own later brief) + 15 result fields, via new `ensure_airport_ticket_terminal_columns` mirrored in `ensure_airport_ticket_table` + versioned `migrations/20260630_airport_tickets_terminal_columns.sql`. Live `status` + `check_in_outcome` CHECKs are an ORTHOGONAL axis — UNTOUCHED. Part 2: idempotent gated BB pilot seed via new `scripts/seed_bb_pilot_registry.py` calling #439's `register_project`.
+Box 5 Build Order 5 — the runner. EXTEND the EXISTING `airport_ticketing` run_tick (NO new scheduler/lease/cursor table; single-replica still inherited from lease 8800100). Adds: per-source cursor via existing `trigger_watermarks` (key `airport_ticketing:email`, replaces today's constant 48h re-scan); `FOR UPDATE SKIP LOCKED` row claim (intra-tick safety); a status-guarded SINGLE terminal write (`UPDATE ... WHERE id=%s AND terminal_status IS NULL` — the ONLY terminal-write path, so re-run = 0 rows, no double-write); deterministic clears ONLY (DUPLICATE via dedup_key, REJECT_NOISE via automated-sender/no-keyword), everything else → TICKET (full desk review). NO project-number lane (D), NO manifest lane (E), NO VISIBLE_HOLD.
 
 ## Scope (locked — do NOT exceed)
-- Part 1: additive terminal columns + own CHECK, mirrored in `ensure_airport_ticket_table` + versioned migration. Do NOT touch live `status`/`check_in_outcome` CHECKs or indexes.
-- Part 2: `scripts/seed_bb_pilot_registry.py` — one-off, gated, NOT auto-run on boot. Calls `register_project` (PR #439). matter_slug=**annaberg** (the Baden-Baden project vehicle; "AUK" is the human mnemonic, NOT the aukera lender — matches #439's seed_bb_pilot).
-- Additive only. No new env, no deps, every SELECT LIMIT, rollback in except. No collision with PR #440's columns (last_nudged_at/nudge_count/escalated_at) — those are merged; add only the terminal-status set.
+- Extend run_tick in `orchestrator/airport_ticketing_bridge.py`. Writes terminal_status/terminal_reason/processed_at/terminal_outcome_written_at/raw_source_*.
+- Kill-switches: master = existing `AIRPORT_TICKETING_BRIDGE_ENABLED` (dark); NEW `BOX5_FAST_LANE_ENABLED` (default false) → routes everything to safe-default TICKET while still clearing backlog (freeze a misroute by flag flip, no deploy).
+- Errors NEVER auto-clear (a throw must be distinguishable from a no-match; error → leave terminal_status NULL + count).
+- Per-tick stats + stuck-arrivals gauge (terminal_status IS NULL AND source_received_at < NOW()-30min).
+- Additive/extend only; do NOT add D's project-number lane or E's manifest lane. Parameterized SQL, LIMIT on selects, rollback in except.
 
 ## Acceptance criteria
-- AC1: `py_compile` clean (migration-runner-applied migration + the seed script).
-- AC2: `pytest` new tests pass (live-PG auto-skip without TEST_DATABASE_URL; CI live).
-- AC3: `bash scripts/check_singletons.sh` OK; `bash scripts/check_applied_migrations.sh` OK.
-- AC4: terminal_status CHECK rejects an out-of-set value; the 6 valid states accepted; VISIBLE_HOLD rejected (excluded by design).
-- AC5: migration + bootstrap mirror both add the same columns (no migration-vs-bootstrap drift); live `status`/`check_in_outcome` axis unchanged.
+- AC1: `py_compile` clean; `bash scripts/check_singletons.sh` OK.
+- AC2: the 8-case test matrix (idempotency, concurrency/SKIP LOCKED, error-routing, cursor advance, dedup, noise-reject, safe-default-TICKET, stuck-gauge) — all pass (live-PG auto-skip without TEST_DATABASE_URL; CI live).
+- AC3: re-run over an already-terminal row = 0 rows updated (status-guarded single write proven).
+- AC4: `BOX5_FAST_LANE_ENABLED=false` → every arrival → TICKET (no deterministic clearing); flag true → DUPLICATE/REJECT_NOISE clear deterministically.
+- AC5: a raised exception in classify leaves terminal_status NULL (NOT cleared) + increments the error count.
 
 ## Done rubric
-Build-done = PR merged + AC1-AC5 green + migration applies clean on boot. Seed is NOT run by this build — seed execution is a separate Director-gated step (annaberg matter confirm). No deploy flag (pure additive schema; columns unused until the runner brief consumes them).
+Build-done = PR merged + AC1-AC5 green. Ships DARK (master flag off). NO activation this build — that's a later Director GO. C must merge before D/E dispatch.
 
 ## Context-economy (HARD — no auto-compaction)
-- Read ONLY the files in the brief's Context Contract. Output to /tmp; tails only. Context >70%: commit, push, bus handoff, STOP.
+- Read ONLY the files in the brief's Context Contract. Output to /tmp; tails only. Context >70%: commit, push, bus handoff, STOP. Reminder: a prior Box-5 job (PR #440) passed the builder's own self-check but codex caught 2 P1 crash-path bugs — write the reliability test matrix FIRST and make it assert real crash/concurrency/error paths, not happy-path.
