@@ -1003,6 +1003,48 @@ def test_thread_continuity_explicit_code_in_reply_skips_thread_lane(runner, hard
         assert cur.fetchone()[0] == "safe_default_desk_review"
 
 
+# 35 — codex G3 #4925 fix: the column alone is forward-only, so a code-bound ticket
+#      that predates the migration keeps thread_id NULL and continuity misses it. The
+#      migration BACKFILL recovers thread_id from email_messages (primary) AND, when the
+#      source email is pruned, from the ticket JSONB luggage (fallback) — so continuity
+#      works for already-ticketed threads, not only post-deploy ones. Runs the REAL
+#      migration SQL against a row forced to the pre-migration state.
+def test_thread_continuity_backfill_recovers_null_thread_id(runner, hard_lane, monkeypatch):
+    monkeypatch.setenv("BOX5_FAST_LANE_ENABLED", "true")
+    hard_lane("BB-AUK-001", participants=[{"channel": "email", "value": _BOUND_SENDER}])
+    _seed_email(runner, "bf_orig", subject="aukera funding", thread_id="T-BF",
+                sender_email=_BOUND_SENDER, body="review BB-AUK-001",
+                received=_now() - timedelta(hours=3))
+    bridge.run_tick()   # -> FAST_TICKET row for bf_orig, thread_id populated
+    assert _terminal(runner, "bf_orig")[0] == "FAST_TICKET"
+
+    migration_sql = (Path(__file__).parent.parent / "migrations"
+                     / "20260701c_airport_tickets_thread_id.sql").read_text()
+
+    # --- primary path: source email still in email_messages ---
+    with runner.cursor() as cur:
+        cur.execute("UPDATE airport_tickets SET thread_id = NULL WHERE raw_source_id = 'bf_orig'")
+        cur.execute(migration_sql)
+        cur.execute("SELECT thread_id FROM airport_tickets WHERE raw_source_id = 'bf_orig'")
+        assert cur.fetchone()[0] == "T-BF"   # recovered from email_messages
+
+    # --- fallback path: source email pruned -> recover from the ticket JSONB luggage ---
+    with runner.cursor() as cur:
+        cur.execute("UPDATE airport_tickets SET thread_id = NULL WHERE raw_source_id = 'bf_orig'")
+        cur.execute("DELETE FROM email_messages WHERE message_id = 'bf_orig'")
+        cur.execute(migration_sql)
+        cur.execute("SELECT thread_id FROM airport_tickets WHERE raw_source_id = 'bf_orig'")
+        assert cur.fetchone()[0] == "T-BF"   # recovered from ticket JSONB luggage
+
+    # --- continuity now works for a code-less reply on the recovered thread ---
+    _seed_email(runner, "bf_reply", subject="re: aukera", thread_id="T-BF",
+                sender_email=_OTHER_SENDER, body="aukera reply, no code",
+                received=_now() - timedelta(hours=1))
+    s = bridge.run_tick()
+    assert s["thread_routed_ticket"] == 1
+    assert _terminal(runner, "bf_reply")[0] == "TICKET"
+
+
 # ============================================================================
 # BOX5_OUTBOUND_INGEST_1 — direction-aware ingestion (Increment 1). Outbound
 # (Brisen-controlled sender) short-circuits BEFORE build_email_ticket + every lane:
