@@ -419,25 +419,39 @@ def test_excluded_wellknown_and_subtree_pruned():
 
 
 def test_excluded_folder_ids_resolves_wellknown():
-    """Each well-known folder name is resolved to its real id for the deny-set."""
+    """Each well-known folder name is resolved to its real id; complete=True."""
     client = _fake_client(ready=True)
     client.get.side_effect = [
         {"id": "sent-id"}, {"id": "drafts-id"},
         {"id": "deleted-id"}, {"id": "junk-id"},
     ]
-    ids = gmt._excluded_folder_ids(client)
+    ids, complete = gmt._excluded_folder_ids(client)
     assert ids == {"sent-id", "drafts-id", "deleted-id", "junk-id"}
+    assert complete is True
     # resolved via well-known names (locale-proof), one GET each
     paths = [c.args[0] for c in client.get.call_args_list]
     assert any(p.endswith("/mailFolders/sentitems") for p in paths)
     assert any(p.endswith("/mailFolders/junkemail") for p in paths)
 
 
+def test_excluded_folder_ids_incomplete_when_lookup_none():
+    """codex G3: a well-known lookup returning None marks the set INCOMPLETE (so the
+    caller fails closed) — never silently trusted as authoritative."""
+    client = _fake_client(ready=True)
+    client.get.side_effect = [
+        {"id": "sent-id"}, None,            # drafts lookup fails
+        {"id": "deleted-id"}, {"id": "junk-id"},
+    ]
+    ids, complete = gmt._excluded_folder_ids(client)
+    assert complete is False
+    assert "sent-id" in ids                 # the ones that resolved are still returned
+
+
 def test_folder_list_cached_not_reenumerated_within_ttl():
     """lead: bound the walk to a cached list, not every tick. Two polls within TTL →
     one enumeration."""
     client = _fake_client(ready=True)
-    with mock.patch.object(gmt, "_excluded_folder_ids", return_value=set()) as exc, \
+    with mock.patch.object(gmt, "_excluded_folder_ids", return_value=(set(), True)) as exc, \
          mock.patch.object(gmt, "_enumerate_folders",
                            return_value=_folders("inbox-id")) as enum:
         first = gmt._get_pollable_folders(client)
@@ -451,7 +465,7 @@ def test_folder_cache_refreshes_after_ttl():
     """A stale cache (older than TTL) triggers a fresh enumeration."""
     client = _fake_client(ready=True)
     from datetime import datetime, timezone, timedelta
-    with mock.patch.object(gmt, "_excluded_folder_ids", return_value=set()), \
+    with mock.patch.object(gmt, "_excluded_folder_ids", return_value=(set(), True)), \
          mock.patch.object(gmt, "_enumerate_folders",
                            return_value=_folders("inbox-id")) as enum:
         gmt._get_pollable_folders(client)
@@ -461,6 +475,70 @@ def test_folder_cache_refreshes_after_ttl():
         )
         gmt._get_pollable_folders(client)
     assert enum.call_count == 2         # re-enumerated after expiry
+
+
+# ── codex G3 HIGH regression: fail-closed hard-exclude (German-locale safety) ─
+def test_fail_closed_when_excludes_unresolved_on_cold_cache():
+    """codex G3 HIGH: if the well-known hard-exclude lookup is INCOMPLETE and there is
+    no last-known-good set, REFUSE to poll (return []) rather than walk folders and
+    risk returning a localized Sent/Junk ('Gesendete Elemente') as pollable. The walk
+    must never run in this state."""
+    client = _fake_client(ready=True)
+    with mock.patch.object(gmt, "_excluded_folder_ids",
+                           return_value=({"sent-id"}, False)), \
+         mock.patch.object(gmt, "_enumerate_folders") as enum:
+        folders = gmt._get_pollable_folders(client)
+    assert folders == []                # fail-closed
+    enum.assert_not_called()            # never walked → never exposed an unclassified folder
+
+
+def test_poll_fails_closed_raises_end_to_end():
+    """End-to-end: unresolved excludes + cold cache → poll RAISES (report_failure,
+    watermark not advanced), and no message-delta fetch is issued."""
+    client = _fake_client(ready=True)
+    with mock.patch.object(gmt, "GraphClient", return_value=client), \
+         mock.patch.object(gmt, "_excluded_folder_ids",
+                           return_value=({"sent-id"}, False)):
+        with pytest.raises(RuntimeError):
+            gmt.poll_graph_mail()
+    # never reached a per-folder delta GET (the exclusion set was untrustworthy)
+    assert client.get.call_count == 0
+
+
+def test_reuse_last_known_good_on_resolution_blip():
+    """A transient incomplete resolution AFTER a complete one reuses the proven
+    excluded-id set (does not fail closed, does not fall back to display-strings)."""
+    client = _fake_client(ready=True)
+    from datetime import datetime, timezone, timedelta
+    captured = []
+    with mock.patch.object(gmt, "_excluded_folder_ids",
+                           side_effect=[({"sent-id", "drafts-id"}, True),
+                                        ({"sent-id"}, False)]), \
+         mock.patch.object(gmt, "_enumerate_folders",
+                           side_effect=lambda c, excluded: captured.append(set(excluded))
+                           or _folders("inbox-id")):
+        gmt._get_pollable_folders(client)                 # complete → caches good set
+        gmt._folder_cache["fetched_at"] = (
+            datetime.now(timezone.utc) - gmt._FOLDER_CACHE_TTL - timedelta(minutes=1)
+        )
+        gmt._get_pollable_folders(client)                 # incomplete → reuse good set
+    assert captured[0] == {"sent-id", "drafts-id"}
+    assert captured[1] == {"sent-id", "drafts-id"}        # reused, NOT the partial {"sent-id"}
+
+
+def test_localized_german_sent_excluded_by_displayname_belt():
+    """Defense-in-depth: even with excluded_ids empty, a German 'Gesendete Elemente'
+    (Sent, DE) folder is dropped by the localized displayName deny-set."""
+    top = {"value": [
+        {"id": "inbox-id", "displayName": "Posteingang", "childFolderCount": 0},
+        {"id": "sent-de-id", "displayName": "Gesendete Elemente", "childFolderCount": 0},
+        {"id": "drafts-de-id", "displayName": "Entwürfe", "childFolderCount": 0},
+    ]}
+    client = _fake_client(ready=True)
+    client.get.side_effect = [top]
+    folders = gmt._enumerate_folders(client, excluded_ids=set())
+    ids = {f["id"] for f in folders}
+    assert ids == {"inbox-id"}          # German Sent + Drafts dropped by name belt
 
 
 # ---------------------------------------------------------------------------

@@ -30,12 +30,26 @@ _SELECT = "id,conversationId,subject,from,receivedDateTime,body,isDraft,hasAttac
 #
 # EXCLUDE (HARD): Sent Items / Drafts / Deleted Items / Junk Email — Sent/Drafts
 # would ingest Dimitry's own outbound as inbound (pollutes Box 5 direction logic);
-# Deleted/Junk are noise. Excluded by well-known folder id (locale-proof) with a
-# displayName deny-set as belt-and-suspenders if well-known resolution hiccups.
+# Deleted/Junk are noise.
+#
+# PRIMARY guard = well-known folder-id resolution (locale-PROOF: the well-known name
+# `sentitems` maps to the localized folder regardless of mailbox language). The
+# excluded-id set is FAIL-CLOSED (codex G3 HIGH, worktree-probed on the German-locale
+# target mailbox): if we cannot positively resolve the hard-exclude ids on a cold
+# cache we REFUSE to poll rather than fall back to a display-string guess — the
+# original bug ingested 'Gesendete Elemente' (Sent, DE) as inbound because an
+# English-only displayName set missed it. Last-known-good ids are cached across polls
+# so a transient resolution blip reuses the proven set instead of stalling.
+#
+# The displayName set below is DEFENSE-IN-DEPTH ONLY (never the sole line of defense —
+# fail-closed covers the resolution-failure case). Covers EN + DE (Dimitry's locale).
 _EXCLUDED_WELLKNOWN = ("sentitems", "drafts", "deleteditems", "junkemail")
-_EXCLUDED_DISPLAYNAMES = frozenset(
-    {"Sent Items", "Drafts", "Deleted Items", "Junk Email"}
-)
+_EXCLUDED_DISPLAYNAMES = frozenset({
+    # English
+    "Sent Items", "Drafts", "Deleted Items", "Junk Email",
+    # German (Dimitry's mailbox locale — codex G3 probe)
+    "Gesendete Elemente", "Entwürfe", "Gelöschte Elemente", "Junk-E-Mail",
+})
 
 # Delta-reset safety (LOAD-BEARING, AC3): a fresh per-folder delta with no state
 # token would re-pull that folder's ENTIRE history — mailbox-wide that is the
@@ -56,6 +70,12 @@ _FOLDER_WALK_GUARD = 500             # hard ceiling on hierarchy-walk iterations
 # Lazy per-process folder-list cache. Reset by tests via _reset_folder_cache().
 _folder_cache: dict = {"folders": None, "fetched_at": None}
 
+# Last-known-good hard-exclude folder ids (Sent/Drafts/Deleted/Junk). Populated the
+# first time ALL well-known folders resolve; reused on a later resolution blip so a
+# transient failure does not stall ingest AND never falls back to display-strings
+# alone. None until the first complete resolution (cold cache → fail-closed).
+_excluded_ids_good = None
+
 # Surfaced, never-silently-swallowed counter: incremented whenever a single
 # folder's poll fails (fetch None / mid-pagination None / exception). One folder
 # failing must NOT abort the whole poll (lead), but the failure must stay visible.
@@ -68,10 +88,12 @@ def folder_poll_failures() -> int:
 
 
 def _reset_folder_cache() -> None:
-    """Clear the folder-list cache (test hook; also safe at runtime — forces a
-    re-enumeration on the next poll)."""
+    """Clear the folder-list cache + last-known-good excluded ids (test hook; also
+    safe at runtime — forces a re-enumeration + fresh exclude resolution next poll)."""
+    global _excluded_ids_good
     _folder_cache["folders"] = None
     _folder_cache["fetched_at"] = None
+    _excluded_ids_good = None
 # M365_GRAPH_ATTACHMENT_FETCH_DIAG_1: do NOT use $select on the /attachments
 # COLLECTION. Graph 400s with "Could not find a property named contentBytes"
 # when contentBytes is named in a collection $select (confirmed on Render, bus
@@ -369,27 +391,30 @@ def _capture_graph_attachments(client: GraphClient, m: dict) -> int:
         return 0
 
 
-def _excluded_folder_ids(client: GraphClient) -> set:
-    """Resolve the ids of the never-ingest folders (Sent/Drafts/Deleted/Junk).
+def _excluded_folder_ids(client: GraphClient) -> tuple:
+    """Resolve the ids of the never-ingest folders (Sent/Drafts/Deleted/Junk) by their
+    locale-PROOF well-known names (GET /users/{u}/mailFolders/{wellKnownName}).
 
-    Resolves each well-known folder by its locale-proof name (GET
-    /users/{u}/mailFolders/{wellKnownName}). Fault-tolerant: a well-known GET that
-    fails (or returns None) is logged and skipped — we degrade to the displayName
-    deny-set at walk time rather than crash the whole poll. Never raises.
+    Returns ``(ids, complete)`` where ``complete`` is True iff EVERY well-known folder
+    resolved. A partial set must NOT be trusted as authoritative — the unresolved one
+    could be Sent/Junk under a localized display name a string-guess would miss — so
+    ``complete`` gates the fail-closed decision in _get_pollable_folders. Never raises.
     """
     user = quote(client.cfg.mail_user, safe="")
     ids: set = set()
+    complete = True
     for wk in _EXCLUDED_WELLKNOWN:
         try:
             f = client.get(f"/users/{user}/mailFolders/{wk}", params={"$select": "id"})
         except Exception as e:                       # pragma: no cover - defensive
-            logger.warning("graph mail: well-known folder %s lookup errored (non-fatal): %s", wk, type(e).__name__)
-            continue
+            logger.warning("graph mail: well-known folder %s lookup errored: %s", wk, type(e).__name__)
+            f = None
         if f and f.get("id"):
             ids.add(f["id"])
         else:
-            logger.warning("graph mail: well-known folder %s did not resolve — relying on displayName deny-set", wk)
-    return ids
+            complete = False
+            logger.warning("graph mail: well-known folder %s did not resolve", wk)
+    return ids, complete
 
 
 def _enumerate_folders(client: GraphClient, excluded_ids: set) -> list:
@@ -432,16 +457,45 @@ def _enumerate_folders(client: GraphClient, excluded_ids: set) -> list:
 
 def _get_pollable_folders(client: GraphClient) -> list:
     """Return the cached pollable-folder list, refreshing when older than
-    _FOLDER_CACHE_TTL. On a refresh, re-resolve the excluded ids + re-walk. A refresh
-    that yields an empty list does NOT overwrite a good cache (transient walk failure
-    keeps the last known-good set); an empty result on a cold cache is returned as-is
-    for the caller to treat as failure. Never raises."""
+    _FOLDER_CACHE_TTL. On a refresh, re-resolve the hard-exclude ids + re-walk.
+
+    FAIL-CLOSED on the hard-exclude set (codex G3 HIGH): the never-ingest folders are
+    excluded by well-known folder id. If that resolution is INCOMPLETE we do NOT trust
+    a partial/display-string guess:
+      - complete resolution → cache it as last-known-good + use it;
+      - incomplete but a last-known-good set exists → reuse it (transient blip);
+      - incomplete AND no last-known-good (cold cache) → REFUSE to poll (return [] →
+        the caller raises → report_failure → retry next tick), so own outbound under a
+        localized name ('Gesendete Elemente') is never ingested as inbound.
+
+    A folder-walk that yields empty does NOT overwrite a good folder cache (transient
+    walk failure keeps the last good list); an empty result on a cold cache is returned
+    as-is for the caller to treat as failure. Never raises."""
+    global _excluded_ids_good
     now = datetime.now(timezone.utc)
     fetched = _folder_cache.get("fetched_at")
     cached = _folder_cache.get("folders")
     if cached is not None and fetched is not None and (now - fetched) < _FOLDER_CACHE_TTL:
         return cached
-    excluded = _excluded_folder_ids(client)
+
+    ids, complete = _excluded_folder_ids(client)
+    if complete:
+        _excluded_ids_good = ids
+        excluded = ids
+    elif _excluded_ids_good is not None:
+        excluded = _excluded_ids_good
+        logger.warning(
+            "graph mail: hard-exclude resolution incomplete this refresh — reusing "
+            "last-known-good excluded ids (%d) rather than a display-string guess",
+            len(excluded),
+        )
+    else:
+        logger.error(
+            "graph mail: hard-exclude folder ids unresolved on cold cache — REFUSING "
+            "to poll (fail-closed) so own outbound is never ingested as inbound"
+        )
+        return []
+
     folders = _enumerate_folders(client, excluded)
     if folders:
         _folder_cache["folders"] = folders
