@@ -323,12 +323,15 @@ def seed_bb_pilot(conn: Any) -> int:
     """Seed Baden-Baden pilot rows. Callable one-off; NOT auto-run. Returns count.
     matter_slug='aukera' is the Director-ratified canonical slug for the BB-AUK-001
     pilot (slugs.yml v23; is_canonical('aukera') is True). 'AUK' is the display
-    mnemonic in the project number, not the slug; 'annaberg' stays as a human alias."""
+    mnemonic in the project number, not the slug. Aliases are RETIRED for routing
+    safety (routing reversal 2026-07-01, BOX5_ROUTING_REVERSAL_E_1): name/alias
+    matching is unsafe for multi-matter counterparties, so the pilot seeds no
+    aliases — only the explicit project code routes."""
     rows = [
         dict(project_number="BB-AUK-001", desk_owner="baden-baden-desk",
              matter_slug="aukera", clickup_list_id=None,
              participants=[{"channel": "email", "value": "balazs@brisengroup.com"}],
-             aliases=["annaberg", "aukera annaberg"]),
+             aliases=[]),
     ]
     n = 0
     for r in rows:

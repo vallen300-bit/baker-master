@@ -21,7 +21,6 @@ from typing import Any, Optional
 from orchestrator.dispatcher import RESERVED_RECIPIENTS, resolve_owner_slug
 from kbl.project_registry_store import (
     extract_project_codes,
-    resolve_by_alias,          # NEW (BRIEF-E) soft-lane signal #2
     resolve_by_participant,
     resolve_project_number,
 )
@@ -1183,7 +1182,7 @@ def run_tick(*, now: Optional[datetime] = None) -> dict[str, Any]:
     claimed = terminal_written = lease_skipped = 0
     deterministic_cleared = defaulted_ticket = 0
     fast_ticket = 0  # BRIEF-D hard fast lane; not a deterministic_cleared/defaulted_ticket
-    soft_ticket = 0  # BRIEF-E manifest soft lane; routed TICKET, not fast_ticket/defaulted
+    code_routed_ticket = 0  # explicit-code routed TICKET, not FAST_TICKET/defaulted
     outbound_signal = 0  # BOX5_OUTBOUND_INGEST_1 flag-ON captures; never boards a desk
     fast_lane = fast_lane_enabled()  # honored now; only future-proofs D/E
     current = now or _utc_now()
@@ -1482,112 +1481,82 @@ def run_tick(*, now: Optional[datetime] = None) -> dict[str, Any]:
                                     "airport_ticketing hard-fast-lane row failed: %s", exc
                                 )
 
-                        # (e.7) SOFT FAST LANE — manifest inference, >=2 INDEPENDENT
-                        #   signals (BRIEF-E). Runs ONLY when D's (e.5) hard lane did NOT
-                        #   clear (`not handled`) and the flag is on — i.e. the number was
-                        #   missing / unregistered / inactive / conflicting, or the sender
-                        #   was not participant-bound. A clean clear requires participant-
-                        #   signal AND alias-signal on EXACTLY ONE common project
-                        #   (len(agree)==1): 0 => <2 signals on one project (incl. sender-
-                        #   only / alias-only) -> TICKET; >1 => competing active manifests
-                        #   -> TICKET. Soft clear is INFERENCE -> a ROUTED terminal_status
-                        #   ='TICKET' (routing columns set), NEVER FAST_TICKET (D's
-                        #   authoritative lane), NEVER the deferred hold state (#4677.7 —
-                        #   not in BRIEF-B's 6-state CHECK). Exception -> failed +
-                        #   (f) TICKET, never a routed clear. #4680 + #blocker D3.
+                        # (e.7) EXPLICIT-CODE ROUTED LANE — routing reversal
+                        #   (BOX5_ROUTING_REVERSAL_E_1). Director ruling 2026-07-01:
+                        #   name/alias matching is UNSAFE for multi-matter counterparties.
+                        #   Alias is NO LONGER a routing signal. E routes ONLY on a single
+                        #   registered ACTIVE project code that D's (e.5) hard lane did not
+                        #   already FAST_TICKET (code present, sender not participant-bound).
+                        #   Exactly 1 active code -> routed TICKET (desk review); 0 / >1 /
+                        #   unregistered / retired -> fall through to (f) TICKET.
+                        #   resolve_by_alias() is NOT called. Routed TICKET is NOT completion
+                        #   and NOT FAST_TICKET (D's authoritative lane).
                         if fast_lane and row_id and not handled:
                             try:
-                                # SAVEPOINT — same reliability contract as D's (e.5): a
-                                #   soft-lane throw must roll back ONLY E's partial work and
-                                #   PRESERVE issue_ticket's reservation so the (f) fallback
-                                #   still finds the row. A full conn.rollback() here would
-                                #   destroy the reservation and STRAND the arrival — the
-                                #   exact P1 codex caught on D (savepoint-strand).
                                 with conn.cursor() as _sp:
-                                    _sp.execute("SAVEPOINT airport_soft_lane")
-                                sender = (arrival.sender_email or "").strip().lower()
-                                # Two INDEPENDENT registry signals. Both #439 resolvers are
-                                # read-only and swallow their own exceptions to [] (a
-                                # legitimate no-match), so an escaping raise can only come
-                                # from _claim_for_terminal / write_terminal_status below.
-                                p_hits = resolve_by_participant("email", sender)  # signal 1
-                                a_hits = resolve_by_alias(
-                                    f"{arrival.subject} {arrival.full_body}"
-                                )  # signal 2
-                                p_nums = {h["project_number"] for h in p_hits}
-                                a_nums = {h["project_number"] for h in a_hits}
-                                # Projects carrying BOTH independent signals. len==1
-                                # enforces >=2 signals AND no competing conflict in ONE
-                                # check. Sender-only -> a_nums empty -> agree empty; alias-
-                                # only -> p_nums empty -> agree empty; both forbidden.
-                                agree = p_nums & a_nums
-                                if len(agree) == 1:
-                                    pn = next(iter(agree))
-                                    prow = next(
-                                        h for h in p_hits if h["project_number"] == pn
-                                    )
-                                    claim = _claim_for_terminal(conn, row_id)
-                                    if claim is None:
-                                        # Held by a concurrent tick — hold cursor.
-                                        lease_skipped += 1
-                                        conn.commit()
-                                        handled = True
-                                    elif claim[1] is not None:
-                                        # Already terminal (idempotent re-tick).
-                                        if result.get("ok"):
-                                            issued += 1
-                                        conn.commit()
-                                        handled = True
-                                        done = True
-                                    else:
-                                        claimed += 1
-                                        if write_terminal_status(
-                                            conn,
-                                            ticket_row_id=row_id,
-                                            terminal_status="TICKET",  # ROUTED, not FAST_TICKET
-                                            terminal_reason=f"soft_lane_participant+alias:{pn}",
-                                            raw_source_id=arrival.message_id,
-                                            matter_slug=prow["matter_slug"],
-                                            desk_owner=prow["desk_owner"],
-                                            manifest_match_signals=[
-                                                {"signal": "participant", "value": sender},
-                                                {"signal": "alias", "project": pn},
-                                            ],
-                                            confidence=0.60,  # fixed pilot constant; no learned model
-                                        ):
-                                            terminal_written += 1
-                                            soft_ticket += 1
-                                        if result.get("ok"):
-                                            issued += 1
-                                        conn.commit()
-                                        handled = True
-                                        done = True
-                                # 0 agreement (sender-only / alias-only / no match) OR >1
-                                # (competing active manifest): handled stays False -> fall
-                                # through to (f) TICKET. No `failed` on a clean no-match.
+                                    _sp.execute("SAVEPOINT airport_code_lane")
+                                el_text = f"{arrival.subject} {arrival.full_body}"
+                                # >1 distinct code = cross-matter CONFLICT -> no E route;
+                                # 0 codes -> no code -> no E route. Only exactly-1 proceeds.
+                                if len(set(extract_project_codes(el_text))) == 1:
+                                    # Regex shape alone NEVER clears: the code must resolve
+                                    # to a registered ACTIVE row (None if unregistered/retired).
+                                    resolved = resolve_project_number(el_text)
+                                    if resolved is not None:
+                                        pn = resolved["project_number"]
+                                        claim = _claim_for_terminal(conn, row_id)
+                                        if claim is None:
+                                            lease_skipped += 1
+                                            conn.commit()
+                                            handled = True
+                                        elif claim[1] is not None:
+                                            if result.get("ok"):
+                                                issued += 1
+                                            conn.commit()
+                                            handled = True
+                                            done = True
+                                        else:
+                                            claimed += 1
+                                            if write_terminal_status(
+                                                conn,
+                                                ticket_row_id=row_id,
+                                                terminal_status="TICKET",  # ROUTED, not FAST_TICKET
+                                                terminal_reason=f"explicit_code_routed_ticket:{pn}",
+                                                raw_source_id=arrival.message_id,
+                                                matter_slug=resolved["matter_slug"],
+                                                desk_owner=resolved["desk_owner"],
+                                                manifest_match_signals=[
+                                                    {"signal": "project_code", "value": pn,
+                                                     "binding": "registry_active"}
+                                                ],
+                                                confidence=0.80,
+                                            ):
+                                                terminal_written += 1
+                                                code_routed_ticket += 1
+                                            if result.get("ok"):
+                                                issued += 1
+                                            conn.commit()
+                                            handled = True
+                                            done = True
+                                # 0 codes / >1 codes / unregistered / retired ->
+                                #   handled stays False -> fall through to (f) TICKET.
+                                #   No `failed` on a clean no-route.
                             except Exception as exc:
-                                # ERROR NEVER AUTO-CLEARS (#blocker D3). Roll back to the
-                                # savepoint — undo E's partial writes, KEEP the reservation
-                                # — count failed, and FALL THROUGH to (f) TICKET so the
-                                # arrival still ends at a visible terminal. Never a routed
-                                # clear, never soft_ticket++. Distinguish threw (failed)
-                                # from a clean no->=2-signal match (silent fall-through).
+                                # ERROR NEVER AUTO-CLEARS. Roll back to the savepoint (undo
+                                # E's partial writes, KEEP issue_ticket's reservation), count
+                                # failed, fall through to (f) TICKET so the arrival still ends
+                                # at a visible terminal. Never a routed clear.
                                 try:
                                     with conn.cursor() as _sp:
-                                        _sp.execute(
-                                            "ROLLBACK TO SAVEPOINT airport_soft_lane"
-                                        )
+                                        _sp.execute("ROLLBACK TO SAVEPOINT airport_code_lane")
                                 except Exception:
-                                    # Savepoint unusable — full rollback so conn stays
-                                    # usable; the (f) claim then lease-skips and the arrival
-                                    # re-fetches next tick (cursor frozen, never dropped).
                                     try:
                                         conn.rollback()
                                     except Exception:
                                         pass
                                 failed += 1
                                 logger.warning(
-                                    "airport_ticketing soft-fast-lane row failed: %s", exc
+                                    "airport_ticketing explicit-code lane row failed: %s", exc
                                 )
 
                         if not handled:
@@ -1662,7 +1631,7 @@ def run_tick(*, now: Optional[datetime] = None) -> dict[str, Any]:
             "deterministic_cleared": deterministic_cleared,
             "defaulted_ticket": defaulted_ticket,
             "fast_ticket": fast_ticket,
-            "soft_ticket": soft_ticket,
+            "code_routed_ticket": code_routed_ticket,
             "outbound_signal": outbound_signal,
             "stuck_arrivals": stuck_arrivals,
             # Read + surfaced for observability. In BRIEF-C the fast lane is not
