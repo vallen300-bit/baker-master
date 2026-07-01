@@ -25,7 +25,7 @@ import kbl.slug_registry as slug_registry
 PROJECT_NUMBER = "BB-AUK-001"
 DESK_OWNER = "baden-baden-desk"   # MUST equal DESK_CODES['BB']; desk_code is derived from 'BB'
 MATTER_SLUG = "aukera"            # Director-ratified canonical slug; AUK is the display mnemonic
-CLICKUP_LIST_ID = None            # no canonical Baden-Baden ClickUp list yet; backfill when provisioned
+CLICKUP_LIST_ID = "901524194809"  # 'BB-AUK-001 Timetable' list (baden-baden-desk, bus #4886, wired 2026-07-01)
 ALIASES = []  # retired for routing safety (BOX5_ROUTING_REVERSAL_E_1); explicit code only
 
 
