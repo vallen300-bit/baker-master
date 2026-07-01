@@ -366,3 +366,26 @@ def test_p1c_reject_noise_is_automated_sender_only(runner):
         # the no-keyword arrival was prefiltered at fetch -> no airport_tickets row.
         cur.execute("SELECT COUNT(*) FROM airport_tickets WHERE source_id='enokw'")
         assert cur.fetchone()[0] == 0
+
+
+# 12 — BLANK CURSOR: on FIRST activation (no watermark row) the runner must scan the
+# FULL lookback floor (default 48h), not get_watermark's NOW-24h fallback. A 30h-old
+# keyword email in the 24h→48h gap would be stranded permanently under the fallback.
+def test_p1_blank_cursor_scans_full_lookback(runner):
+    # No AIRPORT_TICKETING_LOOKBACK_HOURS set -> default 48h floor.
+    with runner.cursor() as cur:
+        cur.execute("DELETE FROM trigger_watermarks WHERE source = %s",
+                    (bridge._WATERMARK_SOURCE,))
+    runner.commit()
+    assert bridge.trigger_state_watermark_raw(bridge._WATERMARK_SOURCE) is None  # blank
+
+    r_30h = _now() - timedelta(hours=30)          # inside 48h floor, beyond 24h fallback
+    _seed_email(runner, "eblank", subject="annaberg blank cursor", received=r_30h)
+
+    s = bridge.run_tick()
+    assert s["issued"] == 1
+    assert s["terminal_written"] == 1
+    # Would be NULL (stranded) if `since` had collapsed to the NOW-24h fallback.
+    assert _terminal(runner, "eblank")[0] == "TICKET"
+    wm = bridge.trigger_state_get_watermark(bridge._WATERMARK_SOURCE)
+    assert abs((wm - r_30h).total_seconds()) < 1.0

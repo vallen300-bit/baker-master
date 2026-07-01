@@ -205,6 +205,41 @@ class TriggerState:
 
         return datetime.now(timezone.utc) - timedelta(hours=24)
 
+    def get_watermark_raw(self, source: str) -> Optional[datetime]:
+        """Raw watermark read: the stored last_seen (UTC-aware) for ``source``, or
+        ``None`` when NO row exists.
+
+        Unlike :meth:`get_watermark` (which falls back to NOW-24h on a missing row),
+        this lets a caller distinguish 'never activated' from a real cursor value.
+        Callers whose configured lookback exceeds 24h need this: on a blank cursor
+        the 24h fallback would silently skip the 24h→lookback backlog, so they must
+        start at the full lookback floor, not the fallback.
+
+        Returns ``None`` on any DB error too — the caller treats None as 'no cursor'
+        and does a full-lookback re-scan (safe over-scan; an idempotent status-guard
+        makes it a no-op)."""
+        try:
+            store = self._get_store()
+            conn = store._get_conn()
+            if not conn:
+                return None
+            try:
+                cur = conn.cursor()
+                cur.execute(
+                    "SELECT last_seen FROM trigger_watermarks WHERE source = %s",
+                    (source,),
+                )
+                row = cur.fetchone()
+                cur.close()
+                if row and row[0]:
+                    return row[0] if row[0].tzinfo else row[0].replace(tzinfo=timezone.utc)
+                return None
+            finally:
+                store._put_conn(conn)
+        except Exception as e:
+            logger.warning(f"Could not read raw {source} watermark from DB: {e}")
+            return None
+
     def seconds_since_last_scheduler_execution(self) -> Optional[float]:
         """Age in seconds of the most recent scheduler_executions.fired_at, ANY job.
 

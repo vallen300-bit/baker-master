@@ -138,6 +138,16 @@ def trigger_state_get_watermark(source: str) -> datetime:
     return trigger_state.get_watermark(source)
 
 
+def trigger_state_watermark_raw(source: str) -> Optional[datetime]:
+    """Lazy wrapper: raw watermark (None when NO row exists), NOT the NOW-24h
+    fallback. run_tick needs to tell 'never activated' from a real cursor so a blank
+    cursor starts at the full lookback floor instead of stranding the 24h→lookback
+    backlog."""
+    from triggers.state import trigger_state
+
+    return trigger_state.get_watermark_raw(source)
+
+
 def trigger_state_set_watermark(source: str, timestamp: datetime) -> None:
     from triggers.state import trigger_state
 
@@ -1025,13 +1035,22 @@ def run_tick(*, now: Optional[datetime] = None) -> dict[str, Any]:
         # (b) CURSOR — per-source watermark replaces the constant lookback. Keep the
         #     lookback as a FLOOR so a fresh/blank cursor cannot scan unbounded. The
         #     watermark uses a DISTINCT key, never the live email poll.
+        #
+        #     (P1 blank-cursor) On FIRST activation there is NO watermark row.
+        #     trigger_state.get_watermark would return its NOW-24h fallback, and
+        #     max(NOW-24h, floor=NOW-lookback) collapses to NOW-24h whenever the
+        #     lookback exceeds 24h (default 48h) — so the 24h→lookback backlog is
+        #     skipped before the first advance and stranded forever. Read the RAW row:
+        #       - None (missing OR DB error) -> start at the full lookback FLOOR (safe
+        #         over-scan; the status-guard + dedup make the re-scan idempotent).
+        #       - a real cursor -> max(wm, floor) so we never rewind past the window.
         floor = current - timedelta(hours=lookback_hours())
         try:
-            wm = trigger_state_get_watermark(_WATERMARK_SOURCE)
+            raw_wm = trigger_state_watermark_raw(_WATERMARK_SOURCE)
         except Exception as e:
             logger.warning("airport ticketing watermark read failed, using floor: %s", e)
-            wm = floor
-        since = max(wm, floor)
+            raw_wm = None
+        since = floor if raw_wm is None else max(raw_wm, floor)
 
         arrivals = fetch_email_arrivals(conn, since=since, limit=cap * 4)
 
