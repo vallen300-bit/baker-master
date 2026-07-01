@@ -1258,8 +1258,22 @@ def run_tick(*, now: Optional[datetime] = None) -> dict[str, Any]:
                 try:
                     if _ingest_outbound_signal(conn, arrival):
                         outbound_signal += 1
+                    # (b.5-2) BOX5_OUTBOUND_INGEST_2 — drive the captured outbound
+                    #   signal through the ratification connector (event state machine
+                    #   -> ClickUp timetable write -> RECORD-ONLY flight progression) in
+                    #   the SAME transaction as the capture, so they commit atomically.
+                    #   Routine outbound stays evidence-only. A ClickUp API failure is
+                    #   caught INSIDE the connector and recorded as ERROR_RETRY
+                    #   (terminal=False) — never re-raised — so this row is retried next
+                    #   tick and the email cursor never silently drops the event (AC10).
+                    #   Lazy-imported so this whole (b.5) block stays gated behind the
+                    #   flag (flag-off = byte-identical, AC1) and my bridge edits stay
+                    #   inside the outbound branch (b3 owns the E lane in parallel).
+                    from orchestrator import airport_outbound_connector as _obc
+
+                    result = _obc.process_outbound_event(conn, arrival)
                     conn.commit()
-                    done = True
+                    done = bool(result.get("terminal", True))
                 except Exception as exc:
                     try:
                         conn.rollback()
