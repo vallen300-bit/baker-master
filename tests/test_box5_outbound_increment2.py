@@ -43,18 +43,28 @@ def _now() -> datetime:
 
 
 class _FakeClickUp:
-    """Records write calls; optionally fails create_task (AC10). Mirrors the
-    ClickUpClient surface the connector uses."""
+    """Records write calls; mirrors the ClickUpClient surface the connector uses.
 
-    def __init__(self, fail: bool = False):
+    fail_mode: None (success) | 'return_none' (the real `_request` returns None on
+    HTTP>=400 / exhausted retries — F1/AC10) | 'raise' (unexpected throw — AC10b).
+    space: the Space id `_resolve_space_id_for_list` reports (BAKER by default; a
+    non-BAKER value exercises the F2 enforcement)."""
+
+    def __init__(self, fail_mode=None, space="901510186446"):
         self.calls = []
-        self.fail = fail
+        self.fail_mode = fail_mode
+        self.space = space
         self._n = 0
+
+    def _resolve_space_id_for_list(self, list_id):
+        return self.space
 
     def create_task(self, **kwargs):
         self.calls.append(("create_task", kwargs))
-        if self.fail:
+        if self.fail_mode == "raise":
             raise RuntimeError("clickup 500 (simulated)")
+        if self.fail_mode == "return_none":
+            return None
         self._n += 1
         return {"id": "CU-%d" % self._n, "url": "http://cu/%d" % self._n}
 
@@ -164,14 +174,15 @@ def _register(project_number="BB-AUK-001", desk_owner="baden-baden-desk",
 
 def _seed_flight(conn, thread_id, flight="aukera-annaberg-financing"):
     """A prior NON-outbound ticket on `thread_id` carrying a suspected_flight — the
-    record-only proxy for an 'active flight' (correlation step 4)."""
+    record-only proxy for an 'active flight' (correlation step 4). Keyed per-flight so
+    seeding two distinct flights on one thread creates two rows (F4 conflict test)."""
+    key = "prior:%s:%s" % (thread_id, flight)
     with conn.cursor() as cur:
         cur.execute(
             "INSERT INTO airport_tickets (ticket_id, dedup_key, source_channel, "
             "source_id, bus_thread_id, proposed_desk_slug, suspected_flight) "
             "VALUES (%s, %s, 'email', %s, %s, 'baden-baden-desk', %s)",
-            ("prior:" + thread_id, "prior:" + thread_id, "prior-" + thread_id,
-             thread_id, flight),
+            (key, key, "src-" + key, thread_id, flight),
         )
     conn.commit()
 
@@ -227,7 +238,7 @@ def test_ac2_routine_outbound_evidence_only(ob):
     assert _event(ob, "ac2")[0] == "EVIDENCE_ONLY"
     assert _fake().calls == []
     assert _audit_count(ob, "airport_outbound.clickup_write", "ac2") == 0
-    assert _audit_count(ob, "airport_outbound.flight_progressed", "ac2") == 0
+    assert _audit_count(ob, "airport_outbound.flight_transition_recorded", "ac2") == 0
 
 
 # AC3 — ratifying outbound (project code + complete task fields): creates exactly ONE
@@ -262,7 +273,7 @@ def test_ac4_retick_no_duplicate(ob):
     bridge.run_tick()                                         # re-tick (row re-fetched)
     assert len(_creates()) == 1                             # no second create
     assert _audit_count(ob, "airport_outbound.clickup_write", "ac4") == 1
-    assert _audit_count(ob, "airport_outbound.flight_progressed", "ac4") == 1
+    assert _audit_count(ob, "airport_outbound.flight_transition_recorded", "ac4") == 1
     assert _event(ob, "ac4")[0] == "FLIGHT_PROGRESSED"       # unchanged
 
 
@@ -274,7 +285,7 @@ def test_ac5_missing_fields_clickup_blocked(ob):
     bridge.run_tick()
     assert _event(ob, "ac5")[0] == "CLICKUP_BLOCKED"
     assert _fake().calls == []                               # no API write
-    assert _audit_count(ob, "airport_outbound.flight_progressed", "ac5") == 0
+    assert _audit_count(ob, "airport_outbound.flight_transition_recorded", "ac5") == 0
 
 
 # AC6 — ratifying outbound with no active flight: ClickUp may write; flight FLIGHT_BLOCKED.
@@ -288,7 +299,7 @@ def test_ac6_no_flight_clickup_writes_flight_blocked(ob):
     assert ev[0] == "FLIGHT_BLOCKED"
     assert len(_creates()) == 1
     assert _audit_count(ob, "airport_outbound.clickup_write", "ac6") == 1
-    assert _audit_count(ob, "airport_outbound.flight_progressed", "ac6") == 0
+    assert _audit_count(ob, "airport_outbound.flight_transition_recorded", "ac6") == 0
 
 
 # AC7 — external-send outbound: task 'Waiting Reply', flight 'waiting_counterparty', NOT Closed.
@@ -320,7 +331,7 @@ def test_ac8_final_acceptance_no_package_no_landed(ob):
     assert ev[6] == "waiting_receipt"
     assert ev[6] != "landed"
     assert ev[3] == "Needs Director"            # ClickUp status is NOT 'Closed'
-    assert _audit_count(ob, "airport_outbound.flight_progressed", "ac8") == 1  # recorded, success=false
+    assert _audit_count(ob, "airport_outbound.flight_transition_recorded", "ac8") == 1  # recorded, success=false
 
 
 # AC9 — final-acceptance WITH returned package + receipt: flight can 'landed'.
@@ -337,27 +348,52 @@ def test_ac9_final_acceptance_with_package_lands(ob):
     assert ev[3] == "Closed"
 
 
-# AC10 — ClickUp API failure: ERROR_RETRY; the email cursor does not silently drop it.
-def test_ac10_clickup_failure_error_retry_not_dropped(ob, monkeypatch):
+# AC10 — ClickUp write FAILURE via None return (real `_request` returns None on
+#        HTTP>=400 / exhausted retries): CLICKUP_BLOCKED, audit success=false, no flight,
+#        event durably recorded (the email cursor does not silently drop it). [F1]
+def test_ac10_clickup_none_return_blocked_not_dropped(ob, monkeypatch):
     _register()
-    failing = _FakeClickUp(fail=True)
-    monkeypatch.setattr(connector, "_get_clickup_client", lambda: failing)
+    none_ret = _FakeClickUp(fail_mode="return_none")
+    monkeypatch.setattr(connector, "_get_clickup_client", lambda: none_ret)
     _seed_email(ob, "ac10", subject="aukera approved",
                 body="Approved BB-AUK-001. owner: balazs, DV to sign, due 2026-07-10.")
     bridge.run_tick()
     ev = _event(ob, "ac10")
     assert ev is not None                        # event durably recorded (not dropped)
-    assert ev[0] == "ERROR_RETRY"
+    assert ev[0] == "CLICKUP_BLOCKED"            # None return = handled FAILURE, not success
     assert ev[2] is None                         # no clickup_task_id
     assert _audit_count(ob, "airport_outbound.clickup_write", "ac10") == 1
+    assert _audit_count(ob, "airport_outbound.flight_transition_recorded", "ac10") == 0
     with ob.cursor() as cur:
         cur.execute(
             "SELECT success FROM baker_actions WHERE action_type='airport_outbound.clickup_write' "
             "AND payload->>'message_id'='ac10'"
         )
-        assert cur.fetchone()[0] is False        # failure audited
+        assert cur.fetchone()[0] is False        # failure audited (NOT success)
         cur.execute("SELECT COUNT(*) FROM airport_tickets WHERE source_id='ac10'")
         assert cur.fetchone()[0] == 1            # outbound capture committed (nothing lost)
+
+
+# AC10b — ClickUp write raises (unexpected throw): ERROR_RETRY; caught, never re-raised,
+#         so the bridge freezes the cursor for retry. [F1 exception path]
+def test_ac10b_clickup_exception_error_retry(ob, monkeypatch):
+    _register()
+    raising = _FakeClickUp(fail_mode="raise")
+    monkeypatch.setattr(connector, "_get_clickup_client", lambda: raising)
+    _seed_email(ob, "ac10b", subject="aukera approved",
+                body="Approved BB-AUK-001. owner: balazs, DV to sign, due 2026-07-10.")
+    bridge.run_tick()
+    ev = _event(ob, "ac10b")
+    assert ev[0] == "ERROR_RETRY"
+    assert ev[2] is None
+    with ob.cursor() as cur:
+        cur.execute(
+            "SELECT success FROM baker_actions WHERE action_type='airport_outbound.clickup_write' "
+            "AND payload->>'message_id'='ac10b'"
+        )
+        assert cur.fetchone()[0] is False
+        cur.execute("SELECT COUNT(*) FROM airport_tickets WHERE source_id='ac10b'")
+        assert cur.fetchone()[0] == 1            # capture committed
 
 
 # AC11 — system / task-notification email never becomes an outbound ratification.
@@ -384,3 +420,39 @@ def test_ac12_multi_project_needs_controller(ob):
     assert _event(ob, "ac12")[0] == "NEEDS_CONTROLLER"
     assert _fake().calls == []
     assert _audit_count(ob, "airport_outbound.clickup_write", "ac12") == 0
+
+
+# --------------------------------------------------------------------- codex G3 fixes
+# AC5b (F3) — ratifying, owner+action present but NO due date -> CLICKUP_BLOCKED.
+def test_ac5b_missing_due_clickup_blocked(ob):
+    _register()
+    _seed_email(ob, "ac5b", subject="aukera approved",
+                body="Approved BB-AUK-001. owner: balazs, DV to sign, proceed with wiring.")
+    bridge.run_tick()
+    assert _event(ob, "ac5b")[0] == "CLICKUP_BLOCKED"   # missing date blocks (F3)
+    assert _fake().calls == []
+
+
+# F2 — target ClickUp list not in BAKER Space (901510186446) -> no write (repo HARD RULE).
+def test_f2_non_baker_space_blocked(ob, monkeypatch):
+    _register()
+    non_baker = _FakeClickUp(space="901500000000")      # NOT BAKER space
+    monkeypatch.setattr(connector, "_get_clickup_client", lambda: non_baker)
+    _seed_email(ob, "f2", subject="aukera approved",
+                body="Approved BB-AUK-001. owner: balazs, DV to sign, due 2026-07-10.")
+    bridge.run_tick()
+    assert _event(ob, "f2")[0] == "CLICKUP_BLOCKED"
+    assert non_baker.calls == []                        # create_task never attempted
+
+
+# F4 — more than one distinct correlated flight -> NEEDS_CONTROLLER, no write.
+def test_f4_multi_flight_needs_controller(ob):
+    _register()
+    _seed_flight(ob, "f4", flight="aukera-annaberg-financing")
+    _seed_flight(ob, "f4", flight="mo-vie-exit")        # a SECOND distinct flight on the thread
+    _seed_email(ob, "f4", subject="aukera approved",
+                body="Approved BB-AUK-001. owner: balazs, DV to sign, due 2026-07-10.")
+    bridge.run_tick()
+    assert _event(ob, "f4")[0] == "NEEDS_CONTROLLER"
+    assert _fake().calls == []
+    assert _audit_count(ob, "airport_outbound.clickup_write", "f4") == 0

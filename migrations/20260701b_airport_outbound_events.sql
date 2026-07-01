@@ -19,9 +19,10 @@
 -- RECORD-ONLY flight (lead confirmed #4851, 2026-07-01): NO live flight-state store
 -- exists in the repo, and building one exceeds this brief's Files Modified. The flight
 -- transition is recorded on this row (flight_id / flight_from_state / flight_to_state /
--- ratification_class) + a baker_actions 'airport_outbound.flight_progressed' audit;
--- no external flight store is mutated. The real flight lifecycle store is a separate
--- future increment.
+-- ratification_class) + a baker_actions 'airport_outbound.flight_transition_recorded'
+-- audit; no external flight store is mutated. The 'airport_outbound.flight_progressed'
+-- action_type is RESERVED for the future store-backed increment. The real flight
+-- lifecycle store is a separate future increment.
 --
 -- Additive, idempotent, zero-downtime. Guarded end-to-end behind the EXISTING flag
 -- AIRPORT_OUTBOUND_INGEST_ENABLED (default false) — flag OFF means this table is never

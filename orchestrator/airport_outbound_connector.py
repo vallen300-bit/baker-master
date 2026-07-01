@@ -21,7 +21,7 @@ vocabulary (``waiting_ratification`` … ``landed``) exists nowhere. Building a 
 store exceeds this brief's Files Modified. So the flight transition is *recorded* on
 the ``airport_outbound_events`` row (``flight_id`` / ``flight_from_state`` /
 ``flight_to_state`` / ``ratification_class``) plus a ``baker_actions``
-``airport_outbound.flight_progressed`` audit — no external flight store is mutated.
+``airport_outbound.flight_transition_recorded`` audit — no external flight store is mutated.
 "Active flight" for the FLIGHT_BLOCKED gate = a correlation hit in step 4 (an active
 dispatcher thread, or a prior ticket on the same email thread carrying a
 ``suspected_flight``); a miss → FLIGHT_BLOCKED.
@@ -314,6 +314,7 @@ def correlate(conn: Any, arrival: Any) -> Dict[str, Any]:
 
     out: Dict[str, Any] = {
         "conflict": False,
+        "flight_conflict": False,
         "has_correlation": False,
         "project_code": None,
         "matter_slug": None,
@@ -356,7 +357,7 @@ def correlate(conn: Any, arrival: Any) -> Dict[str, Any]:
         try:
             with conn.cursor() as cur:
                 cur.execute(
-                    "SELECT ticket_id, suspected_flight FROM airport_tickets "
+                    "SELECT ticket_id FROM airport_tickets "
                     "WHERE (bus_thread_id = %s OR source_id = %s) "
                     "AND ticket_id NOT LIKE 'airport-outbound:%%' "
                     "ORDER BY created_at LIMIT 1",
@@ -367,33 +368,36 @@ def correlate(conn: Any, arrival: Any) -> Dict[str, Any]:
                 out["thread_ref"] = row[0]
                 out["has_correlation"] = True
                 out["refs"].append({"step": 2, "ticket_id": row[0]})
-                if row[1]:  # step 4 short-cut: this thread already carries a flight
-                    out["flight_id"] = row[1]
         except Exception as e:
             logger.warning("thread correlation failed: %s", e)
 
-    # Step 4 — active flight thread / dispatch id (record-only). A prior NON-outbound
-    # ticket on this email thread carrying a suspected_flight, or an active dispatcher
-    # thread. Outbound self-capture rows are excluded (same self-correlation guard).
-    if not out["flight_id"] and thread_id:
+    # Step 4 — active flight thread / dispatch id (record-only). Collect the DISTINCT
+    # flight refs on this thread (prior NON-outbound tickets' suspected_flight + any
+    # active dispatcher thread). >1 DISTINCT flight = ambiguous correlation ->
+    # flight_conflict -> NEEDS_CONTROLLER (F4; spec §"Correlation Order": ">1 correlated
+    # project/flight -> stop at NEEDS_CONTROLLER"). Outbound self-capture rows excluded.
+    flights: set = set()
+    if thread_id:
         try:
             with conn.cursor() as cur:
                 cur.execute(
-                    "SELECT suspected_flight FROM airport_tickets "
+                    "SELECT DISTINCT suspected_flight FROM airport_tickets "
                     "WHERE (bus_thread_id = %s OR source_id = %s) "
                     "AND suspected_flight IS NOT NULL "
-                    "AND ticket_id NOT LIKE 'airport-outbound:%%' "
-                    "ORDER BY created_at DESC LIMIT 1",
+                    "AND ticket_id NOT LIKE 'airport-outbound:%%'",
                     (thread_id, thread_id),
                 )
-                row = cur.fetchone()
-            if row and row[0]:
-                out["flight_id"] = row[0]
+                flights.update(r[0] for r in cur.fetchall() if r[0])
         except Exception as e:
             logger.warning("flight correlation failed: %s", e)
-    if not out["flight_id"]:
-        out["flight_id"] = _correlate_dispatcher_flight(conn, thread_id, out["project_code"])
-    if out["flight_id"]:
+    disp = _correlate_dispatcher_flight(conn, thread_id, out["project_code"])
+    if disp:
+        flights.add(disp)
+    if len(flights) > 1:
+        out["flight_conflict"] = True
+        out["refs"].append({"step": 4, "flights": sorted(flights)})
+    elif len(flights) == 1:
+        out["flight_id"] = next(iter(flights))
         out["has_correlation"] = True
         out["refs"].append({"step": 4, "flight_id": out["flight_id"]})
 
@@ -512,6 +516,25 @@ def _get_clickup_client() -> Any:
     return ClickUpClient._get_global_instance()
 
 
+def _resolve_list_space(client: Any, list_id: str) -> Optional[str]:
+    """Resolve the ClickUp Space id that owns ``list_id``, or None if unconfirmable.
+
+    Enforces the repo HARD RULE (F2): never write ClickUp outside BAKER Space
+    ``901510186446``. The connector writes ONLY when this returns ``_BAKER_SPACE_ID``;
+    a non-BAKER space OR an unconfirmable result (None) blocks the write (fail-safe).
+    Delegates to the ClickUpClient's own space-resolution path; guarded so a client
+    without it (or a network error) blocks rather than silently writing."""
+    try:
+        fn = (getattr(client, "resolve_space_id_for_list", None)
+              or getattr(client, "_resolve_space_id_for_list", None))
+        if fn is None:
+            return None
+        return fn(list_id)
+    except Exception as e:
+        logger.warning("clickup space resolve failed for list %s: %s", list_id, e)
+        return None
+
+
 # ---------------------------------------------------------------------------
 # ClickUp status + flight mapping
 # ---------------------------------------------------------------------------
@@ -573,8 +596,10 @@ def process_outbound_event(conn: Any, arrival: Any) -> Dict[str, Any]:
                 "clickup_written": False, "flight_progressed": False}
 
     # (4-first) correlation — needed for both condition (3) and the conflict guard.
+    # >1 correlated project OR >1 correlated flight -> NEEDS_CONTROLLER, no write
+    # (spec §"Correlation Order"; F4).
     corr = correlate(conn, arrival)
-    if corr["conflict"]:
+    if corr["conflict"] or corr.get("flight_conflict"):
         _update_event(conn, ticket_id, event_state=NEEDS_CONTROLLER,
                       correlation=corr)
         return {"event_state": NEEDS_CONTROLLER, "terminal": True,
@@ -615,10 +640,11 @@ def _write_clickup_then_flight(
     message_id = getattr(arrival, "message_id", "") or ""
     text = subject + "\n" + body
 
-    # Required task fields. owner + action are the assignable-next-step essentials
-    # (AC5: a bare ratification missing them → CLICKUP_BLOCKED, no write, no flight).
-    # For send/deliverable/close the action is implicit in the class and the owner
-    # falls back to the correlated desk; approval/instruction need them in the email.
+    # Required task fields (spec §"ClickUp Write Contract" + AC5, F3). A ratifying write
+    # needs an assignable next step: owner + due date + required action. Missing ANY of
+    # them -> CLICKUP_BLOCKED (no write, no flight). For send/deliverable/close/commitment
+    # the action is implicit in the class and the owner falls back to the correlated desk;
+    # approval/instruction must carry both explicitly in the email.
     owner = _extract_owner(text)
     due = _extract_due(text)
     action = _extract_action(text)
@@ -629,21 +655,32 @@ def _write_clickup_then_flight(
     returned_package = _returned_package_present(subject, body, attachments)
 
     list_id = corr.get("clickup_list_id")
-    # CLICKUP_BLOCKED: no target list, or no assignable next step (owner+action). Kill
-    # switch BAKER_CLICKUP_READONLY also lands here (write unavailable) — it is the
-    # connector's internal write kill switch; Director-facing activation stays the ONE
-    # flag AIRPORT_OUTBOUND_INGEST_ENABLED.
+    client = _get_clickup_client()
+
+    # CLICKUP_BLOCKED gate — checked BEFORE any write, in order:
+    #   - BAKER_CLICKUP_READONLY kill switch (the connector's internal write kill switch;
+    #     Director-facing activation stays the ONE flag AIRPORT_OUTBOUND_INGEST_ENABLED);
+    #   - no target list;
+    #   - incomplete required fields owner+due+action (AC5 / F3);
+    #   - target list not confirmably in BAKER Space 901510186446 (repo HARD RULE / F2:
+    #     never write ClickUp outside BAKER Space; unconfirmable -> block, fail-safe).
     readonly = os.getenv("BAKER_CLICKUP_READONLY", "").strip().lower() == "true"
-    if readonly or not list_id or not (owner and action):
-        reason = ("readonly" if readonly else
-                  "no_clickup_list" if not list_id else "missing_owner_or_action")
-        _update_event(conn, ticket_id, event_state=CLICKUP_BLOCKED, last_error=reason)
-        _audit(conn, "airport_outbound.clickup_write",
-               ticket_id,
+    block_reason = None
+    if readonly:
+        block_reason = "readonly"
+    elif not list_id:
+        block_reason = "no_clickup_list"
+    elif not complete:
+        block_reason = "missing_owner_date_or_action"
+    elif _resolve_list_space(client, list_id) != _BAKER_SPACE_ID:
+        block_reason = "non_baker_space"
+    if block_reason:
+        _update_event(conn, ticket_id, event_state=CLICKUP_BLOCKED, last_error=block_reason)
+        _audit(conn, "airport_outbound.clickup_write", ticket_id,
                {"message_id": message_id, "project_code": corr.get("project_code"),
-                "operation": "create_task", "status": None, "blocked_reason": reason,
+                "operation": "create_task", "status": None, "blocked_reason": block_reason,
                 "idempotency_key": None},
-               success=False, error_message="CLICKUP_BLOCKED:" + reason)
+               success=False, error_message="CLICKUP_BLOCKED:" + block_reason)
         return {"event_state": CLICKUP_BLOCKED, "terminal": True,
                 "clickup_written": False, "flight_progressed": False}
 
@@ -652,20 +689,24 @@ def _write_clickup_then_flight(
     idem = "outbound-clickup:v1:%s:%s:%s" % (message_id, target_ref, rclass)
     title = ("[outbound %s] %s" % (rclass, subject))[:255]
 
-    # ---- ClickUp write. A ClickUp *API* failure → ERROR_RETRY (durable, retried);
-    # never re-raised, so the event is never silently dropped (AC10).
-    client = _get_clickup_client()
+    # ---- ClickUp write. Two distinct failure modes (F1):
+    #   - EXCEPTION (unexpected throw) -> ERROR_RETRY: caught, never re-raised, cursor
+    #     freezes so the event is retried (AC10b). Not a silent drop.
+    #   - None / missing-id RETURN -> CLICKUP_BLOCKED: clickup_client._request returns
+    #     None on HTTP>=400 / exhausted retries; that is a HANDLED write FAILURE, NOT a
+    #     success — audit success=False, do NOT progress flight (AC10). The event is
+    #     durably recorded (not silently dropped).
     task_id = None
     try:
-        due_ms = None  # record-only: the parsed due string is kept in the event/audit;
-        # we do not fabricate a ms timestamp (no reliable tz for a bare ISO date here).
         res = client.create_task(
             list_id=list_id,
             name=title,
             description=("Outbound ratification (%s) message_id=%s\n%s"
                          % (rclass, message_id, (body or "")[:1500])),
             status=status,
-            due_date=due_ms,
+            # record-only: the parsed due string is kept in the event/audit; we do not
+            # fabricate a ms timestamp from a bare ISO date (no reliable tz).
+            due_date=None,
         )
         task_id = (res or {}).get("id")
     except Exception as exc:
@@ -677,6 +718,19 @@ def _write_clickup_then_flight(
                 "operation": "create_task", "status": status, "idempotency_key": idem},
                success=False, error_message=str(exc)[:400])
         return {"event_state": ERROR_RETRY, "terminal": False,
+                "clickup_written": False, "flight_progressed": False}
+
+    if not task_id:
+        _update_event(conn, ticket_id, event_state=CLICKUP_BLOCKED,
+                      clickup_idempotency_key=idem, clickup_status=status,
+                      clickup_operation="create_task",
+                      last_error="clickup_write_failed_no_id")
+        _audit(conn, "airport_outbound.clickup_write", idem,
+               {"message_id": message_id, "project_code": corr.get("project_code"),
+                "operation": "create_task", "status": status, "idempotency_key": idem,
+                "blocked_reason": "clickup_write_failed_no_id"},
+               success=False, error_message="clickup_write_failed_no_id")
+        return {"event_state": CLICKUP_BLOCKED, "terminal": True,
                 "clickup_written": False, "flight_progressed": False}
 
     _update_event(conn, ticket_id, event_state=CLICKUP_WRITTEN,
@@ -721,7 +775,7 @@ def _progress_flight(
             _update_event(conn, ticket_id, event_state=NEEDS_CONTROLLER,
                           flight_id=flight_id, flight_from_state=from_state,
                           flight_to_state=to_state)
-            _audit(conn, "airport_outbound.flight_progressed",
+            _audit(conn, "airport_outbound.flight_transition_recorded",
                    (flight_id or ticket_id),
                    {"message_id": message_id, "flight_id": flight_id,
                     "from_state": from_state, "to_state": to_state,
@@ -735,7 +789,7 @@ def _progress_flight(
     _update_event(conn, ticket_id, event_state=FLIGHT_PROGRESSED,
                   flight_id=flight_id, flight_from_state=from_state,
                   flight_to_state=to_state, flight_idempotency_key=flight_idem)
-    _audit(conn, "airport_outbound.flight_progressed", (flight_id or flight_idem),
+    _audit(conn, "airport_outbound.flight_transition_recorded", (flight_id or flight_idem),
            {"message_id": message_id, "flight_id": flight_id, "from_state": from_state,
             "to_state": to_state, "ratification_class": rclass,
             "idempotency_key": flight_idem, "clickup_task_id": task_id,
