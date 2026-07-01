@@ -1,6 +1,7 @@
 # CHECKPOINT — BOX5_TARGETED_DROPPED_REPLY_BACKFILL
 
 attempt: 1
+rollover: b2 at ~92% context — clean exit; Phase 2 (greenlit #5003) deferred to successor. Artifacts current.
 brief: bus dispatch #4999 (Director-ratified #4998). No brief file — dispatch-only.
 owner: b2 · dispatched_by: lead · date: 2026-07-01
 
