@@ -847,9 +847,11 @@ def test_ac3_outbound_flag_on_inbound_unchanged(runner, monkeypatch):
         assert cur.fetchone()[0] == "inbound"   # via NOT NULL DEFAULT 'inbound'
 
 
-# AC4 — flag OFF: outbound-sender arrivals are SKIPPED (no row at all) and the inbound
-#       path is byte-identical; the outbound skip must NOT strand the cursor.
-def test_ac4_flag_off_skips_outbound_inbound_byte_identical(runner, monkeypatch):
+# AC4 — flag OFF (dark): BOTH inbound AND outbound-sender arrivals are processed
+#       byte-identical to pre-change — outbound is NOT skipped when dark, so a merge is
+#       a pure no-op. (Corrected by lead #4837: the (b.5) short-circuit is itself gated
+#       behind the flag, so nothing classifies/skips until the flag flips.)
+def test_ac4_flag_off_outbound_processed_as_pre_change(runner, monkeypatch):
     monkeypatch.delenv("AIRPORT_OUTBOUND_INGEST_ENABLED", raising=False)  # default false
     r_ob = _now() - timedelta(hours=2)
     r_ib = _now() - timedelta(hours=1)
@@ -858,32 +860,37 @@ def test_ac4_flag_off_skips_outbound_inbound_byte_identical(runner, monkeypatch)
     _seed_email(runner, "ib_off", subject="annaberg closing",
                 sender_email=_COUNTERPARTY_SENDER, body="annaberg inbound note", received=r_ib)
     s = bridge.run_tick()
-    assert s["outbound_signal"] == 0
-    # outbound skipped: NO airport_tickets row created for it.
+    assert s["outbound_signal"] == 0            # no capture when dark
+    # the outbound-sender arrival is processed exactly like any inbound keyword
+    # arrival: safe-default TICKET + bus post, a row carrying direction via the column
+    # DEFAULT (the classifier is never consulted when dark).
+    assert s["defaulted_ticket"] == 2          # BOTH ob_off + ib_off ticketed
+    assert s["issued"] == 2
+    assert _terminal(runner, "ob_off")[0] == "TICKET"
+    assert _terminal(runner, "ib_off")[0] == "TICKET"
     with runner.cursor() as cur:
         cur.execute("SELECT COUNT(*) FROM airport_tickets WHERE source_id='ob_off'")
-        assert cur.fetchone()[0] == 0
-    # inbound byte-identical: still safe-default TICKET + bus post.
-    assert s["defaulted_ticket"] == 1
-    assert s["issued"] == 1
-    assert _terminal(runner, "ib_off")[0] == "TICKET"
-    # cursor advanced past BOTH (older outbound skip did NOT freeze the batch).
+        assert cur.fetchone()[0] == 1          # a row EXISTS (not skipped)
+        cur.execute("SELECT direction FROM airport_tickets WHERE source_id='ob_off'")
+        assert cur.fetchone()[0] == "inbound"  # column default; NOT classified when dark
     wm = bridge.trigger_state_get_watermark(bridge._WATERMARK_SOURCE)
     assert abs((wm - r_ib).total_seconds()) < 1.0
 
 
-# AC4b — flag OFF: an OLDEST outbound arrival must not strand a NEWER inbound one
-#        across ticks (contiguous-prefix advance past the drop).
-def test_ac4b_flag_off_outbound_does_not_strand_batch(runner, monkeypatch):
-    monkeypatch.delenv("AIRPORT_OUTBOUND_INGEST_ENABLED", raising=False)
+# AC4b — flag ON: an OLDEST outbound-sender arrival (captured + lane-skipped) must not
+#        strand a NEWER inbound one; the cursor advances past the capture (exercises the
+#        replicated (P1-A) cursor-advance in the (b.5) block).
+def test_ac4b_flag_on_outbound_capture_does_not_strand_batch(runner, monkeypatch):
+    monkeypatch.setenv("AIRPORT_OUTBOUND_INGEST_ENABLED", "true")
     monkeypatch.setenv("AIRPORT_TICKETING_MAX_POSTS_PER_TICK", "25")
-    r_ob = _now() - timedelta(hours=3)      # oldest = outbound (would freeze if `continue`d raw)
+    r_ob = _now() - timedelta(hours=3)      # oldest = captured outbound
     r_ib = _now() - timedelta(hours=1)
     _seed_email(runner, "ob_head", subject="annaberg lead",
                 sender_email=_OUTBOUND_SENDER, body="annaberg outbound", received=r_ob)
     _seed_email(runner, "ib_tail", subject="annaberg tail",
                 sender_email=_COUNTERPARTY_SENDER, body="annaberg inbound", received=r_ib)
     s = bridge.run_tick()
+    assert s["outbound_signal"] == 1
     assert _terminal(runner, "ib_tail")[0] == "TICKET"   # processed same tick, not stranded
     assert s["issued"] == 1
     wm = bridge.trigger_state_get_watermark(bridge._WATERMARK_SOURCE)
@@ -937,3 +944,31 @@ def test_ac5b_outbound_rows_excluded_from_stuck_gauge(runner):
         )
     runner.commit()
     assert bridge._count_stuck_arrivals(runner) == 1   # only the inbound row, not the outbound one
+
+
+# AC6 — flag ON: an outbound-sender arrival skips ALL lanes (even when the HARD lane
+#       WOULD otherwise fast-track it) and captures exactly one outbound_signal — no
+#       desk ticket, no nudge, no FAST_TICKET. Proves the (b.5) short-circuit runs
+#       BEFORE D's / E's lanes. (lead #4837.)
+def test_ac6_flag_on_outbound_skips_lanes_even_when_hard_lane_would_fire(
+    runner, hard_lane, monkeypatch
+):
+    monkeypatch.setenv("AIRPORT_OUTBOUND_INGEST_ENABLED", "true")
+    monkeypatch.setenv("BOX5_FAST_LANE_ENABLED", "true")
+    # register the outbound sender as a participant of an active project + put its code
+    # in the body: D's hard lane WOULD FAST_TICKET this if it ran. It must not run.
+    hard_lane("BB-AUK-001",
+              participants=[{"channel": "email", "value": _OUTBOUND_SENDER}])
+    _seed_email(runner, "ob_lane", subject="aukera funding",
+                sender_email=_OUTBOUND_SENDER, body="review BB-AUK-001 for closing")
+    s = bridge.run_tick()
+    assert s["outbound_signal"] == 1
+    assert s["fast_ticket"] == 0          # hard lane never ran
+    assert s["soft_ticket"] == 0
+    assert s["issued"] == 0               # no bus / no desk boarding
+    assert _terminal(runner, "ob_lane")[0] is None   # no terminal desk outcome
+    with runner.cursor() as cur:
+        cur.execute("SELECT direction, status FROM airport_tickets WHERE source_id='ob_lane'")
+        direction, live_status = cur.fetchone()
+    assert direction == "outbound"
+    assert live_status == "candidate"     # never boarded a desk

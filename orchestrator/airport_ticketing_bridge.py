@@ -1234,28 +1234,32 @@ def run_tick(*, now: Optional[datetime] = None) -> dict[str, Any]:
             done = False
 
             # (b.5) OUTBOUND SHORT-CIRCUIT — direction-aware ingestion
-            #   (BOX5_OUTBOUND_INGEST_1, Director ruling 2026-07-01). Classified from
-            #   sender_email BEFORE build_email_ticket + every lane, so outbound NEVER
-            #   boards a desk, nudges, or enters D's / E's fast-soft lanes. Dark behind
-            #   AIRPORT_OUTBOUND_INGEST_ENABLED:
-            #     OFF -> drop the arrival (definite disposition: done=True so the cursor
-            #            advances past it and the batch is never stranded; NO row, NO
-            #            ticket -> the live inbound path below stays byte-untouched).
-            #     ON  -> capture ONE direction='outbound' row + one action-evidence
-            #            signal (no bus / no desk). Its own fault isolation mirrors the
-            #            per-row try: a throw rolls back, counts failed, and FREEZES the
-            #            cursor (retry next tick) — never a silent clear.
+            #   (BOX5_OUTBOUND_INGEST_1, Director ruling 2026-07-01). The WHOLE block is
+            #   gated behind AIRPORT_OUTBOUND_INGEST_ENABLED so a merge is a PURE no-op
+            #   (lead #4837):
+            #     OFF (dark) -> the block is skipped entirely (the `and` short-circuits
+            #            before classify), so EVERY arrival — inbound AND outbound-sender
+            #            — flows through the unchanged inbound path below, byte-identical
+            #            to pre-change (no drop, cursor + lane behavior untouched). The
+            #            skip + capture go live together only when the flag flips.
+            #     ON   -> an outbound-sender arrival is classified out BEFORE
+            #            build_email_ticket + every lane, so it NEVER boards a desk,
+            #            nudges, or enters D's / E's fast-soft lanes: it captures ONE
+            #            direction='outbound' row + one action-evidence signal (no bus /
+            #            no desk) instead. Own fault isolation mirrors the per-row try —
+            #            a throw rolls back, counts failed, and FREEZES the cursor (retry
+            #            next tick), never a silent clear.
             #   The `continue` skips the inbound try + the shared (P1-A) cursor block at
             #   the end of the loop, so the two cursor-advance lines are replicated here
             #   and MUST stay in lock-step with that block.
-            if _classify_direction(arrival.sender_email) == "outbound":
+            if (
+                _outbound_ingest_enabled()
+                and _classify_direction(arrival.sender_email) == "outbound"
+            ):
                 try:
-                    if _outbound_ingest_enabled():
-                        if _ingest_outbound_signal(conn, arrival):
-                            outbound_signal += 1
-                        conn.commit()
-                    else:
-                        skipped += 1
+                    if _ingest_outbound_signal(conn, arrival):
+                        outbound_signal += 1
+                    conn.commit()
                     done = True
                 except Exception as exc:
                     try:
