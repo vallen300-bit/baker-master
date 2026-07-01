@@ -1,9 +1,10 @@
 # CHECKPOINT — BOX5_TARGETED_DROPPED_REPLY_BACKFILL
 
-attempt: 1
+attempt: 2
 rollover: b2 at ~92% context — clean exit; Phase 2 (greenlit #5003) deferred to successor. Artifacts current.
+claim: b3 took over attempt 2 (dispatch #5010), 2026-07-01 — executing Phase 2 with the per-candidate any-key guard.
 brief: bus dispatch #4999 (Director-ratified #4998). No brief file — dispatch-only.
-owner: b2 · dispatched_by: lead · date: 2026-07-01
+owner: b3 · dispatched_by: lead · date: 2026-07-01
 
 ## Brief id / context
 Targeted backfill of KNOWN dropped matter replies (the sink conversation-dedup bug,
