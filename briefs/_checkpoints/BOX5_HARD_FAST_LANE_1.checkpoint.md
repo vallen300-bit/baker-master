@@ -33,10 +33,15 @@ Host brisen-lab.onrender.com, auth X-Terminal-Key (`source scripts/brisen_lab_te
   4. PASS → lead G4 `/security-review` on `git diff main...<sha>` (worktree at /tmp if main tree dirty) → squash-merge → **Box 5 build program COMPLETE**.
   5. FAIL → route findings to b4 (`bus_post.sh b4 ... gate/box5-soft-fast-lane-g3-fail-rework`), b4 reworks, re-gate codex.
 
-## DIRECTOR-GATED (NOT done — need explicit GO)
-- Activation of A (flip `AIRPORT_CHECKIN_SWEEP_ENABLED`) and the fast lane (`BOX5_FAST_LANE_ENABLED`).
-- BB pilot **seed run** (aukera) — `scripts/seed_bb_pilot_registry.py`, currently un-run.
-- Box 5 **feed-widening** follow-up brief ("every arrival ends visible" — no-keyword arrivals) — deferred, cowork-ah1 tracking.
+## ACTIVATION — DIRECTOR-AUTHORIZED (#4785, GO on E-MERGE; lead owns flip + prod/Render lane)
+Director quote "turn it on when ready." PRECONDITION: **hold until E is MERGED** (soft lane absent before then). SEQUENCE when E merged + chain complete:
+1. Run BB pilot seed — `scripts/seed_bb_pilot_registry.py` (matter_slug=aukera, BB-AUK-001; currently un-run). Without it the fast lane resolves nothing.
+2. Flip flags (#4749 contract): `AIRPORT_TICKETING_BRIDGE_ENABLED=true` (runner) + `BOX5_FAST_LANE_ENABLED=true` (D hard + E soft). Render env — config not in repo.
+3. POST_DEPLOY_AC on live: fast-board on a seeded clean match; soft-route on 2-signal; safe-default TICKET on conflict/miss; zero VISIBLE_HOLD.
+4. Bus cowork-ah1 + Director the live verdict (POST_DEPLOY_AC_VERDICT).
+- **A check-in sweep (`AIRPORT_CHECKIN_SWEEP_ENABLED`) = lead's call, flag DISTINCTLY** (sends Director-visible check-in nudges). cowork-ah1 recommends ON for the full loop; do NOT bundle silently.
+- Reversible: all flags default false → flip back to disable.
+- **NOT authorized:** feed-widening follow-up ("every arrival ends visible" / no-keyword arrivals) — stays deferred, cowork-ah1 tracking.
 
 ## GIT / HYGIENE
 - main HEAD after E dispatch = **d240602**; after this checkpoint = the attempt-bump commit.
