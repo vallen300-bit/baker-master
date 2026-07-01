@@ -23,7 +23,8 @@ Host brisen-lab.onrender.com, auth X-Terminal-Key (`source scripts/brisen_lab_te
 
 ## IN FLIGHT — D (PR #443)
 - **BOX5_HARD_FAST_LANE_1** (D), branch box5-hard-fast-lane-1, **code SHA 39671d6** (docs commit 6bb7ff2 on top — ignore for gate). b4 shipped; adapted correctly to merged C.
-- **codex G3 FIRED = bus #4773** (`gate/box5-hard-fast-lane-g3`). **AWAITING VERDICT to lead.**
+- **codex G3 round 1 = FAIL** (#4776, acked). 9/10 rubric PASS; 1 P1: hard-lane exception does `conn.rollback()` which destroys the reserved row → fallback `_claim_for_terminal` finds nothing → lease_skipped → NO terminal TICKET (arrival stranded; violates blocker-D3). Test at test_box5_ticketing_runner.py:508 accepted None, masking it.
+- **Rework routed to b4 = bus #4777** (`gate/box5-hard-fast-lane-g3-fail-rework`): don't roll back the reservation; scope rollback to failed D work so fallback writes TICKET; fix the test to assert a real TICKET write (not None). **AWAITING b4 re-ship → re-fire codex G3.**
 - NEXT ON VERDICT:
   - PASS → lead G4 `/security-review` on `git diff main...39671d6` (verify all SQL parameterized, no injection/secret/exec; D is additive decision logic + pure regex helper + seed literal edits). Then squash-merge #443. Then dispatch E.
   - FAIL → route findings to b4 (`bus_post.sh b4 ... gate/box5-hard-fast-lane-g3-fail-rework`), b4 reworks, re-gate codex. (D safety rubric = 10 items; the risk edges are: regex-only-never-clears, >1-code conflict→TICKET, binding mandatory, error-never-FAST_TICKET, VISIBLE_HOLD count 0, seed aukera both sites + un-run.)
