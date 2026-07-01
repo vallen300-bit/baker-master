@@ -64,12 +64,12 @@ def test_graph_live_poll_captures_file_attachment(monkeypatch):
 
     assert stored == 1
     client.get.assert_called_once()
-    # M365_GRAPH_ATTACHMENT_CONVERSATIONID_KEYING_1 (Option a, #4317): READ by the
-    # real per-message id, but STORE under thread_id (conversationId) so the row
-    # matches email_messages + baker_email_attachment_read.
+    # BOX5_EMAIL_CONVERSATION_DEDUP_FIX_1 F1: the email row is now keyed PER-MESSAGE
+    # (m['id']), so the attachment MUST store under the same per-message id — NOT the
+    # conversationId — or the read-path join is a false-empty surface (codex G3 HIGH).
     assert "graph-message-1" in client.get.call_args.args[0]   # fetch used the real message id
     assert calls == [{
-        "message_id": "graph-thread-1",                        # stored under the conversationId
+        "message_id": "graph-message-1",                       # stored under the per-message id (== email row key)
         "filename": "memo.pdf",
         "mime_type": "application/pdf",
         "payload_bytes": b"memo-bytes",
@@ -125,8 +125,10 @@ def test_gmail_live_poll_captures_attachment_via_existing_reader(monkeypatch):
     }]
 
     assert email_trigger._capture_gmail_thread_attachments(service, threads) == 1
+    # BOX5_EMAIL_CONVERSATION_DEDUP_FIX_1 F1: attachment key MUST equal the email-row
+    # key, which is now the per-message id (metadata['message_id']), not thread_id.
     assert calls == [{
-        "message_id": "gmail-thread-1",
+        "message_id": "gmail-message-1",                       # per-message id (== email row key)
         "source": "email",
         "filename": "contract.pdf",
         "mime_type": "application/pdf",
