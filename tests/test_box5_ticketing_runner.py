@@ -531,3 +531,196 @@ def test_hard_lane_flag_off_is_noop(runner, hard_lane, monkeypatch):
     s = bridge.run_tick()
     assert s["fast_ticket"] == 0
     assert _terminal(runner, "hl_off")[0] == "TICKET"
+
+
+# ============================================================================
+# BOX5_SOFT_FAST_LANE_1 (E) — manifest soft fast lane (>=2 independent signals).
+# E's block (e.7) sits AFTER D's (e.5) hard lane and BEFORE C's (f) safe default,
+# guarded `if fast_lane and row_id and not handled:` — it runs ONLY when the hard
+# lane did not clear. A clean clear needs a participant-signal AND an alias-signal
+# on EXACTLY ONE common project; anything else (sender-only, alias-only, conflict,
+# error) falls through to (f) TICKET. Soft clear = ROUTED TICKET, never FAST_TICKET,
+# never VISIBLE_HOLD. Tests exercise the merged run_tick (live-PG); the `hard_lane`
+# fixture wires the registry DB + fixture vault, `_register_soft` adds alias rows.
+# ============================================================================
+
+_OTHER_SENDER = "stranger@brisengroup.com"
+
+
+def _register_soft(project_number, *, participants, aliases,
+                   desk_owner="baden-baden-desk"):
+    """Register an ACTIVE project WITH aliases (the hard_lane fixture's own helper is
+    participant-only). matter_slug MUST be the fixture-vault canonical slug —
+    register_project rejects non-canonical slugs and the harness points slug_registry
+    at tests/fixtures/vault, where only 'alpha' is canonical ('aukera' is canonical
+    only against the prod vault)."""
+    with get_conn() as conn:
+        return reg.register_project(
+            conn, project_number=project_number, desk_owner=desk_owner,
+            matter_slug=_FIXTURE_CANONICAL_SLUG,
+            participants=participants, aliases=aliases,
+        )
+
+
+def _routing(conn, message_id):
+    """(matter_slug, desk_owner, confidence, manifest_match_signals) for a row — the
+    columns ONLY the soft lane populates on a TICKET."""
+    with conn.cursor() as cur:
+        cur.execute(
+            "SELECT matter_slug, desk_owner, confidence, manifest_match_signals "
+            "FROM airport_tickets WHERE raw_source_id = %s LIMIT 1",
+            (message_id,),
+        )
+        row = cur.fetchone()
+    return row if row else (None, None, None, None)
+
+
+# 19 — E case 1: sender is a registered participant but NO matter alias in the text
+#      -> only 1 signal -> agree empty -> (f) TICKET, soft lane routes nothing.
+def test_soft_lane_sender_only_is_ticket(runner, hard_lane, monkeypatch):
+    monkeypatch.setenv("BOX5_FAST_LANE_ENABLED", "true")
+    _register_soft("BB-AUK-001",
+                   participants=[{"channel": "email", "value": _BOUND_SENDER}],
+                   aliases=["annaberg"])
+    # keyword 'aukera' gets it fetched; the alias 'annaberg' is absent -> alias empty.
+    _seed_email(runner, "sl_sender", subject="aukera funding",
+                sender_email=_BOUND_SENDER, body="please review the closing")
+    s = bridge.run_tick()
+    assert s["soft_ticket"] == 0
+    assert s["fast_ticket"] == 0
+    assert _terminal(runner, "sl_sender")[0] == "TICKET"
+    matter_slug, desk_owner, _, signals = _routing(runner, "sl_sender")
+    assert matter_slug is None and desk_owner is None   # soft lane did NOT route
+    assert signals == []                                # default '[]' untouched
+
+
+# 20 — E case 2: the matter alias appears but the sender is NOT a participant
+#      -> only 1 signal -> agree empty -> (f) TICKET.
+def test_soft_lane_alias_only_is_ticket(runner, hard_lane, monkeypatch):
+    monkeypatch.setenv("BOX5_FAST_LANE_ENABLED", "true")
+    _register_soft("BB-AUK-001",
+                   participants=[{"channel": "email", "value": _OTHER_SENDER}],
+                   aliases=["annaberg"])
+    _seed_email(runner, "sl_alias", subject="annaberg status",
+                sender_email=_BOUND_SENDER, body="annaberg update please review")
+    s = bridge.run_tick()
+    assert s["soft_ticket"] == 0
+    assert _terminal(runner, "sl_alias")[0] == "TICKET"
+    assert _routing(runner, "sl_alias")[0] is None      # not routed
+
+
+# 21 — E case 3: participant AND alias agree on the SAME project -> routed TICKET with
+#      routing columns set + soft_ticket++, NEVER FAST_TICKET.
+def test_soft_lane_two_signals_same_project_is_routed_ticket(runner, hard_lane, monkeypatch):
+    monkeypatch.setenv("BOX5_FAST_LANE_ENABLED", "true")
+    _register_soft("BB-AUK-001",
+                   participants=[{"channel": "email", "value": _BOUND_SENDER}],
+                   aliases=["annaberg"])
+    # participant (sender) + alias ('annaberg') both hit BB-AUK-001; NO project code
+    # in the text so D's hard lane falls through and E runs.
+    _seed_email(runner, "sl_ok", subject="status update",
+                sender_email=_BOUND_SENDER, body="please review annaberg closing")
+    s = bridge.run_tick()
+    assert s["soft_ticket"] == 1
+    assert s["fast_ticket"] == 0
+    assert s["deterministic_cleared"] == 0
+    status, written = _terminal(runner, "sl_ok")
+    assert status == "TICKET"          # ROUTED, not FAST_TICKET
+    assert written is not None
+    matter_slug, desk_owner, confidence, signals = _routing(runner, "sl_ok")
+    assert matter_slug == _FIXTURE_CANONICAL_SLUG      # 'alpha' in the fixture vault
+    assert desk_owner == "baden-baden-desk"
+    assert float(confidence) == 0.60
+    assert isinstance(signals, list) and len(signals) == 2
+    assert {sig["signal"] for sig in signals} == {"participant", "alias"}
+    with runner.cursor() as cur:
+        cur.execute("SELECT terminal_reason FROM airport_tickets WHERE raw_source_id='sl_ok'")
+        assert cur.fetchone()[0].startswith("soft_lane_participant+alias")
+
+
+# 22 — E case 4: two INDEPENDENT signals agree but on >1 project (competing active
+#      manifests) -> len(agree) != 1 -> (f) TICKET, no route.
+def test_soft_lane_conflict_two_projects_is_ticket(runner, hard_lane, monkeypatch):
+    monkeypatch.setenv("BOX5_FAST_LANE_ENABLED", "true")
+    # BOTH projects carry the sender AND an alias present in the text -> agree = {both}.
+    _register_soft("BB-AUK-001",
+                   participants=[{"channel": "email", "value": _BOUND_SENDER}],
+                   aliases=["annaberg"])
+    _register_soft("BB-LIL-002",
+                   participants=[{"channel": "email", "value": _BOUND_SENDER}],
+                   aliases=["lilienmatt"])
+    _seed_email(runner, "sl_conflict", subject="two matters",
+                sender_email=_BOUND_SENDER, body="annaberg and lilienmatt both update")
+    s = bridge.run_tick()
+    assert s["soft_ticket"] == 0
+    assert _terminal(runner, "sl_conflict")[0] == "TICKET"
+    assert _routing(runner, "sl_conflict")[0] is None   # no routed clear on conflict
+
+
+# 23 — E case 5: a raise in E's resolve/compose/write NEVER routes. It rolls back to
+#      the savepoint (preserving issue_ticket's reservation), counts failed, and STILL
+#      ends the arrival at a visible (f) TICKET — never stranded, never soft_ticket++.
+#      (Same savepoint-strand P1 class codex caught on D.)
+def test_soft_lane_error_never_routes_and_ends_visible(runner, hard_lane, monkeypatch):
+    monkeypatch.setenv("BOX5_FAST_LANE_ENABLED", "true")
+    _register_soft("BB-AUK-001",
+                   participants=[{"channel": "email", "value": _BOUND_SENDER}],
+                   aliases=["annaberg"])
+
+    def _boom(text):
+        raise RuntimeError("alias resolver exploded")
+
+    monkeypatch.setattr(bridge, "resolve_by_alias", _boom)
+    _seed_email(runner, "sl_err", subject="annaberg status",
+                sender_email=_BOUND_SENDER, body="please review annaberg",
+                received=_now() - timedelta(hours=2))
+    _seed_email(runner, "sl_next", subject="annaberg plain",
+                sender_email=_BOUND_SENDER, body="a second annaberg note",
+                received=_now() - timedelta(hours=1))
+    s = bridge.run_tick()
+    assert s["soft_ticket"] == 0
+    assert s["fast_ticket"] == 0
+    assert s["deterministic_cleared"] == 0
+    assert s["failed"] >= 1
+    # errored row still ends at a (f) TICKET (savepoint preserved the reservation),
+    # NOT a routed soft clear and NOT stranded as None.
+    err_status, err_written = _terminal(runner, "sl_err")
+    assert err_status == "TICKET"
+    assert err_written is not None
+    with runner.cursor() as cur:
+        cur.execute("SELECT terminal_reason FROM airport_tickets WHERE raw_source_id='sl_err'")
+        assert cur.fetchone()[0] == "safe_default_desk_review"   # (f), not soft_lane
+    assert _routing(runner, "sl_err")[0] is None                 # no routing columns
+    # the batch kept processing the next arrival
+    assert _terminal(runner, "sl_next")[0] == "TICKET"
+
+
+# 24 — E case 6: when the HARD lane already cleared (project code + participant bound),
+#      E never runs -> FAST_TICKET stands, soft_ticket == 0 (proves D-before-E precedence).
+def test_soft_lane_not_reached_when_hard_lane_clears(runner, hard_lane, monkeypatch):
+    monkeypatch.setenv("BOX5_FAST_LANE_ENABLED", "true")
+    _register_soft("BB-AUK-001",
+                   participants=[{"channel": "email", "value": _BOUND_SENDER}],
+                   aliases=["annaberg"])
+    # code BB-AUK-001 present + sender participant-bound -> D writes FAST_TICKET first.
+    _seed_email(runner, "sl_hard", subject="aukera funding",
+                sender_email=_BOUND_SENDER, body="review BB-AUK-001 annaberg closing")
+    s = bridge.run_tick()
+    assert s["fast_ticket"] == 1
+    assert s["soft_ticket"] == 0
+    assert _terminal(runner, "sl_hard")[0] == "FAST_TICKET"
+
+
+# 25 — E case 7: flag OFF -> E's branch skipped; a participant+alias arrival lands on
+#      C's safe-default TICKET with no routing columns (E adds nothing live dark).
+def test_soft_lane_flag_off_is_noop(runner, hard_lane, monkeypatch):
+    monkeypatch.delenv("BOX5_FAST_LANE_ENABLED", raising=False)  # default false
+    _register_soft("BB-AUK-001",
+                   participants=[{"channel": "email", "value": _BOUND_SENDER}],
+                   aliases=["annaberg"])
+    _seed_email(runner, "sl_off", subject="status update",
+                sender_email=_BOUND_SENDER, body="please review annaberg closing")
+    s = bridge.run_tick()
+    assert s["soft_ticket"] == 0
+    assert _terminal(runner, "sl_off")[0] == "TICKET"
+    assert _routing(runner, "sl_off")[0] is None
