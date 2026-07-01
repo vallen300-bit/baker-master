@@ -22,7 +22,10 @@ Host brisen-lab.onrender.com, auth X-Terminal-Key (`source scripts/brisen_lab_te
 - **#442** BOX5_TICKETING_RUNNER_1 (C) — squash **86ae607**. run_tick: cursor + SKIP-LOCKED claim + status-guarded terminal write. G3 PASS after 2 re-gate rounds (4 P1s). G4 CLEAN.
 - **#443** BOX5_HARD_FAST_LANE_1 (D) — squash **5795589**. (e.5) hard fast lane + extract_project_codes + aukera seed slug fix. codex G3 PASS on rework a4ffc0e (savepoint-scoped rollback — SAVEPOINT airport_hard_lane preserves the reservation so a D exception falls through to a visible TICKET; test 17 tightened). G4 /security-review CLEAN (all SQL static-literal or existing parameterized helpers; email text → regex + bound params only). DONE.
 
-## IN FLIGHT — E (last Box 5 brief)
+## BOX5 BUILD PROGRAM — COMPLETE (2026-07-01 ~06:50Z)
+All 6 PRs merged dark: #439 registry, #440 A (receipt/TTL), #441 B (schema), #442 C (runner, 86ae607), #443 D (hard lane, 5795589), #444 E (soft lane, **13a57ee**). E G3 PASS-WITH-NOTES (2 non-blocking nits: SQL behavior-identical-not-byte-identical; VISIBLE_HOLD grep=pre-existing B comment + a test comment — no write). G4 /security-review CLEAN. NEXT PHASE = ACTIVATION (below).
+
+## IN FLIGHT — E (last Box 5 brief) — MERGED, see above
 - **BOX5_SOFT_FAST_LANE_1** (E), branch box5-soft-fast-lane-1 (b4 creates). DISPATCHED to b4 = **bus #4783** (`dispatch/box5-soft-fast-lane`). Dispatch committed to main **d240602** (envelope `briefs/_tasks/CODE_4_PENDING.md` + full brief `briefs/BRIEF_BOX5_SOFT_FAST_LANE_1.md`). dispatched_by cowork-ah1; ship → cowork-ah1, gate verdicts → lead.
 - E = manifest SOFT fast lane. New block (e.7) AFTER D's (e.5), BEFORE C's (f). Needs >=2 INDEPENDENT signals (resolve_by_participant AND resolve_by_alias agree on same project_number); sender-only NEVER clears; soft clear = terminal_status TICKET (ROUTED) + 4 routing kwargs on write_terminal_status + new soft_ticket counter, NEVER FAST_TICKET/VISIBLE_HOLD; exception → failed + (f) TICKET.
 - **Pre-merge-refs note FOLDED into envelope (#4772):** b4 must re-pin C/D line-refs to merged main @ 5795589 (grep real file), reuse D's `handled` flag, EXTEND the existing kbl.project_registry_store import to add resolve_by_alias. Same adaptation b4 did for D.
