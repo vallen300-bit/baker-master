@@ -1,5 +1,9 @@
 ---
-status: PENDING
+status: SHIPPED_AWAITING_GATES
+pr: 442
+head_sha: ed2c8da
+shipped_at: 2026-07-01
+g3_rework: "ed2c8da — round1 P1-A/B/C fixed (confirmed by codex); round2 P1 blank-cursor 24h-fallback strand fixed via trigger_state.get_watermark_raw (missing->full-lookback floor). 14/14 matrix + 20 airport + 69 state/trigger tests GREEN live-PG; awaiting re-gate (codex G3)"
 brief_id: BOX5_TICKETING_RUNNER_1
 to: b4
 from: lead
