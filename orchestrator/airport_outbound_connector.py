@@ -144,11 +144,48 @@ _CLASS_KEYWORDS = (
 )
 
 # ClickUp status mapping (spec §"ClickUp Write Contract" status table).
+# These five are the connector's CANONICAL internal states (the decision output of
+# _clickup_status). They are NOT literal ClickUp status strings — the actual string
+# sent to a given list is resolved by _resolve_clickup_status (see below), because a
+# matter timetable list owns its own status vocab (BOX5_OUTBOUND_CLICKUP_STATUS_MAPPING_1).
 _STATUS_READY = "Ready for Baker Relay"
 _STATUS_PACKET_DRAFT = "Packet Draft"
 _STATUS_WAITING_REPLY = "Waiting Reply"
 _STATUS_NEEDS_DIRECTOR = "Needs Director"
 _STATUS_CLOSED = "Closed"
+
+# BOX5_OUTBOUND_CLICKUP_STATUS_MAPPING_1 — canonical connector state -> literal ClickUp
+# status string, resolved per target list. The connector's five statuses are a
+# Baker-relay workflow vocabulary; matter timetable lists deliberately own a different
+# vocab (baden-baden-desk designed BB-AUK-001 Timetable so auto-generated tasks stay
+# isolated from curated tracks). Live proof (b4 canary #4894): writing the native five
+# to list 901524194809 returns 400 {"err":"Status not found","ECODE":"CRTSK_001"}.
+#
+# _DEFAULT_STATUS_MAP is the fallback for any list WITHOUT an explicit override
+# (b4-proposed targets). NOTE: "in progress"/"to do"/"complete" are common ClickUp
+# statuses, but "waiting"/"at risk" are NOT universal ClickUp defaults — a list lacking
+# them still degrades SAFELY to CLICKUP_BLOCKED via the fault-tolerant write gate. Add a
+# per-list override when onboarding a new matter list (a config-table design is a later
+# brief if more matter lists appear).
+_DEFAULT_STATUS_MAP = {
+    _STATUS_READY: "in progress",
+    _STATUS_PACKET_DRAFT: "to do",
+    _STATUS_WAITING_REPLY: "waiting",
+    _STATUS_NEEDS_DIRECTOR: "at risk",
+    _STATUS_CLOSED: "complete",
+}
+# Per-list overrides keyed by ClickUp list_id. BB-AUK-001 Timetable (901524194809, BAKER
+# Space) vocab: to do, planning, in progress, at risk, update required, on hold, waiting,
+# blocked, complete, cancelled. All five targets below exist in that vocab (canary-proven).
+_PER_LIST_STATUS_MAP = {
+    "901524194809": {
+        _STATUS_READY: "in progress",
+        _STATUS_PACKET_DRAFT: "to do",
+        _STATUS_WAITING_REPLY: "waiting",
+        _STATUS_NEEDS_DIRECTOR: "at risk",
+        _STATUS_CLOSED: "complete",
+    },
+}
 
 # Flight transitions (spec §"Flight-State Progression Contract"). Record-only: the
 # from/to states are recorded on the event, not applied to any live flight store.
@@ -596,6 +633,26 @@ def _clickup_status(rclass: str, complete: bool, returned_package: bool) -> str:
     return _STATUS_PACKET_DRAFT
 
 
+def _resolve_clickup_status(list_id: Optional[str], canonical_state: str) -> str:
+    """Map a CANONICAL connector state to the literal ClickUp status string to SEND for
+    ``list_id`` (BOX5_OUTBOUND_CLICKUP_STATUS_MAPPING_1).
+
+    Resolution order:
+      1. per-list override (if ``list_id`` has one AND it carries ``canonical_state``);
+      2. module _DEFAULT_STATUS_MAP;
+      3. ``canonical_state`` itself — last-resort passthrough.
+
+    Never raises: an unknown ``list_id`` (or a state absent from both maps) returns the
+    canonical string via ``.get`` passthrough — no KeyError. If the resolved status is
+    still not accepted by the list, the write path's fault-tolerant gate degrades to
+    CLICKUP_BLOCKED (no crash, no residue). The connector adapts to each list's vocab;
+    it never imposes its own."""
+    per_list = _PER_LIST_STATUS_MAP.get(list_id or "")
+    if per_list and canonical_state in per_list:
+        return per_list[canonical_state]
+    return _DEFAULT_STATUS_MAP.get(canonical_state, canonical_state)
+
+
 # ---------------------------------------------------------------------------
 # Main entry
 # ---------------------------------------------------------------------------
@@ -728,7 +785,11 @@ def _write_clickup_then_flight(
         return {"event_state": CLICKUP_BLOCKED, "terminal": True,
                 "clickup_written": False, "flight_progressed": False}
 
+    # `status` stays the CANONICAL internal state — recorded on the event + audit as the
+    # connector's decision (spec: canonical keys, not literal ClickUp strings). Only the
+    # outbound create_task call speaks the list's literal vocab, resolved here.
     status = _clickup_status(rclass, complete, returned_package)
+    resolved_status = _resolve_clickup_status(list_id, status)
     target_ref = corr.get("project_code") or ticket_id
     idem = "outbound-clickup:v1:%s:%s:%s" % (message_id, target_ref, rclass)
     title = ("[outbound %s] %s" % (rclass, subject))[:255]
@@ -747,7 +808,7 @@ def _write_clickup_then_flight(
             name=title,
             description=("Outbound ratification (%s) message_id=%s\n%s"
                          % (rclass, message_id, (body or "")[:1500])),
-            status=status,
+            status=resolved_status,
             # record-only: the parsed due string is kept in the event/audit; we do not
             # fabricate a ms timestamp from a bare ISO date (no reliable tz).
             due_date=None,

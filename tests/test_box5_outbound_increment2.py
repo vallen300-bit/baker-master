@@ -300,13 +300,16 @@ def test_ac3_ratifying_creates_one_clickup_task(ob):
     assert s["outbound_signal"] == 1
     ev = _event(ob, "ac3")
     assert ev[2] is not None                                  # clickup_task_id set
-    assert ev[3] == "Ready for Baker Relay"                   # complete -> ready
+    assert ev[3] == "Ready for Baker Relay"                   # event records CANONICAL state
     assert ev[4] == "outbound-clickup:v1:ac3:BB-AUK-001:approval"  # idempotency key
     assert ev[0] == "FLIGHT_BLOCKED"                          # wrote ClickUp; no active flight
     creates = _creates()
     assert len(creates) == 1
     assert creates[0][1]["list_id"] == _LIST_ID
-    assert creates[0][1]["status"] == "Ready for Baker Relay"
+    # SENT status is the list-resolved literal, not the canonical state
+    # (BOX5_OUTBOUND_CLICKUP_STATUS_MAPPING_1). _LIST_ID has no per-list override → DEFAULT map.
+    assert creates[0][1]["status"] == connector._resolve_clickup_status(_LIST_ID, "Ready for Baker Relay")
+    assert creates[0][1]["status"] == "in progress"
     assert _audit_count(ob, "airport_outbound.clickup_write", "ac3") == 1
 
 
@@ -360,11 +363,13 @@ def test_ac7_external_send_waiting_reply_not_closed(ob):
                      "awaiting their reply. owner: balazs, due 2026-07-10.")
     bridge.run_tick()
     ev = _event(ob, "ac7")
-    assert ev[3] == "Waiting Reply"
+    assert ev[3] == "Waiting Reply"                           # event records CANONICAL state
     assert ev[3] != "Closed"
     assert ev[0] == "FLIGHT_PROGRESSED"
     assert ev[6] == "waiting_counterparty"
-    assert _creates()[0][1]["status"] == "Waiting Reply"
+    # SENT status is the list-resolved literal (DEFAULT map; _LIST_ID has no override).
+    assert _creates()[0][1]["status"] == connector._resolve_clickup_status(_LIST_ID, "Waiting Reply")
+    assert _creates()[0][1]["status"] == "waiting"
 
 
 # AC8 — final-acceptance without returned package: no 'landed'; waiting_receipt + Controller.
@@ -573,3 +578,70 @@ def test_correlation_read_error_savepoint_isolated(ob, monkeypatch):
     assert ev[0] == "FLIGHT_BLOCKED"                         # ClickUp wrote; boom killed flight
     assert len(_creates()) == 1                              # downstream ran -> correlate finished
     assert _audit_count(ob, "airport_outbound.clickup_write", "isoerr") == 1
+
+
+# ===========================================================================
+# BOX5_OUTBOUND_CLICKUP_STATUS_MAPPING_1 — per-list ClickUp status resolution.
+# The connector's five CANONICAL states are a Baker-relay workflow vocab; matter
+# timetable lists own a different vocab. _resolve_clickup_status adapts the SENT status
+# string per target list so ratifications stop 400-ing on 'Status not found'. The
+# resolver tests (TDD-1..3) are pure units — no DB, they run without TEST_DATABASE_URL.
+# ===========================================================================
+
+# BB-AUK-001 Timetable (list 901524194809, BAKER Space) real status vocab — the exact set
+# the live canary (#4894) reported. The connector's native five are ABSENT from it.
+_BB_AUK_001_LIST = "901524194809"
+_BB_AUK_001_VOCAB = {
+    "to do", "planning", "in progress", "at risk", "update required",
+    "on hold", "waiting", "blocked", "complete", "cancelled",
+}
+_CANONICAL_STATES = (
+    "Ready for Baker Relay", "Packet Draft", "Waiting Reply", "Needs Director", "Closed",
+)
+
+
+# TDD-1 (repro) — the connector's native canonical statuses are NOT in the BB-AUK-001
+# vocab (this IS the live 400 'Status not found'); post-fix each resolves INTO the vocab.
+def test_status_mapping_repro_canonical_absent_resolved_present():
+    for canonical in _CANONICAL_STATES:                      # repro: canonical would 400
+        assert canonical not in _BB_AUK_001_VOCAB
+    resolved = connector._resolve_clickup_status(_BB_AUK_001_LIST, "Ready for Baker Relay")
+    assert resolved != "Ready for Baker Relay"               # post-fix: remapped
+    assert resolved in _BB_AUK_001_VOCAB                     # ...to a list-present status
+
+
+# TDD-2 (per-state mapping, AC1) — every canonical state resolves to a status present in
+# the BB-AUK-001 timetable vocab.
+def test_status_mapping_every_canonical_state_in_list_vocab():
+    for canonical in _CANONICAL_STATES:
+        resolved = connector._resolve_clickup_status(_BB_AUK_001_LIST, canonical)
+        assert resolved in _BB_AUK_001_VOCAB, (canonical, resolved)
+
+
+# TDD-3 (default-map fallback, AC2) — an unknown list_id resolves via the DEFAULT map;
+# a None list_id and an unmapped canonical passthrough — no KeyError, no crash.
+def test_status_mapping_unknown_list_uses_default_map():
+    for canonical, expected in connector._DEFAULT_STATUS_MAP.items():
+        assert connector._resolve_clickup_status("999999999999", canonical) == expected
+    assert connector._resolve_clickup_status(None, "Ready for Baker Relay") == "in progress"
+    # Unmapped canonical -> passthrough (the fault-tolerant write gate catches a reject).
+    assert connector._resolve_clickup_status("999999999999", "Totally Unknown") == "Totally Unknown"
+
+
+# TDD-4 (fault-tolerance regression, AC3) — even the RESOLVED status can be rejected by a
+# list (400 'Status not found' -> clickup_client returns None). The connector MUST degrade
+# to CLICKUP_BLOCKED, complete the event, audit the write, and NEVER raise. HARD path.
+def test_status_mapping_resolved_still_rejected_degrades_blocked(ob, monkeypatch):
+    _register()                                              # _LIST_ID: no override -> DEFAULT map
+    rejects = _FakeClickUp(fail_mode="return_none")         # list rejects even the resolved status
+    monkeypatch.setattr(connector, "_get_clickup_client", lambda: rejects)
+    _seed_email(ob, "mapdeg", subject="aukera approved",
+                body="Approved BB-AUK-001. owner: balazs, DV to sign, due 2026-07-10.")
+    bridge.run_tick()                                       # must not raise
+    ev = _event(ob, "mapdeg")
+    assert ev is not None                                   # durably recorded, not silently dropped
+    assert ev[0] == "CLICKUP_BLOCKED"                       # safe degrade preserved
+    assert ev[3] == "Ready for Baker Relay"                 # event still records CANONICAL state
+    assert rejects.calls[0][1]["status"] == "in progress"   # ...but the SENT string was resolved
+    assert _audit_count(ob, "airport_outbound.clickup_write", "mapdeg") == 1
+    assert _audit_count(ob, "airport_outbound.flight_transition_recorded", "mapdeg") == 0
