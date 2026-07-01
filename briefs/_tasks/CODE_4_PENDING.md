@@ -1,8 +1,9 @@
 ---
 status: SHIPPED_AWAITING_GATES
 pr: 442
-head_sha: 8a168eb
+head_sha: ff8a231
 shipped_at: 2026-07-01
+g3_rework: "ff8a231 — codex G3 P1-A(cursor oldest-first+contiguous prefix)+P1-B(bus-fail=failure)+P1-C(reject_noise=automated-sender-only); 13/13 matrix + 20 airport tests GREEN live-PG; awaiting re-gate (codex G3)"
 brief_id: BOX5_TICKETING_RUNNER_1
 to: b4
 from: lead
