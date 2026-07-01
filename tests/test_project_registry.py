@@ -311,14 +311,39 @@ def test_resolve_by_participant_deterministic_order(store):
 def test_seed_bb_pilot_registry_constants_consistent():
     """Pure check: the seed's desk_owner must equal the desk derived from its
     project number's prefix (BB -> baden-baden-desk), and its matter_slug must be
-    the resolved 'annaberg' (not the 'aukera' lender). Catches a silent drift
-    between the seed constants and #439's DESK_CODES authority."""
+    the Director-ratified canonical 'aukera' (BRIEF-D correction; 'annaberg' stays
+    a human alias only). Catches a silent drift between the seed constants and
+    #439's DESK_CODES authority."""
     import scripts.seed_bb_pilot_registry as seed
     assert seed.PROJECT_NUMBER == "BB-AUK-001"
-    assert seed.MATTER_SLUG == "annaberg"
+    assert seed.MATTER_SLUG == "aukera"
     prefix = seed.PROJECT_NUMBER.split("-", 1)[0]
     assert prefix == "BB"
     assert seed.DESK_OWNER == reg.DESK_CODES[prefix] == "baden-baden-desk"
+
+
+# --- BOX5_HARD_FAST_LANE_1: extract_project_codes (pure regex, NO live PG) -----
+
+
+def test_extract_project_codes_distinct_order():
+    """Case 1 — DISTINCT valid-shaped codes in first-occurrence text order."""
+    assert reg.extract_project_codes("AO-MOV-002 then BB-AUK-001") == [
+        "AO-MOV-002", "BB-AUK-001",
+    ]
+    assert reg.extract_project_codes("ref ZZ-XX-99 see BB-AUK-001") == [
+        "ZZ-XX-99", "BB-AUK-001",
+    ]
+    assert reg.extract_project_codes("") == []
+    assert reg.extract_project_codes("no code here at all") == []
+
+
+def test_extract_project_codes_dedup_and_conflict_count():
+    """Case 2 — tolerant separators collapse to one canonical code; two DISTINCT
+    codes are the >1 conflict trigger the hard lane refuses to fast-board."""
+    # 'bb auk 001' and 'BB-AUK001' are the same code -> single entry.
+    assert reg.extract_project_codes("bb auk 001 and BB-AUK001") == ["BB-AUK-001"]
+    # two distinct codes -> len(set)>1 -> conflict gate fires.
+    assert len(set(reg.extract_project_codes("AO-MOV-002 and BB-AUK-001"))) == 2
 
 
 def test_seed_mechanism_one_row_desk_routing_idempotent(store):

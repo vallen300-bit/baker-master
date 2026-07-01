@@ -12,11 +12,20 @@ NEON_*; CI runs live).
 from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
+from pathlib import Path
 
 import psycopg2
 import pytest
 
 from orchestrator import airport_ticketing_bridge as bridge
+from kbl import project_registry_store as reg
+from kbl import slug_registry
+from kbl.db import get_conn
+
+# BOX5_HARD_FAST_LANE_1 branch tests use the fixture vault for slug validation
+# (never the prod slugs.yml), mirroring tests/test_project_registry.py.
+_FIXTURE_VAULT = Path(__file__).parent / "fixtures" / "vault"
+_FIXTURE_CANONICAL_SLUG = "alpha"  # canonical in the fixture vault
 
 
 def _now() -> datetime:
@@ -389,3 +398,126 @@ def test_p1_blank_cursor_scans_full_lookback(runner):
     assert _terminal(runner, "eblank")[0] == "TICKET"
     wm = bridge.trigger_state_get_watermark(bridge._WATERMARK_SOURCE)
     assert abs((wm - r_30h).total_seconds()) < 1.0
+
+
+# ============================================================================
+# BOX5_HARD_FAST_LANE_1 (D) — project-number hard fast lane branch in run_tick.
+# ============================================================================
+_BOUND_SENDER = "balazs@brisengroup.com"
+
+
+@pytest.fixture
+def hard_lane(runner, needs_live_pg, monkeypatch):
+    """Extend `runner`: wire project_registry to the SAME DB, point slug validation
+    at the fixture vault, and hand back a clean registry + a `register` helper. Each
+    test seeds exactly the codes it needs and sets BOX5_FAST_LANE_ENABLED itself."""
+    monkeypatch.setenv("DATABASE_URL", needs_live_pg)
+    monkeypatch.setenv("BAKER_VAULT_PATH", str(_FIXTURE_VAULT))
+    slug_registry.reload()
+    with get_conn() as conn:
+        reg.ensure_project_registry_table(conn)
+        with conn.cursor() as cur:
+            cur.execute("DELETE FROM project_registry")
+        conn.commit()
+
+    def register(project_number, desk_owner="baden-baden-desk", participants=None):
+        with get_conn() as conn:
+            return reg.register_project(
+                conn, project_number=project_number, desk_owner=desk_owner,
+                matter_slug=_FIXTURE_CANONICAL_SLUG, participants=participants or [],
+            )
+
+    yield register
+    slug_registry.reload()
+
+
+# 13 — D case 3: a 1-code arrival whose code is UNREGISTERED never fast-clears
+#      (regex shape alone is not a clearance, #4679.3) -> TICKET.
+def test_hard_lane_regex_only_no_row_is_ticket(runner, hard_lane, monkeypatch):
+    monkeypatch.setenv("BOX5_FAST_LANE_ENABLED", "true")
+    # registry is empty -> resolve_project_number returns None
+    _seed_email(runner, "hl_unreg", subject="aukera update",
+                sender_email=_BOUND_SENDER, body="ref BB-AUK-001 (unregistered)")
+    s = bridge.run_tick()
+    assert s["fast_ticket"] == 0
+    assert _terminal(runner, "hl_unreg")[0] == "TICKET"
+
+
+# 14 — D case 4: registered ACTIVE code + sender in the participant set -> FAST_TICKET.
+def test_hard_lane_valid_code_and_binding_is_fast_ticket(runner, hard_lane, monkeypatch):
+    monkeypatch.setenv("BOX5_FAST_LANE_ENABLED", "true")
+    hard_lane("BB-AUK-001", participants=[{"channel": "email", "value": _BOUND_SENDER}])
+    _seed_email(runner, "hl_ok", subject="aukera funding",
+                sender_email=_BOUND_SENDER, body="please review BB-AUK-001 for closing")
+    s = bridge.run_tick()
+    assert s["fast_ticket"] == 1
+    status, _ = _terminal(runner, "hl_ok")
+    assert status == "FAST_TICKET"
+    with runner.cursor() as cur:
+        cur.execute("SELECT terminal_reason FROM airport_tickets WHERE raw_source_id='hl_ok'")
+        assert cur.fetchone()[0].startswith("hard_lane_project_code_participant_bound")
+    assert s["deterministic_cleared"] == 0   # a fast-lane clear is NOT a deterministic clear
+    assert s["defaulted_ticket"] == 0
+
+
+# 15 — D case 5: registered ACTIVE code but sender NOT bound -> TICKET (binding mandatory).
+def test_hard_lane_valid_code_no_binding_is_ticket(runner, hard_lane, monkeypatch):
+    monkeypatch.setenv("BOX5_FAST_LANE_ENABLED", "true")
+    hard_lane("BB-AUK-001", participants=[{"channel": "email", "value": _BOUND_SENDER}])
+    _seed_email(runner, "hl_unbound", subject="aukera funding",
+                sender_email="stranger@brisengroup.com", body="review BB-AUK-001 please")
+    s = bridge.run_tick()
+    assert s["fast_ticket"] == 0
+    assert _terminal(runner, "hl_unbound")[0] == "TICKET"
+
+
+# 16 — D case 6: >1 distinct code = cross-matter CONFLICT (F4) -> TICKET, never fast-board.
+def test_hard_lane_conflict_two_codes_is_ticket(runner, hard_lane, monkeypatch):
+    monkeypatch.setenv("BOX5_FAST_LANE_ENABLED", "true")
+    hard_lane("BB-AUK-001", participants=[{"channel": "email", "value": _BOUND_SENDER}])
+    hard_lane("AO-MOV-002", desk_owner="ao-desk",
+              participants=[{"channel": "email", "value": _BOUND_SENDER}])
+    _seed_email(runner, "hl_conflict", subject="aukera cross ref",
+                sender_email=_BOUND_SENDER, body="both BB-AUK-001 and AO-MOV-002 appear")
+    s = bridge.run_tick()
+    assert s["fast_ticket"] == 0
+    assert _terminal(runner, "hl_conflict")[0] == "TICKET"
+
+
+# 17 — D case 7: an exception in the resolve/bind composition NEVER auto-FAST_TICKETs —
+#      it counts `failed`, falls through to TICKET, and the batch continues.
+def test_hard_lane_error_never_fast_tickets(runner, hard_lane, monkeypatch):
+    monkeypatch.setenv("BOX5_FAST_LANE_ENABLED", "true")
+    hard_lane("BB-AUK-001", participants=[{"channel": "email", "value": _BOUND_SENDER}])
+
+    def _boom(channel, value):
+        raise RuntimeError("registry exploded")
+
+    monkeypatch.setattr(bridge, "resolve_by_participant", _boom)
+    _seed_email(runner, "hl_err", subject="aukera funding",
+                sender_email=_BOUND_SENDER, body="review BB-AUK-001",
+                received=_now() - timedelta(hours=2))
+    _seed_email(runner, "hl_plain", subject="aukera plain note",
+                sender_email=_BOUND_SENDER, body="no code here",
+                received=_now() - timedelta(hours=1))
+    s = bridge.run_tick()
+    assert s["fast_ticket"] == 0
+    assert s["failed"] >= 1
+    assert s["deterministic_cleared"] == 0
+    # errored row fell through to the safe default, never FAST_TICKET
+    assert _terminal(runner, "hl_err")[0] in ("TICKET", None)
+    assert _terminal(runner, "hl_err")[0] != "FAST_TICKET"
+    # the batch kept processing the second (code-less) arrival
+    assert _terminal(runner, "hl_plain")[0] == "TICKET"
+
+
+# 18 — D case 8: flag OFF -> the whole branch is skipped; a registered+bound arrival
+#      lands on C's safe-default TICKET (D adds nothing live until the flag flips).
+def test_hard_lane_flag_off_is_noop(runner, hard_lane, monkeypatch):
+    monkeypatch.delenv("BOX5_FAST_LANE_ENABLED", raising=False)  # default false
+    hard_lane("BB-AUK-001", participants=[{"channel": "email", "value": _BOUND_SENDER}])
+    _seed_email(runner, "hl_off", subject="aukera funding",
+                sender_email=_BOUND_SENDER, body="review BB-AUK-001 please")
+    s = bridge.run_tick()
+    assert s["fast_ticket"] == 0
+    assert _terminal(runner, "hl_off")[0] == "TICKET"

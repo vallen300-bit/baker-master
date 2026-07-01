@@ -240,6 +240,30 @@ def resolve_project_number(text: str) -> Optional[dict]:
         return None
 
 
+def extract_project_codes(text: str) -> list[str]:
+    """Conflict pre-check primitive (F4): DISTINCT valid-SHAPED DESK-MATTER-### codes
+    in first-occurrence text order. PURE regex — reuses the module-level ``_NUMBER_RE``,
+    NO registry/DB hit and no second compiled pattern.
+
+    Box 5's hard fast lane calls this FIRST: ``>1`` distinct code => cross-matter
+    CONFLICT => do NOT fast-board (route to full desk TICKET). Canonical upper form
+    ('BB-AUK-001') matches ``register_project``'s stored display, so 'bb auk 001' and
+    'BB-AUK001' collapse to one code. Regex shape ALONE never clears (#4679.3) — the
+    real clearance still requires ``resolve_project_number`` (registry, ACTIVE) AND a
+    participant binding; this only filters shape + counts distinct codes for the
+    conflict gate."""
+    if not text:
+        return []
+    out: list[str] = []
+    seen: set[str] = set()
+    for m in _NUMBER_RE.finditer(text):
+        code = f"{m.group(1)}-{m.group(2)}-{m.group(3)}".upper()
+        if code not in seen:
+            seen.add(code)
+            out.append(code)
+    return out
+
+
 def resolve_by_participant(channel: str, value: str) -> list[dict]:
     """SOFT-LANE signal #1 (number forgotten): ACTIVE projects whose participant
     set contains {channel, value}. NEVER sufficient alone (sender-only forbidden)."""
@@ -297,11 +321,12 @@ def resolve_by_alias(text: str) -> list[dict]:
 
 def seed_bb_pilot(conn: Any) -> int:
     """Seed Baden-Baden pilot rows. Callable one-off; NOT auto-run. Returns count.
-    matter_slug below is a PLACEHOLDER — confirm the canonical Aukera/Annaberg slug
-    via slug_registry.canonical_slugs() before running."""
+    matter_slug='aukera' is the Director-ratified canonical slug for the BB-AUK-001
+    pilot (slugs.yml v23; is_canonical('aukera') is True). 'AUK' is the display
+    mnemonic in the project number, not the slug; 'annaberg' stays as a human alias."""
     rows = [
         dict(project_number="BB-AUK-001", desk_owner="baden-baden-desk",
-             matter_slug="annaberg", clickup_list_id=None,
+             matter_slug="aukera", clickup_list_id=None,
              participants=[{"channel": "email", "value": "balazs@brisengroup.com"}],
              aliases=["annaberg", "aukera annaberg"]),
     ]
