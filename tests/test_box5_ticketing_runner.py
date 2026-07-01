@@ -484,8 +484,11 @@ def test_hard_lane_conflict_two_codes_is_ticket(runner, hard_lane, monkeypatch):
     assert _terminal(runner, "hl_conflict")[0] == "TICKET"
 
 
-# 17 — D case 7: an exception in the resolve/bind composition NEVER auto-FAST_TICKETs —
-#      it counts `failed`, falls through to TICKET, and the batch continues.
+# 17 — D case 7: an exception in the resolve/bind composition NEVER auto-FAST_TICKETs.
+#      The hard-lane throw rolls back ONLY D's partial work (savepoint), PRESERVES the
+#      issue_ticket reservation, and STILL ends the arrival at a visible terminal TICKET
+#      — never FAST_TICKET, never stranded as None (blocker-D3 / every-arrival-visible).
+#      It counts `failed`, and the batch keeps processing the next arrival.
 def test_hard_lane_error_never_fast_tickets(runner, hard_lane, monkeypatch):
     monkeypatch.setenv("BOX5_FAST_LANE_ENABLED", "true")
     hard_lane("BB-AUK-001", participants=[{"channel": "email", "value": _BOUND_SENDER}])
@@ -504,9 +507,16 @@ def test_hard_lane_error_never_fast_tickets(runner, hard_lane, monkeypatch):
     assert s["fast_ticket"] == 0
     assert s["failed"] >= 1
     assert s["deterministic_cleared"] == 0
-    # errored row fell through to the safe default, never FAST_TICKET
-    assert _terminal(runner, "hl_err")[0] in ("TICKET", None)
-    assert _terminal(runner, "hl_err")[0] != "FAST_TICKET"
+    # The hard-lane throw fell through to the safe default with an ACTUAL terminal write
+    # (never FAST_TICKET, never stranded). The reservation survived the scoped rollback.
+    assert s["terminal_written"] >= 1
+    assert s["defaulted_ticket"] >= 1
+    err_status, err_written = _terminal(runner, "hl_err")
+    assert err_status == "TICKET"          # visible terminal, NOT None
+    assert err_written is not None         # terminal_outcome_written_at stamped
+    with runner.cursor() as cur:
+        cur.execute("SELECT terminal_reason FROM airport_tickets WHERE raw_source_id='hl_err'")
+        assert cur.fetchone()[0] == "safe_default_desk_review"
     # the batch kept processing the second (code-less) arrival
     assert _terminal(runner, "hl_plain")[0] == "TICKET"
 

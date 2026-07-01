@@ -1187,6 +1187,18 @@ def run_tick(*, now: Optional[datetime] = None) -> dict[str, Any]:
                         handled = False
                         if fast_lane and row_id:
                             try:
+                                # (P1 G3-rework) SAVEPOINT FIRST — before any D work but
+                                #   AFTER issue_ticket's row reservation (~L1126, still
+                                #   uncommitted in this shared tick txn). A D failure must
+                                #   roll back ONLY D's partial work and PRESERVE that
+                                #   reservation so the (f) TICKET fallback below still finds
+                                #   the row via _claim_for_terminal. The prior full
+                                #   conn.rollback() in the except destroyed the reservation
+                                #   -> fallback found NO row -> lease_skipped -> the arrival
+                                #   was STRANDED with no terminal outcome (violates
+                                #   blocker-D3 + the every-arrival-ends-visible spine).
+                                with conn.cursor() as _sp:
+                                    _sp.execute("SAVEPOINT airport_hard_lane")
                                 hl_text = f"{arrival.subject} {arrival.full_body}"
                                 codes = extract_project_codes(hl_text)
                                 # >1 distinct code = cross-matter CONFLICT (F4) -> TICKET;
@@ -1237,13 +1249,28 @@ def run_tick(*, now: Optional[datetime] = None) -> dict[str, Any]:
                                                 handled = True
                                                 done = True
                             except Exception as exc:
-                                # ERROR NEVER AUTO-FAST_TICKETs (#blocker D3). Roll back
-                                # D's partial work, count failed, and FALL THROUGH to (f)
-                                # TICKET (handled stays False) — never a clear on error.
+                                # ERROR NEVER AUTO-FAST_TICKETs (#blocker D3). Roll back to
+                                # the SAVEPOINT — this undoes D's partial writes but KEEPS
+                                # the issue_ticket reservation — count failed, and FALL
+                                # THROUGH to (f) TICKET (handled stays False) so the arrival
+                                # STILL ends at a visible terminal. Distinguish threw
+                                # (-> TICKET + count failed) from a row genuinely held by a
+                                # concurrent tick (lease_skipped, handled inside the try).
                                 try:
-                                    conn.rollback()
+                                    with conn.cursor() as _sp:
+                                        _sp.execute(
+                                            "ROLLBACK TO SAVEPOINT airport_hard_lane"
+                                        )
                                 except Exception:
-                                    pass
+                                    # Savepoint unusable (e.g. the SAVEPOINT statement
+                                    # itself failed) — fall back to a full rollback so conn
+                                    # stays usable. The (f) claim then lease-skips and the
+                                    # arrival re-fetches next tick (cursor frozen, never
+                                    # silently dropped).
+                                    try:
+                                        conn.rollback()
+                                    except Exception:
+                                        pass
                                 failed += 1
                                 logger.warning(
                                     "airport_ticketing hard-fast-lane row failed: %s", exc
