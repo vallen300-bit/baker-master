@@ -59,6 +59,27 @@ _DEFAULT_MATTER = "lilienmatt"
 _DEFAULT_FLIGHT = "aukera-annaberg-financing"
 _DEFAULT_LOOKBACK_HOURS = 48
 _DEFAULT_MAX_POSTS = 5
+
+# BOX5_DROP_OBSERVABILITY_1 (G3 rework #4957) — Gate-2 miss-fetch cap. Observability is
+# TWO DECOUPLED queries: an UNCHANGED keyword-ILIKE match fetch decides what tickets
+# (byte-for-byte parity), and a SEPARATE, independently-bounded query fetches the recent
+# NON-matching set for drop-logging ONLY. This cap bounds that miss fetch ALONE; it can
+# NEVER affect the ticketed set. The earlier single-superset-under-a-cap approach was
+# G3-rejected for exactly that failure mode: a row cap on the un-prefiltered fetch could
+# starve real keyword matches behind older non-matches and thereby change what tickets.
+# When the miss fetch hits the cap the tick logs it (never a silent cut).
+_MISS_FETCH_CAP_ENV = "AIRPORT_TICKETING_MISS_FETCH_CAP"
+_DEFAULT_MISS_FETCH_CAP = 500
+
+# BOX5_DROP_OBSERVABILITY_1 — drop-log gate vocabulary (mirrors the CHECK in
+# migrations/20260701d_box5_dropped_signals.sql). keyword_prefilter = Gate-2 miss (not
+# ticketed); routing_unrouted / routing_conflict = Gate-3 (ticketed to safe-default
+# desk review but not confidently auto-routed); other = reserved.
+_GATE_KEYWORD_PREFILTER = "keyword_prefilter"
+_GATE_ROUTING_UNROUTED = "routing_unrouted"
+_GATE_ROUTING_CONFLICT = "routing_conflict"
+_DROP_LOG_SAVEPOINT = "airport_drop_log"
+
 _SKIP_EMAIL_SENDER_PATTERNS = (
     "noreply@",
     "no-reply@",
@@ -225,6 +246,45 @@ def active_keywords() -> tuple[str, ...]:
     return tuple(values) if values else _DEFAULT_KEYWORDS
 
 
+def _miss_fetch_cap() -> int:
+    """BOX5_DROP_OBSERVABILITY_1 (G3 rework #4957) — hard row cap on the Gate-2 MISS
+    fetch (drop-logging only). Env-tunable; bounded so a misconfig cannot trigger an
+    unbounded scan. This bounds the drop-log query ALONE and is fully decoupled from the
+    match fetch that decides what tickets — it can never starve a real keyword match."""
+    try:
+        value = int(os.environ.get(_MISS_FETCH_CAP_ENV, str(_DEFAULT_MISS_FETCH_CAP)))
+    except (TypeError, ValueError):
+        return _DEFAULT_MISS_FETCH_CAP
+    return max(1, min(value, 5000))
+
+
+def _match_active_keywords(
+    subject: str, full_body: str, keys: tuple[str, ...]
+) -> list[str]:
+    """Single source of truth for the active-keyword match (Gate 2). Case-insensitive
+    substring over subject + body — the Python mirror of the SQL
+    `subject ILIKE %kw% OR full_body ILIKE %kw%` prefilter. Used by build_email_ticket
+    to record which keywords a ticketed arrival matched (urgency + matched_keywords), so
+    the ticket's recorded match can never drift from the SQL gate that admitted it."""
+    haystack = f"{subject} {full_body}".lower()
+    return [kw for kw in keys if kw and kw.lower() in haystack]
+
+
+def _keyword_ilike_where(keys: tuple[str, ...]) -> tuple[str, list[str]]:
+    """Build the Gate-2 keyword-ILIKE predicate + its bind params, shared by the match
+    fetch and the (negated) miss fetch so the two are EXACT complements — the miss set
+    is byte-for-byte 'the rows the match query would not return'. This is the IDENTICAL
+    construction the pre-observability match query used inline, so restoring it in the
+    match fetch keeps what tickets byte-for-byte the same (parity)."""
+    clauses: list[str] = []
+    params: list[str] = []
+    for keyword in keys:
+        pattern = f"%{keyword}%"
+        clauses.append("(subject ILIKE %s OR full_body ILIKE %s)")
+        params.extend([pattern, pattern])
+    return " OR ".join(clauses), params
+
+
 def _desk_slug() -> str:
     return os.environ.get(_DESK_ENV, _DEFAULT_DESK).strip() or _DEFAULT_DESK
 
@@ -237,7 +297,9 @@ def _flight_name() -> str:
     return os.environ.get(_FLIGHT_ENV, _DEFAULT_FLIGHT).strip() or _DEFAULT_FLIGHT
 
 
-def _json_param(payload: dict[str, Any]) -> Any:
+def _json_param(payload: Any) -> Any:
+    # Accepts any JSON-serializable value (dict for action payloads, list for
+    # box5_dropped_signals.matched_keywords). psycopg2 Json() adapts both.
     try:
         import psycopg2.extras
 
@@ -328,8 +390,7 @@ def build_email_ticket(
         return None
 
     keys = keywords or active_keywords()
-    haystack = f"{arrival.subject} {arrival.full_body}".lower()
-    matched = [kw for kw in keys if kw and kw.lower() in haystack]
+    matched = _match_active_keywords(arrival.subject, arrival.full_body, keys)
     if not matched:
         return None
 
@@ -548,6 +609,260 @@ def ensure_airport_ticket_terminal_columns(conn: Any) -> None:
         raise
 
 
+def ensure_box5_dropped_signals_table(conn: Any) -> None:
+    """BOX5_DROP_OBSERVABILITY_1 — bootstrap the per-gate drop-log table.
+
+    Mirrors migrations/20260701d_box5_dropped_signals.sql VERBATIM so a DB that a
+    migration runner has not yet reached still gains the table on the next tick
+    (Lesson #50). Brand-new table -> a single identical CREATE TABLE IF NOT EXISTS in
+    both places cannot drift; no ALTER / DROP-ADD churn on the hot path.
+
+    FAULT-TOLERANT BY DESIGN: observability must never break the pipeline. If the
+    bootstrap fails we roll back (keep the shared conn usable) and return WITHOUT
+    raising — the drop-log is simply skipped this tick (every _write_dropped_signals
+    call is itself guarded), the real ticketing journey continues untouched."""
+    try:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                CREATE TABLE IF NOT EXISTS box5_dropped_signals (
+                    id               BIGSERIAL PRIMARY KEY,
+                    message_id       TEXT,
+                    thread_id        TEXT,
+                    sender_email     TEXT,
+                    subject          TEXT,
+                    matched_keywords JSONB NOT NULL DEFAULT '[]'::jsonb,
+                    gate             TEXT NOT NULL,
+                    reason           TEXT,
+                    received_date    TIMESTAMPTZ,
+                    tick_at          TIMESTAMPTZ NOT NULL DEFAULT now(),
+                    CONSTRAINT box5_dropped_signals_gate_check CHECK (
+                        gate IN (
+                            'keyword_prefilter',
+                            'routing_unrouted',
+                            'routing_conflict',
+                            'other'
+                        )
+                    )
+                )
+                """
+            )
+            cur.execute(
+                "CREATE INDEX IF NOT EXISTS idx_box5_dropped_signals_tick_at "
+                "ON box5_dropped_signals (tick_at)"
+            )
+            cur.execute(
+                "CREATE INDEX IF NOT EXISTS idx_box5_dropped_signals_gate "
+                "ON box5_dropped_signals (gate)"
+            )
+            cur.execute(
+                "CREATE UNIQUE INDEX IF NOT EXISTS uq_box5_dropped_signals_msg_gate "
+                "ON box5_dropped_signals (message_id, gate)"
+            )
+        conn.commit()
+    except Exception as exc:
+        try:
+            conn.rollback()
+        except Exception:
+            pass
+        logger.warning(
+            "box5 dropped_signals bootstrap failed (drop-log skipped this tick): %s",
+            exc,
+        )
+
+
+def _drop_record(
+    arrival: "EmailArrival",
+    *,
+    gate: str,
+    reason: str,
+    matched_keywords: list[str] | None = None,
+) -> tuple:
+    """Build one box5_dropped_signals row tuple from an arrival (subject truncated,
+    matched_keywords JSON-adapted). Column order matches _write_dropped_signals."""
+    return (
+        str(arrival.message_id or ""),
+        str(arrival.thread_id or arrival.message_id or ""),
+        str(arrival.sender_email or ""),
+        _normalize_text(arrival.subject, limit=300),
+        _json_param(list(matched_keywords or [])),
+        gate,
+        reason,
+        arrival.received_date,
+    )
+
+
+def _write_dropped_signals(
+    conn: Any, records: list[tuple], *, savepoint: bool = False
+) -> int:
+    """BOX5_DROP_OBSERVABILITY_1 — fault-tolerant drop-log writer. NEVER raises; a
+    drop-log write failure must never abort or block the tick (AC3).
+
+    ON CONFLICT (message_id, gate) DO NOTHING makes a re-fetched boundary arrival's
+    re-classification idempotent (one drop per signal per gate).
+
+    savepoint=False (Gate-2 fetch path, called on a CLEAN txn): commit the batch here
+    so the rows persist even when the tick issues no per-row commit (e.g. an all-miss
+    window). On error rollback so the shared conn stays usable.
+
+    savepoint=True (Gate-3, inside run_tick's shared per-row txn with an uncommitted
+    ticket reservation): wrap in a SAVEPOINT and DON'T commit — the caller's existing
+    conn.commit() flushes the drop row atomically with the terminal write. On error
+    ROLLBACK TO SAVEPOINT undoes ONLY the drop-log, preserving the reservation +
+    terminal write (a bare conn.rollback would discard those good writes — the exact
+    class the correlation-fix caught)."""
+    if not records:
+        return 0
+    try:
+        with conn.cursor() as cur:
+            if savepoint:
+                cur.execute(f"SAVEPOINT {_DROP_LOG_SAVEPOINT}")
+            cur.executemany(
+                """
+                INSERT INTO box5_dropped_signals
+                    (message_id, thread_id, sender_email, subject,
+                     matched_keywords, gate, reason, received_date)
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
+                ON CONFLICT (message_id, gate) DO NOTHING
+                """,
+                records,
+            )
+            if savepoint:
+                cur.execute(f"RELEASE SAVEPOINT {_DROP_LOG_SAVEPOINT}")
+        if not savepoint:
+            conn.commit()
+        return len(records)
+    except Exception as exc:
+        try:
+            if savepoint:
+                with conn.cursor() as cur:
+                    cur.execute(f"ROLLBACK TO SAVEPOINT {_DROP_LOG_SAVEPOINT}")
+            else:
+                conn.rollback()
+        except Exception:
+            # Savepoint unusable (e.g. the SAVEPOINT stmt itself failed) — full
+            # rollback so the shared conn stays usable; the tick continues.
+            try:
+                conn.rollback()
+            except Exception:
+                pass
+        logger.warning(
+            "box5 drop-log write failed (%d row(s), observability best-effort): %s",
+            len(records),
+            exc,
+        )
+        return 0
+
+
+def summarize_recent_drops(conn: Any, *, hours: int = 24) -> list[dict[str, Any]]:
+    """Read-only observability surface (design item 4): drop counts by gate over the
+    last N hours — the query lead runs to size the Gate-2 keyword-broadening off real
+    data. Fault-tolerant: returns [] on any error (never raises)."""
+    try:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                SELECT gate, COUNT(*)
+                  FROM box5_dropped_signals
+                 WHERE tick_at >= now() - make_interval(hours => %s)
+                 GROUP BY gate
+                 ORDER BY COUNT(*) DESC
+                """,
+                (max(0, int(hours)),),
+            )
+            return [{"gate": r[0], "count": int(r[1])} for r in cur.fetchall()]
+    except Exception as exc:
+        try:
+            conn.rollback()
+        except Exception:
+            pass
+        logger.warning("box5 drop summary read failed: %s", exc)
+        return []
+
+
+def _log_keyword_prefilter_misses(
+    conn: Any, *, since: datetime, keys: tuple[str, ...]
+) -> None:
+    """BOX5_DROP_OBSERVABILITY_1 (G3 rework #4957) — Gate-2 observability, fully
+    DECOUPLED from ticketing.
+
+    A SEPARATE, independently-bounded query fetches the recent NON-matching arrivals
+    (the NEGATED keyword ILIKE) and writes them to box5_dropped_signals so keyword-misses
+    become visible. It shares NO state with the match fetch that decides what tickets, so
+    it can NEVER change the ticketed set — parity is guaranteed by construction. (The
+    G3-rejected single-superset-under-a-cap could starve real matches; two decoupled
+    queries cannot.)
+
+    Fully fault-tolerant (AC3): every failure path is caught, the shared conn is left
+    usable, and the tick continues. Called on a CLEAN txn (fetch_email_arrivals runs
+    before run_tick's per-row loop; ensure_* already committed, the match read is
+    read-only), so the batch is committed inline (savepoint=False).
+    """
+    miss_cap = _miss_fetch_cap()
+    where, kw_params = _keyword_ilike_where(keys)
+    try:
+        with conn.cursor() as cur:
+            cur.execute(
+                f"""
+                SELECT message_id, thread_id, sender_email, subject, received_date
+                FROM email_messages
+                WHERE received_date >= %s
+                  AND NOT ({where})
+                -- Recent-first: under the cap we keep the NEWEST misses (most useful for
+                -- 'last 24h drops by gate'). Independently bounded — decoupled from the
+                -- match fetch's LIMIT, so it can never affect what tickets.
+                ORDER BY received_date DESC
+                LIMIT %s
+                """,
+                (since, *kw_params, miss_cap),
+            )
+            rows = cur.fetchall()
+    except Exception as exc:
+        # Read failed — roll back so the shared conn stays usable for the per-row loop
+        # (no good writes exist to lose at this call site). Drops are simply skipped.
+        try:
+            conn.rollback()
+        except Exception:
+            pass
+        logger.warning(
+            "airport_ticketing Gate-2 miss-fetch read failed (drops unlogged this tick, "
+            "ticketing unaffected): %s",
+            exc,
+        )
+        return
+
+    # Never a silent cut (AC4): if the miss fetch saturated its cap, some older misses
+    # went unlogged this tick — log it (they re-surface as newer ones age out).
+    if len(rows) >= miss_cap:
+        logger.info(
+            "airport_ticketing Gate-2 miss-fetch hit cap=%d; older misses beyond the cap "
+            "unlogged this tick (raise %s if fuller drop coverage is needed)",
+            miss_cap,
+            _MISS_FETCH_CAP_ENV,
+        )
+
+    miss_records: list[tuple] = []
+    for row in rows:
+        received_raw = row[4]
+        if isinstance(received_raw, datetime) and received_raw.tzinfo is None:
+            received_raw = received_raw.replace(tzinfo=timezone.utc)
+        miss_records.append(
+            (
+                str(row[0] or ""),
+                str(row[1] or row[0] or ""),
+                str(row[2] or ""),
+                _normalize_text(str(row[3] or ""), limit=300),
+                _json_param([]),  # keyword-miss -> matched_keywords empty (AC1)
+                _GATE_KEYWORD_PREFILTER,
+                "no_active_keyword_match",
+                received_raw if isinstance(received_raw, datetime) else None,
+            )
+        )
+
+    if miss_records:
+        _write_dropped_signals(conn, miss_records, savepoint=False)
+
+
 def fetch_email_arrivals(
     conn: Any,
     *,
@@ -558,14 +873,18 @@ def fetch_email_arrivals(
     keys = keywords or active_keywords()
     if not keys:
         return []
-    clauses: list[str] = []
-    params: list[Any] = [since]
-    for keyword in keys:
-        pattern = f"%{keyword}%"
-        clauses.append("(subject ILIKE %s OR full_body ILIKE %s)")
-        params.extend([pattern, pattern])
-    params.append(max(1, min(int(limit), 200)))
-    where = " OR ".join(clauses)
+    # BOX5_DROP_OBSERVABILITY_1 (G3 rework #4957) — Gate-2 observability is TWO DECOUPLED
+    # queries:
+    #   (1) MATCH FETCH (below) — the ONLY thing that decides what tickets. It is
+    #       BYTE-IDENTICAL to the pre-observability keyword-ILIKE query, so parity is
+    #       guaranteed BY CONSTRUCTION (nothing in the drop-log path can touch this set).
+    #   (2) MISS FETCH (_log_keyword_prefilter_misses) — a SEPARATE, independently-
+    #       bounded query that writes keyword-misses to box5_dropped_signals ONLY.
+    # The earlier single-superset-under-a-cap approach was G3-rejected: a row cap on the
+    # un-prefiltered fetch could starve real matches behind older non-matches and thereby
+    # CHANGE what tickets. Two decoupled queries make that starvation impossible.
+    lim = max(1, min(int(limit), 200))
+    where, kw_params = _keyword_ilike_where(keys)
 
     with conn.cursor() as cur:
         cur.execute(
@@ -583,9 +902,14 @@ def fetch_email_arrivals(
             ORDER BY received_date ASC
             LIMIT %s
             """,
-            tuple(params),
+            (since, *kw_params, lim),
         )
         rows = cur.fetchall()
+
+    # Observability (decoupled, best-effort) — a separate bounded miss-fetch logs the
+    # recent keyword-misses. It shares NO state with `rows` above, so it can never change
+    # what tickets, and any failure inside is swallowed (the tick continues, AC3).
+    _log_keyword_prefilter_misses(conn, since=since, keys=keys)
 
     message_ids = [row[0] for row in rows if row and row[0]]
     attachment_map = _fetch_email_attachments(conn, message_ids)
@@ -1318,6 +1642,9 @@ def run_tick(*, now: Optional[datetime] = None) -> dict[str, Any]:
     contiguous = True
     try:
         ensure_airport_ticket_table(conn)  # idempotent; also ensures BRIEF-B terminal cols
+        # BOX5_DROP_OBSERVABILITY_1 — bootstrap the drop-log (fault-tolerant: never
+        # raises, so a drop-log infra hiccup can't abort the ticketing tick).
+        ensure_box5_dropped_signals_table(conn)
 
         # (b) CURSOR — per-source watermark replaces the constant lookback. Keep the
         #     lookback as a FLOOR so a fresh/blank cursor cannot scan unbounded. The
@@ -1809,6 +2136,46 @@ def run_tick(*, now: Optional[datetime] = None) -> dict[str, Any]:
                                 ):
                                     terminal_written += 1
                                     defaulted_ticket += 1
+                                # BOX5_DROP_OBSERVABILITY_1 — Gate 3 drop-log. Reaching
+                                # (f) with the fast lane ON means D/E/thread routing was
+                                # ATTEMPTED and did NOT confidently assign a desk (the
+                                # arrival still tickets, unchanged — this only records
+                                # WHY it fell to generic desk review). >1 distinct code =
+                                # cross-matter conflict; else no confident route. Guarded
+                                # by fast_lane so we don't label every ticket "unrouted"
+                                # when routing isn't even running. Savepoint-guarded +
+                                # committed atomically with the terminal write above.
+                                if fast_lane:
+                                    _codes = set(
+                                        extract_project_codes(
+                                            f"{arrival.subject} {arrival.full_body}"
+                                        )
+                                    )
+                                    if len(_codes) > 1:
+                                        _g3_gate = _GATE_ROUTING_CONFLICT
+                                        _g3_reason = (
+                                            "cross_matter_conflict:"
+                                            + ",".join(sorted(_codes))
+                                        )
+                                    else:
+                                        _g3_gate = _GATE_ROUTING_UNROUTED
+                                        _g3_reason = "no_confident_route"
+                                    _write_dropped_signals(
+                                        conn,
+                                        [
+                                            _drop_record(
+                                                arrival,
+                                                gate=_g3_gate,
+                                                reason=_g3_reason,
+                                                matched_keywords=_match_active_keywords(
+                                                    arrival.subject,
+                                                    arrival.full_body,
+                                                    active_keywords(),
+                                                ),
+                                            )
+                                        ],
+                                        savepoint=True,
+                                    )
                                 if result.get("ok"):
                                     issued += 1
                                 conn.commit()
