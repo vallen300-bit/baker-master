@@ -876,18 +876,31 @@ def _process_email_threads(new_threads: list):
     processed = 0
     skipped = 0
     latest_seen_dt = None  # F4: track max received_date across ALL seen threads
-    _seen_threads_this_cycle: set = set()  # ALERT-DEDUP-1: prevent within-cycle duplicates
+    _seen_this_cycle: set = set()  # within-cycle dup guard (BOX5 fix: keyed per-message)
 
     for thread in new_threads:
         metadata = thread.get("metadata", {})
         thread_id = metadata.get("thread_id", "unknown")
 
-        # ALERT-DEDUP-1: Skip if we already processed this thread in this poll cycle
-        # (extract_poll can return the same thread twice via Gmail pagination)
-        if thread_id in _seen_threads_this_cycle:
+        # BOX5_EMAIL_CONVERSATION_DEDUP_FIX_1: dedup + storage on a stable PER-MESSAGE
+        # key so replies on an already-seen conversation are NEVER dropped (the P0).
+        # thread_id stays as correlation/routing context ONLY — never the processing key.
+        #   gmail  -> metadata['message_id'] = latest message id (extract_gmail)
+        #   graph  -> metadata['message_id'] = m['id'] (per-message Graph id)
+        #   exchange/bluewin -> no metadata['message_id'] -> falls back to thread_id,
+        #                       which for those sources IS already the per-message
+        #                       RFC822 Message-ID (so behaviour is unchanged).
+        msg_key = metadata.get("message_id") or thread_id
+
+        # Within-cycle dup guard on the PER-MESSAGE key. MUST be per-message, not
+        # thread_id: graph's per-folder delta can return several messages of the SAME
+        # conversationId as separate dicts in ONE poll — a thread-level guard would drop
+        # all but the first intra-cycle. A paginated-duplicate thread still collapses
+        # (same latest message id -> same msg_key). (lead-blessed deviation, bus #4977.)
+        if msg_key in _seen_this_cycle:
             skipped += 1
             continue
-        _seen_threads_this_cycle.add(thread_id)
+        _seen_this_cycle.add(msg_key)
 
         # REPLY-TRACK-1: Check if this incoming email is a reply to a Baker-sent email
         try:
@@ -913,22 +926,26 @@ def _process_email_threads(new_threads: list):
             except (ValueError, TypeError):
                 pass
 
-        # F1: Dedup on thread_id against trigger_log — skip if this thread was already processed
-        # ALERT-DEDUP-1 fix: use thread_id for dedup (not individual message_ids which only
-        # partially match trigger_log entries, causing repeat processing every cycle)
-        if trigger_state.is_processed("email", thread_id):
+        # BOX5_EMAIL_CONVERSATION_DEDUP_FIX_1: persistent (cross-cycle) dedup on the
+        # PER-MESSAGE key, NOT thread_id. Keying on thread_id (=conversationId) was the
+        # P0: the first message on a conversation was processed and every subsequent
+        # reply hit is_processed=True -> continue -> was NEVER stored/pipelined/routed.
+        # The old "thread_id fixes repeat-processing" note was wrong — a STABLE
+        # per-message key gives once-only semantics AND lets replies through. A single
+        # per-message dedup layer suffices; no separate thread-novelty gate is needed
+        # (deputy-codex #4975 + codex-arch, lead-confirmed #4977) — that gate WAS the drop.
+        if trigger_state.is_processed("email", msg_key):
             skipped += 1
             continue
 
-        # COST-OPT-WAVE1: Pre-mark as processed BEFORE pipeline.run() to prevent
-        # race condition where next poll cycle re-processes the same thread.
-        # Safe: email is also stored in email_messages (line below) so nothing is lost
-        # even if pipeline.run() fails. The store_back inside pipeline.run() will
-        # attempt its own INSERT which harmlessly conflicts (ON CONFLICT DO NOTHING).
-        trigger_state.mark_processed("email", thread_id)
+        # COST-OPT-WAVE1: Pre-mark BEFORE pipeline.run() so the next cycle does not
+        # re-process this message. Safe: the message is also stored below, so nothing is
+        # lost even if pipeline.run() fails (its store_back INSERT ON CONFLICT no-ops).
+        trigger_state.mark_processed("email", msg_key)
 
-        # Use thread_id as pipeline source_id (stable across poll cycles)
-        message_id = thread_id
+        # Per-message id is the storage key + pipeline source_id (stable across cycles).
+        # thread_id is kept in the email_messages.thread_id COLUMN for correlation.
+        message_id = msg_key
 
         # ARCH-6: Store full email to PostgreSQL
         try:

@@ -113,12 +113,15 @@ def test_two_messages_exact_thread_shape():
     t0 = threads[0]
     assert set(t0.keys()) == {"text", "metadata"}
     assert set(t0["metadata"].keys()) == {
-        "source", "thread_id", "subject", "primary_sender",
+        "source", "thread_id", "message_id", "subject", "primary_sender",
         "primary_sender_email", "received_date",
     }
     assert t0["metadata"] == {
         "source": "graph",
         "thread_id": "c1",
+        # BOX5_EMAIL_CONVERSATION_DEDUP_FIX_1: per-message id (m['id']) carried for the
+        # sink's per-message dedup; conversationId stays in thread_id.
+        "message_id": "m1",
         "subject": "Subject One",
         "primary_sender": "Alice",
         "primary_sender_email": "alice@x.com",

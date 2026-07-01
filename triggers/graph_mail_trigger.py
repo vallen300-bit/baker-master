@@ -148,6 +148,11 @@ def _to_thread(m: dict) -> dict | None:
         "metadata": {
             "source": "graph",
             "thread_id": m.get("conversationId") or m.get("id"),
+            # BOX5_EMAIL_CONVERSATION_DEDUP_FIX_1: carry the stable PER-MESSAGE Graph id
+            # so the sink dedups/stores per message, not per conversation. Without this
+            # the sink falls back to thread_id (=conversationId) and drops every reply on
+            # an already-seen thread. m['id'] is always present (in _SELECT).
+            "message_id": m.get("id"),
             "subject": m.get("subject", ""),
             "primary_sender": sender.get("name", ""),
             "primary_sender_email": sender.get("address", ""),
