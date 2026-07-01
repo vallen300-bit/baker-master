@@ -1,6 +1,7 @@
 # CHECKPOINT — Box 5 ticketing arc (lead / AH1)
 
 **Written:** 2026-07-01 ~06:05Z · context rollover at ~86%. Successor: claim = attempt-bump commit, not bus ack.
+**Attempt:** 2 (rollover re-fired ~87%; state unchanged — D still awaiting codex G3 #4773; respawn already posted #4774).
 
 ## ROLE
 AH1 lead orchestrator. Sole dispatch/gate/merge. Box 5 build program (Baker OS V2, Signal Journey / airport ticketing). cowork-ah1 = parallel AH1, authors Box 5 briefs A–E, owns Box 5 DESIGN. b4 = builder (CODE_4 slot). codex = live BUS gate terminal.
