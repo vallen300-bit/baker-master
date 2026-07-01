@@ -1,10 +1,27 @@
 # CHECKPOINT — BOX5_TARGETED_DROPPED_REPLY_BACKFILL
 
 attempt: 2
+status: DONE (b3, 2026-07-01) — Phase 2 executed with any-key guard. See "## PHASE 2 RESULT" below.
 rollover: b2 at ~92% context — clean exit; Phase 2 (greenlit #5003) deferred to successor. Artifacts current.
 claim: b3 took over attempt 2 (dispatch #5010), 2026-07-01 — executing Phase 2 with the per-candidate any-key guard.
 brief: bus dispatch #4999 (Director-ratified #4998). No brief file — dispatch-only.
 owner: b3 · dispatched_by: lead · date: 2026-07-01
+
+## PHASE 2 RESULT (b3, 2026-07-01) — DONE
+Any-key guard applied to all 4 recover-set candidates. Result: 1 recovered, 3 skipped-already-stored.
+- RECOVERED (1): siegfried.brandner "AW: Annaberg Status - Closing actions" 2026-06-29 09:14:58
+  (...Aa2oF3AAA=) — genuinely absent under BOTH per-message id AND thread+sender+subj+date.
+  → email_messages row stored; ticket airport-ticket-v1-f515528bbd070824bb73 (row id=65),
+    desk=baden-baden-desk, terminal_status=TICKET, reason=backfill_ac6, bus AIRPORT_TICKET #5015.
+- SKIPPED-ALREADY-STORED (3): the guard caught these as first-messages already stored under
+  message_id==conversationId (per-id "absent" but present by thread+sender+subj+date):
+  Zuechner "Speed of intended transaction!!!" (...AR4eWiAAA=), Merz "Lilienmatt Restrukturierung"
+  (...Ac2LtJAAA=), balazs "Annaberg Status - Closing actions" (...Aa2oF0AAA=). Re-ingesting any of
+  these would have double-stored + double-ticketed — the guard prevented it (b2's #5003 warning was right).
+- HARD-EXCLUDED (not touched): balazs "FW: AB Sprint" (...Aa2oF2AAA=, holds ticket id=1), 3 ClickUp
+  automated [Overdue] notifs, ESG reply (...c2Ls6AAA=, already recovered in canary #4993).
+- Idempotency verified: ticket id=1 untouched (still DUPLICATE/dedup_key_collision); exactly 1 ticket
+  (id=65) for siegfried's raw_source_id. Reported to lead + POST_DEPLOY_AC_VERDICT v1 emitted.
 
 ## Brief id / context
 Targeted backfill of KNOWN dropped matter replies (the sink conversation-dedup bug,
