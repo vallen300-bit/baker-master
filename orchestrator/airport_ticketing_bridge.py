@@ -19,6 +19,7 @@ from datetime import datetime, timedelta, timezone
 from typing import Any, Optional
 
 from orchestrator.dispatcher import RESERVED_RECIPIENTS, resolve_owner_slug
+from kbl.db import get_conn
 from kbl.project_registry_store import (
     extract_project_codes,
     resolve_by_participant,
@@ -26,6 +27,21 @@ from kbl.project_registry_store import (
 )
 
 logger = logging.getLogger("sentinel.airport_ticketing")
+
+# THREAD_CONTINUITY_ROUTING_1 — code-bound terminal_reason prefixes. These are the
+# ONLY prior dispositions the thread-continuity lane may inherit from: an explicit
+# registered ACTIVE project code drove each of them. Anything else (a soft / alias /
+# participant-only match, or the (f) safe-default desk ticket) is deliberately
+# excluded so continuity can never launder a weak match forward. The (e.5)/(e.7)
+# writes build their reason from these prefixes, and resolve_by_thread filters on the
+# same two prefixes, so the coupling is a single greppable pair — never a magic string.
+_HARD_LANE_REASON_PREFIX = "hard_lane_project_code_participant_bound:"   # (e.5) FAST_TICKET
+_CODE_ROUTED_REASON_PREFIX = "explicit_code_routed_ticket:"             # (e.7) routed TICKET
+# The thread-continuity lane's OWN reason. Deliberately NOT in the inheritable set
+# above: a thread-routed ticket is itself an inheritance, and the original code-bound
+# ticket always remains on the thread for later replies, so re-inheriting a
+# thread-routed row would only add transitive drift with no recall gain.
+_THREAD_CONTINUITY_REASON_PREFIX = "thread_continuity_routed_ticket:"
 
 _ENABLED_ENV = "AIRPORT_TICKETING_BRIDGE_ENABLED"
 _KEYWORDS_ENV = "AIRPORT_TICKETING_KEYWORDS"
@@ -110,6 +126,11 @@ class AirportTicket:
     luggage: tuple[str, ...]
     why_ticketed: tuple[str, ...]
     known_limits: tuple[str, ...]
+    # THREAD_CONTINUITY_ROUTING_1: email thread identity, persisted as a queryable
+    # airport_tickets column (see reserve_ticket). Default "" keeps the field optional
+    # for any non-email constructor; NOT added to payload() so the AIRPORT_TICKET v1
+    # bus contract stays byte-identical.
+    thread_id: str = ""
 
     def payload(self) -> dict[str, Any]:
         return {
@@ -357,6 +378,9 @@ def build_email_ticket(
             "Ticketing Bridge did not decide condition precedent status.",
             "Owning desk must check in as VALID, FAKE, DUPLICATE, WRONG_TERMINAL, URGENT, or NEEDS_LUGGAGE_READ.",
         ),
+        # Same thread identity the luggage line records, now also a queryable column
+        # so a later code-less reply on this thread can inherit its routing.
+        thread_id=arrival.thread_id or arrival.message_id,
     )
 
 
@@ -441,6 +465,17 @@ def ensure_airport_ticket_table(conn: Any) -> None:
         # capture path writes 'outbound'.
         cur.execute(
             "ALTER TABLE airport_tickets ADD COLUMN IF NOT EXISTS direction TEXT NOT NULL DEFAULT 'inbound'"
+        )
+        # THREAD_CONTINUITY_ROUTING_1: queryable email thread identity + its lookup
+        # index. Mirrors migrations/20260701c_airport_tickets_thread_id.sql so an
+        # already-bootstrapped DB (CREATE TABLE IF NOT EXISTS no-ops) still gains the
+        # column + index (Lesson #50 migration-vs-bootstrap drift). Additive/nullable.
+        cur.execute(
+            "ALTER TABLE airport_tickets ADD COLUMN IF NOT EXISTS thread_id TEXT"
+        )
+        cur.execute(
+            "CREATE INDEX IF NOT EXISTS idx_airport_tickets_thread_id "
+            "ON airport_tickets (thread_id)"
         )
     # Additive terminal-classification axis (BOX5_SCHEMA_FOUNDATION_1 / BRIEF-B).
     # Mirrors migrations/20260630_airport_tickets_terminal_columns.sql. The
@@ -640,8 +675,8 @@ def reserve_ticket(conn: Any, ticket: AirportTicket) -> dict[str, Any]:
             INSERT INTO airport_tickets
                 (ticket_id, dedup_key, source_channel, source_id, source_received_at,
                  originator, suspected_matter_slug, suspected_flight,
-                 proposed_desk_slug, urgency_hint, ticket)
-            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                 proposed_desk_slug, urgency_hint, ticket, thread_id)
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
             ON CONFLICT (dedup_key) DO NOTHING
             RETURNING id
             """,
@@ -657,6 +692,9 @@ def reserve_ticket(conn: Any, ticket: AirportTicket) -> dict[str, Any]:
                 ticket.proposed_desk_slug,
                 ticket.urgency_hint,
                 _json_param(payload),
+                # NULL when unset (non-email channels); the failed-row retry path above
+                # never touches thread_id (the original INSERT already set it).
+                ticket.thread_id or None,
             ),
         )
         row = cur.fetchone()
@@ -1157,6 +1195,89 @@ def _advance(cur_max: Optional[datetime], candidate: Optional[datetime]) -> Opti
     return cur_max
 
 
+def resolve_by_thread(thread_id: str) -> Optional[dict]:
+    """THREAD_CONTINUITY_ROUTING_1 — strong-signal thread-continuity resolver.
+
+    Return the single active project a prior CODE-BOUND ticket on this email thread
+    was routed to, so a code-less reply on a thread already bound to a matter inherits
+    that matter — restoring the recall the routing reversal (#446) removed WITHOUT
+    reviving unsafe name/alias matching. Thread identity is a strong signal (this
+    mirrors the outbound connector's own bus_thread_id continuity).
+
+    Inherit ONLY from a hard/code-bound prior disposition — D's FAST_TICKET
+    (``_HARD_LANE_REASON_PREFIX``) or E's explicit-code routed TICKET
+    (``_CODE_ROUTED_REASON_PREFIX``). Both were driven by an explicit registered
+    ACTIVE project code; neither is a soft guess. A soft / alias / participant-only
+    match and the (f) safe-default desk ticket are excluded, so continuity can never
+    launder a weak binding forward (the load-bearing safety rule).
+
+    Returns None when: no thread id; no prior code-bound ticket on the thread; the
+    bound project is no longer registered/active (a since-retired binding is not
+    inherited — the registry is re-checked as the source of truth); OR the thread
+    carries code-bound tickets to >1 distinct ACTIVE project (a legitimately
+    multi-matter thread) -> CONFLICT, so the caller falls through to a full desk
+    TICKET, never a silent cross-matter pick.
+
+    Opens its OWN connection (mirrors resolve_project_number / resolve_by_participant)
+    so a failure here can never abort the shared tick transaction, and reads only
+    COMMITTED prior tickets — exactly what continuity needs.
+    """
+    if not thread_id:
+        return None
+    try:
+        with get_conn() as conn:
+            with conn.cursor() as cur:
+                # DISTINCT reasons for code-bound terminal rows on this thread. The
+                # terminal_reason prefix — NOT terminal_status — is the discriminator:
+                # the (f) safe default is ALSO status='TICKET', so filtering on status
+                # alone would launder it in. LIMIT bounds a pathologically long thread.
+                cur.execute(
+                    """
+                    SELECT DISTINCT terminal_reason
+                    FROM airport_tickets
+                    WHERE thread_id = %s
+                      AND terminal_status IN ('FAST_TICKET', 'TICKET')
+                      AND (terminal_reason LIKE %s OR terminal_reason LIKE %s)
+                    LIMIT 200
+                    """,
+                    (
+                        thread_id,
+                        _HARD_LANE_REASON_PREFIX + "%",
+                        _CODE_ROUTED_REASON_PREFIX + "%",
+                    ),
+                )
+                rows = cur.fetchall()
+    except Exception as e:
+        logger.warning("resolve_by_thread query failed: %s", e)
+        return None
+
+    # Extract the bound project number from each code-bound reason (both prefixes
+    # embed the canonical PN after the final ':'; a canonical PN contains no ':').
+    codes: list[str] = []
+    seen: set[str] = set()
+    for (reason,) in rows:
+        if not reason:
+            continue
+        pn = reason.rsplit(":", 1)[-1].strip()
+        if pn and pn not in seen:
+            seen.add(pn)
+            codes.append(pn)
+    if not codes:
+        return None
+
+    # Re-resolve each via the registry (source of truth), keeping ONLY still-ACTIVE
+    # projects. Exactly 1 distinct active project -> inherit it; 0 -> nothing to
+    # inherit (all bindings since retired); >1 -> the thread spans matters -> CONFLICT.
+    active: dict[str, dict] = {}
+    for pn in codes:
+        resolved = resolve_project_number(pn)  # registry, ACTIVE-only; None if retired/unregistered
+        if resolved is not None:
+            active[resolved["project_number"]] = resolved
+    if len(active) != 1:
+        return None
+    return next(iter(active.values()))
+
+
 def run_tick(*, now: Optional[datetime] = None) -> dict[str, Any]:
     # (a) MASTER GATE — ships dark behind AIRPORT_TICKETING_BRIDGE_ENABLED.
     if not bridge_enabled():
@@ -1183,6 +1304,7 @@ def run_tick(*, now: Optional[datetime] = None) -> dict[str, Any]:
     deterministic_cleared = defaulted_ticket = 0
     fast_ticket = 0  # BRIEF-D hard fast lane; not a deterministic_cleared/defaulted_ticket
     code_routed_ticket = 0  # explicit-code routed TICKET, not FAST_TICKET/defaulted
+    thread_routed_ticket = 0  # thread-continuity routed TICKET (inherited code-bound thread)
     outbound_signal = 0  # BOX5_OUTBOUND_INGEST_1 flag-ON captures; never boards a desk
     fast_lane = fast_lane_enabled()  # honored now; only future-proofs D/E
     current = now or _utc_now()
@@ -1430,9 +1552,11 @@ def run_tick(*, now: Optional[datetime] = None) -> dict[str, Any]:
                                         pn = resolved["project_number"]
                                         # Binding mandatory (#4679.2/#4680.1): the sender
                                         # must be in THIS project's participant set.
-                                        # Thread-continuity (the OR branch) is a TODO —
-                                        # no queryable email-thread store on main; pilot
-                                        # v1 = participant-binding only.
+                                        # FAST_TICKET stays code+participant only — thread
+                                        # continuity is NOT folded in here: it lands a routed
+                                        # TICKET (desk review) via the (e.8) lane below, never
+                                        # the authoritative FAST_TICKET (THREAD_CONTINUITY_
+                                        # ROUTING_1, now that thread_id is a queryable column).
                                         hits = resolve_by_participant(
                                             "email",
                                             (arrival.sender_email or "").strip().lower(),
@@ -1457,7 +1581,7 @@ def run_tick(*, now: Optional[datetime] = None) -> dict[str, Any]:
                                                     conn,
                                                     ticket_row_id=row_id,
                                                     terminal_status="FAST_TICKET",
-                                                    terminal_reason=f"hard_lane_project_code_participant_bound:{pn}",
+                                                    terminal_reason=f"{_HARD_LANE_REASON_PREFIX}{pn}",
                                                     raw_source_id=arrival.message_id,
                                                 ):
                                                     terminal_written += 1
@@ -1535,7 +1659,7 @@ def run_tick(*, now: Optional[datetime] = None) -> dict[str, Any]:
                                                 conn,
                                                 ticket_row_id=row_id,
                                                 terminal_status="TICKET",  # ROUTED, not FAST_TICKET
-                                                terminal_reason=f"explicit_code_routed_ticket:{pn}",
+                                                terminal_reason=f"{_CODE_ROUTED_REASON_PREFIX}{pn}",
                                                 raw_source_id=arrival.message_id,
                                                 matter_slug=resolved["matter_slug"],
                                                 desk_owner=resolved["desk_owner"],
@@ -1571,6 +1695,91 @@ def run_tick(*, now: Optional[datetime] = None) -> dict[str, Any]:
                                 failed += 1
                                 logger.warning(
                                     "airport_ticketing explicit-code lane row failed: %s", exc
+                                )
+
+                        # (e.8) THREAD-CONTINUITY LANE — routing reversal recall repair
+                        #   (THREAD_CONTINUITY_ROUTING_1). A code-less reply on a thread
+                        #   whose prior ticket was already CODE-BOUND to an active project
+                        #   inherits that project, restoring the recall #446 removed WITHOUT
+                        #   reviving name/alias matching (thread identity is a strong signal;
+                        #   fuzzy names are not). Sits AFTER the explicit-code lanes and
+                        #   BEFORE (f), guarded `if fast_lane and row_id and not handled:` so
+                        #   it runs ONLY when D/E did not route. It fires ONLY when the reply
+                        #   carries NO explicit project code — an explicit or conflicting code
+                        #   is left to (e.5)/(e.7) or (f); thread continuity never overrides an
+                        #   explicit code signal. resolve_by_thread inherits ONLY a hard/
+                        #   code-bound prior disposition (never a soft/alias/participant guess),
+                        #   returns None on a since-retired binding, and returns None when the
+                        #   thread spans >1 active project (CONFLICT) -> those fall through to
+                        #   (f), never a silent cross-matter pick. Routed TICKET (desk review),
+                        #   confidence 0.75 (an inherited binding, below E's direct-code 0.80),
+                        #   NEVER FAST_TICKET (D's authoritative lane).
+                        if fast_lane and row_id and not handled:
+                            try:
+                                with conn.cursor() as _sp:
+                                    _sp.execute("SAVEPOINT airport_thread_lane")
+                                tc_text = f"{arrival.subject} {arrival.full_body}"
+                                # Code-less replies ONLY (AC1). Any explicit code shape is
+                                # left to the code lanes / (f) — continuity never overrides it.
+                                if not extract_project_codes(tc_text):
+                                    resolved = resolve_by_thread(
+                                        arrival.thread_id or arrival.message_id
+                                    )
+                                    if resolved is not None:
+                                        pn = resolved["project_number"]
+                                        claim = _claim_for_terminal(conn, row_id)
+                                        if claim is None:
+                                            lease_skipped += 1
+                                            conn.commit()
+                                            handled = True
+                                        elif claim[1] is not None:
+                                            if result.get("ok"):
+                                                issued += 1
+                                            conn.commit()
+                                            handled = True
+                                            done = True
+                                        else:
+                                            claimed += 1
+                                            if write_terminal_status(
+                                                conn,
+                                                ticket_row_id=row_id,
+                                                terminal_status="TICKET",  # ROUTED via thread, not FAST_TICKET
+                                                terminal_reason=f"{_THREAD_CONTINUITY_REASON_PREFIX}{pn}",
+                                                raw_source_id=arrival.message_id,
+                                                matter_slug=resolved["matter_slug"],
+                                                desk_owner=resolved["desk_owner"],
+                                                manifest_match_signals=[
+                                                    {"signal": "thread_continuity", "value": pn,
+                                                     "binding": "prior_code_bound_ticket"}
+                                                ],
+                                                confidence=0.75,
+                                            ):
+                                                terminal_written += 1
+                                                thread_routed_ticket += 1
+                                            if result.get("ok"):
+                                                issued += 1
+                                            conn.commit()
+                                            handled = True
+                                            done = True
+                                # code present / no code-bound thread / retired / conflict ->
+                                #   handled stays False -> fall through to (f) TICKET. No
+                                #   `failed` on a clean no-route.
+                            except Exception as exc:
+                                # ERROR NEVER AUTO-CLEARS. Roll back to the savepoint (undo
+                                # this lane's partial writes, KEEP issue_ticket's reservation),
+                                # count failed, fall through to (f) TICKET so the arrival still
+                                # ends at a visible terminal. Never a routed clear.
+                                try:
+                                    with conn.cursor() as _sp:
+                                        _sp.execute("ROLLBACK TO SAVEPOINT airport_thread_lane")
+                                except Exception:
+                                    try:
+                                        conn.rollback()
+                                    except Exception:
+                                        pass
+                                failed += 1
+                                logger.warning(
+                                    "airport_ticketing thread-continuity lane row failed: %s", exc
                                 )
 
                         if not handled:
@@ -1646,6 +1855,7 @@ def run_tick(*, now: Optional[datetime] = None) -> dict[str, Any]:
             "defaulted_ticket": defaulted_ticket,
             "fast_ticket": fast_ticket,
             "code_routed_ticket": code_routed_ticket,
+            "thread_routed_ticket": thread_routed_ticket,
             "outbound_signal": outbound_signal,
             "stuck_arrivals": stuck_arrivals,
             # Read + surfaced for observability. In BRIEF-C the fast lane is not
