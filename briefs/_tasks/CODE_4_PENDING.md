@@ -1,46 +1,44 @@
 ---
-status: SHIPPED_AWAITING_GATES
-pr: 442
-head_sha: ed2c8da
-shipped_at: 2026-07-01
-g3_rework: "ed2c8da — round1 P1-A/B/C fixed (confirmed by codex); round2 P1 blank-cursor 24h-fallback strand fixed via trigger_state.get_watermark_raw (missing->full-lookback floor). 14/14 matrix + 20 airport + 69 state/trigger tests GREEN live-PG; awaiting re-gate (codex G3)"
-brief_id: BOX5_TICKETING_RUNNER_1
+status: PENDING
+brief_id: BOX5_HARD_FAST_LANE_1
 to: b4
 from: lead
 dispatched_by: cowork-ah1
 dispatched_at: 2026-07-01
-branch: box5-ticketing-runner-1
+branch: box5-hard-fast-lane-1
+base_note: branch off main @ 86ae607 or later (contains C's #442 merge — write_terminal_status/_claim_for_terminal/fast_lane_enabled all live)
 reply_target: cowork-ah1 (bus) for ship report; gate verdicts to lead
-effort: medium-high (builder — concurrency/idempotency/error-routing); codex G3 effort medium (focus the reliability matrix, NOT xhigh)
-task_class: EXTEND existing airport_ticketing run_tick (per-source cursor + FOR UPDATE SKIP LOCKED claim + status-guarded single terminal write); ships DARK behind 2 kill-switches
-gate_plan: G1 builder self-check incl. the 8-case idempotency/concurrency/error-routing test matrix (write FIRST) -> codex G3 (bus, effort medium, focus reliability) -> lead G4 /security-review -> lead merge. Dark ship, no activation. C MUST merge before D/E dispatch (they plug into C's classify hook in the same file).
-full_brief: briefs/BRIEF_BOX5_TICKETING_RUNNER_1.md
+effort: medium (builder — surgical branch + pure helper; cost is the binding/conflict/error test matrix); codex G3 effort medium (focus regex-only-never-clears + binding-mandatory + error-never-FAST_TICKET, NOT xhigh)
+task_class: ADDITIVE decision logic + net-new pure helper + seed slug fix. One new precedence tier in C's run_tick between (e) DUPLICATE and (f) safe-default TICKET; one net-new pure-regex extract_project_codes() in kbl/project_registry_store.py (reuse _NUMBER_RE, NO DB); one new fast_ticket counter + stats key; two one-line aukera seed corrections (+ 1 breaking test assertion). No schema migration, no new job/lock/table.
+gate_plan: G1 builder self-test (pytest test_project_registry.py incl. new pure-regex + flipped seed assertion + test_box5_ticketing_runner.py no-regression; py_compile both files) -> codex G3 (bus, effort medium) -> lead G4 /security-review -> lead merge. Ships DARK behind BOX5_FAST_LANE_ENABLED (default false). SEED STAYS UN-RUN until Director GO — D corrects the slug literal only; running scripts/seed_bb_pilot_registry.py is a separate gated step.
+full_brief: briefs/BRIEF_BOX5_HARD_FAST_LANE_1.md
+prev_merged: BOX5_TICKETING_RUNNER_1 (C) MERGED as PR #442 (squash 86ae607); G3 PASS after 2 re-gate rounds (4 P1s caught+fixed), G4 /security-review CLEAN.
 ---
 
-# BOX5_TICKETING_RUNNER_1 — extend run_tick into the Box 5 ticketing runner (Build Order 5)
+# BOX5_HARD_FAST_LANE_1 — project-number hard fast lane (Build Order 6)
 
 ## Read this first
-Complete copy-pasteable impl in **`briefs/BRIEF_BOX5_TICKETING_RUNNER_1.md`** (492 lines, on main, committed alongside). Implement exactly. Brief authored + verifier-checked by cowork-ah1; do not redesign. Prereqs all merged: #439 registry, #440 receipt/TTL, #441 terminal schema.
+Complete copy-pasteable impl in **`briefs/BRIEF_BOX5_HARD_FAST_LANE_1.md`** (on main, committed alongside). Implement exactly. Brief authored + verifier-checked by cowork-ah1; do not redesign. **C (#442) is MERGED** — its helpers exist on main (verified: write_terminal_status / _claim_for_terminal / fast_lane_enabled all present). Prereqs #439 (resolvers), #440 (receipt/TTL), #441 (FAST_TICKET in the 6-state CHECK) all merged. Locate C's actual `(e)`/`(f)` blocks in the MERGED `orchestrator/airport_ticketing_bridge.py` (the brief's `brief_c_draft.md` line refs were the pre-merge draft — grep the real file).
 
 ## Context (one paragraph)
-Box 5 Build Order 5 — the runner. EXTEND the EXISTING `airport_ticketing` run_tick (NO new scheduler/lease/cursor table; single-replica still inherited from lease 8800100). Adds: per-source cursor via existing `trigger_watermarks` (key `airport_ticketing:email`, replaces today's constant 48h re-scan); `FOR UPDATE SKIP LOCKED` row claim (intra-tick safety); a status-guarded SINGLE terminal write (`UPDATE ... WHERE id=%s AND terminal_status IS NULL` — the ONLY terminal-write path, so re-run = 0 rows, no double-write); deterministic clears ONLY (DUPLICATE via dedup_key, REJECT_NOISE via automated-sender/no-keyword), everything else → TICKET (full desk review). NO project-number lane (D), NO manifest lane (E), NO VISIBLE_HOLD.
+Box 5 Build Order 6 — the PROJECT-NUMBER HARD FAST LANE. Insert a new precedence tier BETWEEN C's `(e)` DUPLICATE clear and C's `(f)` safe-default TICKET. On a clean clear write `terminal_status='FAST_TICKET'` via C's `write_terminal_status`; on ANY miss/conflict/exception fall through to C's unchanged TICKET path. Consumes #439 registry: `resolve_project_number(text)` (active-filtered, deterministic single-return) + `resolve_by_participant('email', sender)`. Net-new pure `extract_project_codes(text)` (reuse `_NUMBER_RE`, no DB) runs FIRST: >1 distinct code → cross-matter CONFLICT → TICKET (never fast-board); exactly 1 → resolve; 0 → no code. Also folds the Director-ratified **aukera** seed correction (both hardcoded `annaberg` seed sites → `aukera`; seed stays gated/un-run).
 
 ## Scope (locked — do NOT exceed)
-- Extend run_tick in `orchestrator/airport_ticketing_bridge.py`. Writes terminal_status/terminal_reason/processed_at/terminal_outcome_written_at/raw_source_*.
-- Kill-switches: master = existing `AIRPORT_TICKETING_BRIDGE_ENABLED` (dark); NEW `BOX5_FAST_LANE_ENABLED` (default false) → routes everything to safe-default TICKET while still clearing backlog (freeze a misroute by flag flip, no deploy).
-- Errors NEVER auto-clear (a throw must be distinguishable from a no-match; error → leave terminal_status NULL + count).
-- Per-tick stats + stuck-arrivals gauge (terminal_status IS NULL AND source_received_at < NOW()-30min).
-- Additive/extend only; do NOT add D's project-number lane or E's manifest lane. Parameterized SQL, LIMIT on selects, rollback in except.
+- Locked fast-lane rules: #4679.2/#4680.1 (registered+ACTIVE code AND (sender-in-participant-set OR thread-continuity); sender-only forbidden alone); #4679.3 (regex shape alone NEVER fast-clears — registry validation mandatory); F4 (extract_project_codes conflict pre-check); blocker-D3 (registry/binding exception NEVER auto-clears — routes to TICKET + counts `failed`; distinguish "threw" from "no match").
+- Pilot v1 = participant-binding ONLY (thread-continuity is a documented TODO, not built).
+- Entire branch gated under `if fast_lane and row_id:` reusing C's pre-computed `fast_lane` local — do NOT re-read the env.
+- NO VISIBLE_HOLD (grep count must stay 0). NO new table/schema/job/lock. Seed = two literal-string edits, remains un-run.
 
-## Acceptance criteria
-- AC1: `py_compile` clean; `bash scripts/check_singletons.sh` OK.
-- AC2: the 8-case test matrix (idempotency, concurrency/SKIP LOCKED, error-routing, cursor advance, dedup, noise-reject, safe-default-TICKET, stuck-gauge) — all pass (live-PG auto-skip without TEST_DATABASE_URL; CI live).
-- AC3: re-run over an already-terminal row = 0 rows updated (status-guarded single write proven).
-- AC4: `BOX5_FAST_LANE_ENABLED=false` → every arrival → TICKET (no deterministic clearing); flag true → DUPLICATE/REJECT_NOISE clear deterministically.
-- AC5: a raised exception in classify leaves terminal_status NULL (NOT cleared) + increments the error count.
+## Acceptance criteria — machine-checkable done rubric (10 items, verbatim in full_brief)
+- extract_project_codes pure/no-DB/distinct + reuses `_NUMBER_RE` (no 2nd re.compile).
+- >1 distinct code → TICKET; regex-only-no-row → TICKET; conflict/no-row/no-binding → TICKET (not VISIBLE_HOLD).
+- FAST_TICKET written ONLY on a clean active-resolve + participant-binding match; only one FAST_TICKET write site.
+- Branch fully gated by `BOX5_FAST_LANE_ENABLED` (flag false → C's TICKET default covers everything, D adds nothing live).
+- Error path increments `failed` + falls through to TICKET, never FAST_TICKET; D never touches `deterministic_cleared`.
+- Seed `matter_slug == 'aukera'` in both sites; `test_project_registry.py` asserts `seed.MATTER_SLUG == 'aukera'`; zero remaining `annaberg` literals.
 
 ## Done rubric
-Build-done = PR merged + AC1-AC5 green. Ships DARK (master flag off). NO activation this build — that's a later Director GO. C must merge before D/E dispatch.
+Build-done = PR merged + all 10 rubric items green. Ships DARK (BOX5_FAST_LANE_ENABLED off). NO activation, NO seed run — both are later Director GOs. E (soft fast lane) dispatches after D merges.
 
 ## Context-economy (HARD — no auto-compaction)
-- Read ONLY the files in the brief's Context Contract. Output to /tmp; tails only. Context >70%: commit, push, bus handoff, STOP. Reminder: a prior Box-5 job (PR #440) passed the builder's own self-check but codex caught 2 P1 crash-path bugs — write the reliability test matrix FIRST and make it assert real crash/concurrency/error paths, not happy-path.
+Read ONLY the files in the brief's Context Contract. Output to /tmp; tails only. Context >70%: commit, push, bus handoff, STOP. Reliability reminder: C shipped clean only after codex caught 4 P1s across two re-gate rounds (cursor-strand, bus-fail-strand, dead-branch, blank-cursor). Write the binding/conflict/error test matrix FIRST and make it assert the real fall-through paths (regex-only, >1 code, resolver-throws, no-binding), not happy-path FAST_TICKET.
