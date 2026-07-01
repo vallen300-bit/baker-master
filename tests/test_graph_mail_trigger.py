@@ -113,12 +113,15 @@ def test_two_messages_exact_thread_shape():
     t0 = threads[0]
     assert set(t0.keys()) == {"text", "metadata"}
     assert set(t0["metadata"].keys()) == {
-        "source", "thread_id", "subject", "primary_sender",
+        "source", "thread_id", "message_id", "subject", "primary_sender",
         "primary_sender_email", "received_date",
     }
     assert t0["metadata"] == {
         "source": "graph",
         "thread_id": "c1",
+        # BOX5_EMAIL_CONVERSATION_DEDUP_FIX_1: per-message id (m['id']) carried for the
+        # sink's per-message dedup; conversationId stays in thread_id.
+        "message_id": "m1",
         "subject": "Subject One",
         "primary_sender": "Alice",
         "primary_sender_email": "alice@x.com",
@@ -682,8 +685,10 @@ def test_no_attachments_flag_skips_fetch():
 # Attachments are READ by the real per-message id but STORED under thread_id
 # (conversationId-or-id), matching email_messages.message_id + the read tool.
 
-def test_store_key_is_conversation_id_when_present():
-    """Read by real id; persist under conversationId (matches email_messages keying)."""
+def test_store_key_is_per_message_id_when_present():
+    """BOX5_EMAIL_CONVERSATION_DEDUP_FIX_1 F1: read by the real per-message id AND store
+    under it (== the email-row key). Persisting under conversationId (the old contract)
+    diverged from the now per-message email row -> false-empty read surface (codex G3)."""
     client = _fake_client()
     client.get.return_value = {"value": [_att()]}
     real_id = "AAMkRealMessageId=="
@@ -694,8 +699,8 @@ def test_store_key_is_conversation_id_when_present():
     # FETCH used the real per-message id (percent-encoded in the URL path)...
     from urllib.parse import quote as _q
     assert _q(real_id, safe="") in client.get.call_args_list[0].args[0]
-    # ...but the STORE key is the conversationId.
-    assert ins.call_args.kwargs["message_id"] == conv_id
+    # ...and the STORE key is that SAME per-message id (matches email_messages.message_id).
+    assert ins.call_args.kwargs["message_id"] == real_id
 
 
 def test_fetch_path_url_encodes_message_id():
