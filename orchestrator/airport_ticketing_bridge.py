@@ -59,6 +59,25 @@ _DEFAULT_MATTER = "lilienmatt"
 _DEFAULT_FLIGHT = "aukera-annaberg-financing"
 _DEFAULT_LOOKBACK_HOURS = 48
 _DEFAULT_MAX_POSTS = 5
+
+# BOX5_DROP_OBSERVABILITY_1 — Gate-2 superset fetch cap. The keyword prefilter is now
+# a fetch-superset-then-classify-and-log path: we fetch the recent window WITHOUT the
+# keyword ILIKE so keyword-MISSES become visible, then classify in Python. This MUST
+# stay bounded (no unbounded scan): a hard row cap on the un-prefiltered fetch, floored
+# at the caller's matched-limit so it can never return fewer matched rows than the old
+# SQL LIMIT. When the cap truncates the scan the tick logs it (never a silent cut).
+_SUPERSET_CAP_ENV = "AIRPORT_TICKETING_SUPERSET_CAP"
+_DEFAULT_SUPERSET_CAP = 500
+
+# BOX5_DROP_OBSERVABILITY_1 — drop-log gate vocabulary (mirrors the CHECK in
+# migrations/20260701d_box5_dropped_signals.sql). keyword_prefilter = Gate-2 miss (not
+# ticketed); routing_unrouted / routing_conflict = Gate-3 (ticketed to safe-default
+# desk review but not confidently auto-routed); other = reserved.
+_GATE_KEYWORD_PREFILTER = "keyword_prefilter"
+_GATE_ROUTING_UNROUTED = "routing_unrouted"
+_GATE_ROUTING_CONFLICT = "routing_conflict"
+_DROP_LOG_SAVEPOINT = "airport_drop_log"
+
 _SKIP_EMAIL_SENDER_PATTERNS = (
     "noreply@",
     "no-reply@",
@@ -225,6 +244,31 @@ def active_keywords() -> tuple[str, ...]:
     return tuple(values) if values else _DEFAULT_KEYWORDS
 
 
+def _superset_fetch_cap() -> int:
+    """BOX5_DROP_OBSERVABILITY_1 — hard row cap on the un-prefiltered Gate-2 fetch.
+    Env-tunable; bounded so a misconfig cannot trigger an unbounded scan. The caller
+    floors this at its own matched-limit, so the effective cap is always >= the number
+    of matched rows the old keyword-filtered SQL LIMIT would have returned."""
+    try:
+        value = int(os.environ.get(_SUPERSET_CAP_ENV, str(_DEFAULT_SUPERSET_CAP)))
+    except (TypeError, ValueError):
+        return _DEFAULT_SUPERSET_CAP
+    return max(1, min(value, 5000))
+
+
+def _match_active_keywords(
+    subject: str, full_body: str, keys: tuple[str, ...]
+) -> list[str]:
+    """Single source of truth for the active-keyword match (Gate 2). Case-insensitive
+    substring over subject + body — IDENTICAL logic to the old SQL
+    `subject ILIKE %kw% OR full_body ILIKE %kw%` for the space-free flight keywords,
+    so replacing the SQL prefilter with a Python classify keeps what tickets byte-for-
+    byte the same. Used by both fetch_email_arrivals (drop classification) and
+    build_email_ticket so the two can never drift."""
+    haystack = f"{subject} {full_body}".lower()
+    return [kw for kw in keys if kw and kw.lower() in haystack]
+
+
 def _desk_slug() -> str:
     return os.environ.get(_DESK_ENV, _DEFAULT_DESK).strip() or _DEFAULT_DESK
 
@@ -237,7 +281,9 @@ def _flight_name() -> str:
     return os.environ.get(_FLIGHT_ENV, _DEFAULT_FLIGHT).strip() or _DEFAULT_FLIGHT
 
 
-def _json_param(payload: dict[str, Any]) -> Any:
+def _json_param(payload: Any) -> Any:
+    # Accepts any JSON-serializable value (dict for action payloads, list for
+    # box5_dropped_signals.matched_keywords). psycopg2 Json() adapts both.
     try:
         import psycopg2.extras
 
@@ -328,8 +374,7 @@ def build_email_ticket(
         return None
 
     keys = keywords or active_keywords()
-    haystack = f"{arrival.subject} {arrival.full_body}".lower()
-    matched = [kw for kw in keys if kw and kw.lower() in haystack]
+    matched = _match_active_keywords(arrival.subject, arrival.full_body, keys)
     if not matched:
         return None
 
@@ -548,6 +593,177 @@ def ensure_airport_ticket_terminal_columns(conn: Any) -> None:
         raise
 
 
+def ensure_box5_dropped_signals_table(conn: Any) -> None:
+    """BOX5_DROP_OBSERVABILITY_1 — bootstrap the per-gate drop-log table.
+
+    Mirrors migrations/20260701d_box5_dropped_signals.sql VERBATIM so a DB that a
+    migration runner has not yet reached still gains the table on the next tick
+    (Lesson #50). Brand-new table -> a single identical CREATE TABLE IF NOT EXISTS in
+    both places cannot drift; no ALTER / DROP-ADD churn on the hot path.
+
+    FAULT-TOLERANT BY DESIGN: observability must never break the pipeline. If the
+    bootstrap fails we roll back (keep the shared conn usable) and return WITHOUT
+    raising — the drop-log is simply skipped this tick (every _write_dropped_signals
+    call is itself guarded), the real ticketing journey continues untouched."""
+    try:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                CREATE TABLE IF NOT EXISTS box5_dropped_signals (
+                    id               BIGSERIAL PRIMARY KEY,
+                    message_id       TEXT,
+                    thread_id        TEXT,
+                    sender_email     TEXT,
+                    subject          TEXT,
+                    matched_keywords JSONB NOT NULL DEFAULT '[]'::jsonb,
+                    gate             TEXT NOT NULL,
+                    reason           TEXT,
+                    received_date    TIMESTAMPTZ,
+                    tick_at          TIMESTAMPTZ NOT NULL DEFAULT now(),
+                    CONSTRAINT box5_dropped_signals_gate_check CHECK (
+                        gate IN (
+                            'keyword_prefilter',
+                            'routing_unrouted',
+                            'routing_conflict',
+                            'other'
+                        )
+                    )
+                )
+                """
+            )
+            cur.execute(
+                "CREATE INDEX IF NOT EXISTS idx_box5_dropped_signals_tick_at "
+                "ON box5_dropped_signals (tick_at)"
+            )
+            cur.execute(
+                "CREATE INDEX IF NOT EXISTS idx_box5_dropped_signals_gate "
+                "ON box5_dropped_signals (gate)"
+            )
+            cur.execute(
+                "CREATE UNIQUE INDEX IF NOT EXISTS uq_box5_dropped_signals_msg_gate "
+                "ON box5_dropped_signals (message_id, gate)"
+            )
+        conn.commit()
+    except Exception as exc:
+        try:
+            conn.rollback()
+        except Exception:
+            pass
+        logger.warning(
+            "box5 dropped_signals bootstrap failed (drop-log skipped this tick): %s",
+            exc,
+        )
+
+
+def _drop_record(
+    arrival: "EmailArrival",
+    *,
+    gate: str,
+    reason: str,
+    matched_keywords: list[str] | None = None,
+) -> tuple:
+    """Build one box5_dropped_signals row tuple from an arrival (subject truncated,
+    matched_keywords JSON-adapted). Column order matches _write_dropped_signals."""
+    return (
+        str(arrival.message_id or ""),
+        str(arrival.thread_id or arrival.message_id or ""),
+        str(arrival.sender_email or ""),
+        _normalize_text(arrival.subject, limit=300),
+        _json_param(list(matched_keywords or [])),
+        gate,
+        reason,
+        arrival.received_date,
+    )
+
+
+def _write_dropped_signals(
+    conn: Any, records: list[tuple], *, savepoint: bool = False
+) -> int:
+    """BOX5_DROP_OBSERVABILITY_1 — fault-tolerant drop-log writer. NEVER raises; a
+    drop-log write failure must never abort or block the tick (AC3).
+
+    ON CONFLICT (message_id, gate) DO NOTHING makes a re-fetched boundary arrival's
+    re-classification idempotent (one drop per signal per gate).
+
+    savepoint=False (Gate-2 fetch path, called on a CLEAN txn): commit the batch here
+    so the rows persist even when the tick issues no per-row commit (e.g. an all-miss
+    window). On error rollback so the shared conn stays usable.
+
+    savepoint=True (Gate-3, inside run_tick's shared per-row txn with an uncommitted
+    ticket reservation): wrap in a SAVEPOINT and DON'T commit — the caller's existing
+    conn.commit() flushes the drop row atomically with the terminal write. On error
+    ROLLBACK TO SAVEPOINT undoes ONLY the drop-log, preserving the reservation +
+    terminal write (a bare conn.rollback would discard those good writes — the exact
+    class the correlation-fix caught)."""
+    if not records:
+        return 0
+    try:
+        with conn.cursor() as cur:
+            if savepoint:
+                cur.execute(f"SAVEPOINT {_DROP_LOG_SAVEPOINT}")
+            cur.executemany(
+                """
+                INSERT INTO box5_dropped_signals
+                    (message_id, thread_id, sender_email, subject,
+                     matched_keywords, gate, reason, received_date)
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
+                ON CONFLICT (message_id, gate) DO NOTHING
+                """,
+                records,
+            )
+            if savepoint:
+                cur.execute(f"RELEASE SAVEPOINT {_DROP_LOG_SAVEPOINT}")
+        if not savepoint:
+            conn.commit()
+        return len(records)
+    except Exception as exc:
+        try:
+            if savepoint:
+                with conn.cursor() as cur:
+                    cur.execute(f"ROLLBACK TO SAVEPOINT {_DROP_LOG_SAVEPOINT}")
+            else:
+                conn.rollback()
+        except Exception:
+            # Savepoint unusable (e.g. the SAVEPOINT stmt itself failed) — full
+            # rollback so the shared conn stays usable; the tick continues.
+            try:
+                conn.rollback()
+            except Exception:
+                pass
+        logger.warning(
+            "box5 drop-log write failed (%d row(s), observability best-effort): %s",
+            len(records),
+            exc,
+        )
+        return 0
+
+
+def summarize_recent_drops(conn: Any, *, hours: int = 24) -> list[dict[str, Any]]:
+    """Read-only observability surface (design item 4): drop counts by gate over the
+    last N hours — the query lead runs to size the Gate-2 keyword-broadening off real
+    data. Fault-tolerant: returns [] on any error (never raises)."""
+    try:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                SELECT gate, COUNT(*)
+                  FROM box5_dropped_signals
+                 WHERE tick_at >= now() - make_interval(hours => %s)
+                 GROUP BY gate
+                 ORDER BY COUNT(*) DESC
+                """,
+                (max(0, int(hours)),),
+            )
+            return [{"gate": r[0], "count": int(r[1])} for r in cur.fetchall()]
+    except Exception as exc:
+        try:
+            conn.rollback()
+        except Exception:
+            pass
+        logger.warning("box5 drop summary read failed: %s", exc)
+        return []
+
+
 def fetch_email_arrivals(
     conn: Any,
     *,
@@ -558,23 +774,23 @@ def fetch_email_arrivals(
     keys = keywords or active_keywords()
     if not keys:
         return []
-    clauses: list[str] = []
-    params: list[Any] = [since]
-    for keyword in keys:
-        pattern = f"%{keyword}%"
-        clauses.append("(subject ILIKE %s OR full_body ILIKE %s)")
-        params.extend([pattern, pattern])
-    params.append(max(1, min(int(limit), 200)))
-    where = " OR ".join(clauses)
+    # BOX5_DROP_OBSERVABILITY_1 — Gate 2 is now fetch-SUPERSET-then-classify-and-log.
+    # The keyword ILIKE is REMOVED from SQL so keyword-MISSES become visible; we fetch
+    # the recent window (still bounded: received_date >= since + a hard row cap) and
+    # classify in Python. Matched arrivals proceed EXACTLY as before (parity); misses
+    # are written to box5_dropped_signals and skipped. What tickets is unchanged.
+    lim = max(1, min(int(limit), 200))
+    # Cap floored at lim so the un-prefiltered fetch can never return fewer matched
+    # rows than the old keyword-filtered `LIMIT lim` would have (no unbounded scan).
+    superset_cap = max(lim, _superset_fetch_cap())
 
     with conn.cursor() as cur:
         cur.execute(
-            f"""
+            """
             SELECT message_id, thread_id, sender_name, sender_email,
                    subject, full_body, received_date, source
             FROM email_messages
             WHERE received_date >= %s
-              AND ({where})
             -- BOX5_TICKETING_RUNNER_1 P1-A: OLDEST-FIRST. The runner processes the
             -- backlog in cursor order and advances the watermark only over the
             -- contiguous fully-processed prefix. Newest-first (DESC) under a per-tick
@@ -583,14 +799,66 @@ def fetch_email_arrivals(
             ORDER BY received_date ASC
             LIMIT %s
             """,
-            tuple(params),
+            (since, superset_cap),
         )
         rows = cur.fetchall()
 
-    message_ids = [row[0] for row in rows if row and row[0]]
+    superset_truncated = len(rows) >= superset_cap
+
+    # Classify ASC (oldest-first). Collect matched up to `lim` — IDENTICAL set to the
+    # old SQL `... AND (keyword ILIKE) ... LIMIT lim` (oldest lim matched since watermark).
+    # A keyword-miss encountered BEFORE we reach `lim` matched is logged as a drop;
+    # rows past the lim-th match are left for a later tick (the watermark won't advance
+    # past un-processed rows), so per-tick work stays bounded.
+    matched_rows: list[Any] = []
+    miss_records: list[tuple] = []
+    for row in rows:
+        if len(matched_rows) >= lim:
+            break
+        subject = str(row[4] or "")
+        body = str(row[5] or "")
+        if _match_active_keywords(subject, body, keys):
+            matched_rows.append(row)
+        else:
+            received_raw = row[6]
+            if isinstance(received_raw, datetime) and received_raw.tzinfo is None:
+                received_raw = received_raw.replace(tzinfo=timezone.utc)
+            miss_records.append(
+                (
+                    str(row[0] or ""),
+                    str(row[1] or row[0] or ""),
+                    str(row[3] or ""),
+                    _normalize_text(subject, limit=300),
+                    _json_param([]),  # keyword-miss -> matched_keywords empty (AC1)
+                    _GATE_KEYWORD_PREFILTER,
+                    "no_active_keyword_match",
+                    received_raw if isinstance(received_raw, datetime) else None,
+                )
+            )
+
+    # Fault-tolerant: a drop-log failure must never stop ticketing (AC3). Clean txn
+    # here (ensure_* already committed, watermark read is read-only), so commit inline.
+    if miss_records:
+        _write_dropped_signals(conn, miss_records, savepoint=False)
+
+    # Never a silent cut (AC4): if the hard cap truncated the scan before we reached
+    # `lim` matched, log it — those matched rows defer to next tick, some misses this
+    # tick go unlogged (they re-classify once the window advances).
+    if superset_truncated and len(matched_rows) < lim:
+        logger.warning(
+            "airport_ticketing Gate-2 superset fetch hit cap=%d (matched %d < limit "
+            "%d): matched arrivals deferred + some misses unlogged this tick; raise "
+            "%s if this recurs",
+            superset_cap,
+            len(matched_rows),
+            lim,
+            _SUPERSET_CAP_ENV,
+        )
+
+    message_ids = [row[0] for row in matched_rows if row and row[0]]
     attachment_map = _fetch_email_attachments(conn, message_ids)
     arrivals: list[EmailArrival] = []
-    for row in rows:
+    for row in matched_rows:
         received = row[6]
         if isinstance(received, datetime) and received.tzinfo is None:
             received = received.replace(tzinfo=timezone.utc)
@@ -1318,6 +1586,9 @@ def run_tick(*, now: Optional[datetime] = None) -> dict[str, Any]:
     contiguous = True
     try:
         ensure_airport_ticket_table(conn)  # idempotent; also ensures BRIEF-B terminal cols
+        # BOX5_DROP_OBSERVABILITY_1 — bootstrap the drop-log (fault-tolerant: never
+        # raises, so a drop-log infra hiccup can't abort the ticketing tick).
+        ensure_box5_dropped_signals_table(conn)
 
         # (b) CURSOR — per-source watermark replaces the constant lookback. Keep the
         #     lookback as a FLOOR so a fresh/blank cursor cannot scan unbounded. The
@@ -1809,6 +2080,46 @@ def run_tick(*, now: Optional[datetime] = None) -> dict[str, Any]:
                                 ):
                                     terminal_written += 1
                                     defaulted_ticket += 1
+                                # BOX5_DROP_OBSERVABILITY_1 — Gate 3 drop-log. Reaching
+                                # (f) with the fast lane ON means D/E/thread routing was
+                                # ATTEMPTED and did NOT confidently assign a desk (the
+                                # arrival still tickets, unchanged — this only records
+                                # WHY it fell to generic desk review). >1 distinct code =
+                                # cross-matter conflict; else no confident route. Guarded
+                                # by fast_lane so we don't label every ticket "unrouted"
+                                # when routing isn't even running. Savepoint-guarded +
+                                # committed atomically with the terminal write above.
+                                if fast_lane:
+                                    _codes = set(
+                                        extract_project_codes(
+                                            f"{arrival.subject} {arrival.full_body}"
+                                        )
+                                    )
+                                    if len(_codes) > 1:
+                                        _g3_gate = _GATE_ROUTING_CONFLICT
+                                        _g3_reason = (
+                                            "cross_matter_conflict:"
+                                            + ",".join(sorted(_codes))
+                                        )
+                                    else:
+                                        _g3_gate = _GATE_ROUTING_UNROUTED
+                                        _g3_reason = "no_confident_route"
+                                    _write_dropped_signals(
+                                        conn,
+                                        [
+                                            _drop_record(
+                                                arrival,
+                                                gate=_g3_gate,
+                                                reason=_g3_reason,
+                                                matched_keywords=_match_active_keywords(
+                                                    arrival.subject,
+                                                    arrival.full_body,
+                                                    active_keywords(),
+                                                ),
+                                            )
+                                        ],
+                                        savepoint=True,
+                                    )
                                 if result.get("ok"):
                                     issued += 1
                                 conn.commit()
