@@ -19,6 +19,11 @@ from datetime import datetime, timedelta, timezone
 from typing import Any, Optional
 
 from orchestrator.dispatcher import RESERVED_RECIPIENTS, resolve_owner_slug
+from kbl.project_registry_store import (
+    extract_project_codes,
+    resolve_by_participant,
+    resolve_project_number,
+)
 
 logger = logging.getLogger("sentinel.airport_ticketing")
 
@@ -1019,6 +1024,7 @@ def run_tick(*, now: Optional[datetime] = None) -> dict[str, Any]:
     issued = skipped = failed = 0
     claimed = terminal_written = lease_skipped = 0
     deterministic_cleared = defaulted_ticket = 0
+    fast_ticket = 0  # BRIEF-D hard fast lane; not a deterministic_cleared/defaulted_ticket
     fast_lane = fast_lane_enabled()  # honored now; only future-proofs D/E
     current = now or _utc_now()
     # (P1-A) CONTIGUOUS-PREFIX WATERMARK. The cursor may only advance over the
@@ -1167,34 +1173,139 @@ def run_tick(*, now: Optional[datetime] = None) -> dict[str, Any]:
                         conn.commit()
 
                     else:
-                        # (g) SAFE DEFAULT — TICKET (full desk review). No D/E fast
-                        #     lane built (and/or fast_lane False) -> every non-clear
-                        #     arrival lands here; result is ok=True with a row_id.
-                        claim = _claim_for_terminal(conn, row_id)
-                        if claim is None:
-                            lease_skipped += 1
-                            conn.commit()
-                        elif claim[1] is not None:
-                            # Already terminal (idempotent re-tick) — DONE, no rewrite.
-                            if result.get("ok"):
-                                issued += 1
-                            conn.commit()
-                            done = True
-                        else:
-                            claimed += 1
-                            if write_terminal_status(
-                                conn,
-                                ticket_row_id=row_id,
-                                terminal_status="TICKET",
-                                terminal_reason="safe_default_desk_review",
-                                raw_source_id=arrival.message_id,
-                            ):
-                                terminal_written += 1
-                                defaulted_ticket += 1
-                            if result.get("ok"):
-                                issued += 1
-                            conn.commit()
-                            done = True
+                        # (e.5) HARD FAST LANE — project-number fast-board (BRIEF-D).
+                        #   Gated on C's precomputed `fast_lane` local (BOX5_FAST_LANE_
+                        #   ENABLED, default false). FAST_TICKET requires ALL of: exactly
+                        #   1 distinct code; a registered ACTIVE row; the sender bound to
+                        #   THAT project's participant set. Any conflict / no-code /
+                        #   no-row / no-binding / exception -> fall through to (f) TICKET
+                        #   (never the deferred hold state, never FAST_TICKET on a miss).
+                        #   #4679.2/.3 + #4680.1
+                        #   + blocker-D3. `handled` True = D disposed of the row (a clean
+                        #   FAST_TICKET, an idempotent re-tick, or a lease-skip) and
+                        #   suppresses the (f) TICKET write below.
+                        handled = False
+                        if fast_lane and row_id:
+                            try:
+                                # (P1 G3-rework) SAVEPOINT FIRST — before any D work but
+                                #   AFTER issue_ticket's row reservation (~L1126, still
+                                #   uncommitted in this shared tick txn). A D failure must
+                                #   roll back ONLY D's partial work and PRESERVE that
+                                #   reservation so the (f) TICKET fallback below still finds
+                                #   the row via _claim_for_terminal. The prior full
+                                #   conn.rollback() in the except destroyed the reservation
+                                #   -> fallback found NO row -> lease_skipped -> the arrival
+                                #   was STRANDED with no terminal outcome (violates
+                                #   blocker-D3 + the every-arrival-ends-visible spine).
+                                with conn.cursor() as _sp:
+                                    _sp.execute("SAVEPOINT airport_hard_lane")
+                                hl_text = f"{arrival.subject} {arrival.full_body}"
+                                codes = extract_project_codes(hl_text)
+                                # >1 distinct code = cross-matter CONFLICT (F4) -> TICKET;
+                                # 0 codes -> no code -> TICKET. Only exactly-1 proceeds.
+                                if len(set(codes)) == 1:
+                                    # Regex shape alone NEVER clears (#4679.3): the code
+                                    # must resolve to a registered ACTIVE row.
+                                    resolved = resolve_project_number(hl_text)
+                                    if resolved is not None:
+                                        pn = resolved["project_number"]
+                                        # Binding mandatory (#4679.2/#4680.1): the sender
+                                        # must be in THIS project's participant set.
+                                        # Thread-continuity (the OR branch) is a TODO —
+                                        # no queryable email-thread store on main; pilot
+                                        # v1 = participant-binding only.
+                                        hits = resolve_by_participant(
+                                            "email",
+                                            (arrival.sender_email or "").strip().lower(),
+                                        )
+                                        if any(h.get("project_number") == pn for h in hits):
+                                            claim = _claim_for_terminal(conn, row_id)
+                                            if claim is None:
+                                                # Held by a concurrent tick — hold cursor.
+                                                lease_skipped += 1
+                                                conn.commit()
+                                                handled = True
+                                            elif claim[1] is not None:
+                                                # Already terminal (idempotent re-tick).
+                                                if result.get("ok"):
+                                                    issued += 1
+                                                conn.commit()
+                                                handled = True
+                                                done = True
+                                            else:
+                                                claimed += 1
+                                                if write_terminal_status(
+                                                    conn,
+                                                    ticket_row_id=row_id,
+                                                    terminal_status="FAST_TICKET",
+                                                    terminal_reason=f"hard_lane_project_code_participant_bound:{pn}",
+                                                    raw_source_id=arrival.message_id,
+                                                ):
+                                                    terminal_written += 1
+                                                    fast_ticket += 1
+                                                if result.get("ok"):
+                                                    issued += 1
+                                                conn.commit()
+                                                handled = True
+                                                done = True
+                            except Exception as exc:
+                                # ERROR NEVER AUTO-FAST_TICKETs (#blocker D3). Roll back to
+                                # the SAVEPOINT — this undoes D's partial writes but KEEPS
+                                # the issue_ticket reservation — count failed, and FALL
+                                # THROUGH to (f) TICKET (handled stays False) so the arrival
+                                # STILL ends at a visible terminal. Distinguish threw
+                                # (-> TICKET + count failed) from a row genuinely held by a
+                                # concurrent tick (lease_skipped, handled inside the try).
+                                try:
+                                    with conn.cursor() as _sp:
+                                        _sp.execute(
+                                            "ROLLBACK TO SAVEPOINT airport_hard_lane"
+                                        )
+                                except Exception:
+                                    # Savepoint unusable (e.g. the SAVEPOINT statement
+                                    # itself failed) — fall back to a full rollback so conn
+                                    # stays usable. The (f) claim then lease-skips and the
+                                    # arrival re-fetches next tick (cursor frozen, never
+                                    # silently dropped).
+                                    try:
+                                        conn.rollback()
+                                    except Exception:
+                                        pass
+                                failed += 1
+                                logger.warning(
+                                    "airport_ticketing hard-fast-lane row failed: %s", exc
+                                )
+
+                        if not handled:
+                            # (f) SAFE DEFAULT — TICKET (full desk review). [BRIEF-C,
+                            #     unchanged] Conflict / no-code / no-row / no-binding /
+                            #     hard-lane error / flag-off all land here; result is
+                            #     ok=True with a row_id.
+                            claim = _claim_for_terminal(conn, row_id)
+                            if claim is None:
+                                lease_skipped += 1
+                                conn.commit()
+                            elif claim[1] is not None:
+                                # Already terminal (idempotent re-tick) — DONE, no rewrite.
+                                if result.get("ok"):
+                                    issued += 1
+                                conn.commit()
+                                done = True
+                            else:
+                                claimed += 1
+                                if write_terminal_status(
+                                    conn,
+                                    ticket_row_id=row_id,
+                                    terminal_status="TICKET",
+                                    terminal_reason="safe_default_desk_review",
+                                    raw_source_id=arrival.message_id,
+                                ):
+                                    terminal_written += 1
+                                    defaulted_ticket += 1
+                                if result.get("ok"):
+                                    issued += 1
+                                conn.commit()
+                                done = True
 
             except Exception as exc:  # ERROR NEVER AUTO-CLEARS (blocker D3)
                 try:
@@ -1235,6 +1346,7 @@ def run_tick(*, now: Optional[datetime] = None) -> dict[str, Any]:
             "lease_skipped": lease_skipped,
             "deterministic_cleared": deterministic_cleared,
             "defaulted_ticket": defaulted_ticket,
+            "fast_ticket": fast_ticket,
             "stuck_arrivals": stuck_arrivals,
             # Read + surfaced for observability. In BRIEF-C the fast lane is not
             # built, so this flag has NO behavioral branch yet — it only gates the
