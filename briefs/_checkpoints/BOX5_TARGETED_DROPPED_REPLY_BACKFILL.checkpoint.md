@@ -33,20 +33,50 @@ Phase 2 re-ingest after lead greenlight. <20 = immediate greenlight; ≥20 = hol
 Full per-message ids: re-run the Phase-1 enumerator (below) — it prints them; the 8 are
 stable. 5 would ticket to baden-baden-desk (2 external + 3 internal); 3 are automated no-ticket.
 
-## What's LEFT (Phase 2 — AWAITING lead greenlight on bus #5001)
-Lead to pick the set: (all 5 matter) | (2 external only: Zuechner + Merz) | (all 8 incl automated).
-Then re-ingest each chosen per-message id via the #4993 canary path, idempotent
-(skip any per-message id already in email_messages; never touch existing tickets id=1),
-then REPORT count recovered + which landed on baden-baden-desk + emit POST_DEPLOY_AC_VERDICT v1.
+## What's LEFT (Phase 2 — GREENLIT by lead #5003, with a CORRECTNESS GUARD)
+
+Lead GREENLIT (#5003) but caught a real defect in my Phase-1 diff: it keyed 'stored'
+on the per-message id ONLY. Under the OLD scheme the FIRST message of each already-seen
+conversation WAS stored as message_id=conversationId — so it looks "absent" by
+per-message id but is NOT genuinely dropped. Re-ingesting it would DOUBLE-store +
+double-ticket. Genuine REPLIES (2nd+ msgs) were never stored under ANY key = the real targets.
+
+**PER-CANDIDATE GUARD (MANDATORY before writing each):** confirm the message is absent
+under ANY key — check email_messages by BOTH (a) its per-message id AND (b) by
+(conversationId/thread_id + sender_email + subject + received_date). Recover ONLY if
+genuinely absent everywhere.
+
+**HARD EXCLUSIONS (do NOT re-ingest/ticket):**
+1. balazs "FW: AB Sprint FW: Q&A/ESG/Debt Model" 06-29 (...Aa2oF2AAA=) — it's the
+   first-message stored under conversationId (holds ticket id=1 + canary id=64). SKIP.
+2. the 3 ClickUp automated [Overdue] notifs (...AZ5FWEAAA=, ...Aa2oGJAAA=, ...AcJLUnAAA=)
+   — REJECT_NOISE, not matter replies. SKIP entirely.
+
+**RECOVER SET (candidates — apply the per-candidate ANY-key guard to each; drop any that
+are first-messages-already-stored-under-conversationId):**
+- p.zuechner@aukera.ag "Speed of intended transaction!!!" 06-16 (...AR4eWiAAA=)
+- cm@merz-recht.de "06/2026 Lilienmatt Immobilien GmbH -Restrukturierung" 07-01 (...Ac2LtJAAA=)
+- balazs.csepregi "Annaberg Status - Closing actions" 06-29 (...Aa2oF0AAA=)
+- siegfried.brandner "AW: Annaberg Status - Closing actions" 06-29 (...Aa2oF3AAA=)
+
+Each genuinely-absent one → per-message store + pipeline + distinct ticket (canary #4993
+path), idempotent, existing tickets id=1 untouched.
+REPORT to lead: final recovered count + which genuinely-new vs skipped-as-already-stored
++ the baden-baden-desk ticket ids. Emit POST_DEPLOY_AC_VERDICT v1.
 
 ## Execution recipe (proven in the #4993 canary — reuse verbatim)
 Creds via `op` (NO values here): Graph M365_* from `op://Baker API Keys/wyeoa7ymygvfp5vmuqnjd5xkry/{tenant_id,client_id,cert_thumbprint}` + cert doc "M365 Graph cert PRIVATE KEY (PEM, unlocked 2026-06-03)" → M365_CERT_PATH; DATABASE_URL `op://Baker API Keys/DATABASE_URL/credential` (PARSE into POSTGRES_HOST/PORT/DB/USER/PASSWORD/SSLMODE — the store pool reads POSTGRES_*, NOT DATABASE_URL); ANTHROPIC_API_KEY `op://Baker API Keys/API Anthropic/credential`; VOYAGE_API_KEY `op://Baker API Keys/API Voyager/credential`; QDRANT_URL + QDRANT_API_KEY `op://Baker API Keys/API Qdrant/{QDRANT_URL,credential}`; dispatcher bus key via `brisen_lab_read_terminal_key dispatcher` → export BRISEN_LAB_TERMINAL_KEY_DISPATCHER. PYTHONPATH=~/bm-b2, BAKER_USE_GRAPH=true.
 Per message: Graph GET /users/{u}/messages/{id} ($select=gmt._SELECT) → gmt._to_thread(m) → triggers.email_trigger._process_email_threads([thread]) (stores per-message row; sentinel deep-pipeline may error on local 'google.genai' — harmless, row stores first). Then build EmailArrival → orchestrator.airport_ticketing_bridge.build_email_ticket(arrival, now=utcnow) (None = automated/no-keyword, skip) → issue_ticket(ticket, conn) → write_terminal_status(conn, ticket_row_id=id, terminal_status='TICKET', terminal_reason='backfill_ac6', raw_source_id=msg_id) → conn.commit(). Note: the sentinel-pipeline 'google.genai' local gap means "pipeline event" runs prod-side, not locally — report honestly.
 Phase-1 enumerator logic (re-derive the 8): in-scope convos = SQL UNION of graph email_messages where lower(sender_email) in aukera-domain (a.bonnewitz/p.zuechner/annaberg@aukera.ag) + DISTINCT airport_tickets.thread_id; then Graph list per conv ($filter=conversationId eq '{conv}'), drop isDraft + parentFolderId in gmt._excluded_folder_ids(c)[0], diff per-message id vs email_messages.message_id.
 
-## Next concrete step
-Read bus for lead's greenlight on #5001 (which set). If greenlit + set chosen → run Phase 2
-re-ingest for that set via the recipe above → verify email_messages rows + airport_tickets
-+ baden-baden-desk bus landings → POST_DEPLOY_AC_VERDICT v1 to lead. If not yet greenlit → wait.
-Idempotency: skip per-message ids already in email_messages (the ESG reply ...c2Ls6AAA= is
-already recovered; do not re-touch). Never touch existing ticket id=1.
+## Next concrete step (Phase 2 is GREENLIT #5003 — execute with the guard above)
+For each of the 4 RECOVER-SET candidates: run the PER-CANDIDATE ANY-KEY GUARD first
+(email_messages by per-message id AND by conversationId+sender+subject+received_date).
+Recover ONLY the genuinely-absent ones via the #4993 exec recipe (store per-message →
+build_email_ticket → issue_ticket → write_terminal_status='TICKET'). SKIP the 2 hard
+exclusions (balazs FW AB Sprint ...Aa2oF2AAA=; 3 ClickUp notifs) + the ESG reply
+...c2Ls6AAA= (already recovered). Never touch ticket id=1. Then REPORT recovered count +
+genuinely-new-vs-skipped + baden-baden-desk ticket ids + POST_DEPLOY_AC_VERDICT v1 to lead.
+
+NOTE: likely fewer than 4 recover after the guard — the balazs "Annaberg Status" and
+siegfried "AW: Annaberg Status" may themselves be first-messages/only-copies; check each.
