@@ -1045,6 +1045,15 @@ def fetch_email_arrivals(
     # contiguous-prefix cursor could advance past an OLDER un-processed participant row and
     # strand it below the watermark -> permanent loss. Participant-ONLY rows (no keyword)
     # are tagged so build_email_ticket tickets them on identity alone (never dropped).
+    #
+    # MULTI-MATTER SAFETY (Director ruling, lead amend #5035): identity NEVER auto-routes.
+    # This lane uses participant identity ONLY to *fetch* — routing is decided downstream by
+    # project CODE (the (e.5)/(e.7)/(e.8) code/thread lanes), never by which projects a
+    # sender belongs to. So a sender who is a participant in >1 active project (e.g. a
+    # principal in BB-AUK-001 AND BB-MRCI-001) sending a code-less mail is AMBIGUOUS and
+    # falls through to the (f) safe-default desk-review TICKET by construction — it can
+    # never auto-pick one desk. The allow-set also de-dupes the sender across projects, so
+    # a multi-project participant is fetched once, not once per project.
     participant_only_ids: set[str] = set()
     if participant_lane_enabled():
         keyword_ids = {str(r[0]) for r in rows if r and r[0]}

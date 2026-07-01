@@ -222,6 +222,16 @@ class TestActiveParticipantValues:
         vals = registry_store.active_participant_values(conn, "email")
         assert vals == ["a@x.com", "b@y.com"]                    # distinct + lowered
 
+    def test_multi_project_participant_deduped_in_allowset(self):
+        """Amend #5035 (multi-matter safety): a sender registered in >1 active project
+        appears ONCE in the allow-set, so a multi-project participant is fetched once,
+        not once per project."""
+        conn = _FakeConn(registry_rows=[
+            ([{"channel": "email", "value": _PARTICIPANT}],),   # BB-AUK-001
+            ([{"channel": "email", "value": _PARTICIPANT}],),   # BB-MRCI-001 (same sender)
+        ])
+        assert registry_store.active_participant_values(conn, "email") == [_PARTICIPANT]
+
     def test_error_returns_empty_and_rolls_back(self):
         conn = _FakeConn(registry_rows=[], fail_on="FROM project_registry")
         assert registry_store.active_participant_values(conn, "email") == []
@@ -450,3 +460,36 @@ def test_ac6_lane_off_participant_row_not_ticketed(partenv, monkeypatch):
     ids = _ticketed_ids(partenv)
     assert "hit_auk" in ids                # keyword path unchanged
     assert "part_off" not in ids           # lane off -> not reachable (byte-identical)
+
+
+# ── AMEND #5035 (multi-matter safety, live) — a participant in >1 active project, on a
+#    code-less mail, is AMBIGUOUS: it tickets ONCE via the (f) safe-default desk-review
+#    lane and is NEVER auto-routed to a desk by identity. Fast lane ON so the code/thread
+#    routing lanes actually run and are shown to NOT route this identity.
+def test_amend_multi_project_participant_routes_safe_default(partenv, monkeypatch):
+    monkeypatch.setenv("BOX5_FAST_LANE_ENABLED", "true")
+    # Register the SAME participant in a SECOND active project (BB-MRCI-001).
+    with partenv.cursor() as cur:
+        cur.execute(
+            """
+            INSERT INTO project_registry
+                (project_number, match_key, desk_code, desk_owner, matter_slug,
+                 clickup_list_id, participants, aliases, status)
+            VALUES ('BB-MRCI-001','BBMRCI001','BB','baden-baden-desk','mrci',
+                    NULL, %s::jsonb, '[]'::jsonb, 'active')
+            ON CONFLICT (match_key) DO UPDATE SET participants = EXCLUDED.participants
+            """,
+            (json.dumps([{"channel": "email", "value": _PARTICIPANT}]),),
+        )
+    _seed(partenv, "multi", subject="general question", body="no code and no keyword",
+          sender=_PARTICIPANT, received=_dt(1), thread_id="multi_new_thread")
+    s = bridge.run_tick()
+    assert s["ok"] is True
+    with partenv.cursor() as cur:
+        cur.execute(
+            "SELECT COUNT(*), MIN(terminal_reason) FROM airport_tickets "
+            "WHERE raw_source_id = 'multi'"
+        )
+        cnt, reason = cur.fetchone()
+    assert cnt == 1                                   # fetched once, ticketed once
+    assert reason == "safe_default_desk_review"       # NOT auto-picked to a desk by identity
