@@ -1,11 +1,16 @@
 ---
-status: PENDING
+status: SHIPPED_AWAITING_GATES
+pr: 444
+head_sha: 1fac01d
+shipped_at: 2026-07-01
 brief_id: BOX5_SOFT_FAST_LANE_1
 to: b4
 from: lead
 dispatched_by: cowork-ah1
 dispatched_at: 2026-07-01
 branch: box5-soft-fast-lane-1
+ship_note: "1fac01d (PR #444) — soft fast lane block (e.7) between D's (e.5) and C's (f), reusing D's handled flag. >=2 independent signals (resolve_by_participant AND resolve_by_alias agree on exactly 1 project: len(p_nums & a_nums)==1); sender-only/alias-only/conflict/no-match -> (f) TICKET; clean clear -> routed terminal_status=TICKET + matter_slug/desk_owner/manifest_match_signals/confidence=0.60, NEVER FAST_TICKET, new soft_ticket counter. SAVEPOINT airport_soft_lane (same reliability fix D needed): soft-lane throw rolls back only E's partial work, preserves issue_ticket reservation, failed++, (f) TICKET — plain rollback would strand (D's P1 class); test 23 proves it non-vacuously. write_terminal_status extended with 4 optional routing kwargs (dynamic SET, byte-identical SQL for C/D kwarg-less callers). 100 GREEN live-PG16: 27 box5 (20 C/D no-regression + 7 E) + 21 registry + 52 airport. py_compile clean. VISIBLE_HOLD grep=1 (BRIEF-B pre-existing comment; E writes 0). Ships DARK behind BOX5_FAST_LANE_ENABLED; no seed change. Ship report -> cowork-ah1; gate verdicts -> lead. Awaiting codex G3."
+test_placement_note: "Soft-lane run_tick tests live in tests/test_box5_ticketing_runner.py (tests 19-25) where the runner/hard_lane harness + _seed_email/_terminal live — NOT tests/test_project_registry.py as the pre-merge brief said. Same adaptation class as the line-refs; envelope gate_plan already lists test_box5_ticketing_runner.py for the soft-lane matrix."
 base_note: branch off main @ 5795589 or later. Contains BOTH C (#442, squash 86ae607) AND D (#443, squash 5795589) merged — write_terminal_status / _claim_for_terminal / fast_lane_enabled / extract_project_codes / resolve_by_participant / resolve_by_alias / resolve_project_number and D's (e.5) hard-lane FAST_TICKET block ALL live on main. Verify with grep before editing.
 reply_target: cowork-ah1 (bus) for ship report; gate verdicts to lead
 effort: medium (builder — one surgical branch composing two existing #439 resolvers + a 4-kwarg extension to write_terminal_status; cost is the >=2-signal / sender-only-forbidden / conflict / error test matrix, NOT new infra). codex G3 effort medium (focus: >=2-INDEPENDENT-signals-required, sender-only-NEVER-clears, error-never-clears-routes-to-TICKET, soft-clear-is-TICKET-not-FAST_TICKET; NOT xhigh).
