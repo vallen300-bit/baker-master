@@ -329,7 +329,7 @@ def seed_bb_pilot(conn: Any) -> int:
     aliases — only the explicit project code routes."""
     rows = [
         dict(project_number="BB-AUK-001", desk_owner="baden-baden-desk",
-             matter_slug="aukera", clickup_list_id=None,
+             matter_slug="aukera", clickup_list_id="901524194809",
              participants=[{"channel": "email", "value": "balazs@brisengroup.com"}],
              aliases=[]),
     ]
