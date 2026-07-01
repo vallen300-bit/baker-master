@@ -21,6 +21,7 @@ from typing import Any, Optional
 from orchestrator.dispatcher import RESERVED_RECIPIENTS, resolve_owner_slug
 from kbl.project_registry_store import (
     extract_project_codes,
+    resolve_by_alias,          # NEW (BRIEF-E) soft-lane signal #2
     resolve_by_participant,
     resolve_project_number,
 )
@@ -839,6 +840,10 @@ def write_terminal_status(
     terminal_status: str,
     terminal_reason: str,
     raw_source_id: str,
+    matter_slug: Optional[str] = None,               # NEW (BRIEF-E) routing columns —
+    desk_owner: Optional[str] = None,                # appended to the SET clause ONLY
+    manifest_match_signals: Optional[list] = None,   # when non-None (JSONB via _json_param)
+    confidence: Optional[float] = None,              # NUMERIC(3,2), 0.00-1.00
 ) -> bool:
     """Single idempotent terminal write — the ONLY path that writes terminal_status.
 
@@ -846,23 +851,46 @@ def write_terminal_status(
     ``AND terminal_status IS NULL`` guard makes re-runs and lease-expired reclaims
     no-ops (0 rows). dedup_key UNIQUE guards duplicate ROWS; this guards duplicate
     terminal WRITES. Caller wraps in a per-row try/except + rollback.
+
+    BRIEF-E adds four OPTIONAL routing kwargs appended to the SET clause ONLY when
+    non-None, so C's and D's existing callers (which pass none) produce byte-identical
+    SQL and write NO routing column. The routing columns ride INSIDE this one status-
+    guarded UPDATE (never a second unguarded write), so they are never written outside
+    the ``terminal_status IS NULL`` guard.
     """
     cur = conn.cursor()
     try:
+        # Fixed base SET fragments (unchanged from C). With no routing kwargs the
+        # generated SQL + params are byte-identical to C's original statement.
+        set_parts = [
+            "terminal_status = %s",
+            "terminal_reason = %s",
+            "processed_at = NOW()",
+            "terminal_outcome_written_at = NOW()",
+            "raw_source_table = 'email_messages'",
+            "raw_source_id = %s",
+        ]
+        params: list = [terminal_status, terminal_reason, raw_source_id]
+        # Each appended fragment is a fixed literal with a %s placeholder — no data
+        # is interpolated into SQL text, so the dynamic clause is injection-safe.
+        if matter_slug is not None:
+            set_parts.append("matter_slug = %s")
+            params.append(matter_slug)
+        if desk_owner is not None:
+            set_parts.append("desk_owner = %s")
+            params.append(desk_owner)
+        if manifest_match_signals is not None:
+            set_parts.append("manifest_match_signals = %s")
+            params.append(_json_param(manifest_match_signals))  # JSONB column
+        if confidence is not None:
+            set_parts.append("confidence = %s")
+            params.append(confidence)  # NUMERIC(3,2) — a 0.00-1.00 float fits
+        params.append(ticket_row_id)
         cur.execute(
-            """
-            UPDATE airport_tickets
-               SET terminal_status = %s,
-                   terminal_reason = %s,
-                   processed_at = NOW(),
-                   terminal_outcome_written_at = NOW(),
-                   raw_source_table = 'email_messages',
-                   raw_source_id = %s
-             WHERE id = %s
-               AND terminal_status IS NULL
-            RETURNING id, ticket_id
-            """,
-            (terminal_status, terminal_reason, raw_source_id, ticket_row_id),
+            "UPDATE airport_tickets SET "
+            + ", ".join(set_parts)
+            + " WHERE id = %s AND terminal_status IS NULL RETURNING id, ticket_id",
+            params,
         )
         won = cur.fetchone()
         if won is None:
@@ -1025,6 +1053,7 @@ def run_tick(*, now: Optional[datetime] = None) -> dict[str, Any]:
     claimed = terminal_written = lease_skipped = 0
     deterministic_cleared = defaulted_ticket = 0
     fast_ticket = 0  # BRIEF-D hard fast lane; not a deterministic_cleared/defaulted_ticket
+    soft_ticket = 0  # BRIEF-E manifest soft lane; routed TICKET, not fast_ticket/defaulted
     fast_lane = fast_lane_enabled()  # honored now; only future-proofs D/E
     current = now or _utc_now()
     # (P1-A) CONTIGUOUS-PREFIX WATERMARK. The cursor may only advance over the
@@ -1276,10 +1305,119 @@ def run_tick(*, now: Optional[datetime] = None) -> dict[str, Any]:
                                     "airport_ticketing hard-fast-lane row failed: %s", exc
                                 )
 
+                        # (e.7) SOFT FAST LANE — manifest inference, >=2 INDEPENDENT
+                        #   signals (BRIEF-E). Runs ONLY when D's (e.5) hard lane did NOT
+                        #   clear (`not handled`) and the flag is on — i.e. the number was
+                        #   missing / unregistered / inactive / conflicting, or the sender
+                        #   was not participant-bound. A clean clear requires participant-
+                        #   signal AND alias-signal on EXACTLY ONE common project
+                        #   (len(agree)==1): 0 => <2 signals on one project (incl. sender-
+                        #   only / alias-only) -> TICKET; >1 => competing active manifests
+                        #   -> TICKET. Soft clear is INFERENCE -> a ROUTED terminal_status
+                        #   ='TICKET' (routing columns set), NEVER FAST_TICKET (D's
+                        #   authoritative lane), NEVER the deferred hold state (#4677.7 —
+                        #   not in BRIEF-B's 6-state CHECK). Exception -> failed +
+                        #   (f) TICKET, never a routed clear. #4680 + #blocker D3.
+                        if fast_lane and row_id and not handled:
+                            try:
+                                # SAVEPOINT — same reliability contract as D's (e.5): a
+                                #   soft-lane throw must roll back ONLY E's partial work and
+                                #   PRESERVE issue_ticket's reservation so the (f) fallback
+                                #   still finds the row. A full conn.rollback() here would
+                                #   destroy the reservation and STRAND the arrival — the
+                                #   exact P1 codex caught on D (savepoint-strand).
+                                with conn.cursor() as _sp:
+                                    _sp.execute("SAVEPOINT airport_soft_lane")
+                                sender = (arrival.sender_email or "").strip().lower()
+                                # Two INDEPENDENT registry signals. Both #439 resolvers are
+                                # read-only and swallow their own exceptions to [] (a
+                                # legitimate no-match), so an escaping raise can only come
+                                # from _claim_for_terminal / write_terminal_status below.
+                                p_hits = resolve_by_participant("email", sender)  # signal 1
+                                a_hits = resolve_by_alias(
+                                    f"{arrival.subject} {arrival.full_body}"
+                                )  # signal 2
+                                p_nums = {h["project_number"] for h in p_hits}
+                                a_nums = {h["project_number"] for h in a_hits}
+                                # Projects carrying BOTH independent signals. len==1
+                                # enforces >=2 signals AND no competing conflict in ONE
+                                # check. Sender-only -> a_nums empty -> agree empty; alias-
+                                # only -> p_nums empty -> agree empty; both forbidden.
+                                agree = p_nums & a_nums
+                                if len(agree) == 1:
+                                    pn = next(iter(agree))
+                                    prow = next(
+                                        h for h in p_hits if h["project_number"] == pn
+                                    )
+                                    claim = _claim_for_terminal(conn, row_id)
+                                    if claim is None:
+                                        # Held by a concurrent tick — hold cursor.
+                                        lease_skipped += 1
+                                        conn.commit()
+                                        handled = True
+                                    elif claim[1] is not None:
+                                        # Already terminal (idempotent re-tick).
+                                        if result.get("ok"):
+                                            issued += 1
+                                        conn.commit()
+                                        handled = True
+                                        done = True
+                                    else:
+                                        claimed += 1
+                                        if write_terminal_status(
+                                            conn,
+                                            ticket_row_id=row_id,
+                                            terminal_status="TICKET",  # ROUTED, not FAST_TICKET
+                                            terminal_reason=f"soft_lane_participant+alias:{pn}",
+                                            raw_source_id=arrival.message_id,
+                                            matter_slug=prow["matter_slug"],
+                                            desk_owner=prow["desk_owner"],
+                                            manifest_match_signals=[
+                                                {"signal": "participant", "value": sender},
+                                                {"signal": "alias", "project": pn},
+                                            ],
+                                            confidence=0.60,  # fixed pilot constant; no learned model
+                                        ):
+                                            terminal_written += 1
+                                            soft_ticket += 1
+                                        if result.get("ok"):
+                                            issued += 1
+                                        conn.commit()
+                                        handled = True
+                                        done = True
+                                # 0 agreement (sender-only / alias-only / no match) OR >1
+                                # (competing active manifest): handled stays False -> fall
+                                # through to (f) TICKET. No `failed` on a clean no-match.
+                            except Exception as exc:
+                                # ERROR NEVER AUTO-CLEARS (#blocker D3). Roll back to the
+                                # savepoint — undo E's partial writes, KEEP the reservation
+                                # — count failed, and FALL THROUGH to (f) TICKET so the
+                                # arrival still ends at a visible terminal. Never a routed
+                                # clear, never soft_ticket++. Distinguish threw (failed)
+                                # from a clean no->=2-signal match (silent fall-through).
+                                try:
+                                    with conn.cursor() as _sp:
+                                        _sp.execute(
+                                            "ROLLBACK TO SAVEPOINT airport_soft_lane"
+                                        )
+                                except Exception:
+                                    # Savepoint unusable — full rollback so conn stays
+                                    # usable; the (f) claim then lease-skips and the arrival
+                                    # re-fetches next tick (cursor frozen, never dropped).
+                                    try:
+                                        conn.rollback()
+                                    except Exception:
+                                        pass
+                                failed += 1
+                                logger.warning(
+                                    "airport_ticketing soft-fast-lane row failed: %s", exc
+                                )
+
                         if not handled:
                             # (f) SAFE DEFAULT — TICKET (full desk review). [BRIEF-C,
                             #     unchanged] Conflict / no-code / no-row / no-binding /
-                            #     hard-lane error / flag-off all land here; result is
+                            #     hard-lane error / soft-lane no->=2-signal-match /
+                            #     soft-lane error / flag-off all land here; result is
                             #     ok=True with a row_id.
                             claim = _claim_for_terminal(conn, row_id)
                             if claim is None:
@@ -1347,6 +1485,7 @@ def run_tick(*, now: Optional[datetime] = None) -> dict[str, Any]:
             "deterministic_cleared": deterministic_cleared,
             "defaulted_ticket": defaulted_ticket,
             "fast_ticket": fast_ticket,
+            "soft_ticket": soft_ticket,
             "stuck_arrivals": stuck_arrivals,
             # Read + surfaced for observability. In BRIEF-C the fast lane is not
             # built, so this flag has NO behavioral branch yet — it only gates the
