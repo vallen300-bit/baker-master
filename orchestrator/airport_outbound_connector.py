@@ -38,11 +38,40 @@ from __future__ import annotations
 
 import os
 import re
-from typing import Any, Dict, List, Optional
+from contextlib import contextmanager
+from typing import Any, Dict, List, Iterator, Optional
 
 import logging
 
 logger = logging.getLogger(__name__)
+
+
+@contextmanager
+def _savepoint(conn: Any, name: str) -> Iterator[None]:
+    """SAVEPOINT-guard a defensive correlation READ on the connector's SHARED, no-commit
+    transaction (BOX5_OUTBOUND_CORRELATION_FIX_1, bug B).
+
+    The bridge owns one transaction per outbound row; correlation reads run inside it,
+    AFTER the connector's first writes (``_load_or_create_event`` / ``DIRECTION_PROVEN``).
+    If a read errors it aborts the whole PG transaction — so a later ``_update_event``
+    write raises ``InFailedSqlTransaction``. A bare ``conn.rollback()`` is WRONG here: it
+    would discard those prior good writes (repo rule ``.claude/rules/python-backend.md``).
+    A SAVEPOINT lets ``ROLLBACK TO SAVEPOINT`` undo ONLY the failed read and keep the txn
+    usable. Correlation is a best-effort hint, so the read error is logged + swallowed.
+
+    ``name`` is a static, code-controlled identifier (never user input)."""
+    with conn.cursor() as cur:
+        cur.execute("SAVEPOINT " + name)
+    try:
+        yield
+    except Exception as e:
+        logger.warning("correlation read %s failed (savepoint-isolated): %s", name, e)
+        with conn.cursor() as cur:
+            cur.execute("ROLLBACK TO SAVEPOINT " + name)
+            cur.execute("RELEASE SAVEPOINT " + name)
+    else:
+        with conn.cursor() as cur:
+            cur.execute("RELEASE SAVEPOINT " + name)
 
 # ---------------------------------------------------------------------------
 # Event states (spec §"Event State Machine"). Kept in lock-step with the CHECK
@@ -354,7 +383,9 @@ def correlate(conn: Any, arrival: Any) -> Dict[str, Any]:
     # source_id == thread_id) is EXCLUDED — a row must not correlate to itself, or every
     # outbound would self-satisfy condition (3).
     if thread_id:
-        try:
+        # savepoint-guarded (bug B): a read error rolls back only this read, never the
+        # connector's prior writes in the shared txn.
+        with _savepoint(conn, "corr_sp_threadref"):
             with conn.cursor() as cur:
                 cur.execute(
                     "SELECT ticket_id FROM airport_tickets "
@@ -364,12 +395,10 @@ def correlate(conn: Any, arrival: Any) -> Dict[str, Any]:
                     (thread_id, thread_id),
                 )
                 row = cur.fetchone()
-            if row:
-                out["thread_ref"] = row[0]
-                out["has_correlation"] = True
-                out["refs"].append({"step": 2, "ticket_id": row[0]})
-        except Exception as e:
-            logger.warning("thread correlation failed: %s", e)
+                if row:
+                    out["thread_ref"] = row[0]
+                    out["has_correlation"] = True
+                    out["refs"].append({"step": 2, "ticket_id": row[0]})
 
     # Step 4 — active flight thread / dispatch id (record-only). Collect the DISTINCT
     # flight refs on this thread (prior NON-outbound tickets' suspected_flight + any
@@ -378,7 +407,7 @@ def correlate(conn: Any, arrival: Any) -> Dict[str, Any]:
     # project/flight -> stop at NEEDS_CONTROLLER"). Outbound self-capture rows excluded.
     flights: set = set()
     if thread_id:
-        try:
+        with _savepoint(conn, "corr_sp_flights"):
             with conn.cursor() as cur:
                 cur.execute(
                     "SELECT DISTINCT suspected_flight FROM airport_tickets "
@@ -388,9 +417,12 @@ def correlate(conn: Any, arrival: Any) -> Dict[str, Any]:
                     (thread_id, thread_id),
                 )
                 flights.update(r[0] for r in cur.fetchall() if r[0])
-        except Exception as e:
-            logger.warning("flight correlation failed: %s", e)
-    disp = _correlate_dispatcher_flight(conn, thread_id, out["project_code"])
+    # The dispatcher-flight read runs on the shared txn too; wrap the CALL in a savepoint
+    # so ANY error inside it (schema drift, transient) rolls back only this read and the
+    # txn stays usable — never a bare rollback that discards prior writes (bug B).
+    disp = None
+    with _savepoint(conn, "corr_sp_dispatch"):
+        disp = _correlate_dispatcher_flight(conn, thread_id, out["project_code"])
     if disp:
         flights.add(disp)
     if len(flights) > 1:
@@ -407,26 +439,38 @@ def correlate(conn: Any, arrival: Any) -> Dict[str, Any]:
 def _correlate_dispatcher_flight(
     conn: Any, thread_id: str, project_code: Optional[str]
 ) -> Optional[str]:
-    """Step 4 (bonus): an active dispatcher_bus_threads row (open / waiting_reply) for
-    this thread. Wrapped defensively — the table may not exist in every deployment."""
-    try:
-        with conn.cursor() as cur:
-            cur.execute(
-                "SELECT to_regclass('public.dispatcher_bus_threads')"
-            )
-            if not cur.fetchone()[0]:
-                return None
-            cur.execute(
-                "SELECT thread_key FROM dispatcher_bus_threads "
-                "WHERE status IN ('open', 'waiting_reply') AND thread_key = %s "
-                "ORDER BY created_at DESC LIMIT 1",
-                (thread_id,),
-            )
-            row = cur.fetchone()
-        return row[0] if row else None
-    except Exception as e:
-        logger.warning("dispatcher flight correlation skipped: %s", e)
+    """Step 4 (bonus): the id of an ACTIVE dispatcher_bus_threads flight on this email
+    thread, else None (BOX5_OUTBOUND_CORRELATION_FIX_1 — bug A).
+
+    Schema (verified against prod + the dispatcher writer ``orchestrator/dispatcher_relay.py``):
+    - the thread column is ``bus_thread_id`` (NOT ``thread_key`` — that column does not
+      exist; the prior query raised ``UndefinedColumn``);
+    - ``status`` lifecycle is ``open -> waiting_reply -> replied`` with terminal ``closed``
+      / ``failed`` (CHECK ``dispatcher_bus_threads_status_check``). "Active flight" = a
+      non-terminal thread = ``{open, waiting_reply, replied}``. The prior set
+      ``{open, waiting_reply}`` dropped ``replied`` — and prod's only live row is
+      ``replied``, so even a column-only fix would still have matched nothing.
+
+    NO internal try/except-swallow: this runs on the connector's shared no-commit txn, so
+    the caller (``correlate``) wraps the call in a SAVEPOINT. An error MUST propagate to
+    that savepoint (a bare swallow would leave the shared txn aborted, defeating bug B's
+    fix). The ``to_regclass`` guard keeps the table-absent deployment error-free.
+    ``project_code`` is reserved (thread-scoped correlation today)."""
+    if not thread_id:
         return None
+    with conn.cursor() as cur:
+        cur.execute("SELECT to_regclass('public.dispatcher_bus_threads')")
+        if not cur.fetchone()[0]:
+            return None
+        cur.execute(
+            "SELECT bus_thread_id FROM dispatcher_bus_threads "
+            "WHERE status IN ('open', 'waiting_reply', 'replied') "
+            "AND bus_thread_id = %s "
+            "ORDER BY created_at DESC LIMIT 1",
+            (thread_id,),
+        )
+        row = cur.fetchone()
+    return row[0] if row else None
 
 
 # ---------------------------------------------------------------------------

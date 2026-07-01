@@ -110,12 +110,43 @@ def ob(tier_b_test_store, needs_live_pg, monkeypatch):
             )
             """
         )
+        # dispatcher_bus_threads — SCHEMA-ACCURATE to prod (BOX5_OUTBOUND_CORRELATION_FIX_1).
+        # The prior fixture never created this table, so correlation step 4's
+        # `to_regclass` guard returned None and the dispatcher-flight read was skipped —
+        # which is exactly what masked the live `thread_key`/column defect (canary #4881).
+        # Real columns (incl. bus_thread_id), real status CHECK, real reason_code CHECK,
+        # real defaults, so a schema mismatch can never hide here again.
+        cur.execute(
+            """
+            CREATE TABLE IF NOT EXISTS dispatcher_bus_threads (
+                id              BIGSERIAL PRIMARY KEY,
+                clickup_task_id TEXT NOT NULL,
+                owner_slug      TEXT NOT NULL,
+                recipient_slug  TEXT NOT NULL,
+                bus_message_id  BIGINT,
+                bus_thread_id   TEXT,
+                status          TEXT NOT NULL DEFAULT 'open'
+                    CHECK (status IN ('open','waiting_reply','replied','closed','failed')),
+                reason_code     TEXT NOT NULL
+                    CHECK (reason_code IN ('due','blocked','unblocked','stale',
+                                           'needs_clarification')),
+                condition_hash  TEXT,
+                last_sent_at    TIMESTAMPTZ,
+                last_reply_at   TIMESTAMPTZ,
+                payload         JSONB NOT NULL DEFAULT '{}'::jsonb,
+                dedup_key       TEXT NOT NULL,
+                created_at      TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                updated_at      TIMESTAMPTZ NOT NULL DEFAULT NOW()
+            )
+            """
+        )
     bridge.ensure_airport_ticket_table(admin)
     connector.ensure_airport_outbound_events_table(admin)
     reg.ensure_project_registry_table(admin)
     with admin.cursor() as cur:
         cur.execute("DELETE FROM airport_outbound_events")
         cur.execute("DELETE FROM airport_tickets")
+        cur.execute("DELETE FROM dispatcher_bus_threads")
         cur.execute("DELETE FROM email_messages")
         cur.execute("DELETE FROM email_attachments")
         cur.execute("DELETE FROM project_registry")
@@ -183,6 +214,24 @@ def _seed_flight(conn, thread_id, flight="aukera-annaberg-financing"):
             "source_id, bus_thread_id, proposed_desk_slug, suspected_flight) "
             "VALUES (%s, %s, 'email', %s, %s, 'baden-baden-desk', %s)",
             (key, key, "src-" + key, thread_id, flight),
+        )
+    conn.commit()
+
+
+def _seed_dispatcher_thread(conn, thread_id, *, status="waiting_reply",
+                            clickup_task_id=None):
+    """An ACTIVE dispatcher_bus_threads row keyed to `thread_id` (the email thread) —
+    the 'active dispatcher thread' proxy for correlation step 4's dispatcher-flight
+    read. Schema-accurate to prod (real bus_thread_id + status CHECK). `status` picks a
+    lifecycle value; 'open'/'waiting_reply'/'replied' are active (non-terminal),
+    'closed'/'failed' are terminal."""
+    ct = clickup_task_id or ("cu-" + thread_id)
+    with conn.cursor() as cur:
+        cur.execute(
+            "INSERT INTO dispatcher_bus_threads (clickup_task_id, owner_slug, "
+            "recipient_slug, bus_thread_id, status, reason_code, dedup_key) "
+            "VALUES (%s, 'baden-baden-desk', 'counterparty', %s, %s, 'due', %s)",
+            (ct, thread_id, status, "disp:" + thread_id),
         )
     conn.commit()
 
@@ -456,3 +505,71 @@ def test_f4_multi_flight_needs_controller(ob):
     assert _event(ob, "f4")[0] == "NEEDS_CONTROLLER"
     assert _fake().calls == []
     assert _audit_count(ob, "airport_outbound.clickup_write", "f4") == 0
+
+
+# ------------------------------------ BOX5_OUTBOUND_CORRELATION_FIX_1 (canary #4881)
+# The dispatcher-flight correlation (step 4) is now exercised against a prod-accurate
+# dispatcher_bus_threads fixture. Pre-fix, the connector queried a non-existent
+# `thread_key` column -> UndefinedColumn aborted the shared txn and the except did NOT
+# roll back -> the next write raised InFailedSqlTransaction. These FAIL on current code.
+
+# FIX-A1 — dispatcher-flight correlates against the real schema (bus_thread_id) and an
+#          active thread progresses the flight.
+def test_dispatcher_flight_correlates_real_schema(ob):
+    _register()
+    _seed_dispatcher_thread(ob, "disppos", status="waiting_reply")
+    _seed_email(ob, "disppos", subject="aukera approved",
+                body="Approved BB-AUK-001. owner: balazs, DV to sign, due 2026-07-10.")
+    bridge.run_tick()
+    ev = _event(ob, "disppos")
+    assert ev is not None                                    # event completed (not aborted)
+    assert ev[0] == "FLIGHT_PROGRESSED"                      # active dispatcher flight found
+    assert ev[5] == "disppos"                                # flight_id == correlated bus_thread_id
+    assert _audit_count(ob, "airport_outbound.flight_transition_recorded", "disppos") == 1
+
+
+# FIX-A2 — 'replied' is non-terminal -> still an active flight. The original
+#          ('open','waiting_reply') set missed it; prod's only live row is 'replied'.
+def test_dispatcher_flight_replied_status_is_active(ob):
+    _register()
+    _seed_dispatcher_thread(ob, "disprep", status="replied")
+    _seed_email(ob, "disprep", subject="aukera approved",
+                body="Approved BB-AUK-001. owner: balazs, DV to sign, due 2026-07-10.")
+    bridge.run_tick()
+    ev = _event(ob, "disprep")
+    assert ev[0] == "FLIGHT_PROGRESSED"
+    assert ev[5] == "disprep"
+
+
+# FIX-A3 — a 'closed'/'failed' dispatcher thread is terminal -> NOT an active flight ->
+#          FLIGHT_BLOCKED (ClickUp wrote; no active flight to progress).
+def test_dispatcher_flight_closed_status_not_active(ob):
+    _register()
+    _seed_dispatcher_thread(ob, "dispclosed", status="closed")
+    _seed_email(ob, "dispclosed", subject="aukera approved",
+                body="Approved BB-AUK-001. owner: balazs, DV to sign, due 2026-07-10.")
+    bridge.run_tick()
+    ev = _event(ob, "dispclosed")
+    assert ev[0] == "FLIGHT_BLOCKED"                         # terminal thread is not active
+
+
+# FIX-B — a correlation READ that aborts the txn is SAVEPOINT-isolated: the event still
+#         completes (no InFailedSqlTransaction propagation, no silent row drop). This is
+#         the load-bearing regression. FAILS on current code (bare except, no rollback).
+def test_correlation_read_error_savepoint_isolated(ob, monkeypatch):
+    _register()
+
+    def _boom(conn, thread_id, project_code):
+        with conn.cursor() as cur:                   # a read that aborts the shared txn
+            cur.execute("SELECT nonexistent_col FROM dispatcher_bus_threads")
+        return None
+
+    monkeypatch.setattr(connector, "_correlate_dispatcher_flight", _boom)
+    _seed_email(ob, "isoerr", subject="aukera approved",
+                body="Approved BB-AUK-001. owner: balazs, DV to sign, due 2026-07-10.")
+    bridge.run_tick()
+    ev = _event(ob, "isoerr")
+    assert ev is not None                                    # completed, not rolled back
+    assert ev[0] == "FLIGHT_BLOCKED"                         # ClickUp wrote; boom killed flight
+    assert len(_creates()) == 1                              # downstream ran -> correlate finished
+    assert _audit_count(ob, "airport_outbound.clickup_write", "isoerr") == 1
