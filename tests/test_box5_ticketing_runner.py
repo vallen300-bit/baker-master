@@ -99,8 +99,12 @@ def runner(tier_b_test_store, needs_live_pg, monkeypatch):
 # same reason, so an inbound sender here is the representative case.)
 def _seed_email(conn, message_id, *, subject="annaberg status",
                 sender_email="counterparty@aukera.lu", body="annaberg update",
-                received=None):
+                received=None, thread_id=None):
+    # thread_id defaults to message_id (each email its own thread) — backward-
+    # compatible with every existing caller. THREAD_CONTINUITY_ROUTING_1 tests pass an
+    # explicit shared thread_id to model a reply chain.
     received = received or (_now() - timedelta(hours=1))
+    thread_id = thread_id or message_id
     with conn.cursor() as cur:
         cur.execute(
             """
@@ -110,7 +114,7 @@ def _seed_email(conn, message_id, *, subject="annaberg status",
             VALUES (%s, %s, 'Sender', %s, %s, %s, %s, 'graph')
             ON CONFLICT (message_id) DO NOTHING
             """,
-            (message_id, message_id, sender_email, subject, body, received),
+            (message_id, thread_id, sender_email, subject, body, received),
         )
     conn.commit()
     return received
@@ -787,6 +791,258 @@ def test_e_flag_off_is_noop(runner, hard_lane, monkeypatch):
     assert _terminal(runner, "e_off")[0] == "TICKET"
     assert _routing(runner, "e_off")[0] is None
 
+
+# ============================================================================
+# THREAD_CONTINUITY_ROUTING_1 — the (e.8) thread-continuity lane. A code-less reply
+# on a thread whose prior ticket was already CODE-BOUND to an active project inherits
+# that project (routed TICKET, confidence 0.75) — restoring the recall the routing
+# reversal (#446) removed WITHOUT reviving name/alias matching. It sits AFTER the
+# explicit-code lanes and BEFORE (f), guarded `if fast_lane and row_id and not
+# handled:`, and fires ONLY when the reply carries NO explicit code. It inherits ONLY
+# a hard/code-bound prior disposition (D FAST_TICKET or E explicit_code_routed),
+# never a soft/alias/participant-only or (f) safe-default row (anti-laundering);
+# returns None on a since-retired binding OR a >1-active-project thread (CONFLICT ->
+# (f), no silent pick). Tests exercise the merged run_tick on live-PG.
+# ============================================================================
+
+# 28 — AC1 (repro): a code-less reply from a NON-participant sender on a thread whose
+#      prior ticket was code+participant bound (FAST_TICKET) inherits that project ->
+#      routed TICKET (thread_continuity_routed_ticket:<pn>), routing columns set,
+#      confidence 0.75, NEVER FAST_TICKET. This is the Siegfried-ESG-reply case.
+def test_thread_continuity_codeless_reply_inherits_fast_ticket(runner, hard_lane, monkeypatch):
+    monkeypatch.setenv("BOX5_FAST_LANE_ENABLED", "true")
+    hard_lane("BB-AUK-001", participants=[{"channel": "email", "value": _BOUND_SENDER}])
+    # Prior: code + bound participant -> D FAST_TICKET, on thread T-CONT.
+    _seed_email(runner, "tc_orig", subject="aukera funding", thread_id="T-CONT",
+                sender_email=_BOUND_SENDER, body="please review BB-AUK-001 for closing",
+                received=_now() - timedelta(hours=3))
+    # Later: a code-less reply from a NON-participant sender on the SAME thread.
+    _seed_email(runner, "tc_reply", subject="re: aukera funding", thread_id="T-CONT",
+                sender_email="siegfried@esg-partner.example",
+                body="my aukera ESG thoughts, no project code here",
+                received=_now() - timedelta(hours=1))
+    s = bridge.run_tick()
+    assert s["fast_ticket"] == 1               # prior code+participant -> FAST_TICKET
+    assert s["thread_routed_ticket"] == 1      # reply inherited via thread continuity
+    assert s["code_routed_ticket"] == 0
+    assert s["deterministic_cleared"] == 0
+    status, written = _terminal(runner, "tc_reply")
+    assert status == "TICKET"                  # ROUTED via thread, NOT FAST_TICKET
+    assert written is not None
+    matter_slug, desk_owner, confidence, signals = _routing(runner, "tc_reply")
+    assert matter_slug == _FIXTURE_CANONICAL_SLUG
+    assert desk_owner == "baden-baden-desk"
+    assert float(confidence) == 0.75
+    assert isinstance(signals, list) and len(signals) == 1
+    assert signals[0]["signal"] == "thread_continuity"
+    assert signals[0]["value"] == "BB-AUK-001"
+    assert signals[0]["binding"] == "prior_code_bound_ticket"
+    with runner.cursor() as cur:
+        cur.execute("SELECT terminal_reason FROM airport_tickets WHERE raw_source_id='tc_reply'")
+        assert cur.fetchone()[0] == "thread_continuity_routed_ticket:BB-AUK-001"
+
+
+# 29 — AC1 variant: E's explicit-code routed TICKET (code, sender NOT bound) is ALSO
+#      an inheritable code-bound disposition. A code-less reply on that thread inherits
+#      it — both code-bound lanes seed continuity, not just D's FAST_TICKET.
+def test_thread_continuity_inherits_explicit_code_routed_prior(runner, hard_lane, monkeypatch):
+    monkeypatch.setenv("BOX5_FAST_LANE_ENABLED", "true")
+    hard_lane("BB-AUK-001")   # ACTIVE, NO participants -> D falls through, E routes
+    _seed_email(runner, "tce_orig", subject="aukera funding", thread_id="T-ECONT",
+                sender_email=_BOUND_SENDER, body="please review BB-AUK-001 for closing",
+                received=_now() - timedelta(hours=3))
+    _seed_email(runner, "tce_reply", subject="re: aukera", thread_id="T-ECONT",
+                sender_email=_OTHER_SENDER, body="aukera follow-up, no code",
+                received=_now() - timedelta(hours=1))
+    s = bridge.run_tick()
+    assert s["code_routed_ticket"] == 1        # prior: E's explicit-code routed TICKET
+    assert s["thread_routed_ticket"] == 1      # reply inherited it
+    assert s["fast_ticket"] == 0
+    assert _terminal(runner, "tce_reply")[0] == "TICKET"
+    matter_slug, desk_owner, _, _ = _routing(runner, "tce_reply")
+    assert matter_slug == _FIXTURE_CANONICAL_SLUG and desk_owner == "baden-baden-desk"
+    with runner.cursor() as cur:
+        cur.execute("SELECT terminal_reason FROM airport_tickets WHERE raw_source_id='tce_reply'")
+        assert cur.fetchone()[0] == "thread_continuity_routed_ticket:BB-AUK-001"
+
+
+# 30 — AC2 (anti-laundering): a thread whose prior disposition was only a soft /
+#      participant match (post-reversal that lands (f) safe_default, NOT code-bound)
+#      does NOT inherit. Continuity may never launder a weak binding forward.
+def test_thread_continuity_soft_prior_does_not_inherit(runner, hard_lane, monkeypatch):
+    monkeypatch.setenv("BOX5_FAST_LANE_ENABLED", "true")
+    # registered WITH participant + alias, but the emails carry NO code -> post-reversal
+    # the prior lands (f) safe_default (participant/alias no longer routes).
+    _register_soft("BB-AUK-001",
+                   participants=[{"channel": "email", "value": _BOUND_SENDER}],
+                   aliases=["annaberg"])
+    _seed_email(runner, "tcs_orig", subject="annaberg status", thread_id="T-SOFT",
+                sender_email=_BOUND_SENDER, body="annaberg update, no code",
+                received=_now() - timedelta(hours=3))
+    _seed_email(runner, "tcs_reply", subject="re: annaberg", thread_id="T-SOFT",
+                sender_email=_OTHER_SENDER, body="annaberg more thoughts, no code",
+                received=_now() - timedelta(hours=1))
+    s = bridge.run_tick()
+    assert s["thread_routed_ticket"] == 0      # soft/safe-default prior is NOT inheritable
+    assert s["code_routed_ticket"] == 0
+    # prior itself landed (f) safe_default (proves it was never code-bound)
+    with runner.cursor() as cur:
+        cur.execute("SELECT terminal_reason FROM airport_tickets WHERE raw_source_id='tcs_orig'")
+        assert cur.fetchone()[0] == "safe_default_desk_review"
+        cur.execute("SELECT terminal_reason FROM airport_tickets WHERE raw_source_id='tcs_reply'")
+        assert cur.fetchone()[0] == "safe_default_desk_review"
+    assert _terminal(runner, "tcs_reply")[0] == "TICKET"
+    assert _routing(runner, "tcs_reply")[0] is None   # no inherited routing columns
+
+
+# 31 — AC3 (conflict): a thread carrying code-bound tickets to >1 distinct ACTIVE
+#      project (a legitimately multi-matter thread) -> CONFLICT -> code-less reply
+#      falls through to (f) TICKET, never a silent cross-matter pick.
+def test_thread_continuity_multi_matter_thread_conflict(runner, hard_lane, monkeypatch):
+    monkeypatch.setenv("BOX5_FAST_LANE_ENABLED", "true")
+    hard_lane("BB-AUK-001", participants=[{"channel": "email", "value": _BOUND_SENDER}])
+    hard_lane("AO-MOV-002", desk_owner="ao-desk",
+              participants=[{"channel": "email", "value": _BOUND_SENDER}])
+    # two prior code-bound (FAST_TICKET) tickets on the SAME thread, DIFFERENT projects
+    _seed_email(runner, "tcm_a", subject="aukera funding", thread_id="T-MULTI",
+                sender_email=_BOUND_SENDER, body="review BB-AUK-001",
+                received=_now() - timedelta(hours=4))
+    _seed_email(runner, "tcm_b", subject="aukera and movie", thread_id="T-MULTI",
+                sender_email=_BOUND_SENDER, body="also AO-MOV-002 here",
+                received=_now() - timedelta(hours=3))
+    # code-less reply on the multi-matter thread -> CONFLICT -> (f), no silent pick
+    _seed_email(runner, "tcm_reply", subject="re: aukera", thread_id="T-MULTI",
+                sender_email=_OTHER_SENDER, body="aukera code-less follow up",
+                received=_now() - timedelta(hours=1))
+    s = bridge.run_tick()
+    assert s["fast_ticket"] == 2               # both priors code+participant bound
+    assert s["thread_routed_ticket"] == 0      # CONFLICT -> NOT inherited
+    assert _terminal(runner, "tcm_reply")[0] == "TICKET"
+    matter_slug, desk_owner, _, _ = _routing(runner, "tcm_reply")
+    assert matter_slug is None and desk_owner is None
+    with runner.cursor() as cur:
+        cur.execute("SELECT terminal_reason FROM airport_tickets WHERE raw_source_id='tcm_reply'")
+        assert cur.fetchone()[0] == "safe_default_desk_review"
+
+
+# 32 — AC4 (savepoint isolation): a raise inside the thread resolver NEVER routes. It
+#      rolls back to the SAVEPOINT (preserving issue_ticket's reservation), counts
+#      failed, and STILL ends the arrival at a visible (f) TICKET; the tick keeps
+#      processing the next arrival (never stranded, never thread_routed_ticket++).
+def test_thread_continuity_resolver_error_savepoint_isolated(runner, hard_lane, monkeypatch):
+    monkeypatch.setenv("BOX5_FAST_LANE_ENABLED", "true")
+
+    def _boom(thread_id):
+        raise RuntimeError("thread resolver exploded")
+
+    monkeypatch.setattr(bridge, "resolve_by_thread", _boom)
+    _seed_email(runner, "tcerr", subject="aukera note", thread_id="T-ERR",
+                sender_email=_OTHER_SENDER, body="aukera code-less, resolver will boom",
+                received=_now() - timedelta(hours=2))
+    _seed_email(runner, "tcafter", subject="annaberg note", thread_id="T-ERR2",
+                sender_email=_OTHER_SENDER, body="annaberg second code-less arrival",
+                received=_now() - timedelta(hours=1))
+    s = bridge.run_tick()
+    assert s["thread_routed_ticket"] == 0
+    assert s["failed"] >= 1
+    # errored arrival still ends visible at (f) TICKET (savepoint preserved reservation)
+    err_status, err_written = _terminal(runner, "tcerr")
+    assert err_status == "TICKET"
+    assert err_written is not None
+    with runner.cursor() as cur:
+        cur.execute("SELECT terminal_reason FROM airport_tickets WHERE raw_source_id='tcerr'")
+        assert cur.fetchone()[0] == "safe_default_desk_review"
+    # the tick kept processing the next code-less arrival
+    assert _terminal(runner, "tcafter")[0] == "TICKET"
+
+
+# 33 — dark-lane regression: flag OFF -> the (e.8) lane is not entered even when the
+#      thread HAS a code-bound prior; the code-less reply lands (f) safe_default.
+def test_thread_continuity_flag_off_is_noop(runner, hard_lane, monkeypatch):
+    # tick 1 (flag ON): create the prior code-bound (FAST_TICKET) ticket on the thread.
+    monkeypatch.setenv("BOX5_FAST_LANE_ENABLED", "true")
+    hard_lane("BB-AUK-001", participants=[{"channel": "email", "value": _BOUND_SENDER}])
+    _seed_email(runner, "tcf_orig", subject="aukera funding", thread_id="T-OFF",
+                sender_email=_BOUND_SENDER, body="review BB-AUK-001",
+                received=_now() - timedelta(hours=3))
+    bridge.run_tick()
+    assert _terminal(runner, "tcf_orig")[0] == "FAST_TICKET"
+    # tick 2 (flag OFF): a code-less reply on the same thread must NOT thread-route.
+    monkeypatch.delenv("BOX5_FAST_LANE_ENABLED", raising=False)
+    _seed_email(runner, "tcf_reply", subject="re: aukera", thread_id="T-OFF",
+                sender_email=_OTHER_SENDER, body="aukera reply, no code",
+                received=_now() - timedelta(hours=1))
+    s = bridge.run_tick()
+    assert s["thread_routed_ticket"] == 0
+    assert _terminal(runner, "tcf_reply")[0] == "TICKET"
+    assert _routing(runner, "tcf_reply")[0] is None
+
+
+# 34 — gate: a reply carrying its OWN explicit code is NEVER thread-inherited (the
+#      (e.8) `not extract_project_codes` gate). Here the reply's code is unregistered,
+#      so (e.5)/(e.7) skip and it lands (f) — NOT the thread's BB-AUK-001. Thread
+#      continuity never overrides an explicit code signal in the reply itself.
+def test_thread_continuity_explicit_code_in_reply_skips_thread_lane(runner, hard_lane, monkeypatch):
+    monkeypatch.setenv("BOX5_FAST_LANE_ENABLED", "true")
+    hard_lane("BB-AUK-001", participants=[{"channel": "email", "value": _BOUND_SENDER}])
+    _seed_email(runner, "tcx_orig", subject="aukera funding", thread_id="T-GATE",
+                sender_email=_BOUND_SENDER, body="review BB-AUK-001",
+                received=_now() - timedelta(hours=3))
+    # reply carries a DIFFERENT (unregistered) explicit code -> (e.8) gate is off
+    _seed_email(runner, "tcx_reply", subject="re: aukera", thread_id="T-GATE",
+                sender_email=_OTHER_SENDER, body="see also XX-YYY-999 for aukera ref",
+                received=_now() - timedelta(hours=1))
+    s = bridge.run_tick()
+    assert s["fast_ticket"] == 1
+    assert s["thread_routed_ticket"] == 0      # gate blocked thread inheritance
+    assert _terminal(runner, "tcx_reply")[0] == "TICKET"
+    matter_slug, desk_owner, _, _ = _routing(runner, "tcx_reply")
+    assert matter_slug is None and desk_owner is None   # NOT inherited to BB-AUK-001
+    with runner.cursor() as cur:
+        cur.execute("SELECT terminal_reason FROM airport_tickets WHERE raw_source_id='tcx_reply'")
+        assert cur.fetchone()[0] == "safe_default_desk_review"
+
+
+# 35 — codex G3 #4925 fix: the column alone is forward-only, so a code-bound ticket
+#      that predates the migration keeps thread_id NULL and continuity misses it. The
+#      migration BACKFILL recovers thread_id from email_messages (primary) AND, when the
+#      source email is pruned, from the ticket JSONB luggage (fallback) — so continuity
+#      works for already-ticketed threads, not only post-deploy ones. Runs the REAL
+#      migration SQL against a row forced to the pre-migration state.
+def test_thread_continuity_backfill_recovers_null_thread_id(runner, hard_lane, monkeypatch):
+    monkeypatch.setenv("BOX5_FAST_LANE_ENABLED", "true")
+    hard_lane("BB-AUK-001", participants=[{"channel": "email", "value": _BOUND_SENDER}])
+    _seed_email(runner, "bf_orig", subject="aukera funding", thread_id="T-BF",
+                sender_email=_BOUND_SENDER, body="review BB-AUK-001",
+                received=_now() - timedelta(hours=3))
+    bridge.run_tick()   # -> FAST_TICKET row for bf_orig, thread_id populated
+    assert _terminal(runner, "bf_orig")[0] == "FAST_TICKET"
+
+    migration_sql = (Path(__file__).parent.parent / "migrations"
+                     / "20260701c_airport_tickets_thread_id.sql").read_text()
+
+    # --- primary path: source email still in email_messages ---
+    with runner.cursor() as cur:
+        cur.execute("UPDATE airport_tickets SET thread_id = NULL WHERE raw_source_id = 'bf_orig'")
+        cur.execute(migration_sql)
+        cur.execute("SELECT thread_id FROM airport_tickets WHERE raw_source_id = 'bf_orig'")
+        assert cur.fetchone()[0] == "T-BF"   # recovered from email_messages
+
+    # --- fallback path: source email pruned -> recover from the ticket JSONB luggage ---
+    with runner.cursor() as cur:
+        cur.execute("UPDATE airport_tickets SET thread_id = NULL WHERE raw_source_id = 'bf_orig'")
+        cur.execute("DELETE FROM email_messages WHERE message_id = 'bf_orig'")
+        cur.execute(migration_sql)
+        cur.execute("SELECT thread_id FROM airport_tickets WHERE raw_source_id = 'bf_orig'")
+        assert cur.fetchone()[0] == "T-BF"   # recovered from ticket JSONB luggage
+
+    # --- continuity now works for a code-less reply on the recovered thread ---
+    _seed_email(runner, "bf_reply", subject="re: aukera", thread_id="T-BF",
+                sender_email=_OTHER_SENDER, body="aukera reply, no code",
+                received=_now() - timedelta(hours=1))
+    s = bridge.run_tick()
+    assert s["thread_routed_ticket"] == 1
+    assert _terminal(runner, "bf_reply")[0] == "TICKET"
 
 
 # ============================================================================
