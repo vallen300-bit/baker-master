@@ -12,11 +12,17 @@ Message-ID). thread_id stays as the correlation/routing context only.
 
 AC1 + AC4b MUST FAIL on current `main` (thread_id-keyed) and PASS after the fix.
 """
+import base64
+import uuid
+from pathlib import Path
 from unittest import mock
 
 import pytest
 
 import triggers.email_trigger as et
+
+_REPO = Path(__file__).resolve().parent.parent
+_ATTACH_MIGRATION = _REPO / "migrations" / "20260610_email_attachments.sql"
 
 
 def _thread(msg_id, conv_id, *, subject="status update", body="body text",
@@ -166,3 +172,78 @@ def test_esg_reply_accepted_after_earlier_thread_message():
                       subject="AW: AB Sprint FW: Q&A / ESG / Debt Model",
                       sender="siegfried.brandner@brisengroup.com")])
     assert "AAMk-siegfried-reply" in sink.stored_ids          # the previously-dropped reply lands
+
+
+# ── F1 (codex G3 HIGH) — attachment store key MUST equal the email-row key ───
+def test_graph_attachment_key_equals_email_row_key():
+    """F1 invariant (local): the graph attachment store key equals the email-row
+    msg_key for the SAME message. If they diverge, the read-path join
+    (email_attachments.message_id == email_messages.message_id) is a false-empty
+    surface. FAILS on main (attachment keyed by conversationId, row by m['id'])."""
+    import triggers.graph_mail_trigger as gmt
+    m = {
+        "id": "AAMk-msg-1", "conversationId": "AAQk-conv-1", "hasAttachments": True,
+        "subject": "s", "from": {"emailAddress": {"name": "N", "address": "a@b.com"}},
+        "receivedDateTime": "2026-07-01T13:00:00Z", "body": {"content": "x"},
+    }
+    # email-row key the sink computes from this message's thread dict:
+    md = gmt._to_thread(m)["metadata"]
+    row_key = md.get("message_id") or md.get("thread_id")
+    # attachment store key actually used by capture:
+    client = mock.MagicMock()
+    client.cfg.mail_user = "u@x.com"
+    client.get.return_value = {"value": [{
+        "id": "att-1", "name": "f.pdf", "contentType": "application/pdf",
+        "size": 1, "contentBytes": base64.b64encode(b"d").decode(), "isInline": False,
+    }]}
+    captured = {}
+    with mock.patch.object(gmt, "_insert_live_attachment",
+                           side_effect=lambda **kw: captured.update(kw) or "row1"):
+        assert gmt._capture_graph_attachments(client, m) == 1
+    assert captured["message_id"] == row_key == "AAMk-msg-1"
+
+
+# ── F1 read-parity (live-PG; auto-skips locally) — capture -> store -> read ───
+@pytest.fixture
+def _attach_pg(needs_live_pg, monkeypatch):
+    """Point kbl.db at the live test DB + apply the (idempotent) attachments
+    migration; clean up only this run's rows (never TRUNCATE — shared test DB)."""
+    import psycopg2
+    monkeypatch.setenv("DATABASE_URL", needs_live_pg)
+    conn = psycopg2.connect(needs_live_pg)
+    conn.autocommit = True
+    with conn.cursor() as cur:
+        cur.execute(_ATTACH_MIGRATION.read_text())
+    mids: list[str] = []
+    yield mids
+    try:
+        with conn.cursor() as cur:
+            if mids:
+                cur.execute("DELETE FROM email_attachments WHERE message_id = ANY(%s)", (mids,))
+    finally:
+        conn.close()
+
+
+def test_graph_capture_read_parity_end_to_end(_attach_pg):
+    """Store a graph attachment via the real capture path, then it is READABLE under
+    the per-message key (== the email-row key) and NOT under the old conversationId.
+    FAILS on main (capture stored under conversationId -> list_attachments(m['id'])=[])."""
+    import triggers.graph_mail_trigger as gmt
+    from kbl.attachment_store import list_attachments
+
+    per_msg = f"AAMk-{uuid.uuid4().hex[:10]}"
+    conv = f"AAQk-{uuid.uuid4().hex[:10]}"
+    _attach_pg.extend([per_msg, conv])
+    m = {"id": per_msg, "conversationId": conv, "hasAttachments": True}
+    client = mock.MagicMock()
+    client.cfg.mail_user = "u@x.com"
+    client.get.return_value = {"value": [{
+        "id": "att-1", "name": "memo.pdf", "contentType": "application/pdf",
+        "size": 4, "contentBytes": base64.b64encode(b"memo").decode(), "isInline": False,
+    }]}
+
+    assert gmt._capture_graph_attachments(client, m) == 1
+    # reachable under the per-message key (the email row's message_id):
+    assert [r["filename"] for r in list_attachments(per_msg)] == ["memo.pdf"]
+    # and NOT under the old conversationId key (the false-empty the fix removes):
+    assert list_attachments(conv) == []

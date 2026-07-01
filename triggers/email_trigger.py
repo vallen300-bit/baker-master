@@ -267,7 +267,14 @@ def _capture_gmail_thread_attachments(service, threads: list) -> int:
     stored = 0
     for thread in threads or []:
         metadata = thread.get("metadata", {})
-        row_message_id = metadata.get("thread_id") or metadata.get("message_id")
+        # BOX5_EMAIL_CONVERSATION_DEDUP_FIX_1 F1: the attachment store key MUST equal
+        # the email-row key for this message. The row is now keyed per-message
+        # (msg_key = metadata['message_id'] or thread_id), so prefer message_id here —
+        # NOT thread_id — else attachments key under the conversation while the row
+        # keys per-message, and the read-path join (email_attachments.message_id ==
+        # email_messages.message_id) returns a false-empty surface. Every attachment
+        # enumerated across the thread's messages lands under this single row key.
+        row_message_id = metadata.get("message_id") or metadata.get("thread_id")
         message_ids = metadata.get("all_message_ids") or [metadata.get("message_id")]
         for mid in [m for m in message_ids if m]:
             try:

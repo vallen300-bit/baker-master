@@ -301,19 +301,24 @@ def _capture_graph_attachments(client: GraphClient, m: dict) -> int:
       attempt-then-fallback (native, then Prefer: IdType="ImmutableId"). A fetch
       that fails on BOTH attempts for a hasAttachments=true message is surfaced
       LOUDLY (ERROR + counter), never silently dropped.
-    - The STORE KEY (conversationId-keying, Option (a) #4317) is thread_id =
-      (conversationId or id), MATCHING email_messages.message_id and the
-      baker_email_attachment_read lookup (email_trigger.py:933 keys every email
-      source by thread_id). Persisting attachments under the real per-message id
-      would key them by a value the read tool never queries — the systemic
-      mismatch that made captured attachments unreachable.
+    - The STORE KEY must EQUAL the email-row key for THIS message, per row
+      (BOX5_EMAIL_CONVERSATION_DEDUP_FIX_1 F1). The email row is now keyed
+      per-message: msg_key = metadata['message_id'](=m['id']) or thread_id, so the
+      attachment store key is m['id'] or conversationId — the SAME value. The read
+      path joins email_attachments.message_id == email_messages.message_id
+      (airport_ticketing_bridge._fetch_email_attachments; attachment_store
+      list_attachments), so any divergence makes attachments a false-empty surface
+      (the split-brain codex G3 caught). The prior conversationId-keying matched the
+      OLD conversationId-keyed row and is now wrong.
     """
     global _attachment_fetch_failures
     fetch_id = m.get("id")
     if not m.get("hasAttachments") or not fetch_id:
         return 0
-    # Read by the real message id; store under thread_id (conversationId-or-id).
-    store_key = m.get("conversationId") or fetch_id
+    # Store under the SAME per-message key the email row uses:
+    # msg_key = metadata['message_id'](=m['id']) or thread_id(=conversationId or id)
+    #         = m['id'] or conversationId  (== fetch_id or conversationId).
+    store_key = fetch_id or m.get("conversationId")
     try:
         page, used_immutable = _fetch_attachments_page(client, fetch_id)
         if page is None:
