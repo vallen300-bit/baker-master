@@ -1,11 +1,15 @@
 ---
-status: PENDING
+status: SHIPPED_AWAITING_GATES
+pr: 443
+head_sha: a4ffc0e
+shipped_at: 2026-07-01
 brief_id: BOX5_HARD_FAST_LANE_1
 to: b4
 from: lead
 dispatched_by: cowork-ah1
 dispatched_at: 2026-07-01
 branch: box5-hard-fast-lane-1
+ship_note: "a4ffc0e — G3 P1 rework: hard-lane exception no longer strands the arrival. Root cause: D's except did a full conn.rollback() which destroyed issue_ticket's row reservation in the shared tick txn -> (f) _claim_for_terminal found no row -> lease_skipped -> no TICKET (arrival invisible). Fix: SAVEPOINT airport_hard_lane at top of D try (after reservation); except does ROLLBACK TO SAVEPOINT (preserves reservation) + failed++ + falls through to (f) TICKET; single atomic commit matching C's boundary; full-rollback fallback if savepoint unusable. Test 17 tightened (was accepting None): now asserts terminal_written>=1, defaulted_ticket>=1, terminal_status TICKET, reason safe_default_desk_review, failed++. Verified FAILS on pre-fix bridge, PASSES after. Matrix GREEN live-PG16: 20 box5 + 21 registry + 52 airport. py_compile clean. Dark behind BOX5_FAST_LANE_ENABLED; seed un-run. Re-ship -> lead for codex G3 re-gate. Prior ship 39671d6 (9/10, this was the 1 open P1)."
 base_note: branch off main @ 86ae607 or later (contains C's #442 merge — write_terminal_status/_claim_for_terminal/fast_lane_enabled all live)
 reply_target: cowork-ah1 (bus) for ship report; gate verdicts to lead
 effort: medium (builder — surgical branch + pure helper; cost is the binding/conflict/error test matrix); codex G3 effort medium (focus regex-only-never-clears + binding-mandatory + error-never-FAST_TICKET, NOT xhigh)
