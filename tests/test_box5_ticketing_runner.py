@@ -273,3 +273,96 @@ def test_stuck_gauge_and_flag_default(runner):
         )
     runner.commit()
     assert bridge._count_stuck_arrivals(runner) >= 1
+
+
+# 9 — P1-A: under a per-tick cap the watermark must NOT jump to the newest row and
+# strand older un-processed rows. Oldest-first + contiguous-prefix advance means the
+# cap freezes the cursor at the oldest processed row; nothing is lost across ticks.
+def test_p1a_cap_does_not_strand_older_rows(runner, monkeypatch):
+    monkeypatch.setenv("AIRPORT_TICKETING_MAX_POSTS_PER_TICK", "1")  # cap = 1
+    r_old = _now() - timedelta(hours=3)
+    r_mid = _now() - timedelta(hours=2)
+    r_new = _now() - timedelta(hours=1)
+    _seed_email(runner, "e_old", subject="annaberg old", received=r_old)
+    _seed_email(runner, "e_mid", subject="annaberg mid", received=r_mid)
+    _seed_email(runner, "e_new", subject="annaberg new", received=r_new)
+
+    # Tick 1: only the OLDEST is issued (cap=1). The cursor freezes at r_old, NOT r_new.
+    s1 = bridge.run_tick()
+    assert s1["issued"] == 1
+    assert _terminal(runner, "e_old")[0] == "TICKET"
+    assert _terminal(runner, "e_mid")[0] is None      # not stranded — still NULL
+    assert _terminal(runner, "e_new")[0] is None
+    wm1 = bridge.trigger_state_get_watermark(bridge._WATERMARK_SOURCE)
+    assert abs((wm1 - r_old).total_seconds()) < 1.0   # froze at OLDEST, not newest
+
+    # Tick 2: e_old is an idempotent no-op, e_mid is issued; cursor moves to r_mid.
+    s2 = bridge.run_tick()
+    assert s2["issued"] == 1
+    assert s2["terminal_written"] == 1                # only e_mid written this tick
+    assert _terminal(runner, "e_mid")[0] == "TICKET"
+    assert _terminal(runner, "e_new")[0] is None
+    wm2 = bridge.trigger_state_get_watermark(bridge._WATERMARK_SOURCE)
+    assert abs((wm2 - r_mid).total_seconds()) < 1.0
+
+    # Tick 3: e_new is finally issued — nothing was ever stranded.
+    s3 = bridge.run_tick()
+    assert s3["issued"] == 1
+    assert _terminal(runner, "e_new")[0] == "TICKET"
+
+
+# 10 — P1-B: a bus-post failure is a FAILURE (terminal stays NULL, `failed` counts),
+# the watermark must NOT advance past it, and reserve_ticket retries it next tick.
+def test_p1b_bus_fail_is_failure_and_retried(runner, monkeypatch):
+    r = _now() - timedelta(hours=1)
+    _seed_email(runner, "ebus", subject="annaberg bus", received=r)
+
+    # Tick 1: bus down -> issue_ticket returns bus_failed (ok=False, no id).
+    monkeypatch.setattr(
+        bridge, "post_ticket_to_bus",
+        lambda ticket: {"ok": False, "error": "bus_down"},
+    )
+    s1 = bridge.run_tick()
+    assert s1["failed"] >= 1
+    assert s1["terminal_written"] == 0
+    assert _terminal(runner, "ebus")[0] is None          # NOT cleared, NOT ticketed
+    with runner.cursor() as cur:
+        cur.execute("SELECT status FROM airport_tickets WHERE source_id='ebus'")
+        assert cur.fetchone()[0] == "failed"             # live status axis marked failed
+    wm1 = bridge.trigger_state_get_watermark(bridge._WATERMARK_SOURCE)
+    assert wm1 < r                                        # cursor did NOT advance past it
+
+    # Tick 2: bus recovers -> the SAME arrival is re-fetched (cursor never passed it)
+    # and reserve_ticket's failed-retry branch re-posts it to a clean TICKET.
+    monkeypatch.setattr(
+        bridge, "post_ticket_to_bus",
+        lambda ticket: {"ok": True, "message_id": 777, "thread_id": "t-777"},
+    )
+    s2 = bridge.run_tick()
+    assert s2["issued"] == 1
+    assert _terminal(runner, "ebus")[0] == "TICKET"      # retried and cleared
+    wm2 = bridge.trigger_state_get_watermark(bridge._WATERMARK_SOURCE)
+    assert abs((wm2 - r).total_seconds()) < 1.0          # now advanced past the row
+
+
+# 11 — P1-C: REJECT_NOISE in C = AUTOMATED-SENDER ONLY. The reason is the precise
+# 'automated_sender'; a no-active-keyword arrival is prefiltered at fetch and never
+# enters the runner (that branch is dead here — no terminal row is written for it).
+def test_p1c_reject_noise_is_automated_sender_only(runner):
+    # (a) automated sender WITH an active keyword -> REJECT_NOISE / automated_sender.
+    _seed_email(runner, "eauto", subject="aukera digest",
+                sender_email="noreply@example.com")
+    # (b) human sender, NO active keyword -> prefiltered at fetch, never processed.
+    _seed_email(runner, "enokw", subject="weekly lunch menu",
+                sender_email="balazs@brisengroup.com", body="sandwiches on friday")
+
+    s = bridge.run_tick()
+    assert s["deterministic_cleared"] >= 1
+    status, _ = _terminal(runner, "eauto")
+    assert status == "REJECT_NOISE"
+    with runner.cursor() as cur:
+        cur.execute("SELECT terminal_reason FROM airport_tickets WHERE raw_source_id='eauto'")
+        assert cur.fetchone()[0] == "automated_sender"   # not the old no-keyword blend
+        # the no-keyword arrival was prefiltered at fetch -> no airport_tickets row.
+        cur.execute("SELECT COUNT(*) FROM airport_tickets WHERE source_id='enokw'")
+        assert cur.fetchone()[0] == 0
