@@ -286,6 +286,49 @@ def resolve_by_participant(channel: str, value: str) -> list[dict]:
         return []
 
 
+def active_participant_values(conn: Any, channel: str = "email") -> list[str]:
+    """BOX5_GATE2_PARTICIPANT_FETCH_LANE_1 — enumerate the DISTINCT participant values
+    (lower-cased) for ``channel`` across ALL ACTIVE projects, as a bounded sender-identity
+    allow-set for Box 5's Gate-2 participant fetch lane.
+
+    Read-only, and runs on the CALLER's connection (Box 5's shared tick conn) rather than
+    opening its own — so the lane needs no second pool connection and a failure can be
+    rolled back on the same conn the keyword fetch uses (fault-tolerance is the caller's
+    contract). Distinct + deterministic (first-seen over project_number-ordered rows) so
+    the downstream ``= ANY(%s)`` set is stable. Fault-tolerant: returns [] on any error
+    (the lane then no-ops that tick; keyword ticketing is unaffected).
+
+    Unlike ``resolve_by_participant`` this is a set-enumeration primitive (no {channel,
+    value} needle), so Box 5 builds the allow-set ONCE per tick instead of one registry
+    round-trip per arrival."""
+    if not channel:
+        return []
+    try:
+        with conn.cursor() as cur:
+            cur.execute(
+                "SELECT participants FROM project_registry "
+                "WHERE status = 'active' ORDER BY project_number LIMIT 500"
+            )
+            rows = cur.fetchall()
+    except Exception as e:
+        try:
+            conn.rollback()
+        except Exception:
+            pass
+        logger.warning(f"active_participant_values failed: {e}")
+        return []
+    seen: set[str] = set()
+    out: list[str] = []
+    for r in rows:
+        for p in _as_list(r[0]):
+            if isinstance(p, dict) and p.get("channel") == channel:
+                val = (p.get("value") or "").strip().lower()
+                if val and val not in seen:
+                    seen.add(val)
+                    out.append(val)
+    return out
+
+
 def resolve_by_alias(text: str) -> list[dict]:
     """SOFT-LANE signal #2: ACTIVE projects whose registered alias (matter
     mnemonic/nickname) appears as a word in the text. One of several independent

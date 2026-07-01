@@ -21,6 +21,7 @@ from typing import Any, Optional
 from orchestrator.dispatcher import RESERVED_RECIPIENTS, resolve_owner_slug
 from kbl.db import get_conn
 from kbl.project_registry_store import (
+    active_participant_values,
     extract_project_codes,
     resolve_by_participant,
     resolve_project_number,
@@ -70,6 +71,19 @@ _DEFAULT_MAX_POSTS = 5
 # When the miss fetch hits the cap the tick logs it (never a silent cut).
 _MISS_FETCH_CAP_ENV = "AIRPORT_TICKETING_MISS_FETCH_CAP"
 _DEFAULT_MISS_FETCH_CAP = 500
+
+# BOX5_GATE2_PARTICIPANT_FETCH_LANE_1 — a SECOND, DECOUPLED fetch lane keyed on sender
+# identity in the project registry (channel=email), unioned into the ticketed set. It
+# widens Gate-2 reachability beyond the keyword ILIKE: a matter email from a KNOWN
+# registered participant with NO keyword on a brand-new (unbound) thread is fetched (and
+# safe-default TICKETed) instead of only drop-logged as a keyword-prefilter miss. Dark by
+# default: flag OFF -> the lane is a pure no-op and fetch_email_arrivals is byte-identical
+# to the keyword-only match fetch (AC6). The cap bounds this lane ALONE (the allow-set is
+# already tiny — registered email participants, ~a dozen today) and, like the miss cap,
+# can NEVER affect the keyword match set (two decoupled queries).
+_PARTICIPANT_LANE_ENV = "BOX5_PARTICIPANT_FETCH_LANE_ENABLED"
+_PARTICIPANT_FETCH_CAP_ENV = "AIRPORT_TICKETING_PARTICIPANT_FETCH_CAP"
+_DEFAULT_PARTICIPANT_FETCH_CAP = 200
 
 # BOX5_DROP_OBSERVABILITY_1 — drop-log gate vocabulary (mirrors the CHECK in
 # migrations/20260701d_box5_dropped_signals.sql). keyword_prefilter = Gate-2 miss (not
@@ -129,6 +143,12 @@ class EmailArrival:
     received_date: Optional[datetime]
     source: str
     attachments: tuple[dict[str, Any], ...] = ()
+    # BOX5_GATE2_PARTICIPANT_FETCH_LANE_1: True iff this arrival entered ONLY via the
+    # participant-identity fetch lane (a registered project participant with NO keyword
+    # match). It makes the arrival ticket-worthy on sender identity alone —
+    # build_email_ticket relaxes its keyword gate for it. Default False keeps every
+    # keyword-lane arrival byte-identical.
+    participant_fetched: bool = False
 
 
 @dataclass(frozen=True)
@@ -255,6 +275,32 @@ def _miss_fetch_cap() -> int:
         value = int(os.environ.get(_MISS_FETCH_CAP_ENV, str(_DEFAULT_MISS_FETCH_CAP)))
     except (TypeError, ValueError):
         return _DEFAULT_MISS_FETCH_CAP
+    return max(1, min(value, 5000))
+
+
+def participant_lane_enabled() -> bool:
+    """BOX5_GATE2_PARTICIPANT_FETCH_LANE_1 dark flag (default OFF). OFF -> the participant
+    fetch lane is a pure no-op and fetch_email_arrivals returns EXACTLY the keyword match
+    set (byte-identical to pre-change, AC6). AH1 flips it in Render (merge-mode) to widen
+    Gate-2 reachability. Orthogonal to the master gate, the fast-lane flag, and the
+    outbound-ingest flag."""
+    raw = os.environ.get(_PARTICIPANT_LANE_ENV, "false")
+    return raw.strip().lower() in {"1", "true", "yes", "on"}
+
+
+def _participant_fetch_cap() -> int:
+    """BOX5_GATE2_PARTICIPANT_FETCH_LANE_1 — hard row cap on the participant fetch lane
+    ALONE (mirrors _miss_fetch_cap). The allow-set is already tiny, but this bounds the
+    scan so a registry misconfig cannot trigger an unbounded fetch. Decoupled from the
+    keyword match fetch — it can never starve a real keyword match."""
+    try:
+        value = int(
+            os.environ.get(
+                _PARTICIPANT_FETCH_CAP_ENV, str(_DEFAULT_PARTICIPANT_FETCH_CAP)
+            )
+        )
+    except (TypeError, ValueError):
+        return _DEFAULT_PARTICIPANT_FETCH_CAP
     return max(1, min(value, 5000))
 
 
@@ -391,7 +437,13 @@ def build_email_ticket(
 
     keys = keywords or active_keywords()
     matched = _match_active_keywords(arrival.subject, arrival.full_body, keys)
-    if not matched:
+    if not matched and not arrival.participant_fetched:
+        # No keyword AND not a registered-participant fetch -> nothing to ticket on.
+        # (Automated senders already returned None above.) BOX5_GATE2_PARTICIPANT_FETCH_
+        # LANE_1: a participant-lane arrival is ticket-worthy on sender identity alone, so
+        # it falls through to a (safe-default desk-review) TICKET even with zero keywords —
+        # it must NEVER be silently dropped now that Gate 2 fetched it. Deterministic:
+        # identity comes from the registry match at fetch, no classifier involved.
         return None
 
     desk_slug = resolve_owner_slug(_desk_slug()) or _desk_slug()
@@ -416,7 +468,12 @@ def build_email_ticket(
         suffix = f", {size} bytes" if size is not None else ""
         luggage.append(f"attachment: {filename} ({mime_type}{suffix})")
 
-    why = [f"matched active flight keyword(s): {', '.join(sorted(set(matched)))}"]
+    if matched:
+        why = [f"matched active flight keyword(s): {', '.join(sorted(set(matched)))}"]
+    else:
+        # BOX5_GATE2_PARTICIPANT_FETCH_LANE_1: fetched on registered-participant identity
+        # with no keyword match (arrival.participant_fetched is True to reach here).
+        why = ["fetched by registered project-participant identity (no keyword match)"]
     if arrival.received_date:
         why.append(f"received_at: {arrival.received_date.isoformat()}")
 
@@ -863,6 +920,73 @@ def _log_keyword_prefilter_misses(
         _write_dropped_signals(conn, miss_records, savepoint=False)
 
 
+def _received_sort_key(row: tuple) -> datetime:
+    """Global-ASC sort key for the unioned two-lane arrival list — received_date (index 6),
+    UTC-coerced. A None / non-datetime date sorts OLDEST (datetime.min) so a null-date row
+    can never leap the watermark ahead of a real dated arrival (AC4 watermark safety)."""
+    dt = row[6] if len(row) > 6 else None
+    if not isinstance(dt, datetime):
+        return datetime.min.replace(tzinfo=timezone.utc)
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=timezone.utc)
+    return dt
+
+
+def _fetch_participant_arrivals(
+    conn: Any, *, since: datetime, limit: int
+) -> list[tuple]:
+    """BOX5_GATE2_PARTICIPANT_FETCH_LANE_1 — the SECOND, DECOUPLED fetch lane.
+
+    Fetches recent ``email_messages`` whose ``sender_email`` is a REGISTERED ACTIVE project
+    participant (channel=email), REGARDLESS of keyword. 100% deterministic registry match —
+    NO classifier decides fetch eligibility (the reachability gate stays out of the LLM's
+    hands). Returns raw rows in the SAME column shape as the keyword match fetch so the
+    caller can union + globally re-sort ASC.
+
+    Decoupling discipline (mirrors the drop-observability miss fetch): a SEPARATE bounded
+    query that shares NO state with the keyword match fetch, so it can never change what the
+    keyword lane fetches. ``ORDER BY received_date ASC`` mirrors the match fetch; the caller
+    re-sorts the union so the runner's contiguous-prefix watermark stays safe.
+
+    Fault-tolerant (AC5): ANY failure (registry enumerate OR the arrivals read) is caught,
+    the shared conn is rolled back so it stays usable, and [] is returned — keyword
+    ticketing proceeds unaffected that tick."""
+    try:
+        participants = active_participant_values(conn, "email")
+        if not participants:
+            return []
+        cap = _participant_fetch_cap()
+        lim = max(1, min(int(limit), cap))
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                SELECT message_id, thread_id, sender_name, sender_email,
+                       subject, full_body, received_date, source
+                FROM email_messages
+                WHERE received_date >= %s
+                  AND LOWER(sender_email) = ANY(%s)
+                -- OLDEST-FIRST, same as the match fetch. The caller merges both lanes and
+                -- re-sorts ASC so the runner's contiguous-prefix cursor can never advance
+                -- past an un-processed participant-lane arrival (AC4).
+                ORDER BY received_date ASC
+                LIMIT %s
+                """,
+                (since, participants, lim),
+            )
+            return cur.fetchall()
+    except Exception as exc:
+        try:
+            conn.rollback()
+        except Exception:
+            pass
+        logger.warning(
+            "airport_ticketing participant fetch lane read failed (ticketing unaffected "
+            "this tick): %s",
+            exc,
+        )
+        return []
+
+
 def fetch_email_arrivals(
     conn: Any,
     *,
@@ -911,6 +1035,36 @@ def fetch_email_arrivals(
     # what tickets, and any failure inside is swallowed (the tick continues, AC3).
     _log_keyword_prefilter_misses(conn, since=since, keys=keys)
 
+    # BOX5_GATE2_PARTICIPANT_FETCH_LANE_1 — union the DECOUPLED participant-identity fetch
+    # lane into the keyword match set. Dark by default: flag OFF -> `rows` above is
+    # returned byte-identically (pure no-op, AC6). ON -> participant-lane rows are unioned
+    # (dedup by message_id; the keyword lane WINS a both-lanes row so its matched_keywords
+    # survive downstream, AC3) and the WHOLE arrival list is globally re-sorted
+    # received_date ASC. That global sort is the watermark-safety guarantee (AC4): a naive
+    # concat of two individually-ASC lanes is NOT globally sorted, so the runner's
+    # contiguous-prefix cursor could advance past an OLDER un-processed participant row and
+    # strand it below the watermark -> permanent loss. Participant-ONLY rows (no keyword)
+    # are tagged so build_email_ticket tickets them on identity alone (never dropped).
+    #
+    # MULTI-MATTER SAFETY (Director ruling, lead amend #5035): identity NEVER auto-routes.
+    # This lane uses participant identity ONLY to *fetch* — routing is decided downstream by
+    # project CODE (the (e.5)/(e.7)/(e.8) code/thread lanes), never by which projects a
+    # sender belongs to. So a sender who is a participant in >1 active project (e.g. a
+    # principal in BB-AUK-001 AND BB-MRCI-001) sending a code-less mail is AMBIGUOUS and
+    # falls through to the (f) safe-default desk-review TICKET by construction — it can
+    # never auto-pick one desk. The allow-set also de-dupes the sender across projects, so
+    # a multi-project participant is fetched once, not once per project.
+    participant_only_ids: set[str] = set()
+    if participant_lane_enabled():
+        keyword_ids = {str(r[0]) for r in rows if r and r[0]}
+        for pr in _fetch_participant_arrivals(conn, since=since, limit=lim):
+            mid = str(pr[0]) if pr and pr[0] else ""
+            if mid and mid not in keyword_ids:
+                keyword_ids.add(mid)
+                participant_only_ids.add(mid)
+                rows.append(pr)
+        rows.sort(key=_received_sort_key)  # global ASC across BOTH lanes (AC4)
+
     message_ids = [row[0] for row in rows if row and row[0]]
     attachment_map = _fetch_email_attachments(conn, message_ids)
     arrivals: list[EmailArrival] = []
@@ -929,6 +1083,7 @@ def fetch_email_arrivals(
                 received_date=received if isinstance(received, datetime) else None,
                 source=str(row[7] or ""),
                 attachments=tuple(attachment_map.get(str(row[0] or ""), ())),
+                participant_fetched=str(row[0] or "") in participant_only_ids,
             )
         )
     return arrivals
@@ -1750,14 +1905,17 @@ def run_tick(*, now: Optional[datetime] = None) -> dict[str, Any]:
                 if ticket is None:
                     # (d) DETERMINISTIC CLEAR — REJECT_NOISE = AUTOMATED SENDER ONLY.
                     #     (P1-C, cowork-ah1 bus #4756) build_email_ticket returns None
-                    #     for an automated sender OR a no-active-keyword arrival, but
-                    #     the no-keyword case is UNREACHABLE here: fetch_email_arrivals
-                    #     prefilters on active keywords (ILIKE), so only automated-
-                    #     sender Nones enter the runner. We assert that cause
-                    #     explicitly rather than infer it, so REJECT_NOISE means
-                    #     automated-sender ONLY. (Feed-widening — "every arrival ends
-                    #     visible" — is a deferred post-A-E follow-up brief; do NOT
-                    #     broaden the fetch scan here.)
+                    #     for an automated sender OR a no-active-keyword arrival, but a
+                    #     None here is still automated-sender ONLY. The keyword lane only
+                    #     fetches keyword matches; the participant lane
+                    #     (BOX5_GATE2_PARTICIPANT_FETCH_LANE_1) DOES fetch no-keyword
+                    #     arrivals, but build_email_ticket tickets those on participant
+                    #     identity (participant_fetched=True) instead of returning None —
+                    #     so a no-keyword arrival never reaches this branch. We assert that
+                    #     cause explicitly rather than infer it, so REJECT_NOISE means
+                    #     automated-sender ONLY. (Broader feed-widening — "every arrival
+                    #     ends visible" regardless of sender — is a deferred follow-up
+                    #     brief; do NOT broaden the fetch scan here.)
                     if _is_automated_email_arrival(arrival):
                         noise_id = reserve_noise_row(conn, arrival)
                         if noise_id is not None:
