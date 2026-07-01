@@ -150,6 +150,49 @@ def test_parity_only_keyword_matches_ticket(dropenv):
     assert _ticketed_ids(dropenv) == {"hit_auk", "hit_ann", "hit_lil"}
 
 
+# ── G3 rework (#4954/#4957) — REGRESSION: a match is NEVER starved by older misses ───
+def test_keyword_match_not_starved_by_older_nonmatches(dropenv, monkeypatch):
+    """codex G3 (HIGH) caught that a single capped superset fetch could return only
+    older NON-matching rows and starve a real keyword match out of the ticketed set —
+    observability would then CHANGE what tickets (the one thing the brief forbids). The
+    two-decoupled-query fix makes the match fetch independent of any miss cap.
+
+    Seed MORE old misses than a tiny cap, plus one NEWER keyword match. Under the retired
+    single-superset design (ORDER BY received_date ASC LIMIT cap) the cap fills with the
+    older misses and the match never appears -> this test FAILS. With the decoupled match
+    fetch (its own keyword-ILIKE LIMIT) the match is always returned -> PASSES.
+    """
+    # Tiny cap on BOTH the new miss-fetch and the retired superset path, so this is a
+    # genuine fail-on-old / pass-on-new regression regardless of which code is present.
+    monkeypatch.setenv("AIRPORT_TICKETING_MISS_FETCH_CAP", "2")
+    monkeypatch.setenv("AIRPORT_TICKETING_SUPERSET_CAP", "2")
+
+    base = _now() - timedelta(hours=6)
+    # 5 OLDER non-matches (> the cap of 2) — these would fill a capped superset.
+    for i in range(5):
+        _seed(dropenv, f"old_miss_{i}", subject="Weekly newsletter",
+              body="nothing relevant", received=base + timedelta(minutes=i))
+    # 1 NEWER keyword match — sits behind the 5 misses in oldest-first order.
+    _seed(dropenv, "late_match", subject="Aukera data room", body="review",
+          received=base + timedelta(hours=1))
+
+    # Small limit so a capped superset (old code) could not have reached the match.
+    arrivals = bridge.fetch_email_arrivals(
+        dropenv, since=base - timedelta(hours=1), limit=2
+    )
+    ids = {a.message_id for a in arrivals}
+    assert "late_match" in ids                              # never starved by the misses
+    assert not any(i.startswith("old_miss") for i in ids)  # misses never ticket
+
+    # Observability still works AND stays independently bounded: the miss fetch logs the
+    # newest `cap` misses only (AC4) — decoupled from what ticketed above.
+    with dropenv.cursor() as cur:
+        cur.execute(
+            "SELECT COUNT(*) FROM box5_dropped_signals WHERE gate = 'keyword_prefilter'"
+        )
+        assert cur.fetchone()[0] == 2
+
+
 # ── AC1 / TDD2 — keyword-miss -> keyword_prefilter drop row, matched_keywords empty ─
 def test_keyword_miss_writes_drop_row_and_matches_do_not(dropenv):
     _seed(dropenv, "hit_auk", subject="Aukera data room", body="please review")

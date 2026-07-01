@@ -60,14 +60,16 @@ _DEFAULT_FLIGHT = "aukera-annaberg-financing"
 _DEFAULT_LOOKBACK_HOURS = 48
 _DEFAULT_MAX_POSTS = 5
 
-# BOX5_DROP_OBSERVABILITY_1 — Gate-2 superset fetch cap. The keyword prefilter is now
-# a fetch-superset-then-classify-and-log path: we fetch the recent window WITHOUT the
-# keyword ILIKE so keyword-MISSES become visible, then classify in Python. This MUST
-# stay bounded (no unbounded scan): a hard row cap on the un-prefiltered fetch, floored
-# at the caller's matched-limit so it can never return fewer matched rows than the old
-# SQL LIMIT. When the cap truncates the scan the tick logs it (never a silent cut).
-_SUPERSET_CAP_ENV = "AIRPORT_TICKETING_SUPERSET_CAP"
-_DEFAULT_SUPERSET_CAP = 500
+# BOX5_DROP_OBSERVABILITY_1 (G3 rework #4957) — Gate-2 miss-fetch cap. Observability is
+# TWO DECOUPLED queries: an UNCHANGED keyword-ILIKE match fetch decides what tickets
+# (byte-for-byte parity), and a SEPARATE, independently-bounded query fetches the recent
+# NON-matching set for drop-logging ONLY. This cap bounds that miss fetch ALONE; it can
+# NEVER affect the ticketed set. The earlier single-superset-under-a-cap approach was
+# G3-rejected for exactly that failure mode: a row cap on the un-prefiltered fetch could
+# starve real keyword matches behind older non-matches and thereby change what tickets.
+# When the miss fetch hits the cap the tick logs it (never a silent cut).
+_MISS_FETCH_CAP_ENV = "AIRPORT_TICKETING_MISS_FETCH_CAP"
+_DEFAULT_MISS_FETCH_CAP = 500
 
 # BOX5_DROP_OBSERVABILITY_1 — drop-log gate vocabulary (mirrors the CHECK in
 # migrations/20260701d_box5_dropped_signals.sql). keyword_prefilter = Gate-2 miss (not
@@ -244,15 +246,15 @@ def active_keywords() -> tuple[str, ...]:
     return tuple(values) if values else _DEFAULT_KEYWORDS
 
 
-def _superset_fetch_cap() -> int:
-    """BOX5_DROP_OBSERVABILITY_1 — hard row cap on the un-prefiltered Gate-2 fetch.
-    Env-tunable; bounded so a misconfig cannot trigger an unbounded scan. The caller
-    floors this at its own matched-limit, so the effective cap is always >= the number
-    of matched rows the old keyword-filtered SQL LIMIT would have returned."""
+def _miss_fetch_cap() -> int:
+    """BOX5_DROP_OBSERVABILITY_1 (G3 rework #4957) — hard row cap on the Gate-2 MISS
+    fetch (drop-logging only). Env-tunable; bounded so a misconfig cannot trigger an
+    unbounded scan. This bounds the drop-log query ALONE and is fully decoupled from the
+    match fetch that decides what tickets — it can never starve a real keyword match."""
     try:
-        value = int(os.environ.get(_SUPERSET_CAP_ENV, str(_DEFAULT_SUPERSET_CAP)))
+        value = int(os.environ.get(_MISS_FETCH_CAP_ENV, str(_DEFAULT_MISS_FETCH_CAP)))
     except (TypeError, ValueError):
-        return _DEFAULT_SUPERSET_CAP
+        return _DEFAULT_MISS_FETCH_CAP
     return max(1, min(value, 5000))
 
 
@@ -260,13 +262,27 @@ def _match_active_keywords(
     subject: str, full_body: str, keys: tuple[str, ...]
 ) -> list[str]:
     """Single source of truth for the active-keyword match (Gate 2). Case-insensitive
-    substring over subject + body — IDENTICAL logic to the old SQL
-    `subject ILIKE %kw% OR full_body ILIKE %kw%` for the space-free flight keywords,
-    so replacing the SQL prefilter with a Python classify keeps what tickets byte-for-
-    byte the same. Used by both fetch_email_arrivals (drop classification) and
-    build_email_ticket so the two can never drift."""
+    substring over subject + body — the Python mirror of the SQL
+    `subject ILIKE %kw% OR full_body ILIKE %kw%` prefilter. Used by build_email_ticket
+    to record which keywords a ticketed arrival matched (urgency + matched_keywords), so
+    the ticket's recorded match can never drift from the SQL gate that admitted it."""
     haystack = f"{subject} {full_body}".lower()
     return [kw for kw in keys if kw and kw.lower() in haystack]
+
+
+def _keyword_ilike_where(keys: tuple[str, ...]) -> tuple[str, list[str]]:
+    """Build the Gate-2 keyword-ILIKE predicate + its bind params, shared by the match
+    fetch and the (negated) miss fetch so the two are EXACT complements — the miss set
+    is byte-for-byte 'the rows the match query would not return'. This is the IDENTICAL
+    construction the pre-observability match query used inline, so restoring it in the
+    match fetch keeps what tickets byte-for-byte the same (parity)."""
+    clauses: list[str] = []
+    params: list[str] = []
+    for keyword in keys:
+        pattern = f"%{keyword}%"
+        clauses.append("(subject ILIKE %s OR full_body ILIKE %s)")
+        params.extend([pattern, pattern])
+    return " OR ".join(clauses), params
 
 
 def _desk_slug() -> str:
@@ -764,6 +780,89 @@ def summarize_recent_drops(conn: Any, *, hours: int = 24) -> list[dict[str, Any]
         return []
 
 
+def _log_keyword_prefilter_misses(
+    conn: Any, *, since: datetime, keys: tuple[str, ...]
+) -> None:
+    """BOX5_DROP_OBSERVABILITY_1 (G3 rework #4957) — Gate-2 observability, fully
+    DECOUPLED from ticketing.
+
+    A SEPARATE, independently-bounded query fetches the recent NON-matching arrivals
+    (the NEGATED keyword ILIKE) and writes them to box5_dropped_signals so keyword-misses
+    become visible. It shares NO state with the match fetch that decides what tickets, so
+    it can NEVER change the ticketed set — parity is guaranteed by construction. (The
+    G3-rejected single-superset-under-a-cap could starve real matches; two decoupled
+    queries cannot.)
+
+    Fully fault-tolerant (AC3): every failure path is caught, the shared conn is left
+    usable, and the tick continues. Called on a CLEAN txn (fetch_email_arrivals runs
+    before run_tick's per-row loop; ensure_* already committed, the match read is
+    read-only), so the batch is committed inline (savepoint=False).
+    """
+    miss_cap = _miss_fetch_cap()
+    where, kw_params = _keyword_ilike_where(keys)
+    try:
+        with conn.cursor() as cur:
+            cur.execute(
+                f"""
+                SELECT message_id, thread_id, sender_email, subject, received_date
+                FROM email_messages
+                WHERE received_date >= %s
+                  AND NOT ({where})
+                -- Recent-first: under the cap we keep the NEWEST misses (most useful for
+                -- 'last 24h drops by gate'). Independently bounded — decoupled from the
+                -- match fetch's LIMIT, so it can never affect what tickets.
+                ORDER BY received_date DESC
+                LIMIT %s
+                """,
+                (since, *kw_params, miss_cap),
+            )
+            rows = cur.fetchall()
+    except Exception as exc:
+        # Read failed — roll back so the shared conn stays usable for the per-row loop
+        # (no good writes exist to lose at this call site). Drops are simply skipped.
+        try:
+            conn.rollback()
+        except Exception:
+            pass
+        logger.warning(
+            "airport_ticketing Gate-2 miss-fetch read failed (drops unlogged this tick, "
+            "ticketing unaffected): %s",
+            exc,
+        )
+        return
+
+    # Never a silent cut (AC4): if the miss fetch saturated its cap, some older misses
+    # went unlogged this tick — log it (they re-surface as newer ones age out).
+    if len(rows) >= miss_cap:
+        logger.info(
+            "airport_ticketing Gate-2 miss-fetch hit cap=%d; older misses beyond the cap "
+            "unlogged this tick (raise %s if fuller drop coverage is needed)",
+            miss_cap,
+            _MISS_FETCH_CAP_ENV,
+        )
+
+    miss_records: list[tuple] = []
+    for row in rows:
+        received_raw = row[4]
+        if isinstance(received_raw, datetime) and received_raw.tzinfo is None:
+            received_raw = received_raw.replace(tzinfo=timezone.utc)
+        miss_records.append(
+            (
+                str(row[0] or ""),
+                str(row[1] or row[0] or ""),
+                str(row[2] or ""),
+                _normalize_text(str(row[3] or ""), limit=300),
+                _json_param([]),  # keyword-miss -> matched_keywords empty (AC1)
+                _GATE_KEYWORD_PREFILTER,
+                "no_active_keyword_match",
+                received_raw if isinstance(received_raw, datetime) else None,
+            )
+        )
+
+    if miss_records:
+        _write_dropped_signals(conn, miss_records, savepoint=False)
+
+
 def fetch_email_arrivals(
     conn: Any,
     *,
@@ -774,23 +873,27 @@ def fetch_email_arrivals(
     keys = keywords or active_keywords()
     if not keys:
         return []
-    # BOX5_DROP_OBSERVABILITY_1 — Gate 2 is now fetch-SUPERSET-then-classify-and-log.
-    # The keyword ILIKE is REMOVED from SQL so keyword-MISSES become visible; we fetch
-    # the recent window (still bounded: received_date >= since + a hard row cap) and
-    # classify in Python. Matched arrivals proceed EXACTLY as before (parity); misses
-    # are written to box5_dropped_signals and skipped. What tickets is unchanged.
+    # BOX5_DROP_OBSERVABILITY_1 (G3 rework #4957) — Gate-2 observability is TWO DECOUPLED
+    # queries:
+    #   (1) MATCH FETCH (below) — the ONLY thing that decides what tickets. It is
+    #       BYTE-IDENTICAL to the pre-observability keyword-ILIKE query, so parity is
+    #       guaranteed BY CONSTRUCTION (nothing in the drop-log path can touch this set).
+    #   (2) MISS FETCH (_log_keyword_prefilter_misses) — a SEPARATE, independently-
+    #       bounded query that writes keyword-misses to box5_dropped_signals ONLY.
+    # The earlier single-superset-under-a-cap approach was G3-rejected: a row cap on the
+    # un-prefiltered fetch could starve real matches behind older non-matches and thereby
+    # CHANGE what tickets. Two decoupled queries make that starvation impossible.
     lim = max(1, min(int(limit), 200))
-    # Cap floored at lim so the un-prefiltered fetch can never return fewer matched
-    # rows than the old keyword-filtered `LIMIT lim` would have (no unbounded scan).
-    superset_cap = max(lim, _superset_fetch_cap())
+    where, kw_params = _keyword_ilike_where(keys)
 
     with conn.cursor() as cur:
         cur.execute(
-            """
+            f"""
             SELECT message_id, thread_id, sender_name, sender_email,
                    subject, full_body, received_date, source
             FROM email_messages
             WHERE received_date >= %s
+              AND ({where})
             -- BOX5_TICKETING_RUNNER_1 P1-A: OLDEST-FIRST. The runner processes the
             -- backlog in cursor order and advances the watermark only over the
             -- contiguous fully-processed prefix. Newest-first (DESC) under a per-tick
@@ -799,66 +902,19 @@ def fetch_email_arrivals(
             ORDER BY received_date ASC
             LIMIT %s
             """,
-            (since, superset_cap),
+            (since, *kw_params, lim),
         )
         rows = cur.fetchall()
 
-    superset_truncated = len(rows) >= superset_cap
+    # Observability (decoupled, best-effort) — a separate bounded miss-fetch logs the
+    # recent keyword-misses. It shares NO state with `rows` above, so it can never change
+    # what tickets, and any failure inside is swallowed (the tick continues, AC3).
+    _log_keyword_prefilter_misses(conn, since=since, keys=keys)
 
-    # Classify ASC (oldest-first). Collect matched up to `lim` — IDENTICAL set to the
-    # old SQL `... AND (keyword ILIKE) ... LIMIT lim` (oldest lim matched since watermark).
-    # A keyword-miss encountered BEFORE we reach `lim` matched is logged as a drop;
-    # rows past the lim-th match are left for a later tick (the watermark won't advance
-    # past un-processed rows), so per-tick work stays bounded.
-    matched_rows: list[Any] = []
-    miss_records: list[tuple] = []
-    for row in rows:
-        if len(matched_rows) >= lim:
-            break
-        subject = str(row[4] or "")
-        body = str(row[5] or "")
-        if _match_active_keywords(subject, body, keys):
-            matched_rows.append(row)
-        else:
-            received_raw = row[6]
-            if isinstance(received_raw, datetime) and received_raw.tzinfo is None:
-                received_raw = received_raw.replace(tzinfo=timezone.utc)
-            miss_records.append(
-                (
-                    str(row[0] or ""),
-                    str(row[1] or row[0] or ""),
-                    str(row[3] or ""),
-                    _normalize_text(subject, limit=300),
-                    _json_param([]),  # keyword-miss -> matched_keywords empty (AC1)
-                    _GATE_KEYWORD_PREFILTER,
-                    "no_active_keyword_match",
-                    received_raw if isinstance(received_raw, datetime) else None,
-                )
-            )
-
-    # Fault-tolerant: a drop-log failure must never stop ticketing (AC3). Clean txn
-    # here (ensure_* already committed, watermark read is read-only), so commit inline.
-    if miss_records:
-        _write_dropped_signals(conn, miss_records, savepoint=False)
-
-    # Never a silent cut (AC4): if the hard cap truncated the scan before we reached
-    # `lim` matched, log it — those matched rows defer to next tick, some misses this
-    # tick go unlogged (they re-classify once the window advances).
-    if superset_truncated and len(matched_rows) < lim:
-        logger.warning(
-            "airport_ticketing Gate-2 superset fetch hit cap=%d (matched %d < limit "
-            "%d): matched arrivals deferred + some misses unlogged this tick; raise "
-            "%s if this recurs",
-            superset_cap,
-            len(matched_rows),
-            lim,
-            _SUPERSET_CAP_ENV,
-        )
-
-    message_ids = [row[0] for row in matched_rows if row and row[0]]
+    message_ids = [row[0] for row in rows if row and row[0]]
     attachment_map = _fetch_email_attachments(conn, message_ids)
     arrivals: list[EmailArrival] = []
-    for row in matched_rows:
+    for row in rows:
         received = row[6]
         if isinstance(received, datetime) and received.tzinfo is None:
             received = received.replace(tzinfo=timezone.utc)
