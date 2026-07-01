@@ -75,6 +75,8 @@ def runner(tier_b_test_store, needs_live_pg, monkeypatch):
         cur.execute("DELETE FROM email_attachments")
         cur.execute("DELETE FROM trigger_watermarks WHERE source = %s", (bridge._WATERMARK_SOURCE,))
         cur.execute("DELETE FROM baker_actions WHERE trigger_source = 'airport_ticketing_bridge'")
+        # BOX5_OUTBOUND_INGEST_1 logs its capture action under a distinct source.
+        cur.execute("DELETE FROM baker_actions WHERE trigger_source = 'airport_outbound_ingest'")
     admin.commit()
 
     monkeypatch.setenv("AIRPORT_TICKETING_BRIDGE_ENABLED", "true")
@@ -90,8 +92,13 @@ def runner(tier_b_test_store, needs_live_pg, monkeypatch):
     admin.close()
 
 
+# Default arrival sender is an INBOUND counterparty. It must NOT be a Brisen-
+# controlled address: BOX5_OUTBOUND_INGEST_1 short-circuits @brisengroup.com senders
+# as outbound BEFORE the lanes, so a Brisen default would make every inbound-lane
+# test skip. (In prod the fast/soft lanes only ever see inbound arrivals for the
+# same reason, so an inbound sender here is the representative case.)
 def _seed_email(conn, message_id, *, subject="annaberg status",
-                sender_email="balazs@brisengroup.com", body="annaberg update",
+                sender_email="counterparty@aukera.lu", body="annaberg update",
                 received=None):
     received = received or (_now() - timedelta(hours=1))
     with conn.cursor() as cur:
@@ -403,7 +410,10 @@ def test_p1_blank_cursor_scans_full_lookback(runner):
 # ============================================================================
 # BOX5_HARD_FAST_LANE_1 (D) — project-number hard fast lane branch in run_tick.
 # ============================================================================
-_BOUND_SENDER = "balazs@brisengroup.com"
+# INBOUND counterparty participant (external project participant). NOT a Brisen
+# address: an @brisengroup.com sender would short-circuit as outbound before D's/E's
+# lanes (BOX5_OUTBOUND_INGEST_1), so the lane tests must bind an inbound participant.
+_BOUND_SENDER = "partner@aukera.lu"
 
 
 @pytest.fixture
@@ -465,7 +475,7 @@ def test_hard_lane_valid_code_no_binding_is_ticket(runner, hard_lane, monkeypatc
     monkeypatch.setenv("BOX5_FAST_LANE_ENABLED", "true")
     hard_lane("BB-AUK-001", participants=[{"channel": "email", "value": _BOUND_SENDER}])
     _seed_email(runner, "hl_unbound", subject="aukera funding",
-                sender_email="stranger@brisengroup.com", body="review BB-AUK-001 please")
+                sender_email="stranger@example.com", body="review BB-AUK-001 please")
     s = bridge.run_tick()
     assert s["fast_ticket"] == 0
     assert _terminal(runner, "hl_unbound")[0] == "TICKET"
@@ -544,7 +554,7 @@ def test_hard_lane_flag_off_is_noop(runner, hard_lane, monkeypatch):
 # fixture wires the registry DB + fixture vault, `_register_soft` adds alias rows.
 # ============================================================================
 
-_OTHER_SENDER = "stranger@brisengroup.com"
+_OTHER_SENDER = "other@aukera.lu"  # inbound (see _BOUND_SENDER note); non-arrival participant
 
 
 def _register_soft(project_number, *, participants, aliases,
@@ -724,3 +734,206 @@ def test_soft_lane_flag_off_is_noop(runner, hard_lane, monkeypatch):
     assert s["soft_ticket"] == 0
     assert _terminal(runner, "sl_off")[0] == "TICKET"
     assert _routing(runner, "sl_off")[0] is None
+
+
+# ============================================================================
+# BOX5_OUTBOUND_INGEST_1 — direction-aware ingestion (Increment 1). Outbound
+# (Brisen-controlled sender) short-circuits BEFORE build_email_ticket + every lane:
+# it NEVER boards a desk / nudges / fast-soft-routes. Dark behind
+# AIRPORT_OUTBOUND_INGEST_ENABLED (default false). AC1 is a pure classifier unit;
+# AC2-AC5 exercise the merged run_tick on live-PG via the `runner` harness.
+# ============================================================================
+_OUTBOUND_SENDER = "dvallen@brisengroup.com"       # Brisen-controlled domain
+_COUNTERPARTY_SENDER = "someone@aukera.lu"          # external -> inbound
+
+
+# AC1 — classifier: Brisen domain + each Director personal address -> outbound;
+#       counterparty / unknown / junk / empty / None -> inbound; never raises.
+def test_ac1_classify_direction():
+    # Brisen-controlled domain -> outbound (case-insensitive).
+    assert bridge._classify_direction("dvallen@brisengroup.com") == "outbound"
+    assert bridge._classify_direction("balazs@brisengroup.com") == "outbound"
+    assert bridge._classify_direction("Office.Vienna@BrisenGroup.COM") == "outbound"
+    # Director personal addresses in the allowlist -> outbound.
+    assert bridge._classify_direction("vallen300@gmail.com") == "outbound"
+    assert bridge._classify_direction("dvallen@bluewin.ch") == "outbound"
+    assert bridge._classify_direction("office.vienna@brisengroup.com") == "outbound"
+    # Counterparty / unknown / non-allowlisted personal -> inbound.
+    assert bridge._classify_direction("someone@aukera.lu") == "inbound"
+    assert bridge._classify_direction("random.person@gmail.com") == "inbound"
+    assert bridge._classify_direction("mohg@example.com") == "inbound"
+    # Junk / empty / None -> inbound, never raises.
+    assert bridge._classify_direction("") == "inbound"
+    assert bridge._classify_direction("not-an-email") == "inbound"      # no '@'
+    assert bridge._classify_direction("   ") == "inbound"               # whitespace only
+    assert bridge._classify_direction(None) == "inbound"                # type: ignore[arg-type]
+    # Domain-match wins even with an empty local part (never a real sender, but the
+    # classifier is deterministic: a Brisen domain part -> outbound).
+    assert bridge._classify_direction("@brisengroup.com") == "outbound"
+
+
+# AC2 — flag ON: an outbound-sender arrival persists direction='outbound', creates
+#       NO desk ticket (no bus post, terminal_status stays NULL, status='candidate'),
+#       NO nudge, and logs EXACTLY ONE 'airport_ticket.outbound_signal'.
+def test_ac2_outbound_flag_on_captures_signal_no_desk(runner, monkeypatch):
+    monkeypatch.setenv("AIRPORT_OUTBOUND_INGEST_ENABLED", "true")
+    _seed_email(runner, "ob1", subject="annaberg status - closing actions",
+                sender_email=_OUTBOUND_SENDER, body="annaberg step plan, DV to sign")
+    s = bridge.run_tick()
+    assert s["ok"]
+    assert s["outbound_signal"] == 1
+    assert s["issued"] == 0                 # NO bus post / boarding pass
+    assert s["terminal_written"] == 0       # NO terminal desk clear
+    assert s["defaulted_ticket"] == 0
+    assert s["fast_ticket"] == 0 and s["soft_ticket"] == 0
+    with runner.cursor() as cur:
+        cur.execute(
+            "SELECT direction, status, terminal_status, proposed_desk_slug "
+            "FROM airport_tickets WHERE source_id='ob1'"
+        )
+        direction, status, term, desk = cur.fetchone()
+    assert direction == "outbound"
+    assert term is None                     # never a terminal desk outcome
+    assert status == "candidate"            # never advanced to 'sent' (never boarded)
+    assert desk == bridge._OUTBOUND_DESK    # sentinel, not a real desk
+    # exactly ONE outbound_signal action for THIS ticket; NO 'created'/'terminal' action.
+    ticket_id = "airport-outbound:ob1"
+    with runner.cursor() as cur:
+        cur.execute(
+            "SELECT COUNT(*) FROM baker_actions "
+            "WHERE action_type='airport_ticket.outbound_signal' AND target_task_id=%s",
+            (ticket_id,),
+        )
+        assert cur.fetchone()[0] == 1
+        cur.execute(
+            "SELECT COUNT(*) FROM baker_actions WHERE target_task_id=%s "
+            "AND action_type IN ('airport_ticket.created','airport_ticket.terminal_written')",
+            (ticket_id,),
+        )
+        assert cur.fetchone()[0] == 0
+
+
+# AC2b — flag ON: re-tick is idempotent — the second pass logs NO second action.
+def test_ac2b_outbound_capture_idempotent(runner, monkeypatch):
+    monkeypatch.setenv("AIRPORT_OUTBOUND_INGEST_ENABLED", "true")
+    _seed_email(runner, "ob_idem", subject="annaberg funding",
+                sender_email=_OUTBOUND_SENDER, body="annaberg to sign")
+    s1 = bridge.run_tick()
+    assert s1["outbound_signal"] == 1
+    s2 = bridge.run_tick()
+    assert s2["outbound_signal"] == 0       # already captured -> no new signal
+    with runner.cursor() as cur:
+        cur.execute(
+            "SELECT COUNT(*) FROM baker_actions "
+            "WHERE action_type='airport_ticket.outbound_signal' "
+            "AND target_task_id='airport-outbound:ob_idem'"
+        )
+        assert cur.fetchone()[0] == 1       # still exactly one
+
+
+# AC3 — flag ON: an inbound-sender arrival is unchanged (routes as today -> safe
+#       default TICKET + bus post) and persists direction='inbound' (column default).
+def test_ac3_outbound_flag_on_inbound_unchanged(runner, monkeypatch):
+    monkeypatch.setenv("AIRPORT_OUTBOUND_INGEST_ENABLED", "true")
+    _seed_email(runner, "ib1", subject="annaberg closing",
+                sender_email=_COUNTERPARTY_SENDER, body="annaberg review please")
+    s = bridge.run_tick()
+    assert s["defaulted_ticket"] == 1       # routes exactly as today
+    assert s["issued"] == 1                 # boards the desk (bus post)
+    assert s["outbound_signal"] == 0
+    assert _terminal(runner, "ib1")[0] == "TICKET"
+    with runner.cursor() as cur:
+        cur.execute("SELECT direction FROM airport_tickets WHERE source_id='ib1'")
+        assert cur.fetchone()[0] == "inbound"   # via NOT NULL DEFAULT 'inbound'
+
+
+# AC4 — flag OFF: outbound-sender arrivals are SKIPPED (no row at all) and the inbound
+#       path is byte-identical; the outbound skip must NOT strand the cursor.
+def test_ac4_flag_off_skips_outbound_inbound_byte_identical(runner, monkeypatch):
+    monkeypatch.delenv("AIRPORT_OUTBOUND_INGEST_ENABLED", raising=False)  # default false
+    r_ob = _now() - timedelta(hours=2)
+    r_ib = _now() - timedelta(hours=1)
+    _seed_email(runner, "ob_off", subject="annaberg to sign",
+                sender_email=_OUTBOUND_SENDER, body="annaberg outbound note", received=r_ob)
+    _seed_email(runner, "ib_off", subject="annaberg closing",
+                sender_email=_COUNTERPARTY_SENDER, body="annaberg inbound note", received=r_ib)
+    s = bridge.run_tick()
+    assert s["outbound_signal"] == 0
+    # outbound skipped: NO airport_tickets row created for it.
+    with runner.cursor() as cur:
+        cur.execute("SELECT COUNT(*) FROM airport_tickets WHERE source_id='ob_off'")
+        assert cur.fetchone()[0] == 0
+    # inbound byte-identical: still safe-default TICKET + bus post.
+    assert s["defaulted_ticket"] == 1
+    assert s["issued"] == 1
+    assert _terminal(runner, "ib_off")[0] == "TICKET"
+    # cursor advanced past BOTH (older outbound skip did NOT freeze the batch).
+    wm = bridge.trigger_state_get_watermark(bridge._WATERMARK_SOURCE)
+    assert abs((wm - r_ib).total_seconds()) < 1.0
+
+
+# AC4b — flag OFF: an OLDEST outbound arrival must not strand a NEWER inbound one
+#        across ticks (contiguous-prefix advance past the drop).
+def test_ac4b_flag_off_outbound_does_not_strand_batch(runner, monkeypatch):
+    monkeypatch.delenv("AIRPORT_OUTBOUND_INGEST_ENABLED", raising=False)
+    monkeypatch.setenv("AIRPORT_TICKETING_MAX_POSTS_PER_TICK", "25")
+    r_ob = _now() - timedelta(hours=3)      # oldest = outbound (would freeze if `continue`d raw)
+    r_ib = _now() - timedelta(hours=1)
+    _seed_email(runner, "ob_head", subject="annaberg lead",
+                sender_email=_OUTBOUND_SENDER, body="annaberg outbound", received=r_ob)
+    _seed_email(runner, "ib_tail", subject="annaberg tail",
+                sender_email=_COUNTERPARTY_SENDER, body="annaberg inbound", received=r_ib)
+    s = bridge.run_tick()
+    assert _terminal(runner, "ib_tail")[0] == "TICKET"   # processed same tick, not stranded
+    assert s["issued"] == 1
+    wm = bridge.trigger_state_get_watermark(bridge._WATERMARK_SOURCE)
+    assert abs((wm - r_ib).total_seconds()) < 1.0        # advanced past the outbound head
+
+
+# AC5 — the direction column exists after bootstrap (NOT NULL DEFAULT 'inbound'),
+#       existing rows backfill to 'inbound', and the bootstrap is idempotent.
+def test_ac5_direction_column_and_bootstrap_idempotent(runner):
+    with runner.cursor() as cur:
+        cur.execute(
+            "SELECT data_type, column_default, is_nullable FROM information_schema.columns "
+            "WHERE table_name='airport_tickets' AND column_name='direction'"
+        )
+        row = cur.fetchone()
+    assert row is not None                       # column present after fixture bootstrap
+    assert row[1] is not None and "inbound" in row[1]   # DEFAULT 'inbound'
+    assert row[2] == "NO"                        # NOT NULL
+    # an INSERT that omits direction backfills to 'inbound' (safe on populated tables).
+    with runner.cursor() as cur:
+        cur.execute(
+            "INSERT INTO airport_tickets (ticket_id,dedup_key,source_channel,source_id,"
+            "proposed_desk_slug) VALUES ('bf','bf','email','bf','baden-baden-desk')"
+        )
+        cur.execute("SELECT direction FROM airport_tickets WHERE source_id='bf'")
+        assert cur.fetchone()[0] == "inbound"
+    runner.commit()
+    # bootstrap idempotent: re-run ensure on a populated table -> no error, value intact.
+    bridge.ensure_airport_ticket_table(runner)
+    runner.commit()
+    with runner.cursor() as cur:
+        cur.execute("SELECT direction FROM airport_tickets WHERE source_id='bf'")
+        assert cur.fetchone()[0] == "inbound"
+
+
+# AC5b — captured OUTBOUND rows (terminal_status NULL by design) are NOT counted as
+#        stuck by the journey gauge; a genuinely-stalled inbound row still is.
+def test_ac5b_outbound_rows_excluded_from_stuck_gauge(runner):
+    with runner.cursor() as cur:
+        # aged outbound capture (terminal_status NULL) -> must NOT count as stuck.
+        cur.execute(
+            "INSERT INTO airport_tickets (ticket_id,dedup_key,source_channel,source_id,"
+            "source_received_at,proposed_desk_slug,direction) "
+            "VALUES ('so','so','email','so', NOW() - INTERVAL '90 minutes','outbound','outbound')"
+        )
+        # aged inbound row with no terminal_status -> genuinely stuck.
+        cur.execute(
+            "INSERT INTO airport_tickets (ticket_id,dedup_key,source_channel,source_id,"
+            "source_received_at,proposed_desk_slug) "
+            "VALUES ('si','si','email','si', NOW() - INTERVAL '90 minutes','baden-baden-desk')"
+        )
+    runner.commit()
+    assert bridge._count_stuck_arrivals(runner) == 1   # only the inbound row, not the outbound one

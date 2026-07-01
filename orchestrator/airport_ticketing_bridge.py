@@ -53,6 +53,29 @@ _SKIP_EMAIL_SENDER_PATTERNS = (
     "@todoist.com",
 )
 
+# BOX5_OUTBOUND_INGEST_1 — direction-aware ingestion (Director ruling 2026-07-01).
+# A sender in a Brisen-controlled domain OR address is OUTBOUND; everyone else is
+# INBOUND. Read ONCE at import (module-level): this is a rarely-changing allowlist
+# set in Render env, not a per-tick knob like the keyword/lookback reads.
+_OUTBOUND_INGEST_ENV = "AIRPORT_OUTBOUND_INGEST_ENABLED"
+_BRISEN_OUTBOUND_DOMAINS = {
+    d.strip().lower()
+    for d in os.environ.get("BRISEN_OUTBOUND_DOMAINS", "brisengroup.com").split(",")
+    if d.strip()
+}
+_BRISEN_OUTBOUND_ADDRESSES = {
+    a.strip().lower()
+    for a in os.environ.get(
+        "BRISEN_OUTBOUND_ADDRESSES",
+        "vallen300@gmail.com,dvallen@bluewin.ch,office.vienna@brisengroup.com",
+    ).split(",")
+    if a.strip()
+}
+# Sentinel proposed_desk_slug for a captured OUTBOUND row. Outbound NEVER boards a
+# real desk (no bus post), so this is a bookkeeping placeholder only — distinct from
+# _NOISE_DESK so captured outbound is never confused with REJECT_NOISE.
+_OUTBOUND_DESK = "outbound"
+
 VALID_CHECK_IN_OUTCOMES = frozenset(
     {"VALID", "FAKE", "DUPLICATE", "WRONG_TERMINAL", "URGENT", "NEEDS_LUGGAGE_READ"}
 )
@@ -247,6 +270,34 @@ def _is_automated_email_arrival(arrival: EmailArrival) -> bool:
     return any(pattern in sender for pattern in _SKIP_EMAIL_SENDER_PATTERNS)
 
 
+def _classify_direction(sender_email: str) -> str:
+    """'outbound' iff the sender is a Brisen-controlled address/domain, else
+    'inbound'. Pure + total — NEVER raises: a bad / empty / garbage sender is
+    'inbound', the safe default that preserves today's inbound routing.
+    BOX5_OUTBOUND_INGEST_1."""
+    try:
+        s = (sender_email or "").strip().lower()
+        if not s or "@" not in s:
+            return "inbound"
+        if s in _BRISEN_OUTBOUND_ADDRESSES:
+            return "outbound"
+        return (
+            "outbound"
+            if s.rsplit("@", 1)[1] in _BRISEN_OUTBOUND_DOMAINS
+            else "inbound"
+        )
+    except Exception:
+        return "inbound"
+
+
+def _outbound_ingest_enabled() -> bool:
+    """Dark flag (default OFF), orthogonal to the master gate + the fast-lane flag.
+    OFF -> outbound arrivals are dropped (never board a desk). ON -> outbound is
+    captured as a direction-tagged action-evidence signal. BOX5_OUTBOUND_INGEST_1."""
+    raw = os.environ.get(_OUTBOUND_INGEST_ENV, "false")
+    return raw.strip().lower() in {"1", "true", "yes", "on"}
+
+
 def build_email_ticket(
     arrival: EmailArrival,
     *,
@@ -382,6 +433,15 @@ def ensure_airport_ticket_table(conn: Any) -> None:
         )
         cur.execute(
             "ALTER TABLE airport_tickets ADD COLUMN IF NOT EXISTS escalated_at TIMESTAMPTZ"
+        )
+        # BOX5_OUTBOUND_INGEST_1: direction axis (inbound / outbound). Mirrors
+        # migrations/20260701_airport_tickets_direction.sql. NOT NULL DEFAULT
+        # 'inbound' is safe on a populated table (existing rows backfill to
+        # 'inbound'); inbound tickets never set it explicitly (the default carries
+        # them, keeping reserve_ticket's INSERT byte-identical), only the outbound
+        # capture path writes 'outbound'.
+        cur.execute(
+            "ALTER TABLE airport_tickets ADD COLUMN IF NOT EXISTS direction TEXT NOT NULL DEFAULT 'inbound'"
         )
     # Additive terminal-classification axis (BOX5_SCHEMA_FOUNDATION_1 / BRIEF-B).
     # Mirrors migrations/20260630_airport_tickets_terminal_columns.sql. The
@@ -997,6 +1057,71 @@ def reserve_noise_row(conn: Any, arrival: EmailArrival) -> Optional[int]:
         cur.close()
 
 
+def _ingest_outbound_signal(conn: Any, arrival: EmailArrival) -> bool:
+    """BOX5_OUTBOUND_INGEST_1 flag-ON capture. Persist ONE direction='outbound'
+    airport_tickets row (deduped by dedup_key so a re-tick is idempotent) and log
+    EXACTLY ONE 'airport_ticket.outbound_signal' baker_action. Outbound NEVER boards
+    a desk (no bus post / no mark_ticket_sent -> the row stays status='candidate',
+    invisible to the check-in reader's status='sent' nudge + escalation sweep),
+    never nudges, never enters D's / E's fast-soft lanes.
+
+    Returns True when THIS call captured a NEW row (+ logged its single action),
+    False on an idempotent re-tick (row already reserved on a prior tick -> no
+    second action). Does NOT commit — the caller owns the per-row commit. Any
+    exception propagates to the caller's per-row handler (rollback + failed++),
+    never a silent clear."""
+    dedup = _dedup_key("email", arrival.message_id, _OUTBOUND_DESK)
+    ticket_id = f"airport-outbound:{arrival.message_id}"
+    with conn.cursor() as cur:
+        cur.execute(
+            """
+            INSERT INTO airport_tickets
+                (ticket_id, dedup_key, source_channel, source_id,
+                 source_received_at, proposed_desk_slug, direction)
+            VALUES (%s, %s, 'email', %s, %s, %s, 'outbound')
+            ON CONFLICT (dedup_key) DO NOTHING
+            RETURNING id
+            """,
+            (
+                ticket_id,
+                dedup,
+                arrival.message_id,
+                arrival.received_date,
+                _OUTBOUND_DESK,
+            ),
+        )
+        row = cur.fetchone()
+        if row is None:
+            # Already captured on a prior tick — idempotent, no second action.
+            return False
+        cur.execute(
+            """
+            INSERT INTO baker_actions
+                (action_type, target_task_id, payload, trigger_source, success)
+            VALUES ('airport_ticket.outbound_signal', %s, %s,
+                    'airport_outbound_ingest', TRUE)
+            """,
+            (
+                ticket_id,
+                _json_param(
+                    {
+                        "sender": (arrival.sender_email or ""),
+                        "subject": (arrival.subject or "")[:200],
+                        "thread_id": arrival.thread_id,
+                        "message_id": arrival.message_id,
+                        "received_at": (
+                            arrival.received_date.isoformat()
+                            if arrival.received_date
+                            else None
+                        ),
+                        "direction": "outbound",
+                    }
+                ),
+            ),
+        )
+    return True
+
+
 def _count_stuck_arrivals(conn: Any) -> int:
     """Journey gauge (NOT scheduler liveness): arrivals that never reached a
     terminal disposition. source_received_at is a real existing column."""
@@ -1007,6 +1132,11 @@ def _count_stuck_arrivals(conn: Any) -> int:
             SELECT COUNT(*)
               FROM airport_tickets
              WHERE terminal_status IS NULL
+               -- Captured OUTBOUND rows are terminal-by-design (no desk journey, so
+               -- terminal_status stays NULL forever); they are NOT stuck. Exclude
+               -- them so the journey gauge counts only genuinely-stalled inbound
+               -- arrivals. (BOX5_OUTBOUND_INGEST_1.)
+               AND direction <> 'outbound'
                AND source_received_at < NOW() - (%s || ' minutes')::interval
             """,
             (_STUCK_ARRIVAL_MINUTES,),
@@ -1054,6 +1184,7 @@ def run_tick(*, now: Optional[datetime] = None) -> dict[str, Any]:
     deterministic_cleared = defaulted_ticket = 0
     fast_ticket = 0  # BRIEF-D hard fast lane; not a deterministic_cleared/defaulted_ticket
     soft_ticket = 0  # BRIEF-E manifest soft lane; routed TICKET, not fast_ticket/defaulted
+    outbound_signal = 0  # BOX5_OUTBOUND_INGEST_1 flag-ON captures; never boards a desk
     fast_lane = fast_lane_enabled()  # honored now; only future-proofs D/E
     current = now or _utc_now()
     # (P1-A) CONTIGUOUS-PREFIX WATERMARK. The cursor may only advance over the
@@ -1101,6 +1232,48 @@ def run_tick(*, now: Optional[datetime] = None) -> dict[str, Any]:
             # (cleared / ticketed / idempotent no-op). Only a done arrival at the head
             # of an unbroken run advances the cursor. Anything not done freezes it.
             done = False
+
+            # (b.5) OUTBOUND SHORT-CIRCUIT — direction-aware ingestion
+            #   (BOX5_OUTBOUND_INGEST_1, Director ruling 2026-07-01). Classified from
+            #   sender_email BEFORE build_email_ticket + every lane, so outbound NEVER
+            #   boards a desk, nudges, or enters D's / E's fast-soft lanes. Dark behind
+            #   AIRPORT_OUTBOUND_INGEST_ENABLED:
+            #     OFF -> drop the arrival (definite disposition: done=True so the cursor
+            #            advances past it and the batch is never stranded; NO row, NO
+            #            ticket -> the live inbound path below stays byte-untouched).
+            #     ON  -> capture ONE direction='outbound' row + one action-evidence
+            #            signal (no bus / no desk). Its own fault isolation mirrors the
+            #            per-row try: a throw rolls back, counts failed, and FREEZES the
+            #            cursor (retry next tick) — never a silent clear.
+            #   The `continue` skips the inbound try + the shared (P1-A) cursor block at
+            #   the end of the loop, so the two cursor-advance lines are replicated here
+            #   and MUST stay in lock-step with that block.
+            if _classify_direction(arrival.sender_email) == "outbound":
+                try:
+                    if _outbound_ingest_enabled():
+                        if _ingest_outbound_signal(conn, arrival):
+                            outbound_signal += 1
+                        conn.commit()
+                    else:
+                        skipped += 1
+                    done = True
+                except Exception as exc:
+                    try:
+                        conn.rollback()
+                    except Exception:
+                        pass
+                    failed += 1
+                    done = False
+                    logger.warning(
+                        "airport_ticketing outbound row failed: %s", exc
+                    )
+                if not done:
+                    contiguous = False
+                elif contiguous:
+                    watermark_candidate = _advance(
+                        watermark_candidate, arrival.received_date
+                    )
+                continue
 
             # (c) PER-ROW FAULT ISOLATION — one bad row never crashes the tick, and
             #     an exception NEVER auto-clears (blocker D3): it routes to `failed`,
@@ -1486,6 +1659,7 @@ def run_tick(*, now: Optional[datetime] = None) -> dict[str, Any]:
             "defaulted_ticket": defaulted_ticket,
             "fast_ticket": fast_ticket,
             "soft_ticket": soft_ticket,
+            "outbound_signal": outbound_signal,
             "stuck_arrivals": stuck_arrivals,
             # Read + surfaced for observability. In BRIEF-C the fast lane is not
             # built, so this flag has NO behavioral branch yet — it only gates the
