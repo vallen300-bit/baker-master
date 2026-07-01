@@ -36,6 +36,28 @@ def _fake_client(ready=True):
     return client
 
 
+@pytest.fixture(autouse=True)
+def _reset_folder_state():
+    """GRAPH_INGEST_SCOPE_WIDEN_1: the folder-list cache + per-folder failure
+    counter are per-process module state — reset around every test."""
+    gmt._reset_folder_cache()
+    gmt._folder_poll_failures = 0
+    yield
+    gmt._reset_folder_cache()
+    gmt._folder_poll_failures = 0
+
+
+def _folders(*specs):
+    """Build a pollable-folder list; each spec is an id str or (id, displayName)."""
+    out = []
+    for s in specs:
+        if isinstance(s, tuple):
+            out.append({"id": s[0], "displayName": s[1]})
+        else:
+            out.append({"id": s, "displayName": s})
+    return out
+
+
 # ── Test 1: dormant → fully inert ────────────────────────────────────────────
 def test_dormant_is_fully_inert():
     client = _fake_client(ready=False)
@@ -82,6 +104,7 @@ def test_two_messages_exact_thread_shape():
     client = _fake_client(ready=True)
     client.get.return_value = page
     with mock.patch.object(gmt, "GraphClient", return_value=client), \
+         mock.patch.object(gmt, "_get_pollable_folders", return_value=_folders("inbox-id")), \
          mock.patch.object(gmt.trigger_state, "get_cursor", return_value=None), \
          mock.patch.object(gmt.trigger_state, "set_cursor"):
         threads = gmt.poll_graph_mail()
@@ -107,6 +130,30 @@ def test_two_messages_exact_thread_shape():
     assert threads[1]["metadata"]["thread_id"] == "c2"
 
 
+# ── AC1: a message in a NON-Inbox folder is ingested ─────────────────────────
+def test_non_inbox_folder_message_ingested():
+    """AC1: a rule-filed subfolder message reaches the sink shape (the exact
+    Siegfried-class miss). Inbox-only scope would never see it."""
+    page = {
+        "value": [_mk_msg("mf", "cf", "Filed", "Siegfried", "s@brandner.at",
+                          "2026-07-01T13:09:00Z")],
+        "@odata.deltaLink": "https://graph.microsoft.com/v1.0/delta?$deltatoken=sub",
+    }
+    client = _fake_client(ready=True)
+    client.get.return_value = page
+    with mock.patch.object(gmt, "GraphClient", return_value=client), \
+         mock.patch.object(gmt, "_get_pollable_folders",
+                           return_value=_folders(("sub-folder-id", "Aukera"))), \
+         mock.patch.object(gmt.trigger_state, "get_cursor", return_value=None), \
+         mock.patch.object(gmt.trigger_state, "set_cursor"):
+        threads = gmt.poll_graph_mail()
+
+    assert [t["metadata"]["thread_id"] for t in threads] == ["cf"]
+    # polled the subfolder's delta, not Inbox's
+    called_path = client.get.call_args_list[0].args[0]
+    assert "mailFolders/sub-folder-id/messages/delta" in called_path
+
+
 # ── Test 3: @removed tombstones + drafts skipped ─────────────────────────────
 def test_removed_and_drafts_skipped():
     page = {
@@ -122,6 +169,7 @@ def test_removed_and_drafts_skipped():
     client = _fake_client(ready=True)
     client.get.return_value = page
     with mock.patch.object(gmt, "GraphClient", return_value=client), \
+         mock.patch.object(gmt, "_get_pollable_folders", return_value=_folders("inbox-id")), \
          mock.patch.object(gmt.trigger_state, "get_cursor", return_value=None), \
          mock.patch.object(gmt.trigger_state, "set_cursor"):
         threads = gmt.poll_graph_mail()
@@ -130,37 +178,68 @@ def test_removed_and_drafts_skipped():
     assert threads[0]["metadata"]["thread_id"] == "c1"
 
 
-# ── Test 4: deltaLink persisted via set_cursor ───────────────────────────────
-def test_deltalink_persisted():
+# ── Test 4: per-folder deltaLink persisted under the folder-keyed source ─────
+def test_deltalink_persisted_per_folder():
     delta = "https://graph.microsoft.com/v1.0/me/delta?$deltatoken=persist-me"
     page = {"value": [], "@odata.deltaLink": delta}
     client = _fake_client(ready=True)
     client.get.return_value = page
     with mock.patch.object(gmt, "GraphClient", return_value=client), \
+         mock.patch.object(gmt, "_get_pollable_folders", return_value=_folders("fid-9")), \
          mock.patch.object(gmt.trigger_state, "get_cursor", return_value=None), \
          mock.patch.object(gmt.trigger_state, "set_cursor") as set_cursor:
         threads = gmt.poll_graph_mail()
 
     assert threads == []
-    set_cursor.assert_called_once_with("graph_mail_poll", delta)
+    # cursor keyed PER FOLDER (graph_mail_poll:folder:<id>), not the bare source
+    set_cursor.assert_called_once_with("graph_mail_poll:folder:fid-9", delta)
 
 
 def test_stored_cursor_followed_via_get_url():
-    """First-run cursor present → followed via get_url (host-pin), not get()."""
+    """Cursored folder → followed via get_url (host-pin), not a fresh delta get()."""
     stored = "https://graph.microsoft.com/v1.0/me/delta?$deltatoken=stored"
     page = {"value": [], "@odata.deltaLink": stored + "-next"}
     client = _fake_client(ready=True)
     client.get_url.return_value = page
     with mock.patch.object(gmt, "GraphClient", return_value=client), \
+         mock.patch.object(gmt, "_get_pollable_folders", return_value=_folders("fid-1")), \
          mock.patch.object(gmt.trigger_state, "get_cursor", return_value=stored), \
          mock.patch.object(gmt.trigger_state, "set_cursor"):
         gmt.poll_graph_mail()
 
     client.get_url.assert_called_once_with(stored)
-    client.get.assert_not_called()
+    client.get.assert_not_called()      # no fresh delta when a cursor exists
 
 
-# ── Test 5: nextLink pagination followed ─────────────────────────────────────
+# ── AC3: first-encounter delta is SEEDED (no full-history backfill) ──────────
+def test_first_encounter_seeds_receiveddatetime_filter():
+    """AC3: an un-cursored folder's initial delta carries $filter=receivedDateTime
+    ge {seed} so cutover pulls only recent mail, NOT the folder's whole history."""
+    page = {"value": [], "@odata.deltaLink": "d"}
+    client = _fake_client(ready=True)
+    client.get.return_value = page
+    with mock.patch.object(gmt, "GraphClient", return_value=client), \
+         mock.patch.object(gmt, "_get_pollable_folders", return_value=_folders("fid-7")), \
+         mock.patch.object(gmt.trigger_state, "get_cursor", return_value=None), \
+         mock.patch.object(gmt.trigger_state, "set_cursor"):
+        gmt.poll_graph_mail()
+
+    params = client.get.call_args_list[0].kwargs.get("params") or {}
+    assert params.get("$filter", "").startswith("receivedDateTime ge ")
+    assert params.get("$top") == 50
+
+
+def test_seed_filter_format():
+    """The seed filter uses now - _SEED_LOOKBACK, Graph's ONLY supported message
+    delta filter form."""
+    from datetime import datetime, timezone
+    now = datetime(2026, 7, 1, 12, 0, 0, tzinfo=timezone.utc)
+    got = gmt._folder_seed_filter(now)
+    expected_seed = (now - gmt._SEED_LOOKBACK).strftime("%Y-%m-%dT%H:%M:%SZ")
+    assert got == f"receivedDateTime ge {expected_seed}"
+
+
+# ── Test 5: nextLink pagination followed within a folder ─────────────────────
 def test_nextlink_pagination_followed():
     next_url = "https://graph.microsoft.com/v1.0/me/delta?$skiptoken=page2"
     delta = "https://graph.microsoft.com/v1.0/me/delta?$deltatoken=final"
@@ -178,21 +257,69 @@ def test_nextlink_pagination_followed():
     client.get.return_value = page1
     client.get_url.return_value = page2
     with mock.patch.object(gmt, "GraphClient", return_value=client), \
+         mock.patch.object(gmt, "_get_pollable_folders", return_value=_folders("fid-2")), \
          mock.patch.object(gmt.trigger_state, "get_cursor", return_value=None), \
          mock.patch.object(gmt.trigger_state, "set_cursor") as set_cursor:
         threads = gmt.poll_graph_mail()
 
     client.get_url.assert_called_once_with(next_url)
     assert [t["metadata"]["thread_id"] for t in threads] == ["c1", "c2"]
-    set_cursor.assert_called_once_with("graph_mail_poll", delta)
+    set_cursor.assert_called_once_with("graph_mail_poll:folder:fid-2", delta)
 
 
-# ── Test 6: failure path — ready-but-None raises; no silent success ──────────
-def test_ready_but_none_raises():
+# ── AC4: delta semantics dedup — a cursored quiet folder re-emits nothing ────
+def test_cursored_quiet_folder_reemits_nothing():
+    """AC4 (poller layer): once a folder's deltaLink is stored, following it returns
+    only NEW changes — an unchanged folder yields []. (Boundary dups are absorbed by
+    the unchanged store-layer ON CONFLICT on message_id.)"""
+    client = _fake_client(ready=True)
+    client.get_url.return_value = {"value": [], "@odata.deltaLink": "d2"}
+    with mock.patch.object(gmt, "GraphClient", return_value=client), \
+         mock.patch.object(gmt, "_get_pollable_folders", return_value=_folders("fid-3")), \
+         mock.patch.object(gmt.trigger_state, "get_cursor", return_value="stored-delta"), \
+         mock.patch.object(gmt.trigger_state, "set_cursor"):
+        threads = gmt.poll_graph_mail()
+    assert threads == []
+
+
+# ── AC5 + failure semantics ──────────────────────────────────────────────────
+def test_single_folder_none_raises_total_failure():
+    """One-folder mailbox whose delta returns None → all folders failed → poll RAISES
+    (no silent success; watermark not advanced by the caller)."""
     client = _fake_client(ready=True)
     client.get.return_value = None
     with mock.patch.object(gmt, "GraphClient", return_value=client), \
+         mock.patch.object(gmt, "_get_pollable_folders", return_value=_folders("fid-1")), \
          mock.patch.object(gmt.trigger_state, "get_cursor", return_value=None):
+        with pytest.raises(RuntimeError):
+            gmt.poll_graph_mail()
+
+
+def test_one_folder_failure_does_not_abort_poll():
+    """AC5: folder A's fetch fails, folder B succeeds → B's mail still ingested, poll
+    does NOT raise, the failure is surfaced via the counter."""
+    good = {"value": [_mk_msg("m2", "c2", "OK", "B", "b@x.com",
+                              "2026-07-01T09:00:00Z")],
+            "@odata.deltaLink": "dl"}
+    client = _fake_client(ready=True)
+    client.get.side_effect = [None, good]     # folder A → None (fails); folder B → page
+    with mock.patch.object(gmt, "GraphClient", return_value=client), \
+         mock.patch.object(gmt, "_get_pollable_folders",
+                           return_value=_folders("bad-id", "good-id")), \
+         mock.patch.object(gmt.trigger_state, "get_cursor", return_value=None), \
+         mock.patch.object(gmt.trigger_state, "set_cursor"):
+        threads = gmt.poll_graph_mail()
+
+    assert [t["metadata"]["thread_id"] for t in threads] == ["c2"]
+    assert gmt.folder_poll_failures() == 1     # A's failure surfaced, not swallowed
+
+
+def test_empty_folder_enumeration_raises():
+    """Ready but folder enumeration yields nothing → listing failed (a real mailbox
+    always has Inbox) → RAISE, don't silently succeed."""
+    client = _fake_client(ready=True)
+    with mock.patch.object(gmt, "GraphClient", return_value=client), \
+         mock.patch.object(gmt, "_get_pollable_folders", return_value=[]):
         with pytest.raises(RuntimeError):
             gmt.poll_graph_mail()
 
@@ -204,6 +331,7 @@ def test_nextlink_none_mid_pagination_raises():
     client.get.return_value = page1
     client.get_url.return_value = None
     with mock.patch.object(gmt, "GraphClient", return_value=client), \
+         mock.patch.object(gmt, "_get_pollable_folders", return_value=_folders("fid-1")), \
          mock.patch.object(gmt.trigger_state, "get_cursor", return_value=None), \
          mock.patch.object(gmt.trigger_state, "set_cursor") as set_cursor:
         with pytest.raises(RuntimeError):
@@ -215,6 +343,7 @@ def test_check_failure_reports_and_does_not_advance():
     client = _fake_client(ready=True)
     client.get.return_value = None     # ready-but-None → poll raises
     with mock.patch.object(gmt, "GraphClient", return_value=client), \
+         mock.patch.object(gmt, "_get_pollable_folders", return_value=_folders("fid-1")), \
          mock.patch.object(gmt, "should_skip_poll", return_value=False), \
          mock.patch.object(gmt, "report_success") as ok, \
          mock.patch.object(gmt, "report_failure") as fail, \
@@ -239,6 +368,7 @@ def test_check_success_advances_watermark_and_calls_sink():
     client = _fake_client(ready=True)
     client.get.return_value = page
     with mock.patch.object(gmt, "GraphClient", return_value=client), \
+         mock.patch.object(gmt, "_get_pollable_folders", return_value=_folders("inbox-id")), \
          mock.patch.object(gmt, "should_skip_poll", return_value=False), \
          mock.patch.object(gmt, "report_success") as ok, \
          mock.patch.object(gmt, "report_failure") as fail, \
@@ -253,6 +383,84 @@ def test_check_success_advances_watermark_and_calls_sink():
     set_wm.assert_called_once()
     ok.assert_called_once_with("graph_mail")
     fail.assert_not_called()
+
+
+# ── Folder enumeration + exclusion (AC2) ─────────────────────────────────────
+def test_enumerate_includes_nested_childfolders():
+    """The walk descends into childFolders so rule-filed subfolders are covered."""
+    top = {"value": [
+        {"id": "inbox-id", "displayName": "Inbox", "childFolderCount": 1},
+    ]}
+    children = {"value": [
+        {"id": "aukera-id", "displayName": "Aukera", "childFolderCount": 0},
+    ]}
+    client = _fake_client(ready=True)
+    # top-level list, then the childFolders of inbox-id
+    client.get.side_effect = [top, children]
+    folders = gmt._enumerate_folders(client, excluded_ids=set())
+    ids = {f["id"] for f in folders}
+    assert ids == {"inbox-id", "aukera-id"}
+
+
+def test_excluded_wellknown_and_subtree_pruned():
+    """AC2: Sent/Drafts/Deleted/Junk are dropped by id AND their subtree is pruned
+    (no descent into a Deleted Items childFolder)."""
+    top = {"value": [
+        {"id": "inbox-id", "displayName": "Inbox", "childFolderCount": 0},
+        {"id": "deleted-id", "displayName": "Deleted Items", "childFolderCount": 1},
+        {"id": "junk-name-id", "displayName": "Junk Email", "childFolderCount": 0},
+    ]}
+    client = _fake_client(ready=True)
+    client.get.side_effect = [top]     # only ONE call → Deleted subtree NOT walked
+    folders = gmt._enumerate_folders(client, excluded_ids={"deleted-id"})
+    ids = {f["id"] for f in folders}
+    assert ids == {"inbox-id"}                    # deleted (by id) + junk (by name) gone
+    assert client.get.call_count == 1             # excluded subtree pruned (no 2nd call)
+
+
+def test_excluded_folder_ids_resolves_wellknown():
+    """Each well-known folder name is resolved to its real id for the deny-set."""
+    client = _fake_client(ready=True)
+    client.get.side_effect = [
+        {"id": "sent-id"}, {"id": "drafts-id"},
+        {"id": "deleted-id"}, {"id": "junk-id"},
+    ]
+    ids = gmt._excluded_folder_ids(client)
+    assert ids == {"sent-id", "drafts-id", "deleted-id", "junk-id"}
+    # resolved via well-known names (locale-proof), one GET each
+    paths = [c.args[0] for c in client.get.call_args_list]
+    assert any(p.endswith("/mailFolders/sentitems") for p in paths)
+    assert any(p.endswith("/mailFolders/junkemail") for p in paths)
+
+
+def test_folder_list_cached_not_reenumerated_within_ttl():
+    """lead: bound the walk to a cached list, not every tick. Two polls within TTL →
+    one enumeration."""
+    client = _fake_client(ready=True)
+    with mock.patch.object(gmt, "_excluded_folder_ids", return_value=set()) as exc, \
+         mock.patch.object(gmt, "_enumerate_folders",
+                           return_value=_folders("inbox-id")) as enum:
+        first = gmt._get_pollable_folders(client)
+        second = gmt._get_pollable_folders(client)
+    assert first == second == _folders("inbox-id")
+    enum.assert_called_once()          # cached — walked once, not twice
+    exc.assert_called_once()
+
+
+def test_folder_cache_refreshes_after_ttl():
+    """A stale cache (older than TTL) triggers a fresh enumeration."""
+    client = _fake_client(ready=True)
+    from datetime import datetime, timezone, timedelta
+    with mock.patch.object(gmt, "_excluded_folder_ids", return_value=set()), \
+         mock.patch.object(gmt, "_enumerate_folders",
+                           return_value=_folders("inbox-id")) as enum:
+        gmt._get_pollable_folders(client)
+        # age the cache past the TTL
+        gmt._folder_cache["fetched_at"] = (
+            datetime.now(timezone.utc) - gmt._FOLDER_CACHE_TTL - timedelta(minutes=1)
+        )
+        gmt._get_pollable_folders(client)
+    assert enum.call_count == 2         # re-enumerated after expiry
 
 
 # ---------------------------------------------------------------------------

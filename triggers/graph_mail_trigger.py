@@ -8,7 +8,7 @@ Never raises to the scheduler; one failure must not affect other pollers.
 from __future__ import annotations
 import base64
 import logging
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 from urllib.parse import quote
 
 from kbl.graph_client import GraphClient
@@ -18,9 +18,60 @@ from triggers.sentinel_health import report_success, report_failure, should_skip
 
 logger = logging.getLogger(__name__)
 
-_SOURCE = "graph_mail_poll"          # watermark/cursor key
-_FOLDER = "Inbox"
+_SOURCE = "graph_mail_poll"          # watermark key + per-folder cursor prefix
 _SELECT = "id,conversationId,subject,from,receivedDateTime,body,isDraft,hasAttachments"
+
+# GRAPH_INGEST_SCOPE_WIDEN_1 (Director-caught miss 2026-07-01, lead Option B):
+# Graph has NO mailbox-wide message delta (/users/{u}/messages/delta does not
+# exist — verified MS Learn message:delta docs). Delta is per-folder ONLY. So we
+# widen ingestion from Inbox-only to WHOLE-MAILBOX by enumerating every mail
+# folder and running a per-folder delta, minus the folders that must never be
+# ingested as inbound signal.
+#
+# EXCLUDE (HARD): Sent Items / Drafts / Deleted Items / Junk Email — Sent/Drafts
+# would ingest Dimitry's own outbound as inbound (pollutes Box 5 direction logic);
+# Deleted/Junk are noise. Excluded by well-known folder id (locale-proof) with a
+# displayName deny-set as belt-and-suspenders if well-known resolution hiccups.
+_EXCLUDED_WELLKNOWN = ("sentitems", "drafts", "deleteditems", "junkemail")
+_EXCLUDED_DISPLAYNAMES = frozenset(
+    {"Sent Items", "Drafts", "Deleted Items", "Junk Email"}
+)
+
+# Delta-reset safety (LOAD-BEARING, AC3): a fresh per-folder delta with no state
+# token would re-pull that folder's ENTIRE history — mailbox-wide that is the
+# ~119k backlog the brief forbids. On first encounter of a folder we seed the
+# initial delta with $filter=receivedDateTime ge {now - _SEED_LOOKBACK} (the ONLY
+# $filter message:delta supports); Graph bakes the bound into the returned
+# deltaLink so every subsequent poll is truly incremental. A small lookback gives
+# a safety margin for mail that landed just before cutover without a real backfill.
+_SEED_LOOKBACK = timedelta(days=1)
+
+# Folder-hierarchy walk is bounded + cached (lead: "bound the folder walk to a
+# cached list refreshed hourly, not every tick"). The poll runs every few minutes;
+# re-enumerating the whole hierarchy each tick is needless Graph load. Cache the
+# pollable-folder list for _FOLDER_CACHE_TTL; refresh lazily when stale.
+_FOLDER_CACHE_TTL = timedelta(hours=1)
+_FOLDER_WALK_GUARD = 500             # hard ceiling on hierarchy-walk iterations
+
+# Lazy per-process folder-list cache. Reset by tests via _reset_folder_cache().
+_folder_cache: dict = {"folders": None, "fetched_at": None}
+
+# Surfaced, never-silently-swallowed counter: incremented whenever a single
+# folder's poll fails (fetch None / mid-pagination None / exception). One folder
+# failing must NOT abort the whole poll (lead), but the failure must stay visible.
+_folder_poll_failures = 0
+
+
+def folder_poll_failures() -> int:
+    """Read the surfaced per-folder poll-failure counter (test/health hook)."""
+    return _folder_poll_failures
+
+
+def _reset_folder_cache() -> None:
+    """Clear the folder-list cache (test hook; also safe at runtime — forces a
+    re-enumeration on the next poll)."""
+    _folder_cache["folders"] = None
+    _folder_cache["fetched_at"] = None
 # M365_GRAPH_ATTACHMENT_FETCH_DIAG_1: do NOT use $select on the /attachments
 # COLLECTION. Graph 400s with "Could not find a property named contentBytes"
 # when contentBytes is named in a collection $select (confirmed on Render, bus
@@ -318,36 +369,125 @@ def _capture_graph_attachments(client: GraphClient, m: dict) -> int:
         return 0
 
 
-def poll_graph_mail() -> list:
-    """Pull new mail via delta query. Returns thread dicts (same shape as poll_exchange).
+def _excluded_folder_ids(client: GraphClient) -> set:
+    """Resolve the ids of the never-ingest folders (Sent/Drafts/Deleted/Junk).
 
-    RAISES on a ready-but-None response (G0 Finding 1): GraphClient never raises and
-    returns None on token/HTTP failure (401/403/429/500). When is_ready() is True, a
-    None from the delta/nextLink call is a FAILURE, not an empty inbox — raise so the
-    caller reports failure and does NOT advance the watermark/cursor. A genuinely empty
-    inbox returns a real page with value:[] (no raise). Returns [] only when dormant.
+    Resolves each well-known folder by its locale-proof name (GET
+    /users/{u}/mailFolders/{wellKnownName}). Fault-tolerant: a well-known GET that
+    fails (or returns None) is logged and skipped — we degrade to the displayName
+    deny-set at walk time rather than crash the whole poll. Never raises.
     """
-    client = GraphClient(GraphConfig())
-    if not client.is_ready():
-        return []                    # dormant gate — no token, no HTTP
+    user = quote(client.cfg.mail_user, safe="")
+    ids: set = set()
+    for wk in _EXCLUDED_WELLKNOWN:
+        try:
+            f = client.get(f"/users/{user}/mailFolders/{wk}", params={"$select": "id"})
+        except Exception as e:                       # pragma: no cover - defensive
+            logger.warning("graph mail: well-known folder %s lookup errored (non-fatal): %s", wk, type(e).__name__)
+            continue
+        if f and f.get("id"):
+            ids.add(f["id"])
+        else:
+            logger.warning("graph mail: well-known folder %s did not resolve — relying on displayName deny-set", wk)
+    return ids
 
-    results: list = []
-    cursor = trigger_state.get_cursor(_SOURCE)   # stored @odata.deltaLink, or None on first run
+
+def _enumerate_folders(client: GraphClient, excluded_ids: set) -> list:
+    """Walk the whole mail-folder hierarchy (incl. nested childFolders) and return
+    the pollable folders as ``[{"id", "displayName"}, ...]``.
+
+    Excluded folders (id in ``excluded_ids`` OR displayName in the deny-set) are
+    dropped AND their subtree is pruned — never recurse into Deleted Items / Junk /
+    Sent / Drafts children. Iterative stack walk, bounded by _FOLDER_WALK_GUARD.
+    Fault-tolerant: a sublevel fetch returning None just skips that subtree (logged);
+    only a totally empty result signals failure (handled by the caller — a real
+    mailbox always has Inbox). Never raises.
+    """
+    user = quote(client.cfg.mail_user, safe="")
+    out: list = []
+    stack = [f"/users/{user}/mailFolders"]          # start at the top level
+    guard = 0
+    while stack and guard < _FOLDER_WALK_GUARD:
+        path = stack.pop()
+        page = client.get(path, params={"$top": 100, "$select": "id,displayName,childFolderCount"})
+        if page is None:
+            logger.warning("graph mail: folder-level fetch returned None (subtree skipped)")
+            continue
+        while page is not None and guard < _FOLDER_WALK_GUARD:
+            guard += 1
+            for f in page.get("value", []):
+                fid = f.get("id")
+                if not fid:
+                    continue
+                name = f.get("displayName", "") or ""
+                if fid in excluded_ids or name in _EXCLUDED_DISPLAYNAMES:
+                    continue                         # drop folder + prune its subtree
+                out.append({"id": fid, "displayName": name})
+                if f.get("childFolderCount", 0):
+                    stack.append(f"/users/{user}/mailFolders/{quote(fid, safe='')}/childFolders")
+            nxt = page.get("@odata.nextLink")
+            page = client.get_url(nxt) if nxt else None
+    return out
+
+
+def _get_pollable_folders(client: GraphClient) -> list:
+    """Return the cached pollable-folder list, refreshing when older than
+    _FOLDER_CACHE_TTL. On a refresh, re-resolve the excluded ids + re-walk. A refresh
+    that yields an empty list does NOT overwrite a good cache (transient walk failure
+    keeps the last known-good set); an empty result on a cold cache is returned as-is
+    for the caller to treat as failure. Never raises."""
+    now = datetime.now(timezone.utc)
+    fetched = _folder_cache.get("fetched_at")
+    cached = _folder_cache.get("folders")
+    if cached is not None and fetched is not None and (now - fetched) < _FOLDER_CACHE_TTL:
+        return cached
+    excluded = _excluded_folder_ids(client)
+    folders = _enumerate_folders(client, excluded)
+    if folders:
+        _folder_cache["folders"] = folders
+        _folder_cache["fetched_at"] = now
+        return folders
+    # Cold cache + empty walk → return empty (caller raises). Warm cache + transient
+    # empty → keep serving the last good list rather than go blind.
+    return cached if cached is not None else folders
+
+
+def _folder_seed_filter(now: datetime | None = None) -> str:
+    """The $filter for a first-encounter (un-cursored) folder delta: the ONLY
+    message:delta filter Graph supports — receivedDateTime ge {now - _SEED_LOOKBACK}.
+    Bounds the initial sync so cutover does NOT trigger a full-history backfill."""
+    now = now or datetime.now(timezone.utc)
+    seed = now - _SEED_LOOKBACK
+    return f"receivedDateTime ge {seed.strftime('%Y-%m-%dT%H:%M:%SZ')}"
+
+
+def _poll_folder(client: GraphClient, folder: dict) -> list:
+    """Poll one folder's message delta. Returns thread dicts.
+
+    First encounter (no stored cursor) seeds the delta from now-_SEED_LOOKBACK; else
+    follows the stored per-folder @odata.deltaLink. RAISES on a ready-but-None page
+    (auth/HTTP failure, NOT empty) so the caller counts it and does NOT advance THIS
+    folder's cursor — the folder retries next tick. A genuinely quiet folder returns a
+    page with value:[] + a deltaLink (persisted; no raise)."""
+    folder_id = folder["id"]
+    src_key = f"{_SOURCE}:folder:{folder_id}"
+    cursor = trigger_state.get_cursor(src_key)       # stored per-folder deltaLink, or None
     if cursor:
-        page = client.get_url(cursor)            # host-pinned follow
+        page = client.get_url(cursor)                # host-pinned follow
     else:
         page = client.get(
-            f"/users/{client.cfg.mail_user}/mailFolders/{_FOLDER}/messages/delta",
-            params={"$select": _SELECT, "$top": 50},
+            f"/users/{client.cfg.mail_user}/mailFolders/{quote(folder_id, safe='')}/messages/delta",
+            params={"$select": _SELECT, "$top": 50, "$filter": _folder_seed_filter()},
         )
     if page is None:                 # ready but no response → auth/HTTP/429 failure, NOT empty
-        raise RuntimeError("graph mail: delta call returned None while ready (auth/HTTP failure)")
+        raise RuntimeError(f"graph mail: folder {folder_id} delta returned None while ready")
 
+    results: list = []
     guard = 0
-    while page is not None and guard < 50:       # bounded pagination
+    while page is not None and guard < 50:           # bounded pagination
         guard += 1
         for m in page.get("value", []):
-            if "@removed" in m:                  # delta tombstone
+            if "@removed" in m:                      # delta tombstone / move-out
                 continue
             t = _to_thread(m)
             if t:
@@ -358,11 +498,57 @@ def poll_graph_mail() -> list:
         if nxt:
             page = client.get_url(nxt)
             if page is None:         # mid-pagination failure → raise BEFORE persisting a partial cursor
-                raise RuntimeError("graph mail: nextLink page returned None (HTTP failure mid-pagination)")
+                raise RuntimeError(f"graph mail: folder {folder_id} nextLink returned None (HTTP failure mid-pagination)")
             continue
         if delta:
-            trigger_state.set_cursor(_SOURCE, delta)   # persist ONLY on clean completion
+            trigger_state.set_cursor(src_key, delta)  # persist ONLY on clean completion of THIS folder
         break
+    return results
+
+
+def poll_graph_mail() -> list:
+    """Pull new mail across the WHOLE mailbox via per-folder delta. Returns thread
+    dicts (same shape as poll_exchange).
+
+    GRAPH_INGEST_SCOPE_WIDEN_1: enumerate every mail folder (minus Sent/Drafts/
+    Deleted/Junk) and run a per-folder delta with a per-folder cursor. Fault-tolerant
+    per folder — one folder's fetch error is counted + logged but does NOT abort the
+    poll (lead). Two failure modes still RAISE (so the caller reports failure and does
+    NOT advance the watermark, preserving the no-silent-success invariant):
+      1. folder enumeration yields nothing while ready (a real mailbox always has
+         Inbox → empty means an auth/HTTP failure listing folders), and
+      2. EVERY enumerated folder failed to poll (systemic auth/HTTP failure).
+    Returns [] only when dormant.
+    """
+    global _folder_poll_failures
+    client = GraphClient(GraphConfig())
+    if not client.is_ready():
+        return []                    # dormant gate — no token, no HTTP
+
+    folders = _get_pollable_folders(client)
+    if not folders:                  # ready but no folders → listing failed, NOT empty
+        raise RuntimeError("graph mail: folder enumeration returned no folders while ready (auth/HTTP failure)")
+
+    results: list = []
+    failures = 0
+    for folder in folders:
+        try:
+            results.extend(_poll_folder(client, folder))
+        except Exception as e:
+            failures += 1
+            _folder_poll_failures += 1
+            logger.error(
+                "graph mail: folder %s poll FAILED (non-fatal, this folder's cursor "
+                "NOT advanced; count=%d): %s",
+                folder.get("id"), _folder_poll_failures, type(e).__name__,
+            )
+            continue
+    if failures and failures == len(folders):
+        # Not one folder succeeded → systemic failure, not a quiet mailbox. Raise so
+        # check_new_graph_messages reports failure + does not advance the watermark.
+        raise RuntimeError(
+            f"graph mail: ALL {failures} enumerated folders failed to poll while ready (systemic failure)"
+        )
     return results
 
 
