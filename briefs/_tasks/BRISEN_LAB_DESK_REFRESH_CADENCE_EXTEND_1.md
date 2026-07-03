@@ -46,6 +46,28 @@ Extend the cadence sweep to matter desks, under the SAME safety guards that alre
 ## Gate chain
 codex G3 (effort medium — additive, guarded) → lead G4 → lead merges → **lead** flips the Render enable flag. Do NOT flip the flag yourself.
 
+## PART 2 — delivery whitelist (CRITICAL; added by lead post-diagnosis 2026-07-03)
+Cadence scheduling alone is a HALF-FIX. Live diagnosis today proved desks are
+excluded from the **wakeable-terminals whitelist**, so refresh/wake signals do
+NOT deliver to a desk:
+- `POST /api/wake {alias: baden-baden-desk}` → `{"detail":"unknown alias"}` (400).
+- `POST /api/refresh-agent?alias=baden-baden-desk&force=true` → server returns
+  `outcome: refreshed` but `expired_session_ids: []` and the desk session never
+  restarts; lifecycle/restart+forced-kill land in the desk's bus inbox UNACKED.
+
+So a cadence sweep that calls `_refresh_one("baden-baden-desk", ...)` will post
+signals into the void unless desks are ALSO added to the wakeable set that
+`/api/wake` + the local `brisen-lab://wake/<alias>` handler validate against.
+
+REQUIRED: locate the wakeable-terminals generator / constant (the source of the
+`/api/wake` "unknown alias" whitelist — search `WAKEABLE_TERMINALS`,
+`wakeable`, `ALLOWED_ALIASES`, the generated terminal identity artifacts). Add
+the 5 matter desks so refresh/wake actually DELIVER. If the wakeable set is
+generated from a config the b-code cannot safely edit here, STOP and report the
+exact file + line to lead — do NOT ship the cadence half without a delivery path.
+Confirm end-to-end in the ship report: a desk alias passed to the cadence sweep
+results in an ACKED lifecycle/restart (not an orphaned unacked signal).
+
 ## Notes / foot-guns
 - Desk slugs are the 5 in `/api/v2/terminals`: hag-desk, ao-desk, movie-desk, baden-baden-desk, origination-desk. If `app.py` has a canonical desk list already, reconcile against it and flag any delta — do NOT silently invent slugs.
 - #86 pre-existing flaky autowake/wake-classification tests (9) fail on clean `main` order-dependently — unrelated, do not fix here, note if seen.
