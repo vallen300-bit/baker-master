@@ -58,7 +58,13 @@ _DEFAULT_CLAIM_TTL_HOURS = 48
 _POST_LIMIT_ENV = "AIRPORT_BOARDING_POST_LIMIT"
 _DEFAULT_POST_LIMIT = 100
 
-_LOUNGE_KEY_PREFIX = "airport-lounge:v1:"
+# MUST match airport_lounge_writer.event_ticket_id, which keys rows as
+# "airport-lounge:" + <source airport_tickets.ticket_id> (NO "v1:" segment). The receipt
+# writer strips this prefix to recover the source ticket id for the checked_in->closed
+# close. An earlier "airport-lounge:v1:" value silently no-op'd the source close on real
+# prod ids (startswith failed -> source_ticket_id=None); caught by the step-2 pilot
+# dry-run. Fixture fidelity: tests use the same real scheme.
+_LOUNGE_KEY_PREFIX = "airport-lounge:"
 _DESK = "baden-baden-desk"
 _TRIGGER = "airport_boarding_flow"
 
