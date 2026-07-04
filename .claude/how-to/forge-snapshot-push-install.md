@@ -34,16 +34,19 @@ one-liner via a `! <command>` prompt in a Terminal-backed session.
 
 ## Self-resume hardening (T3)
 
-The plist carries `RunAtLoad` (resumes on reboot/login, once loaded) and
-`KeepAlive` (resumes on crash). **Flagged to lead:** the worker is a fast-exit
-periodic script with `StartInterval=30`, so literal `KeepAlive=true` makes launchd
-relaunch on every exit (throttled to ~10s) — effectively a ~10s cadence (≈3× the
-intended 30s) plus respawn log spam. If the 30s cadence matters, switch the plist
-to the crash-only form, which preserves `StartInterval`:
+The plist carries `RunAtLoad` (resumes on reboot/login, once loaded) and a
+**crash-only** `KeepAlive` (lead-ratified 2026-07-04, bus #5267):
 
 ```xml
 <key>KeepAlive</key><dict><key>SuccessfulExit</key><false/></dict>
 ```
+
+Why the dict form and not `KeepAlive=true`: the worker is a fast-exit periodic
+script with `StartInterval=30`. A bare `KeepAlive=true` relaunches it on *every*
+exit (throttled to ~10s), collapsing the 30s cadence into a ~10s hot-loop plus
+respawn log spam — the exact failure mode we are hardening against.
+`{SuccessfulExit: false}` restarts only on a non-zero exit, so the 30s cadence is
+preserved while a crash still self-heals.
 
 Note that neither `RunAtLoad` nor `KeepAlive` survives a `launchctl unload` or a
 Cowork `~/Library` wipe — those need a reinstall (the one-liner above). The durable
