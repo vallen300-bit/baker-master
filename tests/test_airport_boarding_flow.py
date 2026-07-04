@@ -31,52 +31,52 @@ def test_flag_on(monkeypatch):
 
 
 def test_accept_token_deterministic_and_verifies():
-    ev = "airport-lounge:v1:abc"
+    ev = "airport-lounge:abc"
     t1, t2 = bf.accept_token(ev), bf.accept_token(ev)
     assert t1 == t2 and t1.startswith("claim:v1:")
-    assert bf.accept_token("airport-lounge:v1:xyz") != t1     # per-ticket
+    assert bf.accept_token("airport-lounge:xyz") != t1     # per-ticket
     assert bf._token_matches(ev, t1) is True
     assert bf._token_matches(ev, "claim:v1:deadbeef") is False
     assert bf._token_matches(ev, "") is False
 
 
 def test_parse_claim():
-    t = bf.accept_token("airport-lounge:v1:a")
+    t = bf.accept_token("airport-lounge:a")
     assert bf.parse_desk_reply(f"CLAIM {t}") == {"kind": "CLAIM", "token": t}
 
 
 def test_parse_claim_extra_junk_rejected():
-    t = bf.accept_token("airport-lounge:v1:a")
+    t = bf.accept_token("airport-lounge:a")
     assert bf.parse_desk_reply(f"CLAIM {t} and more") is None   # exactly a token only
 
 
 def test_parse_status_with_note():
-    t = bf.accept_token("airport-lounge:v1:a")
+    t = bf.accept_token("airport-lounge:a")
     got = bf.parse_desk_reply(f"STATUS BLOCKED {t} awaiting survey")
     assert got == {"kind": "STATUS", "state": "BLOCKED", "token": t, "note": "awaiting survey"}
 
 
 def test_parse_status_no_note():
-    t = bf.accept_token("airport-lounge:v1:a")
+    t = bf.accept_token("airport-lounge:a")
     assert bf.parse_desk_reply(f"STATUS WAITING {t}") == {
         "kind": "STATUS", "state": "WAITING", "token": t, "note": ""}
 
 
 def test_parse_status_bad_state_rejected():
-    t = bf.accept_token("airport-lounge:v1:a")
+    t = bf.accept_token("airport-lounge:a")
     assert bf.parse_desk_reply(f"STATUS FOO {t}") is None
     assert bf.parse_desk_reply(f"STATUS {t}") is None          # missing state word
 
 
 def test_parse_landed_with_package():
-    t = bf.accept_token("airport-lounge:v1:a")
+    t = bf.accept_token("airport-lounge:a")
     got = bf.parse_desk_reply(f"LANDED {t}\nstate: resolved\nevidence: doc1")
     assert got["kind"] == "LANDED" and got["token"] == t
     assert got["package"] == "state: resolved\nevidence: doc1"
 
 
 def test_parse_ambiguous_two_commands_rejected():
-    t = bf.accept_token("airport-lounge:v1:a")
+    t = bf.accept_token("airport-lounge:a")
     assert bf.parse_desk_reply(f"CLAIM {t}\nLANDED {t}") is None
 
 
@@ -92,7 +92,7 @@ def test_status_canonical_map_is_bb_vocab():
 
 
 def test_work_packet_carries_token_and_grammar():
-    ev = {"ticket_id": "airport-lounge:v1:a", "clickup_task_id": "CU-1",
+    ev = {"ticket_id": "airport-lounge:a", "clickup_task_id": "CU-1",
           "clickup_list_id": "901524194809", "matter_slug": "bb-aukera",
           "correlation": {"luggage": ["item one", "item two"]}}
     t = bf.accept_token(ev["ticket_id"])
@@ -284,7 +284,7 @@ def _corr(conn, ev_id):
 
 # --- T1 boarding poster -----------------------------------------------------
 def test_poster_posts_and_advances(bfx):
-    ev = "airport-lounge:v1:a"
+    ev = "airport-lounge:a"
     _insert_lounge_row(bfx, ev, bf.CLICKUP_WRITTEN)
     out = bf.run_boarding_poster(bfx)
     assert out["posted"] == 1 and out["errors"] == 0
@@ -294,7 +294,7 @@ def test_poster_posts_and_advances(bfx):
 
 
 def test_poster_idempotent(bfx):
-    ev = "airport-lounge:v1:a"
+    ev = "airport-lounge:a"
     _insert_lounge_row(bfx, ev, bf.CLICKUP_WRITTEN)
     bf.run_boarding_poster(bfx)
     out2 = bf.run_boarding_poster(bfx)                # already BOARDING_POSTED
@@ -304,7 +304,7 @@ def test_poster_idempotent(bfx):
 
 # --- T1 claim ---------------------------------------------------------------
 def test_claim_advances_and_mirrors(bfx):
-    ev = "airport-lounge:v1:a"
+    ev = "airport-lounge:a"
     tok = bf.accept_token(ev)
     _insert_lounge_row(bfx, ev, bf.BOARDING_POSTED, correlation={"accept_token": tok})
     _bus().queue("baden-baden-desk", f"CLAIM {tok}")
@@ -317,7 +317,7 @@ def test_claim_advances_and_mirrors(bfx):
 
 def test_claim_wrong_order_left_unacked(bfx):
     """CLAIM against a row still at CLICKUP_WRITTEN (never boarded) is out-of-order."""
-    ev = "airport-lounge:v1:a"
+    ev = "airport-lounge:a"
     tok = bf.accept_token(ev)
     _insert_lounge_row(bfx, ev, bf.CLICKUP_WRITTEN, correlation={"accept_token": tok})
     _bus().queue("baden-baden-desk", f"CLAIM {tok}")
@@ -328,7 +328,7 @@ def test_claim_wrong_order_left_unacked(bfx):
 
 
 def test_bad_token_rejected(bfx):
-    ev = "airport-lounge:v1:a"
+    ev = "airport-lounge:a"
     tok = bf.accept_token(ev)
     _insert_lounge_row(bfx, ev, bf.BOARDING_POSTED, correlation={"accept_token": tok})
     _bus().queue("baden-baden-desk", "CLAIM claim:v1:not-the-real-token")
@@ -339,7 +339,7 @@ def test_bad_token_rejected(bfx):
 
 
 def test_claim_replay_is_acked(bfx):
-    ev = "airport-lounge:v1:a"
+    ev = "airport-lounge:a"
     tok = bf.accept_token(ev)
     _insert_lounge_row(bfx, ev, bf.CLAIMED, correlation={"accept_token": tok})
     _bus().queue("baden-baden-desk", f"CLAIM {tok}")   # duplicate claim
@@ -351,7 +351,7 @@ def test_claim_replay_is_acked(bfx):
 
 # --- T2 status mirror -------------------------------------------------------
 def test_status_mirror_stays_claimed(bfx):
-    ev = "airport-lounge:v1:a"
+    ev = "airport-lounge:a"
     tok = bf.accept_token(ev)
     _insert_lounge_row(bfx, ev, bf.CLAIMED, correlation={"accept_token": tok})
     _bus().queue("baden-baden-desk", f"STATUS BLOCKED {tok} awaiting survey")
@@ -365,7 +365,7 @@ def test_status_mirror_stays_claimed(bfx):
 
 # --- T3 landing + receipt ---------------------------------------------------
 def test_landed_then_receipt_closes_everything(bfx):
-    ev = "airport-lounge:v1:src-a"
+    ev = "airport-lounge:src-a"
     tok = bf.accept_token(ev)
     _insert_lounge_row(bfx, ev, bf.CLAIMED, correlation={"accept_token": tok})
     # source ticket must exist at checked_in for the close guard
@@ -397,7 +397,7 @@ def test_landed_then_receipt_closes_everything(bfx):
 
 
 def test_receipt_idempotent(bfx):
-    ev = "airport-lounge:v1:src-a"
+    ev = "airport-lounge:src-a"
     tok = bf.accept_token(ev)
     _insert_lounge_row(bfx, ev, bf.LANDED,
                        correlation={"accept_token": tok, "package": "p"})
@@ -412,7 +412,7 @@ def test_receipt_idempotent(bfx):
 
 # --- T4 exception lane ------------------------------------------------------
 def test_ttl_nudge_then_escalate(bfx):
-    ev = "airport-lounge:v1:a"
+    ev = "airport-lounge:a"
     tok = bf.accept_token(ev)
     # aged past the 48h default TTL, never nudged
     _insert_lounge_row(bfx, ev, bf.BOARDING_POSTED,
@@ -436,9 +436,9 @@ def test_ttl_nudge_then_escalate(bfx):
 # --- AC4 readonly + AC5 reconcile ------------------------------------------
 def test_readonly_sweep_is_nonmutating(bfx, monkeypatch):
     monkeypatch.setenv("BAKER_CLICKUP_READONLY", "true")
-    _insert_lounge_row(bfx, "airport-lounge:v1:a", bf.CLICKUP_WRITTEN,
+    _insert_lounge_row(bfx, "airport-lounge:a", bf.CLICKUP_WRITTEN,
                        correlation={"accept_token": "t"})
-    ev = "airport-lounge:v1:b"
+    ev = "airport-lounge:b"
     tok = bf.accept_token(ev)
     _insert_lounge_row(bfx, ev, bf.CLAIMED, correlation={"accept_token": tok})
     _bus().queue("baden-baden-desk", f"STATUS BLOCKED {tok}")
@@ -449,14 +449,14 @@ def test_readonly_sweep_is_nonmutating(bfx, monkeypatch):
     # NON-MUTATING end-to-end: zero ClickUp writes, no bus posts, no ACK, no state change
     assert _cu().updates == [] and _cu().comments == []
     assert _bus().posts == [] and _bus().acks == []
-    assert _state(bfx, "airport-lounge:v1:a") == bf.CLICKUP_WRITTEN
+    assert _state(bfx, "airport-lounge:a") == bf.CLICKUP_WRITTEN
     assert _state(bfx, ev) == bf.CLAIMED
 
 
 def test_reconcile_clean_no_flight_leak(bfx):
-    _insert_lounge_row(bfx, "airport-lounge:v1:a", bf.BOARDING_POSTED,
+    _insert_lounge_row(bfx, "airport-lounge:a", bf.BOARDING_POSTED,
                        correlation={"accept_token": "t"})
-    _insert_lounge_row(bfx, "airport-lounge:v1:b", bf.RECEIPT_WRITTEN,
+    _insert_lounge_row(bfx, "airport-lounge:b", bf.RECEIPT_WRITTEN,
                        correlation={"accept_token": "t2"})
     rec = bf.reconcile_onward(bfx)
     assert rec["flight_column_leak_count"] == 0
@@ -472,7 +472,7 @@ def test_cap_stops_writes_and_leaves_unacked(bfx):
     _STATE["cu"].cap = 2                                   # tiny cap for the proof
     # 3 CLAIMED rows, each gets a STATUS mirror = 1 update + 1 comment = 2 writes each
     for i in range(3):
-        ev = f"airport-lounge:v1:{i}"
+        ev = f"airport-lounge:{i}"
         tok = bf.accept_token(ev)
         _insert_lounge_row(bfx, ev, bf.CLAIMED, task_id=f"CU-{i}",
                            correlation={"accept_token": tok})
@@ -486,7 +486,7 @@ def test_cap_stops_writes_and_leaves_unacked(bfx):
 # D-32 ASSIST LANE — pure unit
 # ===========================================================================
 def test_parse_assist_variants():
-    t = bf.accept_token("airport-lounge:v1:a")
+    t = bf.accept_token("airport-lounge:a")
     assert bf.parse_desk_reply(f"ASSIST RESEARCHER {t} what is the deadline") == {
         "kind": "ASSIST", "target": "RESEARCHER", "token": t, "question": "what is the deadline"}
     assert bf.parse_desk_reply(f"ASSIST BEN {t} model NOI")["target"] == "BEN"
@@ -494,22 +494,22 @@ def test_parse_assist_variants():
 
 
 def test_parse_assist_bad_target_and_empty_question():
-    t = bf.accept_token("airport-lounge:v1:a")
+    t = bf.accept_token("airport-lounge:a")
     assert bf.parse_desk_reply(f"ASSIST FOO {t} x") is None
     assert bf.parse_desk_reply(f"ASSIST RESEARCHER {t}") is None       # no question
     assert bf.parse_desk_reply(f"ASSIST RESEARCHER {t}   ") is None
 
 
 def test_parse_assist_receipt():
-    aid = "assist:v1:airport-lounge:v1:src-a:1"
+    aid = "assist:v1:airport-lounge:src-a:1"
     got = bf.parse_desk_reply(f"ASSIST_RECEIPT {aid}\nanswer here\nmore")
     assert got == {"kind": "ASSIST_RECEIPT", "assist_id": aid, "answer": "answer here\nmore"}
     assert bf.parse_desk_reply(f"ASSIST_RECEIPT {aid}") is None        # no answer -> malformed
 
 
 def test_parent_ev_from_assist_id():
-    assert bf._parent_ev_from_assist_id("assist:v1:airport-lounge:v1:src-a:3") == \
-        "airport-lounge:v1:src-a"
+    assert bf._parent_ev_from_assist_id("assist:v1:airport-lounge:src-a:3") == \
+        "airport-lounge:src-a"
     assert bf._parent_ev_from_assist_id("garbage") is None
     assert bf._parent_ev_from_assist_id("assist:v1:noindex") is None
 
@@ -522,7 +522,7 @@ def test_assist_route_map():
 
 
 def test_work_packet_advertises_assist_grammar():
-    ev = {"ticket_id": "airport-lounge:v1:a", "clickup_task_id": "CU-1",
+    ev = {"ticket_id": "airport-lounge:a", "clickup_task_id": "CU-1",
           "clickup_list_id": "901524194809", "matter_slug": "bb", "correlation": {}}
     body = bf._format_work_packet(ev, bf.accept_token(ev["ticket_id"]))
     assert "ASSIST RESEARCHER|BEN|LEGAL" in body
@@ -541,7 +541,7 @@ def test_migration_bootstrap_assist_parity():
 # D-32 ASSIST LANE — live-PG
 # ===========================================================================
 def test_assist_request_advances_and_routes(bfx):
-    ev = "airport-lounge:v1:a"
+    ev = "airport-lounge:a"
     tok = bf.accept_token(ev)
     _insert_lounge_row(bfx, ev, bf.CLAIMED, correlation={"accept_token": tok})
     _bus().queue("baden-baden-desk", f"ASSIST RESEARCHER {tok} what is the SW deadline")
@@ -560,7 +560,7 @@ def test_assist_request_advances_and_routes(bfx):
 def test_assist_ben_and_legal_routing(bfx):
     for target, recipient, kind in [("BEN", "ben", "ben"),
                                     ("LEGAL", "researcher", "legal-analysis")]:
-        ev = f"airport-lounge:v1:{target}"
+        ev = f"airport-lounge:{target}"
         tok = bf.accept_token(ev)
         _insert_lounge_row(bfx, ev, bf.CLAIMED, task_id=f"CU-{target}",
                            correlation={"accept_token": tok})
@@ -571,7 +571,7 @@ def test_assist_ben_and_legal_routing(bfx):
 
 
 def test_assist_from_non_claimed_rejected(bfx):
-    ev = "airport-lounge:v1:a"
+    ev = "airport-lounge:a"
     tok = bf.accept_token(ev)
     _insert_lounge_row(bfx, ev, bf.BOARDING_POSTED, correlation={"accept_token": tok})
     _bus().queue("baden-baden-desk", f"ASSIST RESEARCHER {tok} help")
@@ -582,7 +582,7 @@ def test_assist_from_non_claimed_rejected(bfx):
 
 
 def test_assist_duplicate_request_deduped(bfx):
-    ev = "airport-lounge:v1:a"
+    ev = "airport-lounge:a"
     tok = bf.accept_token(ev)
     _insert_lounge_row(bfx, ev, bf.CLAIMED, correlation={"accept_token": tok})
     _bus().queue("baden-baden-desk", f"ASSIST RESEARCHER {tok} same question")
@@ -601,7 +601,7 @@ def test_assist_duplicate_request_deduped(bfx):
 
 
 def test_assist_receipt_all_received_returns_to_claimed(bfx):
-    ev = "airport-lounge:v1:a"
+    ev = "airport-lounge:a"
     a1, a2 = f"assist:v1:{ev}:1", f"assist:v1:{ev}:2"
     _insert_lounge_row(bfx, ev, bf.WAITING_ON_ASSIST, correlation={
         "accept_token": "t",
@@ -624,7 +624,7 @@ def test_assist_receipt_all_received_returns_to_claimed(bfx):
 
 
 def test_assist_receipt_unknown_and_duplicate(bfx):
-    ev = "airport-lounge:v1:a"
+    ev = "airport-lounge:a"
     a1 = f"assist:v1:{ev}:1"
     _insert_lounge_row(bfx, ev, bf.WAITING_ON_ASSIST, correlation={
         "accept_token": "t",
@@ -645,7 +645,7 @@ def test_assist_receipt_unknown_and_duplicate(bfx):
 
 def test_closure_guard_blocks_receipt_with_open_assist(bfx):
     """A LANDED row that still carries an open assist must NOT close."""
-    ev = "airport-lounge:v1:src-a"
+    ev = "airport-lounge:src-a"
     a1 = f"assist:v1:{ev}:1"
     _insert_lounge_row(bfx, ev, bf.LANDED, correlation={
         "accept_token": "t", "package": "p",
@@ -667,7 +667,7 @@ def test_closure_guard_blocks_receipt_with_open_assist(bfx):
 
 
 def test_reconcile_open_assist_count(bfx):
-    ev = "airport-lounge:v1:a"
+    ev = "airport-lounge:a"
     _insert_lounge_row(bfx, ev, bf.WAITING_ON_ASSIST, correlation={
         "accept_token": "t",
         "assists": [{"assist_id": f"assist:v1:{ev}:1", "kind": "researcher", "status": "requested"},
