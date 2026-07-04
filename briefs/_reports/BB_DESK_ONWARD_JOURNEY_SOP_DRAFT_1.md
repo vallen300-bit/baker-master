@@ -71,7 +71,34 @@ STATUS UPDATE_REQUIRED claim:v1:<hash> need Director sign-off on scope
   mirrors are ClickUp-surface only, you can send as many as you need.
 - Only valid while `CLAIMED`.
 
-### 3. Land the journey — `LANDED <token>` + package
+### 3. Request an assist — `ASSIST RESEARCHER|BEN|LEGAL <token> <question>` (D-32)
+
+```
+ASSIST RESEARCHER claim:v1:<hash> what is the ÖNORM SW handover deadline?
+ASSIST BEN claim:v1:<hash> model the NOI impact of a 3-month slip
+ASSIST LEGAL claim:v1:<hash> is clause 4.2 enforceable under AT law?
+```
+
+- Use when you need help **while the ticket is in flight**. The assist is a tracked
+  sub-dispatch on the **same** ticket — never a new ticket, never a side channel.
+- `<TARGET>` is exactly one of **`RESEARCHER`**, **`BEN`**, **`LEGAL`** (uppercase).
+  `LEGAL` is routed to the Researcher runtime tagged `assist_kind=legal-analysis` until a
+  dedicated legal-analysis responder exists.
+- The `<question>` is required (free text after the token). An empty question is rejected.
+- Effect: the journey moves `CLAIMED → WAITING_ON_ASSIST`; the ClickUp task mirrors to
+  **waiting** with a comment naming the assist; Baker posts an `ASSIST_REQUEST` to the
+  responder. The responder replies `ASSIST_RECEIPT <assist_id>` + answer on the thread.
+- **One assist open at a time.** Request the next assist only after the previous one's
+  receipt has returned the ticket to `CLAIMED`. You **cannot `LANDED`** while any assist is
+  open — the receipt writer refuses to close until every assist receipt has landed.
+- Only valid from `CLAIMED`.
+
+> **Responder note (Researcher / BEN):** answer an assist with
+> `ASSIST_RECEIPT <assist_id>` on the first line, then your answer / evidence /
+> recommendation as free text. The `<assist_id>` comes verbatim from the `ASSIST_REQUEST`
+> packet. Empty answers and unknown assist ids are rejected and left un-acked.
+
+### 4. Land the journey — `LANDED <token>` + package
 
 ```
 LANDED claim:v1:<hash>

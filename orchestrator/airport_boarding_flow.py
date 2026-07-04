@@ -69,6 +69,7 @@ CLAIMED = "CLAIMED"
 LANDED = "LANDED"
 RECEIPT_WRITTEN = "RECEIPT_WRITTEN"
 NEEDS_CONTROLLER = "NEEDS_CONTROLLER"
+WAITING_ON_ASSIST = "WAITING_ON_ASSIST"   # D-32: an assist sub-dispatch is outstanding
 
 # --- D-25 in-flight status mirror: desk STATUS token -> canonical ClickUp literal.
 # Routed through _resolve_clickup_status(list_id, canonical); for BB-AUK-001 these pass
@@ -82,6 +83,16 @@ _STATUS_CANONICAL = {
 _CLAIM_STATUS = "in progress"      # CLAIM -> ClickUp in progress
 _CLOSE_STATUS = "complete"         # RECEIPT_WRITTEN -> ClickUp complete
 _NEEDS_CONTROLLER_STATUS = "update required"   # T4 escalation ClickUp status
+_ASSIST_WAITING_STATUS = "waiting"             # D-32 WAITING_ON_ASSIST -> ClickUp waiting
+
+# D-32 assist routing: desk ASSIST target -> (bus recipient slug, assist_kind). LEGAL has
+# no bus slug today (brief constraint) — routed to researcher tagged assist_kind
+# legal-analysis until lead adds a legal-analysis runtime to the registry.
+_ASSIST_ROUTE = {
+    "RESEARCHER": ("researcher", "researcher"),
+    "BEN": ("ben", "ben"),
+    "LEGAL": ("researcher", "legal-analysis"),
+}
 
 
 # ---------------------------------------------------------------------------
@@ -139,7 +150,10 @@ def _token_matches(ev_ticket_id: str, presented: str) -> bool:
 # ---------------------------------------------------------------------------
 # Reply grammar parser (SOP deliverable T5 must match this VERBATIM)
 # ---------------------------------------------------------------------------
-_CMD_RE = re.compile(r"^\s*(CLAIM|STATUS|LANDED)\b(.*)$", re.IGNORECASE | re.MULTILINE)
+# ASSIST_RECEIPT is listed before ASSIST so the longer token wins; \b also prevents
+# ASSIST from matching inside ASSIST_RECEIPT (no boundary before the underscore).
+_CMD_RE = re.compile(r"^\s*(ASSIST_RECEIPT|ASSIST|CLAIM|STATUS|LANDED)\b(.*)$",
+                     re.IGNORECASE | re.MULTILINE)
 
 
 def parse_desk_reply(body: str) -> Optional[Dict[str, Any]]:
@@ -150,11 +164,16 @@ def parse_desk_reply(body: str) -> Optional[Dict[str, Any]]:
         STATUS BLOCKED|WAITING|UPDATE_REQUIRED <token> [note...]
         LANDED <token>
         <package: free text after the LANDED line>
+        ASSIST RESEARCHER|BEN|LEGAL <token> <question...>          (D-32)
+        ASSIST_RECEIPT <assist_id>                                 (D-32)
+        <answer: free text after the ASSIST_RECEIPT line>
 
     Returns dicts:
         {"kind": "CLAIM",  "token": str}
         {"kind": "STATUS", "state": "BLOCKED|WAITING|UPDATE_REQUIRED", "token": str, "note": str}
         {"kind": "LANDED", "token": str, "package": str}
+        {"kind": "ASSIST", "target": "RESEARCHER|BEN|LEGAL", "token": str, "question": str}
+        {"kind": "ASSIST_RECEIPT", "assist_id": str, "answer": str}
     """
     if not body:
         return None
@@ -193,6 +212,33 @@ def parse_desk_reply(body: str) -> Optional[Dict[str, Any]]:
             if trailing:
                 package = (trailing + "\n" + package).strip()
             return {"kind": "LANDED", "token": token, "package": package}
+        if cmd == "ASSIST":
+            # ASSIST <TARGET> <token> <question...> — all three required, question non-empty.
+            parts = rest.split(maxsplit=2)
+            if len(parts) < 3:
+                return None
+            target = parts[0].upper()
+            if target not in _ASSIST_ROUTE:
+                return None
+            question = parts[2].strip()
+            if not question:
+                return None
+            return {"kind": "ASSIST", "target": target, "token": parts[1],
+                    "question": question}
+        if cmd == "ASSIST_RECEIPT":
+            # ASSIST_RECEIPT <assist_id> \n <answer...> — assist_id + non-empty answer.
+            first_line = rest.splitlines()[0] if rest else ""
+            tokens = first_line.split()
+            if not tokens:
+                return None
+            assist_id = tokens[0]
+            answer = body[m.end():].strip()
+            trailing = " ".join(tokens[1:]).strip()
+            if trailing:
+                answer = (trailing + "\n" + answer).strip()
+            if not answer:
+                return None  # malformed (no answer) -> un-acked, logged loud
+            return {"kind": "ASSIST_RECEIPT", "assist_id": assist_id, "answer": answer}
     except Exception:
         return None
     return None
@@ -264,6 +310,35 @@ def _row_by_token(conn: Any, token: str) -> Optional[Dict[str, Any]]:
         return None
     return {"ticket_id": row[0], "event_state": row[1], "clickup_list_id": row[2],
             "clickup_task_id": row[3], "matter_slug": row[4], "correlation": row[5] or {}}
+
+
+def _row_by_ticket(conn: Any, ev_ticket_id: str) -> Optional[Dict[str, Any]]:
+    """Load a lounge row by its event ticket_id (D-32 assist receipts join by parent id,
+    not by accept-token — the responder never sees the desk's token)."""
+    with conn.cursor() as cur:
+        cur.execute(
+            "SELECT ticket_id, event_state, clickup_list_id, clickup_task_id, "
+            "       matter_slug, correlation "
+            "FROM airport_outbound_events WHERE ticket_id = %s LIMIT 1",
+            (ev_ticket_id,),
+        )
+        row = cur.fetchone()
+    if not row:
+        return None
+    return {"ticket_id": row[0], "event_state": row[1], "clickup_list_id": row[2],
+            "clickup_task_id": row[3], "matter_slug": row[4], "correlation": row[5] or {}}
+
+
+def _parent_ev_from_assist_id(assist_id: str) -> Optional[str]:
+    """assist:v1:<event_ticket_id>:<n> -> <event_ticket_id>. The event id itself contains
+    colons (airport-lounge:v1:<src>), so strip the fixed prefix then drop the trailing :<n>."""
+    if not assist_id or not assist_id.startswith("assist:v1:"):
+        return None
+    body = assist_id[len("assist:v1:"):]
+    parent, _, n = body.rpartition(":")
+    if not parent or not n.isdigit():
+        return None
+    return parent
 
 
 def _read_rows_in_state(conn: Any, state: str, limit: int) -> List[Dict[str, Any]]:
@@ -344,8 +419,29 @@ def _format_work_packet(ev: Dict[str, Any], token: str) -> str:
         "Reply grammar (reply on this thread):\n"
         f"  CLAIM {token}\n"
         f"  STATUS BLOCKED|WAITING|UPDATE_REQUIRED {token} [note]\n"
+        f"  ASSIST RESEARCHER|BEN|LEGAL {token} <question>\n"
         f"  LANDED {token}\n"
         "  <package after the LANDED line: state / evidence / asks — free text>"
+    )
+
+
+def _format_assist_request(ev_id: str, assist_id: str, assist_kind: str, question: str,
+                           task_id: Optional[str], recipient: str) -> str:
+    """D-32 ASSIST_REQUEST packet posted to the assist responder (researcher / ben). The
+    responder replies ASSIST_RECEIPT <assist_id> + answer on this thread."""
+    return (
+        f"TO: {recipient}\n"
+        f"FROM: {_boarding_slug()}\n"
+        f"RE: ASSIST_REQUEST {assist_id}\n\n"
+        "ASSIST_REQUEST v1\n"
+        f"assist_id: {assist_id}\n"
+        f"parent_ticket_ref: {ev_id}\n"
+        f"assist_kind: {assist_kind}\n"
+        f"clickup_task_id: {task_id}\n"
+        f"question: {question}\n\n"
+        "Reply on this thread:\n"
+        f"  ASSIST_RECEIPT {assist_id}\n"
+        "  <answer / evidence / recommendation — free text after the ASSIST_RECEIPT line>"
     )
 
 
@@ -394,6 +490,7 @@ def run_boarding_reader(conn: Any) -> Dict[str, Any]:
     if not key:
         return {"ok": False, "reason": "boarding_key_missing"}
     claimed = mirrored = landed = replay = unmatched = bad_token = parsed_none = errors = 0
+    assist_requested = assist_received = 0
     client = None if _readonly() else _get_clickup_client()
     if client is not None:
         client.reset_cycle_counter()
@@ -411,19 +508,31 @@ def run_boarding_reader(conn: Any) -> Dict[str, Any]:
                 logger.warning("boarding reader: unparseable/ambiguous reply id=%s from=%s "
                                "(left un-acked)", mid, sender)
                 continue
-            row = _row_by_token(conn, parsed["token"])
-            if row is None:
-                unmatched += 1
-                logger.warning("boarding reader: no row for token on id=%s (left un-acked)", mid)
-                continue
-            ev_id = row["ticket_id"]
-            if not _token_matches(ev_id, parsed["token"]):
-                bad_token += 1
-                logger.error("boarding reader: token mismatch id=%s ticket=%s (left un-acked)",
-                             mid, ev_id)
-                continue
+            # Row resolution: an ASSIST_RECEIPT joins by the parent id embedded in its
+            # assist_id (the responder never sees the desk's accept-token); every other
+            # reply authenticates by token.
+            if parsed["kind"] == "ASSIST_RECEIPT":
+                ev_id = _parent_ev_from_assist_id(parsed["assist_id"])
+                row = _row_by_ticket(conn, ev_id) if ev_id else None
+                if row is None:
+                    unmatched += 1
+                    logger.warning("boarding reader: no parent row for assist_id on id=%s "
+                                   "(left un-acked)", mid)
+                    continue
+            else:
+                row = _row_by_token(conn, parsed["token"])
+                if row is None:
+                    unmatched += 1
+                    logger.warning("boarding reader: no row for token on id=%s (left un-acked)", mid)
+                    continue
+                ev_id = row["ticket_id"]
+                if not _token_matches(ev_id, parsed["token"]):
+                    bad_token += 1
+                    logger.error("boarding reader: token mismatch id=%s ticket=%s (left un-acked)",
+                                 mid, ev_id)
+                    continue
 
-            outcome = _apply_reply(conn, client, row, parsed, sender)
+            outcome = _apply_reply(conn, client, row, parsed, sender, mid)
             conn.commit()  # commit BEFORE ack
 
             if outcome == "claimed":
@@ -432,6 +541,10 @@ def run_boarding_reader(conn: Any) -> Dict[str, Any]:
                 mirrored += 1; _ack(base, mid, key)
             elif outcome == "landed":
                 landed += 1; _ack(base, mid, key)
+            elif outcome == "assist_requested":
+                assist_requested += 1; _ack(base, mid, key)
+            elif outcome == "assist_received":
+                assist_received += 1; _ack(base, mid, key)
             elif outcome == "replay":
                 replay += 1; _ack(base, mid, key)  # idempotent replay: ACK or it re-reads forever
             else:
@@ -449,15 +562,17 @@ def run_boarding_reader(conn: Any) -> Dict[str, Any]:
             logger.error("boarding reader reply failed id=%s: %s", mid, e)
             continue  # one bad reply never stops the batch
     return {"ok": True, "claimed": claimed, "mirrored": mirrored, "landed": landed,
+            "assist_requested": assist_requested, "assist_received": assist_received,
             "replay": replay, "unmatched": unmatched, "bad_token": bad_token,
             "parsed_none": parsed_none, "errors": errors}
 
 
 def _apply_reply(conn: Any, client: Any, row: Dict[str, Any], parsed: Dict[str, Any],
-                 sender: str) -> str:
-    """Apply one authenticated reply. Returns one of:
-    claimed | mirrored | landed | replay | stale. ClickUp writes happen BEFORE the state
-    advance so a write failure raises and leaves the row un-advanced (retried next tick)."""
+                 sender: str, msg_id: int) -> str:
+    """Apply one authenticated reply. Returns one of: claimed | mirrored | landed |
+    assist_requested | assist_received | replay | stale. ClickUp writes happen BEFORE the
+    state advance so a write failure raises and leaves the row un-advanced (retried next
+    tick)."""
     ev_id = row["ticket_id"]
     state = row["event_state"]
     list_id, task_id = row["clickup_list_id"], row["clickup_task_id"]
@@ -499,6 +614,62 @@ def _apply_reply(conn: Any, client: Any, row: Dict[str, Any], parsed: Dict[str, 
                {"ticket_id": ev_id, "by": sender}, success=moved)
         return "landed" if moved else "stale"
 
+    if kind == "ASSIST":
+        # D-32: assist is valid ONLY from CLAIMED (one open assist at a time — a second
+        # request waits until the first receipt returns the row to CLAIMED).
+        if state != CLAIMED:
+            return "stale"
+        assists = list((row.get("correlation") or {}).get("assists") or [])
+        recipient, assist_kind = _ASSIST_ROUTE[parsed["target"]]
+        question = parsed["question"]
+        # Idempotency (AC5): a same kind+question assist already on the row is a duplicate
+        # request — ACK, never post/store a second one.
+        for a in assists:
+            if a.get("kind") == assist_kind and a.get("question") == question:
+                return "replay"
+        assist_id = f"assist:v1:{ev_id}:{len(assists) + 1}"
+        # Bus sub-dispatch (same parent ticket — never a new ticket/side channel). At-least-
+        # once: a crash between post and commit re-runs this message; the kind+question dedup
+        # above absorbs the common duplicate.
+        res = _post_bus(recipient, _format_assist_request(ev_id, assist_id, assist_kind,
+                                                          question, task_id, recipient),
+                        f"assist/{assist_id}")
+        if not res.get("ok"):
+            raise RuntimeError(f"assist post failed: {res.get('error')}")
+        assists.append({"assist_id": assist_id, "kind": assist_kind, "requested_by": sender,
+                        "question": question, "bus_message_id": _bus_message_id(res),
+                        "status": "requested"})
+        _mirror_clickup_status(client, list_id, task_id, _ASSIST_WAITING_STATUS,
+                               comment=f"Assist requested ({assist_kind}) → {recipient}: {assist_id}")
+        moved = _guarded_transition(conn, ev_id, CLAIMED, WAITING_ON_ASSIST, {"assists": assists})
+        _audit(conn, "airport_boarding.assist_requested", task_id,
+               {"ticket_id": ev_id, "assist_id": assist_id, "kind": assist_kind,
+                "recipient": recipient}, success=moved)
+        return "assist_requested" if moved else "stale"
+
+    if kind == "ASSIST_RECEIPT":
+        assist_id = parsed["assist_id"]
+        assists = list((row.get("correlation") or {}).get("assists") or [])
+        idx = next((i for i, a in enumerate(assists) if a.get("assist_id") == assist_id), None)
+        if idx is None:
+            return "stale"                       # unknown assist id -> un-acked, logged
+        if assists[idx].get("status") == "received":
+            return "replay"                      # duplicate receipt -> idempotent ACK
+        if assists[idx].get("status") != "requested":
+            return "stale"
+        assists[idx] = {**assists[idx], "status": "received", "received_by": sender,
+                        "receipt_bus_message_id": msg_id, "answer": parsed["answer"]}
+        all_received = all(a.get("status") == "received" for a in assists)
+        if all_received and state == WAITING_ON_ASSIST:
+            moved = _guarded_transition(conn, ev_id, WAITING_ON_ASSIST, CLAIMED,
+                                        {"assists": assists})
+        else:
+            moved = _patch_correlation(conn, ev_id, state, {"assists": assists})
+        _audit(conn, "airport_boarding.assist_received", task_id,
+               {"ticket_id": ev_id, "assist_id": assist_id, "all_received": all_received},
+               success=moved)
+        return "assist_received" if moved else "stale"
+
     return "stale"
 
 
@@ -511,7 +682,7 @@ def run_receipt_writer(conn: Any) -> Dict[str, Any]:
     (checked_in -> closed). Journey is Closed ONLY when task-closed + receipt-row +
     bus-proof-id all land. Any partial failure leaves the row at LANDED with last_error
     (fail-loud), retried next cycle. Sub-steps recorded in correlation for idempotency."""
-    written = errors = 0
+    written = errors = blocked_assist = 0
     client = None if _readonly() else _get_clickup_client()
     rows = _read_rows_in_state(conn, LANDED, _post_limit())
     for ev in rows:
@@ -519,6 +690,17 @@ def run_receipt_writer(conn: Any) -> Dict[str, Any]:
         corr = ev.get("correlation") or {}
         list_id, task_id = ev.get("clickup_list_id"), ev.get("clickup_task_id")
         try:
+            # (0) D-32 closure guard: never close while any assist receipt is outstanding.
+            # No ClickUp close, no RECEIPT_WRITTEN, no source-ticket close. Park + fail loud.
+            open_assists = [a.get("assist_id") for a in (corr.get("assists") or [])
+                            if a.get("status") != "received"]
+            if open_assists:
+                _park_error(conn, ev_id, "assist_receipts_pending")
+                blocked_assist += 1
+                logger.warning("receipt writer: %s has %d open assist(s) %s — refusing close",
+                               ev_id, len(open_assists), open_assists)
+                continue
+
             # (1) ClickUp close + receipt comment (idempotent: skip if already done)
             if not corr.get("receipt_clickup_done"):
                 pkg = corr.get("package") or ""
@@ -559,7 +741,8 @@ def run_receipt_writer(conn: Any) -> Dict[str, Any]:
             _park_error(conn, ev_id, str(e))
             logger.error("receipt writer failed for %s (parked at LANDED): %s", ev_id, e)
             continue
-    return {"written": written, "errors": errors, "candidates": len(rows)}
+    return {"written": written, "errors": errors, "blocked_assist": blocked_assist,
+            "candidates": len(rows)}
 
 
 def _close_source_ticket(conn: Any, source_ticket_id: str) -> bool:
@@ -651,8 +834,8 @@ def run_boarding_ttl_nudge(conn: Any) -> Dict[str, Any]:
 # ---------------------------------------------------------------------------
 # Reconciliation (AC5) — flight-leak + state accounting across the new states
 # ---------------------------------------------------------------------------
-_ONWARD_STATES = (CLICKUP_WRITTEN, BOARDING_POSTED, CLAIMED, LANDED, RECEIPT_WRITTEN,
-                  NEEDS_CONTROLLER)
+_ONWARD_STATES = (CLICKUP_WRITTEN, BOARDING_POSTED, CLAIMED, WAITING_ON_ASSIST, LANDED,
+                  RECEIPT_WRITTEN, NEEDS_CONTROLLER)
 _TERMINAL_STATES = frozenset({RECEIPT_WRITTEN, NEEDS_CONTROLLER})
 
 
@@ -686,11 +869,24 @@ def reconcile_onward(conn: Any) -> Dict[str, Any]:
         )
         non_terminal = [{"ticket_id": r[0], "state": r[1], "age_hours": float(r[2] or 0)}
                         for r in cur.fetchall()]
+        # D-32: open assists (any assist object not yet 'received') across all lounge rows.
+        cur.execute(
+            "SELECT e.ticket_id, a->>'assist_id', a->>'kind' "
+            "FROM airport_outbound_events e, "
+            "     jsonb_array_elements(COALESCE(e.correlation->'assists', '[]'::jsonb)) a "
+            "WHERE e.ticket_id LIKE 'airport-lounge:%%' "
+            "  AND a->>'status' IS DISTINCT FROM 'received' "
+            "LIMIT 500"
+        )
+        open_assists = [{"parent_ticket_id": r[0], "assist_id": r[1], "kind": r[2]}
+                        for r in cur.fetchall()]
     undefined = {s: c for s, c in by_state.items() if s not in _ONWARD_STATES}
     clean = flight_leaks == 0 and not undefined
     return {"flight_column_leak_count": flight_leaks, "by_state": by_state,
             "undefined_states": undefined, "non_terminal": non_terminal,
-            "non_terminal_count": len(non_terminal), "clean": clean}
+            "non_terminal_count": len(non_terminal),
+            "open_assist_count": len(open_assists), "open_assists": open_assists,
+            "clean": clean}
 
 
 # ---------------------------------------------------------------------------
@@ -712,7 +908,9 @@ def _dry_run_plan(conn: Any) -> Dict[str, Any]:
         "would_post_boarding": counts.get(CLICKUP_WRITTEN, 0),
         "awaiting_claim": counts.get(BOARDING_POSTED, 0),
         "in_flight": counts.get(CLAIMED, 0),
+        "waiting_on_assist": counts.get(WAITING_ON_ASSIST, 0),
         "would_write_receipt": counts.get(LANDED, 0),
+        "open_assist_count": rec.get("open_assist_count", 0),
     }
     logger.info("onward-journey DRY-RUN (readonly, non-mutating): plan=%s", plan)
     return {"enabled": True, "dry_run": True, "plan": plan, "by_state": counts,
