@@ -8388,6 +8388,32 @@ async def flight_snapshot_page(request: Request, project_code: str):
     return HTMLResponse(flight_snapshot.render_snapshot_html(snap))
 
 
+def _flight_dashboard_enabled() -> bool:
+    """BB_AUK_001_DASHBOARD_V1 feature flag (default OFF — gated rollout; lead flips
+    FLIGHT_DASHBOARD_ENABLED=true to activate the Director-facing CEO view)."""
+    return os.getenv("FLIGHT_DASHBOARD_ENABLED", "false").strip().lower() == "true"
+
+
+@app.get("/flight/{project_code}", include_in_schema=False, response_class=HTMLResponse)
+async def flight_dashboard_page(request: Request, project_code: str):
+    """BB_AUK_001_DASHBOARD_V1 — read-only CEO flight dashboard (v4 content model).
+    Machine §4 ticket counts (live ledger) + desk snapshot sections. Unknown code => 404.
+    Feature flag off => 404. ZERO writes (D-23). Logic in orchestrator.flight_dashboard."""
+    if not _flight_dashboard_enabled():
+        return HTMLResponse("Not Found", status_code=404)
+    if not _mcp_verify_key(request):
+        return HTMLResponse("Unauthorized", status_code=401)
+    from orchestrator import flight_dashboard
+    try:
+        data = flight_dashboard.build_flight_dashboard(project_code)
+    except Exception:
+        logger.exception("flight_dashboard_page failed for %s", project_code)
+        return HTMLResponse("Internal error", status_code=500)
+    if data is None:
+        return HTMLResponse("Unknown flight", status_code=404)
+    return HTMLResponse(flight_dashboard.render_dashboard_html(data))
+
+
 @app.get("/wip", include_in_schema=False, response_class=HTMLResponse)
 async def wip_page(request: Request):
     """Server-rendered WIP-materials browser page (?key= gated)."""

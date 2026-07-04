@@ -1,0 +1,87 @@
+{
+  "contract": "FLIGHT_DASHBOARD_PACKET v2",
+  "snapshot_mode": "read_only",
+  "project_code": "BB-AUK-001",
+  "matter_slug": "aukera",
+  "suspected_flight": "aukera-annaberg-financing",
+  "desk_owner": "baden-baden-desk",
+  "controller": "lead",
+  "header": {
+    "kicker": "BADEN-BADEN",
+    "flight_name": "Aukera financing",
+    "serves": "equity release",
+    "goal": "Close the EUR 15M Aukera facility for Annaberg — signed, drawn, provable — or switch to self-fund.",
+    "state": "AT-RISK",
+    "deadline_label": "Signing",
+    "deadline_date": "2026-07-10",
+    "updated_at": "2026-07-04T09:00:00+00:00",
+    "updated_by": "baden-baden-desk + machine"
+  },
+  "decide_now": {
+    "updated_at": "2026-07-04T09:00:00+00:00",
+    "decisions": [
+      {
+        "question": "Financing path — which lane do we run this week?",
+        "options": [
+          {"tag": "CONTINUE", "recommended": true, "text": "Keep Aukera if old-reference answer, DD room and monitor unblock. Desk recommends — EUR 2.8M cheaper than self-fund if July timing holds."},
+          {"tag": "SWITCH", "recommended": false, "text": "Self-fund if July timing fails — sales cash ≈ EUR 547K/month if collections land."},
+          {"tag": "HOLD", "recommended": false, "text": "Only until missing proof lands; past ~10 Jul holding is not neutral."}
+        ],
+        "decide_by": "2026-07-08",
+        "trigger": "Aukera old-reference answer due 5 Jul",
+        "receipts": ["bus #4966", "bus #4967"],
+        "status": "OPEN"
+      }
+    ]
+  },
+  "money_kpis": {
+    "updated_at": "2026-07-04T09:00:00+00:00",
+    "items": [
+      {"n": "15.0M", "label": "FACILITY EUR", "tone": "none", "receipt": "term sheet draft #4967"},
+      {"n": "2.8M", "label": "CHEAPER THAN SELF-FUND", "tone": "green", "receipt": "BB Desk cost model"},
+      {"n": "60K", "label": "EXTENSION FEE AT RISK", "tone": "red", "receipt": "Merz extension thread"},
+      {"n": "547K", "label": "SELF-FUND CASH / MONTH", "tone": "none", "receipt": "sales collections model"},
+      {"n": "75%", "label": "LTV CAP", "tone": "none", "receipt": "Aukera term sheet"}
+    ]
+  },
+  "ball_in_court": {
+    "updated_at": "2026-07-03T16:00:00+00:00",
+    "rows": [
+      {"waiting_on": "Aukera (via Balazs)", "for_what": "Old-reference answer + registration undertaking", "since_due": "due 5 Jul", "state": "WAITING", "receipt": "bus #4966"},
+      {"waiting_on": "Merz", "for_what": "Independent monitor appointed", "since_due": "due 2 Jul", "state": "OVERDUE +2d", "receipt": "Merz thread"},
+      {"waiting_on": "Merz", "for_what": "Extension + EUR 60K in writing", "since_due": "due 7 Jul", "state": "WAITING", "receipt": "Merz thread"},
+      {"waiting_on": "Aukera (via Balazs)", "for_what": "Final interest rate in term sheet", "since_due": "due 8 Jul", "state": "WAITING", "receipt": "bus #4967"},
+      {"waiting_on": "JM counsel", "for_what": "DD room review (room delivered)", "since_due": "since 1 Jul", "state": "IN REVIEW", "receipt": "DD room receipt"}
+    ]
+  },
+  "top_risks": {
+    "updated_at": "2026-07-03T16:00:00+00:00",
+    "rows": [
+      {"risk": "Land-register path ~3 months vs July clock", "owner": "Merz", "move": "escalating"},
+      {"risk": "Monitor appointment slips past signing", "owner": "Merz", "move": "chase now"},
+      {"risk": "10/20 Jul dates unconfirmed by Aukera", "owner": "Balazs", "move": "answer 5 Jul"}
+    ]
+  },
+  "what_changed": {
+    "updated_at": "2026-07-04T09:00:00+00:00",
+    "rows": [
+      {"date": "3 Jul", "event": "8 new tickets landed (Merz ×5) — awaiting check-in", "receipt": "ledger"},
+      {"date": "3 Jul", "event": "Desk auto-wake paused fleet-wide pending your ratification", "receipt": "bus #4952"},
+      {"date": "3 Jul", "event": "3 Annaberg tickets drained into desk hands", "receipt": "ledger"},
+      {"date": "1 Jul", "event": "Participant manifest live — 15 participants bound", "receipt": "manifest"},
+      {"date": "1 Jul", "event": "Fast-lane proven on 3 real items", "receipt": "ledger"}
+    ]
+  },
+  "communications": {
+    "updated_at": "2026-07-04T09:00:00+00:00",
+    "counts_basis": "desk-provided (v1) — per-person machine wiring deferred to v1.1; §4 strip counts are machine-queried",
+    "humans": [
+      {"name": "Christian Merz", "role": "DE counsel", "urgent": 5, "gist": "Register path + monitor + extension thread; latest unread by desk", "last": "3 Jul", "receipt": "tickets"},
+      {"name": "Balazs Csepregi", "role": "Deal lead", "urgent": 3, "gist": "DD room closure + Aukera reference question + date chase", "last": "2 Jul", "receipt": "tickets"},
+      {"name": "Constantinos Pohanis", "role": "Finance", "urgent": 1, "gist": "Facility/fee schedule cross-check vs Lilienmatt records", "last": "3 Jul", "receipt": "tickets"},
+      {"name": "Siegfried Brandner", "role": "Vienna office", "urgent": 1, "gist": "Forwarded Aukera/Lilienmatt package; duplicates auto-rejected", "last": "3 Jul", "receipt": "tickets"},
+      {"name": "Jennifer Maiworm", "role": "JM counsel", "urgent": 0, "gist": "DD room receipt / counsel review start", "last": "2 Jul", "receipt": "tickets"}
+    ],
+    "research_received": []
+  }
+}
