@@ -8345,6 +8345,49 @@ _WIP_PAGE_TEMPLATE = """<!DOCTYPE html>
 </html>"""
 
 
+def _flight_snapshot_enabled() -> bool:
+    """BAKER_OS_V2_FLIGHT_SNAPSHOT_1 feature flag (default OFF — gated rollout)."""
+    return os.getenv("FLIGHT_SNAPSHOT_ENABLED", "false").strip().lower() == "true"
+
+
+@app.get("/flights", include_in_schema=False, response_class=HTMLResponse)
+@app.get("/flights/", include_in_schema=False, response_class=HTMLResponse)
+async def flights_index(request: Request):
+    """BAKER_OS_V2_FLIGHT_SNAPSHOT_1 — read-only index of registered flight snapshots
+    (D-24). Feature-flagged (FLIGHT_SNAPSHOT_ENABLED, default off) => 404 when off.
+    Logic lives in orchestrator.flight_snapshot; this is route registration only."""
+    if not _flight_snapshot_enabled():
+        return HTMLResponse("Not Found", status_code=404)
+    if not _mcp_verify_key(request):
+        return HTMLResponse("Unauthorized", status_code=401)
+    from orchestrator import flight_snapshot
+    try:
+        flights = flight_snapshot.list_registered_flights()
+    except Exception:
+        logger.exception("flights_index failed")
+        flights = []
+    return HTMLResponse(flight_snapshot.render_index_html(flights))
+
+
+@app.get("/flights/{project_code}", include_in_schema=False, response_class=HTMLResponse)
+async def flight_snapshot_page(request: Request, project_code: str):
+    """Read-only per-flight D-24 snapshot (evidence-assembled, not authoritative).
+    Unknown project code => 404. Feature flag off => 404. ZERO writes (D-23)."""
+    if not _flight_snapshot_enabled():
+        return HTMLResponse("Not Found", status_code=404)
+    if not _mcp_verify_key(request):
+        return HTMLResponse("Unauthorized", status_code=401)
+    from orchestrator import flight_snapshot
+    try:
+        snap = flight_snapshot.build_flight_snapshot(project_code)
+    except Exception:
+        logger.exception("flight_snapshot_page failed for %s", project_code)
+        return HTMLResponse("Internal error", status_code=500)
+    if snap is None:
+        return HTMLResponse("Unknown flight", status_code=404)
+    return HTMLResponse(flight_snapshot.render_snapshot_html(snap))
+
+
 @app.get("/wip", include_in_schema=False, response_class=HTMLResponse)
 async def wip_page(request: Request):
     """Server-rendered WIP-materials browser page (?key= gated)."""
