@@ -213,3 +213,56 @@ def test_graph_mail_in_stale_watchdog():
     assert "graph_mail_poll" in _WATERMARK_MAX_AGE
     # Mail can be quiet; allow some slack but not unbounded.
     assert 1 <= _WATERMARK_MAX_AGE["graph_mail_poll"] <= 12
+
+
+# ── EMAIL_STORE_AUKERA_GAP_1 (lead #5594): since/until/thread_id + UTC labeling ──
+def test_email_search_since_until_thread_id_applied():
+    """Explicit UTC bounds + thread_id become AND conjuncts in the store query."""
+    from tools.email import _build_email_search_sql
+
+    sql, params = _build_email_search_sql(
+        "Merz", None, 20,
+        since="2026-06-20", until="2026-07-05", thread_id="AAQkconv",
+    )
+    assert sql.count("received_date >= %s") >= 1   # since
+    assert "received_date < %s" in sql             # until
+    assert "thread_id = %s" in sql
+    assert "2026-06-20" in params
+    assert "2026-07-05" in params
+    assert "AAQkconv" in params
+
+
+def test_email_search_thread_id_only_pulls_whole_conversation():
+    """thread_id with an empty query → conversation-scoped, no ILIKE tokens."""
+    from tools.email import _build_email_search_sql
+
+    sql, params = _build_email_search_sql("", None, 50, thread_id="AAQkconv")
+    assert "thread_id = %s" in sql
+    assert "ILIKE" not in sql
+    assert "AAQkconv" in params
+
+
+def test_email_search_result_labels_utc():
+    """Store results carry a Z-suffixed date_utc + a timezone=UTC marker so a
+    17:26 UTC mail is never misread as the Director's 19:26 Berlin local."""
+    from tools.email import dispatch_email
+
+    with patch("tools.email._run_email_query", return_value=[_spanyi_row()]):
+        out = json.loads(dispatch_email("baker_email_search", {"provider": "store"}))
+    assert out["timezone"] == "UTC"
+    m = out["matches"][0]
+    assert m["date_utc"] == "2026-06-06T15:59:24Z"
+    assert m["thread_id"] == "AAQkconv"
+
+
+def test_email_search_since_until_echoed_in_response():
+    from tools.email import dispatch_email
+
+    with patch("tools.email._run_email_query", return_value=[_spanyi_row()]):
+        out = json.loads(dispatch_email("baker_email_search", {
+            "provider": "store", "since": "2026-06-01", "until": "2026-06-30",
+            "thread_id": "AAQkconv",
+        }))
+    assert out["since"] == "2026-06-01"
+    assert out["until"] == "2026-06-30"
+    assert out["thread_id"] == "AAQkconv"

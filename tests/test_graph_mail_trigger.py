@@ -39,10 +39,15 @@ def _fake_client(ready=True):
 @pytest.fixture(autouse=True)
 def _reset_folder_state():
     """GRAPH_INGEST_SCOPE_WIDEN_1: the folder-list cache + per-folder failure
-    counter are per-process module state — reset around every test."""
+    counter are per-process module state — reset around every test.
+
+    Also default the seed-lookback re-seed's persisted-cursor enumeration to None
+    (defer → no-op) so poll tests never hit a real DB; the dedicated re-seed tests
+    override list_cursor_sources within their own block."""
     gmt._reset_folder_cache()
     gmt._folder_poll_failures = 0
-    yield
+    with mock.patch.object(gmt.trigger_state, "list_cursor_sources", return_value=None):
+        yield
     gmt._reset_folder_cache()
     gmt._folder_poll_failures = 0
 
@@ -56,6 +61,13 @@ def _folders(*specs):
         else:
             out.append({"id": s, "displayName": s})
     return out
+
+
+def _flag_done(key):
+    """get_cursor side_effect for STEADY-STATE poll tests: the one-time seed-lookback
+    re-seed flag is already 'done' (so _maybe_reseed_known_folders is a no-op), every
+    other cursor unset. Use where a test asserts exact set_cursor calls."""
+    return "done" if key.endswith("seed_lookback_reseed_v1") else None
 
 
 # ── Test 1: dormant → fully inert ────────────────────────────────────────────
@@ -187,9 +199,13 @@ def test_deltalink_persisted_per_folder():
     page = {"value": [], "@odata.deltaLink": delta}
     client = _fake_client(ready=True)
     client.get.return_value = page
+    # Steady state: the one-time seed-lookback re-seed has already run (flag set), so
+    # this test exercises only normal per-folder delta persistence.
+    def _cur(key):
+        return "done" if key.endswith("seed_lookback_reseed_v1") else None
     with mock.patch.object(gmt, "GraphClient", return_value=client), \
          mock.patch.object(gmt, "_get_pollable_folders", return_value=_folders("fid-9")), \
-         mock.patch.object(gmt.trigger_state, "get_cursor", return_value=None), \
+         mock.patch.object(gmt.trigger_state, "get_cursor", side_effect=_cur), \
          mock.patch.object(gmt.trigger_state, "set_cursor") as set_cursor:
         threads = gmt.poll_graph_mail()
 
@@ -233,12 +249,12 @@ def test_first_encounter_seeds_receiveddatetime_filter():
 
 
 def test_seed_filter_format():
-    """The seed filter uses now - _SEED_LOOKBACK, Graph's ONLY supported message
+    """The seed filter uses now - _seed_lookback(), Graph's ONLY supported message
     delta filter form."""
     from datetime import datetime, timezone
     now = datetime(2026, 7, 1, 12, 0, 0, tzinfo=timezone.utc)
     got = gmt._folder_seed_filter(now)
-    expected_seed = (now - gmt._SEED_LOOKBACK).strftime("%Y-%m-%dT%H:%M:%SZ")
+    expected_seed = (now - gmt._seed_lookback()).strftime("%Y-%m-%dT%H:%M:%SZ")
     assert got == f"receivedDateTime ge {expected_seed}"
 
 
@@ -261,7 +277,7 @@ def test_nextlink_pagination_followed():
     client.get_url.return_value = page2
     with mock.patch.object(gmt, "GraphClient", return_value=client), \
          mock.patch.object(gmt, "_get_pollable_folders", return_value=_folders("fid-2")), \
-         mock.patch.object(gmt.trigger_state, "get_cursor", return_value=None), \
+         mock.patch.object(gmt.trigger_state, "get_cursor", side_effect=_flag_done), \
          mock.patch.object(gmt.trigger_state, "set_cursor") as set_cursor:
         threads = gmt.poll_graph_mail()
 
@@ -335,7 +351,7 @@ def test_nextlink_none_mid_pagination_raises():
     client.get_url.return_value = None
     with mock.patch.object(gmt, "GraphClient", return_value=client), \
          mock.patch.object(gmt, "_get_pollable_folders", return_value=_folders("fid-1")), \
-         mock.patch.object(gmt.trigger_state, "get_cursor", return_value=None), \
+         mock.patch.object(gmt.trigger_state, "get_cursor", side_effect=_flag_done), \
          mock.patch.object(gmt.trigger_state, "set_cursor") as set_cursor:
         with pytest.raises(RuntimeError):
             gmt.poll_graph_mail()
@@ -350,7 +366,7 @@ def test_check_failure_reports_and_does_not_advance():
          mock.patch.object(gmt, "should_skip_poll", return_value=False), \
          mock.patch.object(gmt, "report_success") as ok, \
          mock.patch.object(gmt, "report_failure") as fail, \
-         mock.patch.object(gmt.trigger_state, "get_cursor", return_value=None), \
+         mock.patch.object(gmt.trigger_state, "get_cursor", side_effect=_flag_done), \
          mock.patch.object(gmt.trigger_state, "set_cursor") as set_cursor, \
          mock.patch.object(gmt.trigger_state, "set_watermark") as set_wm:
         gmt.check_new_graph_messages()    # must NOT raise to scheduler
@@ -739,3 +755,65 @@ def test_store_key_falls_back_to_message_id_without_conversation():
     with mock.patch.object(gmt, "_insert_live_attachment", return_value="row-1") as ins:
         gmt._capture_graph_attachments(client, m)
     assert ins.call_args.kwargs["message_id"] == real_id
+
+
+# ── GRAPH_SEED_LOOKBACK_FIX_1 (EMAIL_STORE_AUKERA_GAP_1, lead #5598) ──────────
+def test_seed_lookback_defaults_to_90_days(monkeypatch):
+    """Default seed lookback is 90d (was 1d — the silent-drop bug)."""
+    from datetime import timedelta
+    monkeypatch.delenv("GRAPH_SEED_LOOKBACK_DAYS", raising=False)
+    assert gmt._seed_lookback() == timedelta(days=90)
+
+
+def test_seed_lookback_env_override(monkeypatch):
+    from datetime import timedelta
+    monkeypatch.setenv("GRAPH_SEED_LOOKBACK_DAYS", "30")
+    assert gmt._seed_lookback() == timedelta(days=30)
+
+
+@pytest.mark.parametrize("bad", ["", "abc", "0", "-5"])
+def test_seed_lookback_invalid_falls_back_to_default(monkeypatch, bad):
+    from datetime import timedelta
+    monkeypatch.setenv("GRAPH_SEED_LOOKBACK_DAYS", bad)
+    assert gmt._seed_lookback() == timedelta(days=90)
+
+
+def test_reseed_clears_persisted_cursor_set_once_then_flags_done():
+    """First run: clear EVERY persisted folder cursor (authoritative set, NOT the
+    walk) + set the persisted flag last."""
+    calls = []
+    def _set(key, val):
+        calls.append((key, val))
+    persisted = ["graph_mail_poll:folder:fid-a", "graph_mail_poll:folder:fid-b"]
+    with mock.patch.object(gmt.trigger_state, "get_cursor", return_value=None), \
+         mock.patch.object(gmt.trigger_state, "list_cursor_sources", return_value=persisted), \
+         mock.patch.object(gmt.trigger_state, "set_cursor", side_effect=_set):
+        gmt._maybe_reseed_known_folders()
+    assert ("graph_mail_poll:folder:fid-a", "") in calls
+    assert ("graph_mail_poll:folder:fid-b", "") in calls
+    # flag set LAST (after all clears) so a mid-sweep crash retries the whole clear
+    assert calls[-1] == ("graph_mail_poll:seed_lookback_reseed_v1", "done")
+
+
+def test_reseed_is_noop_when_flag_already_set():
+    """Second run (flag present) touches nothing — one-time only, and never even
+    enumerates the cursor set."""
+    with mock.patch.object(gmt.trigger_state, "get_cursor", return_value="done"), \
+         mock.patch.object(gmt.trigger_state, "list_cursor_sources") as lst, \
+         mock.patch.object(gmt.trigger_state, "set_cursor") as set_cursor:
+        gmt._maybe_reseed_known_folders()
+    lst.assert_not_called()
+    set_cursor.assert_not_called()
+
+
+def test_reseed_defers_when_cursor_enumeration_fails_partial_walk():
+    """codex G3 #5604: a transient partial walk must NOT strand folders. The sweep
+    clears from the persisted cursor set, and if that enumeration FAILS (None) it
+    DEFERS — flag NOT set, nothing cleared — so it retries next tick rather than
+    half-finishing and stranding skipped folders on the stale 1-day cursor."""
+    with mock.patch.object(gmt.trigger_state, "get_cursor", return_value=None), \
+         mock.patch.object(gmt.trigger_state, "list_cursor_sources", return_value=None), \
+         mock.patch.object(gmt.trigger_state, "set_cursor") as set_cursor:
+        gmt._maybe_reseed_known_folders()
+    # No flag written → next tick retries the whole sweep once enumeration recovers.
+    set_cursor.assert_not_called()
