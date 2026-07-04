@@ -272,7 +272,8 @@ def ensure_airport_outbound_events_table(conn: Any) -> None:
                         'EVIDENCE_ONLY', 'RATIFICATION_READY', 'CLICKUP_BLOCKED',
                         'CLICKUP_WRITTEN', 'FLIGHT_BLOCKED', 'FLIGHT_PROGRESSED',
                         'NEEDS_CONTROLLER', 'ERROR_RETRY',
-                        'BOARDING_POSTED', 'CLAIMED', 'LANDED', 'RECEIPT_WRITTEN'
+                        'BOARDING_POSTED', 'CLAIMED', 'LANDED', 'RECEIPT_WRITTEN',
+                    'WAITING_ON_ASSIST'
                     ))
             )
             """
@@ -298,7 +299,8 @@ def ensure_airport_outbound_events_table(conn: Any) -> None:
                     'CAPTURED', 'DIRECTION_PROVEN', 'CORRELATION_PENDING', 'EVIDENCE_ONLY',
                     'RATIFICATION_READY', 'CLICKUP_BLOCKED', 'CLICKUP_WRITTEN',
                     'FLIGHT_BLOCKED', 'FLIGHT_PROGRESSED', 'NEEDS_CONTROLLER', 'ERROR_RETRY',
-                    'BOARDING_POSTED', 'CLAIMED', 'LANDED', 'RECEIPT_WRITTEN'
+                    'BOARDING_POSTED', 'CLAIMED', 'LANDED', 'RECEIPT_WRITTEN',
+                    'WAITING_ON_ASSIST'
                 ))
             """
         )

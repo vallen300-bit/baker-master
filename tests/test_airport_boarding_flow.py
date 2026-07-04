@@ -480,3 +480,200 @@ def test_cap_stops_writes_and_leaves_unacked(bfx):
     bf.run_boarding_reader(bfx)
     assert _cu()._count <= _cu().cap                      # cap never breached
     assert len(_bus().acks) < 3                           # at least one reply left un-acked
+
+
+# ===========================================================================
+# D-32 ASSIST LANE — pure unit
+# ===========================================================================
+def test_parse_assist_variants():
+    t = bf.accept_token("airport-lounge:v1:a")
+    assert bf.parse_desk_reply(f"ASSIST RESEARCHER {t} what is the deadline") == {
+        "kind": "ASSIST", "target": "RESEARCHER", "token": t, "question": "what is the deadline"}
+    assert bf.parse_desk_reply(f"ASSIST BEN {t} model NOI")["target"] == "BEN"
+    assert bf.parse_desk_reply(f"ASSIST LEGAL {t} clause 4?")["target"] == "LEGAL"
+
+
+def test_parse_assist_bad_target_and_empty_question():
+    t = bf.accept_token("airport-lounge:v1:a")
+    assert bf.parse_desk_reply(f"ASSIST FOO {t} x") is None
+    assert bf.parse_desk_reply(f"ASSIST RESEARCHER {t}") is None       # no question
+    assert bf.parse_desk_reply(f"ASSIST RESEARCHER {t}   ") is None
+
+
+def test_parse_assist_receipt():
+    aid = "assist:v1:airport-lounge:v1:src-a:1"
+    got = bf.parse_desk_reply(f"ASSIST_RECEIPT {aid}\nanswer here\nmore")
+    assert got == {"kind": "ASSIST_RECEIPT", "assist_id": aid, "answer": "answer here\nmore"}
+    assert bf.parse_desk_reply(f"ASSIST_RECEIPT {aid}") is None        # no answer -> malformed
+
+
+def test_parent_ev_from_assist_id():
+    assert bf._parent_ev_from_assist_id("assist:v1:airport-lounge:v1:src-a:3") == \
+        "airport-lounge:v1:src-a"
+    assert bf._parent_ev_from_assist_id("garbage") is None
+    assert bf._parent_ev_from_assist_id("assist:v1:noindex") is None
+
+
+def test_assist_route_map():
+    assert bf._ASSIST_ROUTE == {
+        "RESEARCHER": ("researcher", "researcher"),
+        "BEN": ("ben", "ben"),
+        "LEGAL": ("researcher", "legal-analysis")}
+
+
+def test_work_packet_advertises_assist_grammar():
+    ev = {"ticket_id": "airport-lounge:v1:a", "clickup_task_id": "CU-1",
+          "clickup_list_id": "901524194809", "matter_slug": "bb", "correlation": {}}
+    body = bf._format_work_packet(ev, bf.accept_token(ev["ticket_id"]))
+    assert "ASSIST RESEARCHER|BEN|LEGAL" in body
+
+
+def test_migration_bootstrap_assist_parity():
+    mig = open("migrations/20260704b_airport_assist_lane.sql").read()
+    conn_src = open("orchestrator/airport_outbound_connector.py").read()
+    assert "WAITING_ON_ASSIST" in mig
+    assert "DROP CONSTRAINT IF EXISTS airport_outbound_events_state_check" in mig
+    # BOTH bootstrap constraint lists (inline CREATE + idempotent ALTER) carry the state
+    assert conn_src.count("'WAITING_ON_ASSIST'") == 2
+
+
+# ===========================================================================
+# D-32 ASSIST LANE — live-PG
+# ===========================================================================
+def test_assist_request_advances_and_routes(bfx):
+    ev = "airport-lounge:v1:a"
+    tok = bf.accept_token(ev)
+    _insert_lounge_row(bfx, ev, bf.CLAIMED, correlation={"accept_token": tok})
+    _bus().queue("baden-baden-desk", f"ASSIST RESEARCHER {tok} what is the SW deadline")
+    out = bf.run_boarding_reader(bfx)
+    assert out["assist_requested"] == 1
+    assert _state(bfx, ev) == bf.WAITING_ON_ASSIST
+    assert ("CU-1", "waiting") in _cu().updates                 # ClickUp mirrored to waiting
+    assists = _corr(bfx, ev)["assists"]
+    assert len(assists) == 1 and assists[0]["kind"] == "researcher"
+    assert assists[0]["status"] == "requested"
+    # bus packet posted to researcher (same-ticket sub-dispatch)
+    assert any(r == "researcher" for r, _, _ in _bus().posts)
+    assert _bus().acks
+
+
+def test_assist_ben_and_legal_routing(bfx):
+    for target, recipient, kind in [("BEN", "ben", "ben"),
+                                    ("LEGAL", "researcher", "legal-analysis")]:
+        ev = f"airport-lounge:v1:{target}"
+        tok = bf.accept_token(ev)
+        _insert_lounge_row(bfx, ev, bf.CLAIMED, task_id=f"CU-{target}",
+                           correlation={"accept_token": tok})
+        _bus().queue("baden-baden-desk", f"ASSIST {target} {tok} please help")
+        bf.run_boarding_reader(bfx)
+        assert any(r == recipient for r, _, _ in _bus().posts), target
+        assert _corr(bfx, ev)["assists"][0]["kind"] == kind
+
+
+def test_assist_from_non_claimed_rejected(bfx):
+    ev = "airport-lounge:v1:a"
+    tok = bf.accept_token(ev)
+    _insert_lounge_row(bfx, ev, bf.BOARDING_POSTED, correlation={"accept_token": tok})
+    _bus().queue("baden-baden-desk", f"ASSIST RESEARCHER {tok} help")
+    out = bf.run_boarding_reader(bfx)
+    assert out["assist_requested"] == 0
+    assert _state(bfx, ev) == bf.BOARDING_POSTED           # no advance
+    assert _bus().acks == []                               # left un-acked
+
+
+def test_assist_duplicate_request_deduped(bfx):
+    ev = "airport-lounge:v1:a"
+    tok = bf.accept_token(ev)
+    _insert_lounge_row(bfx, ev, bf.CLAIMED, correlation={"accept_token": tok})
+    _bus().queue("baden-baden-desk", f"ASSIST RESEARCHER {tok} same question")
+    bf.run_boarding_reader(bfx)
+    posts_after_1 = len(_bus().posts)
+    # move back to CLAIMED to allow a re-request, then send the SAME kind+question
+    with bfx.cursor() as cur:
+        cur.execute("UPDATE airport_outbound_events SET event_state='CLAIMED' WHERE ticket_id=%s",
+                    (ev,))
+    bfx.commit()
+    _bus().queue("baden-baden-desk", f"ASSIST RESEARCHER {tok} same question")
+    out2 = bf.run_boarding_reader(bfx)
+    assert out2["replay"] == 1 and out2["assist_requested"] == 0
+    assert len(_bus().posts) == posts_after_1             # no duplicate sub-dispatch
+    assert len(_corr(bfx, ev)["assists"]) == 1            # no duplicate assist object
+
+
+def test_assist_receipt_all_received_returns_to_claimed(bfx):
+    ev = "airport-lounge:v1:a"
+    a1, a2 = f"assist:v1:{ev}:1", f"assist:v1:{ev}:2"
+    _insert_lounge_row(bfx, ev, bf.WAITING_ON_ASSIST, correlation={
+        "accept_token": "t",
+        "assists": [{"assist_id": a1, "kind": "researcher", "status": "requested",
+                     "question": "q1"},
+                    {"assist_id": a2, "kind": "ben", "status": "requested", "question": "q2"}]})
+    # first receipt -> still one open -> stays WAITING_ON_ASSIST
+    _bus().queue("researcher", f"ASSIST_RECEIPT {a1}\ndeadline is Aug 1")
+    out1 = bf.run_boarding_reader(bfx)
+    assert out1["assist_received"] == 1
+    assert _state(bfx, ev) == bf.WAITING_ON_ASSIST
+    # second receipt -> all received -> back to CLAIMED
+    _bus().queue("ben", f"ASSIST_RECEIPT {a2}\nNOI impact modeled")
+    out2 = bf.run_boarding_reader(bfx)
+    assert out2["assist_received"] == 1
+    assert _state(bfx, ev) == bf.CLAIMED
+    got = {a["assist_id"]: a for a in _corr(bfx, ev)["assists"]}
+    assert got[a1]["status"] == "received" and got[a1]["answer"].startswith("deadline")
+    assert got[a2]["status"] == "received"
+
+
+def test_assist_receipt_unknown_and_duplicate(bfx):
+    ev = "airport-lounge:v1:a"
+    a1 = f"assist:v1:{ev}:1"
+    _insert_lounge_row(bfx, ev, bf.WAITING_ON_ASSIST, correlation={
+        "accept_token": "t",
+        "assists": [{"assist_id": a1, "kind": "researcher", "status": "requested", "question": "q"}]})
+    # unknown assist id on a real parent -> stale, un-acked
+    _bus().queue("researcher", f"ASSIST_RECEIPT assist:v1:{ev}:9\nanswer")
+    out = bf.run_boarding_reader(bfx)
+    assert out["assist_received"] == 0 and _bus().acks == []
+    assert _state(bfx, ev) == bf.WAITING_ON_ASSIST
+    # real receipt, then a duplicate -> duplicate is idempotent replay (acked, no re-open)
+    _bus().queue("researcher", f"ASSIST_RECEIPT {a1}\nthe answer")
+    bf.run_boarding_reader(bfx)
+    assert _state(bfx, ev) == bf.CLAIMED
+    _bus().queue("researcher", f"ASSIST_RECEIPT {a1}\nthe answer again")
+    out3 = bf.run_boarding_reader(bfx)
+    assert out3["replay"] == 1 and out3["assist_received"] == 0
+
+
+def test_closure_guard_blocks_receipt_with_open_assist(bfx):
+    """A LANDED row that still carries an open assist must NOT close."""
+    ev = "airport-lounge:v1:src-a"
+    a1 = f"assist:v1:{ev}:1"
+    _insert_lounge_row(bfx, ev, bf.LANDED, correlation={
+        "accept_token": "t", "package": "p",
+        "assists": [{"assist_id": a1, "kind": "ben", "status": "requested", "question": "q"}]})
+    with bfx.cursor() as cur:
+        cur.execute(
+            "INSERT INTO airport_tickets (ticket_id, dedup_key, status, source_channel, "
+            "source_id, proposed_desk_slug, suspected_matter_slug, urgency_hint, "
+            "check_in_outcome, check_in_at, ticket) VALUES "
+            "('src-a','dk-a','checked_in','email','s','baden-baden-desk','bb','normal','VALID',NOW(),'{}'::jsonb)")
+    bfx.commit()
+    out = bf.run_receipt_writer(bfx)
+    assert out["written"] == 0 and out["blocked_assist"] == 1
+    assert _state(bfx, ev) == bf.LANDED                    # not closed
+    assert ("CU-1", "complete") not in _cu().updates       # ClickUp not closed
+    with bfx.cursor() as cur:
+        cur.execute("SELECT status FROM airport_tickets WHERE ticket_id='src-a'")
+        assert cur.fetchone()[0] == "checked_in"           # source ticket not closed
+
+
+def test_reconcile_open_assist_count(bfx):
+    ev = "airport-lounge:v1:a"
+    _insert_lounge_row(bfx, ev, bf.WAITING_ON_ASSIST, correlation={
+        "accept_token": "t",
+        "assists": [{"assist_id": f"assist:v1:{ev}:1", "kind": "researcher", "status": "requested"},
+                    {"assist_id": f"assist:v1:{ev}:2", "kind": "ben", "status": "received"}]})
+    rec = bf.reconcile_onward(bfx)
+    assert rec["open_assist_count"] == 1                    # only the 'requested' one
+    assert rec["open_assists"][0]["kind"] == "researcher"
+    assert rec["flight_column_leak_count"] == 0
+    assert rec["by_state"].get(bf.WAITING_ON_ASSIST) == 1
