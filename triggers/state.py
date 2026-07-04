@@ -423,6 +423,35 @@ class TriggerState:
         except Exception as e:
             logger.error(f"Failed to set cursor for {source}: {e}")
 
+    def list_cursor_sources(self, prefix: str) -> Optional[list]:
+        """Return every trigger source whose stored cursor key starts with `prefix`
+        and holds a non-empty cursor. This is the AUTHORITATIVE set of already-seeded
+        sources (independent of any in-flight enumeration/walk).
+
+        Returns None on a backend error so callers can distinguish 'enumeration
+        failed → defer' from 'no such sources yet → empty list'. (%/_ in `prefix`
+        would be LIKE wildcards; the graph_mail folder prefix contains neither.)"""
+        try:
+            store = self._get_store()
+            conn = store._get_conn()
+            if not conn:
+                return None
+            try:
+                cur = conn.cursor()
+                cur.execute(
+                    "SELECT source FROM trigger_watermarks "
+                    "WHERE source LIKE %s AND cursor_data IS NOT NULL AND cursor_data <> ''",
+                    (prefix + "%",),
+                )
+                rows = cur.fetchall()
+                cur.close()
+                return [r[0] for r in rows]
+            finally:
+                store._put_conn(conn)
+        except Exception as e:
+            logger.warning(f"Could not list cursor sources for {prefix}: {e}")
+            return None
+
     # -------------------------------------------------------
     # Briefing Queue
     # -------------------------------------------------------

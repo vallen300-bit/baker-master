@@ -548,36 +548,49 @@ def _folder_seed_filter(now: datetime | None = None) -> str:
 
 
 # GRAPH_SEED_LOOKBACK_FIX_1 (lead #5598 step 2): one-time re-seed of every folder
-# already known to the poller, so mail dropped by the prior 1-day seed is pulled
-# once under the widened _seed_lookback() window. Clearing a folder's stored
-# cursor makes the next _poll_folder take the first-encounter seed path; the
-# re-pulled messages upsert on message_id (idempotent), so this cannot duplicate.
-# A persisted flag makes it run exactly once (per deployment of this fix).
+# already seeded under the old 1-day window, so mail it dropped is pulled once under
+# the widened _seed_lookback(). Clearing a folder's stored cursor makes the next
+# _poll_folder take the first-encounter seed path; the re-pulled messages upsert on
+# message_id (idempotent), so this cannot duplicate. A persisted flag makes it run
+# once per deployment of this fix.
+#
+# codex G3 #5604 fix: clear from the AUTHORITATIVE persisted cursor set
+# (graph_mail_poll:folder:% keys), NOT the current walk result. A transient PARTIAL
+# folder walk (a subtree fetch returning None skips that subtree) would otherwise
+# omit folders from the sweep while the done flag set anyway — permanently stranding
+# those folders on the stale 1-day cursor. The persisted cursor set is complete
+# regardless of walk health; if enumeration itself fails we DEFER (flag not set) so
+# the sweep retries next tick rather than half-finishing.
 _RESEED_FLAG_KEY = f"{_SOURCE}:seed_lookback_reseed_v1"
+_FOLDER_CURSOR_PREFIX = f"{_SOURCE}:folder:"
 
 
-def _maybe_reseed_known_folders(folders: list) -> None:
-    """Once: clear each known folder's delta cursor so the next poll re-seeds it
-    with the widened seed window, catching mail the old 1-day seed dropped.
-    No-op after the first successful run (persisted flag). Idempotent: re-running
-    before the flag is set only re-clears already-cleared cursors (harmless)."""
+def _maybe_reseed_known_folders() -> None:
+    """Once: clear every persisted folder delta cursor so the next poll re-seeds each
+    under the widened seed window, catching mail the old 1-day seed dropped. Clears
+    from the authoritative trigger_watermarks cursor set (walk-independent). No-op
+    after the first successful run (persisted flag); DEFERS (no flag) if the cursor
+    enumeration fails, so a backend blip retries the whole sweep next tick."""
     if trigger_state.get_cursor(_RESEED_FLAG_KEY):
         return
-    cleared = 0
-    for folder in folders:
-        fid = folder.get("id")
-        if not fid:
-            continue
+    sources = trigger_state.list_cursor_sources(_FOLDER_CURSOR_PREFIX)
+    if sources is None:
+        # Enumeration failed (backend blip) — do NOT set the flag; retry next tick.
+        logger.warning(
+            "graph mail: seed-lookback re-seed DEFERRED — persisted-cursor "
+            "enumeration failed; will retry next poll",
+        )
+        return
+    for src in sources:
         # Empty string clears: get_cursor treats falsy cursor_data as unset, so the
         # next _poll_folder takes the first-encounter seed path with _seed_lookback().
-        trigger_state.set_cursor(f"{_SOURCE}:folder:{fid}", "")
-        cleared += 1
-    # Set the flag only after ALL cursors are cleared, so a crash mid-sweep retries
-    # the whole (idempotent) clear next tick rather than skipping folders.
+        trigger_state.set_cursor(src, "")
+    # Flag set only after ALL known cursors are cleared; a crash mid-sweep leaves the
+    # flag unset so the whole (idempotent) clear retries next tick.
     trigger_state.set_cursor(_RESEED_FLAG_KEY, "done")
     logger.info(
-        "graph mail: one-time seed-lookback re-seed cleared %d folder cursors "
-        "(will re-pull under %dd window)", cleared, _seed_lookback().days,
+        "graph mail: one-time seed-lookback re-seed cleared %d persisted folder "
+        "cursors (will re-pull under %dd window)", len(sources), _seed_lookback().days,
     )
 
 
@@ -649,9 +662,10 @@ def poll_graph_mail() -> list:
     if not folders:                  # ready but no folders → listing failed, NOT empty
         raise RuntimeError("graph mail: folder enumeration returned no folders while ready (auth/HTTP failure)")
 
-    # One-time widen re-seed (GRAPH_SEED_LOOKBACK_FIX_1): clears known-folder cursors
-    # so this same tick re-seeds them under _seed_lookback(); no-op after first run.
-    _maybe_reseed_known_folders(folders)
+    # One-time widen re-seed (GRAPH_SEED_LOOKBACK_FIX_1): clears every PERSISTED
+    # folder cursor (walk-independent) so subsequent polls re-seed under
+    # _seed_lookback(); no-op after first run, defers on enumeration failure.
+    _maybe_reseed_known_folders()
 
     results: list = []
     failures = 0
