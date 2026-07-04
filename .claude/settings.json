@@ -1,44 +1,55 @@
 {
-  "hooks": {
-    "SessionStart": [
-      {
-        "hooks": [
-          {
-            "type": "command",
-            "command": ".claude/hooks/session-start-role.sh",
-            "timeout": 10
-          }
-        ]
-      }
-    ],
-    "PreToolUse": [
-      {
-        "matcher": "Write|Edit|MultiEdit",
-        "hooks": [
-          {
-            "type": "command",
-            "command": ".claude/hooks/ui-surface-prebrief-check.sh",
-            "timeout": 10
-          },
-          {
-            "type": "command",
-            "command": ".claude/hooks/write_brief_sop_enforcer.sh",
-            "timeout": 10
-          }
-        ]
-      }
-    ],
-    "Stop": [
-      {
-        "hooks": [
-          {
-            "type": "command",
-            "command": ".claude/hooks/context-threshold-check.sh",
-            "timeout": 10
-          }
-        ]
-      }
+ "hooks": {
+  "SessionStart": [
+   {
+    "hooks": [
+     {
+      "type": "command",
+      "command": ".claude/hooks/session-start-role.sh",
+      "timeout": 10
+     }
     ]
-  },
-  "rollover_window_tokens": 1000000
+   }
+  ],
+  "PreToolUse": [
+   {
+    "matcher": "Write|Edit|MultiEdit",
+    "hooks": [
+     {
+      "type": "command",
+      "command": ".claude/hooks/ui-surface-prebrief-check.sh",
+      "timeout": 10
+     },
+     {
+      "type": "command",
+      "command": ".claude/hooks/write_brief_sop_enforcer.sh",
+      "timeout": 10
+     }
+    ]
+   }
+  ],
+  "Stop": [
+   {
+    "hooks": [
+     {
+      "type": "command",
+      "command": ".claude/hooks/context-threshold-check.sh",
+      "timeout": 10
+     }
+    ]
+   }
+  ]
+ },
+ "rollover_window_tokens": 1000000,
+ "SessionEnd": [
+  {
+   "hooks": [
+    {
+     "type": "command",
+     "command": ".claude/hooks/pin-size-check.sh",
+     "timeout": 10
+    }
+   ]
+  }
+ ]
 }
