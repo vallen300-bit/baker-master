@@ -436,14 +436,21 @@ def test_ttl_nudge_then_escalate(bfx):
 # --- AC4 readonly + AC5 reconcile ------------------------------------------
 def test_readonly_sweep_is_nonmutating(bfx, monkeypatch):
     monkeypatch.setenv("BAKER_CLICKUP_READONLY", "true")
-    ev = "airport-lounge:v1:a"
+    _insert_lounge_row(bfx, "airport-lounge:v1:a", bf.CLICKUP_WRITTEN,
+                       correlation={"accept_token": "t"})
+    ev = "airport-lounge:v1:b"
     tok = bf.accept_token(ev)
     _insert_lounge_row(bfx, ev, bf.CLAIMED, correlation={"accept_token": tok})
     _bus().queue("baden-baden-desk", f"STATUS BLOCKED {tok}")
     report = bf.run_onward_journey_sweep(bfx)
     assert report["dry_run"] is True
-    assert _cu().updates == [] and _cu().comments == []   # zero ClickUp writes
-    assert _state(bfx, ev) == bf.CLAIMED                  # mirror is surface-only anyway
+    assert report["plan"]["would_post_boarding"] == 1     # the CLICKUP_WRITTEN row
+    assert report["plan"]["in_flight"] == 1               # the CLAIMED row
+    # NON-MUTATING end-to-end: zero ClickUp writes, no bus posts, no ACK, no state change
+    assert _cu().updates == [] and _cu().comments == []
+    assert _bus().posts == [] and _bus().acks == []
+    assert _state(bfx, "airport-lounge:v1:a") == bf.CLICKUP_WRITTEN
+    assert _state(bfx, ev) == bf.CLAIMED
 
 
 def test_reconcile_clean_no_flight_leak(bfx):

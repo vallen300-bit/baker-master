@@ -696,13 +696,38 @@ def reconcile_onward(conn: Any) -> Dict[str, Any]:
 # ---------------------------------------------------------------------------
 # Operator sweep entry (T1->T4 + reconcile). Gated; flag-off = no-op.
 # ---------------------------------------------------------------------------
+def _dry_run_plan(conn: Any) -> Dict[str, Any]:
+    """AC4 readonly dry-run: NON-MUTATING end-to-end. Reads the current per-state counts +
+    reconciliation and reports what a live sweep WOULD do — zero DB / ClickUp / bus writes,
+    no bus read, no ACK. Mirrors run_lounge_drain's dry-run 'planned' semantics."""
+    with conn.cursor() as cur:
+        cur.execute(
+            "SELECT event_state, COUNT(*) FROM airport_outbound_events "
+            "WHERE ticket_id LIKE 'airport-lounge:%%' AND desk_owner = %s GROUP BY event_state",
+            (_DESK,),
+        )
+        counts = {s: int(c) for s, c in cur.fetchall()}
+    rec = reconcile_onward(conn)
+    plan = {
+        "would_post_boarding": counts.get(CLICKUP_WRITTEN, 0),
+        "awaiting_claim": counts.get(BOARDING_POSTED, 0),
+        "in_flight": counts.get(CLAIMED, 0),
+        "would_write_receipt": counts.get(LANDED, 0),
+    }
+    logger.info("onward-journey DRY-RUN (readonly, non-mutating): plan=%s", plan)
+    return {"enabled": True, "dry_run": True, "plan": plan, "by_state": counts,
+            "reconciliation": rec}
+
+
 def run_onward_journey_sweep(conn: Any) -> Dict[str, Any]:
     """One full onward-journey pass. Order: post boarding packets, read desk replies, write
     receipts for landed rows, run the TTL exception lane, reconcile. Flag-gated no-op when
-    AIRPORT_BOARDING_FLOW_ENABLED is not set."""
+    AIRPORT_BOARDING_FLOW_ENABLED is not set; readonly = non-mutating plan (AC4)."""
     if not boarding_enabled():
         logger.info("onward-journey sweep: AIRPORT_BOARDING_FLOW_ENABLED not set — no-op")
         return {"enabled": False}
+    if _readonly():
+        return _dry_run_plan(conn)
     report = {
         "enabled": True,
         "dry_run": _readonly(),
