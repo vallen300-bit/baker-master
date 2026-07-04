@@ -271,7 +271,8 @@ def ensure_airport_outbound_events_table(conn: Any) -> None:
                         'CAPTURED', 'DIRECTION_PROVEN', 'CORRELATION_PENDING',
                         'EVIDENCE_ONLY', 'RATIFICATION_READY', 'CLICKUP_BLOCKED',
                         'CLICKUP_WRITTEN', 'FLIGHT_BLOCKED', 'FLIGHT_PROGRESSED',
-                        'NEEDS_CONTROLLER', 'ERROR_RETRY'
+                        'NEEDS_CONTROLLER', 'ERROR_RETRY',
+                        'BOARDING_POSTED', 'CLAIMED', 'LANDED', 'RECEIPT_WRITTEN'
                     ))
             )
             """
@@ -279,6 +280,27 @@ def ensure_airport_outbound_events_table(conn: Any) -> None:
         cur.execute(
             "CREATE INDEX IF NOT EXISTS idx_airport_outbound_events_state "
             "ON airport_outbound_events (event_state)"
+        )
+        # BAKER_OS_V2_STEP2_ONWARD_JOURNEY_BLOCKS_2_4_1 (T0): the onward-journey states
+        # (BOARDING_POSTED / CLAIMED / LANDED / RECEIPT_WRITTEN) mirror
+        # migrations/20260704a_airport_onward_journey.sql. On an already-bootstrapped DB
+        # the CREATE TABLE IF NOT EXISTS above no-ops, so the widened inline CHECK never
+        # lands — an idempotent DROP + ADD is what actually amends the live constraint
+        # (migration-vs-bootstrap drift, Lesson #37/#50).
+        cur.execute(
+            "ALTER TABLE airport_outbound_events "
+            "DROP CONSTRAINT IF EXISTS airport_outbound_events_state_check"
+        )
+        cur.execute(
+            """
+            ALTER TABLE airport_outbound_events ADD CONSTRAINT airport_outbound_events_state_check
+                CHECK (event_state IN (
+                    'CAPTURED', 'DIRECTION_PROVEN', 'CORRELATION_PENDING', 'EVIDENCE_ONLY',
+                    'RATIFICATION_READY', 'CLICKUP_BLOCKED', 'CLICKUP_WRITTEN',
+                    'FLIGHT_BLOCKED', 'FLIGHT_PROGRESSED', 'NEEDS_CONTROLLER', 'ERROR_RETRY',
+                    'BOARDING_POSTED', 'CLAIMED', 'LANDED', 'RECEIPT_WRITTEN'
+                ))
+            """
         )
 
 

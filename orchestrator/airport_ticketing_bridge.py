@@ -530,7 +530,7 @@ def ensure_airport_ticket_table(conn: Any) -> None:
                 created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
                 updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
                 CONSTRAINT airport_tickets_status_check
-                    CHECK (status IN ('candidate', 'sent', 'failed', 'checked_in', 'rejected')),
+                    CHECK (status IN ('candidate', 'sent', 'failed', 'checked_in', 'rejected', 'closed')),
                 CONSTRAINT airport_tickets_source_channel_check
                     CHECK (source_channel IN ('email', 'whatsapp', 'plaud', 'clickup', 'calendar', 'other')),
                 CONSTRAINT airport_tickets_urgency_check
@@ -571,6 +571,19 @@ def ensure_airport_ticket_table(conn: Any) -> None:
         )
         cur.execute(
             "ALTER TABLE airport_tickets ADD COLUMN IF NOT EXISTS nudge_count INTEGER NOT NULL DEFAULT 0"
+        )
+        # BAKER_OS_V2_STEP2_ONWARD_JOURNEY_BLOCKS_2_4_1 (T0): 'closed' terminal status for
+        # a fully-received onward journey (source ticket flips checked_in -> closed only at
+        # RECEIPT_WRITTEN). Mirrors migrations/20260704a_airport_onward_journey.sql. On an
+        # already-bootstrapped DB the CREATE TABLE IF NOT EXISTS no-ops, so an idempotent
+        # DROP + ADD is what amends the live constraint (migration-vs-bootstrap drift,
+        # Lesson #37/#50).
+        cur.execute(
+            "ALTER TABLE airport_tickets DROP CONSTRAINT IF EXISTS airport_tickets_status_check"
+        )
+        cur.execute(
+            "ALTER TABLE airport_tickets ADD CONSTRAINT airport_tickets_status_check "
+            "CHECK (status IN ('candidate', 'sent', 'failed', 'checked_in', 'rejected', 'closed'))"
         )
         cur.execute(
             "ALTER TABLE airport_tickets ADD COLUMN IF NOT EXISTS escalated_at TIMESTAMPTZ"
