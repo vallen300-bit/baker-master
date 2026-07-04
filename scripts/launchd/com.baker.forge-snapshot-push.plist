@@ -13,6 +13,20 @@
   <integer>30</integer>
   <key>RunAtLoad</key>
   <true/>
+  <!-- BRISEN_LAB_FORGE_TELEMETRY_DURABILITY_1 (T3): auto-resurrect the pusher so
+       it never dies silently (outage 2026-07-04). RunAtLoad resumes it on
+       reboot/login; KeepAlive (crash-only) resumes it after a failed exit.
+       CRASH-ONLY dict form (lead-ratified 2026-07-04, bus #5267): a bare
+       KeepAlive=true would relaunch this fast-exit periodic script on EVERY exit
+       (throttled to ~10s), collapsing the 30s StartInterval cadence into a ~10s
+       hot-loop + respawn log spam — the exact failure mode we are hardening
+       against. {SuccessfulExit: false} restarts ONLY on a non-zero exit, so the
+       StartInterval=30 cadence is preserved while a crash still self-heals. -->
+  <key>KeepAlive</key>
+  <dict>
+    <key>SuccessfulExit</key>
+    <false/>
+  </dict>
   <key>StandardOutPath</key>
   <string>/Users/dimitry/Library/Logs/forge-snapshot-push.log</string>
   <key>StandardErrorPath</key>
