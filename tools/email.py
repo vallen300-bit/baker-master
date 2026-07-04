@@ -153,6 +153,30 @@ EMAIL_TOOLS: list[Tool] = [
                         "sources. Only applies to provider=store/all."
                     ),
                 },
+                "since": {
+                    "type": "string",
+                    "description": (
+                        "Optional UTC lower bound (inclusive), YYYY-MM-DD. Only "
+                        "received_date >= since is returned. NOTE received_date is "
+                        "UTC — a mail shown as 19:26 Berlin is 17:26 UTC, so use the "
+                        "UTC date. Applies to provider=store/all."
+                    ),
+                },
+                "until": {
+                    "type": "string",
+                    "description": (
+                        "Optional UTC upper bound (exclusive), YYYY-MM-DD. Only "
+                        "received_date < until is returned. Applies to provider=store/all."
+                    ),
+                },
+                "thread_id": {
+                    "type": "string",
+                    "description": (
+                        "Optional exact thread_id (conversation id) to pull a whole "
+                        "conversation deterministically instead of keyword-guessing. "
+                        "Use a thread_id from a prior result. Applies to provider=store/all."
+                    ),
+                },
             },
             "required": [],
         },
@@ -330,15 +354,28 @@ def _tokenize(query: str) -> list[str]:
     return _parse_query(query)[0]
 
 
-def _build_email_search_sql(query: str, source: str | None, limit: int) -> tuple[str, list[Any]]:
+def _build_email_search_sql(query: str, source: str | None, limit: int,
+                            since: str | None = None, until: str | None = None,
+                            thread_id: str | None = None) -> tuple[str, list[Any]]:
     """Build a TOKENIZED, field-aware query over email_messages.
 
     Each token must match (AND across tokens) at least one of subject / sender_name
-    / sender_email / full_body (OR within a token). after:/before: become
-    received_date bounds. Optional exact source filter. Returns (sql, params).
+    / sender_email / full_body (OR within a token). after:/before: in the query
+    become received_date bounds. Optional exact source filter. Returns (sql, params).
     Pure — unit-testable without a DB.
+
+    Explicit params (EMAIL_STORE_AUKERA_GAP_1, lead #5594), all applied as extra AND
+    conjuncts so they compose with any after:/before: from the query text:
+      - since  — received_date >= since   (UTC, inclusive lower bound)
+      - until  — received_date <  until   (UTC, exclusive upper bound)
+      - thread_id — exact thread_id match (pull a full conversation deterministically)
+    Dates are parsed with the same _parse_date used for after:/before:; an
+    unparseable value is ignored (never silently widens to no-bound).
     """
     tokens, after, before = _parse_query(query)
+    # Explicit since/until augment (AND) the token-derived bounds; the tightest wins.
+    since_dt = _parse_date(since) if since else None
+    until_dt = _parse_date(until) if until else None
     where: list[str] = []
     params: list[Any] = []
     for tok in tokens:
@@ -351,6 +388,15 @@ def _build_email_search_sql(query: str, source: str | None, limit: int) -> tuple
     if before:
         where.append("received_date < %s")
         params.append(before)
+    if since_dt:
+        where.append("received_date >= %s")
+        params.append(since_dt)
+    if until_dt:
+        where.append("received_date < %s")
+        params.append(until_dt)
+    if thread_id:
+        where.append("thread_id = %s")
+        params.append(thread_id)
     if source:
         where.append("source = %s")
         params.append(source)
@@ -371,14 +417,36 @@ _ROW_COLS = ("message_id", "thread_id", "sender_name", "sender_email",
              "subject", "snippet", "received_date", "source")
 
 
+def _to_utc_iso(rd: Any) -> str | None:
+    """Format a stored received_date as unambiguous UTC ISO-8601 (Z-suffixed).
+    Accepts a tz-aware datetime (normalizes to UTC) or a string (best-effort)."""
+    if rd is None:
+        return None
+    try:
+        if hasattr(rd, "astimezone"):
+            from datetime import timezone as _tz
+            return rd.astimezone(_tz.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+    except Exception:
+        pass
+    s = str(rd)[:19].replace(" ", "T")
+    return (s + "Z") if s else None
+
+
 def _row_to_match(row: Any) -> dict[str, Any]:
     data = {c: row[i] for i, c in enumerate(_ROW_COLS)}
+    rd = data.get("received_date")
     return {
         "message_id": data.get("message_id"),
+        "thread_id": data.get("thread_id"),
         "sender": data.get("sender_name") or data.get("sender_email"),
         "sender_email": data.get("sender_email"),
         "subject": data.get("subject"),
-        "date": str(data.get("received_date"))[:19] if data.get("received_date") else None,
+        # received_date is stored UTC (TIMESTAMPTZ). `date` stays "YYYY-MM-DD HH:MM:SS"
+        # for back-compat; `date_utc` is unambiguous ISO-8601 Z-suffixed so callers
+        # stop reading a UTC wall-clock as local (EMAIL_STORE_AUKERA_GAP_1, #5594 —
+        # the desk read 17:26Z as "missing" vs the Director's 19:26 Berlin local).
+        "date": str(rd)[:19] if rd else None,
+        "date_utc": _to_utc_iso(rd),
         "source": data.get("source"),
         "snippet": (data.get("snippet") or "")[:_SNIPPET_CAP],
     }
@@ -421,14 +489,19 @@ def _run_email_query(sql: str, params: list[Any]) -> list[Any]:
         raise
 
 
-def _store_search(query: str, max_results: int, source: str | None = None) -> dict[str, Any]:
+def _store_search(query: str, max_results: int, source: str | None = None,
+                  since: str | None = None, until: str | None = None,
+                  thread_id: str | None = None) -> dict[str, Any]:
     """Tokenized, field-aware search of the merged email_messages store.
 
-    Surfaces a backend OUTAGE loudly (backend_unavailable) so an empty result is
-    never silently read as 'no mail'."""
+    Optional since/until (UTC date bounds) + thread_id (exact conversation) narrow
+    the result set deterministically (EMAIL_STORE_AUKERA_GAP_1, #5594). Surfaces a
+    backend OUTAGE loudly (backend_unavailable) so an empty result is never silently
+    read as 'no mail'."""
     from memory.retriever import SearchBackendUnavailable
 
-    sql, params = _build_email_search_sql(query, source, max_results)
+    sql, params = _build_email_search_sql(query, source, max_results,
+                                          since=since, until=until, thread_id=thread_id)
     try:
         rows = _run_email_query(sql, params)
     except SearchBackendUnavailable as e:
@@ -460,9 +533,18 @@ def _store_search(query: str, max_results: int, source: str | None = None) -> di
         "query": query,
         "match_count": len(matches),
         "matches": matches,
+        # All `date`/`date_utc` values are UTC; the store keeps received_date as
+        # TIMESTAMPTZ. Callers reasoning in Berlin/local time must add the offset.
+        "timezone": "UTC",
     }
     if source:
         out["source"] = source
+    if since:
+        out["since"] = since
+    if until:
+        out["until"] = until
+    if thread_id:
+        out["thread_id"] = thread_id
     return out
 
 
@@ -526,14 +608,20 @@ def _search(args: dict) -> str:
     if provider not in _PROVIDERS:
         provider = _DEFAULT_PROVIDER
     source = str(args.get("source") or "").strip().lower() or None
+    since = str(args.get("since") or "").strip() or None
+    until = str(args.get("until") or "").strip() or None
+    thread_id = str(args.get("thread_id") or "").strip() or None
 
     if provider == "store":
-        return json.dumps(_store_search(query, max_results, source))
+        return json.dumps(_store_search(query, max_results, source,
+                                        since=since, until=until, thread_id=thread_id))
     if provider == "graph":
         return json.dumps(_graph_search(query, max_results))
 
-    # provider == "all": merge store + graph, surface per-provider errors.
-    store = _store_search(query, max_results, source)
+    # provider == "all": merge store + graph, surface per-provider errors. Store-only
+    # filters (since/until/thread_id) apply to the store leg; graph is Inbox-live.
+    store = _store_search(query, max_results, source,
+                          since=since, until=until, thread_id=thread_id)
     graph = _graph_search(query, max_results)
     errors: dict[str, str] = {}
     if store.get("error"):
