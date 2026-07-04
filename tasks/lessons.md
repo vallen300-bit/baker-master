@@ -1108,3 +1108,11 @@ complete (Inbox 34%, Sent 0.4%). Nobody noticed until the Director asked "is it 
   4. Mitigant that made these MEDIUM not HIGH: the filter only suppresses the dashboard NUDGE candidate — the
      email-ingest + deadline pipelines are untouched, so no deadline/email is actually lost. Filter at the
      surface, never at ingestion, so an over-filter is recoverable.
+
+## Lesson #108 — Claude Code settings.json nests hooks under top-level `hooks`; top-level `Stop`/`SessionEnd` is a silent no-op
+**Context:** 2026-07-04 AH2 session. While wiring a PINNED size-guard I wrote `SessionEnd` at the JSON top level, verified by reading top-level `SessionEnd` back, and reported it "live." It never fired. Same day, my G1 review of lead's auto-rollover checked top-level `d.get('Stop')` → got `NONE` → wrongly issued request-changes; b3 pushed back with sha256 + `d['hooks']['Stop']` evidence and was correct.
+**Rule:** Claude Code reads lifecycle hooks under the top-level `"hooks"` object: `hooks.SessionStart`, `hooks.PreToolUse`, `hooks.Stop`, `hooks.SessionEnd`. A key placed at the JSON root (e.g. `{"SessionEnd": [...]}`) is ignored — no error, no fire.
+1. When wiring: `d.setdefault("hooks",{}).setdefault("<Event>",[])`, never top-level.
+2. When verifying/reviewing: read `d["hooks"].get("<Event>")`, never `d.get("<Event>")`. A top-level read returns empty on a correctly-wired file and non-empty on a broken one — exactly inverted.
+3. "Verified" by reading back the same wrong path is not verification — it confirms the bug. Read via the path the consumer (Claude Code) actually uses.
+4. Fail-loud corollary: a config edit isn't "live" until the real consumer loads it; round-tripping your own write proves nothing about activation.
