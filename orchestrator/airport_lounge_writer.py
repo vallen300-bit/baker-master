@@ -483,6 +483,22 @@ def run_lounge_drain(conn: Any, desk_slug: str = "baden-baden-desk",
     result["candidates"] = len(tickets)
     plan = plan_drain(tickets)
 
+    # Align the ClickUpClient's PER-PROCESS write cap with THIS drain cycle. The client's
+    # _cycle_write_count is cumulative across calls in one process, so without a reset a
+    # multi-cycle drain in a single process (e.g. the operator script's while-loop) trips
+    # the client's 10-cap on cycle 2 and dumps that whole batch to ERROR_RETRY — observed
+    # live in the pilot (run1 cycle2). Resetting once per drain cycle makes the client
+    # guard match our own per-cycle cap: each cycle still writes ≤ cap, so the "10 ClickUp
+    # writes/cycle" hard rule holds (a drain cycle IS the cycle). Guarded so a client
+    # without the method (or a transient error) never blocks the drain.
+    if not readonly:
+        try:
+            _client = _get_clickup_client()
+            if hasattr(_client, "reset_cycle_counter"):
+                _client.reset_cycle_counter()
+        except Exception as e:
+            logger.warning("lounge drain: could not reset ClickUp cycle counter: %s", e)
+
     writes_this_cycle = 0
     for item in plan:
         ticket = item["ticket"]

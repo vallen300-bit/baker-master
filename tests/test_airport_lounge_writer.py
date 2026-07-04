@@ -150,6 +150,36 @@ class _FakeClickUp:
         return {"id": "CU-%d" % self._n, "url": "http://cu/%d" % self._n}
 
 
+class _CappedFakeClickUp:
+    """Mirrors the REAL ClickUpClient PER-PROCESS write cap: create_task raises once
+    ``cap`` writes have happened, until ``reset_cycle_counter()`` clears the counter.
+    Reproduces the live-pilot cycle-2 ERROR_RETRY storm and proves the per-drain-cycle
+    reset fix."""
+
+    def __init__(self, cap=10, space="901510186446"):
+        self.calls = []
+        self.cap = cap
+        self.space = space
+        self._count = 0
+        self._n = 0
+        self.resets = 0
+
+    def _resolve_space_id_for_list(self, list_id):
+        return self.space
+
+    def reset_cycle_counter(self):
+        self._count = 0
+        self.resets += 1
+
+    def create_task(self, **kwargs):
+        if self._count >= self.cap:
+            raise RuntimeError("Max writes per cycle exceeded (%d)" % self.cap)
+        self.calls.append(kwargs)
+        self._count += 1
+        self._n += 1
+        return {"id": "CU-%d" % self._n}
+
+
 _STATE: dict = {}
 
 
@@ -397,6 +427,25 @@ def test_clickup_exception_error_retry(lg, monkeypatch):
                     "WHERE ticket_id = %s", ("airport-lounge:t1",))
         state = cur.fetchone()[0]
     assert state == lounge.ERROR_RETRY               # retried next cycle, never dropped
+
+
+def test_per_process_cap_reset_across_cycles(lg, monkeypatch):
+    # Live-pilot regression: with a client whose 10-cap is PER-PROCESS, a two-cycle drain
+    # in ONE process must reset the client counter each cycle. Without the reset, cycle 2
+    # would raise on every write → ERROR_RETRY storm (what happened live, run1 cycle2).
+    capped = _CappedFakeClickUp(cap=10)
+    monkeypatch.setattr(lounge, "_get_clickup_client", lambda: capped)
+    _STATE["fake"] = capped
+    for i in range(20):
+        _insert_ticket(lg, "c%02d" % i)
+    r1 = lounge.run_lounge_drain(lg, cap=10)
+    assert r1["wrote"] == 10 and r1["deferred_cap"] == 10 and r1["error_retry"] == 0
+    # Same process, cycle 2: the per-cycle reset lets the next 10 succeed (not ERROR_RETRY).
+    r2 = lounge.run_lounge_drain(lg, cap=10)
+    assert r2["wrote"] == 10 and r2["error_retry"] == 0
+    assert capped.resets >= 2                         # reset once per drain cycle
+    assert len(capped.calls) == 20
+    assert lounge.reconcile(lg)["clean"] is True
 
 
 def test_non_baker_space_blocked(lg, monkeypatch):
