@@ -368,7 +368,7 @@ def _read_rows_in_state(conn: Any, state: str, limit: int) -> List[Dict[str, Any
 # ---------------------------------------------------------------------------
 def _get_clickup_client() -> Any:
     from clickup_client import ClickUpClient
-    return ClickUpClient()
+    return ClickUpClient._get_global_instance()
 
 
 def _post_bus(recipient: str, body: str, topic: str) -> Dict[str, Any]:
