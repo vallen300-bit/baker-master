@@ -8,6 +8,7 @@ Never raises to the scheduler; one failure must not affect other pollers.
 from __future__ import annotations
 import base64
 import logging
+import os
 from datetime import datetime, timezone, timedelta
 from urllib.parse import quote
 
@@ -54,11 +55,32 @@ _EXCLUDED_DISPLAYNAMES = frozenset({
 # Delta-reset safety (LOAD-BEARING, AC3): a fresh per-folder delta with no state
 # token would re-pull that folder's ENTIRE history — mailbox-wide that is the
 # ~119k backlog the brief forbids. On first encounter of a folder we seed the
-# initial delta with $filter=receivedDateTime ge {now - _SEED_LOOKBACK} (the ONLY
+# initial delta with $filter=receivedDateTime ge {now - _seed_lookback()} (the ONLY
 # $filter message:delta supports); Graph bakes the bound into the returned
-# deltaLink so every subsequent poll is truly incremental. A small lookback gives
-# a safety margin for mail that landed just before cutover without a real backfill.
-_SEED_LOOKBACK = timedelta(days=1)
+# deltaLink so every subsequent poll is truly incremental.
+#
+# GRAPH_SEED_LOOKBACK_FIX_1 (EMAIL_STORE_AUKERA_GAP_1, lead #5598): the seed was
+# 1 day, so ANY folder first enumerated by the widened poller backfilled only 1
+# day and silently dropped older mail already filed into that subfolder. The
+# lookback is now env-tunable GRAPH_SEED_LOOKBACK_DAYS (default 90). A wider seed
+# re-pulls more history on first encounter, but the email store upsert is
+# idempotent on message_id (store_back.store_email_message ON CONFLICT), so the
+# only cost is one bounded re-pull — never a duplicate. Per-folder + $top=50 +
+# bounded pagination still cap the pull; whole-mailbox full history stays gated by
+# per-folder deltaLinks after the first tick.
+_DEFAULT_SEED_LOOKBACK_DAYS = 90
+
+
+def _seed_lookback() -> timedelta:
+    """First-encounter delta seed window. Env-tunable via GRAPH_SEED_LOOKBACK_DAYS
+    (default 90d). Falls back to the default on missing / non-int / non-positive."""
+    try:
+        days = int(os.getenv("GRAPH_SEED_LOOKBACK_DAYS", ""))
+        if days <= 0:
+            days = _DEFAULT_SEED_LOOKBACK_DAYS
+    except (TypeError, ValueError):
+        days = _DEFAULT_SEED_LOOKBACK_DAYS
+    return timedelta(days=days)
 
 # Folder-hierarchy walk is bounded + cached (lead: "bound the folder walk to a
 # cached list refreshed hourly, not every tick"). The poll runs every few minutes;
@@ -521,8 +543,42 @@ def _folder_seed_filter(now: datetime | None = None) -> str:
     message:delta filter Graph supports — receivedDateTime ge {now - _SEED_LOOKBACK}.
     Bounds the initial sync so cutover does NOT trigger a full-history backfill."""
     now = now or datetime.now(timezone.utc)
-    seed = now - _SEED_LOOKBACK
+    seed = now - _seed_lookback()
     return f"receivedDateTime ge {seed.strftime('%Y-%m-%dT%H:%M:%SZ')}"
+
+
+# GRAPH_SEED_LOOKBACK_FIX_1 (lead #5598 step 2): one-time re-seed of every folder
+# already known to the poller, so mail dropped by the prior 1-day seed is pulled
+# once under the widened _seed_lookback() window. Clearing a folder's stored
+# cursor makes the next _poll_folder take the first-encounter seed path; the
+# re-pulled messages upsert on message_id (idempotent), so this cannot duplicate.
+# A persisted flag makes it run exactly once (per deployment of this fix).
+_RESEED_FLAG_KEY = f"{_SOURCE}:seed_lookback_reseed_v1"
+
+
+def _maybe_reseed_known_folders(folders: list) -> None:
+    """Once: clear each known folder's delta cursor so the next poll re-seeds it
+    with the widened seed window, catching mail the old 1-day seed dropped.
+    No-op after the first successful run (persisted flag). Idempotent: re-running
+    before the flag is set only re-clears already-cleared cursors (harmless)."""
+    if trigger_state.get_cursor(_RESEED_FLAG_KEY):
+        return
+    cleared = 0
+    for folder in folders:
+        fid = folder.get("id")
+        if not fid:
+            continue
+        # Empty string clears: get_cursor treats falsy cursor_data as unset, so the
+        # next _poll_folder takes the first-encounter seed path with _seed_lookback().
+        trigger_state.set_cursor(f"{_SOURCE}:folder:{fid}", "")
+        cleared += 1
+    # Set the flag only after ALL cursors are cleared, so a crash mid-sweep retries
+    # the whole (idempotent) clear next tick rather than skipping folders.
+    trigger_state.set_cursor(_RESEED_FLAG_KEY, "done")
+    logger.info(
+        "graph mail: one-time seed-lookback re-seed cleared %d folder cursors "
+        "(will re-pull under %dd window)", cleared, _seed_lookback().days,
+    )
 
 
 def _poll_folder(client: GraphClient, folder: dict) -> list:
@@ -592,6 +648,10 @@ def poll_graph_mail() -> list:
     folders = _get_pollable_folders(client)
     if not folders:                  # ready but no folders → listing failed, NOT empty
         raise RuntimeError("graph mail: folder enumeration returned no folders while ready (auth/HTTP failure)")
+
+    # One-time widen re-seed (GRAPH_SEED_LOOKBACK_FIX_1): clears known-folder cursors
+    # so this same tick re-seeds them under _seed_lookback(); no-op after first run.
+    _maybe_reseed_known_folders(folders)
 
     results: list = []
     failures = 0
