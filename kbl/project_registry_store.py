@@ -240,6 +240,51 @@ def resolve_project_number(text: str) -> Optional[dict]:
         return None
 
 
+def resolve_project_number_readonly(text: str) -> Optional[dict]:
+    """STRICT SELECT-ONLY sibling of resolve_project_number — issues NO DDL and NO
+    commit. Same hard-lane resolution (first registered ACTIVE match in text order),
+    but it does NOT call ensure_project_registry_table, so it never CREATEs the table
+    or commits. For genuinely read-only surfaces (e.g. the D-23 flight snapshot) that
+    must not write to any table. If project_registry does not exist yet, the SELECT
+    raises and this returns None (graceful) — a read-only caller must not bootstrap
+    schema as a side effect.
+
+    Added for BAKER_OS_V2_FLIGHT_SNAPSHOT_1 (codex F1: the bootstrap in
+    resolve_project_number violated that surface's zero-write contract)."""
+    if not text:
+        return None
+    ordered_keys: list[str] = []
+    seen: set[str] = set()
+    for m in _NUMBER_RE.finditer(text):
+        k = _match_key(f"{m.group(1)}{m.group(2)}{m.group(3)}")
+        if k and k not in seen:
+            seen.add(k)
+            ordered_keys.append(k)
+    if not ordered_keys:
+        return None
+    try:
+        with get_conn() as conn:
+            # NO ensure_project_registry_table: SELECT-only, no DDL, no commit.
+            with conn.cursor() as cur:
+                cur.execute(
+                    _HARD_SELECT
+                    + "WHERE status = 'active' AND match_key = ANY(%s) LIMIT %s",
+                    (ordered_keys, len(ordered_keys)),
+                )
+                rows = cur.fetchall()
+        if not rows:
+            return None
+        by_key = {r[8]: r for r in rows}
+        for k in ordered_keys:
+            r = by_key.get(k)
+            if r is not None:
+                return _row_to_dict(r)
+        return None
+    except Exception as e:
+        logger.warning(f"resolve_project_number_readonly failed: {e}")
+        return None
+
+
 def extract_project_codes(text: str) -> list[str]:
     """Conflict pre-check primitive (F4): DISTINCT valid-SHAPED DESK-MATTER-### codes
     in first-occurrence text order. PURE regex — reuses the module-level ``_NUMBER_RE``,
