@@ -38,18 +38,18 @@
      }
     ]
    }
+  ],
+  "SessionEnd": [
+   {
+    "hooks": [
+     {
+      "type": "command",
+      "command": ".claude/hooks/pin-size-check.sh",
+      "timeout": 10
+     }
+    ]
+   }
   ]
  },
- "rollover_window_tokens": 1000000,
- "SessionEnd": [
-  {
-   "hooks": [
-    {
-     "type": "command",
-     "command": ".claude/hooks/pin-size-check.sh",
-     "timeout": 10
-    }
-   ]
-  }
- ]
+ "rollover_window_tokens": 1000000
 }
