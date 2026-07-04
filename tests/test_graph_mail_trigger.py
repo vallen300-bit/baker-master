@@ -39,10 +39,15 @@ def _fake_client(ready=True):
 @pytest.fixture(autouse=True)
 def _reset_folder_state():
     """GRAPH_INGEST_SCOPE_WIDEN_1: the folder-list cache + per-folder failure
-    counter are per-process module state — reset around every test."""
+    counter are per-process module state — reset around every test.
+
+    Also default the seed-lookback re-seed's persisted-cursor enumeration to None
+    (defer → no-op) so poll tests never hit a real DB; the dedicated re-seed tests
+    override list_cursor_sources within their own block."""
     gmt._reset_folder_cache()
     gmt._folder_poll_failures = 0
-    yield
+    with mock.patch.object(gmt.trigger_state, "list_cursor_sources", return_value=None):
+        yield
     gmt._reset_folder_cache()
     gmt._folder_poll_failures = 0
 
@@ -773,26 +778,42 @@ def test_seed_lookback_invalid_falls_back_to_default(monkeypatch, bad):
     assert gmt._seed_lookback() == timedelta(days=90)
 
 
-def test_reseed_clears_known_folder_cursors_once_then_flags_done():
-    """First run: clear each known folder's cursor (force re-seed under the wide
-    window) + set the persisted flag."""
+def test_reseed_clears_persisted_cursor_set_once_then_flags_done():
+    """First run: clear EVERY persisted folder cursor (authoritative set, NOT the
+    walk) + set the persisted flag last."""
     calls = []
     def _set(key, val):
         calls.append((key, val))
-    # flag unset on first pass
+    persisted = ["graph_mail_poll:folder:fid-a", "graph_mail_poll:folder:fid-b"]
     with mock.patch.object(gmt.trigger_state, "get_cursor", return_value=None), \
+         mock.patch.object(gmt.trigger_state, "list_cursor_sources", return_value=persisted), \
          mock.patch.object(gmt.trigger_state, "set_cursor", side_effect=_set):
-        gmt._maybe_reseed_known_folders(_folders("fid-a", "fid-b"))
+        gmt._maybe_reseed_known_folders()
     assert ("graph_mail_poll:folder:fid-a", "") in calls
     assert ("graph_mail_poll:folder:fid-b", "") in calls
-    assert ("graph_mail_poll:seed_lookback_reseed_v1", "done") in calls
     # flag set LAST (after all clears) so a mid-sweep crash retries the whole clear
     assert calls[-1] == ("graph_mail_poll:seed_lookback_reseed_v1", "done")
 
 
 def test_reseed_is_noop_when_flag_already_set():
-    """Second run (flag present) touches nothing — one-time only."""
+    """Second run (flag present) touches nothing — one-time only, and never even
+    enumerates the cursor set."""
     with mock.patch.object(gmt.trigger_state, "get_cursor", return_value="done"), \
+         mock.patch.object(gmt.trigger_state, "list_cursor_sources") as lst, \
          mock.patch.object(gmt.trigger_state, "set_cursor") as set_cursor:
-        gmt._maybe_reseed_known_folders(_folders("fid-a"))
+        gmt._maybe_reseed_known_folders()
+    lst.assert_not_called()
+    set_cursor.assert_not_called()
+
+
+def test_reseed_defers_when_cursor_enumeration_fails_partial_walk():
+    """codex G3 #5604: a transient partial walk must NOT strand folders. The sweep
+    clears from the persisted cursor set, and if that enumeration FAILS (None) it
+    DEFERS — flag NOT set, nothing cleared — so it retries next tick rather than
+    half-finishing and stranding skipped folders on the stale 1-day cursor."""
+    with mock.patch.object(gmt.trigger_state, "get_cursor", return_value=None), \
+         mock.patch.object(gmt.trigger_state, "list_cursor_sources", return_value=None), \
+         mock.patch.object(gmt.trigger_state, "set_cursor") as set_cursor:
+        gmt._maybe_reseed_known_folders()
+    # No flag written → next tick retries the whole sweep once enumeration recovers.
     set_cursor.assert_not_called()
