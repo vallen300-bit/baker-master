@@ -91,6 +91,16 @@ ACT_PARK = "park"     # exception lane: parking-status ClickUp task + NEEDS_CONT
 ACT_BLOCK = "block"   # cannot route (no list): event-row-only CLICKUP_BLOCKED, loud log
 ACT_DUP = "dup"       # duplicate of an earlier ticket in the batch: no new ClickUp task
 
+# Event states that mean a ticket is already SUCCESSFULLY dispositioned — the ONLY states
+# that make a re-run idempotent-skip. CLICKUP_BLOCKED / ERROR_RETRY are DELIBERATELY NOT
+# here: a blocked/errored ticket was never written to ClickUp, so a later cycle (or a live
+# run after a dry-run) MUST re-attempt it. Treating them as terminal was the P1 defect
+# codex caught on PR #458 (dry-run bricks live run; ERROR_RETRY never retried).
+_DONE_STATES = frozenset({CLICKUP_WRITTEN, NEEDS_CONTROLLER, EVIDENCE_ONLY})
+# Non-success rows a re-run RE-PROCESSES (re-attempts the write via the ON CONFLICT
+# DO UPDATE upsert). Anything not in _DONE_STATES ⇒ re-process.
+_UNRESOLVED_STATES = frozenset({CLICKUP_BLOCKED, ERROR_RETRY})
+
 
 def lounge_enabled() -> bool:
     return os.environ.get(_ENABLED_ENV, "false").strip().lower() in {"1", "true", "yes", "on"}
@@ -312,10 +322,12 @@ def _task_description(ticket: Dict[str, Any], reason: str) -> str:
     )[:3000]
 
 
-def _disposition_one(conn: Any, plan_item: Dict[str, Any], readonly: bool) -> Dict[str, Any]:
-    """Execute ONE planned disposition. Owns no commit — the drain loop commits per
-    ticket. Returns a result dict incl. ``clickup_write_attempted`` so the drain can
-    count against the ≤10/cycle cap accurately."""
+def _disposition_one(conn: Any, plan_item: Dict[str, Any]) -> Dict[str, Any]:
+    """Execute ONE planned disposition (always mutating — the drain loop has already
+    filtered out dry-run and done-state tickets). Owns no commit — the loop commits per
+    ticket. The event upsert is ON CONFLICT DO UPDATE, so re-processing a CLICKUP_BLOCKED
+    / ERROR_RETRY row updates that same row (no duplicate). Returns a result dict incl.
+    ``clickup_write_attempted`` so the loop counts the ≤10/cycle cap accurately."""
     ticket = plan_item["ticket"]
     action = plan_item["action"]
     ev_id = event_ticket_id(ticket.get("ticket_id") or "")
@@ -329,13 +341,6 @@ def _disposition_one(conn: Any, plan_item: Dict[str, Any], readonly: bool) -> Di
     base = {"ticket_id": ticket.get("ticket_id"), "event_id": ev_id,
             "action": action, "clickup_write_attempted": False,
             "clickup_written": False, "event_state": None}
-
-    # Idempotency (AC2): an existing lounge row is never re-written, no duplicate task.
-    existing = _existing_disposition(conn, ev_id)
-    if existing is not None:
-        base["event_state"] = existing
-        base["skipped_idempotent"] = True
-        return base
 
     # ACT_DUP — duplicate source message: record, no ClickUp task (D-28).
     if action == ACT_DUP:
@@ -360,25 +365,6 @@ def _disposition_one(conn: Any, plan_item: Dict[str, Any], readonly: bool) -> Di
     status = plan_item.get("status") or _STATUS_NEW
     is_park = action == ACT_PARK
     idem = _idem_key(ticket.get("ticket_id") or "")
-
-    # Kill switch / dry-run: log the intended write, record a BLOCKED event row (durable
-    # disposition, truthful reconciliation), never call ClickUp.
-    if readonly:
-        logger.warning("lounge DRY-RUN (readonly): WOULD create ClickUp task list=%s "
-                       "status=%s title=%r for ticket %s",
-                       list_id, status, _task_title(ticket), ticket.get("ticket_id"))
-        _write_event(conn, ev_id, message_id=message_id, thread_id=thread_id,
-                     event_state=CLICKUP_BLOCKED, desk_owner=desk, matter_slug=matter,
-                     clickup_list_id=list_id, clickup_status=status,
-                     clickup_operation="create_task", clickup_idempotency_key=idem,
-                     last_error="readonly",
-                     correlation=_correlation_json(ticket, reason, ttl_renudge=is_park))
-        _audit(conn, "airport_lounge.clickup_write", None,
-               {"ticket_id": ticket.get("ticket_id"), "list_id": list_id,
-                "status": status, "operation": "create_task", "dry_run": True,
-                "idempotency_key": idem}, success=False, error_message="readonly_dry_run")
-        base["event_state"] = CLICKUP_BLOCKED
-        return base
 
     client = _get_clickup_client()
 
@@ -451,6 +437,7 @@ def _disposition_one(conn: Any, plan_item: Dict[str, Any], readonly: bool) -> Di
                  event_state=final_state, desk_owner=desk, matter_slug=matter,
                  clickup_list_id=list_id, clickup_task_id=task_id, clickup_status=status,
                  clickup_operation="create_task", clickup_idempotency_key=idem,
+                 last_error=None,   # clear any prior ERROR_RETRY/BLOCKED error on success
                  correlation=_correlation_json(ticket, reason, ttl_renudge=is_park))
     _audit(conn, "airport_lounge.clickup_write", task_id,
            {"ticket_id": ticket.get("ticket_id"), "list_id": list_id, "status": status,
@@ -478,11 +465,12 @@ def run_lounge_drain(conn: Any, desk_slug: str = "baden-baden-desk",
     Flag-off (``AIRPORT_LOUNGE_WRITER_ENABLED`` != true) ⇒ no-op (AC: merge is inert).
     ``BAKER_CLICKUP_READONLY=true`` ⇒ dry-run: intended writes logged, no ClickUp calls.
     """
+    readonly = _readonly()
     result: Dict[str, Any] = {
-        "enabled": lounge_enabled(), "desk": desk_slug, "dry_run": _readonly(),
+        "enabled": lounge_enabled(), "desk": desk_slug, "dry_run": readonly,
         "candidates": 0, "wrote": 0, "parked": 0, "blocked": 0, "dup": 0,
         "error_retry": 0, "skipped_idempotent": 0, "deferred_cap": 0,
-        "cap": cap, "dispositions": [],
+        "planned": 0, "cap": cap, "dispositions": [],
     }
     if not result["enabled"]:
         logger.info("lounge drain: flag OFF — no-op")
@@ -494,31 +482,54 @@ def run_lounge_drain(conn: Any, desk_slug: str = "baden-baden-desk",
     tickets = read_checked_in_tickets(conn, desk_slug)
     result["candidates"] = len(tickets)
     plan = plan_drain(tickets)
-    readonly = _readonly()
 
     writes_this_cycle = 0
     for item in plan:
-        # Cap gate: only ClickUp-writing actions consume the budget. A would-be write
-        # past the cap is DEFERRED (left with no event row) for the next cycle.
-        will_write = item["action"] in (ACT_WRITE, ACT_PARK) and not readonly
-        if will_write and writes_this_cycle >= cap:
+        ticket = item["ticket"]
+        tid = ticket.get("ticket_id")
+        ev_id = event_ticket_id(tid or "")
+
+        # DRY-RUN (kill switch): NON-MUTATING. Log the intended action, write nothing to
+        # the DB or ClickUp — so a recommended prod dry-run cannot leave residue that
+        # bricks the later live run (codex P1-1). Cap is not consumed.
+        if readonly:
+            logger.warning("lounge DRY-RUN (readonly): WOULD %s ticket %s -> list=%s "
+                           "status=%s", item["action"], tid, item.get("list_id"),
+                           item.get("status"))
+            result["planned"] += 1
+            result["dispositions"].append(
+                {"ticket_id": tid, "state": "DRY_RUN", "action": item["action"]})
+            continue
+
+        # Idempotency (AC2): skip ONLY a truly-done row (task already written / parked /
+        # dup-recorded). A CLICKUP_BLOCKED / ERROR_RETRY row is NOT done — fall through and
+        # re-attempt it (codex P1-1/P1-2: dry-run-then-live + exception-then-retry).
+        existing = _existing_disposition(conn, ev_id)
+        if existing in _DONE_STATES:
+            result["skipped_idempotent"] += 1
+            continue
+
+        # Cap gate: only genuinely ClickUp-writing actions (write/park) consume the ≤cap
+        # budget. dup/block never call ClickUp, and done-state tickets already skipped
+        # above, so the cap can't mis-defer a no-op ticket. A would-be write past the cap
+        # is DEFERRED (no event row this cycle) and drains next call.
+        needs_clickup = item["action"] in (ACT_WRITE, ACT_PARK)
+        if needs_clickup and writes_this_cycle >= cap:
             result["deferred_cap"] += 1
             continue
+
         try:
-            r = _disposition_one(conn, item, readonly)
+            r = _disposition_one(conn, item)
             conn.commit()
         except Exception as exc:
             # python-backend rule: rollback before any further query. The ticket keeps no
-            # event row this cycle (retried next call) — surfaced, not swallowed silently.
+            # new row this cycle (retried next call) — surfaced, not swallowed silently.
             conn.rollback()
-            logger.error("lounge drain: ticket %s failed hard: %s",
-                         item["ticket"].get("ticket_id"), exc)
+            logger.error("lounge drain: ticket %s failed hard: %s", tid, exc)
             result["error_retry"] += 1
             continue
 
-        if r.get("skipped_idempotent"):
-            result["skipped_idempotent"] += 1
-        elif r["event_state"] == CLICKUP_WRITTEN:
+        if r["event_state"] == CLICKUP_WRITTEN:
             result["wrote"] += 1
         elif r["event_state"] == NEEDS_CONTROLLER:
             result["parked"] += 1
@@ -529,7 +540,7 @@ def run_lounge_drain(conn: Any, desk_slug: str = "baden-baden-desk",
         elif r["event_state"] == ERROR_RETRY:
             result["error_retry"] += 1
 
-        if r.get("clickup_write_attempted") and not readonly:
+        if r.get("clickup_write_attempted"):
             writes_this_cycle += 1
         result["dispositions"].append(
             {"ticket_id": r["ticket_id"], "state": r["event_state"],
@@ -566,14 +577,30 @@ FLIGHT_NULL_SQL = (
     "       OR flight_to_state IS NOT NULL OR flight_idempotency_key IS NOT NULL)"
 )
 
+# A lounge row that exists but was NOT successfully written (blocked / errored). NOT an
+# orphan (it has a row), but NOT resolved either — so counting orphans alone would let a
+# failed drain false-pass (codex finding). The drain is only "clean" when this is 0 too.
+UNRESOLVED_SQL = (
+    "SELECT ticket_id FROM airport_outbound_events "
+    "WHERE ticket_id LIKE 'airport-lounge:%%' "
+    "  AND event_state IN ('CLICKUP_BLOCKED', 'ERROR_RETRY')"
+)
+
 
 def reconcile(conn: Any, desk_slug: str = "baden-baden-desk") -> Dict[str, Any]:
-    """Prove the drain: (a) 0 checked-in VALID/URGENT tickets without a lounge onward
-    row (AC1), (b) 0 lounge rows with any non-NULL flight column (AC5 / D-23)."""
+    """Prove the drain: (a) 0 checked-in VALID/URGENT tickets without a lounge onward row
+    (AC1), (b) 0 lounge rows with any non-NULL flight column (AC5 / D-23), (c) 0 rows
+    stuck in a non-success state (CLICKUP_BLOCKED / ERROR_RETRY) — so a failed write is
+    surfaced, never a false pass. ``clean`` folds all three."""
     with conn.cursor() as cur:
         cur.execute(ORPHAN_SQL, (desk_slug,))
         orphans = [r[0] for r in cur.fetchall()]
         cur.execute(FLIGHT_NULL_SQL)
         flight_leak = cur.fetchone()[0]
+        cur.execute(UNRESOLVED_SQL)
+        unresolved = [r[0] for r in cur.fetchall()]
     return {"orphans": orphans, "orphan_count": len(orphans),
-            "flight_column_leak_count": int(flight_leak)}
+            "unresolved": unresolved, "unresolved_count": len(unresolved),
+            "flight_column_leak_count": int(flight_leak),
+            "clean": (len(orphans) == 0 and len(unresolved) == 0
+                      and int(flight_leak) == 0)}

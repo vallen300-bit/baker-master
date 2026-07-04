@@ -242,6 +242,22 @@ def test_ac1_reconcile_zero_orphans_after_drain(lg):
     rec = lounge.reconcile(lg)
     assert rec["orphan_count"] == 0                  # AC1
     assert rec["flight_column_leak_count"] == 0      # AC5
+    assert rec["unresolved_count"] == 0
+    assert rec["clean"] is True
+
+
+def test_reconcile_flags_blocked_not_false_pass(lg, monkeypatch):
+    # A ticket that could not be written (None-return) leaves a CLICKUP_BLOCKED row: NOT
+    # an orphan, but NOT clean either — reconcile must surface it (codex finding).
+    none_ret = _FakeClickUp(fail_mode="return_none")
+    monkeypatch.setattr(lounge, "_get_clickup_client", lambda: none_ret)
+    _STATE["fake"] = none_ret
+    _insert_ticket(lg, "t1")
+    lounge.run_lounge_drain(lg)
+    rec = lounge.reconcile(lg)
+    assert rec["orphan_count"] == 0                  # it HAS a row
+    assert rec["unresolved_count"] == 1              # but it's blocked
+    assert rec["clean"] is False                     # so NOT a false pass
 
 
 def test_ac3_exception_lane_visible_parking(lg):
@@ -277,19 +293,67 @@ def test_ac4_write_cap_enforced_two_cycles(lg):
     assert len(_fake().calls) == 12
 
 
-def test_ac4_dry_run_readonly_logs_no_write(lg, monkeypatch):
+def test_ac4_dry_run_readonly_non_mutating(lg, monkeypatch):
+    # Dry-run is NON-MUTATING: no ClickUp call AND no event row (so it can't brick the
+    # later live run — codex P1-1). It only reports the plan.
     monkeypatch.setenv("BAKER_CLICKUP_READONLY", "true")
     _insert_ticket(lg, "t1")
     res = lounge.run_lounge_drain(lg)
     assert res["dry_run"] is True
+    assert res["planned"] == 1
+    assert res["wrote"] == 0 and res["blocked"] == 0
     assert _fake().calls == []                       # kill switch: no ClickUp write
-    assert res["blocked"] == 1                       # recorded as blocked (durable)
     with lg.cursor() as cur:
-        cur.execute("SELECT event_state, last_error FROM airport_outbound_events "
+        cur.execute("SELECT count(*) FROM airport_outbound_events "
                     "WHERE ticket_id = %s", ("airport-lounge:t1",))
-        state, err = cur.fetchone()
-    assert state == lounge.CLICKUP_BLOCKED
-    assert err == "readonly"
+        assert cur.fetchone()[0] == 0                # NO residue row written
+
+
+def test_dry_run_then_live_actually_writes(lg, monkeypatch):
+    # codex P1-1 regression: a dry-run must NOT prevent the subsequent live run from
+    # actually creating the ClickUp task.
+    _insert_ticket(lg, "t1")
+    monkeypatch.setenv("BAKER_CLICKUP_READONLY", "true")
+    dry = lounge.run_lounge_drain(lg)
+    assert dry["planned"] == 1 and _fake().calls == []
+    monkeypatch.delenv("BAKER_CLICKUP_READONLY", raising=False)
+    live = lounge.run_lounge_drain(lg)
+    assert live["wrote"] == 1                        # NOT skipped as idempotent
+    assert len(_fake().calls) == 1
+    with lg.cursor() as cur:
+        cur.execute("SELECT event_state, clickup_task_id FROM airport_outbound_events "
+                    "WHERE ticket_id = %s", ("airport-lounge:t1",))
+        state, task = cur.fetchone()
+    assert state == lounge.CLICKUP_WRITTEN and task is not None
+
+
+def test_exception_then_retry_succeeds(lg, monkeypatch):
+    # codex P1-2 regression: an ERROR_RETRY row is re-attempted next cycle (not treated
+    # as terminal). First cycle raises → ERROR_RETRY; second cycle (client now healthy)
+    # → the SAME ticket is re-processed and written.
+    raising = _FakeClickUp(fail_mode="raise")
+    monkeypatch.setattr(lounge, "_get_clickup_client", lambda: raising)
+    _STATE["fake"] = raising
+    _insert_ticket(lg, "t1")
+    r1 = lounge.run_lounge_drain(lg)
+    assert r1["error_retry"] == 1
+    with lg.cursor() as cur:
+        cur.execute("SELECT event_state FROM airport_outbound_events WHERE ticket_id=%s",
+                    ("airport-lounge:t1",))
+        assert cur.fetchone()[0] == lounge.ERROR_RETRY
+
+    healthy = _FakeClickUp()                          # client recovers
+    monkeypatch.setattr(lounge, "_get_clickup_client", lambda: healthy)
+    _STATE["fake"] = healthy
+    r2 = lounge.run_lounge_drain(lg)
+    assert r2["wrote"] == 1                           # re-processed, not skipped
+    assert r2["skipped_idempotent"] == 0
+    assert len(healthy.calls) == 1
+    with lg.cursor() as cur:
+        cur.execute("SELECT event_state FROM airport_outbound_events WHERE ticket_id=%s",
+                    ("airport-lounge:t1",))
+        assert cur.fetchone()[0] == lounge.CLICKUP_WRITTEN
+    assert lounge.reconcile(lg)["clean"] is True      # now clean
 
 
 def test_dup_source_message_one_task(lg):
