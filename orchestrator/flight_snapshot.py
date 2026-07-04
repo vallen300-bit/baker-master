@@ -24,7 +24,7 @@ from typing import Any, Optional
 import psycopg2.extras
 
 from kbl.db import get_conn
-from kbl.project_registry_store import resolve_project_number
+from kbl.project_registry_store import resolve_project_number_readonly
 
 logger = logging.getLogger(__name__)
 
@@ -62,12 +62,16 @@ def _fetch(sql: str, params: tuple) -> list[dict]:
 # --------------------------------------------------------------------------
 
 def _project_meta(project_code: str) -> Optional[dict]:
-    """resolve_project_number → matter_slug / desk_owner / clickup_list_id / status.
-    Returns None if the code is not a registered active project (caller ⇒ 404)."""
+    """resolve (SELECT-only) → matter_slug / desk_owner / clickup_list_id / status.
+    Returns None if the code is not a registered active project (caller ⇒ 404).
+    Uses resolve_project_number_readonly (no DDL, no commit) — the plain
+    resolve_project_number bootstraps the table + commits, which would violate this
+    surface's zero-write contract (D-23; codex F1)."""
     try:
-        return resolve_project_number(project_code)
+        return resolve_project_number_readonly(project_code)
     except Exception as e:
-        logger.warning("resolve_project_number failed for %s: %s", project_code, e)
+        logger.warning("resolve_project_number_readonly failed for %s: %s",
+                       project_code, e)
         return None
 
 

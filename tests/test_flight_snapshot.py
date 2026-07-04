@@ -238,3 +238,58 @@ def test_route_index_200(monkeypatch):
     r = c.get("/flights?key=test-key")
     assert r.status_code == 200
     assert "/flights/BB-AUK-001" in r.text
+
+
+# --------------------------------------------------------------------------
+# Zero-write proof (codex F1): _project_meta must issue NO DDL and NO commit.
+# The plain resolve_project_number bootstraps (CREATE TABLE + commit); this surface
+# must use the SELECT-only path. Spy the connection to prove it.
+# --------------------------------------------------------------------------
+
+class _SpyCursor:
+    def __init__(self, log):
+        self._log = log
+    def execute(self, sql, params=None):
+        self._log["sql"].append(" ".join(str(sql).split()))
+    def fetchall(self):
+        return []
+    def __enter__(self):
+        return self
+    def __exit__(self, *a):
+        return False
+
+
+class _SpyConn:
+    def __init__(self, log):
+        self._log = log
+    def cursor(self, *a, **k):
+        return _SpyCursor(self._log)
+    def commit(self):
+        self._log["commit"] += 1
+    def rollback(self):
+        self._log["rollback"] += 1
+
+
+def test_project_meta_is_strictly_read_only(monkeypatch):
+    from contextlib import contextmanager
+    import kbl.project_registry_store as prs
+
+    log = {"sql": [], "commit": 0, "rollback": 0}
+
+    @contextmanager
+    def _spy_get_conn():
+        yield _SpyConn(log)
+
+    # Patch the get_conn used inside resolve_project_number_readonly.
+    monkeypatch.setattr(prs, "get_conn", _spy_get_conn)
+
+    fs._project_meta("BB-AUK-001")  # returns None (spy fetchall empty) — fine
+
+    joined = " ".join(log["sql"]).upper()
+    # No schema/data mutation of any kind.
+    for verb in ("CREATE ", "ALTER ", "INSERT ", "UPDATE ", "DELETE ", "DROP ", "TRUNCATE "):
+        assert verb not in joined, f"read-only path issued a write: {verb.strip()}"
+    # No commit (the bootstrap path commits; this one must not).
+    assert log["commit"] == 0, "read-only path must not commit"
+    # It did run exactly the SELECT.
+    assert any(s.upper().startswith("SELECT") for s in log["sql"])
