@@ -31,7 +31,17 @@ work branch: brisen-lab @ b2/brisen-lab-bus-wiring-fix (off origin/main b0fb768)
   (AC4). 18 passed (188s). Regression suite (director-block/bus/authz/identity/schema) IN PROGRESS.
 - All 5 modified .py compile-clean. Canonicalizer verified standalone (64 entries).
 
-## STATUS (2026-07-04): PRs OPEN — awaiting merge + post-deploy
+## STATUS (2026-07-04): DONE — merged, deployed, post-deploy AC PASS
+- PRs #139 (baker-vault) + #92 (brisen-lab @bdd8837) MERGED after Tier-A gate (security CLEAN,
+  arch APPROVE-WITH-NITS). Render redeploy live 10:15:55Z (validation probe 200→400).
+- Post-deploy cleanup --apply on 5177 live msgs: re-addressed 2, soft-deleted 6 dead. AC5 CLEAN.
+- AC3 live: daemon=0, dispatcher=0 authority rows seeded. AC1 live: ghost→400.
+- POST_DEPLOY_AC_VERDICT v1 posted bus #5232 (lead+deputy): all ACs PASS, done_state DONE.
+- Follow-up PR #93 (b2/bus-wiring-cleanup-followup): cleanup-script hardening + T4 docstring nit
+  (non-blocking, ops-script only). Bus #5234.
+- NOTHING LEFT. Surfaced to lead: 'ben' + 'ticketing-desk' were in-use unregistered ghost slugs.
+
+## (historical) PRs OPEN — awaiting merge + post-deploy
 - Regression suite GREEN: 18 new + 111 post-path regression = all passed. Zero regressions.
 - baker-vault PR #139 (b2/bus-wiring-registry @7485548) — registry alias source.
 - brisen-lab PR #92 (b2/brisen-lab-bus-wiring-fix @fec70c9) — regen + T1-T4 + tests.
