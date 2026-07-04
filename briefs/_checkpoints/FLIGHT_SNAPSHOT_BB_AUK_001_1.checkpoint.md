@@ -5,7 +5,13 @@ owner: b2 · dispatched_by: lead (#5252) · date: 2026-07-04
 brief: baker-master briefs/_tasks/BAKER_OS_V2_FLIGHT_SNAPSHOT_BB_AUK_001_1.md
 work branch: b2/flight-snapshot-bb-auk-001-1 @03f3ace1
 
-## STATUS: b2 scope DONE — PR #456, codex F1 FIXED (re-ship #5262), awaiting re-gate + merge
+## STATUS: DONE — merged @0b6a68a, live, POST_DEPLOY_AC PASS (verdict #5269)
+- Re-gate PASS #5264. Merged squash @0b6a68a. FLIGHT_SNAPSHOT_ENABLED=true on Render, live.
+- AC6 live proof (b2 independent curl + lead #5265): GET /flights/BB-AUK-001 -> 200,
+  banner + not-authoritative + timestamp + all D-24 fields, 0-outbound-rows clean.
+  POST_DEPLOY_AC_VERDICT v1 emitted bus #5269 (lead+deputy). done_state DONE. NOTHING LEFT.
+
+## (superseded) STATUS: b2 scope DONE — PR #456, codex F1 FIXED (re-ship #5262), awaiting re-gate + merge
 - Codex gate #5260 REQUEST_CHANGES F1 (HIGH): resolve_project_number transitively did
   CREATE TABLE + commit (ensure_project_registry_table) → zero-write violation. FIXED
   @c9f1b06b: added resolve_project_number_readonly (SELECT-only) to project_registry_store.py;
