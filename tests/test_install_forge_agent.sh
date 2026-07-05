@@ -94,6 +94,34 @@ echo '{"model":"x"}' > "$CLAUDE_HOME/settings.json"   # blow away hooks
 bash "$INSTALLER" --check --headless >/dev/null 2>&1 && bad "missing wiring -> drift" || ok "missing wiring -> drift"
 rm -rf "$TMP"
 
+# --- 8. executable-bit drift: a deployed hook that loses +x -> drift ---------
+new_env
+run_install --headless
+chmod -x "$FORGE_AGENT_HOME/heartbeat-ticker.sh"
+bash "$INSTALLER" --check --headless >/dev/null 2>&1 && bad "lost +x -> drift" || ok "lost +x -> drift"
+rm -rf "$TMP"
+
+# --- 9. headless install CONVERGES: strips Director-facing hooks -------------
+new_env
+run_install --headless
+# inject a Director-facing enforcement hook (as a stale prior-install leftover)
+python3 - "$CLAUDE_HOME/settings.json" <<'PY'
+import json,sys
+p=sys.argv[1]; d=json.load(open(p))
+d["hooks"].setdefault("Stop",[]).append({"hooks":[{"type":"command","command":"/x/.claude/hooks/recommendation-check.sh"}]})
+json.dump(d,open(p,"w"))
+PY
+# re-run headless install: must remove it (converge), not warn-and-leave
+run_install --headless
+stray="$(python3 -c 'import json;d=json.load(open("'"$CLAUDE_HOME"'/settings.json"));print(sum(1 for ev in d.get("hooks",{}) for g in d["hooks"][ev] for h in g.get("hooks",[]) if "recommendation-check" in h.get("command","")))')"
+[[ "$stray" == "0" ]] && ok "headless install strips Director hook (converges)" || bad "headless install strips Director hook (stray=$stray)"
+# and now --check is clean (no unhealable loop)
+if bash "$INSTALLER" --check --headless >/dev/null 2>&1; then ok "post-converge --check clean (no install/check loop)"; else bad "post-converge --check clean"; fi
+# forge+bus wiring survived the strip
+kept="$(python3 -c 'import json;d=json.load(open("'"$CLAUDE_HOME"'/settings.json"));print(sum(1 for ev in d.get("hooks",{}) for g in d["hooks"][ev] for h in g.get("hooks",[]) if "session-start-hook" in h.get("command","") or "turn-stop-hook" in h.get("command","")))')"
+[[ "$kept" -ge 2 ]] && ok "forge hooks survive Director-hook strip" || bad "forge hooks survive strip (kept=$kept)"
+rm -rf "$TMP"
+
 echo "----"
 echo "PASS=$PASS FAIL=$FAIL"
 [[ "$FAIL" -eq 0 ]]
