@@ -4,6 +4,27 @@
 **Owner:** AI Head A (operator). Authored by B5 closing BRISEN_LAB_1.
 **Audit-trail PR:** baker-master `b5/brisen-lab-1-completion` (this file is the doc-note).
 
+## 2026-07-05 UPDATE — now installer-managed (WAKE_HOST_AFFINITY_1 follow-up)
+
+The hand-provisioning below drifted silently: the Mac Mini (the designated desk
+**spawn** host under WAKE_HOST_AFFINITY_1) was never provisioned, so **no** session
+on it ever spawned a heartbeat ticker. The wake handler's same-host anti-duplicate
+guard (`isAliasLive`, a local `pgrep` of the ticker process) was therefore
+permanently blind on the Mini, and a desk double-spawned + stalled overnight
+(2026-07-04). Root cause: the forge-agent scripts had **no source-of-truth in the
+repo and no installer**.
+
+Fixed by:
+- **Canonical scripts:** `scripts/forge-agent/{session-start-hook,heartbeat-ticker,turn-start-hook,turn-stop-hook}.sh` (bus hooks stay canonical in `tests/fixtures/{session-start-bus-drain,stop-bus-ack}.sh`).
+- **Installer:** `scripts/install_forge_agent.sh` — idempotent; deploys scripts, adds `FORGE_KEY`/`LAB_URL` to `~/.zshrc` (from env or 1Password, never hardcoded), and wires the forge+bus hooks into `~/.claude/settings.json` (backup + atomic merge, existing keys preserved).
+- **Host-class distinction (codified):** the forge+bus set installs on both classes; Director-facing **enforcement** hooks (recommendation-check / laconic-reminder / etc.) are for the interactive laptop ONLY and are never added to a headless spawn host. Detected by hostname (`*mac-mini*` ⇒ headless) or `~/.brisen-lab/host-class`; `--headless`/`--laptop` override.
+- **Drift check (cron-able):** `bash scripts/install_forge_agent.sh --check` — non-mutating, exits non-zero on any drift (script shasum mismatch, missing env, missing/incorrect hook wiring, or a Director-facing hook on a headless host). Example cron: `*/30 * * * * cd ~/bm-b2 && bash scripts/install_forge_agent.sh --check || <alert>`.
+
+The old "cannot be tracked in git" objection (below) was really about the per-clone
+`settings.json` files (still install-generated). The **scripts** are `$HOME`-relative
+and path-agnostic — tracking them as source-of-truth is what makes the install
+repeatable and the drift detectable.
+
 ## Why this is a doc-note, not tracked config
 
 Brisen Lab observes 6 watched Claude Code clones (lead/deputy on `~/Desktop/baker-code` + `~/bm-b{1..4}`) plus the b5 launcher. Each clone's `.claude/settings.json` is mutated to install the SessionStart hook at `/Users/dimitry/forge-agent/session-start-hook.sh`.
