@@ -32,3 +32,5 @@ updated: 2026-07-05
 ## Next concrete step
 None from b4 unless lead posts request-changes on thread baker-os-v2/audit-round-2. If resumed: check bus for lead
 review verdict on #5643 before touching the file again (lead may have already committed).
+
+<!-- rollover re-confirmed 2026-07-05, same session, attempt unchanged (1); work still DONE, awaiting lead commit of #5643 -->
