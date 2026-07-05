@@ -1,17 +1,17 @@
-# CODE_4_PENDING — dispatch (supersedes prior)
+# CODE_4_PENDING — active dispatch mailbox for b4
 
-dispatch: BOX5_OUTBOUND_CORRELATION_FIX_1
-brief: briefs/BRIEF_BOX5_OUTBOUND_CORRELATION_FIX_1.md
-to: b4
-from: lead
-dispatched_by: lead
-ship_to: lead (ship report + gate verdicts to lead)
-branch: box5-outbound-correlation-fix-1
-class: production bug fix, additive/corrective (connector stays DARK, flag rolled back to false)
-effort: high
+**ACTIVE: BB_AUK_001_AUDIT_ROUND2_DASHBOARD_UPDATE_1 — STAGE 2** (dispatched bus #5586, stage-2 GO #5635, re-pin #5637, 2026-07-05)
 
-summary: Fix the live defect your canary #4881 caught. correlate() step 4 (_correlate_dispatcher_flight) queries dispatcher_bus_threads.thread_key (does not exist; real col = bus_thread_id) with status IN ('open','waiting_reply') (wrong; prod status incl. 'replied'). to_regclass guard passes -> UndefinedColumn -> the except returns None WITHOUT conn.rollback() -> under the shared no-commit txn the txn aborts -> next _update_event raises InFailedSqlTransaction uncaught -> every ratifying AND routine outbound errors in prod. Two fixes: (A) column bus_thread_id + real status vocabulary (grep dispatcher writer); (B) SAVEPOINT-guard every defensive correlation read so a read error can't abort the shared txn (bare conn.rollback would discard prior good writes). Fixture fidelity is part of the fix: the unit fixture masked the schema mismatch — make dispatcher_bus_threads fixture schema-accurate to prod + add repro/regression tests. Full envelope + AC in the brief.
+Task: fold b3's Aukera sweep results (bus #5630/#5632, report `briefs/_reports/B3_AUKERA_FLIGHT_MANUAL_SWEEP_1_2026-07-05.md`) into the CEO dashboard
+`~/baker-vault/_ops/build/baker-os-v2/05_outputs/flight-dashboards/BB-AUK-001/dashboard-v1-pattern-d.html`.
 
-status: lead rolled AIRPORT_OUTBOUND_INGEST_ENABLED back to false (verified) — connector dark. This fix does NOT flip it; lead re-activates + re-canaries after gate+merge.
+- Pull vault main first — file took a Director-ordered Page-v2 UI revision (@d658b7b). CONTENT nodes only; keep layout.
+- Loan-cost tile: ~EUR 1.66M PROVISIONAL (1,479,416 reserve + 184,650 structuring; v26 coupon BLANK — render "rate pending", never a fixed rate).
+- Blockers from D2: signing (~10 Jul) 9 items, RETT ~EUR 2M lead ("zwingend vor Unterschrift", 14-day criminal-report trap); drawdown (~20 Jul) 5 items, Skliar 457.8K + Grundbuch 3-5mo lead.
+- Contract v2.1/2.2 rules: verbatim anchor per claim, direction check, as-of doc version+date per tile.
+- Stamp "desk validation pending" — desk (baden-baden-desk) validates after; NOT final-final.
+- Vault commits are lead's — hand diffs to lead (bus topic `baker-os-v2/audit-round-2`).
 
-gate: G1 self-check -> codex G3 on BUS (topic gate/box5-outbound-correlation-fix-g3, effort HIGH) -> lead G4 /security-review -> lead squash-merge.
+**SUPERSEDED / DO NOT REDO:** BOX5_OUTBOUND_CORRELATION_FIX_1 — SHIPPED, PR #448 MERGED 2026-07-01 (verified in main per bus #5548).
+
+Harness-V2: N/A — content-update task fully specified above + in bus thread; no production code.
