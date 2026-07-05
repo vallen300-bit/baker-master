@@ -34,3 +34,4 @@ None from b4 unless lead posts request-changes on thread baker-os-v2/audit-round
 review verdict on #5643 before touching the file again (lead may have already committed).
 
 <!-- rollover re-confirmed 2026-07-05, same session, attempt unchanged (1); work still DONE, awaiting lead commit of #5643 -->
+<!-- rollover heartbeat 4548bee -->
