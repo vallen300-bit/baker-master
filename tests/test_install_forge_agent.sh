@@ -122,6 +122,31 @@ kept="$(python3 -c 'import json;d=json.load(open("'"$CLAUDE_HOME"'/settings.json
 [[ "$kept" -ge 2 ]] && ok "forge hooks survive Director-hook strip" || bad "forge hooks survive strip (kept=$kept)"
 rm -rf "$TMP"
 
+# --- 10. $HOME-form wiring is recognized (no false drift, no re-install dup) --
+# Claude Code expands $HOME at runtime; the laptop wires turn hooks as
+# "$HOME/forge-agent/...". The check + dedup must treat that as == the absolute
+# form. Test env lives UNDER $HOME so the $HOME-form path resolves to FORGE_HOME.
+HTMP="$(mktemp -d "$HOME/.forge-agent-test.XXXXXX")"
+export FORGE_AGENT_HOME="$HTMP/forge-agent" CLAUDE_HOME="$HTMP/.claude" \
+       FORGE_AGENT_ZSHRC="$HTMP/.zshrc" BRISEN_LAB_HOST_CLASS_FILE="$HTMP/host-class"
+run_install --headless
+python3 - "$CLAUDE_HOME/settings.json" "$HOME" <<'PY'
+import json,sys
+p,home=sys.argv[1],sys.argv[2]
+d=json.load(open(p))
+for ev in ("UserPromptSubmit","Stop","SessionStart"):
+    for g in d["hooks"].get(ev,[]):
+        for h in g.get("hooks",[]):
+            c=h.get("command","")
+            if c.startswith(home): h["command"]="$HOME"+c[len(home):]
+json.dump(d,open(p,"w"))
+PY
+if bash "$INSTALLER" --check --headless >/dev/null 2>&1; then ok 'HOME-form wiring recognized (no false drift)'; else bad 'HOME-form wiring recognized (false drift)'; fi
+run_install --headless   # re-install against $HOME-form settings must not duplicate
+dupct="$(python3 -c 'import json;d=json.load(open("'"$CLAUDE_HOME"'/settings.json"));print(sum(1 for g in d["hooks"].get("UserPromptSubmit",[]) for h in g.get("hooks",[]) if "turn-start-hook" in h.get("command","")))')"
+[[ "$dupct" == "1" ]] && ok "re-install no dup vs HOME-form turn hook" || bad "re-install no dup vs HOME-form (count=$dupct)"
+rm -rf "$HTMP"
+
 echo "----"
 echo "PASS=$PASS FAIL=$FAIL"
 [[ "$FAIL" -eq 0 ]]
