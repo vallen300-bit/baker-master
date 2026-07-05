@@ -162,14 +162,22 @@ if [[ "$MODE" == "check" ]]; then
 import json, os, sys
 d = json.load(open(sys.argv[1]))
 hooks = d.get("hooks", {})
-def cmds(ev): return [h.get("command","") for g in hooks.get(ev,[]) for h in g.get("hooks",[])]
+# Path-form normalization: Claude Code expands $HOME / ${HOME} / ~ at runtime,
+# so a hook wired as "$HOME/forge-agent/turn-start-hook.sh" is EQUIVALENT to the
+# absolute "/Users/x/forge-agent/turn-start-hook.sh". Compare normalized forms
+# or a legit $HOME-form wiring false-positives as missing (laptop drift alarm).
+HOME = os.environ.get("HOME", "")
+def norm(c):
+    c = (c or "").replace("${HOME}", HOME).replace("$HOME", HOME)
+    return os.path.expanduser(c)
+def cmds(ev): return [norm(h.get("command","")) for g in hooks.get(ev,[]) for h in g.get("hooks",[])]
 forge, hd = os.environ["FORGE_HOME"], os.environ["HOOKS_DIR"]
 need = {
     "SessionStart": [f"{forge}/session-start-hook.sh", f"{hd}/session-start-bus-drain.sh"],
     "UserPromptSubmit": [f"{forge}/turn-start-hook.sh"],
     "Stop": [f"{forge}/turn-stop-hook.sh", f"{hd}/stop-bus-ack.sh"],
 }
-missing = [f"{ev}:{c}" for ev, cs in need.items() for c in cs if c not in cmds(ev)]
+missing = [f"{ev}:{c}" for ev, cs in need.items() for c in cs if norm(c) not in cmds(ev)]
 for m in missing: print("FAIL missing-wire " + m)
 if os.environ["HOST_CLASS"] == "headless":
     subs = os.environ["DIRECTOR_ONLY"].split()
@@ -247,7 +255,15 @@ sp = os.environ["SETTINGS"]
 d = json.load(open(sp))
 frag = json.loads(os.environ["FRAG"])
 hooks = d.setdefault("hooks", {})
-def cmds(group): return tuple(h.get("command") for h in group.get("hooks", []))
+# Normalize $HOME/${HOME}/~ so an existing "$HOME/..."-form hook is recognized as
+# the same as the absolute form we emit — else dedup misses it and we append a
+# DUPLICATE (a re-install on the laptop, whose turn hooks use $HOME form, would
+# double them). Same normalization as --check.
+HOME = os.environ.get("HOME", "")
+def norm(c):
+    c = (c or "").replace("${HOME}", HOME).replace("$HOME", HOME)
+    return os.path.expanduser(c)
+def cmds(group): return tuple(norm(h.get("command")) for h in group.get("hooks", []))
 for ev, groups in frag.items():
     existing = hooks.setdefault(ev, [])
     have = {cmds(g) for g in existing}
