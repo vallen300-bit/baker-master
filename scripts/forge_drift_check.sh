@@ -51,14 +51,17 @@ if [[ -r "$KEY_FILE" ]]; then
   KEY="$(tr -d '\r\n' < "$KEY_FILE" 2>/dev/null || true)"
   BODY="forge-agent DRIFT on ${HOST} (${TS}): ${FAILS:-see log}. Re-run install_forge_agent.sh on that host to converge; log: ${LOG}."
   # Sender is inferred from the X-Terminal-Key (daemon key) — NOT sent in-body.
-  # Endpoint is /msg/{recipient}; body uses `to` (list). Mirrors bus_post.py and
-  # the daemon's own daemon->lead alert path (app.py from_slug="daemon").
+  # Endpoint is /msg/{recipient}; body uses `to` (list). kind MUST be one of the
+  # daemon's VALID_KINDS (bus.py: dispatch/ack/broadcast/ratify_required/
+  # ratify_decision) — "alert" 400s (bad_kind) and the curl below swallows it, so
+  # the drift would silently never reach lead (codex G3 #5653 HIGH). Use
+  # "dispatch"; tier "A" is in VALID_TIERS.
   curl -fsS --max-time 6 -X POST "${LAB_URL}/msg/lead" \
     -H "X-Terminal-Key: ${KEY}" -H "Content-Type: application/json" \
     -d "$(FORGE_BODY="$BODY" HOST="$HOST" python3 -c '
 import json, os
 print(json.dumps({
-    "kind": "alert",
+    "kind": "dispatch",
     "body": os.environ["FORGE_BODY"],
     "to": ["lead"],
     "tier_required": "A",
