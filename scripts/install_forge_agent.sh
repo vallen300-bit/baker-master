@@ -133,18 +133,22 @@ if [[ "$MODE" == "check" ]]; then
   report() { printf '  [%s] %s\n' "$1" "$2"; }
   echo "forge-agent drift-check (host-class=$HOST_CLASS, home=$FORGE_HOME)"
 
-  # 1. Deployed forge scripts match canonical.
+  # 1. Deployed forge scripts match canonical AND are executable. A content
+  #    match with a lost +x bit is silent death (the hook simply never runs), so
+  #    -x is validated alongside the shasum (codex G3 #5629 finding 1).
   for s in "${FORGE_SCRIPTS[@]}"; do
     if [[ ! -f "${FORGE_HOME}/${s}" ]]; then report FAIL "missing deployed ${FORGE_HOME}/${s}"; drift=1
     elif [[ "$(_sha "${FORGE_HOME}/${s}")" != "$(_sha "${FORGE_SRC_DIR}/${s}")" ]]; then
       report FAIL "drift ${s} (deployed != canonical)"; drift=1
+    elif [[ ! -x "${FORGE_HOME}/${s}" ]]; then report FAIL "${s} not executable (-x lost)"; drift=1
     else report OK "${s}"; fi
   done
-  # 2. Deployed bus hooks match canonical.
+  # 2. Deployed bus hooks match canonical AND are executable.
   for h in "${BUS_HOOKS[@]}"; do
     if [[ ! -f "${HOOKS_DIR}/${h}" ]]; then report FAIL "missing deployed ${HOOKS_DIR}/${h}"; drift=1
     elif [[ "$(_sha "${HOOKS_DIR}/${h}")" != "$(_sha "${FIXTURES_DIR}/${h}")" ]]; then
       report FAIL "drift ${h} (deployed != canonical fixture)"; drift=1
+    elif [[ ! -x "${HOOKS_DIR}/${h}" ]]; then report FAIL "${h} not executable (-x lost)"; drift=1
     else report OK "${h}"; fi
   done
   # 3. Env present in zshrc.
@@ -250,14 +254,33 @@ for ev, groups in frag.items():
     for g in groups:
         if cmds(g) not in have:
             existing.append(g); have.add(cmds(g))
-# Headless purity: on a spawn host, Director-facing enforcement hooks are noise.
-# We never ADD them; warn (do not silently strip) if a prior install left some.
+# Headless purity: on a spawn host, Director-facing enforcement hooks are noise
+# AND make --check fail. The installer must CONVERGE (codex G3 #5629 finding 2:
+# leaving them warns but then --check fails on the same host = unhealable loop),
+# so on --headless we STRIP any Director-facing hook entry, dropping groups that
+# become empty and events that become empty. Reported, not silent.
 if os.environ["HOST_CLASS"] == "headless":
     subs = os.environ["DIRECTOR_ONLY"].split()
-    stray = [h.get("command","") for ev in hooks for g in hooks[ev]
-             for h in g.get("hooks",[]) if any(s in h.get("command","") for s in subs)]
-    if stray:
-        print("  WARN headless host carries Director-facing hooks (left intact; review): " + ", ".join(stray))
+    removed = []
+    for ev in list(hooks.keys()):
+        new_groups = []
+        for g in hooks[ev]:
+            kept = []
+            for h in g.get("hooks", []):
+                cmd = h.get("command", "")
+                if any(s in cmd for s in subs):
+                    removed.append(cmd)
+                else:
+                    kept.append(h)
+            if kept:
+                ng = dict(g); ng["hooks"] = kept; new_groups.append(ng)
+        if new_groups:
+            hooks[ev] = new_groups
+        else:
+            del hooks[ev]
+    if removed:
+        print("  stripped %d Director-facing hook(s) on headless host: %s"
+              % (len(removed), ", ".join(removed)))
 fd, tmp = tempfile.mkstemp(dir=os.path.dirname(sp))
 with os.fdopen(fd, "w") as f:
     json.dump(d, f, indent=2)
