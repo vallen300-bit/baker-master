@@ -105,6 +105,39 @@ def _role_to_slug(bus_agents: list[dict[str, Any]]) -> dict[str, str]:
     return out
 
 
+VAULT_FALLBACK_PATH = "/Users/dimitry/baker-vault"
+
+# Slugs that legitimately resolve to the generic vault fallback snapshot path
+# (no dedicated `~/bm-<slug>` picker snapshot registered). Enumerated explicitly
+# so that a genuinely NEW slug — e.g. a fleet-rollout desk install (D6) — is not
+# silently swallowed by the fallback but instead triggers a fail-loud stderr
+# WARNING (see _snapshot_path_for). Add a slug here only after deliberately
+# deciding it should share the vault snapshot path; otherwise give it an
+# explicit path above. (BAKER_OS_V2_C1_PICKER_FOLDER_WIRING_1.)
+KNOWN_FALLBACK_SLUGS = frozenset({
+    "aid",
+    "b5",
+    "researcher",
+    "codex",
+    "codex-arch",
+    "russo-ai",
+    "deep55",
+    "ben",
+    "hag-desk",
+    "origination-desk",
+    "ao-desk",
+    "movie-desk",
+    "baden-baden-desk",
+    "brisen-desk",
+    "bb-finance",
+    "CM-1",
+    "CM-2",
+    "CM-3",
+    "CM-4",
+    "hag-filer",
+})
+
+
 def _snapshot_path_for(agent: dict[str, Any]) -> str | None:
     slug = str(agent["slug"])
     runtime = str(agent.get("runtime") or "")
@@ -118,7 +151,22 @@ def _snapshot_path_for(agent: dict[str, Any]) -> str | None:
         return f"/Users/dimitry/bm-{slug},/Users/dimitry/bm-{slug}-brisen-lab"
     if slug in {"clerk", "clerk-haiku"}:
         return "/Users/dimitry/bm-clerk"
-    return "/Users/dimitry/baker-vault"
+    if slug == "cowork-bb-desk":
+        return "/Users/dimitry/bm-cowork-bb-desk"
+    if slug in KNOWN_FALLBACK_SLUGS:
+        return VAULT_FALLBACK_PATH
+    # Fail-loud, not fail-hard: an unrecognised slug still gets a usable path so
+    # generation never breaks mid-rollout, but we name it on stderr so the
+    # installer wires an explicit snapshot path (or adds it to
+    # KNOWN_FALLBACK_SLUGS) instead of shipping a silent wrong path.
+    print(
+        f"WARNING: agent slug {slug!r} has no explicit snapshot path and is not "
+        f"in KNOWN_FALLBACK_SLUGS; emitting fallback {VAULT_FALLBACK_PATH!r}. "
+        f"Add it to _snapshot_path_for() in "
+        f"scripts/generate_agent_identity_artifacts.py.",
+        file=sys.stderr,
+    )
+    return VAULT_FALLBACK_PATH
 
 
 def _snapshot_terminals(bus_agents: list[dict[str, Any]]) -> tuple[str, ...]:

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import importlib.util
 import subprocess
 import sys
 from pathlib import Path
@@ -16,6 +17,16 @@ from orchestrator.agent_identity_registry import identity_label, resolve_agent
 REPO_ROOT = Path(__file__).resolve().parents[1]
 GENERATOR = REPO_ROOT / "scripts" / "generate_agent_identity_artifacts.py"
 REGISTRY = Path("/Users/dimitry/baker-vault/_ops/registries/agent_registry.yml")
+
+
+def _load_generator():
+    """Import the generator script as a module for direct unit testing."""
+    spec = importlib.util.spec_from_file_location(
+        "_gen_agent_identity", GENERATOR
+    )
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    return mod
 
 
 def test_identity_label_disambiguates_codex_variants():
@@ -129,3 +140,46 @@ def test_generated_artifacts_match_vault_registry():
         timeout=15,
     )
     assert result.returncode == 0, result.stderr
+
+
+# --- BAKER_OS_V2_C1_PICKER_FOLDER_WIRING_1: snapshot-path explicit map + fail-loud ---
+
+def test_snapshot_path_cowork_bb_desk_explicit(capsys):
+    gen = _load_generator()
+    path = gen._snapshot_path_for({"slug": "cowork-bb-desk", "runtime": "app-claude"})
+    assert path == "/Users/dimitry/bm-cowork-bb-desk"
+    # explicit map hit ⇒ no warning
+    assert "WARNING" not in capsys.readouterr().err
+
+
+def test_snapshot_path_cowork_bb_desk_in_generated_terminals():
+    # the regenerated artifact must carry the corrected (non-fallback) path
+    assert "cowork-bb-desk:/Users/dimitry/bm-cowork-bb-desk" in SNAPSHOT_TERMINALS
+    assert "cowork-bb-desk:/Users/dimitry/baker-vault" not in SNAPSHOT_TERMINALS
+
+
+def test_snapshot_path_known_fallback_slug_silent(capsys):
+    gen = _load_generator()
+    # a slug we deliberately keep on the vault fallback must NOT warn
+    path = gen._snapshot_path_for({"slug": "ao-desk", "runtime": "terminal-claude"})
+    assert path == "/Users/dimitry/baker-vault"
+    assert "WARNING" not in capsys.readouterr().err
+
+
+def test_snapshot_path_unknown_slug_warns_loud(capsys):
+    gen = _load_generator()
+    path = gen._snapshot_path_for(
+        {"slug": "invented-desk-zz", "runtime": "terminal-claude"}
+    )
+    # fail-loud, not fail-hard: still emits the fallback path
+    assert path == "/Users/dimitry/baker-vault"
+    err = capsys.readouterr().err
+    assert "WARNING" in err
+    assert "invented-desk-zz" in err
+
+
+def test_snapshot_path_service_runtime_still_none(capsys):
+    gen = _load_generator()
+    assert gen._snapshot_path_for({"slug": "whatever", "runtime": "service"}) is None
+    # service agents legitimately have no picker ⇒ no warning
+    assert "WARNING" not in capsys.readouterr().err
