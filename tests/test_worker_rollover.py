@@ -44,10 +44,12 @@ def _run_hook(transcript: Path, *, window: int | None = None, settings: Path | N
 
 
 def _additional_context(stdout: str) -> str | None:
+    # Stop hooks emit a top-level `systemMessage` (not hookSpecificOutput —
+    # Claude's Stop schema rejects that field); read it back the same way.
     out = stdout.strip()
     if not out:
         return None
-    return json.loads(out)["hookSpecificOutput"]["additionalContext"]
+    return json.loads(out)["systemMessage"]
 
 
 def test_rollover_scripts_exist_executable_and_syntax_clean():
@@ -96,6 +98,56 @@ def test_context_hook_reads_window_from_settings(tmp_path):
     result = _run_hook(transcript, settings=settings)
     assert result.returncode == 0, result.stderr
     assert "context ~70%" in _additional_context(result.stdout)
+
+
+def test_context_hook_soft_percent_configurable_via_settings(tmp_path):
+    # Worker seats drop soft-warn to 50%; default stays 70 when the key is absent.
+    settings = tmp_path / "settings.json"
+    settings.write_text(json.dumps({"rollover_window_tokens": 1000, "rollover_soft_percent": 50}))
+    transcript = _write_transcript(tmp_path, 500)  # 50%
+    result = _run_hook(transcript, settings=settings)
+    assert result.returncode == 0, result.stderr
+    ctx = _additional_context(result.stdout)
+    assert ctx is not None
+    assert "context ~50%" in ctx
+    assert "Refresh the checkpoint" in ctx
+
+
+def test_context_hook_silent_below_configured_soft(tmp_path):
+    settings = tmp_path / "settings.json"
+    settings.write_text(json.dumps({"rollover_window_tokens": 1000, "rollover_soft_percent": 50}))
+    transcript = _write_transcript(tmp_path, 499)  # 49% -> below configured 50
+    result = _run_hook(transcript, settings=settings)
+    assert result.returncode == 0, result.stderr
+    assert result.stdout.strip() == ""
+
+
+def test_context_hook_soft_percent_from_settings_local(tmp_path):
+    # settings.local.json (per-seat, gitignored) overrides the shared base.
+    claude = tmp_path / ".claude"
+    claude.mkdir()
+    (claude / "settings.json").write_text(json.dumps({"rollover_window_tokens": 1000}))
+    (claude / "settings.local.json").write_text(json.dumps({"rollover_soft_percent": 50}))
+    transcript = claude.parent / "transcript.jsonl"
+    transcript.write_bytes(b"x" * 500 * 4)  # 50% of a 1000-token window
+    result = _run_hook(transcript)  # no env overrides -> resolves via cwd/.claude
+    assert result.returncode == 0, result.stderr
+    ctx = _additional_context(result.stdout)
+    assert ctx is not None
+    assert "context ~50%" in ctx
+
+
+def test_context_hook_hard_percent_still_default_85_with_soft_50(tmp_path):
+    # Dropping soft to 50 must not move the hard block; it stays 85.
+    settings = tmp_path / "settings.json"
+    settings.write_text(json.dumps({"rollover_window_tokens": 1000, "rollover_soft_percent": 50}))
+    transcript = _write_transcript(tmp_path, 850)  # 85%
+    result = _run_hook(transcript, settings=settings)
+    assert result.returncode == 0, result.stderr
+    ctx = _additional_context(result.stdout)
+    assert ctx is not None
+    assert "context ~85%" in ctx
+    assert "HARD: write or refresh" in ctx
 
 
 def test_installer_adds_stop_hook_and_window_idempotently(tmp_path):
