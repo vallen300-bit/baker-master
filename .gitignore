@@ -47,3 +47,6 @@ venv/
 
 CLAUDE.local.md
 .r2_creds.tmp.json
+
+# C3 gate-runner evidence logs (generated artifacts)
+scripts/c3_gate/_runs/
