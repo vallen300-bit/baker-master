@@ -71,6 +71,12 @@ fi
 # PR lookup toggle (disabled in tests to avoid gh dependency / network).
 PR_LOOKUP_ENABLED="${PR_LOOKUP_ENABLED:-1}"
 
+# Complete mailboxes are a short-lived "just shipped" signal, not a permanent
+# task state. If a COMPLETE marker is older than this window, report it as
+# empty so the dashboard dot returns to grey. Set to 0 to disable expiry in
+# tests or one-off diagnostics.
+COMPLETE_MAILBOX_FRESH_SECONDS="${COMPLETE_MAILBOX_FRESH_SECONDS:-1800}"
+
 # pick_active_clone — given an alias and comma-separated candidate paths,
 # return the single best repo path. Scoring (highest wins):
 #   open PR on current branch of that clone : +1000
@@ -233,6 +239,47 @@ extract_frontmatter_status_from_content() {
     | head -1
 }
 
+mailbox_updated_epoch() {
+  local repo="$1"
+  local n="$2"
+  local filename_status="$3"
+  local f="$4"
+  local source="$5"
+
+  if [[ "$source" == "origin_main" ]]; then
+    local rel_path="briefs/_tasks/CODE_${n}_$(echo "$filename_status" | tr '[:lower:]' '[:upper:]').md"
+    git -C "$repo" log -1 --format='%ct' origin/main -- "$rel_path" 2>/dev/null | head -1
+    return
+  fi
+
+  [[ -f "$f" ]] || { echo ""; return; }
+  python3 - "$f" <<'PY' 2>/dev/null || true
+import os
+import sys
+
+print(int(os.path.getmtime(sys.argv[1])))
+PY
+}
+
+complete_mailbox_is_fresh() {
+  local repo="$1"
+  local n="$2"
+  local filename_status="$3"
+  local f="$4"
+  local source="$5"
+
+  [[ "$COMPLETE_MAILBOX_FRESH_SECONDS" == "0" ]] && return 0
+  [[ "$COMPLETE_MAILBOX_FRESH_SECONDS" =~ ^[0-9]+$ ]] || return 0
+
+  local updated_epoch now_epoch age_s
+  updated_epoch="$(mailbox_updated_epoch "$repo" "$n" "$filename_status" "$f" "$source")"
+  [[ "$updated_epoch" =~ ^[0-9]+$ ]] || return 0
+
+  now_epoch="$(date +%s)"
+  age_s=$((now_epoch - updated_epoch))
+  [[ "$age_s" -le "$COMPLETE_MAILBOX_FRESH_SECONDS" ]]
+}
+
 # classify_mailbox — find the b-code's mailbox file (if any) and return final
 # classification. Frontmatter `status:` is authoritative; filename suffix is
 # fallback when frontmatter is absent or carries an unknown value. Echoes
@@ -337,6 +384,13 @@ classify_mailbox() {
   if [[ "$read_from_origin_main" == "1" ]]; then
     source="origin_main"
   fi
+
+  if [[ "$final_status" == "complete" ]] \
+     && ! complete_mailbox_is_fresh "$repo" "$n" "$filename_status" "$f" "$source"; then
+    echo "empty||"
+    return
+  fi
+
   echo "${final_status}|${f}|${source}"
 }
 

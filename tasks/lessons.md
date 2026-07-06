@@ -1108,3 +1108,66 @@ complete (Inbox 34%, Sent 0.4%). Nobody noticed until the Director asked "is it 
   4. Mitigant that made these MEDIUM not HIGH: the filter only suppresses the dashboard NUDGE candidate — the
      email-ingest + deadline pipelines are untouched, so no deadline/email is actually lost. Filter at the
      surface, never at ingestion, so an over-filter is recoverable.
+## Lesson #105 — fleet wake delivery is TWO layers; a wake failure can be either, diagnose both (2026-06-18)
+- INCIDENT: agents stopped waking on bus receipt ("otherwise there is no autonomous work" — Director P0).
+  Two compounding causes, neither alone explained it:
+  (a) SERVER: BUS_WAKE_TOPIC_GATE_1 (brisen-lab PR #77, added same morning to fix over-waking) gated OS-wake
+  to an allowlist of topic prefixes (dispatch/gate/blocker/ratify/request-changes). Every operational topic
+  (post-deploy-ac/ investigation/ cleanup/ final-closeout/ fyi/) badged but did NOT wake. Fix: PR #78 fail-open
+  (_is_wake_worthy()->True for all addressed msgs; keep debounce+loop-detector+killswitch+disabled-slugs).
+  (b) MAC (dominant): brisen-lab:// URL scheme drifted off the correct handler (com.brisen.lab.wake =
+  "Brisen Lab Wake.app") to a stale binding; the wake-listener's `open brisen-lab://wake/<alias>` failed
+  LaunchServices -609/-600. Fix: lsregister -f the Wake.app + relaunch listener in gui/$(id -u) domain;
+  hardened durable via PR #79 (login-time re-register guard + gui-domain LaunchAgent + self-heal on -609).
+- RULES: (1) wake failures have a server half AND a Mac half — check BOTH wake_events (suppressed_reason) AND
+  ~/.brisen-lab/wake-listener.stderr.log (LSOpenURLs -600/-609). (2) NEVER `launchctl kickstart -k <label>`
+  without the `gui/$(id -u)/` domain prefix — a bare kickstart drops the listener into a context that can't
+  launch GUI apps (this was a "mitigation" that worsened it). (3) Competing "Brisen Lab*" apps fight for the
+  scheme; re-register com.brisen.lab.wake authoritatively + guard it at login. (4) Wake design principle:
+  fail-OPEN wake + mechanical rate-limits (debounce/cap/loop-detector), NEVER a content allowlist judging
+  "priority" — a topic string can't know what matters (Director ruling 2026-06-18).
+
+## Lesson #106 — test ALL credential-shaped fields on a 1Password item before declaring a credential dead (2026-06-18)
+- INCIDENT: todoist sentinel down on 401. The 1P item "API Todoist" has TWO 40-char fields — `credential`
+  (revoked, 401) and `TODOIST_API_TOKEN` (VALID, 200). I tested only `credential`, got 401, and wrongly
+  declared it "Director-blocked, only you can mint a token." Director's nudge ("you have the token in 1P?")
+  forced a re-check that found the valid token in the sibling field.
+- RULE: when a 1P item has multiple secret/credential-shaped fields, live-test EVERY one against the real API
+  before concluding the credential is dead or escalating to the Director. Don't assume `credential` is the live field.
+
+## Lesson #107 — "deployed" != "working"; verify the actual end-to-end flow, never claim auto-heal (2026-06-18)
+- INCIDENT: deployed a valid Todoist token to Render and told Director "sentinel auto-heals in ~30 min."
+  It did NOT — the token was necessary but not sufficient (and the integration was being retired anyway).
+  Reinforces Lesson #8 (compile-clean != done). I over-claimed twice this session (todoist auto-heal; an early
+  "topic-gate is the cause" before the Mac layer surfaced).
+- RULE: never report a fix as working off a deploy alone. Exercise the real flow (fire the actual path, watch
+  the real signal change) before saying "fixed/healed/restored." Default to "deployed; verifying" until proven.
+
+## Lesson #108 — never merge a Tier-A / HIGH-class change before G1+G2 complete, not just G3 (2026-06-18)
+- INCIDENT: CORTEX_LITE_REBASE_1 (PR #373) was HIGH-class but merged after only the G3 codex gate; G1/G2
+  (code-review + /security-review) were skipped pre-merge (b1's own report said "awaiting G1/G2"). Caught
+  on closeout; had to run /security-review retroactively (PASS) + a full WP-coverage verify after the fact.
+- RULE: the cross-vendor G3 gate is NOT a substitute for G1/G2. On Tier-A/HIGH, all of code-review +
+  /security-review (Lesson #52) + G3 must clear BEFORE merge. If a merge already happened without them,
+  close the gap retroactively immediately and log it — don't let a green G3 paper over a skipped security gate.
+
+## Lesson #109 — weigh competing diagnoses by EVIDENCE STRENGTH; don't act on the weakly-supported one (2026-06-18)
+- INCIDENT: two agents gave conflicting wake diagnoses. deputy (Claude): "fleet-wide hook exception, no
+  wake_event rows." Codex (AH2): "topic-gate suppressing — 19/26 wake_events are low_priority_topic." I
+  half-acted on deputy's theory (redeployed brisen-lab — a phantom chase) before the evidence was solid.
+  deputy then RETRACTED (he'd misread the wake_health time window). Codex's concrete suppression-row count
+  was the stronger evidence and was right; the bus.py code confirmed it deterministically.
+- RULE (extends "surface conflicts, don't average"): when two diagnoses conflict, rank by concrete evidence
+  (row counts, code-deterministic facts) over inference; verify against source before taking a remediating
+  action. A redeploy/restart "just in case" on a weak theory wastes time and can mask the real cause.
+
+## Lesson #110 — a 1-arg/2-arg signature mismatch behind a bare `except` freezes sentinels silently (2026-06-18)
+- INCIDENT: roadmap_drift_sentinel read "down" for ~1 month though its ClickUp post SUCCEEDED daily.
+  report_success(source) took 1 arg but 4 callers passed 2 (payload) -> TypeError swallowed by a bare except
+  -> report_success could never write "healthy"; report_failure (2-arg sig) worked, so failures stuck but
+  successes didn't = frozen at last failure. Same latent bug at 3 more callers (embedded_scheduler lint jobs).
+  Fix: widen `def report_success(source, payload=None)` (backward-compat) + regression test (PR #378).
+- RULE: a sentinel that only ever reports one polarity (always-down / always-healthy) is a signature/exception
+  smell, not necessarily a real outage — verify the underlying action's true result (baker_actions) before
+  trusting the sentinel row. Keep status-reporting fns backward-compatible; never let a bare except hide arity
+  errors on the health-write path.
