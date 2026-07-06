@@ -46,11 +46,11 @@ def _settings_docs(payload: dict) -> list:
     explicit = os.environ.get("ROLLOVER_SETTINGS_PATH")
     if explicit:
         paths.append(Path(explicit))
-    roots: list[Path] = []
+    # Use payload.cwd EXCLUSIVELY when present so a per-seat percent can never
+    # leak from the process cwd (a different picker); fall back to process cwd
+    # only when the payload carries no cwd.
     cwd = payload.get("cwd")
-    if cwd:
-        roots.append(Path(str(cwd)) / ".claude")
-    roots.append(Path.cwd() / ".claude")
+    roots: list[Path] = [Path(str(cwd)) / ".claude"] if cwd else [Path.cwd() / ".claude"]
     for root in roots:
         paths.append(root / "settings.local.json")
         paths.append(root / "settings.json")
