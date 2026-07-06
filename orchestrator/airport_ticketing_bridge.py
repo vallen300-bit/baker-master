@@ -61,6 +61,26 @@ _DEFAULT_FLIGHT = "aukera-annaberg-financing"
 _DEFAULT_LOOKBACK_HOURS = 48
 _DEFAULT_MAX_POSTS = 5
 
+# BAKER_OS_V2_C5_NONMAIL_SIGNALS_1 — phase-1 non-mail source lanes (Plaud + WhatsApp).
+# The email lane tickets email only; Plaud transcripts + WhatsApp messages already in the
+# store never board a flight. These two lanes fetch them into the SAME airport_tickets
+# spine (source_channel already includes 'plaud'/'whatsapp' + dedup_key UNIQUE). Ships
+# DARK behind AIRPORT_NONMAIL_SOURCES_ENABLED (default OFF): run_tick calls the new
+# fetchers ONLY when true, so a merge is a pure no-op until the flag flips. Rule 11c
+# preview-first: AIRPORT_NONMAIL_DRY_RUN logs would-be tickets WITHOUT inserting (and does
+# NOT advance the per-source watermark, so the preview re-shows until the real run).
+# News/RSS/X/Substack = phase 2, Director-gated — ZERO code here.
+_NONMAIL_ENABLED_ENV = "AIRPORT_NONMAIL_SOURCES_ENABLED"
+_NONMAIL_DRY_RUN_ENV = "AIRPORT_NONMAIL_DRY_RUN"
+# Per-source watermark keys — DISTINCT from the email cursor + from each other so no lane
+# can advance another's cursor.
+_WATERMARK_SOURCE_PLAUD = "airport_ticketing:plaud"
+_WATERMARK_SOURCE_WHATSAPP = "airport_ticketing:whatsapp"
+# Non-mail lookback FLOOR. Brief: watermark starts at flag-enable minus 7 days (OOM lesson
+# — no full-history backfill on startup). Configurable; a blank cursor starts at this floor.
+_NONMAIL_LOOKBACK_HOURS_ENV = "AIRPORT_NONMAIL_LOOKBACK_HOURS"
+_DEFAULT_NONMAIL_LOOKBACK_HOURS = 168  # 7 days
+
 # BOX5_DROP_OBSERVABILITY_1 (G3 rework #4957) — Gate-2 miss-fetch cap. Observability is
 # TWO DECOUPLED queries: an UNCHANGED keyword-ILIKE match fetch decides what tickets
 # (byte-for-byte parity), and a SEPARATE, independently-bounded query fetches the recent
@@ -194,6 +214,34 @@ class AirportTicket:
         }
 
 
+# BAKER_OS_V2_C5_NONMAIL_SIGNALS_1 — non-mail arrival shapes, mirroring EmailArrival.
+# Each carries a `*_matched` bool (symmetric to EmailArrival.participant_fetched): True
+# iff the row entered ONLY via the identity lane (registry matter_slug for Plaud, registry
+# WhatsApp participant for WA) with NO keyword hit, so build_*_ticket tickets it on
+# identity alone. `received_at` feeds the same contiguous-prefix watermark _advance the
+# email lane uses.
+@dataclass(frozen=True)
+class PlaudArrival:
+    transcript_id: str
+    title: str
+    summary: str
+    full_transcript: str
+    received_at: Optional[datetime]
+    matter_slug: str
+    matter_matched: bool = False
+
+
+@dataclass(frozen=True)
+class WhatsAppArrival:
+    message_id: str
+    sender: str
+    sender_name: str
+    chat_id: str
+    full_text: str
+    received_at: Optional[datetime]
+    participant_matched: bool = False
+
+
 def bridge_enabled() -> bool:
     raw = os.environ.get(_ENABLED_ENV, "false")
     return raw.strip().lower() in {"1", "true", "yes", "on"}
@@ -258,6 +306,33 @@ def lookback_hours() -> int:
     except (TypeError, ValueError):
         return _DEFAULT_LOOKBACK_HOURS
     return max(1, min(value, 24 * 14))
+
+
+def nonmail_sources_enabled() -> bool:
+    """BAKER_OS_V2_C5_NONMAIL_SIGNALS_1 master flag. Default OFF -> run_tick never calls
+    the Plaud/WhatsApp fetchers, so a merge is a pure no-op on the email lane."""
+    raw = os.environ.get(_NONMAIL_ENABLED_ENV, "false")
+    return raw.strip().lower() in {"1", "true", "yes", "on"}
+
+
+def nonmail_dry_run() -> bool:
+    """Rule 11c preview-first: when true the non-mail lanes LOG would-be tickets without
+    inserting or advancing the watermark. The first live run with the master flag on
+    should be a dry run before the real one."""
+    raw = os.environ.get(_NONMAIL_DRY_RUN_ENV, "false")
+    return raw.strip().lower() in {"1", "true", "yes", "on"}
+
+
+def nonmail_lookback_hours() -> int:
+    try:
+        value = int(
+            os.environ.get(
+                _NONMAIL_LOOKBACK_HOURS_ENV, str(_DEFAULT_NONMAIL_LOOKBACK_HOURS)
+            )
+        )
+    except (TypeError, ValueError):
+        return _DEFAULT_NONMAIL_LOOKBACK_HOURS
+    return max(1, min(value, 24 * 30))
 
 
 def active_keywords() -> tuple[str, ...]:
@@ -500,6 +575,312 @@ def build_email_ticket(
         # so a later code-less reply on this thread can inherit its routing.
         thread_id=arrival.thread_id or arrival.message_id,
     )
+
+
+# ---------------------------------------------------------------------------
+# BAKER_OS_V2_C5_NONMAIL_SIGNALS_1 — Plaud + WhatsApp lanes (phase 1)
+# ---------------------------------------------------------------------------
+_NONMAIL_KNOWN_LIMITS = (
+    "Ticketing Bridge did not read or interpret the full transcript/message.",
+    "Ticketing Bridge did not decide condition precedent status.",
+    "Owning desk must check in as VALID, FAKE, DUPLICATE, WRONG_TERMINAL, URGENT, or NEEDS_LUGGAGE_READ.",
+)
+
+
+def _nonmail_originator(name: str, handle: str) -> str:
+    name = _normalize_text(name, limit=120)
+    handle = _normalize_text(handle, limit=160)
+    if name and handle:
+        return f"{name} <{handle}>"
+    return name or handle or "unknown"
+
+
+def _nonmail_urgency(matched: list[str]) -> str:
+    # Non-mail lanes never fast-board; identity-only matches route to desk review at
+    # 'normal', keyword matches at 'high' (mirrors the email lane's non-urgent default).
+    return "high" if matched else "normal"
+
+
+def _active_matter_slugs(conn: Any) -> set[str]:
+    """DISTINCT matter_slug over ACTIVE registry rows — the Plaud matter lane's allow-set,
+    built once per tick (mirrors active_participant_values for WA). Fault-tolerant: []
+    on any error so a registry hiccup no-ops the lane rather than aborting the tick."""
+    try:
+        with conn.cursor() as cur:
+            cur.execute(
+                "SELECT DISTINCT matter_slug FROM project_registry "
+                "WHERE status = 'active' AND matter_slug IS NOT NULL LIMIT 500"
+            )
+            rows = cur.fetchall()
+    except Exception as e:
+        try:
+            conn.rollback()
+        except Exception:
+            pass
+        logger.warning("active matter slugs fetch failed: %s", e)
+        return set()
+    return {str(r[0]).strip().lower() for r in rows if r and r[0]}
+
+
+def build_plaud_ticket(
+    arrival: PlaudArrival,
+    *,
+    now: Optional[datetime] = None,
+    keywords: tuple[str, ...] | None = None,
+) -> Optional[AirportTicket]:
+    keys = keywords or active_keywords()
+    matched = _match_active_keywords(
+        arrival.title, f"{arrival.summary} {arrival.full_transcript}", keys
+    )
+    if not matched and not arrival.matter_matched:
+        # No keyword AND not an active-matter fetch -> nothing to ticket on.
+        return None
+
+    desk_slug = resolve_owner_slug(_desk_slug()) or _desk_slug()
+    if not desk_slug or desk_slug in RESERVED_RECIPIENTS:
+        logger.warning("airport nonmail invalid proposed desk (plaud): %s", desk_slug)
+        return None
+
+    created_at = now or _utc_now()
+    luggage = [
+        f"plaud transcript: {arrival.title or '(untitled)'}",
+        f"transcript_id: {arrival.transcript_id}",
+    ]
+    summary_preview = _normalize_text(arrival.summary or arrival.full_transcript, limit=260)
+    if summary_preview:
+        luggage.append(f"summary_preview: {summary_preview}")
+    if arrival.matter_slug:
+        luggage.append(f"registry matter_slug: {arrival.matter_slug}")
+
+    if matched:
+        why = [f"matched active flight keyword(s): {', '.join(sorted(set(matched)))}"]
+    else:
+        why = [f"matched active registry matter_slug: {arrival.matter_slug}"]
+    if arrival.received_at:
+        why.append(f"received_at: {arrival.received_at.isoformat()}")
+
+    return AirportTicket(
+        ticket_id=_ticket_id("plaud", arrival.transcript_id, desk_slug),
+        dedup_key=_dedup_key("plaud", arrival.transcript_id, desk_slug),
+        created_at=created_at,
+        source_channel="plaud",
+        source_id=arrival.transcript_id,
+        source_received_at=arrival.received_at,
+        originator=_nonmail_originator(arrival.title, arrival.transcript_id),
+        suspected_matter_slug=arrival.matter_slug or _matter_slug(),
+        suspected_flight=_flight_name(),
+        proposed_desk_slug=desk_slug,
+        urgency_hint=_nonmail_urgency(matched),
+        luggage=tuple(luggage),
+        why_ticketed=tuple(why),
+        known_limits=_NONMAIL_KNOWN_LIMITS,
+    )
+
+
+def build_whatsapp_ticket(
+    arrival: WhatsAppArrival,
+    *,
+    now: Optional[datetime] = None,
+    keywords: tuple[str, ...] | None = None,
+) -> Optional[AirportTicket]:
+    keys = keywords or active_keywords()
+    matched = _match_active_keywords("", arrival.full_text, keys)
+    if not matched and not arrival.participant_matched:
+        # No keyword AND not a registered-participant fetch -> nothing to ticket on.
+        return None
+
+    desk_slug = resolve_owner_slug(_desk_slug()) or _desk_slug()
+    if not desk_slug or desk_slug in RESERVED_RECIPIENTS:
+        logger.warning("airport nonmail invalid proposed desk (whatsapp): %s", desk_slug)
+        return None
+
+    created_at = now or _utc_now()
+    body_preview = _normalize_text(arrival.full_text, limit=260)
+    luggage = [
+        f"whatsapp from: {arrival.sender_name or arrival.sender or 'unknown'}",
+        f"message_id: {arrival.message_id}",
+        f"chat_id: {arrival.chat_id or 'unknown'}",
+    ]
+    if body_preview:
+        luggage.append(f"body_preview: {body_preview}")
+
+    if matched:
+        why = [f"matched active flight keyword(s): {', '.join(sorted(set(matched)))}"]
+    else:
+        why = ["fetched by registered project-participant identity (no keyword match)"]
+    if arrival.received_at:
+        why.append(f"received_at: {arrival.received_at.isoformat()}")
+
+    return AirportTicket(
+        ticket_id=_ticket_id("whatsapp", arrival.message_id, desk_slug),
+        dedup_key=_dedup_key("whatsapp", arrival.message_id, desk_slug),
+        created_at=created_at,
+        source_channel="whatsapp",
+        source_id=arrival.message_id,
+        source_received_at=arrival.received_at,
+        originator=_nonmail_originator(arrival.sender_name, arrival.sender),
+        suspected_matter_slug=_matter_slug(),
+        suspected_flight=_flight_name(),
+        proposed_desk_slug=desk_slug,
+        urgency_hint=_nonmail_urgency(matched),
+        luggage=tuple(luggage),
+        why_ticketed=tuple(why),
+        known_limits=_NONMAIL_KNOWN_LIMITS,
+    )
+
+
+def fetch_plaud_arrivals(
+    conn: Any,
+    *,
+    since: datetime,
+    limit: int = 50,
+    keywords: tuple[str, ...] | None = None,
+) -> list[PlaudArrival]:
+    """meeting_transcripts WHERE source='plaud' AND (keyword ILIKE on title/summary/
+    full_transcript OR matter_slug in an ACTIVE registry matter). OLDEST-FIRST for the
+    contiguous-prefix watermark. Fault-tolerant: [] + rollback on any error."""
+    keys = keywords or active_keywords()
+    lim = max(1, min(int(limit), 200))
+    active_matters = _active_matter_slugs(conn)
+
+    kw_clauses: list[str] = []
+    kw_params: list[str] = []
+    for kw in keys:
+        if not kw:
+            continue
+        pattern = f"%{kw}%"
+        kw_clauses.append(
+            "(title ILIKE %s OR summary ILIKE %s OR full_transcript ILIKE %s)"
+        )
+        kw_params.extend([pattern, pattern, pattern])
+    kw_where = " OR ".join(kw_clauses) if kw_clauses else "FALSE"
+
+    try:
+        with conn.cursor() as cur:
+            cur.execute(
+                f"""
+                SELECT id, title, summary, full_transcript, meeting_date, matter_slug
+                FROM meeting_transcripts
+                WHERE source = 'plaud'
+                  AND meeting_date >= %s
+                  AND ( ({kw_where})
+                        OR (matter_slug IS NOT NULL AND matter_slug IN (
+                              SELECT matter_slug FROM project_registry
+                              WHERE status = 'active' AND matter_slug IS NOT NULL)) )
+                ORDER BY meeting_date ASC
+                LIMIT %s
+                """,
+                (since, *kw_params, lim),
+            )
+            rows = cur.fetchall()
+    except Exception as e:
+        try:
+            conn.rollback()
+        except Exception:
+            pass
+        logger.warning("fetch_plaud_arrivals failed: %s", e)
+        return []
+
+    arrivals: list[PlaudArrival] = []
+    for row in rows:
+        received = row[4]
+        if isinstance(received, datetime) and received.tzinfo is None:
+            received = received.replace(tzinfo=timezone.utc)
+        title = str(row[1] or "")
+        summary = str(row[2] or "")
+        transcript = str(row[3] or "")
+        matter = str(row[5] or "")
+        # matter_matched = fetched via the active-matter lane with NO keyword hit
+        # (symmetric to EmailArrival.participant_fetched).
+        kw_hit = bool(_match_active_keywords(title, f"{summary} {transcript}", keys))
+        matter_matched = (not kw_hit) and (matter.strip().lower() in active_matters)
+        arrivals.append(
+            PlaudArrival(
+                transcript_id=str(row[0] or ""),
+                title=title,
+                summary=summary,
+                full_transcript=transcript,
+                received_at=received if isinstance(received, datetime) else None,
+                matter_slug=matter,
+                matter_matched=matter_matched,
+            )
+        )
+    return arrivals
+
+
+def fetch_whatsapp_arrivals(
+    conn: Any,
+    *,
+    since: datetime,
+    limit: int = 50,
+    keywords: tuple[str, ...] | None = None,
+) -> list[WhatsAppArrival]:
+    """whatsapp_messages WHERE keyword ILIKE on full_text OR sender/chat_id in the ACTIVE
+    registry WhatsApp participant set (participant match alone -> desk review, never fast
+    lane — same rule as email). @lid chat-ids accepted (Lesson #28, no format filtering).
+    OLDEST-FIRST. Fault-tolerant: [] + rollback on any error."""
+    keys = keywords or active_keywords()
+    lim = max(1, min(int(limit), 200))
+    participants = active_participant_values(conn, "whatsapp")
+
+    kw_clauses: list[str] = []
+    kw_params: list[str] = []
+    for kw in keys:
+        if not kw:
+            continue
+        kw_clauses.append("full_text ILIKE %s")
+        kw_params.append(f"%{kw}%")
+    kw_where = " OR ".join(kw_clauses) if kw_clauses else "FALSE"
+
+    try:
+        with conn.cursor() as cur:
+            cur.execute(
+                f"""
+                SELECT id, sender, sender_name, chat_id, full_text, timestamp
+                FROM whatsapp_messages
+                WHERE timestamp >= %s
+                  AND ( ({kw_where})
+                        OR lower(sender) = ANY(%s)
+                        OR lower(chat_id) = ANY(%s) )
+                ORDER BY timestamp ASC
+                LIMIT %s
+                """,
+                (since, *kw_params, participants, participants, lim),
+            )
+            rows = cur.fetchall()
+    except Exception as e:
+        try:
+            conn.rollback()
+        except Exception:
+            pass
+        logger.warning("fetch_whatsapp_arrivals failed: %s", e)
+        return []
+
+    part_set = set(participants)
+    arrivals: list[WhatsAppArrival] = []
+    for row in rows:
+        received = row[5]
+        if isinstance(received, datetime) and received.tzinfo is None:
+            received = received.replace(tzinfo=timezone.utc)
+        sender = str(row[1] or "")
+        chat_id = str(row[3] or "")
+        full_text = str(row[4] or "")
+        kw_hit = bool(_match_active_keywords("", full_text, keys))
+        participant_matched = (not kw_hit) and (
+            sender.strip().lower() in part_set or chat_id.strip().lower() in part_set
+        )
+        arrivals.append(
+            WhatsAppArrival(
+                message_id=str(row[0] or ""),
+                sender=sender,
+                sender_name=str(row[2] or ""),
+                chat_id=chat_id,
+                full_text=full_text,
+                received_at=received if isinstance(received, datetime) else None,
+                participant_matched=participant_matched,
+            )
+        )
+    return arrivals
 
 
 def ensure_airport_ticket_table(conn: Any) -> None:
@@ -1770,6 +2151,110 @@ def resolve_by_thread(thread_id: str) -> Optional[dict]:
     return next(iter(active.values()))
 
 
+def _run_nonmail_lane(
+    conn: Any,
+    *,
+    source_label: str,
+    fetch_fn,
+    build_fn,
+    watermark_source: str,
+    current: datetime,
+    cap: int,
+    dry_run: bool,
+) -> dict[str, int]:
+    """BAKER_OS_V2_C5_NONMAIL_SIGNALS_1 — process ONE non-mail source (plaud/whatsapp)
+    into candidate desk-review tickets. Mirrors the email lane's contiguous-prefix
+    watermark discipline but WITHOUT the email routing lanes: a non-mail match is always a
+    candidate ticket via issue_ticket, never a fast-board (brief design pt 1 — participant
+    match alone routes to desk review). Own per-source watermark (never the email cursor).
+    Dry-run LOGS would-be tickets and advances NOTHING (Rule 11c preview-first)."""
+    issued = skipped = failed = 0
+    watermark_candidate: Optional[datetime] = None
+    contiguous = True
+
+    floor = current - timedelta(hours=nonmail_lookback_hours())
+    try:
+        raw_wm = trigger_state_watermark_raw(watermark_source)
+    except Exception as e:
+        logger.warning(
+            "airport nonmail %s watermark read failed, using floor: %s", source_label, e
+        )
+        raw_wm = None
+    since = floor if raw_wm is None else max(raw_wm, floor)
+
+    try:
+        arrivals = fetch_fn(conn, since=since, limit=cap * 4)
+    except Exception as e:
+        logger.warning("airport nonmail %s fetch failed: %s", source_label, e)
+        return {"issued": 0, "skipped": 0, "failed": 0}
+
+    for arrival in arrivals:
+        if issued >= cap:
+            # Cap reached: this + every newer arrival stay re-fetchable (freeze cursor).
+            contiguous = False
+            break
+        done = False
+        try:
+            ticket = build_fn(arrival, now=current)
+            if ticket is None:
+                # Fetch guarantees a match, so a None here is a desk misconfig only —
+                # hold the cursor, never silently advance past it.
+                skipped += 1
+                done = False
+            elif dry_run:
+                logger.info(
+                    "AIRPORT_NONMAIL_DRY_RUN would ticket %s dedup=%s desk=%s",
+                    source_label,
+                    ticket.dedup_key,
+                    ticket.proposed_desk_slug,
+                )
+                skipped += 1
+                done = False  # preview-only: never advance the watermark
+            else:
+                result = issue_ticket(ticket, conn)
+                if result.get("ok"):
+                    issued += 1
+                    conn.commit()
+                    done = True
+                elif result.get("skipped") and result.get("reason") == "duplicate":
+                    # Already ticketed on a prior tick — idempotent no-op, DONE.
+                    conn.commit()
+                    done = True
+                elif not result.get("ok") and result.get("reason") == "bus_failed":
+                    # BUS-FAIL = FAILURE: mark_ticket_failed persisted, cursor frozen so
+                    # issue_ticket retries it next tick (never a silent drop).
+                    failed += 1
+                    conn.commit()
+                    done = False
+                else:
+                    # Reserve race / no id — not ours to finish, hold the cursor.
+                    conn.commit()
+                    done = False
+        except Exception as exc:  # ERROR NEVER AUTO-CLEARS
+            try:
+                conn.rollback()
+            except Exception:
+                pass
+            failed += 1
+            done = False
+            logger.warning("airport nonmail %s row failed: %s", source_label, exc)
+
+        if not done:
+            contiguous = False
+        elif contiguous:
+            watermark_candidate = _advance(watermark_candidate, arrival.received_at)
+
+    if watermark_candidate is not None and not dry_run:
+        try:
+            trigger_state_set_watermark(watermark_source, watermark_candidate)
+        except Exception as e:
+            logger.warning(
+                "airport nonmail %s watermark advance failed: %s", source_label, e
+            )
+
+    return {"issued": issued, "skipped": skipped, "failed": failed}
+
+
 def run_tick(*, now: Optional[datetime] = None) -> dict[str, Any]:
     # (a) MASTER GATE — ships dark behind AIRPORT_TICKETING_BRIDGE_ENABLED.
     if not bridge_enabled():
@@ -2380,6 +2865,38 @@ def run_tick(*, now: Optional[datetime] = None) -> dict[str, Any]:
             except Exception as e:
                 logger.warning("airport ticketing watermark advance failed: %s", e)
 
+        # BAKER_OS_V2_C5_NONMAIL_SIGNALS_1 — non-mail lanes (Plaud + WhatsApp). Dark by
+        # default. Runs AFTER the email lane's cursor already advanced, and each lane has
+        # its OWN watermark + fetcher, so a non-mail failure never affects email ticketing.
+        # Each lane issues candidate desk-review tickets through the SAME issue_ticket
+        # spine (never checked_in, never a lounge-writer claim path). Phase 2 news feeds
+        # are Director-gated and intentionally absent.
+        nonmail_plaud = {"issued": 0, "skipped": 0, "failed": 0}
+        nonmail_whatsapp = {"issued": 0, "skipped": 0, "failed": 0}
+        nonmail_dry = False
+        if nonmail_sources_enabled():
+            nonmail_dry = nonmail_dry_run()
+            nonmail_plaud = _run_nonmail_lane(
+                conn,
+                source_label="plaud",
+                fetch_fn=fetch_plaud_arrivals,
+                build_fn=build_plaud_ticket,
+                watermark_source=_WATERMARK_SOURCE_PLAUD,
+                current=current,
+                cap=cap,
+                dry_run=nonmail_dry,
+            )
+            nonmail_whatsapp = _run_nonmail_lane(
+                conn,
+                source_label="whatsapp",
+                fetch_fn=fetch_whatsapp_arrivals,
+                build_fn=build_whatsapp_ticket,
+                watermark_source=_WATERMARK_SOURCE_WHATSAPP,
+                current=current,
+                cap=cap,
+                dry_run=nonmail_dry,
+            )
+
         stuck_arrivals = _count_stuck_arrivals(conn)
         stats = {
             "ok": True,
@@ -2396,6 +2913,16 @@ def run_tick(*, now: Optional[datetime] = None) -> dict[str, Any]:
             "thread_routed_ticket": thread_routed_ticket,
             "outbound_signal": outbound_signal,
             "stuck_arrivals": stuck_arrivals,
+            # BAKER_OS_V2_C5_NONMAIL_SIGNALS_1 — non-mail lane counters (all 0 when the
+            # AIRPORT_NONMAIL_SOURCES_ENABLED flag is off).
+            "nonmail_enabled": nonmail_sources_enabled(),
+            "nonmail_dry_run": nonmail_dry,
+            "plaud_issued": nonmail_plaud["issued"],
+            "plaud_skipped": nonmail_plaud["skipped"],
+            "plaud_failed": nonmail_plaud["failed"],
+            "whatsapp_issued": nonmail_whatsapp["issued"],
+            "whatsapp_skipped": nonmail_whatsapp["skipped"],
+            "whatsapp_failed": nonmail_whatsapp["failed"],
             # Read + surfaced for observability. In BRIEF-C the fast lane is not
             # built, so this flag has NO behavioral branch yet — it only gates the
             # future D/E lanes (project-number / manifest). Deterministic clears
