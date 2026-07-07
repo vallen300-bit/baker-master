@@ -89,6 +89,7 @@ class PublisherBusWorkerConfig:
     terminal_key: str
     poll_limit: int = 10
     per_wake_render_cap: int = 5          # spec §3: default 5 renders bound a cycle
+    max_drain_cycles: int = 10            # spec §3: re-wake safety bound (invocation ceiling)
     http_timeout_s: float = 10.0
     queue_age_alarm_s: float = 1800.0     # spec §6.4 queue-age tripwire (default 30m)
     escalate_gate_fail: bool = True
@@ -116,6 +117,7 @@ def publisher_bus_worker_config_from_env() -> PublisherBusWorkerConfig:
         terminal_key=_terminal_key_from_env(),
         poll_limit=_bounded_int("PUBLISHER_BUS_POLL_LIMIT", 10, 1, 25),
         per_wake_render_cap=_bounded_int("PUBLISHER_BUS_RENDER_CAP", 5, 1, 20),
+        max_drain_cycles=_bounded_int("PUBLISHER_BUS_MAX_DRAIN_CYCLES", 10, 1, 100),
         http_timeout_s=_bounded_float("PUBLISHER_BUS_HTTP_TIMEOUT_S", 10.0, 1.0, 60.0),
         queue_age_alarm_s=_bounded_float("PUBLISHER_BUS_QUEUE_AGE_ALARM_S", 1800.0, 60.0, 86400.0),
         escalate_gate_fail=_env_bool("PUBLISHER_BUS_ESCALATE_GATE_FAIL", True),
@@ -157,43 +159,58 @@ class PublisherBusWorker:
             logger.warning("publisher bus worker skipped; missing config: %s", ",".join(missing))
             return {"status": "skipped_config", "missing": missing, "processed": 0, "acked": 0, "errors": 0}
 
-        try:
-            messages = self._fetch_inbox()
-        except Exception as e:
-            logger.warning("publisher inbox fetch failed: %s", type(e).__name__)
-            return {"status": "fetch_failed", "processed": 0, "acked": 0, "errors": 1}
-
-        pending = [m for m in messages if not m.get("acknowledged_at")]
-        self._queue_age_tripwire(pending)
-
         stats: dict[str, Any] = {
-            "status": "ok",
-            "fetched": len(messages),
-            "pending": len(pending),
-            "processed": 0,
-            "acked": 0,
-            "bounced": 0,
-            "errors": 0,
-            "overflow": len(pending) > self.cfg.per_wake_render_cap,
+            "status": "ok", "fetched": 0, "pending": 0, "processed": 0,
+            "acked": 0, "bounced": 0, "errors": 0, "cycles": 0,
+            "overflow": False, "stranded": False,
         }
-        for msg in pending[: self.cfg.per_wake_render_cap]:
-            try:
-                result = self.process_message(msg)
-                stats["processed"] += 1
-                if result.get("acked"):
-                    stats["acked"] += 1
-                if result.get("status") == "bounce":
-                    stats["bounced"] += 1
-            except Exception as e:
-                stats["errors"] += 1
-                logger.exception("publisher bus message failed id=%s error=%s", msg.get("id"), type(e).__name__)
 
-        # spec §3: the cap bounds a cycle, never strands the queue. Signal that a
-        # re-wake should drain the remainder immediately rather than wait a full interval.
-        if stats["overflow"]:
+        # spec §3: the per-wake cap bounds each CYCLE; on overflow we re-wake
+        # immediately (re-fetch + drain again) rather than strand the remainder to
+        # the next poll interval. max_drain_cycles is the invocation safety ceiling.
+        for cycle in range(1, self.cfg.max_drain_cycles + 1):
+            try:
+                messages = self._fetch_inbox()
+            except Exception as e:
+                logger.warning("publisher inbox fetch failed (cycle %d): %s", cycle, type(e).__name__)
+                if cycle == 1:
+                    stats["status"] = "fetch_failed"
+                    stats["errors"] += 1
+                return stats  # mid-drain fetch failure stops here; next interval resumes
+
+            stats["cycles"] = cycle
+            stats["fetched"] += len(messages)
+            pending = [m for m in messages if not m.get("acknowledged_at")]
+
+            if cycle == 1:
+                stats["pending"] = len(pending)
+                self._queue_age_tripwire(pending)  # alarm AH1 once per invocation if tripped
+
+            if not pending:
+                break
+
+            for msg in pending[: self.cfg.per_wake_render_cap]:
+                try:
+                    result = self.process_message(msg)
+                    stats["processed"] += 1
+                    if result.get("acked"):
+                        stats["acked"] += 1
+                    if result.get("status") == "bounce":
+                        stats["bounced"] += 1
+                except Exception as e:
+                    stats["errors"] += 1
+                    logger.exception("publisher bus message failed id=%s error=%s", msg.get("id"), type(e).__name__)
+
+            if len(pending) <= self.cfg.per_wake_render_cap:
+                break  # drained everything available this cycle
+            stats["overflow"] = True  # more than the cap remained -> re-wake (loop continues)
+        else:
+            # exhausted max_drain_cycles with work still arriving: made forward
+            # progress but did not fully drain; the next poll interval continues.
+            stats["stranded"] = True
             logger.info(
-                "publisher queue over per-wake cap (%d pending > %d cap) — re-wake to continue draining",
-                len(pending), self.cfg.per_wake_render_cap,
+                "publisher drain hit max_drain_cycles=%d; queue not fully drained, next interval resumes",
+                self.cfg.max_drain_cycles,
             )
         return stats
 
@@ -295,15 +312,16 @@ class PublisherBusWorker:
         body = data.get("body")
         return body.strip() if isinstance(body, str) else ""
 
-    def _post_reply(self, *, recipient: str, topic: str, body: str, parent_id: int) -> dict[str, Any]:
-        payload = {
+    def _post_reply(self, *, recipient: str, topic: str, body: str, parent_id: int | None = None) -> dict[str, Any]:
+        payload: dict[str, Any] = {
             "kind": "dispatch",
             "body": body,
             "to": [recipient],
             "tier_required": "B",
             "topic": topic,
-            "parent_id": parent_id,
         }
+        if parent_id is not None:
+            payload["parent_id"] = parent_id
         resp = self.http.post(
             f"{self.cfg.lab_url}/msg/{recipient}",
             headers={"X-Terminal-Key": self.cfg.terminal_key, "Content-Type": "application/json"},
@@ -380,14 +398,26 @@ class PublisherBusWorker:
     # ---- tripwire --------------------------------------------------------------
 
     def _queue_age_tripwire(self, pending: list[dict[str, Any]]) -> None:
-        # spec §6.4: alarm AH1 (log surface here) if the oldest pending ticket
-        # exceeds the age threshold while the loop is live.
+        # spec §6.4: alarm AH1 if the oldest pending ticket exceeds the age
+        # threshold while the loop is live. Fires at most once per poll_once
+        # invocation (called only on cycle 1); a persistent backlog re-alarms each
+        # interval, which is the intended "queue is stuck" signal.
         oldest = self._oldest_age_seconds(pending)
-        if oldest is not None and oldest > self.cfg.queue_age_alarm_s:
-            logger.warning(
-                "publisher queue-age tripwire: oldest pending render ticket is %.0fs old (> %.0fs threshold)",
-                oldest, self.cfg.queue_age_alarm_s,
-            )
+        if oldest is None or oldest <= self.cfg.queue_age_alarm_s:
+            return
+        logger.warning(
+            "publisher queue-age tripwire: oldest pending render ticket is %.0fs old (> %.0fs threshold)",
+            oldest, self.cfg.queue_age_alarm_s,
+        )
+        body = (
+            f"Publisher queue-age tripwire (spec §6.4): oldest pending render ticket is "
+            f"{oldest:.0f}s old (> {self.cfg.queue_age_alarm_s:.0f}s threshold); queue depth "
+            f"{len(pending)}. Drain loop is live but not keeping pace."
+        )
+        try:
+            self._post_reply(recipient=_ESCALATION_SLUG, topic="alarm/publisher-queue-age", body=body)
+        except Exception as e:
+            logger.warning("publisher queue-age alarm post to lead failed: %s", type(e).__name__)
 
     @staticmethod
     def _oldest_age_seconds(pending: list[dict[str, Any]]) -> float | None:

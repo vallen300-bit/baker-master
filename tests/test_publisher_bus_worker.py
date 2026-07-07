@@ -49,8 +49,12 @@ class FakeHTTP:
     def post(self, url, headers=None, json=None, timeout=None):
         self.calls.append(("post", url))
         if url.endswith("/ack"):
+            mid = int(url.split("/msg/")[1].split("/ack")[0])
+            for m in self.inbox:  # mark acked so a re-fetch drains it (drain-loop realism)
+                if m.get("id") == mid:
+                    m["acknowledged_at"] = "2026-07-07T00:00:00+00:00"
             return FakeResp({"ok": True})
-        # a reply/receipt/bounce/escalation POST to /msg/<recipient>
+        # a reply/receipt/bounce/escalation/alarm POST to /msg/<recipient>
         if self.fail_on_reply:
             raise RuntimeError("simulated reply POST failure")
         self.posted_bodies.append((url, (json or {}).get("body", "")))
@@ -140,14 +144,31 @@ def test_bounce_path_no_inline_patch():
     assert "BOUNCE" in body and "reserve figure missing" in body and "No inline patch" in body
 
 
-def test_per_wake_cap_and_overflow():
+def test_overflow_rewakes_and_drains_full_backlog():
+    # F1: cap bounds a CYCLE; overflow must re-wake and drain the rest in the same
+    # invocation, not strand it to the next interval.
     inbox = [_msg(200 + i) for i in range(7)]
     full = {200 + i: "{}" for i in range(7)}
     http = FakeHTTP(inbox=inbox, full_bodies=full)
-    w = PublisherBusWorker(cfg=_cfg(per_wake_render_cap=3), http_client=http, render_fn=lambda t: _rendered())
+    w = PublisherBusWorker(cfg=_cfg(per_wake_render_cap=3, max_drain_cycles=10),
+                           http_client=http, render_fn=lambda t: _rendered())
     out = w.poll_once()
-    assert out["processed"] == 3 and out["overflow"] is True
-    assert len(_acks(http)) == 3
+    assert out["processed"] == 7 and out["acked"] == 7          # whole backlog drained
+    assert out["overflow"] is True and out["stranded"] is False
+    assert out["cycles"] >= 3                                    # 3+3+1 across re-wakes
+    assert len(_acks(http)) == 7
+
+
+def test_stranded_when_backlog_exceeds_cycle_ceiling():
+    # F1 safety bound: a backlog larger than cap*max_drain_cycles makes forward
+    # progress then yields (stranded), rather than looping unbounded.
+    inbox = [_msg(700 + i) for i in range(10)]
+    full = {700 + i: "{}" for i in range(10)}
+    http = FakeHTTP(inbox=inbox, full_bodies=full)
+    w = PublisherBusWorker(cfg=_cfg(per_wake_render_cap=2, max_drain_cycles=2),
+                           http_client=http, render_fn=lambda t: _rendered())
+    out = w.poll_once()
+    assert out["processed"] == 4 and out["cycles"] == 2 and out["stranded"] is True
 
 
 def test_ack_not_called_when_reply_fails():
@@ -185,6 +206,25 @@ def test_gate_fail_escalates_to_lead():
     assert any(u.endswith("/msg/lead") for u in reply_urls)
     esc_body = next(b for (u, b) in http.posted_bodies if u.endswith("/msg/lead"))
     assert "ESCALATION" in esc_body and "lexical(10c)" in esc_body
+
+
+def test_queue_age_tripwire_alarms_lead():
+    # F2: an old pending ticket must POST an alarm to lead (AH1), not just log.
+    old = "2020-01-01T00:00:00+00:00"
+    http = FakeHTTP(inbox=[_msg(800, created_at=old)], full_bodies={800: "{}"})
+    w = PublisherBusWorker(cfg=_cfg(queue_age_alarm_s=60), http_client=http, render_fn=lambda t: _rendered())
+    w.poll_once()
+    lead_posts = [(u, b) for (u, b) in http.posted_bodies if u.endswith("/msg/lead")]
+    assert lead_posts, "expected a queue-age alarm posted to lead"
+    assert "queue-age tripwire" in lead_posts[0][1]
+
+
+def test_queue_age_tripwire_silent_when_fresh():
+    fresh = "2099-01-01T00:00:00+00:00"  # future -> negative age -> never trips
+    http = FakeHTTP(inbox=[_msg(801, created_at=fresh)], full_bodies={801: "{}"})
+    w = PublisherBusWorker(cfg=_cfg(queue_age_alarm_s=60), http_client=http, render_fn=lambda t: _rendered())
+    w.poll_once()
+    assert not any(u.endswith("/msg/lead") for (u, _b) in http.posted_bodies)
 
 
 def test_render_crash_is_fault_tolerant():
