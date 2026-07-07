@@ -48,10 +48,23 @@ Spec: same dir `SPEC_PUBLISHER_AGENT_v1.md`. Dispatch: bus #6295 (lead). Thread 
 - Verify gate: `~/baker-vault/_ops/skills/verify-dashboard-render/SKILL.md`.
 - Registry (Row 5/6): `~/baker-vault/_ops/registries/agent_registry.yml` + `scripts/generate_agent_identity_artifacts.py --write` (3-repo SHA256 match).
 
+## SPEC v1.1 (Director-ratified 2026-07-07, cowork-ah1 #6855 / lead #6862 — @vault main)
+Two binding additions join the AC set (AC1-AC6 + these two):
+- **(a) Per-flight content-contract, NO universal schema.** The engine loads EACH FLIGHT's OWN
+  content-contract at render time. `FLIGHT_DASHBOARD_PACKET v1` (below) is the BASE/template shape,
+  not a one-size schema — a flight's own contract governs its render. Engine must resolve the
+  per-flight contract from the ticket/matter, not hardcode PACKET v1.
+- **(b) Per-render context isolation, one matter per render cycle.** New **AC7 (cross-contamination):**
+  a matter-A fact must NEVER appear in a matter-B render within the same drain run. Engine must be
+  stateless per render (no module-level caches keyed across matters); the Part-2 worker already calls
+  render_fn(ticket) per message with no shared state — keep it that way + add the seeded AC7 test.
+Lead: fold (a)/(b) fully at Part 4; (a) already corrected in the Part-3 design below.
+
 ## PART 3 SPEC (gathered 2026-07-07)
-- **Input schema:** `FLIGHT_DASHBOARD_PACKET v1` (contract file above) — the structured facts the
-  engine renders. Fields incl. project_code/flight_name/matter_slug, current_state (+ state vocab),
-  blockers, workstreams, evidence, ticket/dispatch/clickup refs, proof_gaps, last_refreshed_at.
+- **Input schema (base/template):** `FLIGHT_DASHBOARD_PACKET v1` (contract file above) — the base
+  structured-facts shape. Per v1.1(a) the engine loads the flight's OWN contract per render.
+  Fields incl. project_code/flight_name/matter_slug, current_state (+ state vocab), blockers,
+  workstreams, evidence, ticket/dispatch/clickup refs, proof_gaps, last_refreshed_at.
 - **Gate definitions are in `verify-dashboard-render/SKILL.md` step 4 (NOT the contract file):**
   - version-stamp: `Page vN` present + incremented.
   - lexical 10a/10b/10c: no German diacritics/terms; no banned abbreviations; no text block
@@ -70,8 +83,11 @@ wall-of-text >2 sentences, stale stamp, missing `Page vN`); (2) facts->HTML via 
 `wiki/_templates/flight-dashboard-canonical-v5.html`; (3) **AC1** deterministic-diff test re-rendering
 BB-AUK-001 v9 (`.../flight-dashboards/BB-AUK-001/dashboard-v1-pattern-d.html`) from its extracted
 PACKET facts — PASS = byte-normalized match on figures + section set + receipt IDs (brief §10 OPEN-2).
-Wire `render_ticket` as the worker's default `render_fn`. Sequencing lean (with lead): engine before
-the 3-repo registry regen.
+Wire `render_ticket` as the worker's default `render_fn`. Per v1.1(a): resolve the flight's OWN
+content-contract from the ticket/matter at render time (no hardcoded universal schema). Per v1.1(b):
+keep the engine stateless per render + add the **AC7** seeded cross-contamination test (matter-A fact
+absent from a matter-B render in the same drain run). Sequencing lean (with lead): engine before the
+3-repo registry regen.
 
 Gate chain on return: G1 self-verify -> G2 deputy -> G3 codex (route via `codex` bus slug).
 Report to lead on topic `baker-os-v2/publisher-install`.
