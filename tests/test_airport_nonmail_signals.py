@@ -132,6 +132,79 @@ def test_build_whatsapp_ticket_no_match_returns_none():
     assert bridge.build_whatsapp_ticket(arrival) is None
 
 
+# ---------------------------------------------------------------------------
+# DATA_OPS_AO_PLAUD_BACKFILL_WA_NOISE_1 task 6 — WA identity-only ticket suppression
+# (config reader + predicates; pure unit, no DB). build_whatsapp_ticket is UNCHANGED —
+# suppression happens in _run_nonmail_lane via suppress_fn, so these test the policy.
+# ---------------------------------------------------------------------------
+def test_wa_identity_ticket_max_age_hours_reader(monkeypatch):
+    monkeypatch.delenv("AIRPORT_WA_IDENTITY_TICKET_MAX_AGE_HOURS", raising=False)
+    assert bridge._wa_identity_ticket_max_age_hours() == 0  # default: suppress all
+    monkeypatch.setenv("AIRPORT_WA_IDENTITY_TICKET_MAX_AGE_HOURS", "168")
+    assert bridge._wa_identity_ticket_max_age_hours() == 168
+    monkeypatch.setenv("AIRPORT_WA_IDENTITY_TICKET_MAX_AGE_HOURS", "-1")
+    assert bridge._wa_identity_ticket_max_age_hours() == -1  # disabled (legacy)
+    monkeypatch.setenv("AIRPORT_WA_IDENTITY_TICKET_MAX_AGE_HOURS", "not-an-int")
+    assert bridge._wa_identity_ticket_max_age_hours() == 0  # garbage -> default
+    monkeypatch.setenv("AIRPORT_WA_IDENTITY_TICKET_MAX_AGE_HOURS", "99999")
+    assert bridge._wa_identity_ticket_max_age_hours() == 8760  # bounded at 1y
+
+
+def test_wa_identity_only_predicate(monkeypatch):
+    monkeypatch.delenv("AIRPORT_TICKETING_KEYWORDS", raising=False)
+    # participant identity + NO keyword -> identity-only
+    assert bridge._wa_identity_only(_wa(full_text="call you later", participant_matched=True)) is True
+    # participant identity + keyword hit -> NOT identity-only (keyword always tickets)
+    assert bridge._wa_identity_only(_wa(full_text="aukera closing", participant_matched=True)) is False
+    # not a participant fetch -> never identity-only
+    assert bridge._wa_identity_only(_wa(full_text="call you later", participant_matched=False)) is False
+
+
+def test_wa_identity_suppressed_default_all(monkeypatch):
+    monkeypatch.delenv("AIRPORT_WA_IDENTITY_TICKET_MAX_AGE_HOURS", raising=False)
+    now = datetime(2026, 7, 4, 12, tzinfo=timezone.utc)
+    # even a same-day identity-only arrival is suppressed under the default (#6619)
+    fresh = _wa(full_text="call later", participant_matched=True,
+                received_at=datetime(2026, 7, 4, 11, tzinfo=timezone.utc))
+    assert bridge._wa_identity_suppressed(fresh, now) is True
+
+
+def test_wa_identity_suppressed_age_ceiling(monkeypatch):
+    monkeypatch.setenv("AIRPORT_WA_IDENTITY_TICKET_MAX_AGE_HOURS", "168")
+    now = datetime(2026, 7, 4, 12, tzinfo=timezone.utc)
+    old = _wa(full_text="call later", participant_matched=True,
+              received_at=datetime(2026, 6, 8, 10, tzinfo=timezone.utc))  # >168h
+    young = _wa(full_text="call later", participant_matched=True,
+                received_at=datetime(2026, 7, 4, 6, tzinfo=timezone.utc))  # 6h
+    assert bridge._wa_identity_suppressed(old, now) is True
+    assert bridge._wa_identity_suppressed(young, now) is False
+
+
+def test_wa_identity_suppressed_keyword_exempt(monkeypatch):
+    monkeypatch.setenv("AIRPORT_WA_IDENTITY_TICKET_MAX_AGE_HOURS", "0")  # suppress-all
+    now = datetime(2026, 7, 4, 12, tzinfo=timezone.utc)
+    # keyword match is never identity-only -> never suppressed, even under suppress-all
+    kw = _wa(full_text="aukera closing", participant_matched=True,
+             received_at=datetime(2026, 1, 1, tzinfo=timezone.utc))
+    assert bridge._wa_identity_suppressed(kw, now) is False
+
+
+def test_wa_identity_suppressed_disabled_escape_hatch(monkeypatch):
+    monkeypatch.setenv("AIRPORT_WA_IDENTITY_TICKET_MAX_AGE_HOURS", "-1")
+    now = datetime(2026, 7, 4, 12, tzinfo=timezone.utc)
+    ident = _wa(full_text="call later", participant_matched=True,
+                received_at=datetime(2026, 1, 1, tzinfo=timezone.utc))
+    assert bridge._wa_identity_suppressed(ident, now) is False  # legacy: still tickets
+
+
+def test_wa_identity_suppressed_null_received_at(monkeypatch):
+    monkeypatch.setenv("AIRPORT_WA_IDENTITY_TICKET_MAX_AGE_HOURS", "168")
+    now = datetime(2026, 7, 4, 12, tzinfo=timezone.utc)
+    ident = _wa(full_text="call later", participant_matched=True, received_at=None)
+    # cannot prove recency under an age-ceiling -> suppress (noise-reduction default)
+    assert bridge._wa_identity_suppressed(ident, now) is True
+
+
 def test_dedup_keys_distinct_per_channel():
     same_id, desk = "shared-id", "baden-baden-desk"
     email_k = bridge._dedup_key("email", same_id, desk)
@@ -318,4 +391,47 @@ def test_dry_run_inserts_nothing(nm_conn, monkeypatch):
         dry_run=True,
     )
     assert stats["issued"] == 0
+
+
+def test_run_nonmail_lane_suppresses_identity_wa_and_advances_watermark(nm_conn, monkeypatch):
+    """Task 6 + 3b + 7: an identity-only WA arrival is NOT ticketed but the watermark
+    ADVANCES past it (so it never re-tickets next tick), while a keyword match from the
+    same participant STILL tickets. In-memory watermark to avoid trigger_state coupling."""
+    monkeypatch.delenv("AIRPORT_WA_IDENTITY_TICKET_MAX_AGE_HOURS", raising=False)  # default: suppress all
+    wm: dict = {}
+    monkeypatch.setattr(bridge, "trigger_state_watermark_raw", lambda src: wm.get(src))
+    monkeypatch.setattr(bridge, "trigger_state_set_watermark", lambda src, ts: wm.__setitem__(src, ts))
+
+    # Dates MUST fall inside _run_nonmail_lane's lookback floor (current - nonmail_lookback_hours,
+    # clamped <=14d) or fetch_whatsapp_arrivals never returns them. Keep them a few hours before current.
+    # identity-only: registered participant (41790000000), NO keyword
+    _insert_wa(nm_conn, "nmtest-w-idonly", sender="41790000000", chat_id="41790000000@c.us",
+               text="call you later", when=datetime(2026, 7, 4, 8, 0, tzinfo=timezone.utc))
+    # keyword match from the SAME participant -> must still ticket (never suppressed)
+    _insert_wa(nm_conn, "nmtest-w-kw", sender="41790000000", chat_id="41790000000@c.us",
+               text="aukera closing note", when=datetime(2026, 7, 4, 9, 0, tzinfo=timezone.utc))
+
+    current = datetime(2026, 7, 4, 12, tzinfo=timezone.utc)
+    kwargs = dict(
+        source_label="whatsapp",
+        fetch_fn=bridge.fetch_whatsapp_arrivals,
+        build_fn=bridge.build_whatsapp_ticket,
+        watermark_source=bridge._WATERMARK_SOURCE_WHATSAPP,
+        current=current,
+        cap=50,
+        dry_run=False,
+        suppress_fn=bridge._wa_identity_suppressed,
+    )
+    stats = bridge._run_nonmail_lane(nm_conn, **kwargs)
+
+    assert stats["suppressed"] >= 1            # identity-only suppressed
+    assert stats["issued"] == 1               # only the keyword arrival ticketed
+    assert _count(nm_conn, "whatsapp") == 1   # no identity-only ticket row
+    # watermark advanced past BOTH arrivals (both handled: suppressed + issued)
+    assert wm[bridge._WATERMARK_SOURCE_WHATSAPP] >= datetime(2026, 7, 4, 9, 0, tzinfo=timezone.utc)
+
+    # 3b: a SECOND tick mints no new ticket (idempotent; no re-ticket churn)
+    stats2 = bridge._run_nonmail_lane(nm_conn, **kwargs)
+    assert stats2["issued"] == 0
+    assert _count(nm_conn, "whatsapp") == 1
     assert _count(nm_conn, "plaud") == 0

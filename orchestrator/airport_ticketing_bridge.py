@@ -105,6 +105,24 @@ _PARTICIPANT_LANE_ENV = "BOX5_PARTICIPANT_FETCH_LANE_ENABLED"
 _PARTICIPANT_FETCH_CAP_ENV = "AIRPORT_TICKETING_PARTICIPANT_FETCH_CAP"
 _DEFAULT_PARTICIPANT_FETCH_CAP = 200
 
+# DATA_OPS_AO_PLAUD_BACKFILL_WA_NOISE_1 task 6 (lead #6200/#6619, Director #6209) — WA
+# identity-only ticket suppression. A WhatsApp arrival fetched ONLY on registered-
+# participant identity (participant_matched, NO active-keyword hit) carries no matter
+# signal: every WA sender is a real contact the Director talks to, so identity alone
+# floods the flight with ack/chatter tickets ("call later" / "Ок" / "1.30"). This knob
+# suppresses MINTING such tickets — the underlying whatsapp_messages row is never touched
+# (store-everything: the message stays searchable + classifiable to its correct matter),
+# and keyword/matter matches STILL ticket to the correct desk regardless of this knob.
+# Semantics of AIRPORT_WA_IDENTITY_TICKET_MAX_AGE_HOURS:
+#   0  (default) -> suppress ALL identity-only WA tickets regardless of age (#6619 shape).
+#   N>0          -> suppress identity-only WA older than N hours (age-ceiling, #6200).
+#   <0           -> DISABLED: legacy behavior, identity-only always tickets (escape hatch).
+# Suppressed arrivals ADVANCE the watermark (they are intentionally handled, not held) so
+# they are never re-fetched/re-ticketed next tick — distinct from a build_fn None, which
+# means desk-misconfig and holds the cursor.
+_WA_IDENTITY_TICKET_MAX_AGE_ENV = "AIRPORT_WA_IDENTITY_TICKET_MAX_AGE_HOURS"
+_DEFAULT_WA_IDENTITY_TICKET_MAX_AGE_HOURS = 0
+
 # BOX5_DROP_OBSERVABILITY_1 — drop-log gate vocabulary (mirrors the CHECK in
 # migrations/20260701d_box5_dropped_signals.sql). keyword_prefilter = Gate-2 miss (not
 # ticketed); routing_unrouted / routing_conflict = Gate-3 (ticketed to safe-default
@@ -377,6 +395,61 @@ def _participant_fetch_cap() -> int:
     except (TypeError, ValueError):
         return _DEFAULT_PARTICIPANT_FETCH_CAP
     return max(1, min(value, 5000))
+
+
+def _wa_identity_ticket_max_age_hours() -> int:
+    """DATA_OPS_AO_PLAUD_BACKFILL_WA_NOISE_1 task 6 — WA identity-only ticket suppression
+    knob. Returns hours: 0 = suppress all identity-only WA tickets regardless of age
+    (#6619 default), N>0 = suppress only those older than N hours (#6200 ceiling), and a
+    negative value = DISABLED (legacy: identity-only always tickets). Bounded at 1y so a
+    misconfig cannot overflow; a non-integer value falls back to the default."""
+    try:
+        value = int(
+            os.environ.get(
+                _WA_IDENTITY_TICKET_MAX_AGE_ENV,
+                str(_DEFAULT_WA_IDENTITY_TICKET_MAX_AGE_HOURS),
+            )
+        )
+    except (TypeError, ValueError):
+        return _DEFAULT_WA_IDENTITY_TICKET_MAX_AGE_HOURS
+    if value < 0:
+        return -1
+    return min(value, 8760)
+
+
+def _wa_identity_only(
+    arrival: "WhatsAppArrival", keywords: tuple[str, ...] | None = None
+) -> bool:
+    """True iff a WA arrival is identity-only: fetched on registered-participant identity
+    (participant_matched) with NO active-keyword hit. A keyword match is never identity-
+    only and always tickets, so it is exempt from task-6 suppression."""
+    if not arrival.participant_matched:
+        return False
+    keys = keywords or active_keywords()
+    return not _match_active_keywords("", arrival.full_text, keys)
+
+
+def _wa_identity_suppressed(
+    arrival: "WhatsAppArrival",
+    now: datetime,
+    keywords: tuple[str, ...] | None = None,
+) -> bool:
+    """Task 6: should this WA arrival's identity-only ticket be suppressed (not minted)?
+    Config-driven via AIRPORT_WA_IDENTITY_TICKET_MAX_AGE_HOURS. NEVER suppresses a
+    keyword/matter match — only identity-only arrivals. Suppression mints no ticket; the
+    stored whatsapp_messages row is untouched (store-everything). Callers must advance the
+    watermark past a suppressed arrival (it is intentionally handled)."""
+    if not _wa_identity_only(arrival, keywords):
+        return False
+    max_age = _wa_identity_ticket_max_age_hours()
+    if max_age < 0:
+        return False  # DISABLED (legacy escape hatch): identity-only still tickets
+    if max_age == 0:
+        return True  # suppress all identity-only regardless of age (#6619)
+    if arrival.received_at is None:
+        return True  # cannot prove recency -> suppress (noise-reduction default)
+    age_hours = (now - arrival.received_at).total_seconds() / 3600.0
+    return age_hours >= max_age
 
 
 def _match_active_keywords(
@@ -2186,14 +2259,20 @@ def _run_nonmail_lane(
     current: datetime,
     cap: int,
     dry_run: bool,
+    suppress_fn=None,
 ) -> dict[str, int]:
     """BAKER_OS_V2_C5_NONMAIL_SIGNALS_1 — process ONE non-mail source (plaud/whatsapp)
     into candidate desk-review tickets. Mirrors the email lane's contiguous-prefix
     watermark discipline but WITHOUT the email routing lanes: a non-mail match is always a
     candidate ticket via issue_ticket, never a fast-board (brief design pt 1 — participant
     match alone routes to desk review). Own per-source watermark (never the email cursor).
-    Dry-run LOGS would-be tickets and advances NOTHING (Rule 11c preview-first)."""
-    issued = skipped = failed = 0
+    Dry-run LOGS would-be tickets and advances NOTHING (Rule 11c preview-first).
+
+    suppress_fn (optional, task 6): predicate (arrival, now) -> bool. When it returns
+    True the arrival is intentionally NOT ticketed but IS treated as fully handled, so the
+    contiguous-prefix watermark ADVANCES past it (never re-fetched/re-ticketed next tick).
+    Distinct from a build_fn None, which means desk-misconfig and HOLDS the cursor."""
+    issued = skipped = failed = suppressed = 0
     watermark_candidate: Optional[datetime] = None
     contiguous = True
 
@@ -2211,7 +2290,7 @@ def _run_nonmail_lane(
         arrivals = fetch_fn(conn, since=since, limit=cap * 4)
     except Exception as e:
         logger.warning("airport nonmail %s fetch failed: %s", source_label, e)
-        return {"issued": 0, "skipped": 0, "failed": 0}
+        return {"issued": 0, "skipped": 0, "failed": 0, "suppressed": 0}
 
     for arrival in arrivals:
         if issued >= cap:
@@ -2220,41 +2299,62 @@ def _run_nonmail_lane(
             break
         done = False
         try:
-            ticket = build_fn(arrival, now=current)
-            if ticket is None:
-                # Fetch guarantees a match, so a None here is a desk misconfig only —
-                # hold the cursor, never silently advance past it.
-                skipped += 1
-                done = False
-            elif dry_run:
-                logger.info(
-                    "AIRPORT_NONMAIL_DRY_RUN would ticket %s dedup=%s desk=%s",
-                    source_label,
-                    ticket.dedup_key,
-                    ticket.proposed_desk_slug,
-                )
-                skipped += 1
-                done = False  # preview-only: never advance the watermark
-            else:
-                result = issue_ticket(ticket, conn)
-                if result.get("ok"):
-                    issued += 1
-                    conn.commit()
-                    done = True
-                elif result.get("skipped") and result.get("reason") == "duplicate":
-                    # Already ticketed on a prior tick — idempotent no-op, DONE.
-                    conn.commit()
-                    done = True
-                elif not result.get("ok") and result.get("reason") == "bus_failed":
-                    # BUS-FAIL = FAILURE: mark_ticket_failed persisted, cursor frozen so
-                    # issue_ticket retries it next tick (never a silent drop).
-                    failed += 1
-                    conn.commit()
+            if suppress_fn is not None and suppress_fn(arrival, current):
+                # Task 6: identity-only WA arrival, config-suppressed. NOT ticketed, but
+                # fully handled — advance the cursor past it so it is never re-fetched /
+                # re-ticketed next tick (the stored whatsapp_messages row is untouched:
+                # store-everything). Under dry-run, advance nothing (preview-first).
+                if dry_run:
+                    logger.info(
+                        "AIRPORT_NONMAIL_DRY_RUN would suppress %s id=%s (identity-only)",
+                        source_label,
+                        getattr(
+                            arrival,
+                            "message_id",
+                            getattr(arrival, "transcript_id", "?"),
+                        ),
+                    )
+                    skipped += 1
                     done = False
                 else:
-                    # Reserve race / no id — not ours to finish, hold the cursor.
-                    conn.commit()
+                    suppressed += 1
+                    done = True
+            else:
+                ticket = build_fn(arrival, now=current)
+                if ticket is None:
+                    # Fetch guarantees a match, so a None here is a desk misconfig only —
+                    # hold the cursor, never silently advance past it.
+                    skipped += 1
                     done = False
+                elif dry_run:
+                    logger.info(
+                        "AIRPORT_NONMAIL_DRY_RUN would ticket %s dedup=%s desk=%s",
+                        source_label,
+                        ticket.dedup_key,
+                        ticket.proposed_desk_slug,
+                    )
+                    skipped += 1
+                    done = False  # preview-only: never advance the watermark
+                else:
+                    result = issue_ticket(ticket, conn)
+                    if result.get("ok"):
+                        issued += 1
+                        conn.commit()
+                        done = True
+                    elif result.get("skipped") and result.get("reason") == "duplicate":
+                        # Already ticketed on a prior tick — idempotent no-op, DONE.
+                        conn.commit()
+                        done = True
+                    elif not result.get("ok") and result.get("reason") == "bus_failed":
+                        # BUS-FAIL = FAILURE: mark_ticket_failed persisted, cursor frozen
+                        # so issue_ticket retries it next tick (never a silent drop).
+                        failed += 1
+                        conn.commit()
+                        done = False
+                    else:
+                        # Reserve race / no id — not ours to finish, hold the cursor.
+                        conn.commit()
+                        done = False
         except Exception as exc:  # ERROR NEVER AUTO-CLEARS
             try:
                 conn.rollback()
@@ -2277,7 +2377,12 @@ def _run_nonmail_lane(
                 "airport nonmail %s watermark advance failed: %s", source_label, e
             )
 
-    return {"issued": issued, "skipped": skipped, "failed": failed}
+    return {
+        "issued": issued,
+        "skipped": skipped,
+        "failed": failed,
+        "suppressed": suppressed,
+    }
 
 
 def run_tick(*, now: Optional[datetime] = None) -> dict[str, Any]:
@@ -2896,8 +3001,8 @@ def run_tick(*, now: Optional[datetime] = None) -> dict[str, Any]:
         # Each lane issues candidate desk-review tickets through the SAME issue_ticket
         # spine (never checked_in, never a lounge-writer claim path). Phase 2 news feeds
         # are Director-gated and intentionally absent.
-        nonmail_plaud = {"issued": 0, "skipped": 0, "failed": 0}
-        nonmail_whatsapp = {"issued": 0, "skipped": 0, "failed": 0}
+        nonmail_plaud = {"issued": 0, "skipped": 0, "failed": 0, "suppressed": 0}
+        nonmail_whatsapp = {"issued": 0, "skipped": 0, "failed": 0, "suppressed": 0}
         nonmail_dry = False
         if nonmail_sources_enabled():
             nonmail_dry = nonmail_dry_run()
@@ -2920,6 +3025,9 @@ def run_tick(*, now: Optional[datetime] = None) -> dict[str, Any]:
                 current=current,
                 cap=cap,
                 dry_run=nonmail_dry,
+                # Task 6: suppress identity-only WA ticket minting (config-driven), while
+                # still advancing the watermark past suppressed arrivals.
+                suppress_fn=_wa_identity_suppressed,
             )
 
         stuck_arrivals = _count_stuck_arrivals(conn)
@@ -2948,6 +3056,8 @@ def run_tick(*, now: Optional[datetime] = None) -> dict[str, Any]:
             "whatsapp_issued": nonmail_whatsapp["issued"],
             "whatsapp_skipped": nonmail_whatsapp["skipped"],
             "whatsapp_failed": nonmail_whatsapp["failed"],
+            # Task 6: identity-only WA arrivals suppressed (not ticketed) this tick.
+            "whatsapp_suppressed": nonmail_whatsapp.get("suppressed", 0),
             # Read + surfaced for observability. In BRIEF-C the fast lane is not
             # built, so this flag has NO behavioral branch yet — it only gates the
             # future D/E lanes (project-number / manifest). Deterministic clears
