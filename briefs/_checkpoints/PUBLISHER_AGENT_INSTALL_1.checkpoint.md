@@ -48,11 +48,30 @@ Spec: same dir `SPEC_PUBLISHER_AGENT_v1.md`. Dispatch: bus #6295 (lead). Thread 
 - Verify gate: `~/baker-vault/_ops/skills/verify-dashboard-render/SKILL.md`.
 - Registry (Row 5/6): `~/baker-vault/_ops/registries/agent_registry.yml` + `scripts/generate_agent_identity_artifacts.py --write` (3-repo SHA256 match).
 
+## PART 3 SPEC (gathered 2026-07-07)
+- **Input schema:** `FLIGHT_DASHBOARD_PACKET v1` (contract file above) — the structured facts the
+  engine renders. Fields incl. project_code/flight_name/matter_slug, current_state (+ state vocab),
+  blockers, workstreams, evidence, ticket/dispatch/clickup refs, proof_gaps, last_refreshed_at.
+- **Gate definitions are in `verify-dashboard-render/SKILL.md` step 4 (NOT the contract file):**
+  - version-stamp: `Page vN` present + incremented.
+  - lexical 10a/10b/10c: no German diacritics/terms; no banned abbreviations; no text block
+    >2 sentences outside Engine Lab (build/audit log exempt per v2.5).
+  - as-of 9a: every figure/claim tile carries an as-of anchor.
+  - staleness 9c: diff vs the matter's `living-documents-register.md`; older-than-registered = STALE/FAIL.
+  - honesty 11a: no fake-live controls; machine-section counts from a live ledger query, not a snapshot.
+  - Steps 1-3 (open in real browser via Chrome 9222, interact, console zero-errors) = the browser half;
+    step 4 gates = the deterministic/scriptable half the engine runs as code.
+
 ## NEXT CONCRETE STEP
-Read the canonical template + content contract + BB-AUK-001 v9 to extract its structured
-flight-state facts, then build `orchestrator/publisher_render.py` (`render_ticket(ticket)->dict`)
-producing HTML + the gate table, and an AC1 deterministic-diff test re-rendering v9. Sequencing lean
-(flagged to lead, awaiting confirm): render engine before the 3-repo registry regen.
+Build `orchestrator/publisher_render.py` = `render_ticket(ticket)->dict`: (1) the 5 deterministic
+gate functions (lexical/staleness/version-stamp/as-of/honesty) as pure code returning
+{gate,verdict,detail} — these deliver **AC2** (unit tests seed one violation each: German diacritic,
+wall-of-text >2 sentences, stale stamp, missing `Page vN`); (2) facts->HTML via canonical template
+`wiki/_templates/flight-dashboard-canonical-v5.html`; (3) **AC1** deterministic-diff test re-rendering
+BB-AUK-001 v9 (`.../flight-dashboards/BB-AUK-001/dashboard-v1-pattern-d.html`) from its extracted
+PACKET facts — PASS = byte-normalized match on figures + section set + receipt IDs (brief §10 OPEN-2).
+Wire `render_ticket` as the worker's default `render_fn`. Sequencing lean (with lead): engine before
+the 3-repo registry regen.
 
 Gate chain on return: G1 self-verify -> G2 deputy -> G3 codex (route via `codex` bus slug).
 Report to lead on topic `baker-os-v2/publisher-install`.
