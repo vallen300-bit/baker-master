@@ -3,7 +3,7 @@ brief_id: RESEARCHER_HARNESS_RETROFIT_1
 attempt: 1
 seat: b1
 status: MERGED + follow-up hardening pushed (2 commits not yet on main)
-updated: 2026-07-07
+updated: 2026-07-07 (rollover confirmed, seat exiting)
 ---
 
 # Checkpoint — RESEARCHER_HARNESS_RETROFIT_1 (rollover at ~91% ctx)
