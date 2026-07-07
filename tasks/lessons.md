@@ -1182,3 +1182,7 @@ complete (Inbox 34%, Sent 0.4%). Nobody noticed until the Director asked "is it 
 - RULE: ANY push to baker-master main = full Render redeploy = process cycle, even if the diff is
   runtime-inert (.githooks/, docs, briefs). During a live AC window or any in-flight prod verification
   arc, lead holds non-urgent main pushes until the verdict posts. Batch mechanical commits; push after.
+
+## Lesson #112 — 2026-07-07 — Merge fired before the brief's full gate plan was walked
+**What happened:** lead merged PR #474 on codex round-5 PASS (#6311) without re-reading the C3 brief's gate plan; b3 flagged (#6314) that G4 /security-review was still owed. Review ran post-merge (PASS, no findings — no harm), but the sequencing was wrong.
+**Rule:** before ANY merge, re-open the dispatching brief and walk its gate plan line by line — a gate verdict (codex PASS) satisfies ONLY its own gate, never the plan. Post-merge remediation is fail-loud but not a substitute.
