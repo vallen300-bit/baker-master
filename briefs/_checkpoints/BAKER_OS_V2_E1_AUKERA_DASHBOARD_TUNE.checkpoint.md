@@ -1,42 +1,56 @@
 ---
 brief_id: BAKER_OS_V2_E1_AUKERA_DASHBOARD_TUNE
-worker: b2
-attempt: 1
-repo: baker-vault (NOT baker-master) — artifact is vault-side
-branch: b2/e1-aukera-dashboard-tune (in an ISOLATED clone; recreate — see next_action)
-base_commit: baker-vault origin/main @f56402b
-last_commit: none (zero edits made this session — pure discovery + setup)
-pr: none
-mailbox: bus-dispatch #5814 (E1 rerouted to b2 from cowork-ah1); inputs #5824 #5846 #5852
-gates_cleared: []
-gates_pending: [codex-terminal-UI-critique, lead-review, Director-visual-ratify]
-tests_state: "n/a — static HTML artifact, no test suite"
-next_action: >
-  Re-clone the vault isolated (git clone --depth 1 --branch main https://github.com/vallen300-bit/baker-vault.git /tmp/bm-b2-e1-vault; git checkout -b b2/e1-aukera-dashboard-tune) then edit dashboard-v1-pattern-d.html — apply BB desk finding 2 FIRST (loan-cost tile).
-done_log:
-  - Full E1 orientation done; all inputs located + read.
-  - Mini P1 (#5781) diagnosed + PARKED by Director; stood down (do NOT touch build.sh signing PR).
-  - Branch-lock incident recovered (#5857): shared ~/baker-vault restored to main @f56402b, stray branch deleted, E1 moved to isolated clone. Confirmed to lead #5859.
-open_questions:
-  - none blocking; finding-2 loan-cost content is LOCKED by BB desk (render verbatim, do not re-derive).
-bus_thread: baker-os-v2/wave0-e1-template-lane-b2; baker-os-v2/wave0-e1-aukera-dashboard-tune
-no_secrets: true
-written_at: 2026-07-07T00:00:00Z
-trigger: manual (Director 50%-context-refresh rule #5917)
+attempt: 2
+owner: b2
+dispatched_by: lead
+work_target: baker-vault (STAYS ON main — branch-lock rule #5857; do NOT branch the shared vault)
+work_file: ~/baker-vault/_ops/build/baker-os-v2/05_outputs/flight-dashboards/BB-AUK-001/dashboard-v1-pattern-d.html
+updated: 2026-07-07
 ---
 
-## E1 work-list (from BB desk memo E1-content-pass-findings-bbdesk-20260706.md: SHOWN 9 / MISSING 6 / NOISE 6)
+# E1 Aukera flight-dashboard TEMPLATE pass — checkpoint
 
-Target file (vault): `_ops/build/baker-os-v2/05_outputs/flight-dashboards/BB-AUK-001/dashboard-v1-pattern-d.html` (756 lines).
-Then flow structural/rule changes into: `wiki/_templates/flight-dashboard-canonical-v5.html` + skill `_ops/skills/flight-dashboard-build/SKILL.md`.
-Contract: `content-contract-v2.md` (rules 1-11). Living-docs register: `wiki/matters/lilienmatt/living-documents-register.md`.
+## STATUS: DONE — content 12/12 + v9 language pass (arc complete; awaiting any further review)
+- v7 (10/12): vault commit **fdd6518** → Page v7. Ship #5991.
+- v8 (2/2 parked closed): cowork-ah1 ruling #5993 folded → vault commit **1214d8e**, Page v8. Closure #6014/#6015.
+- v9 (rule-10c language pass): cowork-ah1 #6096 (Director walls-of-text complaint) → vault commit **868b66d** (pushed origin/main), Page v9.
+  8 flagged business-page walls + MRCI note bulletized (one thought per bullet); 3 more unflagged walls caught via DOM scan; SWITCH + MRCI stamp tightened; 2 rule-10b abbrev cleanups. Language only — figures preserved. Ship #6109 (cowork-ah1), #6110 (lead).
+- Verified each pass in Chrome (render + DOM sentence-count scan → 0 business walls + layout); tag balance clean; no German/abbrev leak.
+- Resume/gap marker: #5982. Nothing open on this arc.
 
-**Do FIRST — HIGH (decision-integrity, rule 7 / Lesson #78):**
-1. Loan-cost tile — RENDER VERBATIM from `decide-now-loan-cost-tile-CORRECTED-bbdesk-20260706.md` (commit 7055a13). ≈1.66M is UPFRONT ONLY (reserve 1,479,416 + structuring 184,650); all-in = +coupon(blank)+1.116x MOIC make-whole+40,350 structuring re-cut = OPEN; old 2.8M WITHDRAWN/STALE. Mislabels to kill: line 275 "All-in loan cost" ; KPI line 201 "Loan cost"; decsub line 194; decide-now opts lines 246-247; Financials line 266.
-2. Comms per-sender msg/urgent counts hand-typed vs ledger (rule 5) — lines 464-498; badge block "desk-estimated, not ledger" until wired.
+## What's done
+- Attempt 1 (session #5925) posted a respawn but NEVER committed a checkpoint or the
+  b2/e1-aukera-dashboard-tune branch — both were lost. This attempt-2 checkpoint fixed that gap.
+- Read both governing inputs: BB desk findings memo + verbatim loan-cost tile lock.
+- Applied 10/12: NOISE-2 (rule-7 loan-cost verbatim reframe, all instances), MISSING-1 (as-of
+  anchors), MISSING-5/NOISE-4 (LTV revision-pending badge + basis note), NOISE-1 (comms counts
+  desk-estimated badge), NOISE-5 (Engine-Lab snapshot label), MISSING-4 (new What-changed matter
+  feed on Overview), MISSING-6 (writer stamps), NOISE-3 (2+1-year gloss), NOISE-6 (countdown softened).
+- PARKED for cowork-ah1 ruling: MISSING-2 (section-4 boarding counter — live vs '0 not built'),
+  MISSING-3 (section-5b research rows — add vs honest-empty).
 
-**MISSING (medium):** 3=rule-9a as-of anchors on KPI tiles (lines 200-204); 4=STALE badge on LTV+collateral tiles (Colliers p29 mid-revision, rule 9c); 5=Director-facing "what changed" matter-event feed on Overview (currently only build-feed in Engine Lab); 6=section 5b research-received (b3 sweep + ESG); 7=rule-4 updated-by actor on Overview attention + KPI cards.
+## What's left (the 12 content findings to apply to dashboard-v1-pattern-d.html)
+MISSING (6): 1[HIGH] rule-9a family+version on KPI tile receipts; 2[HIGH] section-4 honest
+"0 — not built (step-2)" boarding counter (confirm w/ cowork-ah1 if collapsed into Engine Lab);
+3[MED] section-5b research-received row (b3 sweep + ESG) or keep honest-empty; 4[MED] section-6
+Director-facing "What changed this week" matter-event feed on Overview (distinct from Engine-Lab
+build feed); 5[MED] rule-9c STALE/revision-pending badge on LTV + collateral tiles; 6[LOW] rule-4
+updated-by actor on Overview attention + KPI cards.
+NOISE (6): 1[HIGH] rule-5 hand-typed comms msg/urgent counts — badge "desk-estimated, not ledger";
+2[HIGH] loan-cost tile — RENDER VERBATIM from corrected block (below); 3[MED] rule-10b gloss
+"2+1-year term" once; 4[MED] LTV basis note on KPI tile (37% on 33.1M secured, not 38.6M whole);
+5[LOW] Engine-Lab ticket counts label "snapshot — live query in step-2"; 6[LOW] soften countdown
+to "may slip — see land register".
 
-**NOISE (med/low):** LTV basis note on KPI tile (37% vs 33.1M secured, not 38.6M whole); gloss "2+1-year term"; Engine Lab counts "snapshot — live query in step-2" label (line 599, stale 4 Jul 22:42); countdown soften "may slip — see land register" (line 184).
+## Key paths
+- Work file: dashboard-v1-pattern-d.html (Page v6, ~75KB)
+- Findings: _ops/build/baker-os-v2/05_outputs/flight-dashboards/BB-AUK-001/E1-content-pass-findings-bbdesk-20260706.md
+- VERBATIM tile: .../decide-now-loan-cost-tile-CORRECTED-bbdesk-20260706.md (render exactly, do NOT re-derive numbers)
+- Rules: .../content-contract-v2.md (v2.4, rules 1-11)
+- Spec-change (open/go/attention cards): .../spec-change-open-go-attention-cards-cowork-ah1-20260706.md
 
-**Gate after edits:** codex terminal UI critique BEFORE Director sees it → push branch from isolated clone → open vault PR → post DONE to lead with evidence. Autonomous GO (do not ask Director).
+## Next concrete step
+Read content-contract-v2.md + dashboard-v1-pattern-d.html structure; then apply NOISE-2 (verbatim
+loan-cost tile) first (highest severity rule-7), then MISSING-1 + NOISE-1 (receipt/ledger integrity),
+then the rest. Commit vault edits atomically on main (branch-lock). Two scope-confirm items for
+cowork-ah1/lead: MISSING-2 (section-4 surface) + MISSING-3 (5b research rows).
