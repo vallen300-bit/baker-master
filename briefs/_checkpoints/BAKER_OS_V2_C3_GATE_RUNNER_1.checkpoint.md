@@ -21,7 +21,22 @@ reason_for_checkpoint: context ~45%, 50%-refresh rule (#5918) + lead order #5959
   DB, Q3 direct `email_messages` INSERT (cleared by b2 #5935 + b4 #5937).
 - DONE posted #5946.
 
-## STATUS attempt 2 — all 4 fixes APPLIED @81f365cb (pushed), re-gate posted to codex
+## STATUS attempt 2 round-2 — codex #5984 (3 HIGH + 1 MED) fixed @80dd1806, re-gated
+- Round-1 (#5956) fixes were @81f365cb (below). Codex re-review (#5983/#5984) FAILED
+  with 4 NEW findings; all fixed @80dd1806 (pushed, PR #474):
+  - HIGH-1 R3/R4 live scope leak — `sandbox_boarding_desk()` repoints `flow._DESK`
+    to `c3-gate-desk` on live (restored in finally); R3/R4 seed with `flow._DESK`.
+    Boarding scans (run_receipt_writer/run_boarding_ttl_nudge) now hit ONLY harness rows.
+  - HIGH-2 baker_actions `details`->`payload` in `nudge_actions()` + `cleanup()`.
+  - HIGH-3 registry DB split — `bind_global_store()` now also routes `kbl.db.get_conn`
+    AND the bound `kbl.project_registry_store.get_conn` at `db_url()`.
+  - MED-1 R2 reply made code-less (keyword-only) so production thread-continuity fires.
+- Validated: py_compile ×5, `--dry` ×4, run-guard, singletons clean. Re-gate → codex
+  #5998 topic `gate/c3-gate-runner-g3`. Next: codex G3 → lead G4 /security-review → merge.
+- NOTE: no live `--run` executed locally (needs C3_HARNESS_LIVE + a DB); fixes are
+  static + dry-validated. Live T2 evidence run stays gated on lead go (#5930).
+
+## (superseded) STATUS attempt 2 — round-1 fixes APPLIED @81f365cb
 - HIGH-1 `bind_global_store()` in c3_lib repoints `SentinelStoreBack._get_global_instance`
   at `db_url()` (called in `main_scaffold` before run_fn) — run_tick + trigger_state
   now share the harness DB. `_HarnessStore` shim mirrors conftest `_TestStore`.
