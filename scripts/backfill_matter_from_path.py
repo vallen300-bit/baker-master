@@ -47,10 +47,10 @@ FOLDER_MATTER_MAP = [
 
     ("05_RE_CASH_PRODUCING_ACQISITIONS/Davos", "Owner's Lens"),
 
-    ("AO_MASTER/10_AO_RG7", "Oskolkov-RG7"),
-    ("AO_MASTER/AO GF/AO RG7", "Oskolkov-RG7"),
-    ("AO_MASTER", "Oskolkov-RG7"),
-    ("AO_RG7", "Oskolkov-RG7"),
+    ("AO_MASTER/10_AO_RG7", "Oskolkov"),
+    ("AO_MASTER/AO GF/AO RG7", "Oskolkov"),
+    ("AO_MASTER", "Oskolkov"),
+    ("AO_RG7", "Oskolkov"),
 
     ("Cupial", "Cupial"),
     ("Hagenauer", "Hagenauer"),

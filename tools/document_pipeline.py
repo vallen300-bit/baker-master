@@ -115,7 +115,7 @@ PATH_MATTER_HINTS = {
     'Cap_Ferrat': 'Cap Ferrat Villa',
     'Kitzb': 'Kitzbühel',
     'Kempinski': 'Kempinski Kitzbühel Acquisition',
-    'Oskolkov': 'Oskolkov-RG7',
+    'Oskolkov': 'Oskolkov',  # AO_LABEL_MAP_CANONICAL_FIX_1: retired combined 'Oskolkov-RG7' (mis-aliases to hagenauer-rg7); 'Oskolkov' normalizes to canonical slug 'ao'
     'Marketing': 'Mandarin Oriental Sales',
     'Finance': 'Financing Vienna & Baden-Baden',
     'Annaberg': 'Annaberg',
