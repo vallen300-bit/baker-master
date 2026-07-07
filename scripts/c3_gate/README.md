@@ -25,6 +25,9 @@ C3_HARNESS_LIVE=1 python3 scripts/c3_gate/r1_fast_lane.py --run    # execute aga
   authoritative description of each run + the evidence it emits.
 - **`--run`** is guarded (`C3_HARNESS_LIVE=1`). It executes against the DB in the
   environment and writes a JSONL evidence record to `_runs/`.
+- Run these **from the repo root** exactly as written. `c3_lib.py` inserts the repo
+  root on `sys.path` (mirroring `scripts/regen_hot_md.py`) so a `--run` resolves
+  `memory.*` / `orchestrator.*` / `kbl.*` without an editable install (F3, codex #6158).
 
 ## Target DB (lead #5930 Q2 — BOTH, sequenced)
 - **Dev / validation:** `TEST_DATABASE_URL` → ephemeral Neon branch (the existing

@@ -36,6 +36,16 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, Callable, Optional
 
+# F3 (codex #6158): allow "python3 scripts/c3_gate/rN_*.py" from the repo root
+# without an editable install. Running a runner puts scripts/c3_gate on sys.path[0]
+# (so `import c3_lib` resolves) but NOT the repo root — the lazy heavy imports below
+# (memory.store_back, orchestrator.*, kbl.*) need it, so a real `--run` from the repo
+# root failed ModuleNotFoundError before the intended DB fail-loud. Mirror
+# scripts/regen_hot_md.py:67-70. Runs before any heavy import (all are lazy).
+_REPO_ROOT = Path(__file__).resolve().parent.parent.parent
+if str(_REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(_REPO_ROOT))
+
 # Synthetic-signal marker: every row this harness creates is prefixed so live-DB
 # evidence runs can be cleaned up deterministically and never collide with real
 # pilot traffic.
@@ -456,25 +466,33 @@ def restore_boarding_desk(orig) -> None:
 
 
 def sandbox_email_fetch():
-    """Round-3 residual (codex #6002): belt-and-suspenders on the live email lane.
+    """Round-3 residual (codex #6002) + round-5 F1 (codex #6158): scope the harness's
+    OWN live email tick to its own rows.
 
-    The watermark pin (`_SANDBOX_SINCE`) scopes only the SINCE cursor. Production
-    `bridge.fetch_email_arrivals` then selects EVERY keyword-matching row with
-    `received_date >= since` and applies NO message_id/source filter — so a REAL
-    matching email arriving mid-run (at/after `_SANDBOX_SINCE`) would be swept,
-    ticketed under the stubbed bus, and COMMIT a real `airport_tickets` row that
-    fake-sends; the watermark restore does not undo it.
+    Two independent leaks are in play:
+      (1) harness tick -> REAL arrivals. The watermark pin (`_SANDBOX_SINCE`) scopes
+          only the SINCE cursor; a REAL matching email arriving mid-run (at/after
+          `_SANDBOX_SINCE`) would be swept, ticketed under the stubbed bus, and
+          COMMIT a real `airport_tickets` row that fake-sends. This wrapper drops
+          every non-`c3-gate-` row before `run_tick` can ticket it.
+      (2) production/Render tick -> harness rows. Fixed PROD-side, NOT here:
+          `bridge.fetch_email_arrivals` now excludes `c3-gate-` rows by default
+          (`include_synthetic=False`), so a concurrent Render tick can never fetch
+          them regardless of this process's monkeypatch (F1 defense-in-depth).
 
-    Wrap the module global so a live run's spine only ever sees THIS harness's own
-    `c3-gate-` rows — every other arrival is dropped before `run_tick` can ticket
-    it. `run_tick` calls the module-level name, so patching `bridge.fetch_email_arrivals`
-    intercepts it. Returns the original fn so `finally` can restore. Mirrors the
-    `sandbox_boarding_desk()` pattern; live-target only (caller-gated)."""
+    Because production now excludes synthetic rows by default, the harness's own tick
+    must OPT BACK IN (`include_synthetic=True`) to even see its injected rows, then
+    keep ONLY them. `run_tick` calls the module-level name, so patching
+    `bridge.fetch_email_arrivals` intercepts it. Returns the original fn so `finally`
+    can restore. Mirrors `sandbox_boarding_desk()`; live-target only (caller-gated)."""
     from orchestrator import airport_ticketing_bridge as bridge
 
     orig = bridge.fetch_email_arrivals
 
     def _scoped(*args, **kwargs):
+        # Opt into synthetic rows (prod default excludes them, F1) then keep ONLY the
+        # harness's own c3-gate- rows — dropping any real concurrent arrival.
+        kwargs.setdefault("include_synthetic", True)
         return [
             a for a in orig(*args, **kwargs)
             if str(getattr(a, "message_id", "") or "").startswith(PREFIX)
@@ -526,6 +544,12 @@ def cleanup(conn) -> dict:
 # --------------------------------------------------------------------------- #
 # Runner scaffold shared by r1..r4
 # --------------------------------------------------------------------------- #
+# F2 (codex #6158): distinct "never mutated" sentinel for per-resource restore in
+# main_scaffold's finally — lets it tell an un-sandboxed resource apart from one
+# whose captured restore-token legitimately is None/falsy.
+_UNSET: Any = object()
+
+
 def main_scaffold(row: str, dry_description: str, run_fn: Callable[[Any], dict]) -> None:
     """Common argparse + dispatch for a per-row runner.
 
@@ -562,23 +586,32 @@ def main_scaffold(row: str, dry_description: str, run_fn: Callable[[Any], dict])
     # never a real un-ticketed arrival. The real cursor is restored in `finally`.
     global _SANDBOX_SINCE
     wm_source = _email_watermark_source()
+    # F2 (codex #6158): per-resource restore markers. Each records whether ITS
+    # resource was (or may have been) mutated, so the `finally` can restore exactly
+    # what changed, independent of whether the LATER mutations succeeded. The prior
+    # single `sandboxed` flag flipped only after all three mutations, so a failure
+    # between set_watermark and the last monkeypatch left the real cursor pinned.
     wm_snapshot: Optional[tuple] = None
-    boarding_desk_orig = None
-    email_fetch_orig = None
-    sandboxed = False
+    wm_pinned = False
+    boarding_desk_orig: Any = _UNSET
+    email_fetch_orig: Any = _UNSET
     try:
         bootstrap_tables(conn)
         stub_external_io()
         if is_live_target():
+            # Snapshot BEFORE pinning; mark each resource the instant it is (or is
+            # about to be) mutated. wm_pinned is set pessimistically BEFORE
+            # set_watermark so an ambiguous partial commit still triggers restore
+            # (restore_watermark reinstates the snapshot idempotently either way).
             wm_snapshot = snapshot_watermark(conn, wm_source)
             _SANDBOX_SINCE = now()
+            wm_pinned = True
             set_watermark(conn, wm_source, _SANDBOX_SINCE)
             # HIGH-1: scope the R3/R4 boarding-flow production scans to harness rows.
             boarding_desk_orig = sandbox_boarding_desk()
             # Round-3 residual (codex #6002): scope the email lane to harness rows so a
             # real concurrent arrival mid-run can never be ticketed under the stub.
             email_fetch_orig = sandbox_email_fetch()
-            sandboxed = True
         result = run_fn(conn)
         log_path = write_run_log(row, {"pass": result["pass"],
                                        "evidence": result.get("evidence"),
@@ -590,10 +623,16 @@ def main_scaffold(row: str, dry_description: str, run_fn: Callable[[Any], dict])
         if result.get("notes"):
             print(f"notes: {result['notes']}")
     finally:
-        if sandboxed:
-            restore_watermark(conn, wm_source, wm_snapshot)
-            restore_boarding_desk(boarding_desk_orig)
+        # F2 (codex #6158): restore EACH sandboxed resource independently of the
+        # others. In-memory monkeypatches unwind FIRST (attribute swaps that can't
+        # fail on DB I/O), then the watermark DB restore LAST — so a DB error there
+        # can never strand the module globals patched.
+        if email_fetch_orig is not _UNSET:
             restore_email_fetch(email_fetch_orig)
+        if boarding_desk_orig is not _UNSET:
+            restore_boarding_desk(boarding_desk_orig)
+        if wm_pinned:
+            restore_watermark(conn, wm_source, wm_snapshot)
             print(f"watermark restored: {wm_source}")
         if not args.keep:
             removed = cleanup(conn)

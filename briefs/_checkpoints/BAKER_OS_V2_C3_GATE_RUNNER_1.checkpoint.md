@@ -10,6 +10,31 @@ reason_for_checkpoint: context ~52% over the 50% line; lead order #6032 = checkp
 
 # C3 GATE-RUNNER R1-R4 harness — checkpoint (attempt 1)
 
+## ROUND-5 STATUS — codex #6158 F1/F2/F3 FIXED (attempt 3, lead GO #6170, NO attempt bump)
+Round-4 codex gate (#6158, PR #474 @1856b353) FAILED with F1/F2 HIGH + F3 MED.
+All three fixed on this branch (lead fix order #6170):
+- **F1 HIGH (prod-side defense-in-depth).** `orchestrator/airport_ticketing_bridge.py`
+  `fetch_email_arrivals` gains `include_synthetic: bool = False`; a post-union filter
+  drops `c3-gate-` rows in prod so a concurrent Render `airport_ticketing_tick` can
+  NEVER fetch/ticket a harness row regardless of harness state. Covers keyword +
+  participant lanes (filters the unioned set). New module const `_C3_GATE_SYNTHETIC_PREFIX`
+  (mirrors c3_lib.PREFIX; bridge can't import scripts/). Harness `sandbox_email_fetch`
+  `_scoped` now `kwargs.setdefault("include_synthetic", True)` to still drive its rows.
+- **F2 HIGH (partial-failure-safe restore).** `c3_lib.main_scaffold` per-resource restore
+  markers: `wm_pinned` (set pessimistically BEFORE `set_watermark`), `_UNSET` sentinels
+  for boarding/email monkeypatches. `finally` restores each independently — in-memory
+  swaps first, watermark DB restore last. A failure between mutations no longer strands
+  the pinned cursor.
+- **F3 MED (runnable from repo root).** `c3_lib.py` inserts repo root on `sys.path`
+  (mirrors `scripts/regen_hot_md.py:67-70`); README notes run-from-repo-root. A `--run`
+  from repo root now reaches the DB fail-loud, not `ModuleNotFoundError: memory`.
+Validated: py_compile ×6, `--dry` ×4, run-guard, F3 fail-loud path, `check_singletons`,
+box5 fetch/ticketing tests (16 pass / 60 skip live-PG). NEXT: codex round-5 re-gate on
+`gate/c3-gate-runner-g3`; then lead G4 /security-review → squash-merge.
+FLAG to lead (pre-existing, NOT C3): `tests/test_worker_rollover.py` 3 failures on the
+RAW branch — branch is behind main on that file (has old `f287041f` test vs main's
+`ea02bf45`); passes 11/11 in the simulated-merge-onto-main state codex gates in.
+
 ## ROUND-4 STATUS — round-3 residual FIX APPLIED (attempt 3, respawn GO #6036)
 Codex #6002 residual HIGH (live email sandbox admits real concurrent arrivals) is
 FIXED. `c3_lib.sandbox_email_fetch()`/`restore_email_fetch()` wrap
