@@ -77,3 +77,93 @@ bny5lj14iaocwn4m-2bw2dsoo-paoi-ly26-wz3b-cl14tsqnese6-000000@email.amazonses.com
 - AC4: `bluewin_future=0, any_source_future=0, clamped=14`.
 - AC5: `lilienmatt suspected=143, AO-principal-referencing=24 (Pohanis-dominated)`.
 - AC1: `documents Oskolkov-RG7=511, baker_insights oskolkov=3, meeting_transcripts ao=1`.
+
+## AC1 — EXECUTION (post lead rulings #6325 + #6333)
+Lead extended Files-Modified to me: re-tag `documents`+`baker_insights` to canonical slugs; `cortex-config` = lead (Tier-B, fires last); guard = sample-first. Guard fired → 511 `Oskolkov-RG7` is a legacy combined label (~59% AO), so split by deterministic source_path markers to slugs.yml-canonical targets (all 7 verified canonical). One atomic priority-ordered UPDATE.
+
+**documents BEFORE → AFTER (511 total):**
+
+| Target slug | n | note |
+|-------------|---|------|
+| `ao` | 301 | AO-investor (oskolkov/AO GF/AO_MASTER/AO RG7/AO CBH/AO-LCG/aelio/SPA AO markers) |
+| `hagenauer-rg7` | 71 | bucket1 hagenauer/mebloform/cupial/S&K (17) + bucket7 rg7/riemergasse/BAU (54) — rg7+oskolkov-rg7 are its slugs.yml aliases |
+| `mo-vie-am` | 46 | mandarin/movie/granit |
+| `mrci` | 22 | mrci/balgerstrasse/mercedes (Baden-Baden) |
+| `steininger` | 10 | Steininger (Kitzbühel) |
+| `lilienmatt` | 4 | lilienmatt-marked |
+| `annaberg` | 0 | none matched |
+| `Oskolkov-RG7` (held) | 57 | **manual-pass** — see below |
+
+Re-tagged **454**, held **57**. Verified: 7 canonical slugs sum to exactly 511 → zero pre-existing docs under these slugs (no collision), `ao`=301 (was 0).
+
+**Deviation from lead's ratified bucket-3=39:** on inspection the 13 bare-`baden` docs were genuinely mixed (AO-RG7 meeting notes, Sosnin/MRC&I loans, Riemergasse LOI, Lilienmatt call options) and lead's sub-split only named lilienmatt/annaberg/mrci. So bucket-3 re-tagged the 26 clean matches (lilienmatt 4 + mrci 22) and the 13 baden-only went to manual-pass rather than mis-tag AO docs as Baden-Baden. Flagged.
+
+**Manual-pass (57 held as `Oskolkov-RG7`)** = 37 unclassified + 13 baden-only + 7 EPI. Per lead: no re-tag, listing for later desk routing (not launch-blocking). Sample flags for routers: EPI/bondholders → financing; S&K/Hagenauer/RG7-defects → hagenauer-rg7; MOHG notes → mo-vie-am; Steininger/Hayford/French-Monaco corporate → their matters. NOTE a few AO-adjacent items are in here because path markers missed them (`pm/OKOLKOV_MEETING_PREP` typo, `MESSAGE_TO_CODE300_AO_BRIEF`, Ilana Oskolkova ETL letter id=64834) — so the 57 are NOT purely non-AO. Full 57-row listing (id, source_path, first line) in Appendix A below.
+
+**baker_insights x3** — verified Lilienmatt-centric (270 Lilienmatt/MRCI 2024 FS Russian-tax EUR3M penalty; 271 AO's msg re the fine; 272 Lilienmatt shareholder meeting EUR19.65M loss). Re-tagged `oskolkov`→`lilienmatt` (270 co-references MRCI; Russian-filing entity = Lilienmatt). Verified: 0 `oskolkov` insights remain.
+
+**Still open (flagged to lead, NOT mine to execute):**
+- `cortex-config.md` slug flip (L4/L55/L139-140) → `ao` — Tier-B, lead-owned, fires last (now safe since docs are `ao`).
+- Classifier label map `tools/document_pipeline.py:118` (`'Oskolkov'→'Oskolkov-RG7'`) will keep minting the combined label on NEW docs — needs a decision (map to `ao`? it can't do the path-split the bulk needed). Follow-up.
+- Manual-pass 57 → desk routing.
+
+## Appendix A — manual-pass listing (57 docs held as `Oskolkov-RG7`, id · path · first line)
+```
+15    email:.../Brief an Brisen _Sicherstellung.PDF               EINSCHREIBEN Brisen Development GmbH zH Edita/Dimitry Vallen (Hagenauer Sicherstellung)
+42    email:.../Brief an HAG_Aufrechnungserklärung_03.03.2026     Brisen Development GmbH — Aufrechnungserklärung (Hagenauer)
+92    email:.../220706-LM-TRANSPARENZREGISTER                     Transparenzregister Eingangsmitteilung (LM)
+487   EPI ESTATE FUND/Summary Torbex debt restructuring/sale RG7  RESTRUCTURING OF TORBEX LOANS & SALE OF RG7 TO LCG
+1610  Official Docs/СОГЛАСИЯ Осколковы.docx                       СОГЛАСИЕ (Oskolkov/Ilana consent, Izhevsk) — AO-family
+2072  INTERNAL DRAFTS/History of Transactions AO and Baden        AO + Baden accounts transaction history — AO-investor
+2308  Loan Brisen Capital GSM to VS & IO/Amendment                Amendment to Loan Agreement (Ilana Oskolkova/Sosnin/GSM) -> mrci?
+3272  1. HISTORY/PHOTO-2020...jpg                                 Clemens Krause WP transcription — AO
+3975  Loan .../Shareholder Loan Assignment (Oskolkova) exec       Shareholder Loan Receivables Assignment (MRC&I) -> mrci?
+4105  2020/Confirmation Oskolkov 2020-10-13                       Confirmation Oskolkov + Lilienmatt/Opus -> lilienmatt?
+4116  Loan .../2020.09.28 Loan Agreement Amended                  Loan Agreement A&R (Ilana/Sosnin/GSM) -> mrci?
+5080  Loan .../Shareholder Loan Assignment EXECUTED               Shareholder Loan Assignment (MRC&I) -> mrci?
+6060  AO RG7/PREPARING NOTES 30 AUG 18 MEETING BADEN              Contract for sales AO RG7 — AO/rg7
+6087  AO_RG7_pre-2025/PREPARING NOTES ... MEETING BADEN           (dup of 6060) — AO/rg7
+7769  AO RG7/Talking Points 2018 Aug 30 Baden meeting            AO RG7 talking points — AO/rg7
+8009  Development Agreement/Riemergasse LOI Brisen exec           Riemergasse LOI (LCG/UBM) -> hagenauer-rg7
+8449  2020/Charterd Investment Germany Call Option               Options-Vereinbarung (Ilana/Sosnin/Lilienmatt) -> lilienmatt
+8618  email:.../260217_Projection Completion.xlsx                1029 RG7 Project Completion/Defects -> hagenauer-rg7
+8621  email:.../invoice-brisen-ellie(2).pdf                      Ellie Technologies invoice (Baker/ops)
+8633  email:.../Baker_vs_Ava_Reconciliation.pdf                  Baker vs Ava reconciliation (ops)
+14770 email:.../DRAFT_action(1249821.2).docx                     Court draft action (Hagenauer/Mebloform litigation) -> hagenauer-rg7
+23344 email:.../ET-2026-003.pdf                                  LCG Services Immobiliers (Ellie Tech invoice)
+44620 Hayford Old/MW comments re Hayford to KPMG 11 Feb 2020     Hayford/KPMG — financing
+44715 Meeting Minutes/Note 11 Oct 2019                           AGENDA RG7 BAU -> hagenauer-rg7
+44743 Hayford/MW comments re Hayford to KPMG                     (dup of 44620) Hayford/KPMG
+46167 to MOHG/BALAZS LTR TO FRANCESCO                            Balazs to MOHG KYC -> mo-vie-am
+46169 to MOHG/Balazs to MOHG                                     (dup) -> mo-vie-am
+46212 LCG expenses/2018-11-20 Facture 10312                      Gantey/LCG expense
+46340 EPI - Letter to bondholders/EPISCA                         EPI bondholders letter — financing
+46352 LCG expenses/Gantey 2017.12.28                             Gantey/LCG expense
+46374 Hayford Old/HAYFORD BS DRAFT 2016                          Hayford balance sheet
+46436 EPI - Letter to bondholders/EPI_Letter                     EPI bondholders — financing
+46469 Legal Docs/PROPOSED LETTER TO ALRIC                        Letter to Alric (Ofenheimer/litigation)
+46538 WURZINGER/Note 22 Nov 2017                                 BAU Financing mandate terms -> hagenauer-rg7
+46544 to MOHG/Note 23 May 2019                                   MOHG note -> mo-vie-am
+46745 INCOME DRAFT 2020/RECEIVABLE 2020                          GSM SA receivables 2020
+46849 to MOHG/Note 28 May 2019                                   MOHG note -> mo-vie-am
+47264 to MOHG/Note 2 Jun 2019                                    MOHG note -> mo-vie-am
+47341 Estate Notes/EPISCA bondholders                            EPI bondholders — financing
+47381 03. Corporate Information/Reunion parts une seule main     Monaco/French corporate (Helico?)
+47440 22_07_22 MW/Pièce 70.pdf                                   Performance Fee Agreement (Hayford/Torbex)
+47655 EPI 2024/Estates Notes RG7 Interest 31.12.2020            Estates Notes RG7 interest — financing/rg7
+47713 03. Corporate Information/PV CHANGEMENT DE GERANCE         French/Monaco corporate PV
+47715 03. Corporate Information/PV TRANSFERT PARTS               French/Monaco corporate PV (Helico)
+47760 ESTATE NOTES & EPI/Estates Notes RG7 Interest             (dup 47655) — financing/rg7
+49867 Agreements/Loan Agreement DV:KO 25.02.2022                 Loan Agreement DV / Konstantin Oshepkov
+50005 ESTATE NOTES & EPI/EPISCA bondholders                     EPI bondholders — financing
+50200 1989-2013/DV SoW 2019 11 05                                DV Source of Wealth — Vallen wealth
+50540 Organization/2018.11.05 MoU LCG Mr R                       MoU LCG/Riemergasse -> hagenauer-rg7
+50709 03. Corporate Information/PV registered_Helico             Helico (Monaco) corporate PV
+64834 email:.../RE_2025251600.pdf                                Ilana Oskolkova / ETL Weippert (German tax) — AO-family
+78249 _archive/SK_Bankruptcy_Cost_Analysis                      S&K insolvency cost analysis -> hagenauer-rg7
+78250 _archive/SK_Bankruptcy_Cost_Analysis.md                   (dup) S&K insolvency -> hagenauer-rg7
+78285 gmail/gmail_threads.json                                   FW 1029 RG7 Access to Excel -> hagenauer-rg7
+78953 pm/OKOLKOV_MEETING_PREP_PROTOCOL.md                        AO meeting prep protocol — AO (marker missed: 'OKOLKOV' typo)
+79899 pm/PM_HANDOVER_SESSION_E.md                                AO PM handover — AO
+79919 pm/MESSAGE_TO_CODE300_AO_BRIEF.md                          AO profiling brief — AO (marker missed: 'AO_' underscore)
+```
