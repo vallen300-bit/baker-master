@@ -1381,12 +1381,21 @@ def _fetch_participant_arrivals(
         return []
 
 
+# C3_GATE_RUNNER F1 (codex #6158) — synthetic-row marker, mirrored from
+# scripts/c3_gate/c3_lib.py:PREFIX. The bridge lives in orchestrator/ and cannot
+# import from scripts/, so the literal is redeclared here with this cross-reference;
+# both MUST stay "c3-gate-". Rows carrying this message_id prefix are the C3 gate
+# harness's own injected signals and are excluded from every production fetch below.
+_C3_GATE_SYNTHETIC_PREFIX = "c3-gate-"
+
+
 def fetch_email_arrivals(
     conn: Any,
     *,
     since: datetime,
     limit: int = 50,
     keywords: tuple[str, ...] | None = None,
+    include_synthetic: bool = False,
 ) -> list[EmailArrival]:
     keys = keywords or active_keywords()
     if not keys:
@@ -1458,6 +1467,22 @@ def fetch_email_arrivals(
                 participant_only_ids.add(mid)
                 rows.append(pr)
         rows.sort(key=_received_sort_key)  # global ASC across BOTH lanes (AC4)
+
+    # C3_GATE_RUNNER F1 (codex #6158) — defense-in-depth: the C3 gate harness injects
+    # marked synthetic rows (message_id prefix `c3-gate-`) straight into the LIVE
+    # email_messages table. Those rows must be INERT to the production spine — a
+    # concurrent Render `airport_ticketing_tick` (AIRPORT_TICKETING_BRIDGE_ENABLED on)
+    # must never fetch/ticket a harness row, regardless of whether the harness's own
+    # process-local sandbox monkeypatch is active. Excluding them here — the one
+    # production fetch that feeds run_tick — makes them permanently un-ticketable in
+    # prod. The harness's OWN tick opts back in (include_synthetic=True) to drive its
+    # rows through the real spine. Filtering the already-unioned set covers BOTH the
+    # keyword and the participant lanes in one place.
+    if not include_synthetic:
+        rows = [
+            r for r in rows
+            if not str((r[0] if r else "") or "").startswith(_C3_GATE_SYNTHETIC_PREFIX)
+        ]
 
     message_ids = [row[0] for row in rows if row and row[0]]
     attachment_map = _fetch_email_attachments(conn, message_ids)
