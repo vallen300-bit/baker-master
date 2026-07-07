@@ -1,11 +1,11 @@
 ---
 brief_id: BAKER_OS_V2_C3_GATE_RUNNER_1
-attempt: 2
+attempt: 3
 branch: b3/c3-gate-runner-harness
 pr: 474
 reply_topic: baker-os-v2/c3-gate-runner
 dispatched_by: lead
-reason_for_checkpoint: context ~45%, 50%-refresh rule (#5918) + lead order #5959; attempt-2 claimed 2026-07-07 per respawn #5966
+reason_for_checkpoint: context ~52% over the 50% line; lead order #6032 = checkpoint+respawn before starting the round-3 residual fix. NOT a failure loop — rounds 1/2/3 each resolved DISTINCT codex findings; attempt-3 successor should PROCEED with the single residual fix below, not stand down.
 ---
 
 # C3 GATE-RUNNER R1-R4 harness — checkpoint (attempt 1)
@@ -20,6 +20,35 @@ reason_for_checkpoint: context ~45%, 50%-refresh rule (#5918) + lead order #5959
 - Lead rulings already wired: Q1a receipt-row evidence (R3), Q2 BOTH-sequenced
   DB, Q3 direct `email_messages` INSERT (cleared by b2 #5935 + b4 #5937).
 - DONE posted #5946.
+
+## ROUND-3 RESIDUAL — codex #6001/#6002 (ONE HIGH, all prior fixes CONFIRMED resolved)
+Codex round-3 (#6001) VERIFIED resolved: R3/R4 _DESK sandbox, baker_actions payload,
+kbl.db/registry get_conn routing, R2 code-less + continuity pass bar. Merge blocked by
+ONE residual HIGH only:
+
+- **HIGH — live email sandbox admits real concurrent arrivals.** Pinning the watermark
+  (`_SANDBOX_SINCE`) scopes the SINCE cursor, but production `fetch_email_arrivals`
+  (orchestrator/airport_ticketing_bridge.py:1409-1424) has NO message_id/source filter —
+  it selects EVERY keyword-matching email with `received_date >= since`. A real matching
+  email arriving AFTER `_SANDBOX_SINCE` (mid-run) is processed under stubbed bus I/O and
+  `issue_ticket`/`write_terminal_status` COMMIT a real `airport_tickets` row
+  (bridge.py:2450-2480, 2563-2574) that fake-sends. Watermark restore does NOT undo it.
+
+### NEXT CONCRETE STEP (attempt 3 — do exactly this, then re-gate)
+1. In `scripts/c3_gate/c3_lib.py` add a `sandbox_email_fetch()` / `restore_email_fetch()`
+   pair mirroring `sandbox_boarding_desk()`: on `is_live_target()`, monkeypatch
+   `bridge.fetch_email_arrivals` with a wrapper that calls the original then returns ONLY
+   rows whose `message_id` startswith `PREFIX` (`c3-gate-`). Return the original fn for
+   restore. (run_tick calls the module global `fetch_email_arrivals`, so patching
+   `bridge.fetch_email_arrivals` intercepts it. EmailArrival has `.message_id`.)
+2. Wire into `main_scaffold`'s live sandbox block: `email_fetch_orig = sandbox_email_fetch()`
+   set BEFORE run_fn (alongside the watermark + _DESK sandbox); `restore_email_fetch(email_fetch_orig)`
+   in the `finally` next to `restore_boarding_desk`. Guard var init `= None` like the others.
+3. Re-validate: py_compile ×5 + `--dry` ×4 + run-guard + `check_singletons.sh`.
+4. Commit NEW commit (never amend) + push `b3/c3-gate-runner-harness`; post codex re-gate on
+   topic `gate/c3-gate-runner-g3` (round 4); status to lead topic `ship/box5-c3-gate-runner-g3`
+   with context %. Update this checkpoint / mark done.
+Codex full verdict: bus #6002. Lead fix order: #6032.
 
 ## STATUS attempt 2 round-2 — codex #5984 (3 HIGH + 1 MED) fixed @80dd1806, re-gated
 - Round-1 (#5956) fixes were @81f365cb (below). Codex re-review (#5983/#5984) FAILED
