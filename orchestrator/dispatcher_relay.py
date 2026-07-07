@@ -664,7 +664,14 @@ def dispatch_done_gate(
     if list_id != str(expected_list_id):
         return {"ok": False, "reason": f"wrong_list:{list_id or 'unknown'}"}
     space_id = str((detail.get("space") or {}).get("id") or "")
-    if space_id and space_id != _BAKER_SPACE_ID:
+    if not space_id:
+        # FAIL-CLOSED (codex #6437 F1): a real ClickUp task ALWAYS carries its space.
+        # A missing/unknown space is NOT a confirmed cage — reject rather than write.
+        # The prior `if space_id and ...` guard let unknown-space fall through to
+        # confirmed, and _check_write_allowed does not cage space either, so nothing
+        # downstream caught it.
+        return {"ok": False, "reason": "unknown_space"}
+    if space_id != _BAKER_SPACE_ID:
         return {"ok": False, "reason": f"non_baker_space:{space_id}"}
     return {"ok": True, "reason": "confirmed"}
 

@@ -95,6 +95,33 @@ def test_ac3_gate_rejects_non_baker_space():
     assert out["ok"] is False and out["reason"].startswith("non_baker_space"), out
 
 
+def test_ac3_gate_rejects_missing_space(monkeypatch: pytest.MonkeyPatch):
+    # correct list but the refetched detail carries NO space -> fail-closed (codex #6437 F1).
+    client = _FakeClient({"task-nospace": {"id": "task-nospace", "list": {"id": _DECLARED_LIST}}})
+    out = relay.dispatch_done_gate(client, "task-nospace", expected_list_id=_DECLARED_LIST)
+    assert out["ok"] is False and out["reason"] == "unknown_space", out
+
+
+def test_ac3_process_replies_rejects_missing_space_no_write(monkeypatch: pytest.MonkeyPatch):
+    """A reply whose target has no resolvable space is REJECTED before any write."""
+    monkeypatch.setenv(relay._LIST_ID_ENV, _DECLARED_LIST)
+    client = _FakeClient({"nospace-task": {"id": "nospace-task", "list": {"id": _DECLARED_LIST}}})
+    store = MagicMock()
+    store._get_conn.return_value = MagicMock()
+
+    monkeypatch.setattr(relay, "read_dispatcher_inbox", lambda: [{"id": 13, "from_terminal": "x"}])
+    monkeypatch.setattr(relay, "read_bus_event", lambda eid: {"id": eid, "body": "DONE", "from_terminal": "x"})
+    monkeypatch.setattr(relay, "resolve_reply_clickup_task_id", lambda *a, **k: "nospace-task")
+    ack = MagicMock()
+    monkeypatch.setattr(relay, "ack_bus_event", ack)
+
+    out = relay.process_replies(client, store)
+
+    assert out == {"ok": True, "processed": 0}, out
+    assert client.posted == [], "missing-space target must NOT be written"
+    ack.assert_not_called()
+
+
 def test_ac3_process_replies_rejects_out_of_cage_target_no_write(monkeypatch: pytest.MonkeyPatch):
     """A dispatcher reply whose target is out of cage is REJECTED before any write —
     post_comment is never called, the message is not acked."""
