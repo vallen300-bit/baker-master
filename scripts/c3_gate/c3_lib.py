@@ -42,9 +42,88 @@ from typing import Any, Callable, Optional
 PREFIX = "c3-gate-"
 RUNS_DIR = Path(__file__).resolve().parent / "_runs"
 
+# HIGH-2 live-path sandbox (codex #5956). When set (live-target runs only) it pins
+# BOTH the email watermark AND the received_date of every injected row to a single
+# run-start instant, so the real spine sweeps ONLY this harness's freshly-injected
+# c3-gate- rows and never a real un-ticketed arrival. None on the ephemeral Neon
+# test branch -> injected rows keep the historical now()-1h default + blank cursor.
+_SANDBOX_SINCE: Optional[datetime] = None
+
+# MED-1 (codex #5956). Every project code this harness registers is tracked so
+# cleanup can delete exactly what it created — and ONLY on the test branch. The
+# real BB-AUK-001 registry row on live is NEVER touched.
+_REGISTERED_CODES: set[str] = set()
+
 
 def now() -> datetime:
     return datetime.now(timezone.utc)
+
+
+def _default_received() -> datetime:
+    """received_date for an injected row. On a sandboxed live run this is the
+    pinned run-start instant (so the row lands at/after the sandbox cursor); on the
+    test branch it is the historical now()-1h default."""
+    return _SANDBOX_SINCE if _SANDBOX_SINCE is not None else (now() - timedelta(hours=1))
+
+
+def _email_watermark_source() -> str:
+    """The trigger_watermarks source key the email lane advances. Read from the
+    bridge so the harness never drifts from the real cursor key."""
+    from orchestrator import airport_ticketing_bridge as bridge
+
+    return bridge._WATERMARK_SOURCE
+
+
+def bind_global_store() -> None:
+    """HIGH-1 (codex #5956) — unify the DB contract. ``run_tick`` and
+    ``triggers.state.trigger_state`` both read/write through
+    ``SentinelStoreBack._get_global_instance()``, whose pool is configured from
+    ``POSTGRES_*`` env — which can point at a DIFFERENT database than the harness
+    admin conn (``TEST_DATABASE_URL``/``DATABASE_URL`` via ``db_url()``). Left
+    unbound, run_tick would write one DB while the harness injects/reads another.
+
+    Repoint the global singleton at a store bound to ``db_url()`` (mirrors the
+    ``tier_b_test_store`` fixture in tests/conftest.py) so the whole run — injection,
+    spine tick, watermark, evidence read — is one explicit DSN. Idempotent."""
+    from memory.store_back import SentinelStoreBack
+
+    store = _HarnessStore(db_url())
+    SentinelStoreBack._get_global_instance = classmethod(lambda cls: store)  # type: ignore[assignment]
+    # TierBRuntime caches the store on first use; drop the cache so it re-reads the
+    # patched singleton (mirrors the fixture's TierBRuntime._instance reset).
+    try:
+        from orchestrator import tier_b_runtime as tbr
+
+        tbr.TierBRuntime._instance = None
+    except Exception:
+        pass
+
+
+class _HarnessStore:
+    """Minimal SentinelStoreBack shim bound to the harness DSN. Mirrors the
+    ``_TestStore`` shim in tests/conftest.py: a fresh psycopg2 connection per
+    ``_get_conn`` so run_tick's SERIALIZABLE isolation never leaks into helpers."""
+
+    def __init__(self, dsn: str):
+        import psycopg2
+
+        self._dsn = dsn
+        self._psycopg2 = psycopg2
+
+    def _get_conn(self):
+        return self._psycopg2.connect(self._dsn)
+
+    def _put_conn(self, conn) -> None:
+        if conn is None:
+            return
+        try:
+            conn.rollback()
+        except Exception:
+            pass
+        try:
+            conn.close()
+        except Exception:
+            pass
 
 
 # --------------------------------------------------------------------------- #
@@ -140,7 +219,7 @@ def inject_email(conn, suffix: str, *, sender_email: str, subject: str,
     marked, cleanup-able row. Returns the message_id."""
     message_id = f"{PREFIX}{suffix}"
     thread_id = f"{PREFIX}{thread_suffix}" if thread_suffix else message_id
-    received = received or (now() - timedelta(hours=1))
+    received = received or _default_received()
     with conn.cursor() as cur:
         cur.execute(
             """
@@ -164,10 +243,14 @@ def register_code(conn, project_number: str, *, matter_slug: str,
     ephemeral Neon branch where the registry is seeded per-run."""
     from kbl import project_registry_store as reg
 
-    return reg.register_project(
+    result = reg.register_project(
         conn, project_number=project_number, desk_owner=desk_owner,
         matter_slug=matter_slug, participants=participants or [],
     )
+    # MED-1: remember what we registered so cleanup can remove exactly this row
+    # (test branch only — never the real live registry row).
+    _REGISTERED_CODES.add(project_number)
+    return result
 
 
 # --------------------------------------------------------------------------- #
@@ -274,6 +357,55 @@ def write_run_log(row: str, record: dict) -> Path:
     return path
 
 
+def snapshot_watermark(conn, source: str) -> Optional[tuple]:
+    """HIGH-2: read the current trigger_watermarks row for ``source`` so the live
+    cursor can be restored byte-for-byte after the run. None when no row exists."""
+    with conn.cursor() as cur:
+        cur.execute(
+            "SELECT last_seen, updated_at, cursor_data FROM trigger_watermarks "
+            "WHERE source = %s",
+            (source,),
+        )
+        return cur.fetchone()
+
+
+def set_watermark(conn, source: str, ts: datetime) -> None:
+    """HIGH-2: pin the email cursor to ``ts`` so the tick sweeps only rows at/after
+    it (the harness's freshly-injected c3-gate- rows), never a real past arrival."""
+    with conn.cursor() as cur:
+        cur.execute(
+            """
+            INSERT INTO trigger_watermarks (source, last_seen, updated_at)
+            VALUES (%s, %s, %s)
+            ON CONFLICT (source) DO UPDATE
+              SET last_seen = EXCLUDED.last_seen, updated_at = EXCLUDED.updated_at
+            """,
+            (source, ts, ts),
+        )
+    conn.commit()
+
+
+def restore_watermark(conn, source: str, snap: Optional[tuple]) -> None:
+    """HIGH-2: put the real cursor back exactly as ``snapshot_watermark`` found it —
+    reinstate the prior row, or DELETE if there was none (never-activated cursor)."""
+    with conn.cursor() as cur:
+        if snap is None:
+            cur.execute("DELETE FROM trigger_watermarks WHERE source = %s", (source,))
+        else:
+            cur.execute(
+                """
+                INSERT INTO trigger_watermarks (source, last_seen, updated_at, cursor_data)
+                VALUES (%s, %s, %s, %s)
+                ON CONFLICT (source) DO UPDATE
+                  SET last_seen = EXCLUDED.last_seen,
+                      updated_at = EXCLUDED.updated_at,
+                      cursor_data = EXCLUDED.cursor_data
+                """,
+                (source, snap[0], snap[1], snap[2]),
+            )
+    conn.commit()
+
+
 def cleanup(conn) -> dict:
     """Delete every marked synthetic row this harness could have created. Safe on
     live (only touches c3-gate- / airport-lounge:c3-gate- rows). Logged + returned
@@ -292,6 +424,16 @@ def cleanup(conn) -> dict:
         counts["email_messages"] = cur.rowcount
         cur.execute("DELETE FROM baker_actions WHERE details::text LIKE %s", (f"%{PREFIX}%",))
         counts["baker_actions"] = cur.rowcount
+        # MED-1: remove the project_registry rows THIS harness seeded — TEST BRANCH
+        # ONLY. On live the pilot code (BB-AUK-001) is the real registry row; never
+        # delete it. _REGISTERED_CODES is empty on a fresh process, so the run-start
+        # cleanup is a no-op and only the post-run cleanup removes seeded codes.
+        if not is_live_target() and _REGISTERED_CODES:
+            cur.execute(
+                "DELETE FROM project_registry WHERE project_number = ANY(%s)",
+                (list(_REGISTERED_CODES),),
+            )
+            counts["project_registry"] = cur.rowcount
     conn.commit()
     return counts
 
@@ -324,10 +466,27 @@ def main_scaffold(row: str, dry_description: str, run_fn: Callable[[Any], dict])
         return
 
     require_run_guard()
+    # HIGH-1: unify the DB contract BEFORE any spine call so run_tick +
+    # trigger_state read/write the SAME DB the harness injects into.
+    bind_global_store()
     conn = admin_conn()
+
+    # HIGH-2: on a live-target run, sandbox the shared email cursor. Snapshot the
+    # real watermark, then pin it to run-start; every injected row lands AT that
+    # instant (via _SANDBOX_SINCE) so the tick sweeps ONLY this harness's rows and
+    # never a real un-ticketed arrival. The real cursor is restored in `finally`.
+    global _SANDBOX_SINCE
+    wm_source = _email_watermark_source()
+    wm_snapshot: Optional[tuple] = None
+    sandboxed = False
     try:
         bootstrap_tables(conn)
         stub_external_io()
+        if is_live_target():
+            wm_snapshot = snapshot_watermark(conn, wm_source)
+            _SANDBOX_SINCE = now()
+            set_watermark(conn, wm_source, _SANDBOX_SINCE)
+            sandboxed = True
         result = run_fn(conn)
         log_path = write_run_log(row, {"pass": result["pass"],
                                        "evidence": result.get("evidence"),
@@ -339,7 +498,11 @@ def main_scaffold(row: str, dry_description: str, run_fn: Callable[[Any], dict])
         if result.get("notes"):
             print(f"notes: {result['notes']}")
     finally:
+        if sandboxed:
+            restore_watermark(conn, wm_source, wm_snapshot)
+            print(f"watermark restored: {wm_source}")
         if not args.keep:
             removed = cleanup(conn)
             print(f"cleanup: {removed}")
+        _SANDBOX_SINCE = None
         conn.close()

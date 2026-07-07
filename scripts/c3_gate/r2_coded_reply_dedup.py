@@ -83,11 +83,16 @@ def run(conn) -> dict:
     same_desk = bool(a and b and a["proposed_desk_slug"] == b["proposed_desk_slug"])
     continuity = bool(b and "thread_continuity" in (b["terminal_reason"] or ""))
     replay_inert = replay_written == 0
-    return {"pass": same_desk and replay_inert,
+    # MED-2 (codex #5956): the reply MUST route on the thread-continuity lane — it
+    # was computed but omitted from the pass bar. A same-desk reply that did NOT go
+    # through thread_continuity (e.g. a divergent re-ticket that happens to share the
+    # desk) is not a D-39d pass. Fold continuity into the invariant.
+    passed = same_desk and replay_inert and continuity
+    return {"pass": passed,
             "evidence": {"msg_a": a, "msg_b": b, "thread_ticket_count": thread_count,
                          "replay_terminal_written": replay_written,
                          "reply_is_thread_continuity": continuity},
-            "notes": ("" if (same_desk and replay_inert)
+            "notes": ("" if passed
                       else f"same_desk={same_desk} replay_inert={replay_inert} "
                            f"continuity={continuity}") +
                      " | C2 pins the final no-duplicate threshold (b4 lane)."}
