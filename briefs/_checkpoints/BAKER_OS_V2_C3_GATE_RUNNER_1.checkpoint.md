@@ -1,11 +1,11 @@
 ---
 brief_id: BAKER_OS_V2_C3_GATE_RUNNER_1
-attempt: 1
+attempt: 2
 branch: b3/c3-gate-runner-harness
 pr: 474
 reply_topic: baker-os-v2/c3-gate-runner
 dispatched_by: lead
-reason_for_checkpoint: context ~45%, 50%-refresh rule (#5918) + lead order #5959
+reason_for_checkpoint: context ~45%, 50%-refresh rule (#5918) + lead order #5959; attempt-2 claimed 2026-07-07 per respawn #5966
 ---
 
 # C3 GATE-RUNNER R1-R4 harness — checkpoint (attempt 1)
