@@ -346,6 +346,79 @@ def test_fetch_whatsapp_arrivals_keyword_and_participant_lanes(nm_conn):
     assert part_row.participant_matched is True
 
 
+# ===========================================================================
+# AO_FLIGHT_PROD_TICKET_ROUTING_1 — per-matter desk routing via project_registry
+# ===========================================================================
+def test_desk_for_matter_no_conn_global_fallback(monkeypatch):
+    """PURE UNIT (DB-free): with no conn, _desk_for_matter never touches the registry and
+    returns the global _desk_slug() — byte-identical to today's routing."""
+    monkeypatch.setenv("AIRPORT_TICKETING_DESK", "baden-baden-desk")
+    assert bridge._desk_for_matter("ao", conn=None) == "baden-baden-desk"
+    assert bridge._desk_for_matter(None, conn=None) == "baden-baden-desk"
+    assert bridge._desk_for_matter("", conn=None) == "baden-baden-desk"
+
+
+def test_desk_for_matter_registry_routes_by_matter(nm_conn):
+    """LIVE-PG: registry desk_owner drives routing. AO matter -> ao-desk; the fixture's
+    BB matter (aukera) -> baden-baden-desk; an unmapped matter -> global fallback."""
+    from kbl.project_registry_store import register_project
+
+    register_project(
+        nm_conn,
+        project_number="AO-OSK-001",
+        desk_owner="ao-desk",
+        matter_slug="ao",
+    )
+    nm_conn.commit()
+    assert bridge._desk_for_matter("ao", conn=nm_conn) == "ao-desk"
+    assert bridge._desk_for_matter("aukera", conn=nm_conn) == "baden-baden-desk"
+    assert bridge._desk_for_matter("no-such-matter", conn=nm_conn) == "baden-baden-desk"
+
+
+def test_build_plaud_ticket_routes_ao_by_registry(nm_conn):
+    """AC1 + AC2: an AO-manifest Plaud arrival mints proposed_desk_slug='ao-desk' while a
+    BB-matter Plaud arrival still mints to baden-baden-desk."""
+    from kbl.project_registry_store import register_project
+
+    register_project(
+        nm_conn,
+        project_number="AO-OSK-001",
+        desk_owner="ao-desk",
+        matter_slug="ao",
+    )
+    nm_conn.commit()
+
+    # AC1 — AO-manifest arrival (identity lane, no keyword) boards ao-desk.
+    ao_arrival = _plaud(
+        title="AO weekly sync",
+        summary="no flight terms here",
+        full_transcript="nothing relevant",
+        matter_slug="ao",
+        matter_matched=True,
+    )
+    ao_ticket = bridge.build_plaud_ticket(ao_arrival, conn=nm_conn)
+    assert ao_ticket is not None
+    assert ao_ticket.proposed_desk_slug == "ao-desk"
+    assert ao_ticket.suspected_matter_slug == "ao"
+    assert ao_ticket.dedup_key == bridge._dedup_key("plaud", ao_arrival.transcript_id, "ao-desk")
+
+    # AC2 regression — BB-matter arrival still boards baden-baden-desk.
+    bb_arrival = _plaud(matter_slug="aukera")  # 'aukera' keyword in default title/body
+    bb_ticket = bridge.build_plaud_ticket(bb_arrival, conn=nm_conn)
+    assert bb_ticket is not None
+    assert bb_ticket.proposed_desk_slug == "baden-baden-desk"
+
+    # AC2 regression — an unmapped matter falls back to the global desk.
+    unmapped = _plaud(
+        transcript_id="plaud-unmapped-1",
+        title="aukera annaberg note",
+        matter_slug="no-such-matter",
+    )
+    unmapped_ticket = bridge.build_plaud_ticket(unmapped, conn=nm_conn)
+    assert unmapped_ticket is not None
+    assert unmapped_ticket.proposed_desk_slug == "baden-baden-desk"
+
+
 def test_nonmail_vertical_candidate_and_idempotent(nm_conn):
     since = datetime(2026, 6, 1, tzinfo=timezone.utc)
     _insert_plaud(nm_conn, "nmtest-p-v", title="Aukera sync", summary="s", transcript="t", matter="aukera")
