@@ -10,6 +10,18 @@ reason_for_checkpoint: context ~52% over the 50% line; lead order #6032 = checkp
 
 # C3 GATE-RUNNER R1-R4 harness — checkpoint (attempt 1)
 
+## ROUND-4 STATUS — round-3 residual FIX APPLIED (attempt 3, respawn GO #6036)
+Codex #6002 residual HIGH (live email sandbox admits real concurrent arrivals) is
+FIXED. `c3_lib.sandbox_email_fetch()`/`restore_email_fetch()` wrap
+`bridge.fetch_email_arrivals` on live-target runs to return ONLY `c3-gate-` rows;
+wired into `main_scaffold` alongside `_DESK` + watermark sandbox (set before run_fn,
+restored in `finally`, guard var `email_fetch_orig = None`). A real matching email
+arriving mid-run is now dropped before `run_tick` can ticket it under the stub.
+Validated: py_compile ×5 + `--dry` ×4 + run-guard + no-DB fail-loud + `check_singletons`
++ behavioral wrapper test (real rows dropped, c3-gate- kept, restore reinstates
+unfiltered fetch). Attempt NOT bumped (GO #6036 is the claim). Next: codex round-4
+re-gate on `gate/c3-gate-runner-g3`, then lead G4 /security-review → squash-merge.
+
 ## What's done
 - Full harness shipped: `scripts/c3_gate/` = `c3_lib.py` + `r1_fast_lane.py` +
   `r2_coded_reply_dedup.py` + `r3_receipt_writeback.py` + `r4_nudge_stop_on_landing.py`

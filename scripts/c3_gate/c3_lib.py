@@ -455,6 +455,41 @@ def restore_boarding_desk(orig) -> None:
     flow._DESK = orig
 
 
+def sandbox_email_fetch():
+    """Round-3 residual (codex #6002): belt-and-suspenders on the live email lane.
+
+    The watermark pin (`_SANDBOX_SINCE`) scopes only the SINCE cursor. Production
+    `bridge.fetch_email_arrivals` then selects EVERY keyword-matching row with
+    `received_date >= since` and applies NO message_id/source filter — so a REAL
+    matching email arriving mid-run (at/after `_SANDBOX_SINCE`) would be swept,
+    ticketed under the stubbed bus, and COMMIT a real `airport_tickets` row that
+    fake-sends; the watermark restore does not undo it.
+
+    Wrap the module global so a live run's spine only ever sees THIS harness's own
+    `c3-gate-` rows — every other arrival is dropped before `run_tick` can ticket
+    it. `run_tick` calls the module-level name, so patching `bridge.fetch_email_arrivals`
+    intercepts it. Returns the original fn so `finally` can restore. Mirrors the
+    `sandbox_boarding_desk()` pattern; live-target only (caller-gated)."""
+    from orchestrator import airport_ticketing_bridge as bridge
+
+    orig = bridge.fetch_email_arrivals
+
+    def _scoped(*args, **kwargs):
+        return [
+            a for a in orig(*args, **kwargs)
+            if str(getattr(a, "message_id", "") or "").startswith(PREFIX)
+        ]
+
+    bridge.fetch_email_arrivals = _scoped  # type: ignore[assignment]
+    return orig
+
+
+def restore_email_fetch(orig) -> None:
+    from orchestrator import airport_ticketing_bridge as bridge
+
+    bridge.fetch_email_arrivals = orig
+
+
 def cleanup(conn) -> dict:
     """Delete every marked synthetic row this harness could have created. Safe on
     live (only touches c3-gate- / airport-lounge:c3-gate- rows). Logged + returned
@@ -529,6 +564,7 @@ def main_scaffold(row: str, dry_description: str, run_fn: Callable[[Any], dict])
     wm_source = _email_watermark_source()
     wm_snapshot: Optional[tuple] = None
     boarding_desk_orig = None
+    email_fetch_orig = None
     sandboxed = False
     try:
         bootstrap_tables(conn)
@@ -539,6 +575,9 @@ def main_scaffold(row: str, dry_description: str, run_fn: Callable[[Any], dict])
             set_watermark(conn, wm_source, _SANDBOX_SINCE)
             # HIGH-1: scope the R3/R4 boarding-flow production scans to harness rows.
             boarding_desk_orig = sandbox_boarding_desk()
+            # Round-3 residual (codex #6002): scope the email lane to harness rows so a
+            # real concurrent arrival mid-run can never be ticketed under the stub.
+            email_fetch_orig = sandbox_email_fetch()
             sandboxed = True
         result = run_fn(conn)
         log_path = write_run_log(row, {"pass": result["pass"],
@@ -554,6 +593,7 @@ def main_scaffold(row: str, dry_description: str, run_fn: Callable[[Any], dict])
         if sandboxed:
             restore_watermark(conn, wm_source, wm_snapshot)
             restore_boarding_desk(boarding_desk_orig)
+            restore_email_fetch(email_fetch_orig)
             print(f"watermark restored: {wm_source}")
         if not args.keep:
             removed = cleanup(conn)
