@@ -402,12 +402,14 @@ def test_run_nonmail_lane_suppresses_identity_wa_and_advances_watermark(nm_conn,
     monkeypatch.setattr(bridge, "trigger_state_watermark_raw", lambda src: wm.get(src))
     monkeypatch.setattr(bridge, "trigger_state_set_watermark", lambda src, ts: wm.__setitem__(src, ts))
 
-    # identity-only: registered participant (41790000000), NO keyword, older ts
+    # Dates MUST fall inside _run_nonmail_lane's lookback floor (current - nonmail_lookback_hours,
+    # clamped <=14d) or fetch_whatsapp_arrivals never returns them. Keep them a few hours before current.
+    # identity-only: registered participant (41790000000), NO keyword
     _insert_wa(nm_conn, "nmtest-w-idonly", sender="41790000000", chat_id="41790000000@c.us",
-               text="call you later", when=datetime(2026, 6, 8, 10, 0, tzinfo=timezone.utc))
+               text="call you later", when=datetime(2026, 7, 4, 8, 0, tzinfo=timezone.utc))
     # keyword match from the SAME participant -> must still ticket (never suppressed)
     _insert_wa(nm_conn, "nmtest-w-kw", sender="41790000000", chat_id="41790000000@c.us",
-               text="aukera closing note", when=datetime(2026, 6, 8, 11, 0, tzinfo=timezone.utc))
+               text="aukera closing note", when=datetime(2026, 7, 4, 9, 0, tzinfo=timezone.utc))
 
     current = datetime(2026, 7, 4, 12, tzinfo=timezone.utc)
     kwargs = dict(
@@ -426,7 +428,7 @@ def test_run_nonmail_lane_suppresses_identity_wa_and_advances_watermark(nm_conn,
     assert stats["issued"] == 1               # only the keyword arrival ticketed
     assert _count(nm_conn, "whatsapp") == 1   # no identity-only ticket row
     # watermark advanced past BOTH arrivals (both handled: suppressed + issued)
-    assert wm[bridge._WATERMARK_SOURCE_WHATSAPP] >= datetime(2026, 6, 8, 11, 0, tzinfo=timezone.utc)
+    assert wm[bridge._WATERMARK_SOURCE_WHATSAPP] >= datetime(2026, 7, 4, 9, 0, tzinfo=timezone.utc)
 
     # 3b: a SECOND tick mints no new ticket (idempotent; no re-ticket churn)
     stats2 = bridge._run_nonmail_lane(nm_conn, **kwargs)
