@@ -1,7 +1,7 @@
 ---
 brief_id: AO_FLIGHT_IDENTITY_RECONCILE_1
-attempt: 1
-status: NOT_STARTED — checkpoint+respawn at dispatch (predecessor context ~60% > 50% refresh threshold)
+attempt: 2
+status: CLAIMED — successor resumed; executing Task 2 (registry reshape) first per §5
 dispatched_by: lead
 reply_to: lead + ao-desk (bus topic baker-os-v2/b4-ao-data-preflight)
 priority: P1 — blocks B6 AO flight launch
