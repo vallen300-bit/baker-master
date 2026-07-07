@@ -627,6 +627,48 @@ def _extract_clickup_task_id(text: str) -> Optional[str]:
     return match.group(1) if match else None
 
 
+def dispatch_done_gate(
+    client: Any, task_id: Optional[str], *, expected_list_id: str
+) -> dict[str, Any]:
+    """Deterministic done-gate for a Dispatcher ClickUp write (DISPATCHER_HARNESS_RETROFIT_1 B4).
+
+    A dispatch write to ``task_id`` is DONE/ALLOWED only when the target is a REAL
+    ClickUp task at the declared BAKER-space list — "posted" alone is NOT done. The
+    gate re-fetches the task by ID (``client.get_task_detail``) and confirms, in order:
+      * the task exists and its returned ID matches (fabricated/absent id -> FAIL, AC4),
+      * it sits at the declared dispatcher list ``DISPATCHER_CLICKUP_LIST_ID``
+        (wrong list -> FAIL, AC4 "confirmed at the declared list"),
+      * its space is the BAKER space ``901510186446`` (non-BAKER -> FAIL, B2/AC3 cage).
+
+    Called CONFIRM-THEN-WRITE (before the comment write) so a fabricated or out-of-cage
+    target is REJECTED before any write happens — "posted" can never precede "confirmed".
+    Pure code: no model call, no self-judgment. Fault-tolerant: a re-fetch error is a
+    gate FAIL, never a crash. Returns ``{"ok": bool, "reason": str}``.
+    """
+    from clickup_client import _BAKER_SPACE_ID
+
+    if not task_id:
+        return {"ok": False, "reason": "no_task_id"}
+    if not expected_list_id:
+        return {"ok": False, "reason": "no_declared_list"}
+    try:
+        detail = client.get_task_detail(task_id)
+    except Exception as e:  # a re-fetch failure is a gate FAIL, not a crash
+        return {"ok": False, "reason": f"refetch_error:{e}"}
+    if not isinstance(detail, dict) or not detail.get("id"):
+        return {"ok": False, "reason": "task_absent"}
+    got_id = str(detail.get("id"))
+    if got_id != str(task_id):
+        return {"ok": False, "reason": f"id_mismatch:{got_id}"}
+    list_id = str((detail.get("list") or {}).get("id") or "")
+    if list_id != str(expected_list_id):
+        return {"ok": False, "reason": f"wrong_list:{list_id or 'unknown'}"}
+    space_id = str((detail.get("space") or {}).get("id") or "")
+    if space_id and space_id != _BAKER_SPACE_ID:
+        return {"ok": False, "reason": f"non_baker_space:{space_id}"}
+    return {"ok": True, "reason": "confirmed"}
+
+
 def process_replies(client: Any, store: Any) -> dict[str, Any]:
     messages = read_dispatcher_inbox()
     if not messages:
@@ -645,6 +687,19 @@ def process_replies(client: Any, store: Any) -> dict[str, Any]:
             task_id = resolve_reply_clickup_task_id(conn, event={**msg, **event}, body=body)
             if not task_id:
                 logger.warning("dispatcher reply missing ClickUp task id: %s", msg_id)
+                continue
+            # DISPATCHER_HARNESS_RETROFIT_1 (B4 done-gate + B2 cage): confirm the reply
+            # target is a REAL task at the declared BAKER-space list BEFORE writing.
+            # "Posted" is not done; a fabricated or out-of-cage target is REJECTED and
+            # no comment is written (deterministic, no model call).
+            gate = dispatch_done_gate(
+                client, task_id, expected_list_id=os.environ.get(_LIST_ID_ENV, "").strip()
+            )
+            if not gate["ok"]:
+                logger.warning(
+                    "dispatcher done-gate REJECTED reply for task %s: %s",
+                    task_id, gate["reason"],
+                )
                 continue
             comment = (
                 f"Dispatcher bus reply from {event.get('from_terminal') or msg.get('from_terminal') or 'unknown'}\n\n"
