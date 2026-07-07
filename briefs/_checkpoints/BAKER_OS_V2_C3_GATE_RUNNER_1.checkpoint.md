@@ -21,7 +21,20 @@ reason_for_checkpoint: context ~45%, 50%-refresh rule (#5918) + lead order #5959
   DB, Q3 direct `email_messages` INSERT (cleared by b2 #5935 + b4 #5937).
 - DONE posted #5946.
 
-## What's left — codex GATE FAIL #5956 / lead #5959: 4 fixes, then re-gate
+## STATUS attempt 2 — all 4 fixes APPLIED @81f365cb (pushed), re-gate posted to codex
+- HIGH-1 `bind_global_store()` in c3_lib repoints `SentinelStoreBack._get_global_instance`
+  at `db_url()` (called in `main_scaffold` before run_fn) — run_tick + trigger_state
+  now share the harness DB. `_HarnessStore` shim mirrors conftest `_TestStore`.
+- HIGH-2 `snapshot_watermark`/`set_watermark`/`restore_watermark` + `_SANDBOX_SINCE`:
+  live-target only, pins email cursor to run-start, injects rows AT that instant,
+  restores real cursor in `finally`. Test branch behaviour untouched.
+- MED-1 `_REGISTERED_CODES` tracked by `register_code`; `cleanup` deletes them from
+  `project_registry` ONLY when `not is_live_target()`.
+- MED-2 R2 pass bar now `same_desk and replay_inert and continuity`.
+- Validated: py_compile ×5, `--dry` ×4, `check_singletons.sh` clean. Re-gate → codex
+  topic `gate/c3-gate-runner-g3`. Remaining: codex G3 re-review → lead G4 /security-review → merge.
+
+## (historical) codex GATE FAIL #5956 / lead #5959: 4 fixes, then re-gate
 - **HIGH-1 unify DB contract.** `bridge.run_tick()` uses the global
   `SentinelStoreBack` pool (reads `POSTGRES_*` config), NOT the harness admin
   conn (`TEST_DATABASE_URL`/`DATABASE_URL`). They can point at DIFFERENT DBs →
