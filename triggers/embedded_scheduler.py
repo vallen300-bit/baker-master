@@ -267,6 +267,24 @@ def _register_jobs(scheduler: BackgroundScheduler):
     register_expected_job("clerk_bus_poll", _clerk_bus_interval)
     logger.info(f"Registered: clerk_bus_poll (every {_clerk_bus_interval}s)")
 
+    # Publisher render bus worker — server-side drain for slug "publisher"
+    # (PUBLISHER_AGENT_INSTALL_1 Part 2). PUBLISHER_BUS_WORKER_ENABLED defaults
+    # false (kill-switch, spec §8); the job still registers so scheduler_liveness
+    # observes the polling surface before the Tier-B flag flip at canary.
+    from orchestrator.publisher_bus_worker import (
+        poll_publisher_bus,
+        publisher_bus_poll_interval_seconds,
+    )
+    _publisher_bus_interval = publisher_bus_poll_interval_seconds()
+    scheduler.add_job(
+        poll_publisher_bus,
+        IntervalTrigger(seconds=_publisher_bus_interval),
+        id="publisher_bus_poll", name="Publisher render bus polling",
+        coalesce=True, max_instances=1, replace_existing=True,
+    )
+    register_expected_job("publisher_bus_poll", _publisher_bus_interval)
+    logger.info(f"Registered: publisher_bus_poll (every {_publisher_bus_interval}s)")
+
     # WhatsApp: migrated from Wassenger polling to WAHA webhook (Session 26)
     # whatsapp_poll job removed — inbound messages now arrive via POST /api/webhook/whatsapp
 
