@@ -1186,3 +1186,11 @@ complete (Inbox 34%, Sent 0.4%). Nobody noticed until the Director asked "is it 
 ## Lesson #112 — 2026-07-07 — Merge fired before the brief's full gate plan was walked
 **What happened:** lead merged PR #474 on codex round-5 PASS (#6311) without re-reading the C3 brief's gate plan; b3 flagged (#6314) that G4 /security-review was still owed. Review ran post-merge (PASS, no findings — no harm), but the sequencing was wrong.
 **Rule:** before ANY merge, re-open the dispatching brief and walk its gate plan line by line — a gate verdict (codex PASS) satisfies ONLY its own gate, never the plan. Post-merge remediation is fail-loud but not a substitute.
+
+## Lesson #113 — Claude Code settings.json nests hooks under top-level `hooks`; top-level `Stop`/`SessionEnd` is a silent no-op
+**Context:** 2026-07-04 AH2 session. While wiring a PINNED size-guard I wrote `SessionEnd` at the JSON top level, verified by reading top-level `SessionEnd` back, and reported it "live." It never fired. Same day, my G1 review of lead's auto-rollover checked top-level `d.get('Stop')` → got `NONE` → wrongly issued request-changes; b3 pushed back with sha256 + `d['hooks']['Stop']` evidence and was correct.
+**Rule:** Claude Code reads lifecycle hooks under the top-level `"hooks"` object: `hooks.SessionStart`, `hooks.PreToolUse`, `hooks.Stop`, `hooks.SessionEnd`. A key placed at the JSON root (e.g. `{"SessionEnd": [...]}`) is ignored — no error, no fire.
+1. When wiring: `d.setdefault("hooks",{}).setdefault("<Event>",[])`, never top-level.
+2. When verifying/reviewing: read `d["hooks"].get("<Event>")`, never `d.get("<Event>")`. A top-level read returns empty on a correctly-wired file and non-empty on a broken one — exactly inverted.
+3. "Verified" by reading back the same wrong path is not verification — it confirms the bug. Read via the path the consumer (Claude Code) actually uses.
+4. Fail-loud corollary: a config edit isn't "live" until the real consumer loads it; round-tripping your own write proves nothing about activation.
