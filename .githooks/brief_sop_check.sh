@@ -7,8 +7,13 @@
 #
 # Triggers on:
 #   git diff --cached --name-only --diff-filter=AM matches
-#     (briefs/BRIEF_*.md OR _ops/briefs/BRIEF_*.md)
+#     (briefs/BRIEF_*.md OR _ops/briefs/BRIEF_*.md OR briefs/_tasks/<slug>.md)
 #   AND NOT (briefs/_reports/* OR briefs/_tasks/CODE_*_PENDING|COMPLETE|...md)
+#
+# Extended 2026-07-07 (AH2 HARNESS_V2_ADOPTION_AUDIT, lead #5987): the
+# briefs/_tasks/<slug>.md dispatch path was hook-blind — every 2026-06-29..07-07
+# production brief lived there (not the BRIEF_ prefix) and skipped this gate.
+# Now covered; CODE_*_PENDING state-flips + _reports stay excluded.
 #
 # Blocks if 3+ of 5 canonical SOP section headers are missing in the staged
 # content:
@@ -46,9 +51,11 @@ if [ -f "$COMMIT_MSG_FILE" ]; then
         exit 0
     fi
 fi
-# Detect staged formal-brief files (additions + modifications; no rename/delete).
+# Detect staged brief files (additions + modifications; no rename/delete).
+# Covers formal BRIEF_*.md + the briefs/_tasks/<slug>.md dispatch path; excludes
+# the CODE_*_PENDING dispatch envelopes (state-flip mailbox files) + _reports.
 STAGED_BRIEFS="$(git diff --cached --name-only --diff-filter=AM \
-    | grep -E '(^|/)(_ops/)?briefs/BRIEF_[^/]+\.md$' \
+    | grep -E '(^|/)(_ops/)?briefs/(BRIEF_[^/]+|_tasks/[^/]+)\.md$' \
     | grep -vE '/_reports/|/_tasks/CODE_[1-5]_(PENDING|COMPLETE|DROPPED|RETURN|PARKED)' \
     || true)"
 
@@ -61,7 +68,7 @@ STAGED_BRIEFS="$(git diff --cached --name-only --diff-filter=AM \
 # COMMIT_EDITMSG before pre-commit even on -m/-F, so the trailer path works).
 if [ "${BAKER_BRIEF_SOP_BYPASS:-}" = "1" ]; then
     if [ -n "$STAGED_BRIEFS" ]; then
-        echo "WARN [brief-sop-check]: BAKER_BRIEF_SOP_BYPASS=1 IGNORED — formal BRIEF_*.md staged; env bypass leaves no audit trace. Use commit-msg trailer: Brief-SOP-bypass: <reason>" >&2
+        echo "WARN [brief-sop-check]: BAKER_BRIEF_SOP_BYPASS=1 IGNORED — brief file(s) staged; env bypass leaves no audit trace. Use commit-msg trailer: Brief-SOP-bypass: <reason>" >&2
         # fall through to the section checks below
     else
         echo "INFO [brief-sop-check]: bypass env BAKER_BRIEF_SOP_BYPASS=1 set (no formal briefs staged); allowing." >&2
