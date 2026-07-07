@@ -1,11 +1,29 @@
 ---
 brief_id: BAKER_OS_V2_C5_NONMAIL_SIGNALS_1
-lane: post-deploy AC verdict (code merged; live AC in progress — dry-run PASS, live drain confirming)
+lane: post-deploy AC verdict — DONE (VERDICT PASS posted #6025). Only DEFERRED LOOKBACK-revert follow-up remains.
 attempt: 1
 owner: b1
 reply_topic: baker-os-v2/c5-nonmail-signals
-updated: 2026-07-07T09:26Z
+updated: 2026-07-07T09:34Z
 ---
+
+# UPDATE 2026-07-07T09:34Z — AC COMPLETE, VERDICT PASS. C5 lane closed except 1 deferred follow-up.
+
+POST_DEPLOY_AC_VERDICT v1 = PASS, posted lead #6025. Ship report: briefs/_reports/B1_BAKER_OS_V2_C5_NONMAIL_SIGNALS_1_POSTDEPLOY_AC_20260707.md.
+All 5 ACs PASS (dry-run 0-insert, flag-on tickets both channels, >=1 each, idempotent no-dup, escalation=designed lifecycle). DB: plaud 1/1 keys, whatsapp 7/7 keys, all status=sent baden-baden-desk. Watermarks: plaud @2026-06-22T14:09, whatsapp @2026-06-07T20:43.
+
+## ONLY remaining C5 follow-up (deferred — NOT urgent, do when wa drain ~complete)
+- Revert AIRPORT_NONMAIL_LOOKBACK_HOURS 720->168 via tools.render_env_guard, ONLY AFTER whatsapp watermark passes now-168h (else max(wm,floor) strands un-drained 06-07..06-30 candidates). This CORRECTS my earlier #5990/#6017 "revert after AC" note. Purpose: defense vs future cursor-reset re-flood. Env stays SOURCES_ENABLED=true, DRY_RUN=false meanwhile.
+- Observability watch (not action): stuck_arrivals rose 1->9 (email-lane counter; nonmail tickets awaiting non-responsive baden-baden-desk). baden-baden autowake Mini/wrong-host = pre-existing lead-tracked, not C5.
+
+## NEXT ARC (fresh seat per lead #6018 — do NOT start at 64% context)
+BAKER_OS_V2_B4_AO_DATA_PREFLIGHT_1 (#5914, brief on main @7646753: briefs/_tasks/BAKER_OS_V2_B4_AO_DATA_PREFLIGHT_1.md). Read-only AO data preflight, Aukera precedent. AC-first discipline.
+
+## Render creds for successor
+op item ugerv6jmgbigpaa5cqhd7xe6x4 vault "Baker API Keys" field credential = RENDER_API_KEY. service srv-d6dgsbctgctc73f55730. owner tea-d6dgif24d50c73apjilg. Logs API: GET /v1/logs?ownerId=..&resource=srv..&text=..&startTime=..&endTime=.. . Env writes: python3 -m tools.render_env_guard <svc> <KEY> <val> (merge-mode, NEVER raw array PUT). Env change needs an explicit deploy trigger (POST /deploys {clearCache:do_not_clear}) to take effect; scheduler re-registers on boot, first airport tick = boot +600s.
+
+---
+# (prior 09:26 update below — superseded by the PASS above)
 
 # UPDATE 2026-07-07T09:26Z — live AC in progress (do NOT restart env work)
 
