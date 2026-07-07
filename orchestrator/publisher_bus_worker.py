@@ -415,7 +415,7 @@ class PublisherBusWorker:
             f"{len(pending)}. Drain loop is live but not keeping pace."
         )
         try:
-            self._post_reply(recipient=_ESCALATION_SLUG, topic="alarm/publisher-queue-age", body=body)
+            self._post_reply(recipient=_ESCALATION_SLUG, topic="publisher/queue-age-alarm", body=body)
         except Exception as e:
             logger.warning("publisher queue-age alarm post to lead failed: %s", type(e).__name__)
 
