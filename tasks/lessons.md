@@ -1194,3 +1194,6 @@ complete (Inbox 34%, Sent 0.4%). Nobody noticed until the Director asked "is it 
 2. When verifying/reviewing: read `d["hooks"].get("<Event>")`, never `d.get("<Event>")`. A top-level read returns empty on a correctly-wired file and non-empty on a broken one — exactly inverted.
 3. "Verified" by reading back the same wrong path is not verification — it confirms the bug. Read via the path the consumer (Claude Code) actually uses.
 4. Fail-loud corollary: a config edit isn't "live" until the real consumer loads it; round-tripping your own write proves nothing about activation.
+
+## Lesson #114 (2026-07-07, AH1-lead) — Merge only on the gate agent's OWN verdict post, never on relayed status
+Merged RESEARCHER_HARNESS_RETROFIT_1 @fa2941d to vault main at 15:25:49 based on b1's relay ("codex G3 accepted-residual") + deputy PASS. b1's HOLD landed 13 seconds later: codex #6618/#6628 had a SEPARATE blocking finding (enforce-mode parser bypass) distinct from the accepted residual. Exposure was zero only by luck of the WARN-default. Rule: a gate is closed when the GATE AGENT's own verdict post says so on the EXACT tip being merged — a builder's summary of the gate chain is input, not authority. Extends Lesson #112 (walk the full gate plan before merge).
