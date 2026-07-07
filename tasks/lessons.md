@@ -1171,3 +1171,14 @@ complete (Inbox 34%, Sent 0.4%). Nobody noticed until the Director asked "is it 
   smell, not necessarily a real outage — verify the underlying action's true result (baker_actions) before
   trusting the sentinel row. Keep status-reporting fns backward-compatible; never let a bare except hide arity
   errors on the health-write path.
+
+## Lesson #111 (2026-07-07) — main pushes auto-deploy and cycle the dyno mid-tick; freeze pushes during live AC windows
+- Context: b1 was running the C5 nonmail post-deploy AC (live flag-on, first real tick). Lead pushed
+  a dev-hook-only mirror sync (76a55e4, .githooks/) to main at 09:15:46Z; Render auto-deployed
+  (dep-d96c7gn4, live 09:18:52Z) and the restart interrupted the tick mid-whatsapp-loop — ~18 of 21
+  candidates never issued that tick, no run_tick stats line logged (bus #6017).
+- Saved by design: issue_ticket commits per-ticket (3 survived) + contiguous-prefix watermark did not
+  advance past unprocessed rows (rest re-fetchable, issued dedup as idempotent no-op). No data loss.
+- RULE: ANY push to baker-master main = full Render redeploy = process cycle, even if the diff is
+  runtime-inert (.githooks/, docs, briefs). During a live AC window or any in-flight prod verification
+  arc, lead holds non-urgent main pushes until the verdict posts. Batch mechanical commits; push after.
