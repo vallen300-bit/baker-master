@@ -25,7 +25,9 @@ Row R2 — Coded reply routes E2E (D-39d).
 
   step 1  inject email  message_id=c3-gate-r2-a  thread=c3-gate-r2-thr  code BB-AUK-001
           call bridge.run_tick()  -> ticket #1 for message a
-  step 2  inject reply  message_id=c3-gate-r2-b  thread=c3-gate-r2-thr  code BB-AUK-001
+  step 2  inject reply  message_id=c3-gate-r2-b  thread=c3-gate-r2-thr  NO code
+          (keyword-only "aukera" so it is fetched; production continuity fires ONLY
+           on code-less replies — an explicit code would take the code lane instead)
           call bridge.run_tick()  -> reply routes on the SAME thread
           EXPECT reply terminal_reason = thread_continuity_routed_ticket:BB-AUK-001
                  routed to the SAME desk/matter as ticket #1 (no divergent desk)
@@ -70,8 +72,12 @@ def run(conn) -> dict:
     c3.inject_email(conn, "r2-a", thread_suffix="r2-thr", sender_email=sender,
                     subject="aukera closing", body=f"opening item on {CODE}")
     bridge.run_tick()
+    # MED-1 (codex #5984): production thread-continuity fires ONLY on a code-LESS
+    # reply (airport_ticketing_bridge.py ~2704-2708: `if not extract_project_codes`).
+    # The reply must carry a keyword (subject "aukera" -> fetched) but NO project
+    # code, so it routes by inherited thread binding, not by re-extracting the code.
     c3.inject_email(conn, "r2-b", thread_suffix="r2-thr", sender_email=sender,
-                    subject="RE: aukera closing", body=f"follow-up on {CODE}")
+                    subject="RE: aukera closing", body="following up on the closing timeline, please advise")
     bridge.run_tick()
     replay = bridge.run_tick()
 

@@ -50,7 +50,7 @@ def _seed_landed(conn) -> str:
             "VALUES (%s, %s, %s, %s, %s::jsonb) "
             "ON CONFLICT (ticket_id) DO UPDATE SET event_state = EXCLUDED.event_state, "
             "correlation = EXCLUDED.correlation, updated_at = NOW()",
-            (ev_id, f"{c3.PREFIX}r3", flow.LANDED, flow._boarding_slug(),
+            (ev_id, f"{c3.PREFIX}r3", flow.LANDED, flow._DESK,
              json.dumps({"package": "returned package (c3 gate)"})),
         )
     conn.commit()

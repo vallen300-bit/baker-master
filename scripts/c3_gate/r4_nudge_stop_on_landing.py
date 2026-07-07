@@ -49,7 +49,7 @@ def _seed_boarding_posted(conn) -> str:
             "VALUES (%s, %s, %s, %s, %s::jsonb, NOW() - INTERVAL '100 hours') "
             "ON CONFLICT (ticket_id) DO UPDATE SET event_state = EXCLUDED.event_state, "
             "correlation = EXCLUDED.correlation, updated_at = NOW() - INTERVAL '100 hours'",
-            (ev_id, f"{c3.PREFIX}r4", flow.BOARDING_POSTED, flow._boarding_slug(),
+            (ev_id, f"{c3.PREFIX}r4", flow.BOARDING_POSTED, flow._DESK,
              json.dumps({"nudge_count": 0})),
         )
     conn.commit()

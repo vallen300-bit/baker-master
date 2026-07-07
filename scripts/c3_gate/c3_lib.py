@@ -54,6 +54,13 @@ _SANDBOX_SINCE: Optional[datetime] = None
 # real BB-AUK-001 registry row on live is NEVER touched.
 _REGISTERED_CODES: set[str] = set()
 
+# HIGH-1 (codex #5984). Sentinel boarding desk. On live-target runs the boarding
+# `_DESK` filter is repointed here so run_receipt_writer / run_boarding_ttl_nudge
+# production scans (WHERE desk_owner = _DESK) match ONLY this harness's seeded
+# rows, never a real baden-baden-desk journey row. R3/R4 seed with `flow._DESK`
+# so seed and scan agree on both branches (real desk on test, sentinel on live).
+_SANDBOX_BOARDING_DESK = f"{PREFIX}desk"
+
 
 def now() -> datetime:
     return datetime.now(timezone.utc)
@@ -97,6 +104,31 @@ def bind_global_store() -> None:
         tbr.TierBRuntime._instance = None
     except Exception:
         pass
+
+    # HIGH-3 (codex #5984): the project registry code/participant/thread lanes that
+    # run_tick uses resolve via kbl.db.get_conn (project_registry_store does
+    # `from kbl.db import get_conn`). kbl/db.py IGNORES TEST_DATABASE_URL — so
+    # without this, on the test branch the harness seeds the registry in db_url()
+    # while the resolver reads a DIFFERENT DB and never sees the seed. Route BOTH
+    # the module and the already-bound name at db_url(). On live db_url() ==
+    # DATABASE_URL, so this is a semantic no-op there.
+    import contextlib
+
+    import kbl.db as _kbl_db
+    import kbl.project_registry_store as _reg_mod
+
+    @contextlib.contextmanager
+    def _harness_get_conn():
+        import psycopg2
+
+        conn = psycopg2.connect(db_url())
+        try:
+            yield conn
+        finally:
+            conn.close()
+
+    _kbl_db.get_conn = _harness_get_conn  # type: ignore[assignment]
+    _reg_mod.get_conn = _harness_get_conn  # type: ignore[assignment]
 
 
 class _HarnessStore:
@@ -334,7 +366,7 @@ def nudge_actions(conn, ev_ticket_id: str) -> list:
         cur.execute(
             "SELECT action_type, created_at FROM baker_actions "
             "WHERE action_type IN ('airport_boarding.nudged','airport_boarding.escalated') "
-            "  AND details::text LIKE %s "
+            "  AND payload::text LIKE %s "
             "ORDER BY created_at ASC",
             (f"%{ev_ticket_id}%",),
         )
@@ -406,6 +438,23 @@ def restore_watermark(conn, source: str, snap: Optional[tuple]) -> None:
     conn.commit()
 
 
+def sandbox_boarding_desk():
+    """HIGH-2/HIGH-1: repoint the boarding-flow desk filter to the sentinel so the
+    receipt-writer + ttl-nudge production scans (desk_owner = _DESK) see ONLY this
+    harness's seeded rows. Returns the original _DESK so `finally` can restore it."""
+    from orchestrator import airport_boarding_flow as flow
+
+    orig = flow._DESK
+    flow._DESK = _SANDBOX_BOARDING_DESK
+    return orig
+
+
+def restore_boarding_desk(orig) -> None:
+    from orchestrator import airport_boarding_flow as flow
+
+    flow._DESK = orig
+
+
 def cleanup(conn) -> dict:
     """Delete every marked synthetic row this harness could have created. Safe on
     live (only touches c3-gate- / airport-lounge:c3-gate- rows). Logged + returned
@@ -422,7 +471,8 @@ def cleanup(conn) -> dict:
         counts["airport_tickets"] = cur.rowcount
         cur.execute("DELETE FROM email_messages WHERE message_id LIKE %s", (f"{PREFIX}%",))
         counts["email_messages"] = cur.rowcount
-        cur.execute("DELETE FROM baker_actions WHERE details::text LIKE %s", (f"%{PREFIX}%",))
+        # HIGH-2 (codex #5984): live baker_actions has `payload` JSONB, no `details`.
+        cur.execute("DELETE FROM baker_actions WHERE payload::text LIKE %s", (f"%{PREFIX}%",))
         counts["baker_actions"] = cur.rowcount
         # MED-1: remove the project_registry rows THIS harness seeded — TEST BRANCH
         # ONLY. On live the pilot code (BB-AUK-001) is the real registry row; never
@@ -478,6 +528,7 @@ def main_scaffold(row: str, dry_description: str, run_fn: Callable[[Any], dict])
     global _SANDBOX_SINCE
     wm_source = _email_watermark_source()
     wm_snapshot: Optional[tuple] = None
+    boarding_desk_orig = None
     sandboxed = False
     try:
         bootstrap_tables(conn)
@@ -486,6 +537,8 @@ def main_scaffold(row: str, dry_description: str, run_fn: Callable[[Any], dict])
             wm_snapshot = snapshot_watermark(conn, wm_source)
             _SANDBOX_SINCE = now()
             set_watermark(conn, wm_source, _SANDBOX_SINCE)
+            # HIGH-1: scope the R3/R4 boarding-flow production scans to harness rows.
+            boarding_desk_orig = sandbox_boarding_desk()
             sandboxed = True
         result = run_fn(conn)
         log_path = write_run_log(row, {"pass": result["pass"],
@@ -500,6 +553,7 @@ def main_scaffold(row: str, dry_description: str, run_fn: Callable[[Any], dict])
     finally:
         if sandboxed:
             restore_watermark(conn, wm_source, wm_snapshot)
+            restore_boarding_desk(boarding_desk_orig)
             print(f"watermark restored: {wm_source}")
         if not args.keep:
             removed = cleanup(conn)
