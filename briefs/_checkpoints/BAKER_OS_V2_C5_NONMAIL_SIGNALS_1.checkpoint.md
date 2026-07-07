@@ -1,11 +1,29 @@
 ---
 brief_id: BAKER_OS_V2_C5_NONMAIL_SIGNALS_1
-lane: post-deploy AC verdict (code merged; live AC owed)
+lane: post-deploy AC verdict (code merged; live AC in progress — dry-run PASS, live drain confirming)
 attempt: 1
 owner: b1
 reply_topic: baker-os-v2/c5-nonmail-signals
-updated: 2026-07-07T00:00Z
+updated: 2026-07-07T09:26Z
 ---
+
+# UPDATE 2026-07-07T09:26Z — live AC in progress (do NOT restart env work)
+
+## Live AC state (Render srv-d6dgsbctgctc73f55730)
+- Env LIVE (persist across deploys): AIRPORT_NONMAIL_SOURCES_ENABLED=true, AIRPORT_NONMAIL_DRY_RUN=false, AIRPORT_NONMAIL_LOOKBACK_HOURS=720. Render key: op item ugerv6jmgbigpaa5cqhd7xe6x4 vault "Baker API Keys" field credential. Owner tea-d6dgif24d50c73apjilg.
+- DRY-RUN LEG PASS: tick 09:02:25Z logged 21 would-ticket (1 plaud + 20 wa, all :baden-baden-desk), 0 rows inserted. Stats line confirms plaud_skipped=1 whatsapp_skipped=20 nonmail_dry_run=True.
+- LIVE LEG PARTIAL: first live tick ~09:19:37Z issued 1 plaud + 2 whatsapp (DB status=sent) then INTERRUPTED mid-wa-loop by UNRELATED new_commit deploy dep-d96c7gn4 (commit 76a55e4d harness-v2, not C5). Per-ticket commits saved the 3. Remaining ~18 wa un-issued, re-fetchable.
+- Watermarks: plaud advanced to 2026-06-22T14:09 (drained, sole candidate). whatsapp watermark row ABSENT (end-of-lane advance never reached) -> next tick re-fetches all 20, 2 dedup idempotent, next ~5 issue (cap=5/lane/tick).
+- Posted lead: #5990 (status), #6017 (RE #6013 interim answers). Acked #6013. lead #6013 = 2 wa escalated (#6008/#6010), baden-baden-desk non-responsive; do NOT re-route/delete; answer 2 Qs in verdict.
+
+## Next concrete step
+1. Confirm next clean tick (~09:30:45Z = 09:20:45 register +600s): assert plaud 0-new (idempotent, no 2nd plaud row), whatsapp issues next batch w/ NO duplicate rows for the 2 already-issued dedup_keys, whatsapp_issued>0 in stats. Query: SELECT source_channel,status,count(*) FROM airport_tickets WHERE source_channel IN('plaud','whatsapp') GROUP BY 1,2; + check dup dedup_key.
+2. Optionally let 1-2 more ticks drain wa toward 20 (not required for AC — >=1 each already proven).
+3. Revert LOOKBACK to 168 via merge-guard post-AC (defense vs future cursor-reset re-flood) + redeploy.
+4. Post POST_DEPLOY_AC_VERDICT v1 to lead on baker-os-v2/c5-nonmail-signals with row ids + the 2 #6013 answers.
+5. THEN Wave-2 BAKER_OS_V2_B4_AO_DATA_PREFLIGHT_1 (#5914, brief @7646753).
+
+## Prod recon (unchanged from below — still valid)
 
 # Checkpoint — C5 post-deploy AC (context-refresh handoff at ~50%)
 
