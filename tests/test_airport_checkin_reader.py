@@ -9,6 +9,7 @@ network is touched; only the DB writes are real.
 """
 from __future__ import annotations
 
+import re
 from datetime import datetime, timedelta, timezone
 
 import psycopg2
@@ -251,6 +252,123 @@ def test_reader_one_bad_reply_does_not_stop_batch(pg, monkeypatch):
     assert out["errors"] == 1
     assert out["checked_in"] == 1
     assert _ticket(pg, "TK5")["status"] == "checked_in"
+
+
+# --- Part 1b: drain-to-empty + dead-letter (CHECKIN_READER_DRAIN_DEADLETTER_1) ----
+
+class PagingFakeBus(FakeBus):
+    """FakeBus that RESPECTS ?limit and DROPS acked messages from the unread set, so the
+    drain-to-empty loop pages through a backlog the way the real daemon does."""
+
+    def __init__(self, inbox=None, bodies=None):
+        super().__init__(inbox=inbox, bodies=bodies)
+        self._acked_ids: set = set()
+
+    def __call__(self, method, url, *, key, payload=None, timeout=15):
+        if method == "GET" and "/msg/" in url and "unread=true" in url:
+            m = re.search(r"limit=(\d+)", url)
+            lim = int(m.group(1)) if m else 25
+            unread = [x for x in self.inbox if x.get("id") not in self._acked_ids]
+            return {"messages": unread[:lim]}
+        if method == "POST" and url.endswith("/ack"):
+            mid = int(url.rsplit("/msg/", 1)[1].split("/")[0])
+            self._acked_ids.add(mid)
+        return super().__call__(method, url, key=key, payload=payload, timeout=timeout)
+
+
+_T0 = datetime(2026, 7, 7, 12, 0, tzinfo=timezone.utc)
+
+
+def test_reader_dead_letters_aged_unmatched(pg, monkeypatch):
+    # reply matches NO ticket and is older than the dead-letter budget -> ACK + audit
+    bus = FakeBus(
+        inbox=[{"id": 6001, "parent_id": 999999, "thread_id": "nope",
+                "from_terminal": "baden-baden-desk", "body_preview": "FAKE",
+                "created_at": _T0.isoformat()}],
+        bodies={6001: "FAKE"},
+    )
+    monkeypatch.setattr(reader, "_request_json", bus)
+    out = reader.run_checkin_reader(pg, now=_T0 + timedelta(minutes=45))
+    assert out["dead_lettered"] == 1
+    assert out["unmatched"] == 0
+    assert 6001 in bus.acks
+    assert _audit_count(pg, "airport_checkin.dead_letter") == 1
+
+
+def test_reader_keeps_young_unmatched_unacked(pg, monkeypatch):
+    # same unmatched reply but YOUNG -> not dead-lettered, left un-acked for retry
+    bus = FakeBus(
+        inbox=[{"id": 6002, "parent_id": 999999, "thread_id": "nope",
+                "from_terminal": "baden-baden-desk", "body_preview": "FAKE",
+                "created_at": _T0.isoformat()}],
+        bodies={6002: "FAKE"},
+    )
+    monkeypatch.setattr(reader, "_request_json", bus)
+    out = reader.run_checkin_reader(pg, now=_T0 + timedelta(minutes=5))
+    assert out["dead_lettered"] == 0
+    assert out["unmatched"] == 1
+    assert 6002 not in bus.acks
+    assert _audit_count(pg, "airport_checkin.dead_letter") == 0
+
+
+def test_reader_dead_letters_aged_parsed_none(pg, monkeypatch):
+    _insert_ticket(pg, ticket_id="TK6", bus_message_id=4610)
+    bus = FakeBus(
+        inbox=[{"id": 6003, "parent_id": 4610, "thread_id": "t",
+                "from_terminal": "baden-baden-desk", "body_preview": "hmm",
+                "created_at": _T0.isoformat()}],
+        bodies={6003: "just some free text, no outcome word"},
+    )
+    monkeypatch.setattr(reader, "_request_json", bus)
+    out = reader.run_checkin_reader(pg, now=_T0 + timedelta(minutes=45))
+    assert out["dead_lettered"] == 1
+    assert out["parsed_none"] == 0
+    assert 6003 in bus.acks
+
+
+def test_reader_drain_to_empty_multi_page(pg, monkeypatch):
+    # 12 real disposes, poll limit 5 -> must page (5+5+2) to clear all in one sweep
+    monkeypatch.setattr(reader, "_poll_limit", lambda: 5)
+    inbox, bodies = [], {}
+    for i in range(12):
+        _insert_ticket(pg, ticket_id=f"TKd{i}", bus_message_id=7000 + i)
+        inbox.append({"id": 8000 + i, "parent_id": 7000 + i, "thread_id": f"th{i}",
+                      "from_terminal": "baden-baden-desk", "body_preview": "FAKE",
+                      "created_at": _T0.isoformat()})
+        bodies[8000 + i] = "FAKE"
+    bus = PagingFakeBus(inbox=inbox, bodies=bodies)
+    monkeypatch.setattr(reader, "_request_json", bus)
+    out = reader.run_checkin_reader(pg, now=_T0 + timedelta(minutes=1))
+    assert out["checked_in"] == 12
+    assert len(bus.acks) == 12
+    for i in range(12):
+        assert _ticket(pg, f"TKd{i}")["status"] == "rejected"  # FAKE -> rejected
+
+
+def test_reader_dead_letter_unblocks_dispose_behind_wall(pg, monkeypatch):
+    # AC scenario: a WALL of 5 aged un-ackable junk replies sits at the front of the
+    # oldest-first window, ahead of a real dispose. poll limit 5 => without dead-letter
+    # the real dispose would never be reached. With dead-letter, junk clears and the
+    # real dispose checks in within the SAME sweep.
+    monkeypatch.setattr(reader, "_poll_limit", lambda: 5)
+    _insert_ticket(pg, ticket_id="TKreal", bus_message_id=7777)
+    inbox = [
+        {"id": 9000 + i, "parent_id": 111000 + i, "thread_id": f"junk{i}",
+         "from_terminal": "baden-baden-desk", "body_preview": "FAKE",
+         "created_at": _T0.isoformat()}
+        for i in range(5)
+    ]
+    inbox.append({"id": 9500, "parent_id": 7777, "thread_id": "real",
+                  "from_terminal": "baden-baden-desk", "body_preview": "FAKE",
+                  "created_at": _T0.isoformat()})
+    bodies = {m["id"]: "FAKE" for m in inbox}
+    bus = PagingFakeBus(inbox=inbox, bodies=bodies)
+    monkeypatch.setattr(reader, "_request_json", bus)
+    out = reader.run_checkin_reader(pg, now=_T0 + timedelta(minutes=45))
+    assert out["dead_lettered"] == 5      # the wall of aged junk
+    assert out["checked_in"] == 1         # the real dispose behind it
+    assert _ticket(pg, "TKreal")["status"] == "rejected"
+    assert 9500 in bus.acks
 
 
 # --- Part 2: TTL / nudge ----------------------------------------------------
