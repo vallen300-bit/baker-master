@@ -8414,6 +8414,43 @@ async def flight_dashboard_page(request: Request, project_code: str):
     return HTMLResponse(flight_dashboard.render_dashboard_html(data))
 
 
+@app.post("/api/flight-board/{project_code}", dependencies=[Depends(verify_api_key)])
+async def flight_board_upsert(project_code: str, payload: dict = Body(...)):
+    """ARRIVALS_BOARD_LIVE_1: pilot upsert of flight board state."""
+    from orchestrator import arrivals_board
+
+    try:
+        row = arrivals_board.upsert_board_state(
+            project_code,
+            payload,
+            updated_by=str(payload.get("updated_by") or "unknown"),
+        )
+    except ValueError as e:
+        raise HTTPException(status_code=422, detail=str(e)) from e
+    except Exception:
+        logger.exception("flight_board_upsert failed for %s", project_code)
+        raise HTTPException(status_code=500, detail="flight_board_upsert_failed")
+    return {"ok": True, "state": row}
+
+
+@app.get("/arrivals", include_in_schema=False, response_class=HTMLResponse)
+async def arrivals_board_page(request: Request):
+    """ARRIVALS_BOARD_LIVE_1: Director ARRIVALS board (ratified v6 register)."""
+    from orchestrator import arrivals_board
+
+    rows = arrivals_board.list_board_rows()
+    return HTMLResponse(arrivals_board.render_board_html(rows))
+
+
+@app.get("/api/arrivals.json", include_in_schema=False)
+async def arrivals_board_json():
+    """ARRIVALS_BOARD_LIVE_1: ARRIVALS board rows for monitors/future clients."""
+    from orchestrator import arrivals_board
+
+    rows = arrivals_board.json_rows(arrivals_board.list_board_rows())
+    return {"count": len(rows), "rows": rows}
+
+
 @app.get("/wip", include_in_schema=False, response_class=HTMLResponse)
 async def wip_page(request: Request):
     """Server-rendered WIP-materials browser page (?key= gated)."""

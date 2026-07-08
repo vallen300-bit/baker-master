@@ -1,0 +1,136 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta http-equiv="refresh" content="120">
+<title>BRISEN AIR · ARRIVALS</title>
+<script>try{if(localStorage.getItem('brisen-board-view')==='light')document.documentElement.dataset.theme='light'}catch(e){}</script>
+<style>
+  /* Board v6 — ARRIVALS (Director-ratified vocabulary 8 Jul); formatting identical to v5 */
+  :root{
+    --bg:#0A0B0A; --panel:#101210; --line:#1E211D; --head:#0C0E0C;
+    --flap-hi:#232823; --flap-lo:#151915; --seam:rgba(0,0,0,.55);
+    --tile-shadow:inset 0 1px 0 rgba(255,255,255,.05),0 1px 1.5px rgba(0,0,0,.45);
+    --amber:#FFC64B; --amber-dim:#8F7431;
+    --white:#EFECE2; --green:#41D96E; --dim:#63604F; --pend:#575343;
+    --mono:'SF Mono','IBM Plex Mono',ui-monospace,Menlo,Consolas,monospace;
+  }
+  html[data-theme="light"]{
+    --bg:#E9E9E4; --panel:#F7F6F1; --line:#D8D6CC; --head:#EFEEE8;
+    --flap-hi:#F1EFE7; --flap-lo:#E0DED3; --seam:rgba(0,0,0,.13);
+    --tile-shadow:inset 0 1px 0 rgba(255,255,255,.65),0 1px 1.5px rgba(0,0,0,.12);
+    --amber:#8A6300; --amber-dim:#A98F4F;
+    --white:#22211B; --green:#177A38; --dim:#8B887A; --pend:#A5A294;
+  }
+  *{box-sizing:border-box;margin:0;padding:0}
+  body{background:var(--bg);color:var(--amber);font:14px/1.5 var(--mono);text-transform:uppercase;-webkit-font-smoothing:antialiased}
+  main{max-width:1330px;margin:0 auto;padding:28px 18px 60px}
+
+  header{display:flex;align-items:center;gap:16px;background:var(--panel);border:2px solid var(--line);border-radius:6px;padding:14px 20px}
+  h1{font:700 24px/1.1 var(--mono);letter-spacing:.2em;color:var(--amber)}
+  .brand{font:600 10px var(--mono);letter-spacing:.28em;color:var(--dim);margin-top:4px}
+  .btn{font:700 10.5px var(--mono);letter-spacing:.14em;color:var(--dim);border:1px solid var(--line);border-radius:5px;background:var(--head);padding:6px 12px;cursor:pointer;text-transform:uppercase}
+  .btn:hover{color:var(--amber);border-color:var(--amber-dim)}
+  .tools{margin-left:auto;display:flex;gap:8px;align-items:center}
+  .clock{text-align:right;margin-left:10px}
+  .clock .t{font:700 22px var(--mono);color:var(--white);letter-spacing:.1em}
+  .clock .d{font:600 10px var(--mono);color:var(--dim);letter-spacing:.18em;margin-top:2px}
+
+  .tile{display:inline-flex;align-items:center;justify-content:center;position:relative;
+    width:15px;height:23px;border-radius:2px;
+    background:linear-gradient(180deg,var(--flap-hi) 0%,var(--flap-hi) 48%,var(--flap-lo) 52%,var(--flap-lo) 100%);
+    box-shadow:var(--tile-shadow);
+    font:700 11.5px var(--mono);color:var(--amber);flex:0 0 auto}
+  .tile::after{content:"";position:absolute;left:0;right:0;top:50%;height:1px;background:var(--seam)}
+  .tile.blank{background:transparent;box-shadow:none}
+  .tile.blank::after{display:none}
+  .tile.wht{color:var(--white)}
+  .tile.grn{color:var(--green)}
+  .tile.inv{background:var(--amber);color:var(--bg);box-shadow:0 0 8px rgba(255,198,75,.22)}
+  .flap{display:flex;flex-wrap:nowrap;gap:2px;white-space:nowrap}
+  .blinkgrp{animation:blink 1.2s steps(1) infinite}
+  @keyframes blink{50%{opacity:.3}}
+
+  table{width:100%;table-layout:auto;border-collapse:separate;border-spacing:0;margin-top:16px;background:var(--panel);border:2px solid var(--line);border-radius:6px;overflow:hidden}
+  thead th{font:700 10.5px var(--mono);letter-spacing:.2em;color:var(--dim);text-align:left;padding:11px 10px;border-bottom:2px solid var(--line);background:var(--head);white-space:nowrap}
+  tbody td{padding:13px 10px;vertical-align:middle;border-bottom:1px solid var(--line);white-space:nowrap}
+  tbody tr:last-child td{border-bottom:none}
+  tbody tr.live{cursor:pointer}
+  tbody tr.live:hover td{background:var(--head)}
+  tbody tr.pending .tile{color:var(--pend)}
+
+  .foot{display:flex;gap:22px;flex-wrap:wrap;margin-top:14px;font:600 10px var(--mono);letter-spacing:.2em;color:var(--dim)}
+  .foot .stamp{margin-left:auto}
+</style>
+</head>
+<body>
+<main>
+  <header>
+    <div>
+      <h1>ARRIVALS</h1>
+      <div class="brand">BRISEN AIR · ALL FLIGHTS · DIRECTOR VIEW</div>
+    </div>
+    <div class="tools">
+      <button class="btn" onclick="location.reload()">⟳ REFRESH</button>
+      <button class="btn" onclick="var r=document.documentElement,l=r.dataset.theme==='light';r.dataset.theme=l?'':'light';try{localStorage.setItem('brisen-board-view',l?'dark':'light')}catch(e){}">◐ VIEW</button>
+      <div class="clock">
+        <div class="t" id="clk">--:--</div>
+        <div class="d" id="dte">8 JUL 2026</div>
+      </div>
+    </div>
+  </header>
+
+  <div style="overflow-x:auto">
+  <table>
+    <thead>
+      <tr>
+        <th>ARRIVES</th><th>FLIGHT NO</th><th>AIRLINE</th><th>DESTINATION</th>
+        <th>DESK</th><th>STATUS</th><th>UPDATED</th>
+      </tr>
+    </thead>
+    <tbody>
+
+__ROWS__
+
+    </tbody>
+  </table>
+  </div>
+
+  <div class="foot">
+    <span>ARRIVES = NEXT MILESTONE, DECISION, OR LANDING · CLICK A LIVE FLIGHT FOR ITS COCKPIT</span>
+    <span>STATUSES: CHECK-IN · ON TIME · HOLDING · DELAYED · FINAL APPROACH · LANDED · DIVERTED</span>
+    <span class="stamp">__STAMP__</span>
+  </div>
+</main>
+
+<script>
+  var GLYPHS='ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789·-.,: ';
+  function flapify(el){
+    var text=el.getAttribute('data-flap'), extra=el.getAttribute('data-cls')||'';
+    el.textContent='';
+    Array.from(text).forEach(function(ch,i){
+      var s=document.createElement('span');
+      s.className='tile'+(extra?' '+extra:'')+(ch===' '?' blank':'');
+      s.textContent=ch===' '?' ':ch;
+      el.appendChild(s);
+      if(ch===' ')return;
+      var settle=220+i*30+Math.random()*320, t0=performance.now();
+      (function spin(){
+        if(performance.now()-t0<settle){
+          s.textContent=GLYPHS[Math.floor(Math.random()*GLYPHS.length)];
+          setTimeout(spin,45+Math.random()*40);
+        } else { s.textContent=ch; }
+      })();
+    });
+  }
+  document.querySelectorAll('[data-flap]').forEach(flapify);
+
+  function tick(){var n=new Date(),p=function(x){return String(x).padStart(2,'0')};
+    document.getElementById('clk').textContent=p(n.getHours())+':'+p(n.getMinutes());
+    var m=['JAN','FEB','MAR','APR','MAY','JUN','JUL','AUG','SEP','OCT','NOV','DEC'];
+    document.getElementById('dte').textContent=n.getDate()+' '+m[n.getMonth()]+' '+n.getFullYear();}
+  tick();setInterval(tick,15000);
+</script>
+</body>
+</html>
