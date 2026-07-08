@@ -78,6 +78,22 @@ def test_baden_baden_desk_promoted_active_on_bus():
     assert "baden-baden-desk" in BUS_AGENT_SLUGS
 
 
+def test_librarian_registered_on_bus():
+    # LIBRARIAN_AGENT_INSTALL_1: AG-209 librarian (internal-retrieval specialist),
+    # Sonnet-pinned terminal seat, snapshot path = ~/baker-vault (its findings
+    # commit to wiki/_library/; picker ~/bm-librarian has no .git — RESEARCHER_ON_BUS_1
+    # foot-gun avoided). Registry-driven install; assertion guards the regen.
+    assert resolve_agent("librarian").slug == "librarian"
+    assert resolve_agent("AG-209").slug == "librarian"
+    assert resolve_agent("ag-209").slug == "librarian"
+    assert resolve_agent("LIBRARIAN").slug == "librarian"
+    assert identity_label("librarian") == "AG-209 Librarian [librarian]"
+    assert "librarian" in VALID_BUS_SLUGS
+    assert "librarian" in BUS_AGENT_SLUGS
+    # snapshot path = vault fallback (picker has no git clone), like researcher/ben
+    assert "librarian:/Users/dimitry/baker-vault" in SNAPSHOT_TERMINALS
+
+
 def test_snapshot_terminals_include_generated_registry_agents():
     assert "codex-arch:/Users/dimitry/baker-vault" in SNAPSHOT_TERMINALS
     assert "clerk:/Users/dimitry/bm-clerk" in SNAPSHOT_TERMINALS
