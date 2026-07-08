@@ -320,13 +320,15 @@ def _row_html(row: dict[str, Any], today: date) -> str:
     click = f' onclick="{_onclick(url)}"' if url != "/cockpit" else ""
     return (
         f'      <tr class="{row_class}"{click}>\n'
-        f"        <td>{_flap(_format_arrives(row.get('arrives_on')))}</td>\n"
+        # arrives / desk / updated = tech-meta columns -> smaller 'meta' tiles so
+        # they don't compete with flight name, destination and status.
+        f"        <td>{_flap(_format_arrives(row.get('arrives_on')), 'meta')}</td>\n"
         f"        <td>{_flap(flight_no)}</td>\n"
         f"        <td>{_flap(airline, 'wht' if has_state else '')}</td>\n"
         f"        <td>{_flap(destination, 'wht' if has_state else '')}</td>\n"
-        f"        <td>{_flap(desk)}</td>\n"
+        f"        <td>{_flap(desk, 'meta')}</td>\n"
         f"        <td>{_flap(status, status_cls, status_extra)}</td>\n"
-        f"        <td>{_flap(_format_updated(row.get('updated_at')))}</td>\n"
+        f"        <td>{_flap(_format_updated(row.get('updated_at')), 'meta')}</td>\n"
         "      </tr>"
     )
 

@@ -48,7 +48,10 @@
   .tile.wht{color:var(--white)}
   .tile.grn{color:var(--green)}
   .tile.inv{background:var(--amber);color:var(--bg);box-shadow:0 0 8px rgba(255,198,75,.22)}
-  .flap{display:flex;flex-wrap:nowrap;gap:2px;white-space:nowrap}
+  /* meta = tech columns (arrives / desk / updated): smaller so they don't compete
+     with the load-bearing flight name, destination and status. */
+  .tile.meta{width:11px;height:17px;font-size:8.5px;color:var(--dim)}
+  .flap{display:flex;flex-wrap:nowrap;gap:2px;white-space:nowrap;align-items:center}
   .blinkgrp{animation:blink 1.2s steps(1) infinite}
   @keyframes blink{50%{opacity:.3}}
 

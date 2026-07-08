@@ -116,12 +116,12 @@ def test_cockpit_route_unknown_returns_404(monkeypatch):
 
 
 def test_inject_back_button_placement():
-    """ARRIVALS return control lands before </body>, is same-origin, appears once."""
+    """Arrivals return control lands before </body>, is same-origin, appears once."""
     out = cs._inject_back_button("<html><body><h1>Aukera</h1></body></html>")
     assert out.count('href="/arrivals"') == 1
-    assert out.index("ARRIVALS") < out.index("</body>")
+    assert out.index('href="/arrivals"') < out.index("</body>")
     # No </body>: still injected (fixed-position renders anywhere).
     assert 'href="/arrivals"' in cs._inject_back_button("<div>x</div>")
     # Multiple bodies: attach to the last.
     multi = cs._inject_back_button("<body>a</body>x<body>b</body>")
-    assert multi.rfind("ARRIVALS") < multi.rfind("</body>")
+    assert multi.rfind('href="/arrivals"') < multi.rfind("</body>")

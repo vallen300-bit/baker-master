@@ -117,17 +117,20 @@ def _read_file_content(path: str) -> str:
     return raw.decode("utf-8")
 
 
-# Floating "back to ARRIVALS" control injected into every served cockpit — the
+# Floating "back to Arrivals" control injected into every served cockpit — the
 # desk cockpit files have no board-return control of their own (they are also
 # opened standalone). Serving-layer injection keeps the vault files untouched and
 # covers every flight at once. Same-origin /arrivals; the PIN cookie already set.
+# Style mirrors the cockpit's own native ".backlink" pill (Back to overview):
+# reuses the Pattern-E theme tokens so it inherits light/dark, with hard fallbacks
+# for any cockpit that lacks them. Floating (fixed) so it stays reachable on scroll.
 _BACK_BUTTON = (
     '<a href="/arrivals" '
-    'style="position:fixed;top:14px;left:14px;z-index:99999;'
-    "font:700 12px/1 'SF Mono',ui-monospace,Menlo,monospace;letter-spacing:.1em;"
-    "text-transform:uppercase;color:#0A0B0A;background:#FFC64B;"
-    "text-decoration:none;padding:9px 13px;border-radius:6px;"
-    'box-shadow:0 2px 8px rgba(0,0,0,.45);">&#8592; ARRIVALS</a>'
+    'style="position:fixed;top:14px;left:14px;z-index:99999;display:inline-block;'
+    "font:600 12.5px/1 -apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,sans-serif;"
+    "color:var(--ink-3,#676C6F);background:var(--surface,#FFFFFF);"
+    "border:1px solid var(--line-strong,#DADCDD);border-radius:6px;padding:6px 12px;"
+    'text-decoration:none;box-shadow:0 1px 4px rgba(0,0,0,.12);">&#8592; Arrivals</a>'
 )
 
 
