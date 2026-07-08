@@ -82,7 +82,8 @@ def test_render_board_html_uses_template_tokens_and_filters_old_landed():
     html = ab.render_board_html(rows, now=NOW)
     assert 'data-flap="BB-AUK-001"' in html
     assert "external.example" not in html
-    assert 'onclick="location.href=&quot;/flights/BB-AUK-001&quot;"' in html
+    assert 'onclick="location.href=&quot;/cockpit/BB-AUK-001&quot;"' in html
+    assert 'onclick="location.href=&quot;/cockpit/AO-OSK-001&quot;"' in html
     assert "blinkgrp" in html
     assert 'data-flap="FINAL APPROACH"' in html
     assert 'data-flap="PENDING"' in html
