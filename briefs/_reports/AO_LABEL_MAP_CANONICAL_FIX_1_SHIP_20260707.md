@@ -7,6 +7,41 @@
 | task class | classifier label-map fix + registry rename; Option A per lead #6822 |
 | gate | G1 self ✅ → codex G3 (gate/ao-label-map-g3, effort=medium) → lead merge → AC4 post-deploy |
 
+## ROUND-2 ADDENDUM (deputy, 2026-07-08) — codex G3 FAIL #6935 remediation
+
+**Why round-1 was incomplete (codex #6934/#6935, valid P1):** round-1 only flipped the
+`'Oskolkov'` hint value. But the real AO corpus lives under `/Baker-Feed/AO_MASTER/…`
+folders that contain **no literal `Oskolkov` substring** — they contain `RG7`, so the generic
+`'RG7' -> 'Riemergasse 7'` hint won first-match and mislabeled them. Round-1's AC1 test masked
+this by using a path that literally contained `Oskolkov`.
+
+**Round-2 fix (surgical, zero non-AO blast radius):**
+1. **`tools/document_pipeline.py`** — added two **root-scope** keys at the TOP of
+   `PATH_MATTER_HINTS`: `'AO_MASTER' -> 'Oskolkov'` and `'AO_RG7' -> 'Oskolkov'`. Because
+   `get_path_matter_hint` returns first-match, placing the AO root scope first makes it beat
+   both the generic `'RG7'` hint AND any subfolder-name collision. Matcher logic UNCHANGED
+   (no global reordering) — the only paths whose hint changes are those containing `AO_MASTER`/
+   `AO_RG7`, and (verified prod) those strings appear **only** in AO docs. Every non-AO path's
+   output is byte-identical to before.
+2. **`tests/test_document_pipeline_matter_hint.py`** — added 4 parametrized AC1 tests using
+   **real prod source_paths** (one per AO_MASTER subtree family + the 1 email doc outside
+   AO_MASTER), a generic-`RG7`→Riemergasse regression test (proves AO keys don't steal genuine
+   Riemergasse docs), and a **foot-gun ordering guard** asserting AO keys iterate before `RG7`.
+
+**Prod evidence (read-only, `documents` table):** 597 docs under `AO_MASTER` currently scattered
+across **10 wrong matters** (Baker 82, Financing 37, Cupial/Kitzbühel/Cap-Ferrat/MO-AM/Brisen-AI…);
+268 contain `AO_RG7`, of which exactly **2** live outside `AO_MASTER` (both AO reconciliation docs
+— caught by the standalone `AO_RG7` key). Codex's 305 was the RG7-collision subset; this fix
+covers the full 597-doc AO_MASTER corpus.
+
+**Tests:** `BAKER_VAULT_PATH=… pytest tests/test_document_pipeline_matter_hint.py -v` → **11 passed**.
+
+**Scope note:** this is the LIVE-hint fix for docs going forward. The 597 already-stored
+mislabels are re-tagged by the offline `backfill_matter_from_path.py` (separate, lead-coordinated),
+not by this code change.
+
+---
+
 ## What shipped (surgical — 3 code files + 1 new test)
 
 1. **`tools/document_pipeline.py:118`** — `PATH_MATTER_HINTS['Oskolkov']`: `'Oskolkov-RG7'` → `'Oskolkov'`. The retired combined label is no longer minted; `'Oskolkov'` normalizes to canonical slug `ao` (verified `slug_registry.normalize('Oskolkov') == 'ao'`).

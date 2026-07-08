@@ -48,6 +48,50 @@ def test_ac1_oskolkov_hint_normalizes_to_ao():
     assert canonical == "ao"
 
 
+# --- AC1 round-2 — real AO_MASTER prod paths (no literal 'Oskolkov' in path) hint to AO ---
+# Round-1 only tested a path literally containing 'Oskolkov'. The real corpus lives under
+# /Baker-Feed/AO_MASTER/... with NO 'Oskolkov' substring — the gap codex #6935 caught: the
+# generic 'RG7' -> 'Riemergasse 7' hint won first-match for these. Each path below is a real
+# prod source_path (verified live) from a distinct AO_MASTER subtree family.
+
+@pytest.mark.parametrize("src", [
+    # AO_in_RG7 financial subtree (was mislabeled 'Baker'); contains 'RG7' -> must NOT go to Riemergasse
+    "/Baker-Feed/AO_MASTER/10_AO_RG7_2025/AO_in_RG7/Financial/General 2014-2025/TRANSACTIONS/1.45 MLN Private A:C AO CBH/22497 2.pdf",
+    # AO GF / mezz subtree (was mislabeled 'Cap Ferrat Villa')
+    "/Baker-Feed/AO_MASTER/AO GF/AO Mezz 6 mln 2023/15_07_23 Payments Schedule 2023-2024.xlsx",
+    # AO GF / project-list subtree (was mislabeled 'Cupial')
+    "/Baker-Feed/AO_MASTER/AO GF/Boxing/AO Project List/AO CYPRUS/AO PASSPORT CUPRUS.pdf",
+    # AO_RG7 reconciliation doc that lives OUTSIDE AO_MASTER (email source)
+    "email:19d4e5be10c4049c/50448752_AO_RG7_Reconciliation_For_Confirmation.docx",
+])
+def test_ac1_round2_ao_master_paths_hint_oskolkov_not_riemergasse(src):
+    """Every AO_MASTER / AO_RG7 prod path hints the AO matter ('Oskolkov'), never the
+    generic 'Riemergasse 7' (the first-match collision codex #6935 flagged)."""
+    hint = get_path_matter_hint(src)
+    assert "Oskolkov" in hint, f"AO path did not hint Oskolkov: {src!r} -> {hint!r}"
+    assert "Riemergasse" not in hint, f"AO path wrongly hinted Riemergasse: {src!r}"
+    assert "Oskolkov-RG7" not in hint
+
+
+def test_regression_generic_rg7_still_hints_riemergasse():
+    """A non-AO path containing only the generic 'RG7' token still resolves to
+    'Riemergasse 7' — the AO_* keys must not steal genuine Riemergasse docs."""
+    src = "/Baker-Feed/Riemergasse 7 Sanierung/RG7 Bauakt/Nachtrag_03.pdf"
+    hint = get_path_matter_hint(src)
+    assert "Riemergasse 7" in hint
+    assert "Oskolkov" not in hint
+
+
+def test_ordering_ao_keys_precede_generic_rg7():
+    """Foot-gun guard: AO root-scope keys MUST iterate before the generic 'RG7' key,
+    because get_path_matter_hint returns first-match. A future edit that reorders the
+    dict and puts an AO key after 'RG7' would silently reintroduce the mislabel."""
+    keys = list(PATH_MATTER_HINTS.keys())
+    assert "RG7" in keys and "AO_MASTER" in keys and "AO_RG7" in keys
+    assert keys.index("AO_MASTER") < keys.index("RG7")
+    assert keys.index("AO_RG7") < keys.index("RG7")
+
+
 # --- Regression — the legacy fold is deliberately UNTOUCHED (landmine = separate PR) ---
 
 def test_regression_legacy_rg7_fold_unchanged():
