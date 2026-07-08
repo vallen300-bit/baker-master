@@ -14,7 +14,7 @@
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&family=EB+Garamond:wght@400;500;600;700&display=swap" rel="stylesheet">
-    <link rel="stylesheet" href="/static/style.css?v=84">
+    <link rel="stylesheet" href="/static/style.css?v=85">
 </head>
 <body>
 
@@ -40,6 +40,9 @@
     <nav class="sidebar-nav" aria-label="Baker sections">
         <a class="nav-item nav-item-external" href="https://brisen-lab.onrender.com/#production" target="_blank" rel="noopener noreferrer" id="navBrisenLab">
             <span class="nav-label">Brisen Lab ↗</span>
+        </a>
+        <a class="nav-item nav-item-external" href="/arrivals" target="_blank" rel="noopener noreferrer" id="navArrivals">
+            <span class="nav-label">ARRIVALS BOARD ↗</span>
         </a>
 
         <div class="nav-divider"></div>
@@ -68,29 +71,9 @@
         </div>
         <div class="nav-sub" id="inboxSubList" style="display:none;"></div>
 
-        <!-- PEOPLE-SECTION-1: People section (expandable) -->
-        <div class="nav-section-header" id="navPeopleHeader" data-section="people" role="button" tabindex="0" aria-controls="peopleSubList" aria-expanded="false">
-            <span class="nav-section-arrow">&#9656;</span>
-            <span class="nav-section-label">People</span>
-            <span class="nav-count" id="peopleCount"></span>
-        </div>
-        <div class="nav-sub" id="peopleSubList" style="display:none;"></div>
-
-        <!-- IDEAS-CAPTURE-1: Ideas section -->
-        <div class="nav-section-header" id="navIdeasHeader" data-section="ideas" role="button" tabindex="0" aria-controls="ideasSubList" aria-expanded="false">
-            <span class="nav-section-arrow">&#9656;</span>
-            <span class="nav-section-label">Ideas</span>
-            <span class="nav-count" id="ideasCount"></span>
-        </div>
-        <div class="nav-sub" id="ideasSubList" style="display:none;"></div>
-
-        <!-- MEDIA-SIDEBAR: Media section (promoted to top tier, peer of Ideas/People) -->
-        <div class="nav-section-header" id="navMediaHeader" data-section="media" role="button" tabindex="0" aria-controls="mediaSubList" aria-expanded="false">
-            <span class="nav-section-arrow">&#9656;</span>
-            <span class="nav-section-label">Media</span>
-            <span class="nav-count" id="mediaCount"></span>
-        </div>
-        <div class="nav-sub" id="mediaSubList" style="display:none;"></div>
+        <!-- COCKPIT_REFERENCE_DESK_1: People / Ideas / Media nav sections removed
+             (empty/frozen data — see brief). View <div>s + app.js code retained;
+             reachable by deep link only. -->
 
         <div class="nav-item" data-tab="ao-dashboard" role="button" tabindex="0">
             <span class="nav-dot" id="aoDot" style="margin-top:1px;"></span>
@@ -125,10 +108,7 @@
             <span class="nav-label">Dossiers</span>
             <span class="nav-count" id="dossiersCount"></span>
         </div>
-        <div class="nav-item" data-tab="presentations" role="button" tabindex="0">
-            <span class="nav-label">Presentations</span>
-            <span class="nav-count" id="presentationsCount"></span>
-        </div>
+        <!-- COCKPIT_REFERENCE_DESK_1: Presentations nav item removed (empty manifest). -->
         <div class="nav-item" data-tab="wip" role="button" tabindex="0">
             <span class="nav-label">Work in progress</span>
         </div>
@@ -139,11 +119,7 @@
             <span class="nav-label">AI Hotel Lab</span>
         </a>
 
-        <div class="nav-divider"></div>
-
-        <div class="nav-item" data-tab="travel" role="button" tabindex="0">
-            <span class="nav-label">Travel</span>
-        </div>
+        <!-- COCKPIT_REFERENCE_DESK_1: Travel nav item + its divider removed (empty feed). -->
 
         <div class="nav-divider"></div>
         <div class="nav-item" data-tab="system" role="button" tabindex="0">
@@ -263,23 +239,8 @@
                 </div>
             </div>
 
-            <!-- Cortex Intent Feed (CORTEX-PHASE-3) -->
-            <div id="cortexFeedCard" class="cortex-feed-card" hidden>
-                <div class="grid-cell-header grid-header-cortex">
-                    <span class="section-label" style="margin:0">Cortex</span>
-                    <span class="cortex-tabs">
-                        <button class="cortex-tab active" onclick="_cortexTab('events')" id="cortexTabEvents">Events</button>
-                        <button class="cortex-tab" onclick="_cortexTab('dedup')" id="cortexTabDedup">Dedup</button>
-                        <button class="cortex-tab" onclick="_cortexTab('lint')" id="cortexTabLint">Lint</button>
-                        <button class="cortex-tab" onclick="_cortexTab('pending')" id="cortexTabPending">Pending</button>
-                    </span>
-                    <span class="scheduler-pill" id="cortexSchedulerPill" title="Cortex scheduler liveness"></span>
-                    <span class="grid-cell-count" id="cortexCount"></span>
-                </div>
-                <div class="cortex-feed-body" id="cortexFeedBody">
-                    <div class="grid-empty">Loading Cortex data...</div>
-                </div>
-            </div>
+            <!-- COCKPIT_REFERENCE_DESK_1: Cortex Intent Feed card removed from landing
+                 (last cycle 2026-05-20; returns when Cortex trial data justifies it). -->
 
             <!-- Silent contacts warning (populated by JS) -->
             <div id="silentContactsCard" hidden></div>
@@ -304,7 +265,7 @@
 
         <!-- VIEW: Matters -->
         <div class="view" id="viewMatters">
-            <div class="section-label">Matters</div>
+            <div class="section-label" id="mattersSectionLabel">Matters</div>
             <div id="mattersContent"></div>
         </div>
 
@@ -627,7 +588,7 @@
   })();
 </script>
 
-<script src="/static/app.js?v=132"></script>
+<script src="/static/app.js?v=133"></script>
 <script>
 // PWA-DESKTOP-1: Register service worker for installability
 if ('serviceWorker' in navigator) {

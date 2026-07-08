@@ -64,6 +64,51 @@ def _apply_retirement(rows: list) -> list:
 
 
 # ─────────────────────────────────────────────
+# COCKPIT_REFERENCE_DESK_1 — honest staleness overlay
+# ─────────────────────────────────────────────
+# A sentinel that silently stops (no failures, just no successes) never flips
+# 'down' via _status_for_failures, so it shows 'healthy' forever — the single
+# defect that made the whole cockpit untrustworthy (browser last success
+# 2026-04-27, calendar 2026-05-29, both green today). Read-time overlay (no
+# write), same pattern as _apply_retirement: hours before a quiet source flips
+# to 'stale'; default covers anything unlisted.
+_STALE_AFTER_HOURS_DEFAULT = 48
+_STALE_AFTER_HOURS = {
+    "email": 6,
+    "graph_mail": 6,
+    "whatsapp": 24,
+    "clickup": 30,
+    "todoist": 48,
+    "calendar": 48,
+    "rss": 72,
+    "browser": 168,
+}
+
+
+def _apply_staleness(rows: list) -> list:
+    """Flip long-silent sentinels to 'stale' on the health surface.
+
+    Read-time transform (no write) so it is safe even in a read-only transaction.
+    'disabled' (retired) and 'down' (hard failure) outrank staleness; a row that
+    never succeeded (last_success_at is None) is left to the existing 'unknown'
+    logic. Meant to compose as _apply_staleness(_apply_retirement(rows)).
+    """
+    now = datetime.now(timezone.utc)
+    for r in rows:
+        if r.get("status") in ("disabled", "down"):
+            continue  # retirement and hard-down outrank staleness
+        ls = r.get("last_success_at")
+        if ls is None:
+            continue  # 'unknown' handled by existing logic
+        if ls.tzinfo is None:
+            ls = ls.replace(tzinfo=timezone.utc)
+        max_h = _STALE_AFTER_HOURS.get(r.get("source"), _STALE_AFTER_HOURS_DEFAULT)
+        if (now - ls).total_seconds() / 3600 > max_h:
+            r["status"] = "stale"
+    return rows
+
+
+# ─────────────────────────────────────────────
 # Table DDL — called on first DB access
 # ─────────────────────────────────────────────
 
@@ -646,7 +691,7 @@ def get_all_sentinel_health() -> list:
         """)
         rows = [dict(r) for r in cur.fetchall()]
         cur.close()
-        return _apply_retirement(rows)
+        return _apply_staleness(_apply_retirement(rows))
     except Exception as e:
         logger.warning(f"get_all_sentinel_health failed: {e}")
         return []

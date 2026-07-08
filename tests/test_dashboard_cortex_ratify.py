@@ -119,9 +119,16 @@ def test_trace_route_is_registered_in_dashboard_source():
 
 
 def test_pending_tab_button_in_static_index_html():
+    # COCKPIT_REFERENCE_DESK_1 (Director-ratified 2026-07-08) removed the Cortex
+    # feed card from the landing — last cycle 2026-05-20; it "returns when Cortex
+    # trial data justifies it". The Pending tab was part of that card, so its
+    # button is intentionally gone from index.html. The ratify workflow's backend
+    # (/api/cortex/cycles/pending) and JS helpers are preserved (see the route +
+    # js-helper tests above/below) so the card can be re-added unchanged. This test
+    # now guards the ratified removal rather than the button's presence.
     src = Path("outputs/static/index.html").read_text()
-    assert 'id="cortexTabPending"' in src
-    assert "_cortexTab('pending')" in src
+    assert 'id="cortexTabPending"' not in src, "Cortex feed card should be removed from landing"
+    assert 'id="cortexFeedCard"' not in src, "Cortex feed card should be removed from landing"
     # Cache-bust param present on each asset (version-agnostic — survives future bumps)
     assert re.search(r"app\.js\?v=\d+", src), "app.js cache-bust param missing"
     assert re.search(r"style\.css\?v=\d+", src), "style.css cache-bust param missing"
