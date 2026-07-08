@@ -55,7 +55,9 @@ def test_fetch_cockpit_html_picks_latest_dashboard_and_caches(monkeypatch):
     assert first is second
     assert first.project_code == "BB-AUK-001"
     assert first.path.endswith("dashboard-v2-pattern-e.html")
-    assert first.html == "<html>cockpit</html>"
+    # Served HTML = vault content + injected floating ARRIVALS back control.
+    assert "<html>cockpit</html>" in first.html
+    assert 'href="/arrivals"' in first.html
     assert calls == [
         "_ops/build/baker-os-v2/05_outputs/flight-dashboards/BB-AUK-001",
         "_ops/build/baker-os-v2/05_outputs/flight-dashboards/BB-AUK-001/dashboard-v2-pattern-e.html",
@@ -111,3 +113,15 @@ def test_cockpit_route_unknown_returns_404(monkeypatch):
     client = TestClient(dashboard.app, base_url="https://testserver")
     resp = client.get("/cockpit/NO-FILE-001", headers={"X-Baker-Key": "test-key"})
     assert resp.status_code == 404
+
+
+def test_inject_back_button_placement():
+    """ARRIVALS return control lands before </body>, is same-origin, appears once."""
+    out = cs._inject_back_button("<html><body><h1>Aukera</h1></body></html>")
+    assert out.count('href="/arrivals"') == 1
+    assert out.index("ARRIVALS") < out.index("</body>")
+    # No </body>: still injected (fixed-position renders anywhere).
+    assert 'href="/arrivals"' in cs._inject_back_button("<div>x</div>")
+    # Multiple bodies: attach to the last.
+    multi = cs._inject_back_button("<body>a</body>x<body>b</body>")
+    assert multi.rfind("ARRIVALS") < multi.rfind("</body>")
