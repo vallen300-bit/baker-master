@@ -1,11 +1,17 @@
 ---
 brief_id: LIBRARIAN_AGENT_INSTALL_1
-attempt: 1
+attempt: 2
 updated: 2026-07-08
 owner: b1
 dispatched_by: lead
 thread: 69558182-7a17-4227-b76b-1f9b08813a8b
 ---
+
+> **CLAIM (attempt 2, successor seat) — 2026-07-08:** picked up per lead #7491 "FRESH SEAT GO"
+> (#146 merged, deputy delta-verify PASS #7489). Vault canon pulled to main @ e027c17 — seat's
+> symlinked hooks now carry the seat-first-use fixes. Running Part C rung-1 acceptance (only
+> remaining builder deliverable); hunt #1 = live ticket #7482. Reporting evidence to lead on the
+> main thread; lead posts POST_DEPLOY_AC_VERDICT after.
 
 # Checkpoint — LIBRARIAN_AGENT_INSTALL_1
 
