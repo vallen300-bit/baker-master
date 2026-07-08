@@ -118,6 +118,13 @@ KNOWN_FALLBACK_SLUGS = frozenset({
     "aid",
     "b5",
     "researcher",
+    # librarian (AG-209): picker ~/bm-librarian is a plain dir with no .git
+    # (install_picker_dir.sh mkdir-only), so the forge pusher would skip it and
+    # the card would stay grey — the RESEARCHER_ON_BUS_1 foot-gun. Its findings
+    # commit to baker-vault (wiki/_library/), so ~/baker-vault is its real work
+    # repo, exactly like researcher. SOP Row 12 hard rule (picker-without-git ->
+    # ~/baker-vault) wins over brief Row 1's literal "explicit ~/bm-librarian".
+    "librarian",
     "codex",
     "codex-arch",
     "russo-ai",
