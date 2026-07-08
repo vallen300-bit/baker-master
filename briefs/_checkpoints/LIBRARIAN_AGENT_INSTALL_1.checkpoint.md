@@ -46,6 +46,18 @@ thread: 69558182-7a17-4227-b76b-1f9b08813a8b
 > grade vs the key + post the tally (receipt-FAIL rate + silent-MISS count) to lead; lead then
 > posts POST_DEPLOY_AC_VERDICT (deputy #147 PASS already in). If the seat never activates, that is
 > a Director/lead coordination item (activate the open librarian window), not a builder blocker.
+>
+> **UPDATE 2 — 2026-07-08 (live seat surfaced F4+F5):** the live seat ran but produced **0 replies**
+> (blocked, not degraded). Two more seat-first-use defects, both MASKED by hunt #1 (b1 harness used
+> raw curl + direct MCP): **F4** — caged seat had no full-body read (list+mailbox truncate, curl caged);
+> it was inferring asks from topic slugs. Fix: `librarian_drain.sh body <id>` (recipient-scoped, numeric-only).
+> **F5** — `librarian_sql.sh` validates-only by design; the data-surface-map arrow misled the seat into
+> expecting it to execute. Fix (docs): SQL is two-step (validate → `baker_raw_query` MCP). Both in
+> **baker-vault PR #148** (seeded suite 31/0, deny surface unchanged), awaiting deputy delta-verify.
+> **Vault working tree parked on branch `b1/librarian-seat-fix-f4-f5`** so the live seat's symlinked
+> canon carries F4+F5 now (switch to main after #148 merges). Fix chain: F3 #147 (merged) → F4+F5 #148.
+> **Next:** live seat re-reads each hunt with `body <id>` + runs SQL via baker_raw_query → replies →
+> b1 grades vs the key. Still 0 gradeable replies as of this update.
 
 # Checkpoint — LIBRARIAN_AGENT_INSTALL_1
 
