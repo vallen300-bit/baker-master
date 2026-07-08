@@ -1,5 +1,7 @@
 ---
-status: PENDING
+status: COMPLETE
+completed_at: 2026-07-08
+completion: merged baker-master PR #483 (main 5cdaf169) + G3 fix round landed; flipped by lead per b1 #7399
 brief_id: AO_FLIGHT_PROD_TICKET_ROUTING_1
 to: b1
 from: lead
