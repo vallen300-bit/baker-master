@@ -2116,7 +2116,8 @@ def _set_arrivals_board_cookie(response: HTMLResponse | JSONResponse) -> None:
         _arrivals_board_pin_token(pin),
         max_age=_ARRIVALS_BOARD_PIN_COOKIE_MAX_AGE_S,
         httponly=True,
-        samesite="lax",
+        secure=True,
+        samesite="strict",
     )
 
 

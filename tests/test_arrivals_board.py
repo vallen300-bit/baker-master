@@ -226,7 +226,7 @@ def test_arrivals_json_uses_effective_status(monkeypatch):
     ]
     monkeypatch.setattr(ab, "list_board_rows", lambda: rows)
     monkeypatch.setattr(dashboard, "_BAKER_API_KEY", "test-key", raising=False)
-    client = TestClient(dashboard.app)
+    client = TestClient(dashboard.app, base_url="https://testserver")
 
     no_key = client.get("/api/arrivals.json")
     assert no_key.status_code == 404
@@ -246,7 +246,11 @@ def test_arrivals_json_uses_effective_status(monkeypatch):
 
     pin_page = client.get("/arrivals?pin=123456")
     assert pin_page.status_code == 200
-    assert "arrivals_board_access" in pin_page.headers.get("set-cookie", "")
+    set_cookie = pin_page.headers.get("set-cookie", "")
+    assert "arrivals_board_access" in set_cookie
+    assert "HttpOnly" in set_cookie
+    assert "Secure" in set_cookie
+    assert "SameSite=strict" in set_cookie
 
     bare_page_with_cookie = client.get("/arrivals")
     assert bare_page_with_cookie.status_code == 200
@@ -258,10 +262,14 @@ def test_arrivals_json_uses_effective_status(monkeypatch):
     assert body["count"] == 1
     assert body["rows"][0]["effective_status"] == "DELAYED"
 
-    fresh_client = TestClient(dashboard.app)
+    fresh_client = TestClient(dashboard.app, base_url="https://testserver")
     pin_resp = fresh_client.get("/api/arrivals.json?pin=123456")
     assert pin_resp.status_code == 200
-    assert "arrivals_board_access" in pin_resp.headers.get("set-cookie", "")
+    api_set_cookie = pin_resp.headers.get("set-cookie", "")
+    assert "arrivals_board_access" in api_set_cookie
+    assert "HttpOnly" in api_set_cookie
+    assert "Secure" in api_set_cookie
+    assert "SameSite=strict" in api_set_cookie
 
     cookie_resp = fresh_client.get("/api/arrivals.json")
     assert cookie_resp.status_code == 200
