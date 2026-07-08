@@ -51,7 +51,7 @@ print(json.dumps({"hookSpecificOutput": {"hookEventName": "SessionStart", "addit
 
 # BEGIN GENERATED AGENT IDENTITY ROLE MAP
 # Generated from /Users/dimitry/baker-vault/_ops/registries/agent_registry.yml
-# SHA256: 9b0b3eaa5b8fb087e784cd46b14c425c6748e25f77c4a1f25cfddeba18e2ae75
+# SHA256: 9166ecb87dbb8374fbf698e99301d264786ceb3d513a85dddb2698583b63e054
 case "${BAKER_ROLE:-}" in
     AG-001|ag-001|lead|LEAD|AH1|aihead1|AIHEAD1) SLUG=lead ;;
     AG-002|ag-002|cowork-ah1|COWORK-AH1|cowork_ah1|COWORK_AH1|AH1-APP|cowork|COWORK) SLUG=cowork-ah1 ;;
@@ -71,6 +71,7 @@ case "${BAKER_ROLE:-}" in
     AG-206|ag-206|russo-ai|RUSSO-AI|russo_ai|RUSSO_AI) SLUG=russo-ai ;;
     AG-207|ag-207|deep55|DEEP55|deep-55|DEEP-55|gpt-5.5-raw|GPT-5.5-RAW) SLUG=deep55 ;;
     AG-208|ag-208|ben|BEN) SLUG=ben ;;
+    AG-209|ag-209|librarian|LIBRARIAN) SLUG=librarian ;;
     AG-301|ag-301|hag-desk|HAG-DESK|hag_desk|HAG_DESK|hagenauer-desk|HAGENAUER-DESK) SLUG=hag-desk ;;
     AG-302|ag-302|origination-desk|ORIGINATION-DESK|origination_desk|ORIGINATION_DESK|origination|ORIGINATION) SLUG=origination-desk ;;
     AG-303|ag-303|ao-desk|AO-DESK|ao_desk|AO_DESK|ao|AO) SLUG=ao-desk ;;
