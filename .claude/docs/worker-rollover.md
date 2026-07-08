@@ -4,11 +4,13 @@ Canonical process: `baker-vault/_ops/processes/worker-checkpoint-respawn.md`.
 
 ## Stop Hook
 
-`.claude/hooks/context-threshold-check.sh` reads the Stop-event `transcript_path`, estimates tokens as `bytes / 4`, and compares that estimate with a per-picker window:
+`.claude/hooks/context-threshold-check.sh` reads the Stop-event `transcript_path`, estimates tokens as `bytes / 4`, and compares that estimate with a per-picker window resolved in this precedence (first hit wins; `settings.local.json` is read before `settings.json` so a per-seat override beats the shared base):
 
-1. `ROLLOVER_WINDOW_TOKENS`
-2. `.claude/settings.json` key `rollover_window_tokens`
-3. `.claude/settings.json` key `rollover.window_tokens`
+1. env `ROLLOVER_WINDOW_TOKENS`
+2. `.claude/settings.local.json` key `rollover_window_tokens`, then nested `rollover.window_tokens`
+3. `.claude/settings.json` key `rollover_window_tokens`, then nested `rollover.window_tokens`
+
+`rollover_soft_percent` / `rollover_hard_percent` resolve the same way (env → `settings.local.json` → `settings.json` → built-in default 70 / 85).
 
 The hook is silent below 70%, emits a checkpoint reminder at 70%, and emits a hard checkpoint-now instruction at 85%.
 
