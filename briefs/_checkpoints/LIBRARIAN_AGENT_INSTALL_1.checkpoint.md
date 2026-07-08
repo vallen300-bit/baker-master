@@ -31,8 +31,21 @@ thread: 69558182-7a17-4227-b76b-1f9b08813a8b
 > Harness-artifact (NOT a seat defect): b1 harness inherits BRISEN_LAB_TERMINAL_KEY=b1-key →
 > reader_slug_mismatch; flagged to lead for a hardening call.
 >
-> **REMAINING (non-b1): (1) deputy delta-verify PR #147; (2) lead POST_DEPLOY_AC_VERDICT.**
-> No builder work left. Successor: only re-engage if a PR #147 fix-round arrives.
+> **UPDATE 2026-07-08 (lead #7497 + #7500):** hunt #1 ACCEPTED, but rung-1 needs 8-10 hunts
+> (spec §6.1) — 7-9 still owed (anchor §6 tripwire baselines). PR **#147 MERGED** (deputy PASS
+> #7499, + bonus daemon env-lock fold); vault pulled to main e8e0b55. Lesson **#117** appended.
+> **SEEDED 8 known-answer hunts** through the live seat: bus #7501-#7508 (H2 SQL BREC2 series,
+> H3 email 2017 EPI bond, H4 vault AO position, H5 SQL Estates-Notes doc, H6 transcripts latest
+> AO plaud, H7 ClaimsMax Serie-A, H8 MISS-test BREC2 ISIN, H9 WA reachability). Grading key +
+> per-hunt PASS criteria: `briefs/_reports/B1_LIBRARIAN_PART_C_SEEDED_HUNTS_KEY_20260708.md`
+> (b1 3fa32ee2). Reported to lead #7509.
+>
+> **BLOCKED ON SEAT DRAIN:** the live librarian seat is a Cowork session (PID 52476) — invisible
+> to auto-wake, drains only when active. The 8 hunts sit queued (per-wake cap 3 → ~3 drains).
+> As of seeding, 0 replies. **b1 next action:** once the seat drains + replies on the 8 threads,
+> grade vs the key + post the tally (receipt-FAIL rate + silent-MISS count) to lead; lead then
+> posts POST_DEPLOY_AC_VERDICT (deputy #147 PASS already in). If the seat never activates, that is
+> a Director/lead coordination item (activate the open librarian window), not a builder blocker.
 
 # Checkpoint — LIBRARIAN_AGENT_INSTALL_1
 
