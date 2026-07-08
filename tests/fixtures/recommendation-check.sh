@@ -37,6 +37,27 @@ except Exception:
 ' 2>/dev/null)"
 [ "$ACTIVE" = "True" ] && exit 0
 
+# Role exemption (added 2026-07-08, b1 bus #7536) — Recommendation requirement
+# applies to Director-facing agents only. B-codes (b1..b5), codex, codex-arch,
+# and architect are NOT Director-facing (HARD RULE, Director 2026-05-29;
+# Architect exempt per Tier-0 Rule 5). Resolution mirrors session-start-role.sh:
+# 1) $BAKER_ROLE env (Terminal profile), 2) cwd from hook input JSON.
+case "${BAKER_ROLE:-}" in
+    b[0-9]|b[0-9][0-9]|codex|codex-arch|codexarch|architect) exit 0 ;;
+esac
+if [ -z "${BAKER_ROLE:-}" ]; then
+    CWD="$(printf '%s' "$INPUT" | python3 -c '
+import json, sys
+try:
+    print(json.loads(sys.stdin.read()).get("cwd", ""))
+except Exception:
+    pass
+' 2>/dev/null)"
+    case "$CWD" in
+        */bm-b[0-9]|*/bm-b[0-9]/*|*/bm-codex*|*/bm-architect|*/bm-architect/*) exit 0 ;;
+    esac
+fi
+
 TRANSCRIPT="$(printf '%s' "$INPUT" | python3 -c '
 import json, sys
 try:
