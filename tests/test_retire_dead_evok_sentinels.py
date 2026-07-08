@@ -14,9 +14,27 @@ import triggers.sentinel_health as sh
 RETIRED = ["exchange", "exchange_sent", "exchange_calendar"]
 LIVE = ["graph_mail", "todoist", "roadmap_drift_sentinel", "email", "clickup"]
 
+# COCKPIT_REFERENCE_DESK_2 (ruling bus #7525/#7527, Director-informed 2026-07-09)
+# expanded retirement beyond the original 3 Evok sources. The retired set is now
+# a growing single-control-point list, not "exactly the Evok three".
+CRD2_RETIRED = [
+    "browser", "calendar", "slack", "initiative_engine",
+    "obligation_generator", "fireflies", "fireflies_backfill",
+]
 
-def test_retired_set_is_exactly_the_three_evok_sources():
-    assert sh.RETIRED_SOURCES == frozenset(RETIRED)
+
+def test_evok_sources_remain_retired():
+    # The original RETIRE_DEAD_EVOK_SENTINELS_1 guarantee still holds: the 3 Evok
+    # sources are retired. (Was test_retired_set_is_exactly_the_three_evok_sources;
+    # reconciled for CRD_2's ratified retirement expansion.)
+    for src in RETIRED:
+        assert src in sh.RETIRED_SOURCES, src
+
+
+def test_retired_set_is_exactly_evok_plus_crd2():
+    # Single control point: the retired set is exactly Evok + the CRD_2 seven.
+    # A stray addition here should fail loudly (this set is Director-ratified).
+    assert sh.RETIRED_SOURCES == frozenset(RETIRED) | frozenset(CRD2_RETIRED)
 
 
 def test_should_skip_poll_true_for_retired_without_db():
@@ -79,8 +97,11 @@ def test_live_sources_not_retired():
 # ---- stale-watermark retirement (G3/codex M1 on PR #315) ---------------------
 
 # trigger_watermarks source names differ from sentinel source names.
+# COCKPIT_REFERENCE_DESK_2 removed "slack" and "fireflies" from this live list —
+# both are now retired watermark sources (see RETIRED_WATERMARK_SOURCES); their
+# retirement is asserted in test_sentinel_staleness.py.
 LIVE_WATERMARK_SOURCES = [
-    "email_poll", "todoist", "slack", "dropbox", "fireflies", "whatsapp_resync",
+    "email_poll", "todoist", "dropbox", "whatsapp_resync",
 ]
 
 
