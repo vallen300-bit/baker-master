@@ -12,6 +12,10 @@ Canonical process: `baker-vault/_ops/processes/worker-checkpoint-respawn.md`.
 
 The hook is silent below 70%, emits a checkpoint reminder at 70%, and emits a hard checkpoint-now instruction at 85%.
 
+**Block-at-most-once (hard band).** Over the hard band the hook returns `decision:block` exactly once per session — keyed to a marker at `<transcript_path>.rollover-blocked` — then steps aside (`block=False`) on every later Stop. A Stop hook that blocks forces the session to *continue*, never to stop; blocking every Stop would trap the session in a self-feeding loop (each blocked turn grows the transcript, pushing the percentage higher — BB desk ran 137→153%, +21.4k tokens, 2026-07-08, Director-witnessed). One block forces the checkpoint; the successor is spawned by orchestrator-wake, so the clean exit that follows loses nothing.
+
+**Known limit.** Measurement happens only at Stop (turn end). One very long turn can jump from under the soft band to far over hard in a single measurement (BB desk first-fired at 137%). Mid-turn metering is the outer context-cost watchdog's job, not this hook's.
+
 Install or refresh settings with:
 
 ```bash
