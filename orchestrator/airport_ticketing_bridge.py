@@ -534,6 +534,57 @@ def _flight_name() -> str:
     return os.environ.get(_FLIGHT_ENV, _DEFAULT_FLIGHT).strip() or _DEFAULT_FLIGHT
 
 
+def _flight_for_matter(matter_slug: Optional[str], conn: Any = None) -> str:
+    """AIRPORT_TICKET_PER_FLIGHT_TAG_1 — per-matter suspected_flight resolution.
+
+    Mirrors _desk_for_matter: use the caller's open transaction when available,
+    return the registry project_number only when the active matter maps
+    unambiguously to one flight, and fail open to the global flight label on any
+    unknown/ambiguous/error/conn-less path. Never raises and never returns empty.
+    """
+    fallback = _flight_name()
+    if conn is None or not matter_slug:
+        return fallback
+    try:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                SELECT DISTINCT project_number
+                  FROM project_registry
+                 WHERE status = 'active'
+                   AND LOWER(matter_slug) = %s
+                   AND project_number IS NOT NULL
+                   AND btrim(project_number) <> ''
+                 LIMIT 10
+                """,
+                (str(matter_slug).strip().lower(),),
+            )
+            rows = cur.fetchall()
+    except Exception as e:
+        try:
+            conn.rollback()
+        except Exception:
+            pass
+        logger.warning(
+            "airport ticketing per-matter flight lookup failed (%s): %s",
+            matter_slug,
+            e,
+        )
+        return fallback
+    flights = {str(r[0]).strip().upper() for r in rows if r and r[0] and str(r[0]).strip()}
+    if len(flights) != 1:
+        return fallback
+    flight = next(iter(flights))
+    # Untrusted registry input: accept only registered project-code shape. A malformed
+    # value falls back to the global label instead of creating a bogus bus topic.
+    if extract_project_codes(flight) != [flight]:
+        logger.warning(
+            "airport ticketing per-matter flight %r invalid, using global", flight
+        )
+        return fallback
+    return flight
+
+
 def _json_param(payload: Any) -> Any:
     # Accepts any JSON-serializable value (dict for action payloads, list for
     # box5_dropped_signals.matched_keywords). psycopg2 Json() adapts both.
@@ -788,7 +839,7 @@ def build_plaud_ticket(
         source_received_at=arrival.received_at,
         originator=_nonmail_originator(arrival.title, arrival.transcript_id),
         suspected_matter_slug=arrival.matter_slug or _matter_slug(),
-        suspected_flight=_flight_name(),
+        suspected_flight=_flight_for_matter(arrival.matter_slug, conn),
         proposed_desk_slug=desk_slug,
         urgency_hint=_nonmail_urgency(matched),
         luggage=tuple(luggage),

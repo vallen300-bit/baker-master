@@ -3,7 +3,9 @@
   "snapshot_mode": "read_only",
   "project_code": "BB-AUK-001",
   "matter_slug": "aukera",
-  "suspected_flight": "aukera-annaberg-financing",
+  "suspected_flight": "BB-AUK-001",
+  "legacy_suspected_flights": ["aukera-annaberg-financing"],
+  "legacy_matter_slugs": ["lilienmatt"],
   "desk_owner": "baden-baden-desk",
   "controller": "lead",
   "header": {

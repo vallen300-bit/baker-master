@@ -99,7 +99,23 @@ def _aggregate_counts(rows: list[dict]) -> dict:
     }
 
 
-def count_flight_tickets(suspected_flight: Optional[str]) -> dict:
+def _clean_list(values: Any) -> list[str]:
+    if values is None:
+        return []
+    if isinstance(values, str):
+        values = [values]
+    try:
+        return [str(v).strip() for v in values if str(v or "").strip()]
+    except TypeError:
+        return []
+
+
+def count_flight_tickets(
+    suspected_flight: Optional[str],
+    *,
+    legacy_suspected_flights: Optional[list[str]] = None,
+    legacy_matter_slugs: Optional[list[str]] = None,
+) -> dict:
     """Machine §4 read: aggregate airport_tickets counts for one flight.
 
     Returns {"available": True, checked_in, urgent, awaiting, rejected, total} on a clean
@@ -107,24 +123,42 @@ def count_flight_tickets(suspected_flight: Optional[str]) -> dict:
     the caller renders "ledger unavailable" rather than fabricating zeros (fault-tolerant
     read; rule 5). This function NEVER issues INSERT/UPDATE/DELETE.
     """
-    if not suspected_flight:
+    primary_flights = _clean_list(suspected_flight)
+    legacy_flights = _clean_list(legacy_suspected_flights)
+    legacy_matters = _clean_list(legacy_matter_slugs)
+    if not primary_flights and not (legacy_flights and legacy_matters):
         return {"available": True, "checked_in": 0, "urgent": 0, "awaiting": 0,
                 "rejected": 0, "total": 0}
     sql = (
         "SELECT status, urgency_hint, COUNT(*) AS n "
-        "FROM airport_tickets WHERE suspected_flight = %s "
+        "FROM airport_tickets "
+        "WHERE suspected_flight = ANY(%s) "
+        "   OR (suspected_flight = ANY(%s) AND suspected_matter_slug = ANY(%s)) "
         "GROUP BY status, urgency_hint LIMIT %s"
     )
     try:
         with get_conn() as conn:
             with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
-                cur.execute(sql, (suspected_flight, _COUNT_CAP))
+                cur.execute(
+                    sql,
+                    (
+                        primary_flights or ["__baker_no_primary_flight__"],
+                        legacy_flights or ["__baker_no_legacy_flight__"],
+                        legacy_matters or ["__baker_no_legacy_matter__"],
+                        _COUNT_CAP,
+                    ),
+                )
                 rows = [dict(r) for r in cur.fetchall()]
         agg = _aggregate_counts(rows)
         agg["available"] = True
         return agg
     except Exception as e:  # fault-tolerant: signal unavailable, never fabricate zeros
-        logger.warning("count_flight_tickets read failed for %s: %s", suspected_flight, e)
+        logger.warning(
+            "count_flight_tickets read failed for %s/%s: %s",
+            primary_flights,
+            legacy_flights,
+            e,
+        )
         return {"available": False}
 
 
@@ -194,7 +228,11 @@ def build_flight_dashboard(project_code: str, now: Optional[datetime] = None) ->
     snap = load_snapshot(project_code)
     if snap is None:
         return None
-    tickets = count_flight_tickets(snap.get("suspected_flight"))
+    tickets = count_flight_tickets(
+        snap.get("suspected_flight"),
+        legacy_suspected_flights=snap.get("legacy_suspected_flights"),
+        legacy_matter_slugs=snap.get("legacy_matter_slugs"),
+    )
     header = snap.get("header", {})
     data = {
         "project_code": snap.get("project_code", project_code),

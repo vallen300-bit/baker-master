@@ -38,6 +38,7 @@ def test_count_flight_tickets_available_on_clean_read(monkeypatch):
     class _Cur:
         def execute(self, sql, params=None):
             captured["sql"] = sql
+            captured["params"] = params
         def fetchall(self):
             return [
                 {"status": "checked_in", "urgency_hint": "urgent", "n": 8},
@@ -61,6 +62,42 @@ def test_count_flight_tickets_available_on_clean_read(monkeypatch):
     assert out["available"] is True
     assert out["checked_in"] == 8 and out["awaiting"] == 8 and out["urgent"] == 8
     assert captured["sql"].strip().lower().startswith("select")
+    assert captured["params"][0] == ["aukera-annaberg-financing"]
+
+
+def test_count_flight_tickets_dual_matches_legacy_label_with_matter_guard(monkeypatch):
+    captured = {}
+
+    class _Cur:
+        def execute(self, sql, params=None):
+            captured["sql"] = sql
+            captured["params"] = params
+        def fetchall(self):
+            return [{"status": "checked_in", "urgency_hint": "normal", "n": 179}]
+        def __enter__(self):
+            return self
+        def __exit__(self, *a):
+            return False
+
+    class _Conn:
+        def cursor(self, cursor_factory=None):
+            return _Cur()
+        def __enter__(self):
+            return self
+        def __exit__(self, *a):
+            return False
+
+    monkeypatch.setattr(fd, "get_conn", lambda: _Conn())
+    out = fd.count_flight_tickets(
+        "BB-AUK-001",
+        legacy_suspected_flights=["aukera-annaberg-financing"],
+        legacy_matter_slugs=["lilienmatt"],
+    )
+    assert out["total"] == 179
+    assert "suspected_matter_slug = any" in captured["sql"].lower()
+    assert captured["params"][0] == ["BB-AUK-001"]
+    assert captured["params"][1] == ["aukera-annaberg-financing"]
+    assert captured["params"][2] == ["lilienmatt"]
 
 
 # --- Test 2: query failure -> "ledger unavailable", no crash, no fabricated zeros ----
@@ -147,7 +184,7 @@ def test_footer_has_no_false_conformance_claim():
 # --- Bonus: end-to-end assembly + render of the committed snapshot (no live DB) ------
 def test_build_and_render_committed_snapshot(monkeypatch):
     # Force the ledger unavailable so this stays DB-free but still renders fully.
-    monkeypatch.setattr(fd, "count_flight_tickets", lambda f: {"available": False})
+    monkeypatch.setattr(fd, "count_flight_tickets", lambda f, **kw: {"available": False})
     data = fd.build_flight_dashboard("BB-AUK-001", now=NOW)
     assert data is not None
     html = fd.render_dashboard_html(data)
@@ -191,7 +228,7 @@ def test_route_unknown_code_404(monkeypatch):
 
 def test_route_known_code_renders_200(monkeypatch):
     # Ledger unavailable keeps it DB-free; the desk snapshot still renders.
-    monkeypatch.setattr(fd, "count_flight_tickets", lambda f: {"available": False})
+    monkeypatch.setattr(fd, "count_flight_tickets", lambda f, **kw: {"available": False})
     r = _client(enabled=True).get("/flight/BB-AUK-001?key=test-key")
     assert r.status_code == 200
     assert "READ-ONLY snapshot" in r.text
