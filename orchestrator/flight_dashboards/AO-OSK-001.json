@@ -2,8 +2,8 @@
   "contract": "FLIGHT_DASHBOARD_PACKET v2",
   "snapshot_mode": "read_only",
   "project_code": "AO-OSK-001",
-  "matter_slug": "oskolkov",
-  "suspected_flight": "",
+  "matter_slug": "ao",
+  "suspected_flight": "AO-OSK-001",
   "desk_owner": "ao-desk",
   "controller": "lead",
   "header": {
@@ -66,7 +66,7 @@
   "what_changed": {
     "updated_at": "2026-07-07T21:00:00+00:00",
     "rows": [
-      {"date": "8 Jul", "event": "Per-flight ticket tagging pending — AO check-ins are recorded in the ledger but not yet segregated to this flight, so §4 shows honest zeros until the tagging fix lands", "receipt": "bus #7127 / #7107"},
+      {"date": "8 Jul", "event": "Per-flight ticket counts are live — AO check-ins are now segregated to this flight after the audited backfill", "receipt": "audit_id 16584 / bus #7167"},
       {"date": "7 Jul", "event": "Three ownership corrections logged: Joseph = son-in-law; EUR 1.9M = AO capital call for Vienna; Irina stays with this desk", "receipt": "your debrief 7 Jul"},
       {"date": "7 Jul", "event": "Baden-Baden desk handoff: Eli/Joseph hotel cluster + EUR 2.3M split", "receipt": "bus 6704"},
       {"date": "6–7 Jul", "event": "Villa Gabbiano cancelled-for-now; AO wants the family to decide; family at the villa 2–16 Aug", "receipt": "recorded call 6 Jul · RF-VILLA"},
@@ -75,7 +75,7 @@
   },
   "communications": {
     "updated_at": "2026-07-07T21:00:00+00:00",
-    "counts_basis": "desk-provided gists (7 Jul) · per-person message counts render only when machine-queried — AO flight not yet segregated in the ticket ledger",
+    "counts_basis": "desk-provided gists (7 Jul) · §4 strip counts are machine-queried from the per-flight ticket ledger",
     "humans": [
       {"name": "Andrey Oskolkov (AO)", "role": "Principal", "urgent": 0, "gist": "Istanbul: yes-in-principle to 51% via Aelio; villa held for a family decision", "last": "6 Jul", "receipt": "tickets"},
       {"name": "Constantinos Pohanis", "role": "AO advisor · our Cyprus finance director", "urgent": 0, "gist": "Sent the EUR 2.13M June tranche 4 Jul; adverse on Joseph's hotel deal", "last": "4 Jul", "receipt": "tickets"},
