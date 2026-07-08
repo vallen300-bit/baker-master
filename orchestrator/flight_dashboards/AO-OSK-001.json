@@ -1,0 +1,87 @@
+{
+  "contract": "FLIGHT_DASHBOARD_PACKET v2",
+  "snapshot_mode": "read_only",
+  "project_code": "AO-OSK-001",
+  "matter_slug": "oskolkov",
+  "suspected_flight": "",
+  "desk_owner": "ao-desk",
+  "controller": "lead",
+  "header": {
+    "kicker": "AO DESK",
+    "flight_name": "AO majority & capital",
+    "serves": "51% majority via Aelio",
+    "goal": "Land AO's move to a 51% majority through his Aelio vehicle — written intent 10 Jul, term sheet 18 Jul, notary 3–7 Aug, money landed and 51% on record 28 Aug — while collecting the EUR 2.13M capital-call balance.",
+    "state": "ON-TRACK",
+    "deadline_label": "Written intent",
+    "deadline_date": "2026-07-10",
+    "updated_at": "2026-07-07T21:00:00+00:00",
+    "updated_by": "ao-desk + machine"
+  },
+  "decide_now": {
+    "updated_at": "2026-07-07T21:00:00+00:00",
+    "decisions": [
+      {
+        "question": "The EUR 100K reconciliation — hold our EUR 7.0M figure, or concede AO's EUR 6,900,668 and credit the difference?",
+        "options": [
+          {"tag": "CONCEDE", "recommended": true, "text": "Accept AO's EUR 6,900,668; credit EUR 99,332 to the next capital call. ~EUR 100K of goodwill going into the majority ask — removes AO's 'I overpaid' irritant days before the 51% commitment (working brief Q-2, 7 Jul)."},
+          {"tag": "HOLD", "recommended": false, "text": "Keep the EUR 7.0M position and reconcile line-by-line with Constantinos. Saves the credit if our figure wins, but keeps a EUR 100K argument alive through the majority negotiation."}
+        ],
+        "decide_by": "2026-07-10",
+        "trigger": "Written-intent chase for the 51% majority goes to AO via Constantinos ~10 Jul",
+        "receipts": ["working brief F-5 (7 Jul)", "codex second read bus #6895 (PASS)"],
+        "status": "OPEN"
+      }
+    ]
+  },
+  "money_kpis": {
+    "updated_at": "2026-07-07T21:00:00+00:00",
+    "items": [
+      {"n": "51%", "label": "TARGET AELIO STAKE (FROM ~10%)", "tone": "green", "receipt": "Istanbul 5–6 Jul · brief F-1"},
+      {"n": "28 Aug", "label": "MAJORITY ON RECORD — TARGET", "tone": "none", "receipt": "deal program · 7 Jul"},
+      {"n": "2.13M", "label": "CAPITAL CALL OUTSTANDING EUR", "tone": "none", "receipt": "sent 4 Jul · receipt pending"},
+      {"n": "66.5M", "label": "TOTAL PRINCIPAL EXPOSURE EUR", "tone": "none", "receipt": "decision D-001 · room 24 Jun"},
+      {"n": "1.9M", "label": "AO CAPITAL CALL — VIENNA HOTEL EUR", "tone": "none", "receipt": "decision D-017 · 7 Jul"}
+    ]
+  },
+  "ball_in_court": {
+    "updated_at": "2026-07-07T21:00:00+00:00",
+    "rows": [
+      {"waiting_on": "Desk · Edita", "for_what": "EUR 2.13M June tranche — bank receipt confirmation (+ EUR 7M spend-breakdown for the Istanbul pack)", "since_due": "sent 4 Jul", "state": "WAITING", "receipt": "working brief F-5, 7 Jul"},
+      {"waiting_on": "Desk · Buchwalder", "for_what": "Security-release discrepancy — EUR 1.5M offered vs EUR 12M registered package", "since_due": "open", "state": "OVERDUE — unresolved", "receipt": "working brief F-6 (item G3), 7 Jul"},
+      {"waiting_on": "Desk tracks · you execute", "for_what": "Irina's EUR 440K — in-person bank visit required (June attempt failed)", "since_due": "open", "state": "WAITING — blocked", "receipt": "decision log U-5, 7 Jul"},
+      {"waiting_on": "Desk → your gate", "for_what": "Joseph hotel target — desk read before the 22 Jul visit (~EUR 1.9M/room; Constantinos adverse)", "since_due": "visit the 22nd", "state": "WAITING — reading", "receipt": "decision U-1 / D-017, 7 Jul"},
+      {"waiting_on": "Desk monitors", "for_what": "Villa Gabbiano reignition window — family on site", "since_due": "2–16 Aug", "state": "WAITING — watch", "receipt": "red flag RF-VILLA, 7 Jul"}
+    ]
+  },
+  "top_risks": {
+    "updated_at": "2026-07-07T21:00:00+00:00",
+    "rows": [
+      {"risk": "Disclosure line — all AO-facing framing says 'the fund'; the disclosure decision is yours alone", "owner": "You", "move": "steady ="},
+      {"risk": "Villa Gabbiano reignition — family on site 2–16 Aug", "owner": "Desk watch", "move": "window opens ↑"},
+      {"risk": "Relationship cadence — silence must never precede an ask (max 14-day quiet gap)", "owner": "Desk", "move": "steady ="},
+      {"risk": "Joseph hotel deal — family-sourced, adviser-opposed, facts unknown", "owner": "Desk", "move": "new ↑"},
+      {"risk": "The 48/45 economic gap — the one unresolved dispute (3% apart, parked to exit)", "owner": "You", "move": "parked ="}
+    ]
+  },
+  "what_changed": {
+    "updated_at": "2026-07-07T21:00:00+00:00",
+    "rows": [
+      {"date": "8 Jul", "event": "Per-flight ticket tagging pending — AO check-ins are recorded in the ledger but not yet segregated to this flight, so §4 shows honest zeros until the tagging fix lands", "receipt": "bus #7127 / #7107"},
+      {"date": "7 Jul", "event": "Three ownership corrections logged: Joseph = son-in-law; EUR 1.9M = AO capital call for Vienna; Irina stays with this desk", "receipt": "your debrief 7 Jul"},
+      {"date": "7 Jul", "event": "Baden-Baden desk handoff: Eli/Joseph hotel cluster + EUR 2.3M split", "receipt": "bus 6704"},
+      {"date": "6–7 Jul", "event": "Villa Gabbiano cancelled-for-now; AO wants the family to decide; family at the villa 2–16 Aug", "receipt": "recorded call 6 Jul · RF-VILLA"},
+      {"date": "5–6 Jul", "event": "Istanbul: AO yes-in-principle — Aelio ~10% → 51% via new-share issue", "receipt": "Istanbul meeting"}
+    ]
+  },
+  "communications": {
+    "updated_at": "2026-07-07T21:00:00+00:00",
+    "counts_basis": "desk-provided gists (7 Jul) · per-person message counts render only when machine-queried — AO flight not yet segregated in the ticket ledger",
+    "humans": [
+      {"name": "Andrey Oskolkov (AO)", "role": "Principal", "urgent": 0, "gist": "Istanbul: yes-in-principle to 51% via Aelio; villa held for a family decision", "last": "6 Jul", "receipt": "tickets"},
+      {"name": "Constantinos Pohanis", "role": "AO advisor · our Cyprus finance director", "urgent": 0, "gist": "Sent the EUR 2.13M June tranche 4 Jul; adverse on Joseph's hotel deal", "last": "4 Jul", "receipt": "tickets"},
+      {"name": "Joseph", "role": "AO's son-in-law", "urgent": 0, "gist": "Sourced the hotel target (~EUR 1.9M per room); visit planned the 22nd", "last": "7 Jul", "receipt": "tickets"},
+      {"name": "Baden-Baden desk (internal)", "role": "Handoff", "urgent": 0, "gist": "Eli/Joseph hotel cluster + the EUR 2.3M split handed to this desk", "last": "7 Jul", "receipt": "bus 6704"}
+    ],
+    "research_received": []
+  }
+}
