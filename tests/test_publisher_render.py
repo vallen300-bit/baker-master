@@ -310,3 +310,28 @@ def test_malformed_packet_bounces():
     assert r["status"] == "bounce"
     assert "project_code" in r["bounce_reason"]
     assert r["cost"]["usd"] == 0.0
+
+
+# ── codex G3 F1: path-traversal-safe project_code (surface path can't escape) ─
+@pytest.mark.parametrize("bad_code", ["../../escape", "BB/AUK/001", "..", "a/../b", "BB AUK 001", "BB.AUK.001"])
+def test_f1_traversal_project_code_bounces(bad_code):
+    r = render_ticket(_clean_ticket(project_code=bad_code))
+    assert r["status"] == "bounce", f"{bad_code!r} should bounce, got {r['status']} surface={r.get('surface')}"
+    assert "project_code" in r["bounce_reason"]
+    # never emit a surface path built from an unvalidated code
+    assert r["surface"] == ""
+
+
+def test_f1_valid_project_code_surface_is_contained():
+    r = render_ticket(_clean_ticket(project_code="BB-AUK-001"))
+    assert r["surface"].endswith("flight-dashboards/BB-AUK-001/dashboard-v1-pattern-d.html")
+    assert ".." not in r["surface"]
+
+
+# ── codex G3 F2: staleness gate normalizes register keys (case-insensitive) ──
+def test_f2_staleness_matches_mixed_case_register_key():
+    register = {"Loan Agreement": {"version": "v26", "as_of": "2026-07-02"}}
+    figs = (Figure(value="15.0M", label="Facility", source_family="loan agreement",
+                   source_version="v17", as_of="2026-06-20"),)
+    v = gate_staleness(_clean_doc(figures=figs, register=register))
+    assert v["verdict"] == "FAIL" and "STALE" in v["detail"]
