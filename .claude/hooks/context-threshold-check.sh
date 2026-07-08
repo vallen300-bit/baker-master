@@ -11,6 +11,19 @@
 #   -> built-in default.
 # This lets a worker picker soft-warn at 50 via settings.local.json while lead
 # (bm-aihead1) stays at the 70/85 default with no local override.
+#
+# Block-at-most-once: over the hard band the hook returns decision:block EXACTLY
+# once per session (marker keyed to transcript_path), then steps aside. A Stop
+# hook that blocks forces the session to CONTINUE, never to stop — so blocking on
+# every Stop traps it: each blocked turn grows the transcript, pushing percent
+# higher, a self-feeding loop (BB desk 137->153%, +21.4k tokens, 2026-07-08,
+# Director-witnessed). One block forces the checkpoint; the successor is spawned
+# by orchestrator-wake, so the clean exit that follows loses nothing.
+#
+# KNOWN LIMIT: measurement happens only at Stop (turn end). One very long turn can
+# jump from under the soft band to far over hard in a single measurement (BB desk
+# first-fired at 137%). Not fixable here — mid-turn metering is the outer
+# context-cost watchdog's job (context-cost-watchdog-delta spec, cowork-ah1).
 
 PAYLOAD="$(cat 2>/dev/null || true)"
 ROLLOVER_HOOK_PAYLOAD="$PAYLOAD" python3 - <<'PY'
@@ -121,15 +134,41 @@ if percent < soft:
     raise SystemExit(0)
 
 if percent >= hard:
-    _emit(
-        "[rollover] context ~{}% ({} est tokens / {} window, hard {}%). "
-        "HARD: write or refresh briefs/_checkpoints/<BRIEF_ID>.checkpoint.md now, "
-        "commit + push it, post respawn request, then exit cleanly. "
-        "Claim in the successor is the attempt-bump commit, not bus ack.".format(
-            percent, tokens_est, window_tokens, hard
-        ),
-        block=True,
-    )
+    # Block-at-most-once (see header). Marker is keyed to transcript_path:
+    # unique per session, local, deterministic — no cross-session leak, and no
+    # race with the checkpoint commit (a local file, not a git/bus round-trip).
+    marker = Path(str(transcript) + ".rollover-blocked")
+    if marker.exists():
+        # Already forced a checkpoint this session. Blocking again would loop
+        # the session forever; let it exit. orchestrator-wake spawns the
+        # successor, so nothing is lost.
+        _emit(
+            "[rollover] context ~{}% ({} est tokens / {} window, hard {}%). "
+            "Checkpoint already demanded this session — exit now; the successor is "
+            "spawned by orchestrator-wake so a clean exit loses nothing. If you have "
+            "NOT yet written briefs/_checkpoints/<BRIEF_ID>.checkpoint.md + committed "
+            "+ pushed + posted the respawn request, do it first, then exit.".format(
+                percent, tokens_est, window_tokens, hard
+            ),
+            block=False,
+        )
+    else:
+        try:
+            marker.write_text(str(tokens_est))
+            blocked = True
+        except OSError:
+            # Cannot persist the marker -> never block, or the session would loop
+            # forever with no way to record that it was already told.
+            blocked = False
+        _emit(
+            "[rollover] context ~{}% ({} est tokens / {} window, hard {}%). "
+            "HARD: write or refresh briefs/_checkpoints/<BRIEF_ID>.checkpoint.md now, "
+            "commit + push it, post respawn request, then exit cleanly. "
+            "Claim in the successor is the attempt-bump commit, not bus ack.".format(
+                percent, tokens_est, window_tokens, hard
+            ),
+            block=blocked,
+        )
 else:
     _emit(
         "[rollover] context ~{}% ({} est tokens / {} window, soft {}% / hard {}%). "

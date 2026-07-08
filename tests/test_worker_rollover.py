@@ -52,6 +52,16 @@ def _additional_context(stdout: str) -> str | None:
     return json.loads(out)["systemMessage"]
 
 
+def _decision(stdout: str) -> str | None:
+    # `decision: block` is what forces the session to keep running; its absence
+    # is what lets the session exit. Block-at-most-once turns on the presence of
+    # this field across successive Stops.
+    out = stdout.strip()
+    if not out:
+        return None
+    return json.loads(out).get("decision")
+
+
 def test_rollover_scripts_exist_executable_and_syntax_clean():
     for script in (HOOK, INSTALLER, RESPAWN):
         assert script.is_file()
@@ -89,6 +99,46 @@ def test_context_hook_hard_instruction_at_85_percent(tmp_path):
     assert "context ~85%" in ctx
     assert "HARD: write or refresh" in ctx
     assert "attempt-bump commit" in ctx
+
+
+def test_context_hook_hard_first_fire_blocks_and_writes_marker(tmp_path):
+    # First Stop over the hard band blocks (forces the checkpoint) and records a
+    # per-session marker keyed to transcript_path.
+    transcript = _write_transcript(tmp_path, 850)  # 85%
+    result = _run_hook(transcript, window=1000)
+    assert result.returncode == 0, result.stderr
+    assert _decision(result.stdout) == "block"
+    assert "HARD: write or refresh" in _additional_context(result.stdout)
+    marker = Path(str(transcript) + ".rollover-blocked")
+    assert marker.exists(), "first hard fire must persist the block-once marker"
+
+
+def test_context_hook_hard_second_fire_does_not_block(tmp_path):
+    # The doom-loop regression: with the marker present, a second (or Nth) Stop
+    # over the hard band must NOT block, so the session can actually exit.
+    transcript = _write_transcript(tmp_path, 850)
+    first = _run_hook(transcript, window=1000)
+    assert _decision(first.stdout) == "block"
+
+    # Grow the transcript further (as a blocked turn would) and fire again.
+    transcript.write_bytes(b"x" * 950 * 4)  # 95%
+    second = _run_hook(transcript, window=1000)
+    assert second.returncode == 0, second.stderr
+    assert _decision(second.stdout) is None, "must not block again — that is the loop"
+    ctx = _additional_context(second.stdout)
+    assert ctx is not None and "exit now" in ctx
+
+
+def test_context_hook_hard_marker_is_keyed_to_transcript(tmp_path):
+    # A different session (different transcript_path) blocks on its own first
+    # fire even though another session already has a marker.
+    first_t = _write_transcript(tmp_path, 850)
+    _run_hook(first_t, window=1000)  # writes first_t marker
+
+    other = tmp_path / "other.jsonl"
+    other.write_bytes(b"x" * 850 * 4)
+    result = _run_hook(other, window=1000)
+    assert _decision(result.stdout) == "block", "second session must still block once"
 
 
 def test_context_hook_reads_window_from_settings(tmp_path):
