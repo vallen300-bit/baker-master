@@ -117,6 +117,32 @@ def _read_file_content(path: str) -> str:
     return raw.decode("utf-8")
 
 
+# Floating "back to ARRIVALS" control injected into every served cockpit — the
+# desk cockpit files have no board-return control of their own (they are also
+# opened standalone). Serving-layer injection keeps the vault files untouched and
+# covers every flight at once. Same-origin /arrivals; the PIN cookie already set.
+_BACK_BUTTON = (
+    '<a href="/arrivals" '
+    'style="position:fixed;top:14px;left:14px;z-index:99999;'
+    "font:700 12px/1 'SF Mono',ui-monospace,Menlo,monospace;letter-spacing:.1em;"
+    "text-transform:uppercase;color:#0A0B0A;background:#FFC64B;"
+    "text-decoration:none;padding:9px 13px;border-radius:6px;"
+    'box-shadow:0 2px 8px rgba(0,0,0,.45);">&#8592; ARRIVALS</a>'
+)
+
+
+def _inject_back_button(html: str) -> str:
+    """Insert the floating ARRIVALS return control just before </body> (last
+    occurrence, case-insensitive). If the document has no </body>, append — a
+    fixed-position anchor renders regardless of where it lands."""
+    if not html:
+        return _BACK_BUTTON
+    idx = html.lower().rfind("</body>")
+    if idx == -1:
+        return html + _BACK_BUTTON
+    return html[:idx] + _BACK_BUTTON + html[idx:]
+
+
 def fetch_cockpit_html(project_code: str) -> CockpitHtml:
     code = normalize_project_code(project_code)
     now = time.monotonic()
@@ -135,7 +161,7 @@ def fetch_cockpit_html(project_code: str) -> CockpitHtml:
     path = str(selected.get("path") or "")
     if not path.startswith(f"{folder}/"):
         raise CockpitNotFound(folder)
-    html = _read_file_content(path)
+    html = _inject_back_button(_read_file_content(path))
     result = CockpitHtml(project_code=code, path=path, html=html)
 
     with _CACHE_LOCK:
