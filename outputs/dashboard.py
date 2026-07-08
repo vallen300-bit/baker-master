@@ -5864,14 +5864,17 @@ async def get_morning_brief():
             """)
             unanswered_count = cur.fetchone()["cnt"]
 
-            # COCKPIT_REFERENCE_DESK_1 Fix 3: shared "live fire" predicate so the
-            # fire_count badge and the top_fires list can never diverge again. A live
-            # fire is pending, not snoozed, recent (<=30d), and not a travel/flight
-            # alert (those are shown in Travel, not Fires). fire_count adds tier<=2;
-            # top_fires narrows to tier=1 + dedup. The badge used to read 436 (all
-            # pending, any age) against 5 rendered — pure alarm fatigue.
+            # COCKPIT_REFERENCE_DESK_1 Fix 3 (codex G3 M1 / lead #7513 ruling a):
+            # fire_count must count EXACTLY what the fires list counts — the tier-1
+            # deduped-by-matter live-fire set — not T1+T2. The badge used to read 428
+            # (T1+T2, any recent) against 5 rendered; against prod the tier-1 deduped
+            # set is ~28, and the list shows its top 5. Same predicate + same dedup,
+            # so the number and the list can never diverge. A live fire is pending,
+            # not snoozed, recent (<=30d), not a travel/flight alert (those live in
+            # Travel, not Fires).
             _live_fire_where = """
                 status = 'pending'
+                AND tier = 1
                 AND (snoozed_until IS NULL OR snoozed_until < now())
                 AND created_at >= now() - INTERVAL '30 days'
                 AND title NOT ILIKE '%%flight%%'
@@ -5879,8 +5882,16 @@ async def get_morning_brief():
                 AND title NOT ILIKE '%%arrival%%'
             """
 
-            # Stats: fire count (T1+T2 live fires — matches the fires surface + mobile badge)
-            cur.execute(f"SELECT COUNT(*) AS cnt FROM alerts WHERE {_live_fire_where} AND tier <= 2")
+            # Stats: fire count = size of the tier-1 deduped live-fire set (the exact
+            # set top_fires draws its top 5 from).
+            cur.execute(f"""
+                SELECT COUNT(*) AS cnt FROM (
+                    SELECT DISTINCT ON (COALESCE(matter_slug, id::text)) id
+                    FROM alerts
+                    WHERE {_live_fire_where}
+                    ORDER BY COALESCE(matter_slug, id::text), created_at DESC
+                ) deduped
+            """)
             fire_count = cur.fetchone()["cnt"]
 
             # Stats: deadlines this week (due between today and +7 days)
@@ -5923,14 +5934,14 @@ async def get_morning_brief():
             except Exception:
                 pass
 
-            # Top fires (T1 live fires, most recent per matter, limit 5). Reuses the
-            # exact _live_fire_where predicate as fire_count so the number and the
-            # list share one definition (COCKPIT_REFERENCE_DESK_1 Fix 3).
+            # Top fires = top 5 of the exact same tier-1 deduped set fire_count
+            # counts (COCKPIT_REFERENCE_DESK_1 Fix 3 / lead #7513). _live_fire_where
+            # already pins tier = 1, so the number and the list share one definition.
             cur.execute(f"""
                 SELECT * FROM (
                     SELECT DISTINCT ON (COALESCE(matter_slug, id::text)) *
                     FROM alerts
-                    WHERE {_live_fire_where} AND tier = 1
+                    WHERE {_live_fire_where}
                     ORDER BY COALESCE(matter_slug, id::text), created_at DESC
                 ) deduped
                 ORDER BY created_at DESC
