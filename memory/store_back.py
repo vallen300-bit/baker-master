@@ -3928,7 +3928,7 @@ class SentinelStoreBack:
                 "Mandarin Oriental Asset Management", "Mandarin Oriental Sales",
                 "Mandarin Oriental Dispute", "Mandarin Oriental Hotel Dispute",
                 "Hagenauer", "Kempinski Kitzbühel Acquisition", "Kempinski KitzbüHel Acquisition",
-                "Cap Ferrat Villa", "Oskolkov-RG7", "FX Mayr",
+                "Cap Ferrat Villa", "Oskolkov", "FX Mayr",
                 "Financing Vienna & Baden-Baden", "Wertheimer LP",
                 "Lanas", "ClaimsMax", "Alric", "Cupial",
                 "NVIDIA-GTC-2026", "Annaberg Restructuring",
