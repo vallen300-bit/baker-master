@@ -8,10 +8,31 @@ thread: 69558182-7a17-4227-b76b-1f9b08813a8b
 ---
 
 > **CLAIM (attempt 2, successor seat) — 2026-07-08:** picked up per lead #7491 "FRESH SEAT GO"
-> (#146 merged, deputy delta-verify PASS #7489). Vault canon pulled to main @ e027c17 — seat's
-> symlinked hooks now carry the seat-first-use fixes. Running Part C rung-1 acceptance (only
-> remaining builder deliverable); hunt #1 = live ticket #7482. Reporting evidence to lead on the
-> main thread; lead posts POST_DEPLOY_AC_VERDICT after.
+> (#146 merged, deputy delta-verify PASS #7489). Vault canon pulled to main @ e027c17.
+>
+> **PART C RUNG-1 DONE (2026-07-08) — last builder deliverable complete.** Full librarian hunt
+> loop proven end-to-end (drain→search→verbatim→HARD-FLAG→findings→commit→receipt→reply→ack):
+> - Hunt #1 live ticket #7482 (ao-desk BREC2): answered on-thread (bus **#7494**) + acked #7482
+>   after receipt PASS. Answer: BREC2 Issue Date **15/11/2019**, Series **EUR 20,000,000**, coupon
+>   **1% p.a. + 30% variable**, matures 14/11/2025, issuer EPI SCA. HARD-FLAGGED (not resolved):
+>   distinct 2017 EUR25M EPI series (2021 email) + the Opus €12M Gesamtgrundschuld 2020-09-28 tie
+>   (candidate deed documents.id=5518, unconfirmed) — ao-desk decides.
+> - Surfaces (≥5, real retrieval): SQL / Email / Vault / ClaimsMax / KBL(timeout) / ClickUp(empty).
+> - Findings delivered to vault main via librarian_commit.sh = **831d379**,
+>   `wiki/_library/findings/2026-07-08-ao-flight-bond-source-date-brec2.md`; receipt-check VERDICT PASS.
+> - Reported to lead: bus **#7495** (thread 360e57a0).
+>
+> **DEFECT F3 found + fixed → baker-vault PR #147 (awaiting deputy delta-verify).** Reply wrapper
+> `librarian_bus_reply.sh` used a single-quoted f-string inside the single-quoted `python3 -c '...'`
+> block → bash-parse crash → false-rejected EVERY valid inbound thread. Genuine seat-blocker (real
+> seat could never reply). Fix = double-quote concat, deny surface UNCHANGED; seeded suite **28/0**
+> (added h.1 static guard + h.2 positive-path — the missing coverage that let F3 escape). Completed
+> the reply/ack on the fixed (then-uncommitted) wrapper per lead GO #7491 (false-reject narrowing).
+> Harness-artifact (NOT a seat defect): b1 harness inherits BRISEN_LAB_TERMINAL_KEY=b1-key →
+> reader_slug_mismatch; flagged to lead for a hardening call.
+>
+> **REMAINING (non-b1): (1) deputy delta-verify PR #147; (2) lead POST_DEPLOY_AC_VERDICT.**
+> No builder work left. Successor: only re-engage if a PR #147 fix-round arrives.
 
 # Checkpoint — LIBRARIAN_AGENT_INSTALL_1
 
