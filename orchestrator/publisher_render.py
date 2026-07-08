@@ -355,12 +355,16 @@ def gate_staleness(doc: RenderDoc) -> dict[str, str]:
     living-documents register = STALE/FAIL until re-verified."""
     if not doc.register:
         return _verdict("staleness", True, "no living-documents register supplied — diff skipped")
+    # Normalize register keys the SAME way as the figure family (codex G3 F2):
+    # the desk may key the register with original-case doc families, so a
+    # case-sensitive lookup would silently skip the staleness diff → false PASS.
+    reg = {_norm(k).lower(): v for k, v in doc.register.items()}
     stale: list[str] = []
     for fig in doc.figures:
         fam = _norm(fig.source_family).lower()
-        if not fam or fam not in doc.register:
+        if not fam or fam not in reg:
             continue
-        current = _norm(doc.register[fam].get("version", ""))
+        current = _norm(reg[fam].get("version", ""))
         cited = _norm(fig.source_version)
         if current and cited and _version_is_older(cited, current):
             stale.append(f"'{fig.value}' cites {cited} < register {current} ({fam})")
@@ -531,15 +535,28 @@ class PublisherFacts:
 
 
 _REQUIRED = ("project_code", "matter_slug")
+# Registry-shape flight code: hyphen-separated alphanumeric segments only. This
+# is an ALLOWLIST — it rejects path separators, dots ("..") and any other
+# character that could escape the rendered-surface directory (codex G3 F1: an
+# unvalidated project_code like "../../escape" or "BB/AUK/001" flowed straight
+# into _surface_path). A malformed code bounces back to the desk (FORM-only lane).
+_PROJECT_CODE_RE = re.compile(r"^[A-Za-z0-9]+(?:-[A-Za-z0-9]+)+$")
 
 
 def facts_from_ticket(ticket: dict[str, Any]) -> PublisherFacts:
     """Normalize a FLIGHT_DASHBOARD_PACKET ticket into typed facts. Raises
     ``ValueError`` (bounced by ``render_ticket``) when a required field is absent
-    — Publisher owns FORM only, so a malformed packet goes back to the desk."""
+    or malformed — Publisher owns FORM only, so a bad packet goes back to the desk."""
     missing = [k for k in _REQUIRED if not str(ticket.get(k) or "").strip()]
     if missing:
         raise ValueError(f"packet missing required field(s): {', '.join(missing)}")
+
+    project_code = str(ticket["project_code"]).strip()
+    if not _PROJECT_CODE_RE.match(project_code):
+        raise ValueError(
+            f"project_code '{project_code}' is not a valid flight code "
+            "(expected hyphen-separated alphanumerics, e.g. BB-AUK-001)"
+        )
 
     figures = tuple(_figure_from(f) for f in _as_list(ticket.get("figures")))
     receipts = tuple(
@@ -560,7 +577,7 @@ def facts_from_ticket(ticket: dict[str, Any]) -> PublisherFacts:
         version_history = version_history + (page_version,)
 
     return PublisherFacts(
-        project_code=str(ticket["project_code"]),
+        project_code=project_code,
         flight_name=str(ticket.get("flight_name") or ticket["project_code"]),
         matter_slug=str(ticket["matter_slug"]),
         desk_owner=str(ticket.get("desk_owner") or ""),
