@@ -1711,7 +1711,7 @@ def reserve_ticket(conn: Any, ticket: AirportTicket) -> dict[str, Any]:
     with conn.cursor() as cur:
         cur.execute(
             """
-            SELECT id, status, bus_message_id
+            SELECT id, status, bus_message_id, terminal_status, check_in_at
             FROM airport_tickets
             WHERE dedup_key = %s
             LIMIT 1
@@ -1722,6 +1722,31 @@ def reserve_ticket(conn: Any, ticket: AirportTicket) -> dict[str, Any]:
         if existing:
             status = existing[1]
             bus_message_id = existing[2]
+            terminal_status = existing[3]
+            check_in_at = existing[4]
+            # TICKET_ID_DEDUP_1 (A) — DISPOSED-TICKET GUARD. A row that already reached
+            # a terminal disposition (terminal_status written by the bridge, OR the desk
+            # checked it in, OR a terminal live-status) must NEVER be re-issued. Without
+            # this, the failed-retry path below would reset a disposed row from 'failed'
+            # back to 'candidate' and re-POST it — re-minting an already-disposed
+            # ticket_id to the desk on every tick. Read-timeout retries are the trigger:
+            # a transient bus-post failure leaves status='failed'/bus_message_id NULL, and
+            # if the row is meanwhile disposed the retry must not resurrect it. Return a
+            # disposed no-op so run_tick advances the cursor (deterministic done), never
+            # re-posts. Genuinely-new tickets have no existing row and are unaffected.
+            disposed = (
+                terminal_status is not None
+                or check_in_at is not None
+                or status in ("rejected", "checked_in", "closed")
+            )
+            if disposed:
+                return {
+                    "reserved": False,
+                    "id": existing[0],
+                    "status": status,
+                    "bus_message_id": bus_message_id,
+                    "disposed": True,
+                }
             if status == "failed" and bus_message_id is None:
                 cur.execute(
                     """
@@ -1896,6 +1921,15 @@ def post_ticket_to_bus(ticket: AirportTicket) -> dict[str, Any]:
         "to": [recipient],
         "tier_required": "B",
         "topic": f"airport-ticketing/{ticket.suspected_flight}",
+        # TICKET_ID_DEDUP_1 (B1) — at-least-once delivery guard. post_ticket_to_bus is
+        # NOT idempotent by nature: a bus-post read-timeout is AMBIGUOUS (the daemon
+        # likely created the message but the response was lost), and the failed-retry
+        # loop re-posts next tick. Passing the immutable ticket_id as the idempotency
+        # key makes the daemon return the EXISTING message on a key match instead of
+        # creating a duplicate, so any number of retries deliver EXACTLY ONE desk
+        # message. ticket_id (not ticket_id+attempt) is deliberate: every retry of the
+        # same ticket must collapse onto one key. Daemons without the column ignore it.
+        "idempotency_key": ticket.ticket_id,
     }
     result = _request_json("POST", f"{base}/msg/{recipient}", key=key, payload=payload)
     if result.get("error"):
@@ -1985,7 +2019,11 @@ def mark_ticket_failed(
 def issue_ticket(ticket: AirportTicket, conn: Any) -> dict[str, Any]:
     reserved = reserve_ticket(conn, ticket)
     if not reserved.get("reserved"):
-        return {"skipped": True, "reason": "duplicate", "id": reserved.get("id")}
+        # TICKET_ID_DEDUP_1 (A): distinguish an already-disposed row (never re-post,
+        # deterministic done) from a plain dedup_key duplicate (run_tick's DUPLICATE
+        # terminal-clear path). Both are skips; only the reason differs.
+        reason = "disposed" if reserved.get("disposed") else "duplicate"
+        return {"skipped": True, "reason": reason, "id": reserved.get("id")}
     ticket_row_id = int(reserved["id"])
     result = post_ticket_to_bus(ticket)
     if not result.get("ok"):
@@ -2686,7 +2724,23 @@ def run_tick(*, now: Optional[datetime] = None) -> dict[str, Any]:
                     result = issue_ticket(ticket, conn)
                     row_id = result.get("id")
 
+                    # (e.0) DISPOSED — TICKET_ID_DEDUP_1 (A). The dedup_key row already
+                    #   reached a terminal disposition (terminal_status / desk check-in /
+                    #   terminal live-status). issue_ticket -> reserve_ticket returned a
+                    #   disposed no-op WITHOUT resetting the failed-retry path, so this
+                    #   arrival is idempotently DONE: never re-post, no terminal re-write,
+                    #   advance the cursor. This is the guard that stops an already-
+                    #   disposed ticket_id from re-minting to the desk every tick.
                     if (
+                        result.get("skipped")
+                        and result.get("reason") == "disposed"
+                        and row_id
+                    ):
+                        skipped += 1
+                        conn.commit()
+                        done = True
+
+                    elif (
                         result.get("skipped")
                         and result.get("reason") == "duplicate"
                         and row_id
