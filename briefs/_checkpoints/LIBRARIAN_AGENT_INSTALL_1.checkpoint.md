@@ -67,6 +67,13 @@ API + ping #7479 + librarian key read/ack). Lead GAVE GO for Part C (#7480). Ori
 hard context limit before Part C could start — **successor runs Part C FIRST thing (no gate/build work
 left; wiring+cage merged and gated).**
 
+**RUNG-1 REFINEMENT (lead #7483):** a REAL ticket **#7482** (ao-desk → librarian,
+topic `ao-flight/bond-source-date`) IS the spec's acceptance hunt #1 (BREC2 date + face + coupon +
+Gesamtgrundschuld tie). Run hunt #1 against THAT real ticket — librarian answers **on the #7482 thread**
+via `librarian_bus_reply.sh` (live proof of reply-same-thread + ack-after-receipt-check), and acks #7482
+only after findings-file + reply + `librarian_receipt_check.sh` PASS. The remaining 7-9 hunts stay SEEDED.
+Any OTHER live tickets arriving before rung-1 completes: leave QUEUED + flag lead (ramp discipline).
+
 **Successor FIRST action:** read this checkpoint, bump `attempt:` to claim, then run **Part C rung-1
   acceptance** — the ONLY remaining builder deliverable. 8-10 hunts across ≥5 surfaces; hunt #1 = live
   BREC2 (AO_MASTER "…securitization notes (3).pdf", matter=ao): issuance/subscription date + face + coupon,
