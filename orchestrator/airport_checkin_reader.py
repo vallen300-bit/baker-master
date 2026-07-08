@@ -24,7 +24,7 @@ from __future__ import annotations
 import logging
 import os
 import re
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Any, Optional
 
 from orchestrator.airport_ticketing_bridge import (
@@ -45,6 +45,21 @@ _BUS_URL_ENV = "AIRPORT_TICKETING_BUS_URL"
 _DEFAULT_BUS_URL = "https://brisen-lab.onrender.com"
 _POLL_LIMIT_ENV = "AIRPORT_CHECKIN_POLL_LIMIT"
 _DEFAULT_POLL_LIMIT = 25
+
+# CHECKIN_READER_DRAIN_DEADLETTER_1 (lead #6861) — fix for false 'desk non-responsive'
+# escalations. Root cause: non-actionable replies (unparseable / no-matching-ticket /
+# errored) were never ACKed, so they re-occupied the front of the oldest-first `unread`
+# poll window every sweep, starving real desk disposes (check_in_at stayed NULL ->
+# run_ttl_nudge escalated). Two knobs:
+#   DRAIN_MAX_PAGES: drain-to-empty loop, capped pages/sweep so one sweep clears a
+#                    backlog deeper than a single poll page (kills throughput cap H2).
+#   DEADLETTER_MINUTES: a non-actionable reply older than this is ACKed + audited to a
+#                    dead-letter row (recoverable — bus event persists, NOTHING deleted),
+#                    so it stops consuming the poll budget (kills starvation H1/H3).
+_DRAIN_MAX_PAGES_ENV = "AIRPORT_CHECKIN_DRAIN_MAX_PAGES"
+_DEFAULT_DRAIN_MAX_PAGES = 10
+_DEADLETTER_MIN_ENV = "AIRPORT_CHECKIN_DEADLETTER_MINUTES"
+_DEFAULT_DEADLETTER_MIN = 30  # ~= 3 sweeps at the 10-min default cadence
 
 # Outcome -> terminal status. VALID/URGENT/NEEDS_LUGGAGE_READ accept the arrival;
 # FAKE/DUPLICATE/WRONG_TERMINAL reject it. Locked policy (see Key Constraints in
@@ -192,53 +207,164 @@ def _write_checkin(conn: Any, *, parent_id: int, thread_id: Optional[str],
     return "none"
 
 
-def run_checkin_reader(conn: Any) -> dict[str, Any]:
-    """Part 1: read desk replies, write receipts, ACK after commit."""
+def _safe_int(value: Any) -> Optional[int]:
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return None
+
+
+def _drain_max_pages() -> int:
+    return _int_env(_DRAIN_MAX_PAGES_ENV, _DEFAULT_DRAIN_MAX_PAGES, 1, 100)
+
+
+def _deadletter_minutes() -> int:
+    # 0 disables dead-lettering (non-actionable replies retried forever, legacy behavior).
+    return _int_env(_DEADLETTER_MIN_ENV, _DEFAULT_DEADLETTER_MIN, 0, 60 * 24 * 30)
+
+
+def _msg_age_minutes(msg: dict[str, Any], now: datetime) -> Optional[float]:
+    """Minutes since the reply was created, from the daemon's created_at. Returns None
+    when there is no parseable timestamp — callers then treat the reply as TOO YOUNG to
+    dead-letter (never dead-letter something whose age we cannot establish)."""
+    raw = msg.get("created_at") or msg.get("timestamp")
+    if not raw:
+        return None
+    try:
+        ts = datetime.fromisoformat(str(raw).replace("Z", "+00:00"))
+    except (TypeError, ValueError):
+        return None
+    if ts.tzinfo is None:
+        ts = ts.replace(tzinfo=timezone.utc)
+    return (now - ts).total_seconds() / 60.0
+
+
+def _dead_letter(conn: Any, base: str, key: str, msg: dict[str, Any], *,
+                 reason: str, mid: int) -> None:
+    """ACK a non-actionable reply that has exceeded its retry budget and record a
+    recoverable dead-letter audit row. NOTHING is deleted — the bus event persists and
+    the audit captures message_id + reason so it can be replayed by hand."""
+    with conn.cursor() as cur:
+        cur.execute(
+            """
+            INSERT INTO baker_actions
+                (action_type, target_task_id, payload, trigger_source, success)
+            VALUES (%s, %s, %s, %s, TRUE)
+            """,
+            (
+                "airport_checkin.dead_letter",
+                str(msg.get("parent_id") or ""),
+                _json_param({
+                    "message_id": mid,
+                    "reason": reason,
+                    "parent_id": msg.get("parent_id"),
+                    "from_terminal": msg.get("from_terminal"),
+                    "thread_id": msg.get("thread_id"),
+                    "body_preview": str(msg.get("body_preview") or "")[:280],
+                }),
+                "airport_checkin_reader",
+            ),
+        )
+    conn.commit()  # commit BEFORE ack so a crash re-reads (still un-acked) idempotently
+    _ack(base, mid, key)
+
+
+def run_checkin_reader(conn: Any, *, now: Optional[datetime] = None) -> dict[str, Any]:
+    """Part 1: read desk replies, write receipts, ACK after commit.
+
+    DRAIN-TO-EMPTY: loops the poll (up to DRAIN_MAX_PAGES) so a backlog deeper than one
+    poll page clears in a single sweep. A ``seen`` set makes the loop terminate even
+    when un-acked young non-actionable replies keep re-appearing at the front of the
+    oldest-first ``unread`` window (they are processed once, then skipped).
+
+    DEAD-LETTER: a non-actionable reply (no matching ticket / unparseable body / errored)
+    older than DEADLETTER_MINUTES is ACKed + audited so it stops starving the poll budget.
+    Younger ones stay un-acked and are retried next sweep (bounded retry)."""
     base, key, slug = _bus_base(), _bridge_key(), _ticketing_slug()
     if not key:
         return {"ok": False, "reason": "ticketing_key_missing", "checked_in": 0}
-    checked_in = already = parsed_none = unmatched = errors = 0
-    messages = _fetch_inbox(base, slug, key, _poll_limit())
-    for msg in messages:
-        try:
-            mid = int(msg["id"])
-            parent_id = msg.get("parent_id")
-            if parent_id is None:
-                continue  # not a reply to a ticket; leave it
-            sender = str(msg.get("from_terminal") or "").strip()
-            if not sender or sender == slug:
+    _now = now or datetime.now(timezone.utc)
+    dl_min = _deadletter_minutes()
+    checked_in = already = parsed_none = unmatched = errors = dead_lettered = 0
+    seen: set = set()
+
+    def _old_enough(msg: dict[str, Any]) -> bool:
+        if dl_min <= 0:
+            return False  # dead-lettering disabled
+        age = _msg_age_minutes(msg, _now)
+        return age is not None and age >= dl_min
+
+    for _page in range(_drain_max_pages()):
+        messages = _fetch_inbox(base, slug, key, _poll_limit())
+        fresh = [m for m in messages if _safe_int(m.get("id")) not in seen]
+        if not fresh:
+            break  # inbox drained (or only already-seen young replies remain)
+        for msg in fresh:
+            mid = _safe_int(msg.get("id"))
+            if mid is None:
+                # malformed daemon row (no id): un-ackable -> surface as an error, and
+                # record the sentinel so the drain loop cannot re-process it forever.
+                errors += 1
+                seen.add(None)
+                logger.warning("airport check-in reply missing id: %s", msg)
                 continue
-            body = _fetch_full_body(base, mid, key) or str(msg.get("body_preview") or "")
-            outcome = parse_checkin_outcome(body)
-            if outcome is None:
-                parsed_none += 1
-                continue  # ambiguous/none: never guess; leave un-acked for human/next look
-            state = _write_checkin(
-                conn, parent_id=int(parent_id), thread_id=msg.get("thread_id"),
-                outcome=outcome, desk_slug=sender,
-            )
-            conn.commit()  # commit BEFORE ack so a crash re-reads idempotently
-            if state == "written":
-                checked_in += 1
-                _ack(base, mid, key)
-            elif state == "resolved":
-                # Idempotent replay: the ticket already carries a durable check-in.
-                # The write is a 0-row no-op, but we MUST still ACK or this reply is
-                # re-read forever (F1 — brief lines 28 + 624).
-                already += 1
-                _ack(base, mid, key)
-            else:
-                unmatched += 1  # no matching ticket: leave un-acked for next tick
-        except Exception as e:
+            seen.add(mid)
             try:
-                conn.rollback()
-            except Exception:
-                pass
-            errors += 1
-            logger.warning("airport check-in reply failed id=%s: %s", msg.get("id"), e)
-            continue  # one bad reply never stops the batch
+                parent_id = msg.get("parent_id")
+                sender = str(msg.get("from_terminal") or "").strip()
+                if parent_id is None or not sender or sender == slug:
+                    # not a ticket reply (or self-echo): non-actionable, dead-letter by age
+                    if _old_enough(msg):
+                        _dead_letter(conn, base, key, msg, reason="non_reply", mid=mid)
+                        dead_lettered += 1
+                    continue
+                body = _fetch_full_body(base, mid, key) or str(msg.get("body_preview") or "")
+                outcome = parse_checkin_outcome(body)
+                if outcome is None:
+                    if _old_enough(msg):
+                        _dead_letter(conn, base, key, msg, reason="parsed_none", mid=mid)
+                        dead_lettered += 1
+                    else:
+                        parsed_none += 1  # young: never guess; leave un-acked, retry next sweep
+                    continue
+                state = _write_checkin(
+                    conn, parent_id=int(parent_id), thread_id=msg.get("thread_id"),
+                    outcome=outcome, desk_slug=sender,
+                )
+                conn.commit()  # commit BEFORE ack so a crash re-reads idempotently
+                if state == "written":
+                    checked_in += 1
+                    _ack(base, mid, key)
+                elif state == "resolved":
+                    # Idempotent replay: the ticket already carries a durable check-in.
+                    already += 1
+                    _ack(base, mid, key)
+                elif _old_enough(msg):
+                    # no matching ticket AND past retry budget -> dead-letter (recoverable)
+                    _dead_letter(conn, base, key, msg, reason="unmatched", mid=mid)
+                    dead_lettered += 1
+                else:
+                    unmatched += 1  # young: leave un-acked, retry next sweep
+            except Exception as e:
+                try:
+                    conn.rollback()
+                except Exception:
+                    pass
+                if _old_enough(msg):
+                    # a persistently-failing reply is dead-lettered so it can't starve the
+                    # poll budget forever; the audit row + bus event keep it recoverable.
+                    try:
+                        _dead_letter(conn, base, key, msg, reason=f"errored:{e}"[:200], mid=mid)
+                        dead_lettered += 1
+                    except Exception:
+                        errors += 1
+                else:
+                    errors += 1
+                logger.warning("airport check-in reply failed id=%s: %s", msg.get("id"), e)
+                continue  # one bad reply never stops the batch
     return {"ok": True, "checked_in": checked_in, "already": already,
-            "parsed_none": parsed_none, "unmatched": unmatched, "errors": errors}
+            "parsed_none": parsed_none, "unmatched": unmatched, "errors": errors,
+            "dead_lettered": dead_lettered}
 
 
 # --- Part 2 — stale-ticket TTL / nudge sweep --------------------------------
@@ -487,7 +613,7 @@ def run_checkin_sweep(*, now: Optional[datetime] = None) -> dict[str, Any]:
     try:
         ensure_airport_ticket_table(conn)
         conn.commit()
-        reader = run_checkin_reader(conn)
+        reader = run_checkin_reader(conn, now=now)
         nudge = run_ttl_nudge(conn)
         return {"ok": True, "reader": reader, "nudge": nudge}
     except Exception as e:
