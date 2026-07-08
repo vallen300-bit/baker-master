@@ -8470,6 +8470,37 @@ async def flight_dashboard_page(request: Request, project_code: str):
     return HTMLResponse(flight_dashboard.render_dashboard_html(data))
 
 
+@app.get("/cockpit/{project_code}", include_in_schema=False, response_class=HTMLResponse)
+async def cockpit_html_page(request: Request, project_code: str):
+    """COCKPIT_SERVE_STOPGAP_1: serve frozen vault cockpit HTML for board clicks."""
+    if not (_mcp_verify_key(request) or _arrivals_board_cookie_ok(request)):
+        return HTMLResponse("Unauthorized", status_code=401)
+    from orchestrator.cockpit_serve import (
+        CockpitConfigError,
+        CockpitNotFound,
+        fetch_cockpit_html,
+        normalize_project_code,
+    )
+
+    try:
+        project_code = normalize_project_code(project_code)
+        cockpit = fetch_cockpit_html(project_code)
+    except ValueError:
+        return HTMLResponse("Not Found", status_code=404)
+    except CockpitNotFound:
+        return HTMLResponse("Not Found", status_code=404)
+    except CockpitConfigError:
+        logger.exception("cockpit_html_page not configured")
+        return HTMLResponse("Not Found", status_code=404)
+    except Exception:
+        logger.exception("cockpit_html_page failed for %s", project_code)
+        return HTMLResponse("Internal error", status_code=500)
+    response = HTMLResponse(cockpit.html)
+    response.headers["Cache-Control"] = "no-cache"
+    response.headers["X-Baker-Cockpit-Source"] = cockpit.path
+    return response
+
+
 @app.post("/api/flight-board/{project_code}", dependencies=[Depends(verify_api_key)])
 async def flight_board_upsert(project_code: str, payload: dict = Body(...)):
     """ARRIVALS_BOARD_LIVE_1: pilot upsert of flight board state."""

@@ -279,8 +279,8 @@ def _default_cockpit_url(row: dict[str, Any]) -> str:
     try:
         project = _project_code(str(row.get("project_number") or ""))
     except ValueError:
-        return "/flights"
-    return f"/flights/{project}"
+        return "/cockpit"
+    return f"/cockpit/{project}"
 
 
 def _safe_cockpit_url(row: dict[str, Any]) -> str:
@@ -316,9 +316,8 @@ def _row_html(row: dict[str, Any], today: date) -> str:
     destination = _display_text(row.get("destination"))
     flight_no = project if has_state else "PENDING"
     row_class = "live" if has_state else "pending"
-    click = ""
-    if has_state:
-        click = f' onclick="{_onclick(_safe_cockpit_url(row))}"'
+    url = _safe_cockpit_url(row)
+    click = f' onclick="{_onclick(url)}"' if url != "/cockpit" else ""
     return (
         f'      <tr class="{row_class}"{click}>\n'
         f"        <td>{_flap(_format_arrives(row.get('arrives_on')))}</td>\n"
