@@ -1056,6 +1056,9 @@ async function loadMorningBrief() {
             }
         }
 
+        // COCKPIT_REFERENCE_DESK_1 Fix 4: "as of HH:MM" stamp on the landing header.
+        _renderAsOfStamp(document.getElementById('briefGreeting'), data.as_of, 'briefAsOf');
+
         // DASHBOARD-SIMPLIFY-1: Narrative hidden (kept for future use)
         var narEl = document.getElementById('briefNarrative');
         if (narEl) narEl.style.display = 'none';
@@ -1325,10 +1328,9 @@ async function loadMorningBrief() {
         if (silentCard) silentCard.style.display = 'none';
 
         loadMattersSummary();
-        loadPeopleSidebar();
-        loadMediaSidebar();
-        loadIdeasSidebar();
-        loadCortexFeed();
+        // COCKPIT_REFERENCE_DESK_1: People/Media/Ideas sidebar builders + Cortex feed
+        // loader calls removed — those nav sections/cards are retired from the SPA.
+        // The loader functions remain defined (deep-link views still reachable).
 
         // System widgets moved to Baker Data tab (BAKER-DATA-TUCK-1)
     } catch (e) {
@@ -1394,6 +1396,47 @@ async function loadSystemWidgets() {
     ]);
 }
 
+// COCKPIT_REFERENCE_DESK_1 Fix 4: render a small "as of HH:MM" stamp from an ISO
+// timestamp. Inserts (or updates) a <span class="as-of-stamp"> right after the
+// given anchor element so panels say when their data was fetched.
+function _fmtAsOfClock(iso) {
+    if (!iso) return '';
+    try {
+        var d = new Date(iso);
+        if (isNaN(d.getTime())) return '';
+        var hh = String(d.getHours()).padStart(2, '0');
+        var mm = String(d.getMinutes()).padStart(2, '0');
+        return hh + ':' + mm;
+    } catch (e) { return ''; }
+}
+
+function _renderAsOfStamp(anchorEl, iso, stampId) {
+    if (!anchorEl) return;
+    var clock = _fmtAsOfClock(iso);
+    if (!clock) return;
+    var stamp = document.getElementById(stampId);
+    if (!stamp) {
+        stamp = document.createElement('span');
+        stamp.id = stampId;
+        stamp.className = 'as-of-stamp';
+        stamp.style.cssText = 'font-size:10px;color:var(--text2,#9e9e9e);font-weight:400;margin-left:8px;';
+        anchorEl.parentNode.insertBefore(stamp, anchorEl.nextSibling);
+    }
+    stamp.textContent = 'as of ' + clock;
+}
+
+// COCKPIT_REFERENCE_DESK_1: short date for the "no data since <date>" stale label.
+function _fmtStaleSince(iso) {
+    if (!iso) return 'unknown';
+    try {
+        var d = new Date(iso);
+        if (isNaN(d.getTime())) return 'unknown';
+        return d.toISOString().slice(0, 10);  // YYYY-MM-DD
+    } catch (e) {
+        return 'unknown';
+    }
+}
+
 async function renderSentinelWidget(container) {
     try {
         var resp = await bakerFetch('/api/sentinel-health');
@@ -1415,10 +1458,16 @@ async function renderSentinelWidget(container) {
 
         var badge = document.createElement('span');
         var downCount = summary.down || 0;
+        var staleCount = summary.stale || 0;
         var degradedCount = summary.degraded || 0;
+        // COCKPIT_REFERENCE_DESK_1: 'stale' (silent source) surfaces between down and
+        // degraded — silence must not read as health.
         if (downCount > 0) {
             badge.textContent = downCount + ' down';
             badge.style.cssText = 'color:#f44336;font-weight:600;font-size:11px;';
+        } else if (staleCount > 0) {
+            badge.textContent = staleCount + ' stale';
+            badge.style.cssText = 'color:#e65100;font-weight:600;font-size:11px;';
         } else if (degradedCount > 0) {
             badge.textContent = degradedCount + ' degraded';
             badge.style.cssText = 'color:#ff9800;font-weight:600;font-size:11px;';
@@ -1438,9 +1487,11 @@ async function renderSentinelWidget(container) {
 
             var circle = document.createElement('span');
             circle.style.cssText = 'display:inline-block;width:8px;height:8px;border-radius:50%;';
-            var statusColors = {healthy:'#4caf50', degraded:'#ff9800', down:'#f44336', unknown:'#9e9e9e'};
+            // COCKPIT_REFERENCE_DESK_1: stale = amber-red (silence), disabled = grey (retired).
+            var statusColors = {healthy:'#4caf50', degraded:'#ff9800', down:'#f44336',
+                                stale:'#e65100', disabled:'#9e9e9e', unknown:'#9e9e9e'};
             circle.style.backgroundColor = statusColors[s.status] || '#9e9e9e';
-            if (s.status === 'down') {
+            if (s.status === 'down' || s.status === 'stale') {
                 circle.style.animation = 'pulse 1.5s infinite';
             }
             dot.appendChild(circle);
@@ -1451,6 +1502,14 @@ async function renderSentinelWidget(container) {
                 label.title = 'Failures: ' + s.consecutive_failures + (s.last_error ? '\n' + s.last_error : '');
             }
             dot.appendChild(label);
+
+            // COCKPIT_REFERENCE_DESK_1: a stale source names when its data went quiet.
+            if (s.status === 'stale') {
+                var since = document.createElement('span');
+                since.style.cssText = 'color:#e65100;font-size:10px;';
+                since.textContent = 'no data since ' + _fmtStaleSince(s.last_success);
+                dot.appendChild(since);
+            }
             grid.appendChild(dot);
         });
 
@@ -1653,6 +1712,9 @@ function _sysSentinelStatus(p) {
     if (!p || !p.ok) return 'unknown';
     var s = (p.data && p.data.summary) || {};
     if ((s.down || 0) > 0) return 'red';
+    // COCKPIT_REFERENCE_DESK_1: a silently-stopped ('stale') sentinel must pull the
+    // strip off green — silence must not read as health. Amber, alongside degraded.
+    if ((s.stale || 0) > 0) return 'amber';
     if ((s.degraded || 0) > 0) return 'amber';
     return 'green';
 }
@@ -2056,6 +2118,9 @@ async function loadMattersSummary() {
         if (!resp.ok) return;
         const data = await resp.json();
 
+        // COCKPIT_REFERENCE_DESK_1 Fix 4: "as of HH:MM" stamp on the Matters header.
+        _renderAsOfStamp(document.getElementById('mattersSectionLabel'), data.as_of, 'mattersAsOf');
+
         // Surface degraded-source state so Director sees that the sidebar is
         // running on the legacy fallback (priorities yml missing or invalid).
         var banner = document.getElementById('cockpit-fallback-banner');
@@ -2206,6 +2271,9 @@ function _initSectionToggle(headerId, listId, key, defaultExpanded) {
 // ═══ MEDIA-SIDEBAR: Expandable media categories ═══
 
 async function loadMediaSidebar() {
+    // COCKPIT_REFERENCE_DESK_1: Media nav section retired — bail before the fetch
+    // if its sidebar container is gone (no dead fetch on boot or count-refresh).
+    if (!document.getElementById('mediaSubList')) return;
     try {
         var resp = await bakerFetch('/api/rss/category-counts');
         if (!resp.ok) return;
@@ -2244,6 +2312,9 @@ async function loadMediaSidebar() {
 // ═══ PEOPLE-SECTION-1: People sidebar + issue cards ═══
 
 async function loadPeopleSidebar() {
+    // COCKPIT_REFERENCE_DESK_1: People nav section retired — bail before the fetch
+    // if its sidebar container is gone (residual count-refresh calls no-op).
+    if (!document.getElementById('peopleSubList')) return;
     try {
         var resp = await bakerFetch('/api/people/issues-summary');
         if (!resp.ok) return;
@@ -8598,6 +8669,9 @@ function _injectDataLayerCSS() {
 // ═══ IDEAS TAB — IDEAS-CAPTURE-1 ═══
 
 async function loadIdeasSidebar() {
+    // COCKPIT_REFERENCE_DESK_1: Ideas nav section retired — bail before the fetch
+    // if its sidebar container is gone (no dead fetch on boot).
+    if (!document.getElementById('ideasSubList')) return;
     try {
         var resp = await bakerFetch('/api/ideas');
         if (!resp.ok) return;
@@ -11006,6 +11080,9 @@ async function _updateSchedulerPill() {
 }
 
 async function loadCortexFeed() {
+    // COCKPIT_REFERENCE_DESK_1: Cortex landing card retired — bail before the
+    // four fetches if its card is gone (no dead fetch on boot).
+    if (!document.getElementById('cortexFeedCard')) return;
     try {
         var [eventsRes, lintRes, pendingRes, statsRes] = await Promise.all([
             bakerFetch('/api/cortex/events?limit=30'),
