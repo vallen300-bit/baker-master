@@ -1,9 +1,9 @@
 ---
 brief: PUBLISHER_AGENT_INSTALL_1
 owner: b4
-attempt: 1
-updated: 2026-07-07
-phase: Part 3 (render engine + AC1) — starting
+attempt: 2
+updated: 2026-07-08
+phase: Part 3 (render engine) — building publisher_render.py (successor seat, attempt 2)
 ---
 
 # PUBLISHER_AGENT_INSTALL_1 — checkpoint
@@ -74,6 +74,18 @@ Lead: fold (a)/(b) fully at Part 4; (a) already corrected in the Part-3 design b
   - honesty 11a: no fake-live controls; machine-section counts from a live ledger query, not a snapshot.
   - Steps 1-3 (open in real browser via Chrome 9222, interact, console zero-errors) = the browser half;
     step 4 gates = the deterministic/scriptable half the engine runs as code.
+
+## AC1-TARGET FINDING (attempt 2, 2026-07-08) — escalated to lead
+The checkpoint's AC1 plan assumed a structured-facts PACKET matching the shipped BB-AUK-001 page.
+**It does not exist.** Only on-disk packet = `data-fixture.json` = FLIGHT_DASHBOARD_PACKET **v1**
+(build-infra facts: "Flight lifecycle store missing" / ledger D-20/D-23/D-24; last_refreshed 2026-07-01).
+The shipped page (now **Page v15**, not v9) follows content-contract **v2** (`content-contract-v2.md`,
+rules to v2.5, 9 sections) which SUPERSEDES v1. No v2 matter-content PACKET was ever captured — the
+page was hand-authored by BB desk (the very five-hand-writer path Publisher replaces). AC1-target fork
+posted to lead (options A1 author v2 packet from page / A2 round-trip on existing v1 fixture / A3 defer
+content-diff to BB desk emitting a v2 packet — desk owns content, publisher owns form). Recommended
+A3-production + A2-in-slice. Gates/renderer/AC2/AC7 are unaffected — building now.
+Register for staleness gate: `wiki/matters/lilienmatt/living-documents-register.md` (rich, real).
 
 ## NEXT CONCRETE STEP
 Build `orchestrator/publisher_render.py` = `render_ticket(ticket)->dict`: (1) the 5 deterministic
