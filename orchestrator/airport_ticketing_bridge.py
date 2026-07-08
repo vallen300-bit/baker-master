@@ -516,7 +516,12 @@ def _desk_for_matter(matter_slug: Optional[str], conn: Any = None) -> str:
         return fallback
     if not owner:
         return fallback
-    resolved = resolve_owner_slug(owner) or owner
+    # The registry ``desk_owner`` is UNTRUSTED input: it may name a desk that is not (yet)
+    # a wired bus recipient. Unlike the mint sites' ``resolve_owner_slug(_desk_slug()) or
+    # _desk_slug()`` — which trusts the operator-set global env — we must NOT ``or owner``
+    # here: a raw unresolvable owner would pass the guard, mint a bogus desk, get bus-
+    # rejected, and FREEZE the cursor on bus_failed. Resolve-fail -> global fallback.
+    resolved = resolve_owner_slug(owner)
     if not resolved or resolved in RESERVED_RECIPIENTS:
         logger.warning(
             "airport ticketing per-matter desk %r invalid, using global", owner
