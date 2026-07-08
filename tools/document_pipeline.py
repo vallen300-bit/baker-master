@@ -101,8 +101,25 @@ def triage_document(filename: str, full_text: str, source_path: str = "") -> str
     return 'document'
 
 
-# Path-to-matter mapping for classification hints
+# Path-to-matter mapping for classification hints.
+#
+# ORDERING IS LOAD-BEARING: get_path_matter_hint() returns the FIRST substring
+# match in iteration order. Root-scope container folders (e.g. 'AO_MASTER') must
+# be listed BEFORE any generic subfolder substring they can contain (e.g. the
+# generic 'RG7' -> 'Riemergasse 7' hint), or the generic pattern wins first-match
+# and mislabels. AO_LABEL_MAP_CANONICAL_FIX_1 round-2 (deputy, #6935): without the
+# AO_* keys below, /Baker-Feed/AO_MASTER/... paths (597 prod docs across 10 wrong
+# matters) fall through to 'RG7' and mis-hint to Riemergasse.
 PATH_MATTER_HINTS = {
+    # AO root scope — 'AO_MASTER' is Andrey Oskolkov's master folder; EVERY doc
+    # under it is the AO matter, incl. the 'AO_in_RG7' subtree (Oskolkov's position
+    # in the Riemergasse-7 building). 'Oskolkov' normalizes to canonical slug 'ao';
+    # the combined 'Oskolkov-RG7' label is retired (mis-aliases to hagenauer-rg7).
+    # These are FIRST so the AO root scope beats both the generic 'RG7' hint and any
+    # subfolder-name collision. 'AO_RG7' also catches the 2 AO reconciliation docs
+    # that live outside AO_MASTER (verified prod).
+    'AO_MASTER': 'Oskolkov',
+    'AO_RG7': 'Oskolkov',
     '14_HAGENAUER': 'Hagenauer',
     '13_CUPIAL': 'Cupial',
     'Baden-Baden': 'Baden-Baden Projects',
@@ -115,7 +132,7 @@ PATH_MATTER_HINTS = {
     'Cap_Ferrat': 'Cap Ferrat Villa',
     'Kitzb': 'Kitzbühel',
     'Kempinski': 'Kempinski Kitzbühel Acquisition',
-    'Oskolkov': 'Oskolkov-RG7',
+    'Oskolkov': 'Oskolkov',  # AO_LABEL_MAP_CANONICAL_FIX_1: retired combined 'Oskolkov-RG7' (mis-aliases to hagenauer-rg7); 'Oskolkov' normalizes to canonical slug 'ao'
     'Marketing': 'Mandarin Oriental Sales',
     'Finance': 'Financing Vienna & Baden-Baden',
     'Annaberg': 'Annaberg',
