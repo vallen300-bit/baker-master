@@ -573,11 +573,16 @@ def check_calendar_and_prep():
     2. For each meeting not yet prepped → generate briefing
     3. Store briefing as T2 alert card
     """
-    from triggers.sentinel_health import report_success, report_failure
+    from triggers.sentinel_health import report_success, report_failure, should_skip_poll
     from memory.store_back import SentinelStoreBack
     from triggers.state import trigger_state
     from orchestrator.pipeline import _match_matter_slug, _auto_tag
 
+    # COCKPIT_REFERENCE_DESK_2: calendar sentinel is retired (dead poller since
+    # 2026-05-29). should_skip_poll returns True → stop the wasted poll attempt so
+    # retirement also silences the API calls, not just the health surface.
+    if should_skip_poll("calendar"):
+        return
 
     try:
         try:

@@ -291,10 +291,17 @@ def check_new_transcripts():
             new_transcripts = fetch_new_transcripts(watermark)
         except Exception as e:
             logger.error(f"Fireflies trigger: fetch failed: {e}")
+            # COCKPIT_REFERENCE_DESK_2: a fetch failure must mark the sentinel down,
+            # else "poller dead" is indistinguishable from "poller alive, no data".
+            report_failure("fireflies", f"fetch failed: {e}")
             return
 
         if not new_transcripts:
             logger.info("Fireflies trigger: no new transcripts")
+            # COCKPIT_REFERENCE_DESK_2: poller liveness ≠ data novelty — an empty
+            # result means the poll ran fine, so report success to keep the sentinel
+            # honest (was silently going stale though the poller was healthy).
+            report_success("fireflies")
             return
 
         logger.info(f"Fireflies trigger: {len(new_transcripts)} new transcripts found")
