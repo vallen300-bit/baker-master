@@ -9,6 +9,7 @@ from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 
 import psycopg2
+import pytest
 from fastapi.testclient import TestClient
 
 from orchestrator import arrivals_board as ab
@@ -60,6 +61,7 @@ def test_render_board_html_uses_template_tokens_and_filters_old_landed():
             "arrives_on": date(2026, 7, 10),
             "airline": "Baden-Baden",
             "destination": "Aukera financing",
+            "cockpit_url": "/\\evil.example/landing",
             "updated_at": NOW,
         },
         {
@@ -79,6 +81,8 @@ def test_render_board_html_uses_template_tokens_and_filters_old_landed():
     ]
     html = ab.render_board_html(rows, now=NOW)
     assert 'data-flap="BB-AUK-001"' in html
+    assert "evil.example" not in html
+    assert 'onclick="location.href=&quot;/flights/BB-AUK-001&quot;"' in html
     assert "blinkgrp" in html
     assert 'data-flap="FINAL APPROACH"' in html
     assert 'data-flap="PENDING"' in html
@@ -88,6 +92,13 @@ def test_render_board_html_uses_template_tokens_and_filters_old_landed():
     assert "__STAMP__" not in html
     assert '<meta http-equiv="refresh" content="120">' in html
     assert 'style="overflow-x:auto"' in html
+
+
+def test_cockpit_url_rejects_backslashes():
+    assert ab._optional_cockpit_url("/flights/BB-AUK-001") == "/flights/BB-AUK-001"
+    for url in ("/\\evil.example/path", "/flights\\BB-AUK-001"):
+        with pytest.raises(ValueError):
+            ab._optional_cockpit_url(url)
 
 
 def _bootstrap_live_pg(dsn: str) -> None:
@@ -214,7 +225,19 @@ def test_arrivals_json_uses_effective_status(monkeypatch):
     ]
     monkeypatch.setattr(ab, "list_board_rows", lambda: rows)
     monkeypatch.setattr(dashboard, "_BAKER_API_KEY", "test-key", raising=False)
-    resp = TestClient(dashboard.app).get("/api/arrivals.json")
+    client = TestClient(dashboard.app)
+
+    no_key = client.get("/api/arrivals.json")
+    assert no_key.status_code == 401
+
+    page_no_key = client.get("/arrivals")
+    assert page_no_key.status_code == 401
+
+    page = client.get("/arrivals?key=test-key")
+    assert page.status_code == 200
+    assert 'data-flap="BB-AUK-001"' in page.text
+
+    resp = client.get("/api/arrivals.json?key=test-key")
     assert resp.status_code == 200
     body = resp.json()
     assert body["count"] == 1
