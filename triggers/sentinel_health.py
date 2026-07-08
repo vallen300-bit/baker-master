@@ -30,7 +30,19 @@ logger = logging.getLogger("sentinel.health")
 #   - get_all_sentinel_health()         -> normalizes their status to 'disabled'
 #                                          so no health surface counts them down.
 # Single control point: add/remove a source here and every surface follows.
-RETIRED_SOURCES = frozenset({"exchange", "exchange_sent", "exchange_calendar"})
+RETIRED_SOURCES = frozenset({
+    # RETIRE_DEAD_EVOK_SENTINELS_1 — M365 cutover 2026-06-03:
+    "exchange", "exchange_sent", "exchange_calendar",
+    # COCKPIT_REFERENCE_DESK_2 — ruling bus #7525/#7527, Director-informed 2026-07-09.
+    # Un-retire = delete the line here (+ its _RETIRED_WATERMARK_MAP entry if any).
+    "browser",               # dead since 2026-04-27; browser-use path abandoned
+    "calendar",              # dead since 2026-05-29; future calendar ingest = Graph rebuild
+    "slack",                 # dead since 2026-05-20; Slack reads moved to MCP
+    "initiative_engine",     # dead since 2026-03-27; superseded by Cortex
+    "obligation_generator",  # dead since 2026-03-29; superseded
+    "fireflies",             # account idle — last real meeting 2026-05-19; Plaud replaced it
+    "fireflies_backfill",    # rides with fireflies
+})
 
 # Watermark source names differ from sentinel source names: the `exchange`
 # sentinel advances the `exchange_poll` row in trigger_watermarks. Map each
@@ -43,6 +55,16 @@ _RETIRED_WATERMARK_MAP = {
     "exchange": ("exchange_poll",),        # INBOX poll watermark (WATERMARK_KEY)
     "exchange_sent": ("exchange_poll_sent",),  # Sent poll watermark (WATERMARK_KEY_SENT)
     "exchange_calendar": (),               # EWS calendar poll keeps no watermark
+    # COCKPIT_REFERENCE_DESK_2 — only slack + fireflies own a named _WATERMARK_MAX_AGE
+    # key, so only they need a mapping to stop the permanent STALE-DATA alert; the
+    # other retired sources keep no watermark row.
+    "browser": (),
+    "calendar": (),
+    "slack": ("slack",),          # named key in _WATERMARK_MAX_AGE
+    "initiative_engine": (),
+    "obligation_generator": (),
+    "fireflies": ("fireflies",),  # named key in _WATERMARK_MAX_AGE — stops the permanent 48h STALE-DATA alert
+    "fireflies_backfill": (),
 }
 RETIRED_WATERMARK_SOURCES = frozenset(
     wm for src in RETIRED_SOURCES for wm in _RETIRED_WATERMARK_MAP.get(src, ())
@@ -82,6 +104,11 @@ _STALE_AFTER_HOURS = {
     "calendar": 48,
     "rss": 72,
     "browser": 168,
+    # COCKPIT_REFERENCE_DESK_2: Sunday-weekly jobs — 192h = 8 days, so one
+    # fully-missed week flips stale, a normal week never does.
+    "ao_pm_lint": 192,
+    "movie_am_lint": 192,
+    "waha_restart": 192,
 }
 
 
