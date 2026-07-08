@@ -61,8 +61,13 @@ BOTH gate legs are CLEAN (wiring merged + codex G3 PASS #7464; cage deputy G2 PA
 G3 PASS #7476). Cage PR #145 @ `3fba108` handed to lead #7477 for merge + Tier-B. Ship report written
 (`briefs/_reports/B1_LIBRARIAN_AGENT_INSTALL_1_20260708.md`). Seeded suite 20/0.
 
-**Successor FIRST action:** `check bus` for lead's merge/Tier-B signal on thread `69558182-…`.
-- If lead reports #145 MERGED + Tier-B done (seat keyed, Rows 8/9 latch lifted): run **Part C rung-1
+**UPDATE (lead #7480): TIER-B DONE + LATCH LIFTED — seat keyed + LIVE.** Cage #145 merged; Rows
+3/8/9/13/14 executed (Render deploy `dep-d97afs0k1i2s73d7l5u0`); AC12 smoke PASS (card + terminals
+API + ping #7479 + librarian key read/ack). Lead GAVE GO for Part C (#7480). Original session hit the
+hard context limit before Part C could start — **successor runs Part C FIRST thing (no gate/build work
+left; wiring+cage merged and gated).**
+
+**Successor FIRST action:** read this checkpoint, bump `attempt:` to claim, then run **Part C rung-1
   acceptance** — the ONLY remaining builder deliverable. 8-10 hunts across ≥5 surfaces; hunt #1 = live
   BREC2 (AO_MASTER "…securitization notes (3).pdf", matter=ao): issuance/subscription date + face + coupon,
   verbatim quotes; compare vs Opus €12M Gesamtgrundschuld reg. 2020-09-28 — HARD-FLAG conflicts, do NOT
