@@ -61,7 +61,7 @@ def test_render_board_html_uses_template_tokens_and_filters_old_landed():
             "arrives_on": date(2026, 7, 10),
             "airline": "Baden-Baden",
             "destination": "Aukera financing",
-            "cockpit_url": "/\\evil.example/landing",
+            "cockpit_url": "/\\external.example/landing",
             "updated_at": NOW,
         },
         {
@@ -81,7 +81,7 @@ def test_render_board_html_uses_template_tokens_and_filters_old_landed():
     ]
     html = ab.render_board_html(rows, now=NOW)
     assert 'data-flap="BB-AUK-001"' in html
-    assert "evil.example" not in html
+    assert "external.example" not in html
     assert 'onclick="location.href=&quot;/flights/BB-AUK-001&quot;"' in html
     assert "blinkgrp" in html
     assert 'data-flap="FINAL APPROACH"' in html
@@ -211,6 +211,7 @@ def test_flight_board_endpoint_requires_key_and_rejects_bad_status(monkeypatch):
 
 def test_arrivals_json_uses_effective_status(monkeypatch):
     monkeypatch.setenv("BAKER_API_KEY", "test-key")
+    monkeypatch.setenv("ARRIVALS_BOARD_PIN", "123456")
     from outputs import dashboard
 
     rows = [
@@ -228,17 +229,40 @@ def test_arrivals_json_uses_effective_status(monkeypatch):
     client = TestClient(dashboard.app)
 
     no_key = client.get("/api/arrivals.json")
-    assert no_key.status_code == 401
+    assert no_key.status_code == 404
 
     page_no_key = client.get("/arrivals")
-    assert page_no_key.status_code == 401
+    assert page_no_key.status_code == 404
+
+    wrong_pin = client.get("/arrivals?pin=111111")
+    assert wrong_pin.status_code == 404
 
     page = client.get("/arrivals?key=test-key")
     assert page.status_code == 200
     assert 'data-flap="BB-AUK-001"' in page.text
+
+    header_page = client.get("/arrivals", headers={"X-Baker-Key": "test-key"})
+    assert header_page.status_code == 200
+
+    pin_page = client.get("/arrivals?pin=123456")
+    assert pin_page.status_code == 200
+    assert "arrivals_board_access" in pin_page.headers.get("set-cookie", "")
+
+    bare_page_with_cookie = client.get("/arrivals")
+    assert bare_page_with_cookie.status_code == 200
+    assert 'data-flap="BB-AUK-001"' in bare_page_with_cookie.text
 
     resp = client.get("/api/arrivals.json?key=test-key")
     assert resp.status_code == 200
     body = resp.json()
     assert body["count"] == 1
     assert body["rows"][0]["effective_status"] == "DELAYED"
+
+    fresh_client = TestClient(dashboard.app)
+    pin_resp = fresh_client.get("/api/arrivals.json?pin=123456")
+    assert pin_resp.status_code == 200
+    assert "arrivals_board_access" in pin_resp.headers.get("set-cookie", "")
+
+    cookie_resp = fresh_client.get("/api/arrivals.json")
+    assert cookie_resp.status_code == 200
+    assert cookie_resp.json()["rows"][0]["effective_status"] == "DELAYED"
