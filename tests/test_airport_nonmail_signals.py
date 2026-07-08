@@ -19,6 +19,7 @@ from datetime import datetime, timezone
 import pytest
 
 from orchestrator import airport_ticketing_bridge as bridge
+from scripts import backfill_airport_ticket_suspected_flight as flight_backfill
 
 
 # ===========================================================================
@@ -94,6 +95,119 @@ def test_build_plaud_ticket_matter_lane_only(monkeypatch):
     assert ticket.source_channel == "plaud"
     assert ticket.urgency_hint == "normal"  # identity lane, not keyword
     assert any("registry matter_slug: aukera" in w for w in ticket.why_ticketed)
+
+
+class _SeqCursor:
+    def __init__(self, rows):
+        self._rows = rows
+
+    def execute(self, *_args, **_kwargs):
+        return None
+
+    def fetchall(self):
+        return self._rows
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *_args):
+        return False
+
+    def close(self):
+        return None
+
+
+class _SeqConn:
+    def __init__(self, *rowsets):
+        self._rowsets = list(rowsets)
+        self.rollbacks = 0
+
+    def cursor(self):
+        rows = self._rowsets.pop(0) if self._rowsets else []
+        return _SeqCursor(rows)
+
+    def rollback(self):
+        self.rollbacks += 1
+
+
+class _BoomConn:
+    def __init__(self):
+        self.rollbacks = 0
+
+    def cursor(self):
+        raise RuntimeError("db unavailable")
+
+    def rollback(self):
+        self.rollbacks += 1
+
+
+def test_flight_for_matter_resolves_project_number(monkeypatch):
+    monkeypatch.delenv("AIRPORT_TICKETING_FLIGHT", raising=False)
+    conn = _SeqConn([("AO-OSK-001",)])
+    assert bridge._flight_for_matter("ao", conn) == "AO-OSK-001"
+
+
+def test_flight_for_matter_falls_back_on_none_unknown_invalid_and_error(monkeypatch):
+    monkeypatch.delenv("AIRPORT_TICKETING_FLIGHT", raising=False)
+    assert bridge._flight_for_matter("ao", None) == "aukera-annaberg-financing"
+    assert bridge._flight_for_matter("unknown", _SeqConn([])) == "aukera-annaberg-financing"
+    assert bridge._flight_for_matter("ao", _SeqConn([("not-a-flight",)])) == "aukera-annaberg-financing"
+    boom = _BoomConn()
+    assert bridge._flight_for_matter("ao", boom) == "aukera-annaberg-financing"
+    assert boom.rollbacks == 1
+
+
+def test_build_plaud_ticket_uses_per_matter_flight_when_conn_present(monkeypatch):
+    monkeypatch.delenv("AIRPORT_TICKETING_DESK", raising=False)
+    monkeypatch.delenv("AIRPORT_TICKETING_FLIGHT", raising=False)
+    # First cursor is _desk_for_matter -> ao-desk; second is _flight_for_matter -> AO-OSK-001.
+    conn = _SeqConn([("ao-desk",)], [("AO-OSK-001",)])
+    arrival = _plaud(
+        title="AO weekly ops",
+        summary="no flight terms here",
+        full_transcript="nothing relevant",
+        matter_slug="ao",
+        matter_matched=True,
+    )
+    ticket = bridge.build_plaud_ticket(arrival, conn=conn)
+    assert ticket is not None
+    assert ticket.proposed_desk_slug == "ao-desk"
+    assert ticket.suspected_matter_slug == "ao"
+    assert ticket.suspected_flight == "AO-OSK-001"
+
+
+def test_backfill_planner_registry_and_legacy_dual_match():
+    rows = [
+        {"id": 1, "suspected_matter_slug": "ao", "suspected_flight": "aukera-annaberg-financing"},
+        {"id": 2, "suspected_matter_slug": "lilienmatt", "suspected_flight": "aukera-annaberg-financing"},
+        {"id": 3, "suspected_matter_slug": "hagenauer-rg7", "suspected_flight": "aukera-annaberg-financing"},
+        {"id": 4, "suspected_matter_slug": "ao", "suspected_flight": "AO-OSK-001"},
+    ]
+    plans = flight_backfill.plan_ticket_flight_backfill(
+        rows,
+        matter_to_project={"ao": "AO-OSK-001"},
+        legacy_pairs={("lilienmatt", "aukera-annaberg-financing"): "BB-AUK-001"},
+    )
+    assert [(p.ticket_id, p.new_flight, p.reason) for p in plans] == [
+        (1, "AO-OSK-001", "registry_matter"),
+        (2, "BB-AUK-001", "legacy_default_matter_flight"),
+    ]
+
+
+def test_backfill_loader_reads_explicit_legacy_snapshot_fields(tmp_path):
+    (tmp_path / "BB-AUK-001.json").write_text(
+        """
+        {
+          "project_code": "BB-AUK-001",
+          "suspected_flight": "BB-AUK-001",
+          "legacy_suspected_flights": ["aukera-annaberg-financing"],
+          "legacy_matter_slugs": ["lilienmatt"]
+        }
+        """
+    )
+    assert flight_backfill.load_snapshot_legacy_pairs(tmp_path) == {
+        ("lilienmatt", "aukera-annaberg-financing"): "BB-AUK-001"
+    }
 
 
 def test_build_plaud_ticket_no_match_returns_none():
