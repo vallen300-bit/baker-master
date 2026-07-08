@@ -1197,3 +1197,7 @@ complete (Inbox 34%, Sent 0.4%). Nobody noticed until the Director asked "is it 
 
 ## Lesson #114 (2026-07-07, AH1-lead) — Merge only on the gate agent's OWN verdict post, never on relayed status
 Merged RESEARCHER_HARNESS_RETROFIT_1 @fa2941d to vault main at 15:25:49 based on b1's relay ("codex G3 accepted-residual") + deputy PASS. b1's HOLD landed 13 seconds later: codex #6618/#6628 had a SEPARATE blocking finding (enforce-mode parser bypass) distinct from the accepted residual. Exposure was zero only by luck of the WARN-default. Rule: a gate is closed when the GATE AGENT's own verdict post says so on the EXACT tip being merged — a builder's summary of the gate chain is input, not authority. Extends Lesson #112 (walk the full gate plan before merge).
+
+## Lesson #115 (2026-07-08) — "Built + tests green" without a commit hash = nothing exists
+b3's predecessor seat reported HAG_FILER ACL guard "built + AC2-green" (#6548) but never committed; the seat died and the work evaporated — reflog+stash in both repos confirm zero persistence (#7020). A day later the successor had to rebuild from the spec.
+**Rule:** any worker report claiming "built"/"tested"/"green" MUST carry the commit hash (pushed), or state UNCOMMITTED in caps. Lead treats hash-less build claims as not-yet-existing when sequencing (don't rule "one commit from ship" off a hash-less report). Workers commit+push per green block, not per session.
