@@ -22,15 +22,49 @@ SCRIPT_DIR="$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)"
 . "$SCRIPT_DIR/brisen_lab_terminal_key.sh"
 
 # --- arg parsing ---
+# Positional: <recipient> <body> [topic]. Optional threading flags (BUS_POST_
+# THREADING_ARG_1) may appear in any position, conventionally after the positionals:
+#   --parent <msg-id>  -> payload parent_id (threads a reply onto that message; the
+#                         airport check-in reader matches disposes on parent_id).
+#   --thread <uuid>    -> payload thread_id. The daemon does NOT auto-inherit the
+#                         parent's thread on parent_id alone (verified: a --parent-only
+#                         reply gets a fresh thread), so pass --thread to keep a reply in
+#                         the parent's thread. Mirrors bus_post.py --parent-id/--thread-id.
+# Un-flagged invocations stay byte-identical on the wire (no parent_id/thread_id keys).
+
+PARENT_ID=""
+THREAD_ID=""
+POSITIONAL=()
+while [ "$#" -gt 0 ]; do
+    case "$1" in
+        --parent)
+            [ "$#" -ge 2 ] || { echo "ERROR: --parent requires a message id" >&2; exit 2; }
+            PARENT_ID="$2"; shift 2 ;;
+        --parent=*) PARENT_ID="${1#*=}"; shift ;;
+        --thread)
+            [ "$#" -ge 2 ] || { echo "ERROR: --thread requires a thread uuid" >&2; exit 2; }
+            THREAD_ID="$2"; shift 2 ;;
+        --thread=*) THREAD_ID="${1#*=}"; shift ;;
+        *) POSITIONAL+=("$1"); shift ;;
+    esac
+done
+set -- "${POSITIONAL[@]:-}"
 
 if [ "${1:-}" = "" ] || [ "${2:-}" = "" ]; then
-    echo "Usage: bus_post.sh <recipient_slug> <body> [topic]" >&2
+    echo "Usage: bus_post.sh <recipient_slug> <body> [topic] [--parent <msg-id>] [--thread <uuid>]" >&2
     exit 2
 fi
 
 RECIPIENT_INPUT="$1"
 BODY="$2"
 TOPIC="${3:-}"
+
+# --parent must be an integer message id if provided (fail-loud; matches the daemon's
+# int parent_id + bus_post.py's --parent-id type=int).
+if [ -n "$PARENT_ID" ] && ! printf '%s' "$PARENT_ID" | grep -qE '^[0-9]+$'; then
+    echo "ERROR: --parent must be an integer message id, got: $PARENT_ID" >&2
+    exit 2
+fi
 
 # --- recipient validation ---
 
@@ -73,11 +107,17 @@ fi
 PAYLOAD="$(python3 -c '
 import json, sys
 recipient, body, topic = sys.argv[1], sys.argv[2], sys.argv[3]
+parent_id, thread_id = sys.argv[4], sys.argv[5]
 out = {"kind": "dispatch", "body": body, "to": [recipient], "tier_required": "B"}
 if topic:
     out["topic"] = topic
+# Appended last + only when provided, so an un-flagged post is byte-identical to before.
+if parent_id:
+    out["parent_id"] = int(parent_id)
+if thread_id:
+    out["thread_id"] = thread_id
 print(json.dumps(out))
-' "$RECIPIENT" "$BODY" "$TOPIC")"
+' "$RECIPIENT" "$BODY" "$TOPIC" "$PARENT_ID" "$THREAD_ID")"
 
 # --- POST ---
 

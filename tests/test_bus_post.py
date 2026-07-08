@@ -454,3 +454,85 @@ def test_21_py_op_fallback_cache_seed_uses_0600_create_mode(monkeypatch, tmp_pat
     cache_file = tmp_path / ".brisen-lab" / "keys" / "lead"
     assert cache_file.read_text().strip() == "op-key"
     assert stat.S_IMODE(cache_file.stat().st_mode) == 0o600
+
+
+# ---------- BUS_POST_THREADING_ARG_1: --parent / --thread ----------
+
+def test_22_sh_parent_flag_sets_parent_id(stub_daemon, fake_op_path):
+    """--parent 42 (after positionals) -> payload.parent_id == 42, no thread_id."""
+    url, captured = stub_daemon
+    r = _run_sh(
+        ["b2", "x", "topic/x", "--parent", "42"],
+        _env_with({"BAKER_ROLE": "AH1", "BRISEN_LAB_DAEMON_URL": url},
+                  fake_op_dir=fake_op_path),
+    )
+    assert r.returncode == 0, r.stderr
+    assert captured[0]["payload"]["parent_id"] == 42
+    assert "thread_id" not in captured[0]["payload"]
+
+
+def test_23_sh_thread_flag_sets_thread_id(stub_daemon, fake_op_path):
+    """--parent 42 --thread <uuid> -> parent_id + thread_id both round-trip
+    (the daemon does not auto-inherit thread from parent_id alone)."""
+    url, captured = stub_daemon
+    r = _run_sh(
+        ["b2", "x", "topic/x", "--parent", "42", "--thread", "thr-abc-123"],
+        _env_with({"BAKER_ROLE": "AH1", "BRISEN_LAB_DAEMON_URL": url},
+                  fake_op_dir=fake_op_path),
+    )
+    assert r.returncode == 0, r.stderr
+    assert captured[0]["payload"]["parent_id"] == 42
+    assert captured[0]["payload"]["thread_id"] == "thr-abc-123"
+
+
+def test_24_sh_unflagged_omits_threading_keys(stub_daemon, fake_op_path):
+    """Un-flagged post must carry NO parent_id/thread_id keys — byte-identical
+    to the pre-change request body (AC2)."""
+    url, captured = stub_daemon
+    r = _run_sh(
+        ["b2", "x", "topic/x"],
+        _env_with({"BAKER_ROLE": "AH1", "BRISEN_LAB_DAEMON_URL": url},
+                  fake_op_dir=fake_op_path),
+    )
+    assert r.returncode == 0, r.stderr
+    payload = captured[0]["payload"]
+    assert "parent_id" not in payload
+    assert "thread_id" not in payload
+    # exact key set + order that today's callers put on the wire
+    assert list(payload.keys()) == ["kind", "body", "to", "tier_required", "topic"]
+
+
+def test_25_sh_parent_non_integer_rejected(fake_op_path):
+    """--parent must be an integer message id (fail-loud) -> exit 2."""
+    r = _run_sh(
+        ["b2", "x", "topic/x", "--parent", "not-a-number"],
+        _env_with({"BAKER_ROLE": "AH1"}, fake_op_dir=fake_op_path),
+    )
+    assert r.returncode == 2
+    assert "integer" in r.stderr
+
+
+def test_26_sh_parent_equals_form(stub_daemon, fake_op_path):
+    """--parent=42 equals-form is accepted too."""
+    url, captured = stub_daemon
+    r = _run_sh(
+        ["b2", "x", "topic/x", "--parent=42"],
+        _env_with({"BAKER_ROLE": "AH1", "BRISEN_LAB_DAEMON_URL": url},
+                  fake_op_dir=fake_op_path),
+    )
+    assert r.returncode == 0, r.stderr
+    assert captured[0]["payload"]["parent_id"] == 42
+
+
+def test_27_sh_parent_flag_before_positionals(stub_daemon, fake_op_path):
+    """Flags may precede the positionals; recipient/body/topic still resolve."""
+    url, captured = stub_daemon
+    r = _run_sh(
+        ["--parent", "42", "b2", "x", "topic/x"],
+        _env_with({"BAKER_ROLE": "AH1", "BRISEN_LAB_DAEMON_URL": url},
+                  fake_op_dir=fake_op_path),
+    )
+    assert r.returncode == 0, r.stderr
+    assert captured[0]["path"] == "/msg/b2"
+    assert captured[0]["payload"]["parent_id"] == 42
+    assert captured[0]["payload"]["topic"] == "topic/x"
