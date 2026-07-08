@@ -8436,6 +8436,8 @@ async def flight_board_upsert(project_code: str, payload: dict = Body(...)):
 @app.get("/arrivals", include_in_schema=False, response_class=HTMLResponse)
 async def arrivals_board_page(request: Request):
     """ARRIVALS_BOARD_LIVE_1: Director ARRIVALS board (ratified v6 register)."""
+    if not _mcp_verify_key(request):
+        return HTMLResponse("Unauthorized", status_code=401)
     from orchestrator import arrivals_board
 
     rows = arrivals_board.list_board_rows()
@@ -8443,8 +8445,10 @@ async def arrivals_board_page(request: Request):
 
 
 @app.get("/api/arrivals.json", include_in_schema=False)
-async def arrivals_board_json():
+async def arrivals_board_json(request: Request):
     """ARRIVALS_BOARD_LIVE_1: ARRIVALS board rows for monitors/future clients."""
+    if not _mcp_verify_key(request):
+        return JSONResponse({"detail": "Unauthorized"}, status_code=401)
     from orchestrator import arrivals_board
 
     rows = arrivals_board.json_rows(arrivals_board.list_board_rows())

@@ -86,7 +86,12 @@ def _optional_cockpit_url(value: Any) -> Optional[str]:
     url = _optional_text(value, max_len=512)
     if url is None:
         return None
-    if not url.startswith("/") or url.startswith("//") or any(ord(c) < 32 for c in url):
+    if (
+        not url.startswith("/")
+        or url.startswith("//")
+        or "\\" in url
+        or any(ord(c) < 32 for c in url)
+    ):
         raise ValueError("cockpit_url must be a same-origin path starting with '/'")
     return url
 
@@ -270,6 +275,26 @@ def _onclick(url: str) -> str:
     return html.escape(f"location.href={json.dumps(url)}", quote=True)
 
 
+def _default_cockpit_url(row: dict[str, Any]) -> str:
+    try:
+        project = _project_code(str(row.get("project_number") or ""))
+    except ValueError:
+        return "/flights"
+    return f"/flights/{project}"
+
+
+def _safe_cockpit_url(row: dict[str, Any]) -> str:
+    fallback = _default_cockpit_url(row)
+    try:
+        return _optional_cockpit_url(row.get("cockpit_url")) or fallback
+    except ValueError:
+        logger.warning(
+            "Ignoring invalid arrivals cockpit_url for project_code=%s",
+            row.get("project_number"),
+        )
+        return fallback
+
+
 def _is_old_landed(row: dict[str, Any], now: datetime) -> bool:
     if str(row.get("status") or "").strip().upper() != "LANDED":
         return False
@@ -293,8 +318,7 @@ def _row_html(row: dict[str, Any], today: date) -> str:
     row_class = "live" if has_state else "pending"
     click = ""
     if has_state:
-        url = row.get("cockpit_url") or f"/flights/{project}"
-        click = f' onclick="{_onclick(str(url))}"'
+        click = f' onclick="{_onclick(_safe_cockpit_url(row))}"'
     return (
         f'      <tr class="{row_class}"{click}>\n'
         f"        <td>{_flap(_format_arrives(row.get('arrives_on')))}</td>\n"
