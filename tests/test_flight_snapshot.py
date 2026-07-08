@@ -293,3 +293,20 @@ def test_project_meta_is_strictly_read_only(monkeypatch):
     assert log["commit"] == 0, "read-only path must not commit"
     # It did run exactly the SELECT.
     assert any(s.upper().startswith("SELECT") for s in log["sql"])
+
+
+def test_route_arrivals_cookie_authorizes(monkeypatch):
+    """ARRIVALS_BOARD_LIVE_1 click-through: the Director PIN cookie set at
+    /arrivals must open the read-only /flights/{code} snapshot (no MCP key)."""
+    monkeypatch.setenv("ARRIVALS_BOARD_PIN", "6470")
+    from orchestrator import flight_snapshot as _fs
+    monkeypatch.setattr(
+        _fs, "build_flight_snapshot",
+        lambda code: {"project_code": code, "meta": {}, "fields": {},
+                      "assembled_at": "t", "counts": {}})
+    c = _client(monkeypatch, enabled=True)
+    import outputs.dashboard as _dash
+    token = _dash._arrivals_board_pin_token("6470")
+    c.cookies.set(_dash._ARRIVALS_BOARD_PIN_COOKIE, token)
+    r = c.get("/flights/BB-AUK-001")
+    assert r.status_code == 200
