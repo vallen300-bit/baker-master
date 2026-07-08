@@ -8411,7 +8411,9 @@ async def flights_index(request: Request):
     Logic lives in orchestrator.flight_snapshot; this is route registration only."""
     if not _flight_snapshot_enabled():
         return HTMLResponse("Not Found", status_code=404)
-    if not _mcp_verify_key(request):
+    # Arrivals-board click-through: the Director PIN cookie set at /arrivals is
+    # sufficient for these read-only snapshot pages (ARRIVALS_BOARD_LIVE_1).
+    if not (_mcp_verify_key(request) or _arrivals_board_cookie_ok(request)):
         return HTMLResponse("Unauthorized", status_code=401)
     from orchestrator import flight_snapshot
     try:
@@ -8428,7 +8430,8 @@ async def flight_snapshot_page(request: Request, project_code: str):
     Unknown project code => 404. Feature flag off => 404. ZERO writes (D-23)."""
     if not _flight_snapshot_enabled():
         return HTMLResponse("Not Found", status_code=404)
-    if not _mcp_verify_key(request):
+    # Arrivals-board click-through: Director PIN cookie accepted (read-only page).
+    if not (_mcp_verify_key(request) or _arrivals_board_cookie_ok(request)):
         return HTMLResponse("Unauthorized", status_code=401)
     from orchestrator import flight_snapshot
     try:
