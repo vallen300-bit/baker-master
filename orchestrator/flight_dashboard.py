@@ -163,6 +163,68 @@ def count_flight_tickets(
 
 
 # --------------------------------------------------------------------------
+# AO_FLIGHT_RELATIONSHIP_1 — honest machine comms-gap element (Fix 1)
+# The cockpit AO tab promised "days since last direct contact" and lied: it
+# defaulted GREEN on a silent double query failure (wrong WA chat key +
+# non-existent sent_at column). This element replaces it with verified wiring
+# and the fail-loud rule: unknown -> neutral, NEVER green by default.
+# --------------------------------------------------------------------------
+
+def _gap_tone(days: Optional[int]) -> str:
+    """Pure: gap days -> tone class. None = unknown -> neutral (never green)."""
+    if days is None:
+        return "none"
+    if days > 14:
+        return "red"
+    if days > 10:
+        return "amber"
+    return "green"
+
+
+def last_direct_contact(comms_contact: Optional[dict]) -> Optional[dict]:
+    """Ledger query: most recent WA message in the configured chat OR sent email
+    matching the configured patterns. Returns {'at': datetime, 'channel': str} or
+    None on no-data/failure (caller renders the honest no-data line, never green).
+
+    Uses the module's own DB idiom (kbl.db.get_conn, as count_flight_tickets).
+    READ-ONLY: SELECT MAX(...) only, no writes (D-23)."""
+    try:
+        with get_conn() as conn:
+            with conn.cursor() as cur:
+                best = None
+                wa_chat = (comms_contact or {}).get("wa_chat_id")
+                if wa_chat:
+                    cur.execute(
+                        "SELECT MAX(timestamp) FROM whatsapp_messages WHERE chat_id = %s",
+                        (wa_chat,),
+                    )
+                    r = cur.fetchone()
+                    if r and r[0]:
+                        best = {"at": r[0], "channel": "WhatsApp"}
+                pats = (comms_contact or {}).get("email_patterns") or []
+                if pats:
+                    cur.execute(
+                        "SELECT MAX(created_at) FROM sent_emails WHERE to_address ILIKE ANY(%s)",
+                        (list(pats),),
+                    )
+                    r = cur.fetchone()
+                    if r and r[0] and (best is None or r[0] > best["at"]):
+                        best = {"at": r[0], "channel": "email"}
+                return best
+    except Exception:
+        logger.exception("last_direct_contact failed")
+        return None
+
+
+def _contact_gap_days(at: datetime, now: Optional[datetime] = None) -> int:
+    """Whole-days gap between a contact timestamp and now. Guards naive datetimes
+    the same way _apply_staleness / staleness_flag do."""
+    if at.tzinfo is None:
+        at = at.replace(tzinfo=timezone.utc)
+    return max(0, (_now(now) - at).days)
+
+
+# --------------------------------------------------------------------------
 # Desk snapshot (static, read-only) + staleness
 # --------------------------------------------------------------------------
 
@@ -244,6 +306,10 @@ def build_flight_dashboard(project_code: str, now: Optional[datetime] = None) ->
         "top_risks": snap.get("top_risks", {}),
         "what_changed": snap.get("what_changed", {}),
         "communications": snap.get("communications", {}),
+        # AO_FLIGHT_RELATIONSHIP_1 Fix 2 — optional desk-curated relationship card.
+        # Absent/empty in the snapshot (BB-AUK-001 and every other flight) -> renderer
+        # omits the card entirely -> zero behavior change.
+        "relationship": snap.get("relationship", {}),
         "tickets": tickets,
         "assembled_at": _now(now).isoformat(),
         # Per-card staleness (design rule 4).
@@ -253,8 +319,31 @@ def build_flight_dashboard(project_code: str, now: Optional[datetime] = None) ->
             "top_risks": staleness_flag(snap.get("top_risks", {}).get("updated_at"), now),
             "what_changed": staleness_flag(snap.get("what_changed", {}).get("updated_at"), now),
             "communications": staleness_flag(snap.get("communications", {}).get("updated_at"), now),
+            "relationship": staleness_flag(snap.get("relationship", {}).get("updated_at"), now),
         },
     }
+    # AO_FLIGHT_RELATIONSHIP_1 Fix 1 — machine comms-gap element. Only computed when the
+    # snapshot opts in with a `comms_contact` block; absent key (BB-AUK-001) -> no
+    # last_contact -> renderer emits no line. Fail-loud: a query miss/failure yields
+    # {"days": None} which renders "no data", never a default-green status.
+    comms_contact = snap.get("comms_contact")
+    if comms_contact:
+        hit = last_direct_contact(comms_contact)
+        if hit:
+            days = _contact_gap_days(hit["at"], now)
+            data["last_contact"] = {
+                "days": days,
+                "channel": hit["channel"],
+                "date": str(hit["at"])[:10],
+                "tone": _gap_tone(days),
+                "label": comms_contact.get("label", "DIRECT"),
+            }
+        else:
+            data["last_contact"] = {
+                "days": None,
+                "tone": _gap_tone(None),
+                "label": comms_contact.get("label", "DIRECT"),
+            }
     return data
 
 
@@ -405,15 +494,40 @@ def _money_html(data: dict) -> str:
     return f'<section><div class="kpis">{kpis}</div></section>'
 
 
+def _contact_line_html(data: dict) -> str:
+    """AO_FLIGHT_RELATIONSHIP_1 Fix 1 — one machine line for the §4 card:
+    'LAST DIRECT <LABEL> CONTACT — <n> days (<channel>, <date>)'.
+    Rendered only when the snapshot opted in (data['last_contact'] present).
+    Unknown/failure -> neutral 'no data' line, NEVER green by default."""
+    lc = data.get("last_contact")
+    if not lc:
+        return ""
+    label = _esc(lc.get("label", "DIRECT"))
+    _TONE_COLOR = {"green": "var(--green)", "amber": "var(--amber)", "red": "var(--red)"}
+    if lc.get("days") is None:
+        return (
+            '<div class="cardstamp"><b style="color:var(--dim)">'
+            f'LAST DIRECT {label} CONTACT — no data (wiring check needed)</b></div>'
+        )
+    color = _TONE_COLOR.get(lc.get("tone"), "var(--dim)")
+    return (
+        f'<div class="cardstamp"><b style="color:{color}">'
+        f'LAST DIRECT {label} CONTACT — {int(lc["days"])} days</b> '
+        f'({_esc(lc.get("channel"))}, {_esc(lc.get("date"))})</div>'
+    )
+
+
 def _tickets_html(data: dict) -> str:
     """§4 LIVE SIGNAL TICKETS — restored (G0 fix 1). Machine-queried; on ledger failure
-    renders a visible unavailable state, never fabricated zeros."""
+    renders a visible unavailable state, never fabricated zeros. Carries the optional
+    machine comms-gap line (AO_FLIGHT_RELATIONSHIP_1 Fix 1) when configured."""
+    contact = _contact_line_html(data)
     t = data.get("tickets", {})
     if not t.get("available"):
         return (
             '<section><div class="unavail">4 · LIVE SIGNAL TICKETS — ledger unavailable '
             '(query failed; counts not shown rather than fabricated). Machine-only per '
-            'design rule 5.</div></section>'
+            f'design rule 5.</div>{contact}</section>'
         )
     cells = [
         ("checked_in", "CHECKED-IN", ""),
@@ -433,6 +547,7 @@ def _tickets_html(data: dict) -> str:
         '<section><div class="card"><h3>4 · LIVE SIGNAL TICKETS — MACHINE-QUERIED</h3>'
         f'<div class="strip">{kpis}</div>'
         f'<div class="cardstamp">counts from airport_tickets ledger · {int(t.get("total", 0))} total rows · never hand-typed</div>'
+        f'{contact}'
         '</div></section>'
     )
 
@@ -494,6 +609,59 @@ def _risks_changed_html(data: dict) -> str:
     return f'<section><div class="cols">{rcard}{ccard}</div></section>'
 
 
+def _relationship_html(data: dict) -> str:
+    """AO_FLIGHT_RELATIONSHIP_1 Fix 2 — optional desk-curated 'RELATIONSHIP —
+    COUNTERPARTY READ' card. Rendered between risks/changed and communications.
+    Absent/empty section (no read + no red_flags + no orbit) -> card omitted
+    entirely, so BB-AUK-001 and every flight without the key are byte-identical.
+    All desk values escaped; machine renders, never generates."""
+    block = data.get("relationship", {}) or {}
+    read = block.get("read", []) or []
+    red_flags = block.get("red_flags", []) or []
+    orbit = block.get("orbit", []) or []
+    if not read and not red_flags and not orbit:
+        return ""
+    parts = []
+    if read:
+        items = "".join(
+            f'<tr><td>{_esc(r.get("point"))}</td>'
+            f'<td class="rcpt">{_esc(r.get("receipt", ""))}</td></tr>'
+            for r in read
+        )
+        parts.append(
+            '<table><tr><th>READ</th><th>RECEIPT</th></tr>' + items + '</table>'
+        )
+    if red_flags:
+        items = "".join(
+            f'<tr><td><span class="st over">{_esc(r.get("flag"))}</span></td>'
+            f'<td class="rcpt">{_esc(r.get("receipt", ""))}</td></tr>'
+            for r in red_flags
+        )
+        parts.append(
+            '<table style="margin-top:12px"><tr><th>RED FLAG</th><th>RECEIPT</th></tr>'
+            + items + '</table>'
+        )
+    if orbit:
+        items = "".join(
+            f'<tr><td>{_esc(o.get("name"))}</td><td>{_esc(o.get("role"))}</td>'
+            f'<td>{_esc(o.get("note", ""))}</td></tr>'
+            for o in orbit
+        )
+        parts.append(
+            '<table style="margin-top:12px"><tr><th>ORBIT</th><th>ROLE</th><th>NOTE</th></tr>'
+            + items + '</table>'
+        )
+    stale = data.get("stale", {}).get("relationship")
+    cls = f"card {stale}" if stale else "card"
+    stale_note = f' · <b style="color:var(--amber)">STALE ({stale})</b>' if stale else ""
+    stamp = f'desk · updated {str(block.get("updated_at", ""))[:10]}'
+    return (
+        f'<section><div class="{cls}"><h3>RELATIONSHIP — COUNTERPARTY READ</h3>'
+        f'{"".join(parts)}'
+        f'<div class="cardstamp">{_esc(stamp)}{stale_note}</div></div></section>'
+    )
+
+
 def _comms_html(data: dict) -> str:
     block = data.get("communications", {})
     humans = block.get("humans", [])
@@ -529,6 +697,7 @@ def render_dashboard_html(data: dict) -> str:
         + _tickets_html(data)
         + _ball_html(data)
         + _risks_changed_html(data)
+        + _relationship_html(data)
         + _comms_html(data)
         + f"<footer><b>{_esc(FOOTER_TEXT)}</b></footer>"
     )

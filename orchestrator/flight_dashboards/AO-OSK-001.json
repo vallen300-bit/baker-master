@@ -6,6 +6,11 @@
   "suspected_flight": "AO-OSK-001",
   "desk_owner": "ao-desk",
   "controller": "lead",
+  "comms_contact": {
+    "wa_chat_id": "491736903746@c.us",
+    "email_patterns": ["%oskolkov%", "%aelio%"],
+    "label": "AO"
+  },
   "header": {
     "kicker": "AO DESK",
     "flight_name": "AO majority & capital",
