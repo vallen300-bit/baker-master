@@ -38,13 +38,22 @@ POSITIONAL=()
 while [ "$#" -gt 0 ]; do
     case "$1" in
         --parent)
-            [ "$#" -ge 2 ] || { echo "ERROR: --parent requires a message id" >&2; exit 2; }
+            # An EMPTY value (flag as last arg, or an empty-expanded next arg) must fail
+            # loud, never silently post unthreaded. `&&` short-circuits so $2 is only read
+            # when it exists (safe under set -u).
+            [ "$#" -ge 2 ] && [ -n "$2" ] || { echo "ERROR: --parent requires a non-empty message id" >&2; exit 2; }
             PARENT_ID="$2"; shift 2 ;;
-        --parent=*) PARENT_ID="${1#*=}"; shift ;;
+        --parent=*)
+            PARENT_ID="${1#*=}"
+            [ -n "$PARENT_ID" ] || { echo "ERROR: --parent requires a non-empty message id" >&2; exit 2; }
+            shift ;;
         --thread)
-            [ "$#" -ge 2 ] || { echo "ERROR: --thread requires a thread uuid" >&2; exit 2; }
+            [ "$#" -ge 2 ] && [ -n "$2" ] || { echo "ERROR: --thread requires a non-empty thread uuid" >&2; exit 2; }
             THREAD_ID="$2"; shift 2 ;;
-        --thread=*) THREAD_ID="${1#*=}"; shift ;;
+        --thread=*)
+            THREAD_ID="${1#*=}"
+            [ -n "$THREAD_ID" ] || { echo "ERROR: --thread requires a non-empty thread uuid" >&2; exit 2; }
+            shift ;;
         *) POSITIONAL+=("$1"); shift ;;
     esac
 done

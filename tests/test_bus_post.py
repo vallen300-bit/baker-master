@@ -536,3 +536,57 @@ def test_27_sh_parent_flag_before_positionals(stub_daemon, fake_op_path):
     assert captured[0]["path"] == "/msg/b2"
     assert captured[0]["payload"]["parent_id"] == 42
     assert captured[0]["payload"]["topic"] == "topic/x"
+
+
+def test_28_sh_parent_empty_equals_rejected(stub_daemon, fake_op_path):
+    """--parent= (empty value) must FAIL LOUD, never silently post unthreaded
+    (codex G3 F1: an empty-expanded parent var stranded the check-in). Exit 2,
+    and the daemon must NOT be hit."""
+    url, captured = stub_daemon
+    r = _run_sh(
+        ["b2", "x", "topic/x", "--parent="],
+        _env_with({"BAKER_ROLE": "AH1", "BRISEN_LAB_DAEMON_URL": url},
+                  fake_op_dir=fake_op_path),
+    )
+    assert r.returncode == 2
+    assert "non-empty" in r.stderr
+    assert captured == []  # never posted
+
+
+def test_29_sh_parent_empty_next_arg_rejected(stub_daemon, fake_op_path):
+    """--parent '' (empty next arg, e.g. from an unset shell var) must fail loud."""
+    url, captured = stub_daemon
+    r = _run_sh(
+        ["b2", "x", "topic/x", "--parent", ""],
+        _env_with({"BAKER_ROLE": "AH1", "BRISEN_LAB_DAEMON_URL": url},
+                  fake_op_dir=fake_op_path),
+    )
+    assert r.returncode == 2
+    assert "non-empty" in r.stderr
+    assert captured == []
+
+
+def test_30_sh_thread_empty_equals_rejected(stub_daemon, fake_op_path):
+    """--thread= (empty value) must fail loud."""
+    url, captured = stub_daemon
+    r = _run_sh(
+        ["b2", "x", "topic/x", "--parent", "42", "--thread="],
+        _env_with({"BAKER_ROLE": "AH1", "BRISEN_LAB_DAEMON_URL": url},
+                  fake_op_dir=fake_op_path),
+    )
+    assert r.returncode == 2
+    assert "non-empty" in r.stderr
+    assert captured == []
+
+
+def test_31_sh_thread_empty_next_arg_rejected(stub_daemon, fake_op_path):
+    """--thread '' (empty next arg) must fail loud."""
+    url, captured = stub_daemon
+    r = _run_sh(
+        ["b2", "x", "topic/x", "--parent", "42", "--thread", ""],
+        _env_with({"BAKER_ROLE": "AH1", "BRISEN_LAB_DAEMON_URL": url},
+                  fake_op_dir=fake_op_path),
+    )
+    assert r.returncode == 2
+    assert "non-empty" in r.stderr
+    assert captured == []
