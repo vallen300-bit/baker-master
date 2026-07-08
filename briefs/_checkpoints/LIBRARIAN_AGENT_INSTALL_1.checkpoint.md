@@ -40,7 +40,11 @@ thread: 69558182-7a17-4227-b76b-1f9b08813a8b
 - Wiring: codex G3 PASS #7464 (merged). Cage: deputy G2 PASS #7469 + **codex cage G3 PASS #7476**
   (PR #145 @ `3fba108`). Codex FAIL #7473 fixed: F1 env-prefix hole (deny relocated before trusted
   continue + DAEMON/VAULT/ORIGIN hardcoded) + F2 WITH-CTE DML (SELECT-only + DML blacklist). Seeded suite 20/0.
-- Handed to lead #7477 for merge + Tier-B.
+- Handed to lead #7477 for merge + Tier-B. Tier-B DONE + latch lifted #7480 (seat keyed + live).
+- **Seat-first-use fixes** (lead #7485): baker-vault **PR #146** (branch `b1/librarian-seat-fixes`) —
+  F1 bash-cage `2>&1` over-block (fd-dup neutralized before split) + F2 drain "could not parse mailbox"
+  (heredoc took stdin → env-pass MBOX). Seeded suite **26/0**. Awaiting **deputy delta-verify** (#7487,
+  no full re-gate per lead). Live seat picks up on pull (hooks symlinked canon).
 
 ## LEFT
 - **Lead action (blocking Part C):** merge cage PR #145 + Tier-B — Rows 3 (Terminal profile) / 8 (1P key)
