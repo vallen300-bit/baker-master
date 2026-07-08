@@ -26,8 +26,19 @@ Spec: same dir `SPEC_PUBLISHER_AGENT_v1.md`. Dispatch: bus #6295 (lead). Thread 
   gate-FAIL-after-2-reruns escalation. Kill-switch `PUBLISHER_BUS_WORKER_ENABLED` default OFF (ships
   DORMANT). Gates G1 13/13 + deputy G2 + codex G3 PASS. Delivers **AC3, AC5** + the drain contract.
 
+## PART 3 SHIPPED (attempt 2, 2026-07-08) — PR #490, commit 3df3b978, bus ship #7322
+- `orchestrator/publisher_render.py` (engine) + `tests/test_publisher_render.py` (26 tests). 39/39 green
+  (26 render + 13 worker). Additive-only. Worker's `_default_render_ticket` now resolves.
+- Delivered: **AC2** (5 gates fail a seeded violation each), **AC1 mechanism** (figures/sections/receipts
+  round-trip byte-normalized + grounded on real v1 fixture; Page vN = max), **AC7** (matter isolation +
+  stateless), **v1.1(a)** per-flight contract, **v1.1(b)** stateless.
+- OPEN for lead (bus #7317): AC1 CONTENT-diff target (A2 shipped in-slice; A3 = BB desk emits a v2 packet,
+  recommended production close). Gate chain pending: G1 lead → G2 deputy → G3 codex. Do not self-merge.
+- NEXT after gate: Part 4 (shadow-week harness setup) + install rows (5/6 registry, 8 status card,
+  1-4/12 picker+alias+profile+wake) + AC4 kill-switch e2e.
+
 ## LEFT (this arc)
-- **Part 3 (current) — offline re-render acceptance test = AC1.** Build the render ENGINE (injected as
+- **Part 3 (SHIPPED — see above) — offline re-render acceptance test = AC1.** Build the render ENGINE (injected as
   `render_fn` in publisher_bus_worker): structured flight-state facts -> HTML via canonical template +
   content-contract rules 1-11 + deterministic gates (lexical 10a-c, staleness 9c, version stamp,
   as-of 9a). Then re-render BB-AUK-001 **Page v9** from structured facts and diff vs b2's shipped v9;
