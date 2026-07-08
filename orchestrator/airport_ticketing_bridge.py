@@ -22,6 +22,7 @@ from orchestrator.dispatcher import RESERVED_RECIPIENTS, resolve_owner_slug
 from kbl.db import get_conn
 from kbl.project_registry_store import (
     active_participant_values,
+    desk_owner_for_matter,
     extract_project_codes,
     resolve_by_participant,
     resolve_project_number,
@@ -487,6 +488,48 @@ def _matter_slug() -> str:
     return os.environ.get(_MATTER_ENV, _DEFAULT_MATTER).strip() or _DEFAULT_MATTER
 
 
+def _desk_for_matter(matter_slug: Optional[str], conn: Any = None) -> str:
+    """AO_FLIGHT_PROD_TICKET_ROUTING_1 — per-matter desk resolution for the mint sites.
+
+    Returns the matter's registry ``desk_owner`` when it is known AND a live conn is in
+    hand, else the global ``_desk_slug()`` (today's routing). Resolved through
+    ``resolve_owner_slug`` + ``RESERVED_RECIPIENTS`` exactly as the mint sites do, so a
+    mapped-but-invalid desk falls back rather than minting to a reserved recipient.
+
+    ``conn`` is optional so the pure builders stay callable DB-free (conn=None -> global
+    desk, ZERO registry hit — keeps unit tests byte-identical); run_tick passes the tick's
+    conn so the registry read shares the open transaction (no extra connection). Sourcing
+    from ``project_registry.desk_owner`` (not an env map) is lead ruling #6850 — the
+    registry is the single source of truth already consumed fleet-wide.
+
+    Fault-tolerant: any failure (or a None conn / unknown / ambiguous matter) yields the
+    global desk — NEVER raises, NEVER an empty desk."""
+    fallback = resolve_owner_slug(_desk_slug()) or _desk_slug()
+    if conn is None or not matter_slug:
+        return fallback
+    try:
+        owner = desk_owner_for_matter(conn, matter_slug)
+    except Exception as e:
+        logger.warning(
+            "airport ticketing per-matter desk lookup failed (%s): %s", matter_slug, e
+        )
+        return fallback
+    if not owner:
+        return fallback
+    # The registry ``desk_owner`` is UNTRUSTED input: it may name a desk that is not (yet)
+    # a wired bus recipient. Unlike the mint sites' ``resolve_owner_slug(_desk_slug()) or
+    # _desk_slug()`` — which trusts the operator-set global env — we must NOT ``or owner``
+    # here: a raw unresolvable owner would pass the guard, mint a bogus desk, get bus-
+    # rejected, and FREEZE the cursor on bus_failed. Resolve-fail -> global fallback.
+    resolved = resolve_owner_slug(owner)
+    if not resolved or resolved in RESERVED_RECIPIENTS:
+        logger.warning(
+            "airport ticketing per-matter desk %r invalid, using global", owner
+        )
+        return fallback
+    return resolved
+
+
 def _flight_name() -> str:
     return os.environ.get(_FLIGHT_ENV, _DEFAULT_FLIGHT).strip() or _DEFAULT_FLIGHT
 
@@ -700,6 +743,7 @@ def build_plaud_ticket(
     *,
     now: Optional[datetime] = None,
     keywords: tuple[str, ...] | None = None,
+    conn: Any = None,
 ) -> Optional[AirportTicket]:
     keys = keywords or active_keywords()
     matched = _match_active_keywords(
@@ -709,7 +753,10 @@ def build_plaud_ticket(
         # No keyword AND not an active-matter fetch -> nothing to ticket on.
         return None
 
-    desk_slug = resolve_owner_slug(_desk_slug()) or _desk_slug()
+    # AO_FLIGHT_PROD_TICKET_ROUTING_1: route by the arrival's registry matter (Plaud is the
+    # only mint lane that knows the real matter at mint time — arrival.matter_slug). Unknown
+    # / ambiguous / conn-less -> global desk (byte-identical to today). #6850.
+    desk_slug = _desk_for_matter(arrival.matter_slug, conn)
     if not desk_slug or desk_slug in RESERVED_RECIPIENTS:
         logger.warning("airport nonmail invalid proposed desk (plaud): %s", desk_slug)
         return None
@@ -755,6 +802,7 @@ def build_whatsapp_ticket(
     *,
     now: Optional[datetime] = None,
     keywords: tuple[str, ...] | None = None,
+    conn: Any = None,
 ) -> Optional[AirportTicket]:
     keys = keywords or active_keywords()
     matched = _match_active_keywords("", arrival.full_text, keys)
@@ -762,6 +810,10 @@ def build_whatsapp_ticket(
         # No keyword AND not a registered-participant fetch -> nothing to ticket on.
         return None
 
+    # AO_FLIGHT_PROD_TICKET_ROUTING_1: `conn` is accepted for the shared _run_nonmail_lane
+    # build_fn signature, but the WA lane STAYS on the global desk this brief — WhatsAppArrival
+    # carries no matter_slug, so there is no per-matter attribution at mint (identity-only WA
+    # is suppressed anyway, PR #482). Per-matter WA routing is a reported follow-up (#6850).
     desk_slug = resolve_owner_slug(_desk_slug()) or _desk_slug()
     if not desk_slug or desk_slug in RESERVED_RECIPIENTS:
         logger.warning("airport nonmail invalid proposed desk (whatsapp): %s", desk_slug)
@@ -2320,7 +2372,10 @@ def _run_nonmail_lane(
                     suppressed += 1
                     done = True
             else:
-                ticket = build_fn(arrival, now=current)
+                # AO_FLIGHT_PROD_TICKET_ROUTING_1: pass the tick's conn so the Plaud builder
+                # can resolve the per-matter desk from project_registry on the open txn (WA
+                # accepts + ignores it — stays global this brief).
+                ticket = build_fn(arrival, now=current, conn=conn)
                 if ticket is None:
                     # Fetch guarantees a match, so a None here is a desk misconfig only —
                     # hold the cursor, never silently advance past it.

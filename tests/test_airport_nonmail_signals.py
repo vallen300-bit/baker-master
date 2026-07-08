@@ -346,6 +346,79 @@ def test_fetch_whatsapp_arrivals_keyword_and_participant_lanes(nm_conn):
     assert part_row.participant_matched is True
 
 
+# ===========================================================================
+# AO_FLIGHT_PROD_TICKET_ROUTING_1 — per-matter desk routing via project_registry
+# ===========================================================================
+def test_desk_for_matter_no_conn_global_fallback(monkeypatch):
+    """PURE UNIT (DB-free): with no conn, _desk_for_matter never touches the registry and
+    returns the global _desk_slug() — byte-identical to today's routing."""
+    monkeypatch.setenv("AIRPORT_TICKETING_DESK", "baden-baden-desk")
+    assert bridge._desk_for_matter("ao", conn=None) == "baden-baden-desk"
+    assert bridge._desk_for_matter(None, conn=None) == "baden-baden-desk"
+    assert bridge._desk_for_matter("", conn=None) == "baden-baden-desk"
+
+
+def test_desk_for_matter_registry_routes_by_matter(nm_conn):
+    """LIVE-PG: registry desk_owner drives routing. AO matter -> ao-desk; the fixture's
+    BB matter (aukera) -> baden-baden-desk; an unmapped matter -> global fallback."""
+    from kbl.project_registry_store import register_project
+
+    register_project(
+        nm_conn,
+        project_number="AO-OSK-001",
+        desk_owner="ao-desk",
+        matter_slug="ao",
+    )
+    nm_conn.commit()
+    assert bridge._desk_for_matter("ao", conn=nm_conn) == "ao-desk"
+    assert bridge._desk_for_matter("aukera", conn=nm_conn) == "baden-baden-desk"
+    assert bridge._desk_for_matter("no-such-matter", conn=nm_conn) == "baden-baden-desk"
+
+
+def test_build_plaud_ticket_routes_ao_by_registry(nm_conn):
+    """AC1 + AC2: an AO-manifest Plaud arrival mints proposed_desk_slug='ao-desk' while a
+    BB-matter Plaud arrival still mints to baden-baden-desk."""
+    from kbl.project_registry_store import register_project
+
+    register_project(
+        nm_conn,
+        project_number="AO-OSK-001",
+        desk_owner="ao-desk",
+        matter_slug="ao",
+    )
+    nm_conn.commit()
+
+    # AC1 — AO-manifest arrival (identity lane, no keyword) boards ao-desk.
+    ao_arrival = _plaud(
+        title="AO weekly sync",
+        summary="no flight terms here",
+        full_transcript="nothing relevant",
+        matter_slug="ao",
+        matter_matched=True,
+    )
+    ao_ticket = bridge.build_plaud_ticket(ao_arrival, conn=nm_conn)
+    assert ao_ticket is not None
+    assert ao_ticket.proposed_desk_slug == "ao-desk"
+    assert ao_ticket.suspected_matter_slug == "ao"
+    assert ao_ticket.dedup_key == bridge._dedup_key("plaud", ao_arrival.transcript_id, "ao-desk")
+
+    # AC2 regression — BB-matter arrival still boards baden-baden-desk.
+    bb_arrival = _plaud(matter_slug="aukera")  # 'aukera' keyword in default title/body
+    bb_ticket = bridge.build_plaud_ticket(bb_arrival, conn=nm_conn)
+    assert bb_ticket is not None
+    assert bb_ticket.proposed_desk_slug == "baden-baden-desk"
+
+    # AC2 regression — an unmapped matter falls back to the global desk.
+    unmapped = _plaud(
+        transcript_id="plaud-unmapped-1",
+        title="aukera annaberg note",
+        matter_slug="no-such-matter",
+    )
+    unmapped_ticket = bridge.build_plaud_ticket(unmapped, conn=nm_conn)
+    assert unmapped_ticket is not None
+    assert unmapped_ticket.proposed_desk_slug == "baden-baden-desk"
+
+
 def test_nonmail_vertical_candidate_and_idempotent(nm_conn):
     since = datetime(2026, 6, 1, tzinfo=timezone.utc)
     _insert_plaud(nm_conn, "nmtest-p-v", title="Aukera sync", summary="s", transcript="t", matter="aukera")
@@ -435,3 +508,105 @@ def test_run_nonmail_lane_suppresses_identity_wa_and_advances_watermark(nm_conn,
     assert stats2["issued"] == 0
     assert _count(nm_conn, "whatsapp") == 1
     assert _count(nm_conn, "plaud") == 0
+
+
+# ===========================================================================
+# AO_FLIGHT_PROD_TICKET_ROUTING_1 — G3 fix round: per-matter desk FALLBACK safety
+# (codex gate/ao-ticket-routing-g3 #6979 F2). A registry desk_owner that is not a
+# wired bus recipient must fall back to the global desk, never mint a bogus desk.
+# ===========================================================================
+def test_desk_for_matter_matter_without_registry_row_falls_back_global(nm_conn):
+    """F2 (a): a matter with NO active registry row (the AO state at deploy, before its row
+    is seeded — F1) resolves to the GLOBAL desk. Inert-safe: never a bogus desk, never a
+    freeze while the row is absent."""
+    with nm_conn.cursor() as cur:
+        cur.execute("DELETE FROM project_registry WHERE LOWER(matter_slug) = 'ao'")
+    nm_conn.commit()
+    assert bridge._desk_for_matter("ao", conn=nm_conn) == "baden-baden-desk"
+
+
+def _fake_bus_recipient_guarded(monkeypatch):
+    """Bus fake that mirrors post_ticket_to_bus's REAL recipient guard (bridge :1830-1832):
+    an unresolvable / reserved desk is rejected as invalid_recipient (so a bogus desk truly
+    reproduces the reported bus_failed cursor freeze); a valid desk succeeds. Overrides the
+    fixture's blanket _fake_bus_ok for this test only."""
+
+    def _post(ticket):
+        recipient = bridge.resolve_owner_slug(ticket.proposed_desk_slug)
+        if not recipient or recipient in bridge.RESERVED_RECIPIENTS:
+            return {"ok": False, "error": "invalid_recipient"}
+        return {"ok": True, "message_id": 1, "thread_id": "test-thread"}
+
+    monkeypatch.setattr(bridge, "post_ticket_to_bus", _post)
+
+
+def test_desk_for_matter_garbage_owner_falls_back_and_cursor_advances(nm_conn, monkeypatch):
+    """F2 (b) BUG REPRO: an active registry row whose desk_owner is not a wired bus recipient
+    ('ghost-desk-unwired') must resolve to the GLOBAL desk, not the raw string. Pre-fix
+    ``resolve_owner_slug(owner) or owner`` passed the raw owner through, minted a bogus desk,
+    the bus rejected it (invalid_recipient), and the plaud cursor FROZE on bus_failed. Post-
+    fix: global fallback -> the ticket boards baden-baden-desk, the bus accepts it, and the
+    cursor ADVANCES past the arrival."""
+    from kbl.project_registry_store import desk_owner_for_matter
+
+    # Isolate matter 'ao' to exactly one active row carrying an unresolvable desk_owner.
+    with nm_conn.cursor() as cur:
+        cur.execute("DELETE FROM project_registry WHERE LOWER(matter_slug) = 'ao'")
+        cur.execute(
+            "INSERT INTO project_registry "
+            "(project_number, match_key, desk_code, desk_owner, matter_slug, status) "
+            "VALUES (%s, %s, %s, %s, %s, 'active')",
+            ("AO-GHOST-001", "ao-ghost-match-key", "AO", "ghost-desk-unwired", "ao"),
+        )
+    nm_conn.commit()
+    try:
+        # The registry hands back the garbage owner unambiguously (single active row)...
+        assert desk_owner_for_matter(nm_conn, "ao") == "ghost-desk-unwired"
+        # ...and it is genuinely unresolvable as a bus recipient (the trigger for the bug).
+        assert bridge.resolve_owner_slug("ghost-desk-unwired") is None
+        # (b1) direct: unresolvable owner -> GLOBAL fallback (FAILS pre-fix: returned raw owner).
+        assert bridge._desk_for_matter("ao", conn=nm_conn) == "baden-baden-desk"
+
+        # (b2) end-to-end: recipient-guarded bus + in-memory watermark so a bogus desk would
+        # genuinely freeze the cursor. Post-fix it must issue to the global desk and advance.
+        _fake_bus_recipient_guarded(monkeypatch)
+        wm: dict = {}
+        monkeypatch.setattr(bridge, "trigger_state_watermark_raw", lambda src: wm.get(src))
+        monkeypatch.setattr(
+            bridge, "trigger_state_set_watermark", lambda src, ts: wm.__setitem__(src, ts)
+        )
+        arrival_at = datetime(2026, 7, 4, 9, 0, tzinfo=timezone.utc)
+        _insert_plaud(
+            nm_conn, "nmtest-p-ghost", title="AO ghost sync", summary="no terms",
+            transcript="none", matter="ao", when=arrival_at,
+        )
+        current = datetime(2026, 7, 4, 12, tzinfo=timezone.utc)
+        stats = bridge._run_nonmail_lane(
+            nm_conn,
+            source_label="plaud",
+            fetch_fn=bridge.fetch_plaud_arrivals,
+            build_fn=bridge.build_plaud_ticket,
+            watermark_source=bridge._WATERMARK_SOURCE_PLAUD,
+            current=current,
+            cap=50,
+            dry_run=False,
+        )
+        assert stats["issued"] == 1            # minted (global desk), not frozen
+        assert stats["failed"] == 0            # no bus_failed
+        # cursor advanced past the arrival (KeyError here would mean a freeze -> pre-fix fail)
+        assert wm[bridge._WATERMARK_SOURCE_PLAUD] >= arrival_at
+        # the minted ticket boards the GLOBAL desk, never the ghost desk
+        with nm_conn.cursor() as cur:
+            cur.execute(
+                "SELECT proposed_desk_slug FROM airport_tickets "
+                "WHERE source_channel = 'plaud' AND source_id = %s",
+                ("nmtest-p-ghost",),
+            )
+            row = cur.fetchone()
+        assert row is not None
+        assert row[0] == "baden-baden-desk"
+    finally:
+        with nm_conn.cursor() as cur:
+            cur.execute("DELETE FROM project_registry WHERE project_number = 'AO-GHOST-001'")
+            cur.execute("DELETE FROM airport_tickets WHERE source_id = 'nmtest-p-ghost'")
+        nm_conn.commit()

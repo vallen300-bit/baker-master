@@ -285,6 +285,48 @@ def resolve_project_number_readonly(text: str) -> Optional[dict]:
         return None
 
 
+def desk_owner_for_matter(conn: Any, matter_slug: Optional[str]) -> Optional[str]:
+    """AO_FLIGHT_PROD_TICKET_ROUTING_1 — the owning desk for a matter, read from the
+    registry (single source of truth; the airport bridge routes tickets by it, superseding
+    the earlier env-map design — lead ruling #6850).
+
+    Returns the ``desk_owner`` shared by the matter's ACTIVE registry rows iff it is
+    UNAMBIGUOUS: exactly one distinct non-empty desk_owner across those rows. Returns None
+    when the matter is unknown (no active row), carries no desk_owner, or its active rows
+    DISAGREE (>1 distinct owner) — the caller then falls back to the global desk, mirroring
+    the #5035 multi-matter-safety discipline (never silently auto-pick one desk on an
+    ambiguous matter).
+
+    SELECT-only: no DDL, no commit (mirrors resolve_project_number_readonly). Takes the
+    caller's conn (mirrors active_participant_values) so the read shares the open
+    transaction. Fault-tolerant: any failure rolls the shared conn back so it stays usable
+    and returns None (fail-open to the global desk — never raises)."""
+    if not matter_slug or not str(matter_slug).strip():
+        return None
+    slug = str(matter_slug).strip().lower()
+    try:
+        with conn.cursor() as cur:
+            cur.execute(
+                "SELECT DISTINCT desk_owner FROM project_registry "
+                "WHERE status = 'active' AND LOWER(matter_slug) = %s "
+                "AND desk_owner IS NOT NULL AND btrim(desk_owner) <> '' "
+                "LIMIT 10",
+                (slug,),
+            )
+            rows = cur.fetchall()
+    except Exception as e:
+        try:
+            conn.rollback()
+        except Exception:
+            pass
+        logger.warning(f"desk_owner_for_matter failed for {matter_slug!r}: {e}")
+        return None
+    owners = {str(r[0]).strip() for r in rows if r and r[0] and str(r[0]).strip()}
+    if len(owners) == 1:
+        return next(iter(owners))
+    return None
+
+
 def extract_project_codes(text: str) -> list[str]:
     """Conflict pre-check primitive (F4): DISTINCT valid-SHAPED DESK-MATTER-### codes
     in first-occurrence text order. PURE regex — reuses the module-level ``_NUMBER_RE``,
