@@ -28,6 +28,7 @@ from uuid import uuid4
 
 import anthropic
 from fastapi import BackgroundTasks, Body, Depends, FastAPI, File, Form, Header, HTTPException, Query, Request, UploadFile
+from fastapi.encoders import jsonable_encoder
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, PlainTextResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
@@ -160,6 +161,8 @@ def _scan_prompt_with_ingestion_surfaces() -> str:
 # ============================================================
 
 _BAKER_API_KEY = os.getenv("BAKER_API_KEY", "")
+_ARRIVALS_BOARD_PIN_COOKIE = "arrivals_board_access"
+_ARRIVALS_BOARD_PIN_COOKIE_MAX_AGE_S = 60 * 60 * 24 * 30
 _AI_HOTEL_SESSION_COOKIE = "aih_session"
 _AI_HOTEL_SESSION_SCOPE = "ai-hotel:read"
 # AI_HOTEL_LAB_ADMIN_WRITE_SCOPE_1: a strictly higher scope for mutations
@@ -2066,6 +2069,56 @@ def _mcp_verify_key(request: Request) -> bool:
     """Check MCP auth via ?key= query param or X-Baker-Key header."""
     key = request.query_params.get("key") or request.headers.get("x-baker-key", "")
     return bool(_BAKER_API_KEY) and key == _BAKER_API_KEY
+
+
+def _arrivals_board_pin() -> str:
+    return os.getenv("ARRIVALS_BOARD_PIN", "").strip()
+
+
+def _arrivals_board_pin_token(pin: str) -> str:
+    secret = (_BAKER_API_KEY or pin).encode("utf-8")
+    payload = f"arrivals-board:{pin}".encode("utf-8")
+    return hmac.new(secret, payload, hashlib.sha256).hexdigest()
+
+
+def _arrivals_board_pin_ok(value: str) -> bool:
+    pin = _arrivals_board_pin()
+    if not pin or not pin.isdigit() or not value or not value.isdigit():
+        return False
+    return hmac.compare_digest(value, pin)
+
+
+def _arrivals_board_cookie_ok(request: Request) -> bool:
+    pin = _arrivals_board_pin()
+    if not pin or not pin.isdigit():
+        return False
+    token = request.cookies.get(_ARRIVALS_BOARD_PIN_COOKIE, "")
+    expected = _arrivals_board_pin_token(pin)
+    return bool(token) and hmac.compare_digest(token, expected)
+
+
+def _arrivals_board_access(request: Request) -> tuple[bool, bool]:
+    """Return (allowed, set_cookie) for ARRIVALS read endpoints."""
+    if _mcp_verify_key(request):
+        return True, False
+    supplied_pin = request.query_params.get("pin")
+    if supplied_pin is not None:
+        return _arrivals_board_pin_ok(supplied_pin), _arrivals_board_pin_ok(supplied_pin)
+    return _arrivals_board_cookie_ok(request), False
+
+
+def _set_arrivals_board_cookie(response: HTMLResponse | JSONResponse) -> None:
+    pin = _arrivals_board_pin()
+    if not pin or not pin.isdigit():
+        return
+    response.set_cookie(
+        _ARRIVALS_BOARD_PIN_COOKIE,
+        _arrivals_board_pin_token(pin),
+        max_age=_ARRIVALS_BOARD_PIN_COOKIE_MAX_AGE_S,
+        httponly=True,
+        secure=True,
+        samesite="strict",
+    )
 
 
 def _handle_mcp_message(msg: dict) -> dict | None:
@@ -8412,6 +8465,55 @@ async def flight_dashboard_page(request: Request, project_code: str):
     if data is None:
         return HTMLResponse("Unknown flight", status_code=404)
     return HTMLResponse(flight_dashboard.render_dashboard_html(data))
+
+
+@app.post("/api/flight-board/{project_code}", dependencies=[Depends(verify_api_key)])
+async def flight_board_upsert(project_code: str, payload: dict = Body(...)):
+    """ARRIVALS_BOARD_LIVE_1: pilot upsert of flight board state."""
+    from orchestrator import arrivals_board
+
+    try:
+        row = arrivals_board.upsert_board_state(
+            project_code,
+            payload,
+            updated_by=str(payload.get("updated_by") or "unknown"),
+        )
+    except ValueError as e:
+        raise HTTPException(status_code=422, detail=str(e)) from e
+    except Exception:
+        logger.exception("flight_board_upsert failed for %s", project_code)
+        raise HTTPException(status_code=500, detail="flight_board_upsert_failed")
+    return {"ok": True, "state": row}
+
+
+@app.get("/arrivals", include_in_schema=False, response_class=HTMLResponse)
+async def arrivals_board_page(request: Request):
+    """ARRIVALS_BOARD_LIVE_1: Director ARRIVALS board (ratified v6 register)."""
+    allowed, set_cookie = _arrivals_board_access(request)
+    if not allowed:
+        return HTMLResponse("Not Found", status_code=404)
+    from orchestrator import arrivals_board
+
+    rows = arrivals_board.list_board_rows()
+    response = HTMLResponse(arrivals_board.render_board_html(rows))
+    if set_cookie:
+        _set_arrivals_board_cookie(response)
+    return response
+
+
+@app.get("/api/arrivals.json", include_in_schema=False)
+async def arrivals_board_json(request: Request):
+    """ARRIVALS_BOARD_LIVE_1: ARRIVALS board rows for monitors/future clients."""
+    allowed, set_cookie = _arrivals_board_access(request)
+    if not allowed:
+        return JSONResponse({"detail": "Not Found"}, status_code=404)
+    from orchestrator import arrivals_board
+
+    rows = arrivals_board.json_rows(arrivals_board.list_board_rows())
+    response = JSONResponse(jsonable_encoder({"count": len(rows), "rows": rows}))
+    if set_cookie:
+        _set_arrivals_board_cookie(response)
+    return response
 
 
 @app.get("/wip", include_in_schema=False, response_class=HTMLResponse)
