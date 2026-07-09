@@ -30,8 +30,20 @@ updated: 2026-07-09T22:49Z
 - Drill harness written: tests/test_agent_queue_drill.py (UNCOMMITTED worktree artifact ~/bm-b1-brisen-lab; offered to lead to fold into suite).
 - POST_DEPLOY_AC_VERDICT v1 PASS posted: lead #8267 (fleet/agent-work-queue) + deputy cc #8270 (post-deploy-ac/agent-work-queue-v1).
 
-## LEFT (lead-owned; nothing owed by b1)
-1. Lead flips agent_queue_enabled (hag pilot only) per #8263 on this PASS verdict.
+## FOLLOW-ON: pilot flip (#8272) — BLOCKED on prod creds/authority, escalated to lead (#8275)
+Lead re-dispatched the pilot flip TO b1 (#8272, Director GO given): 1) flip prod brisen_lab_settings
+agent_queue_enabled=on + agent_queue_pilot_roles=hag-desk; 2) live verify; 3) seed one live hag-desk
+job -> confirm real-data render -> clean; 4) confirm on fleet/agent-work-queue.
+BLOCKED (failed loud per #8272 "do NOT improvise creds"):
+- No settings-write API endpoint on brisen-lab daemon (grep app.py) — flip = RAW prod DB write only.
+- No identifiable brisen-lab PROD conn string in op: only TEST_DATABASE_URL_BRISEN_LAB (test),
+  CODEX_NEON_READONLY (ro), generic DATABASE_URL (unlabeled — almost certainly baker-master, not brisen-lab).
+- Authority gap: b1 cannot POST /jobs assigned hag-desk on live daemon (non-dispatcher 403) for step 3.
+Escalated to lead #8275 with 2 paths (A: lead provides prod conn + dispatcher seed path, b1 does all;
+B: lead does flip+seed, b1 does read-only live verify + render confirm). b1 leans B. AWAITING lead.
+
+## LEFT (blocked on lead #8275)
+1. Pilot flip + steps 2-4 — resume once lead answers #8275 (provides creds/authority or takes flip+seed).
 2. Prod 24h soak observation continues in parallel through ~2026-07-10T21:49Z (not gating; per #8264).
 
 ## KEY PATHS
@@ -41,4 +53,7 @@ updated: 2026-07-09T22:49Z
 - Gate isolation: full-suite-WITH-this-file shows ~25 pre-existing wake-cluster failures (BRISEN_LAB_TEST_ISOLATION_WAKE_CLUSTER_1) — use isolated run + full-suite-minus-file.
 
 ## NEXT CONCRETE STEP
-NONE owed by b1. Arc DONE on b1 side: drill PASS + verdict posted (lead #8267, deputy #8270). Remaining action is lead's flag flip. If a fresh b1 seat resumes this checkpoint, stand down — do NOT re-run the drill.
+AWAIT lead answer to blocker #8275 (pilot-flip creds/authority). Do NOT re-run the drill (already PASS,
+verdict #8267/#8270). Do NOT improvise prod DB creds. On lead reply: if path B, run read-only live verify
+(glance enabled:true, /jobs pilot-live, non-pilot guarded, existing surfaces 200) + confirm render evidence;
+if path A, execute flip with the exact conn/authority lead provides.
