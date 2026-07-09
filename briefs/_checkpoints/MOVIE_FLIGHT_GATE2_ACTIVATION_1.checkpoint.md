@@ -1,6 +1,6 @@
 # CHECKPOINT — MOVIE_FLIGHT_GATE2_ACTIVATION_1
 
-attempt: 3
+attempt: 4
 brief_id: MOVIE_FLIGHT_GATE2_ACTIVATION_1
 brief: briefs/_tasks/MOVIE_FLIGHT_GATE2_ACTIVATION_1.md @main (560dcdb9)
 branch: b4/movie-flight-gate2 (off main @253869c3)
