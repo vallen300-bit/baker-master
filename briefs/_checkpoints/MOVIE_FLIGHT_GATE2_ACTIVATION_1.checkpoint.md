@@ -81,13 +81,20 @@ Two-factor hybrid ("match the name PLUS the content, and ideally a project numbe
 5. AC (amended): seeded probe = MOVIE participant + MOVIE keyword content -> desk=movie-desk +
    flight=MO-VIE-001 at mint; identity-only (no content corroboration) -> review lane by design;
    lilienmatt regression unchanged.
-6. FACT for build (answered to lead): safe-default desk today = _desk_slug() = AIRPORT_TICKETING_DESK
-   (unset) = baden-baden-desk = BB cockpit pollution. NO neutral review lane exists. IMPLICATION: to
-   keep uncorroborated MOVIE review tickets OFF the BB cockpit, the build likely needs a NEUTRAL review
-   desk for identity-only/uncorroborated tickets (slug TBD, lead sign-off) instead of the global BB desk.
-7. Keyword list + keyword->matter map: proposal owed to lead, collision-checked, sign-off BEFORE env flip.
-   Never bare `movie`; `rg7` collides hagenauer-rg7. Candidates: "mandarin oriental","riemergasse" (both
-   need matter-tagging + collision-check).
+6. NEUTRAL REVIEW DESK (LEAD RULING #8160): uncorroborated / conflict / multi-match tickets mint
+   proposed_desk_slug=`lead` + a NEW `review_reason` tag on the ticket, value in
+   {identity_only, conflict, multi_match}, so lead reroutes one-glance. NO new agent/slug/pseudo-slug
+   (bus recipient validation would 400 it). The GLOBAL env desk (baden-baden) stays the fallback ONLY
+   for non-participant traffic (today's behavior, unchanged) — it is NOT the review destination. BB
+   cockpit stays clean. NOTE: `lead` must be a valid bus recipient (it is) and resolve_owner_slug/
+   RESERVED_RECIPIENTS must allow it as a proposed desk — verify at build (if `lead` is reserved,
+   raise with lead for the exact review-desk slug).
+7. Keyword list + keyword->matter map: FIRST DELIVERABLE from the fresh seat — draft to lead for
+   sign-off BEFORE any env flip. Collision-checked. Never bare `movie`; `rg7` collides hagenauer-rg7.
+   Candidates: "mandarin oriental","riemergasse" (matter-tag each to MO-VIE-001; collision-check vs
+   all active matters). This is a REQUIRED gate before flipping AIRPORT_TICKETING_KEYWORDS.
+8. Attachment-text extraction (LEAD RULING #8160): accepted OUT of scope; content = subject+full_body
+   only; log attachment-text extraction as a named FOLLOW-UP in the ship report.
 
 ## (superseded) BUILD-TIME FINDING (attempt 2) — #5035 CONFLICT, escalated to lead, RESOLVED by #8154
 Discovered on build entry (before writing code): email/WA per-matter routing ALREADY EXISTS
@@ -127,10 +134,12 @@ Ratified two-factor design above. Build order (TDD-first, branch b4/movie-flight
    sender (email) as a participant. (active_participant_values already builds the email allow-set:1525.)
 3. Resolver: A ∩ B; route only if == 1 matter -> _desk_for_matter/_flight_for_matter for that matter.
    Add matter_slug to EmailArrival (default "") + WA arrival; populate from the resolver at fetch/build.
-4. Neutral review desk for uncorroborated/conflict/multi-match (Fact 6) — propose slug to lead; do NOT
-   default to baden-baden (that pollutes BB). Until decided, this is a lead sign-off item.
-5. Participant lane ON (env flip inside PR, documented). Keyword list + map proposal to lead, collision-
-   checked, sign-off BEFORE env flip.
+4. Neutral review desk = `lead` + `review_reason` tag {identity_only|conflict|multi_match} (LEAD #8160,
+   design pt 6). NO new slug. Add `review_reason` to AirportTicket (default "", NOT in payload() unless
+   the bus contract needs it — check) + the reserve_ticket/airport_tickets column if it must persist.
+   Global env desk stays fallback for NON-participant traffic only.
+5. Participant lane ON (env flip inside PR, documented). FIRST DELIVERABLE before ANY env flip: keyword
+   list + keyword->matter map to lead, collision-checked, sign-off.
 6. TDD tests: (a) MOVIE participant + "mandarin oriental"/"riemergasse" content -> movie-desk/MO-VIE-001;
    (b) multi-matter sender + MOVIE content -> MOVIE; + AO/drawdown content -> AO; (c) identity-only no
    content -> review lane; (d) lilienmatt keyword -> baden-baden (regression byte-identical); (e) e.7/e.8
