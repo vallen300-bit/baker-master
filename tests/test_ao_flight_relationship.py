@@ -99,7 +99,15 @@ def test_ao_snapshot_has_comms_contact_config():
     assert snap is not None
     cc = snap.get("comms_contact")
     assert cc and cc.get("wa_chat_id") == "491736903746@c.us"
-    assert "%oskolkov%" in cc.get("email_patterns", [])
+    pats = cc.get("email_patterns", [])
+    assert "%oskolkov%" in pats
+    # AO_COMMS_CONTACT_PATTERN_FIX (lead #7671, source ao-desk #7576): match the
+    # exact AO address only — the broad %aelio% domain pattern also matched the
+    # Aelio-entity gatekeeper's (Constantinos) mail, counting it as direct-AO
+    # contact and recreating the very blind spot the comms-gap signal exists to
+    # catch. Drop %aelio%; add the exact ao@aelioholding.com.
+    assert "ao@aelioholding.com" in pats
+    assert "%aelio%" not in pats
 
 
 # ───────────────────────── Fix 2: relationship card ─────────────────────────
@@ -128,6 +136,42 @@ def test_relationship_present_renders_and_escapes():
     assert "<script>" not in html  # escaped
     assert "Constantinos" in html and "gatekeeper" in html
     assert "capital-call slip risk" in html
+
+
+# ──────── Fix 2 wiring: ao-desk authored content replaces the empty-state ────
+
+def test_ao_snapshot_has_relationship_content():
+    """The empty-state is replaced: the AO-OSK-001 snapshot now carries the
+    ao-desk-authored relationship block (6 read / 5 red_flags / 7 orbit,
+    receipted) in exactly the field shape _relationship_html reads."""
+    snap = fd.load_snapshot("AO-OSK-001")
+    assert snap is not None
+    rel = snap.get("relationship")
+    assert rel, "AO-OSK-001 relationship block missing — empty-state not replaced"
+    assert rel.get("updated_at")
+    assert len(rel.get("read", [])) == 6
+    assert len(rel.get("red_flags", [])) == 5
+    assert len(rel.get("orbit", [])) == 7
+    # field-name contract consumed by _relationship_html (point/flag/name/role)
+    assert all(r.get("point") and r.get("receipt") for r in rel["read"])
+    assert all(r.get("flag") and r.get("receipt") for r in rel["red_flags"])
+    assert all(o.get("name") and o.get("role") for o in rel["orbit"])
+
+
+def test_build_ao_renders_relationship_card(monkeypatch):
+    """End-to-end: the AO flight page renders the populated card (not the
+    omitted empty-state), with authored content carried through the escaper."""
+    monkeypatch.setattr(fd, "last_direct_contact", lambda c: None)
+    monkeypatch.setattr(fd, "count_flight_tickets", lambda *a, **k: dict(_TICKETS_OK))
+    data = fd.build_flight_dashboard("AO-OSK-001")
+    assert data is not None
+    assert data.get("relationship")  # populated, not {} (empty-state omitted the card)
+    html = fd.render_dashboard_html(data)
+    assert "RELATIONSHIP — COUNTERPARTY READ" in html
+    # ASCII-safe authored anchors, one per sub-table
+    assert "The Hunter" in html            # read
+    assert "Villa Gabbiano" in html        # red_flags
+    assert "Constantinos Pohanis" in html  # orbit
 
 
 # ─────────────── Fix 1+2 regression: BB-AUK-001 opts into neither ───────────
