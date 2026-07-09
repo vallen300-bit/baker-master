@@ -1035,11 +1035,29 @@ def build_whatsapp_ticket(
         # No keyword AND not a registered-participant fetch -> nothing to ticket on.
         return None
 
-    # AO_FLIGHT_PROD_TICKET_ROUTING_1: `conn` is accepted for the shared _run_nonmail_lane
-    # build_fn signature, but the WA lane STAYS on the global desk this brief — WhatsAppArrival
-    # carries no matter_slug, so there is no per-matter attribution at mint (identity-only WA
-    # is suppressed anyway, PR #482). Per-matter WA routing is a reported follow-up (#6850).
-    desk_slug = resolve_owner_slug(_desk_slug()) or _desk_slug()
+    # MOVIE_FLIGHT_GATE2_ACTIVATION_1 — two-factor per-matter routing for WA, parity with email
+    # (Director #8154). Factor A = WA sender's registered matters (channel=whatsapp); factor B =
+    # content keyword->matter over the message text. conn=None or a sender-format mismatch ->
+    # factor A empty -> global fallback (byte-identical to prior WA behavior, PR #482 — never a
+    # misroute). identity-only WA is already suppressed upstream, so the review lane fires here
+    # only on a genuine conflict/multi-match; identity+content corroboration routes per-matter.
+    _matter, review_reason = _two_factor_matter(
+        _sender_matter_set(arrival.sender, conn, channel="whatsapp"),
+        _content_matter_set("", arrival.full_text),
+        arrival.participant_matched,
+    )
+    if _matter:
+        desk_slug = _desk_for_matter(_matter, conn)
+        suspected_matter = _matter
+        suspected_flight = _flight_for_matter(_matter, conn)
+    elif review_reason:
+        desk_slug = resolve_owner_slug(_REVIEW_DESK) or _REVIEW_DESK
+        suspected_matter = _matter_slug()
+        suspected_flight = _flight_name()
+    else:
+        desk_slug = resolve_owner_slug(_desk_slug()) or _desk_slug()
+        suspected_matter = _matter_slug()
+        suspected_flight = _flight_name()
     if not desk_slug or desk_slug in RESERVED_RECIPIENTS:
         logger.warning("airport nonmail invalid proposed desk (whatsapp): %s", desk_slug)
         return None
@@ -1058,6 +1076,14 @@ def build_whatsapp_ticket(
         why = [f"matched active flight keyword(s): {', '.join(sorted(set(matched)))}"]
     else:
         why = ["fetched by registered project-participant identity (no keyword match)"]
+    if _matter:
+        why.append(
+            f"two-factor routed: sender identity + content corroborate matter '{_matter}'"
+        )
+    elif review_reason:
+        why.append(
+            f"review lane ({review_reason}): sender identity did not corroborate content on a single matter"
+        )
     if arrival.received_at:
         why.append(f"received_at: {arrival.received_at.isoformat()}")
 
@@ -1069,13 +1095,14 @@ def build_whatsapp_ticket(
         source_id=arrival.message_id,
         source_received_at=arrival.received_at,
         originator=_nonmail_originator(arrival.sender_name, arrival.sender),
-        suspected_matter_slug=_matter_slug(),
-        suspected_flight=_flight_name(),
+        suspected_matter_slug=suspected_matter,
+        suspected_flight=suspected_flight,
         proposed_desk_slug=desk_slug,
         urgency_hint=_nonmail_urgency(matched),
         luggage=tuple(luggage),
         why_ticketed=tuple(why),
         known_limits=_NONMAIL_KNOWN_LIMITS,
+        review_reason=review_reason,
     )
 
 

@@ -22,7 +22,12 @@ reason_for_checkpoint: context 45-50%; lead ordered checkpoint+respawn FIRST bef
       run_tick passes conn=conn. 7 wiring tests GREEN; 60 pass/9 skip incl box5+boarding, no regression.
       NOTE: review_reason NOT persisted to airport_tickets column yet (lead #8160 'work-queue V2 later');
       visible via why_ticketed on the bus — sufficient for one-glance reroute this PR.
-- [ ] SLICE 4 — WA builder parity (build_*_wa ticket ~898) + Plaud already per-matter (leave).
+- [x] SLICE 4 — build_whatsapp_ticket parity: same two-factor (factor A channel='whatsapp' on
+      arrival.sender, factor B on full_text). conn passed via _run_nonmail_lane already. On WA
+      identity-format mismatch -> factor A empty -> global (byte-identical, never misroute). 4 WA
+      wiring tests GREEN. Plaud already per-matter (left as-is). LIVE-PROBE FLAG: confirm the WA
+      participant value stored on the movie row matches arrival.sender format (else per-matter WA
+      is inert but SAFE = global) — verify at live probe, note in ship report.
 - [ ] SLICE 5 — participant lane ON env + AIRPORT_TICKETING_KEYWORDS append (Part A) at PR/deploy;
       regression + live-PG tests; ship report; PR -> codex G3 medium.
 
