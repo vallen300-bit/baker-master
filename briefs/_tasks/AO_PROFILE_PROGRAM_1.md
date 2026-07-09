@@ -38,7 +38,7 @@ Orchestration program (multi-agent loop) + one small build item (materiality hoo
 | CM-1 / CM-2 / CM-3 | Hunt diggers | Sonnet 1M (all CM seats now Sonnet 1M — no Haiku, Director 2026-07-09) |
 | ao-desk, movie-desk, baden-baden-desk, brisen-desk | Consultants: touchpoint census, finding annotation, gap flags | per seat |
 | codex | Cross-vendor gate on methodology (G0) + final profile (G3) | codex CLI |
-| cowork-ah1 | Program author; escalation point if deputy blocked >24h | — |
+| cowork-ah1 | Program AUTHOR only — App-resident, NOT autonomous; joins Director at the final ratify decision. Does NOT receive mid-loop worker reports | — |
 | lead | Only: Tier-B env flips (desk autowake whitelist) + merges if any | — |
 | Director | Wave-end checkpoints; ratifies materiality definition, final profile + ledger | — |
 
@@ -57,6 +57,7 @@ Orchestration program (multi-agent loop) + one small build item (materiality hoo
 **Wave 2 — Desk consultation loop (target 2–3 days).**
 - Deputy digests findings → consultant desks annotate: confirm, correct, add context, flag gaps. Gaps re-fire hunts (back to Wave 1 mechanics).
 - Loop-until-dry: iterate until **2 consecutive rounds produce no new material findings**.
+- **Room-filing lane (Director GO 2026-07-09 — "dig once, file twice"):** as findings validate, ao-desk files them into the AO project room (`wiki/matters/oskolkov/`) as curated entries — 20-year timeline, commitments register, document index. POINTER pattern (Aukera-room precedent): room entries reference the canonical `_library/findings/` receipts, never duplicate content. Purpose: the MOVIE shadow-equity negotiation prep reads a stocked room, no re-digging. Sensitive-class items follow the standing desk-only rule.
 - Wake mechanics: desk autowake currently suspended (`BRISEN_LAB_AUTOWAKE_DISABLED_SLUGS`). Default: deputy asks lead for a temporary whitelist of the 4 consultant desks for loop duration (Tier-B env flip; restore at loop close). Fallback: batch consultation rounds via manual wakes at Director's normal cadence.
 
 **Wave 3 — Ledger assembly (target 1 day).**
@@ -74,8 +75,9 @@ Orchestration program (multi-agent loop) + one small build item (materiality hoo
 
 ## Loop mechanics (deputy)
 
-- Bus topic: `ao-profile/wave-N-*`; every wave transition + blocker posted; Director sees wave-end checkpoints only (no scheduler chatter).
-- Heartbeat: deputy posts progress at least daily; silence >24h → cowork-ah1 escalates.
+- **Routing (Director 2026-07-09):** cowork-ah1 is App-resident and CANNOT run autonomously/autowake; deputy is terminal-resident and runs the loop unattended. Therefore **deputy sets `dispatched_by: deputy` on every wave dispatch — ALL worker reports route to deputy, not cowork-ah1.** Deputy self-drives waves 0–4 (heartbeats, gap re-fires, loop-until-dry, transitions) without waiting on cowork-ah1.
+- Bus topic: `ao-profile/wave-N-*`; every wave transition + blocker posted for the record.
+- **Escalation to Director + cowork-ah1 only at:** (a) the final assembled profile + ledger for the ratify decision ("You will see the report at the end, and we decide with you what to do" — Director), or (b) a genuine blocker / kill-criterion. Everything mid-loop is deputy's.
 - Re-entry: deputy is wakeable; on rollover, PINNED-style wait-state in deputy memory; loop resumes from last wave checkpoint.
 
 ## Kill criteria + budget
@@ -89,6 +91,7 @@ Waves 0–4 write NO production code. New vault artifacts only:
 - `wiki/research/<date>-counterparty-psych-profile-methodology.md` (researcher, wave 0)
 - `wiki/_library/findings/*` hunt findings (librarian/CM pattern, wave 1–2)
 - `wiki/matters/oskolkov/curated/ao-psychological-profile-v1.md` + `ao-reciprocity-ledger-v1.md` (desk-only, wave 4)
+- AO project room curated entries (timeline / commitments / doc index, pointer-style; ao-desk, wave 2 filing lane)
 - ao-desk process file (option-5 loop line, wave 5)
 - Card distillate: existing ao-desk content lane files only (wave 5, separate publish)
 - Materiality hook = separate wave-5 B-code sub-brief with its own Files Modified; not built under this brief.
@@ -108,6 +111,7 @@ Waves 0–4 write NO production code. New vault artifacts only:
 3. Materiality hook enforcing profile-read on ao-desk material advice (tested).
 4. Option-5 loop in ao-desk process file.
 5. MOVIE shadow-equity section usable as negotiation-prep input.
+5b. AO room stocked: validated findings filed pointer-style (timeline, commitments, doc index) — negotiation prep needs zero re-digging.
 6. Deputy reverted to Opus 4.8; desk autowake whitelist restored.
 
 ## Gate plan
