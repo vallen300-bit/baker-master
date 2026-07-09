@@ -270,3 +270,64 @@ def test_wire_conn_none_is_byte_identical_global(monkeypatch):
     assert t is not None
     assert t.proposed_desk_slug == "baden-baden-desk"
     assert t.review_reason == ""
+
+
+# ---- Slice 4: WhatsApp builder parity -------------------------------------------------------
+
+def _wa(text="", sender="491000000@c.us", participant_matched=False):
+    return bridge.WhatsAppArrival(
+        message_id="wa1",
+        sender=sender,
+        sender_name="Someone",
+        chat_id="c1",
+        full_text=text,
+        received_at=datetime(2026, 7, 9, 8, 0, tzinfo=timezone.utc),
+        participant_matched=participant_matched,
+    )
+
+
+def test_wa_corroborated_movie_routes_to_movie_desk(monkeypatch):
+    monkeypatch.setattr(bridge, "_sender_matter_set", lambda *a, **k: {"movie"})
+    monkeypatch.setattr(bridge, "_desk_for_matter", lambda m, c=None: "movie-desk")
+    monkeypatch.setattr(bridge, "_flight_for_matter", lambda m, c=None: "MO-VIE-001")
+    t = bridge.build_whatsapp_ticket(
+        _wa("update on the Mandarin Oriental opening", participant_matched=True), conn=object()
+    )
+    assert t is not None
+    assert t.proposed_desk_slug == "movie-desk"
+    assert t.suspected_flight == "MO-VIE-001"
+    assert t.suspected_matter_slug == "movie"
+    assert t.review_reason == ""
+
+
+def test_wa_wa_channel_used_for_factor_a(monkeypatch):
+    captured = {}
+
+    def _fake(sender, conn=None, channel="email"):
+        captured["channel"] = channel
+        return {"movie"}
+
+    monkeypatch.setattr(bridge, "_sender_matter_set", _fake)
+    monkeypatch.setattr(bridge, "_desk_for_matter", lambda m, c=None: "movie-desk")
+    monkeypatch.setattr(bridge, "_flight_for_matter", lambda m, c=None: "MO-VIE-001")
+    bridge.build_whatsapp_ticket(_wa("Mandarin Oriental", participant_matched=True), conn=object())
+    assert captured["channel"] == "whatsapp"
+
+
+def test_wa_conflict_goes_to_lead_review(monkeypatch):
+    monkeypatch.setattr(bridge, "_sender_matter_set", lambda *a, **k: {"movie"})
+    t = bridge.build_whatsapp_ticket(
+        _wa("aukera data room question", participant_matched=True), conn=object()
+    )
+    assert t is not None
+    assert t.proposed_desk_slug == "lead"
+    assert t.review_reason == bridge.REVIEW_REASON_CONFLICT
+
+
+def test_wa_keyword_only_unregistered_stays_global(monkeypatch):
+    # WA keyword match ("lilienmatt") from an unregistered sender, conn=None -> global (byte-identical).
+    monkeypatch.delenv("AIRPORT_TICKETING_DESK", raising=False)
+    t = bridge.build_whatsapp_ticket(_wa("lilienmatt closing note"), conn=None)
+    assert t is not None
+    assert t.proposed_desk_slug == "baden-baden-desk"
+    assert t.review_reason == ""
