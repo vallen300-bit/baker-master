@@ -28,8 +28,11 @@ reason_for_checkpoint: context 45-50%; lead ordered checkpoint+respawn FIRST bef
       wiring tests GREEN. Plaud already per-matter (left as-is). LIVE-PROBE FLAG: confirm the WA
       participant value stored on the movie row matches arrival.sender format (else per-matter WA
       is inert but SAFE = global) — verify at live probe, note in ship report.
-- [ ] SLICE 5 — participant lane ON env + AIRPORT_TICKETING_KEYWORDS append (Part A) at PR/deploy;
-      regression + live-PG tests; ship report; PR -> codex G3 medium.
+- [x] SLICE 5 — ship report B4_MOVIE_FLIGHT_GATE2_20260709.md + PR. Env plumbing (participant lane
+      ON + keyword append) documented as POST-DEPLOY operator step (deploy code FIRST, then flip via
+      safe_env_put — flipping before deploy = BB pollution). Full airport suite 108 pass/112 skip,
+      singletons OK, diff-check clean. PR -> codex G3 medium (gate/movie-flight-gate2) -> lead merge
+      -> env flip -> live probes -> POST_DEPLOY_AC_VERDICT. BUILD COMPLETE pending gate+merge.
 
 ## WHAT'S DONE (diagnose gate 1 — CLOSED, lead scope-confirmed #8143)
 - Full prod diagnosis posted to lead as bus #8142; lead ruled option (a) in #8143.
