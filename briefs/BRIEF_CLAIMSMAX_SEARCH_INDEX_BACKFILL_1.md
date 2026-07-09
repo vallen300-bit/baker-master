@@ -69,5 +69,7 @@ are correct). NOT baker-master (already passes through faithfully + has the inte
 
 ## Notes
 - Once this lands, the baker-master PR #499 recovery mapping becomes a harmless no-op (no rows will
-  match the worker pattern). It can stay as defense-in-depth or be reverted at the ClaimsMax team's
-  call — coordinate with lead.
+  match the worker pattern). **Lead ruling (#7739): KEEP PR #499 post-backfill** as defense-in-depth
+  against any future batch-ingest recurrence — do NOT revert.
+- Build ownership: lead assigned the reindex implementation to b2 after the rung-1 tally close
+  (#7739); independent gates cover the self-authored-brief risk.
