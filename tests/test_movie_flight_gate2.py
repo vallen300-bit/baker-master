@@ -86,3 +86,94 @@ def test_review_desk_is_lead_and_not_reserved():
 
     assert bridge._REVIEW_DESK == "lead"
     assert bridge._REVIEW_DESK not in RESERVED_RECIPIENTS
+
+
+# ---- Factor A: sender -> registered-matter set (fake conn, no live DB) -----------------------
+
+class _FakeCursor:
+    def __init__(self, rows, raise_on_execute=False):
+        self._rows = rows
+        self._raise = raise_on_execute
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *a):
+        return False
+
+    def execute(self, *a, **k):
+        if self._raise:
+            raise RuntimeError("boom")
+
+    def fetchall(self):
+        return self._rows
+
+
+class _FakeConn:
+    def __init__(self, rows, raise_on_execute=False):
+        self._rows = rows
+        self._raise = raise_on_execute
+        self.rolled_back = False
+
+    def cursor(self):
+        return _FakeCursor(self._rows, self._raise)
+
+    def rollback(self):
+        self.rolled_back = True
+
+
+_REG_ROWS = [
+    ("movie", [{"channel": "email", "value": "andrey@aelioholding.com"},
+               {"channel": "whatsapp", "value": "491736903746"}]),
+    ("aukera", [{"channel": "email", "value": "balazs.csepregi@brisengroup.com"}]),
+    ("ao", [{"channel": "email", "value": "andrey@aelioholding.com"}]),  # multi-matter sender
+]
+
+
+def test_sender_matter_set_none_conn_is_empty():
+    assert bridge._sender_matter_set("andrey@aelioholding.com", conn=None) == set()
+
+
+def test_sender_matter_set_empty_sender_is_empty():
+    assert bridge._sender_matter_set("", conn=_FakeConn(_REG_ROWS)) == set()
+
+
+def test_sender_matter_set_single_matter():
+    assert bridge._sender_matter_set(
+        "balazs.csepregi@brisengroup.com", conn=_FakeConn(_REG_ROWS)
+    ) == {"aukera"}
+
+
+def test_sender_matter_set_is_case_insensitive():
+    assert bridge._sender_matter_set(
+        "Balazs.Csepregi@BrisenGroup.com", conn=_FakeConn(_REG_ROWS)
+    ) == {"aukera"}
+
+
+def test_sender_matter_set_multi_matter_sender():
+    # andrey is registered in BOTH movie and ao -> factor A is the multi-set; content disambiguates.
+    assert bridge._sender_matter_set(
+        "andrey@aelioholding.com", conn=_FakeConn(_REG_ROWS)
+    ) == {"movie", "ao"}
+
+
+def test_sender_matter_set_channel_scoping():
+    # The whatsapp handle must not match on the email channel.
+    assert bridge._sender_matter_set("491736903746", conn=_FakeConn(_REG_ROWS), channel="email") == set()
+    assert bridge._sender_matter_set("491736903746", conn=_FakeConn(_REG_ROWS), channel="whatsapp") == {"movie"}
+
+
+def test_sender_matter_set_unknown_sender():
+    assert bridge._sender_matter_set("stranger@example.com", conn=_FakeConn(_REG_ROWS)) == set()
+
+
+def test_sender_matter_set_fault_tolerant_rolls_back():
+    conn = _FakeConn(_REG_ROWS, raise_on_execute=True)
+    assert bridge._sender_matter_set("andrey@aelioholding.com", conn=conn) == set()
+    assert conn.rolled_back is True
+
+
+def test_sender_matter_set_handles_json_string_participants():
+    import json as _json
+    rows = [("movie", _json.dumps([{"channel": "email", "value": "x@y.com"}]))]
+    assert bridge._sender_matter_set("x@y.com", conn=_FakeConn(rows)) == {"movie"}
