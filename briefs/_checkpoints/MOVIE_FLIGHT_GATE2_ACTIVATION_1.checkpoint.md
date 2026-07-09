@@ -9,6 +9,20 @@ reply_target: lead
 scope_confirmed: bus #8143 — option (a) CODE change (feature-build, ~6h, PR + codex G3 medium)
 reason_for_checkpoint: context 45-50%; lead ordered checkpoint+respawn FIRST before build (#8143 step 1)
 
+## BUILD SLICES (lead #8169 = build this session; commit+push+checkpoint per slice)
+- [x] SLICE 1 — pure resolver core: KEYWORD_MATTER_MAP + _content_matter_set (factor B) +
+      _two_factor_matter (intersection -> matter|review_reason) + REVIEW constants + _REVIEW_DESK='lead'.
+      Added to airport_ticketing_bridge.py; tests/test_movie_flight_gate2.py (14 tests GREEN); existing
+      bridge tests 31 passed / 9 skip (no regression). Commit: <this commit>.
+- [ ] SLICE 2 — factor A: _sender_matter_set(conn, email) (registry participants -> matter set), DB, tests.
+- [ ] SLICE 3 — wire into build_email_ticket: add conn param; resolve (A ∩ B); route per-matter via
+      _desk_for_matter/_flight_for_matter when corroborated; desk=_REVIEW_DESK + review_reason when
+      participant-fetched-uncorroborated; else global (today). Add matter_slug/review_reason to
+      AirportTicket (+ persist review_reason? check reserve_ticket). Update run_tick email call to pass conn.
+- [ ] SLICE 4 — WA builder parity (build_*_wa ticket ~898) + Plaud already per-matter (leave).
+- [ ] SLICE 5 — participant lane ON env + AIRPORT_TICKETING_KEYWORDS append (Part A) at PR/deploy;
+      regression + live-PG tests; ship report; PR -> codex G3 medium.
+
 ## WHAT'S DONE (diagnose gate 1 — CLOSED, lead scope-confirmed #8143)
 - Full prod diagnosis posted to lead as bus #8142; lead ruled option (a) in #8143.
 - Git-archaeology on BOX5_PARTICIPANT_FETCH_LANE_ENABLED (lead step 3): **never-enabled, shipped

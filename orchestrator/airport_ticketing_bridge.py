@@ -480,6 +480,75 @@ def _keyword_ilike_where(keys: tuple[str, ...]) -> tuple[str, list[str]]:
     return " OR ".join(clauses), params
 
 
+# ---------------------------------------------------------------------------
+# MOVIE_FLIGHT_GATE2_ACTIVATION_1 — two-factor per-matter routing (email/WA lanes)
+# ---------------------------------------------------------------------------
+# Director ruling (relayed lead #8154): route a FETCHED arrival to a matter's desk/flight AT
+# MINT only when the sender's registered-matter set AND the content keyword-matter set
+# corroborate on EXACTLY ONE registered matter. Identity NEVER routes alone (#5035); content
+# NEVER routes alone. No corroboration / conflict / multi-match on a PARTICIPANT-FETCHED
+# arrival -> the neutral review lane (desk=lead + review_reason), NOT the global BB desk
+# (lead #8160 — keeps the BB cockpit clean). A keyword-lane arrival that does not corroborate
+# keeps TODAY's global-desk behavior (lilienmatt regression byte-identical). The (e.7)/(e.8)
+# explicit-code + thread lanes are untouched and still win — code remains the strongest signal.
+
+# Content keyword -> registered matter slug. MOVIE-only this PR (lead sign-off #8165); `aukera`
+# carried so an aukera-content + aukera-participant mail corroborates. `riemergasse`/`rg7` are
+# DELIBERATELY absent (lead #8165 Q2: construction names sit in both MOVIE + hagenauer-rg7 at
+# Riemergasse 7, so identity cannot disambiguate building-address content). AO/BB content-term
+# expansion is a follow-up brief — the resolver below is matter-generic and inherits it free.
+KEYWORD_MATTER_MAP: dict[str, str] = {
+    "mandarin oriental": "movie",
+    "mohg": "movie",
+    "mo-vie": "movie",
+    "mo vienna": "movie",
+    "aukera": "aukera",
+}
+
+# Neutral review-lane desk for uncorroborated participant-fetched arrivals (lead #8160). `lead`
+# is a live bus recipient and NOT in RESERVED_RECIPIENTS, so it is a valid proposed desk slug.
+_REVIEW_DESK = "lead"
+
+REVIEW_REASON_IDENTITY_ONLY = "identity_only"
+REVIEW_REASON_CONFLICT = "conflict"
+REVIEW_REASON_MULTI_MATCH = "multi_match"
+
+
+def _content_matter_set(
+    subject: str, full_body: str, kmap: Optional[dict[str, str]] = None
+) -> set[str]:
+    """Factor B — the registered matters whose CONTENT keywords appear in subject+full_body.
+    Pure, case-insensitive substring over the SAME haystack as _match_active_keywords. Never a
+    DB hit; content-only signal (never sufficient alone to route — see _two_factor_matter)."""
+    mapping = KEYWORD_MATTER_MAP if kmap is None else kmap
+    haystack = f"{subject} {full_body}".lower()
+    return {matter for kw, matter in mapping.items() if kw and kw.lower() in haystack}
+
+
+def _two_factor_matter(
+    sender_matters: set[str],
+    content_matters: set[str],
+    participant_fetched: bool,
+) -> tuple[Optional[str], str]:
+    """Two-factor resolver (Director ruling #8154). Returns (matter, review_reason):
+      - (M, "")        -> corroborated on EXACTLY ONE matter M: route to M's desk/flight at mint.
+      - (None, reason) -> PARTICIPANT-FETCHED but not cleanly corroborated -> neutral review lane;
+                          reason in {identity_only, conflict, multi_match}.
+      - (None, "")     -> no per-matter decision (keyword lane / unregistered sender): keep TODAY's
+                          global-desk behavior. Preserves the lilienmatt regression byte-identical.
+    Identity NEVER routes alone (#5035); content NEVER routes alone. PURE — no DB, no I/O."""
+    intersection = sender_matters & content_matters
+    if len(intersection) == 1:
+        return next(iter(intersection)), ""
+    if participant_fetched:
+        if not content_matters:
+            return None, REVIEW_REASON_IDENTITY_ONLY
+        if not intersection:
+            return None, REVIEW_REASON_CONFLICT
+        return None, REVIEW_REASON_MULTI_MATCH  # len(intersection) > 1
+    return None, ""
+
+
 def _desk_slug() -> str:
     return os.environ.get(_DESK_ENV, _DEFAULT_DESK).strip() or _DEFAULT_DESK
 
