@@ -211,6 +211,12 @@ class AirportTicket:
     # for any non-email constructor; NOT added to payload() so the AIRPORT_TICKET v1
     # bus contract stays byte-identical.
     thread_id: str = ""
+    # MOVIE_FLIGHT_GATE2_ACTIVATION_1: neutral-review-lane tag (lead #8160). Non-empty
+    # (identity_only|conflict|multi_match) ONLY when the two-factor resolver sent a
+    # participant-fetched arrival to the review desk (=lead) instead of a matter desk. Default ""
+    # keeps every other constructor unchanged; surfaced in why_ticketed (bus-visible) for one-glance
+    # reroute. NOT added to payload() so the AIRPORT_TICKET v1 bus contract stays byte-identical.
+    review_reason: str = ""
 
     def payload(self) -> dict[str, Any]:
         return {
@@ -480,6 +486,134 @@ def _keyword_ilike_where(keys: tuple[str, ...]) -> tuple[str, list[str]]:
     return " OR ".join(clauses), params
 
 
+# ---------------------------------------------------------------------------
+# MOVIE_FLIGHT_GATE2_ACTIVATION_1 — two-factor per-matter routing (email/WA lanes)
+# ---------------------------------------------------------------------------
+# Director ruling (relayed lead #8154): route a FETCHED arrival to a matter's desk/flight AT
+# MINT only when the sender's registered-matter set AND the content keyword-matter set
+# corroborate on EXACTLY ONE registered matter. Identity NEVER routes alone (#5035); content
+# NEVER routes alone. No corroboration / conflict / multi-match on a PARTICIPANT-FETCHED
+# arrival -> the neutral review lane (desk=lead + review_reason), NOT the global BB desk
+# (lead #8160 — keeps the BB cockpit clean). A keyword-lane arrival that does not corroborate
+# keeps TODAY's global-desk behavior (lilienmatt regression byte-identical). The (e.7)/(e.8)
+# explicit-code + thread lanes are untouched and still win — code remains the strongest signal.
+
+# Content keyword -> registered matter slug. MOVIE-only this PR (lead sign-off #8165); `aukera`
+# carried so an aukera-content + aukera-participant mail corroborates. `riemergasse`/`rg7` are
+# DELIBERATELY absent (lead #8165 Q2: construction names sit in both MOVIE + hagenauer-rg7 at
+# Riemergasse 7, so identity cannot disambiguate building-address content). AO/BB content-term
+# expansion is a follow-up brief — the resolver below is matter-generic and inherits it free.
+KEYWORD_MATTER_MAP: dict[str, str] = {
+    "mandarin oriental": "movie",
+    "mohg": "movie",
+    "mo-vie": "movie",
+    "mo vienna": "movie",
+    "aukera": "aukera",
+}
+
+# Neutral review-lane desk for uncorroborated participant-fetched arrivals (lead #8160). `lead`
+# is a live bus recipient and NOT in RESERVED_RECIPIENTS, so it is a valid proposed desk slug.
+_REVIEW_DESK = "lead"
+
+REVIEW_REASON_IDENTITY_ONLY = "identity_only"
+REVIEW_REASON_CONFLICT = "conflict"
+REVIEW_REASON_MULTI_MATCH = "multi_match"
+
+
+def _content_matter_set(
+    subject: str, full_body: str, kmap: Optional[dict[str, str]] = None
+) -> set[str]:
+    """Factor B — the registered matters whose CONTENT keywords appear in subject+full_body.
+    Pure, case-insensitive substring over the SAME haystack as _match_active_keywords. Never a
+    DB hit; content-only signal (never sufficient alone to route — see _two_factor_matter)."""
+    mapping = KEYWORD_MATTER_MAP if kmap is None else kmap
+    haystack = f"{subject} {full_body}".lower()
+    return {matter for kw, matter in mapping.items() if kw and kw.lower() in haystack}
+
+
+def _two_factor_matter(
+    sender_matters: set[str],
+    content_matters: set[str],
+    participant_fetched: bool,
+) -> tuple[Optional[str], str]:
+    """Two-factor resolver (Director ruling #8154). Returns (matter, review_reason):
+      - (M, "")        -> corroborated on EXACTLY ONE matter M: route to M's desk/flight at mint.
+      - (None, reason) -> PARTICIPANT-FETCHED but not cleanly corroborated -> neutral review lane;
+                          reason in {identity_only, conflict, multi_match}.
+      - (None, "")     -> no per-matter decision (keyword lane / unregistered sender): keep TODAY's
+                          global-desk behavior. Preserves the lilienmatt regression byte-identical.
+    Identity NEVER routes alone (#5035); content NEVER routes alone. PURE — no DB, no I/O."""
+    intersection = sender_matters & content_matters
+    if len(intersection) == 1:
+        return next(iter(intersection)), ""
+    if participant_fetched:
+        if not content_matters:
+            return None, REVIEW_REASON_IDENTITY_ONLY
+        if not intersection:
+            return None, REVIEW_REASON_CONFLICT
+        return None, REVIEW_REASON_MULTI_MATCH  # len(intersection) > 1
+    return None, ""
+
+
+def _sender_matter_set(
+    sender_value: Optional[str], conn: Any = None, channel: str = "email"
+) -> set[str]:
+    """Factor A — the set of ACTIVE registered matters this sender is a participant in.
+
+    The project registry is the single source of truth (#6850). Shares the caller's tick conn
+    (no second pool connection), mirroring _desk_for_matter/_flight_for_matter. Value compare is
+    case-insensitive (registry values may be stored mixed-case, same robustness as
+    active_participant_values). ``channel`` is 'email' for the mail lane, 'whatsapp' for WA.
+
+    conn=None or empty sender -> empty set (pure fallback so DB-free unit tests stay byte-
+    identical). Fault-tolerant: any failure rolls the shared conn back and returns set() (never
+    raises) — identity resolution failing just falls the arrival through to the global/keyword
+    path, it never blocks a tick."""
+    if conn is None or not sender_value:
+        return set()
+    target = str(sender_value).strip().lower()
+    if not target:
+        return set()
+    try:
+        with conn.cursor() as cur:
+            cur.execute(
+                "SELECT matter_slug, participants FROM project_registry "
+                "WHERE status = 'active' AND matter_slug IS NOT NULL LIMIT 500"
+            )
+            rows = cur.fetchall()
+    except Exception as e:
+        try:
+            conn.rollback()
+        except Exception:
+            pass
+        logger.warning(
+            "airport ticketing sender-matter-set lookup failed (%s): %s", sender_value, e
+        )
+        return set()
+    out: set[str] = set()
+    for row in rows:
+        if not row or not row[0]:
+            continue
+        slug = str(row[0]).strip().lower()
+        raw = row[1]
+        if isinstance(raw, str):
+            try:
+                raw = json.loads(raw)
+            except Exception:
+                raw = []
+        if not isinstance(raw, list):
+            continue
+        for p in raw:
+            if (
+                isinstance(p, dict)
+                and p.get("channel") == channel
+                and str(p.get("value") or "").strip().lower() == target
+            ):
+                out.add(slug)
+                break
+    return out
+
+
 def _desk_slug() -> str:
     return os.environ.get(_DESK_ENV, _DEFAULT_DESK).strip() or _DEFAULT_DESK
 
@@ -673,6 +807,7 @@ def build_email_ticket(
     *,
     now: Optional[datetime] = None,
     keywords: tuple[str, ...] | None = None,
+    conn: Any = None,
 ) -> Optional[AirportTicket]:
     if _is_automated_email_arrival(arrival):
         return None
@@ -688,7 +823,36 @@ def build_email_ticket(
         # identity comes from the registry match at fetch, no classifier involved.
         return None
 
-    desk_slug = resolve_owner_slug(_desk_slug()) or _desk_slug()
+    # MOVIE_FLIGHT_GATE2_ACTIVATION_1 — two-factor per-matter routing (Director ruling #8154).
+    # Resolve the matter from identity (sender's registered matters, factor A) AND content
+    # (keyword->matter map, factor B) corroboration. conn=None (DB-free unit tests) -> factor A
+    # is empty -> the resolver returns (None, "") for keyword-lane arrivals -> the global desk
+    # path below runs EXACTLY as before (byte-identical). The (e.7)/(e.8) explicit-code + thread
+    # lanes downstream in run_tick still win over this at-mint routing (code is the strongest signal).
+    _matter, review_reason = _two_factor_matter(
+        _sender_matter_set(arrival.sender_email, conn, channel="email"),
+        _content_matter_set(arrival.subject, arrival.full_body),
+        arrival.participant_fetched,
+    )
+    if _matter:
+        # Corroborated on exactly one registered matter -> that matter's desk/flight at mint.
+        desk_slug = _desk_for_matter(_matter, conn)
+        suspected_matter = _matter
+        suspected_flight = _flight_for_matter(_matter, conn)
+    elif review_reason:
+        # Neutral review lane (lead #8160): a participant-fetched arrival that did NOT corroborate
+        # a single matter mints to desk=lead + review_reason (NOT the global BB desk) so lead
+        # reroutes one-glance and the BB cockpit stays clean. Global env stays fallback for
+        # non-participant traffic only (the else branch).
+        desk_slug = resolve_owner_slug(_REVIEW_DESK) or _REVIEW_DESK
+        suspected_matter = _matter_slug()
+        suspected_flight = _flight_name()
+    else:
+        # Keyword-lane / unregistered sender: today's global-desk behavior (lilienmatt regression).
+        desk_slug = resolve_owner_slug(_desk_slug()) or _desk_slug()
+        suspected_matter = _matter_slug()
+        suspected_flight = _flight_name()
+
     if not desk_slug or desk_slug in RESERVED_RECIPIENTS:
         logger.warning("airport ticketing invalid proposed desk: %s", desk_slug)
         return None
@@ -716,6 +880,15 @@ def build_email_ticket(
         # BOX5_GATE2_PARTICIPANT_FETCH_LANE_1: fetched on registered-participant identity
         # with no keyword match (arrival.participant_fetched is True to reach here).
         why = ["fetched by registered project-participant identity (no keyword match)"]
+    # MOVIE_FLIGHT_GATE2_ACTIVATION_1 — record the routing decision (bus-visible for reroute).
+    if _matter:
+        why.append(
+            f"two-factor routed: sender identity + content corroborate matter '{_matter}'"
+        )
+    elif review_reason:
+        why.append(
+            f"review lane ({review_reason}): sender identity did not corroborate content on a single matter"
+        )
     if arrival.received_date:
         why.append(f"received_at: {arrival.received_date.isoformat()}")
 
@@ -727,8 +900,8 @@ def build_email_ticket(
         source_id=arrival.message_id,
         source_received_at=arrival.received_date,
         originator=_originator(arrival),
-        suspected_matter_slug=_matter_slug(),
-        suspected_flight=_flight_name(),
+        suspected_matter_slug=suspected_matter,
+        suspected_flight=suspected_flight,
         proposed_desk_slug=desk_slug,
         urgency_hint=_urgency_for(arrival, matched),
         luggage=tuple(luggage),
@@ -741,6 +914,7 @@ def build_email_ticket(
         # Same thread identity the luggage line records, now also a queryable column
         # so a later code-less reply on this thread can inherit its routing.
         thread_id=arrival.thread_id or arrival.message_id,
+        review_reason=review_reason,
     )
 
 
@@ -861,11 +1035,29 @@ def build_whatsapp_ticket(
         # No keyword AND not a registered-participant fetch -> nothing to ticket on.
         return None
 
-    # AO_FLIGHT_PROD_TICKET_ROUTING_1: `conn` is accepted for the shared _run_nonmail_lane
-    # build_fn signature, but the WA lane STAYS on the global desk this brief — WhatsAppArrival
-    # carries no matter_slug, so there is no per-matter attribution at mint (identity-only WA
-    # is suppressed anyway, PR #482). Per-matter WA routing is a reported follow-up (#6850).
-    desk_slug = resolve_owner_slug(_desk_slug()) or _desk_slug()
+    # MOVIE_FLIGHT_GATE2_ACTIVATION_1 — two-factor per-matter routing for WA, parity with email
+    # (Director #8154). Factor A = WA sender's registered matters (channel=whatsapp); factor B =
+    # content keyword->matter over the message text. conn=None or a sender-format mismatch ->
+    # factor A empty -> global fallback (byte-identical to prior WA behavior, PR #482 — never a
+    # misroute). identity-only WA is already suppressed upstream, so the review lane fires here
+    # only on a genuine conflict/multi-match; identity+content corroboration routes per-matter.
+    _matter, review_reason = _two_factor_matter(
+        _sender_matter_set(arrival.sender, conn, channel="whatsapp"),
+        _content_matter_set("", arrival.full_text),
+        arrival.participant_matched,
+    )
+    if _matter:
+        desk_slug = _desk_for_matter(_matter, conn)
+        suspected_matter = _matter
+        suspected_flight = _flight_for_matter(_matter, conn)
+    elif review_reason:
+        desk_slug = resolve_owner_slug(_REVIEW_DESK) or _REVIEW_DESK
+        suspected_matter = _matter_slug()
+        suspected_flight = _flight_name()
+    else:
+        desk_slug = resolve_owner_slug(_desk_slug()) or _desk_slug()
+        suspected_matter = _matter_slug()
+        suspected_flight = _flight_name()
     if not desk_slug or desk_slug in RESERVED_RECIPIENTS:
         logger.warning("airport nonmail invalid proposed desk (whatsapp): %s", desk_slug)
         return None
@@ -884,6 +1076,14 @@ def build_whatsapp_ticket(
         why = [f"matched active flight keyword(s): {', '.join(sorted(set(matched)))}"]
     else:
         why = ["fetched by registered project-participant identity (no keyword match)"]
+    if _matter:
+        why.append(
+            f"two-factor routed: sender identity + content corroborate matter '{_matter}'"
+        )
+    elif review_reason:
+        why.append(
+            f"review lane ({review_reason}): sender identity did not corroborate content on a single matter"
+        )
     if arrival.received_at:
         why.append(f"received_at: {arrival.received_at.isoformat()}")
 
@@ -895,13 +1095,14 @@ def build_whatsapp_ticket(
         source_id=arrival.message_id,
         source_received_at=arrival.received_at,
         originator=_nonmail_originator(arrival.sender_name, arrival.sender),
-        suspected_matter_slug=_matter_slug(),
-        suspected_flight=_flight_name(),
+        suspected_matter_slug=suspected_matter,
+        suspected_flight=suspected_flight,
         proposed_desk_slug=desk_slug,
         urgency_hint=_nonmail_urgency(matched),
         luggage=tuple(luggage),
         why_ticketed=tuple(why),
         known_limits=_NONMAIL_KNOWN_LIMITS,
+        review_reason=review_reason,
     )
 
 
@@ -2672,7 +2873,7 @@ def run_tick(*, now: Optional[datetime] = None) -> dict[str, Any]:
             #     an exception NEVER auto-clears (blocker D3): it routes to `failed`,
             #     never to a deterministic clear, and never advances the cursor.
             try:
-                ticket = build_email_ticket(arrival, now=current)
+                ticket = build_email_ticket(arrival, now=current, conn=conn)
 
                 if ticket is None:
                     # (d) DETERMINISTIC CLEAR — REJECT_NOISE = AUTOMATED SENDER ONLY.
