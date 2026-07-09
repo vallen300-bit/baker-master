@@ -1,6 +1,6 @@
 # CHECKPOINT — MOVIE_FLIGHT_GATE2_ACTIVATION_1
 
-attempt: 1
+attempt: 2
 brief_id: MOVIE_FLIGHT_GATE2_ACTIVATION_1
 brief: briefs/_tasks/MOVIE_FLIGHT_GATE2_ACTIVATION_1.md @main (560dcdb9)
 branch: b4/movie-flight-gate2 (off main @253869c3)
@@ -65,7 +65,47 @@ visible on movie-desk check-in; lilienmatt regression probe still baden-baden-de
   AO flight rows/env or slugs.yml.
 - Tests: tests/test_airport_ticketing_bridge*.py (existing bridge conventions; live-PG cases).
 
-## NEXT CONCRETE STEP (successor starts HERE)
+## BUILD-TIME FINDING (attempt 2) — #5035 CONFLICT, escalated to lead, HOLDING
+Discovered on build entry (before writing code): email/WA per-matter routing ALREADY EXISTS
+downstream in run_tick, but keyed on EXPLICIT PROJECT CODE / THREAD, not identity:
+- (e.7) EXPLICIT-CODE ROUTED LANE (bridge:2895 → desk_owner=resolved["desk_owner"] :2938):
+  a mail carrying exactly one registered ACTIVE project code reroutes to that matter's desk.
+- (e.8) THREAD-CONTINUITY LANE (bridge:2973 → :3023): routes by prior code-routed thread when
+  the mail carries NO explicit code; never overrides an explicit code.
+- build_email_ticket (691/730/731) sets GLOBAL desk/matter/flight as the BASE; the (e.7)/(e.8)
+  lanes reverse it when a code/thread signal exists. That's why prod shows all email→baden-baden
+  (BB mails carry BB codes; AO mails carry no "AO-OSK-001" literal, so never reach ao-desk).
+- Director ruling #5035 (comment bridge:1628-1635): the participant lane uses identity ONLY to
+  FETCH — routing decided by project CODE, NEVER by which projects a sender belongs to. A sender
+  in >1 active project sending a code-less mail is AMBIGUOUS → safe-default desk-review TICKET,
+  never auto-picks a desk.
+CONFLICT: lead #8143 design ("carry registry matter_slug into email/WA tickets + route via
+_desk_for_matter") is IDENTITY-routing — it softens #5035 and overlaps (e.7)/(e.8). Do NOT build
+identity-routing until lead reconciles. Options posted to lead (bus, this topic):
+  Y (strict #5035): identity-only mails go to safe-default desk; MOVIE routes to movie-desk only
+    via explicit MO-VIE-001 code / thread continuity. AC "mint desk=movie-desk" met only for
+    code-carrying/seeded mails. Smallest change (participant lane ON + keyword fetch; routing
+    already works via e.7/e.8). Honors Director #5035 verbatim.
+  Z (bounded relax = lead #8143 intent, my lean): identity routes per-matter ONLY when sender is
+    unambiguously in exactly ONE active matter; multi-matter sender → global (preserves #5035's
+    core). Meets AC at mint for single-matter MOVIE participants. Needs sender→matter resolution
+    in the participant lane + a sender-unambiguity guard; coexist with (not duplicate) e.7/e.8.
+Escalation bus id: (see topic baker-os-v2/movie-flight-gate2). HOLDING for lead ruling Y vs Z.
+
+## NEXT CONCRETE STEP (successor starts HERE — GATED on lead #5035 ruling)
+BLOCKED pending lead's Y-vs-Z ruling on the #5035 reconciliation (above). Do NOT write routing
+code until it lands. Once lead rules:
+- If Z: add matter_slug to EmailArrival; in the participant lane (~1637) resolve the sender's
+  matter via a NEW unambiguous-sender lookup (sender in exactly 1 active registry matter, else
+  ""); build_email_ticket + WA builder route via _desk_for_matter/_flight_for_matter/matter with
+  global fallback when matter_slug=="" ; keep (e.7)/(e.8) intact (they still win on explicit code).
+- If Y: no build_email_ticket routing change — just flip participant lane ON + add MOVIE keywords
+  so MOVIE mails FETCH + TICKET to safe-default desk; movie-desk claims; code/thread lanes route
+  code-carrying mails. Rework AC wording with lead (mint-desk only for code/thread mails).
+Then TDD tests, PR base main, codex G3 medium, lead merge, live probes, POST_DEPLOY_AC_VERDICT.
+Keyword list still needs lead sign-off before any env flip (never bare movie; rg7 collides).
+
+## ORIGINAL NEXT STEP (pre-#5035-finding — SUPERSEDED by the gate above)
 TDD-first on branch b4/movie-flight-gate2:
 1. Write failing tests: (a) MOVIE registered-participant email arrival -> ticket desk=movie-desk,
    suspected_flight=MO-VIE-001, suspected_matter=movie; (b) lilienmatt keyword email -> baden-baden-desk
