@@ -590,11 +590,19 @@ def test_drain_writes_last_seen_marker(hook_mod, monkeypatch, patch_httpx, tmp_p
     assert marker.read_text().strip() == "2026-05-05T12:34:56Z"
 
 
-def test_drain_uses_last_seen_as_since_filter(hook_mod, monkeypatch, patch_httpx, tmp_path):
+def test_drain_uses_full_unacked_scan_not_since_filter(hook_mod, monkeypatch, patch_httpx, tmp_path):
+    """BUS_READ_UNACKED_SCAN_FIX_1: the drain must NOT pass `since` as the daemon
+    selection filter — that silently dropped unacked boundary/out-of-order
+    messages (Director caught 5 unacked lead msgs 12-17h old). New contract: no
+    `since` param, wide `limit=2000` window, client-side acknowledged_at==null
+    selection. A last_seen marker may exist but must NOT become the filter.
+
+    (Renamed from test_drain_uses_last_seen_as_since_filter, which asserted the
+    now-removed buggy behaviour.)"""
     monkeypatch.setenv("BAKER_ROLE", "b4")
     monkeypatch.setenv("TMPDIR", str(tmp_path))
     marker = tmp_path / "baker-brisen-lab-lastseen-b4.txt"
-    marker.write_text("2026-05-05T10:00:00Z")
+    marker.write_text("2026-05-05T10:00:00Z")  # present — must NOT be used as a since filter
     captured: dict = {}
 
     def handler(request):
@@ -608,7 +616,45 @@ def test_drain_uses_last_seen_as_since_filter(hook_mod, monkeypatch, patch_httpx
     with patch.object(sys, "stdin", _stdin_with({"prompt": "."})):
         with pytest.raises(SystemExit):
             hook_mod.main()
-    assert "since=2026-05-05T10%3A00%3A00Z" in captured["url"] or "since=2026-05-05T10:00:00Z" in captured["url"]
+    url = captured["url"]
+    assert "since=" not in url, f"since must not be the selection filter: {url}"
+    assert "limit=2000" in url, f"full-unacked scan must pull the wide window: {url}"
+
+
+def test_drain_selects_unacked_and_excludes_wildcard_broadcasts(hook_mod, monkeypatch, patch_httpx, tmp_path):
+    """New contract: the drain acks/surfaces only UNACKed, non-wildcard rows.
+    An already-acked row is skipped; a wildcard broadcast (to_terminals==['*'])
+    is never per-terminal acked (it 403s and inflates the count, #7011)."""
+    monkeypatch.setenv("BAKER_ROLE", "b4")
+    monkeypatch.setenv("TMPDIR", str(tmp_path))
+    acked_ids: list = []
+    rows = [
+        {"id": 1, "kind": "dispatch", "from_terminal": "lead", "topic": "t",
+         "body_preview": "unacked seat msg", "created_at": "2026-05-05T09:00:00Z",
+         "to_terminals": ["b4"], "acknowledged_at": None},
+        {"id": 2, "kind": "dispatch", "from_terminal": "lead", "topic": "t",
+         "body_preview": "already acked", "created_at": "2026-05-05T09:30:00Z",
+         "to_terminals": ["b4"], "acknowledged_at": "2026-05-05T09:31:00Z"},
+        {"id": 3, "kind": "broadcast", "from_terminal": "daemon", "topic": "lifecycle/x",
+         "body_preview": "wildcard residue", "created_at": "2026-05-05T09:45:00Z",
+         "to_terminals": ["*"], "acknowledged_at": None},
+    ]
+
+    def handler(request):
+        url = str(request.url)
+        if "/msg/b4" in url and request.method == "GET":
+            return httpx.Response(200, json=rows)
+        if request.method == "POST" and "/ack" in url:
+            acked_ids.append(int(url.rstrip("/").split("/")[-2]))
+            return httpx.Response(200, json={"ok": True})
+        return httpx.Response(200, json={})
+
+    patch_httpx(handler)
+    with patch.object(sys, "stdin", _stdin_with({"prompt": "."})):
+        with pytest.raises(SystemExit):
+            hook_mod.main()
+    # Only the unacked, non-wildcard row (#1) is acked; #2 already acked, #3 wildcard.
+    assert acked_ids == [1], f"expected only [1] acked, got {acked_ids}"
 
 
 # ==========================================================================
