@@ -50,8 +50,8 @@ print(json.dumps({"hookSpecificOutput": {"hookEventName": "SessionStart", "addit
 # --- resolve sender slug from BAKER_ROLE ---
 
 # BEGIN GENERATED AGENT IDENTITY ROLE MAP
-# Generated from /Users/dimitry/baker-vault/_ops/registries/agent_registry.yml
-# SHA256: 9166ecb87dbb8374fbf698e99301d264786ceb3d513a85dddb2698583b63e054
+# Generated from /private/tmp/claude-501/-Users-dimitry-bm-aihead1-cowork--claude-worktrees-ao-desk-terminal-setup-675778/fc5936ff-d5d3-4c4f-b594-9eafc63d8106/scratchpad/vault-land/_ops/registries/agent_registry.yml
+# SHA256: 8124126d13d43e57c935b0b97824a93cfc1292c93a37ce8900fa3db61e6e379c
 case "${BAKER_ROLE:-}" in
     AG-001|ag-001|lead|LEAD|AH1|aihead1|AIHEAD1) SLUG=lead ;;
     AG-002|ag-002|cowork-ah1|COWORK-AH1|cowork_ah1|COWORK_AH1|AH1-APP|cowork|COWORK) SLUG=cowork-ah1 ;;
@@ -78,6 +78,7 @@ case "${BAKER_ROLE:-}" in
     AG-304|ag-304|movie-desk|MOVIE-DESK|movie_desk|MOVIE_DESK|moviedesk|MOVIEDESK|movie|MOVIE) SLUG=movie-desk ;;
     AG-305|ag-305|baden-baden-desk|BADEN-BADEN-DESK|baden_baden_desk|BADEN_BADEN_DESK|bb|BB|bb-desk|BB-DESK|baden-baden|BADEN-BADEN) SLUG=baden-baden-desk ;;
     AG-308|ag-308|cowork-bb-desk|COWORK-BB-DESK|cowork_bb_desk|COWORK_BB_DESK|BB-APP|cowork-bb|COWORK-BB) SLUG=cowork-bb-desk ;;
+    AG-309|ag-309|cowork-ao-desk|COWORK-AO-DESK|cowork_ao_desk|COWORK_AO_DESK|AO-APP|cowork-ao|COWORK-AO) SLUG=cowork-ao-desk ;;
     AG-401|ag-401|CM-1|CM_1|cm-1) SLUG=CM-1 ;;
     AG-402|ag-402|CM-2|CM_2|cm-2) SLUG=CM-2 ;;
     AG-403|ag-403|CM-3|CM_3|cm-3) SLUG=CM-3 ;;

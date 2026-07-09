@@ -160,6 +160,8 @@ def _snapshot_path_for(agent: dict[str, Any]) -> str | None:
         return "/Users/dimitry/bm-clerk"
     if slug == "cowork-bb-desk":
         return "/Users/dimitry/bm-cowork-bb-desk"
+    if slug == "cowork-ao-desk":
+        return "/Users/dimitry/bm-cowork-ao-desk"
     if slug in KNOWN_FALLBACK_SLUGS:
         return VAULT_FALLBACK_PATH
     # Fail-loud, not fail-hard: an unrecognised slug still gets a usable path so
