@@ -177,3 +177,96 @@ def test_sender_matter_set_handles_json_string_participants():
     import json as _json
     rows = [("movie", _json.dumps([{"channel": "email", "value": "x@y.com"}]))]
     assert bridge._sender_matter_set("x@y.com", conn=_FakeConn(rows)) == {"movie"}
+
+
+# ---- Slice 3: build_email_ticket wiring (two-factor -> desk/flight/review) -------------------
+
+from datetime import datetime, timezone
+
+
+def _email(subject="", body="", sender="stranger@example.com", participant_fetched=False):
+    return bridge.EmailArrival(
+        message_id="m1",
+        thread_id="t1",
+        sender_name="Someone",
+        sender_email=sender,
+        subject=subject,
+        full_body=body,
+        received_date=datetime(2026, 7, 9, 8, 0, tzinfo=timezone.utc),
+        source="graph",
+        participant_fetched=participant_fetched,
+    )
+
+
+def test_wire_corroborated_movie_routes_to_movie_desk(monkeypatch):
+    monkeypatch.setattr(bridge, "_sender_matter_set", lambda *a, **k: {"movie"})
+    monkeypatch.setattr(bridge, "_desk_for_matter", lambda m, c=None: "movie-desk")
+    monkeypatch.setattr(bridge, "_flight_for_matter", lambda m, c=None: "MO-VIE-001")
+    t = bridge.build_email_ticket(
+        _email("Mandarin Oriental — Vienna update", "hotel ops", participant_fetched=True),
+        conn=object(),
+    )
+    assert t is not None
+    assert t.proposed_desk_slug == "movie-desk"
+    assert t.suspected_flight == "MO-VIE-001"
+    assert t.suspected_matter_slug == "movie"
+    assert t.review_reason == ""
+    assert any("two-factor routed" in w and "movie" in w for w in t.why_ticketed)
+
+
+def test_wire_multimatter_sender_disambiguated_by_content(monkeypatch):
+    # Sender in movie AND ao; MOVIE content -> resolves to movie (Director's Buchwalder example).
+    monkeypatch.setattr(bridge, "_sender_matter_set", lambda *a, **k: {"movie", "ao"})
+    monkeypatch.setattr(bridge, "_desk_for_matter", lambda m, c=None: f"{m}-desk")
+    monkeypatch.setattr(bridge, "_flight_for_matter", lambda m, c=None: "MO-VIE-001")
+    t = bridge.build_email_ticket(_email("MOHG standards note", "", participant_fetched=True), conn=object())
+    assert t is not None
+    assert t.proposed_desk_slug == "movie-desk"
+    assert t.suspected_matter_slug == "movie"
+
+
+def test_wire_identity_only_goes_to_lead_review_lane(monkeypatch):
+    monkeypatch.setattr(bridge, "_sender_matter_set", lambda *a, **k: {"movie"})
+    # No content keyword -> identity_only -> review lane (desk=lead), NOT movie-desk / BB.
+    t = bridge.build_email_ticket(
+        _email("Quick question", "call me later", participant_fetched=True), conn=object()
+    )
+    assert t is not None
+    assert t.proposed_desk_slug == "lead"
+    assert t.review_reason == bridge.REVIEW_REASON_IDENTITY_ONLY
+    assert any("review lane (identity_only)" in w for w in t.why_ticketed)
+
+
+def test_wire_conflict_goes_to_lead_review_lane(monkeypatch):
+    # Identity=movie, content=aukera -> conflict -> review lane.
+    monkeypatch.setattr(bridge, "_sender_matter_set", lambda *a, **k: {"movie"})
+    t = bridge.build_email_ticket(
+        _email("Aukera data room", "closing actions", participant_fetched=True), conn=object()
+    )
+    assert t is not None
+    assert t.proposed_desk_slug == "lead"
+    assert t.review_reason == bridge.REVIEW_REASON_CONFLICT
+
+
+def test_wire_lilienmatt_keyword_regression_stays_baden_baden(monkeypatch):
+    # Unregistered sender, keyword-lane (lilienmatt), conn=None -> global desk, byte-identical.
+    monkeypatch.delenv("AIRPORT_TICKETING_DESK", raising=False)
+    monkeypatch.delenv("AIRPORT_TICKETING_MATTER_SLUG", raising=False)
+    t = bridge.build_email_ticket(
+        _email("Lilienmatt Annaberg status", "closing checklist"), conn=None
+    )
+    assert t is not None
+    assert t.proposed_desk_slug == "baden-baden-desk"
+    assert t.suspected_matter_slug == "lilienmatt"
+    assert t.review_reason == ""
+    assert not any("review lane" in w for w in t.why_ticketed)
+
+
+def test_wire_conn_none_is_byte_identical_global(monkeypatch):
+    # conn=None (DB-free): factor A empty; an aukera keyword mail from an unknown sender keeps
+    # today's global routing (no per-matter, no review lane).
+    monkeypatch.delenv("AIRPORT_TICKETING_DESK", raising=False)
+    t = bridge.build_email_ticket(_email("Aukera update", "data room"), conn=None)
+    assert t is not None
+    assert t.proposed_desk_slug == "baden-baden-desk"
+    assert t.review_reason == ""

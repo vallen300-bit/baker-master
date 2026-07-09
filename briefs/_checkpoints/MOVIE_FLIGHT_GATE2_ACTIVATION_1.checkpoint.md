@@ -16,10 +16,12 @@ reason_for_checkpoint: context 45-50%; lead ordered checkpoint+respawn FIRST bef
       bridge tests 31 passed / 9 skip (no regression). Commit: <this commit>.
 - [x] SLICE 2 — factor A: _sender_matter_set(sender, conn, channel) — registry participants -> matter set,
       shared conn, case-insensitive, channel-scoped, fault-tolerant. 9 fake-conn tests GREEN (23 total).
-- [ ] SLICE 3 — wire into build_email_ticket: add conn param; resolve (A ∩ B); route per-matter via
-      _desk_for_matter/_flight_for_matter when corroborated; desk=_REVIEW_DESK + review_reason when
-      participant-fetched-uncorroborated; else global (today). Add matter_slug/review_reason to
-      AirportTicket (+ persist review_reason? check reserve_ticket). Update run_tick email call to pass conn.
+- [x] SLICE 3 — build_email_ticket wired: +conn param; two-factor resolve; corroborated -> per-matter
+      desk/flight; participant-fetched-uncorroborated -> desk=lead + review_reason (bus-visible why line);
+      else global (byte-identical). AirportTicket.review_reason field (not in payload -> v1 contract intact).
+      run_tick passes conn=conn. 7 wiring tests GREEN; 60 pass/9 skip incl box5+boarding, no regression.
+      NOTE: review_reason NOT persisted to airport_tickets column yet (lead #8160 'work-queue V2 later');
+      visible via why_ticketed on the bus — sufficient for one-glance reroute this PR.
 - [ ] SLICE 4 — WA builder parity (build_*_wa ticket ~898) + Plaud already per-matter (leave).
 - [ ] SLICE 5 — participant lane ON env + AIRPORT_TICKETING_KEYWORDS append (Part A) at PR/deploy;
       regression + live-PG tests; ship report; PR -> codex G3 medium.
