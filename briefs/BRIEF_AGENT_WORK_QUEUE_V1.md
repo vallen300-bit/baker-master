@@ -12,8 +12,9 @@ Decision trail (all on bus): sacca proposal codex-arch #7987 → cowork-ah1 verd
 
 **Ratified authority rule:** queue = work truth for queue-scoped lanes; bus = notification + audit; ClickUp = human view only. In V1 the queue is authoritative ONLY for the pilot desk (hag-desk); `briefs/_tasks/CODE_N_PENDING.md` mailbox and ClickUp Dispatcher lanes stay authoritative for their lanes until V2.
 
-## Estimated time: ~8h
+## Estimated time: ~9h
 ## Complexity: Medium-High
+## G0 history: codex #8079 FAIL folded @rev2 — F1 row-verified dispatch guard (blocker), F2 session-heartbeat producer (new Feature 6), F3 xact-scoped advisory lock. Re-review requested.
 ## Prerequisites
 - Current b1/b4 wave closed (lead confirms on bus before dispatch).
 - brisen-lab checkout current with origin/main at build time — **re-verify every signature referenced below; this draft was written against origin/main @15fb160-era (2026-07-09) and the repo moves fast.**
@@ -190,17 +191,44 @@ Without a sweeper, an expired lease is just a stale timestamp — silent loss re
 - Prototype: N/A. TDD: applies — sweep test below written first.
 
 ### Implementation
-Async loop in `queue.py`, started from `app.py` startup, every 10 minutes, guarded by `pg_try_advisory_lock` (constant lock id, e.g. 780091) so exactly one instance sweeps:
+Async loop in `queue.py`, started from `app.py` startup, every 10 minutes. Single-instance guard: **`pg_try_advisory_xact_lock` (constant lock id, e.g. 780091) inside ONE transaction** — matches existing brisen-lab precedent (db.py ~215-230); lock auto-releases at commit/rollback, so a pooled connection can never wedge holding a session-level lock (codex G0 #8079 Finding 3). Sweep body:
 
-1. Expire: `UPDATE agent_jobs SET state='expired', attempt_count=attempt_count+1, updated_at=NOW() WHERE state IN ('claimed','working') AND lease_until < NOW() RETURNING id, attempt_count` (+ events rows).
-2. Dead: for returned rows with `attempt_count >= 2` → `state='dead'` + events row + bus `kind='alert'` post to the dispatcher set naming job id, title, owner, attempts (RED path — no reliance on Director noticing silence).
-3. Expired-but-not-dead rows stay claimable (`state='expired'` is in the claimable set) — auto-requeue by definition.
+1. **Stalled seat** (expire): `UPDATE agent_jobs SET state='expired', attempt_count=attempt_count+1, updated_at=NOW() WHERE state IN ('claimed','working') AND lease_until < NOW() AND (last_heartbeat IS NULL OR last_heartbeat < NOW() - INTERVAL '60 minutes') RETURNING id, attempt_count` (+ events rows).
+2. **Slow seat** (alert only, per lead #8004 c5 stalled-vs-slow distinction): rows with `lease_until < NOW()` but a heartbeat within 60 min are NOT expired — emit one amber `kind='alert'` bus post per job to the dispatcher set ("lease expired, seat alive — verify progress"), throttled to one alert per job per sweep-day (track via events table lookup).
+3. Dead: expired rows reaching `attempt_count >= 2` → `state='dead'` + events row + bus `kind='alert'` post naming job id, title, owner, attempts (RED path — no reliance on Director noticing silence).
+4. Expired-but-not-dead rows stay claimable (`state='expired'` is in the claimable set) — auto-requeue by definition.
 
 Retryable vs human blocker: lease expiry/no-heartbeat = retryable (sweeper handles); `blocked` = human, sweeper NEVER touches blocked rows.
 
 ### Verification
-- `test_sweeper_expires_and_deadletters` — seed job with lease_until in the past, attempt_count=1 → run sweep fn directly → state='dead', alert row exists in brisen_lab_msg.
+- `test_sweeper_expires_and_deadletters` — seed job with lease_until in the past, no recent heartbeat, attempt_count=1 → run sweep fn directly → state='dead', alert row exists in brisen_lab_msg.
+- `test_sweeper_slow_seat_not_expired` — lease past, heartbeat 5 min ago → state unchanged, amber alert emitted.
+- `test_two_sweepers_no_wedge` — run sweep fn on two connections concurrently → one sweeps, one no-ops, both connections reusable afterward (xact lock released).
 - Staging seeded failure drill (Quality Checkpoint 8).
+
+---
+
+## Fix/Feature 6: Session-heartbeat wiring (heartbeat producer)
+
+### Problem
+Locked decision #4 promises session-aware leases, but Features 2-3 alone give only a manual `POST /jobs/{id}/heartbeat` no agent will reliably call — the sweeper would expire jobs under live seats (codex G0 #8079 Finding 2).
+
+### Current State
+brisen-lab already receives a per-session ticker at `/api/heartbeat` roughly every 45s (app.py ~700-705 — verify exact handler + slug field at build time).
+
+### Engineering Craft Gates
+Diagnose/Prototype: N/A — wiring, not new design. TDD: applies — one vertical test.
+
+### Implementation
+In the existing `/api/heartbeat` handler, AFTER its current work, when `agent_queue_enabled='on'`: fire-and-forget `UPDATE agent_jobs SET last_heartbeat = NOW() WHERE assigned_role = %(slug)s AND state IN ('claimed','working')` (own try/except + rollback; failure logs, never affects the heartbeat response). No lease extension here — session alive proves the SEAT is alive (slow seat), not that the JOB progresses; only explicit `POST /jobs/{id}/heartbeat` or state changes extend `lease_until`. This is exactly the stalled-vs-slow split lead required (#8004 c5): dead session → no last_heartbeat → sweeper expires (stalled); live session past lease → amber alert, no expiry (slow).
+
+### Key Constraints
+- Zero added latency budget on `/api/heartbeat` beyond one indexed UPDATE; must not raise.
+- No new endpoint; no agent-side changes required for the pilot.
+
+### Verification
+- `test_session_heartbeat_touches_active_jobs` — seed claimed job for slug, call handler → last_heartbeat updated; verified/dead rows untouched.
+- `test_session_heartbeat_queue_off_noop` — flag off → no UPDATE issued.
 
 ---
 
@@ -216,10 +244,21 @@ During pilot, a bus dispatch to hag-desk without a queue row recreates the old f
 Diagnose/Prototype: N/A — trivial guard. TDD: applies — one test.
 
 ### Implementation
-In `_post_msg_inner`, AFTER successful insert, when: `kind='dispatch'` AND recipient in `agent_queue_pilot_roles` AND `agent_queue_enabled='on'` AND body does not match `job[_ #]?\d+|/jobs/\d+` → include `"queue_warning": "dispatch to pilot desk without agent_jobs row"` in the response JSON and emit an events-style audit bus post (kind='alert', to dispatcher set) — **no reject, no auto-create in V1** (#8066 block 6). Existing response shape must remain otherwise byte-identical (posters parse it).
+In `_post_msg_inner`, AFTER successful insert, when `kind='dispatch'` AND recipient in `agent_queue_pilot_roles` AND `agent_queue_enabled='on'`, run the **row-verified guard** (codex G0 #8079 Finding 1 — text-matching alone is spoofable by "job 999"):
+
+1. Extract a job reference: explicit `queue_job_id` field in the POST payload (preferred; document in bus_post conventions) OR a `/jobs/<id>` token in the body. Bare "job N" prose does NOT count.
+2. If no reference → warn.
+3. If reference found → `SELECT id, assigned_role, state FROM agent_jobs WHERE id = %(id)s LIMIT 1` and warn unless ALL hold: row exists, `assigned_role` = recipient slug, `state NOT IN ('verified','dead')`.
+4. Warn = include `"queue_warning": "<reason: no_job_ref|job_not_found|wrong_role|terminal_state>"` in the response JSON + emit audit bus post (kind='alert', to dispatcher set) — **no reject, no auto-create in V1** (#8066 block 6). Existing response shape otherwise byte-identical (posters parse it). Guard SELECT failure (DB error) → log + skip warning, never block the post.
 
 ### Verification
-- `test_pilot_dispatch_without_job_warns` / `test_pilot_dispatch_with_job_ref_clean` / `test_nonpilot_dispatch_unaffected`.
+Seeded tests, one per guard outcome (codex G0 required set):
+- `test_pilot_dispatch_no_ref_warns` (incl. spoof case: body says "job 999", no payload field, no `/jobs/` token → warns)
+- `test_pilot_dispatch_job_not_found_warns`
+- `test_pilot_dispatch_wrong_role_warns`
+- `test_pilot_dispatch_terminal_state_warns`
+- `test_pilot_dispatch_valid_job_clean`
+- `test_nonpilot_dispatch_unaffected`
 
 ---
 
@@ -246,8 +285,8 @@ Badge shows seeded dead job within one refresh cycle; drawer renders on iPhone v
 ## Files Modified (ALL in brisen-lab repo)
 - `db.py` — bootstrap DDL append (agent_jobs, agent_job_events, indexes)
 - `queue.py` — NEW: endpoints + sweeper
-- `app.py` — mount queue.register(...), start sweeper task
-- `bus.py` — dispatch-warning hook only (minimal diff inside `_post_msg_inner`)
+- `app.py` — mount queue.register(...), start sweeper task, session-heartbeat → job touch (Feature 6)
+- `bus.py` — row-verified dispatch-warning hook only (minimal diff inside `_post_msg_inner`)
 - `static/` — RED badge + jobs drawer (+ `?v=N` bump)
 - `tests/test_agent_queue.py` — NEW
 
@@ -266,7 +305,10 @@ Badge shows seeded dead job within one refresh cycle; drawer renders on iPhone v
 5. `agent_queue_enabled` missing/off → every /jobs endpoint 503s, zero behavior change anywhere else (regression: existing bus tests all green).
 6. Badge + drawer render on desktop AND iPhone PWA; `?v=N` bumped.
 7. Bootstrap idempotent across a Render rolling deploy (two instances, no duplicate-object errors).
-8. Staging seeded-failure drill: create → claim → no heartbeat → expired (attempt 1) → expired (attempt 2) → dead + RED alert bus post received by dispatcher set.
+8. Staging seeded-failure drill: create → claim → kill session (no heartbeat) → expired (attempt 1) → expired (attempt 2) → dead + RED alert bus post received by dispatcher set.
+9. Dispatch guard: all six seeded outcomes green, incl. "job 999" spoof → warns (G0 #8079 F1).
+10. Two concurrent sweepers: no wedge, connections reusable (xact-lock test green, G0 #8079 F3).
+11. Live seat past lease → amber alert, NOT expired; dead seat → expired (stalled-vs-slow, #8004 c5).
 
 ## Verification SQL
 ```sql
