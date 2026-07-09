@@ -89,10 +89,20 @@ Two-factor hybrid ("match the name PLUS the content, and ideally a project numbe
    cockpit stays clean. NOTE: `lead` must be a valid bus recipient (it is) and resolve_owner_slug/
    RESERVED_RECIPIENTS must allow it as a proposed desk — verify at build (if `lead` is reserved,
    raise with lead for the exact review-desk slug).
-7. Keyword list + keyword->matter map: FIRST DELIVERABLE from the fresh seat — draft to lead for
-   sign-off BEFORE any env flip. Collision-checked. Never bare `movie`; `rg7` collides hagenauer-rg7.
-   Candidates: "mandarin oriental","riemergasse" (matter-tag each to MO-VIE-001; collision-check vs
-   all active matters). This is a REQUIRED gate before flipping AIRPORT_TICKETING_KEYWORDS.
+7. Keyword list + keyword->matter map: **SIGNED OFF by lead #8165 (gate CLEARED). FROZEN spec:**
+   - PART A — FETCH terms to APPEND to AIRPORT_TICKETING_KEYWORDS (env flip, at PR/deploy):
+     'mandarin oriental', 'mohg', 'mo-vie', 'mo vienna'. EXCLUDE bare 'movie', 'rg7', 'riemergasse'.
+   - PART B — CONTENT->MATTER map (factor B), MOVIE-ONLY this PR:
+     movie (MO-VIE-001) <- {'mandarin oriental','mohg','mo-vie','mo vienna'} ; aukera (BB-AUK-001) <- {'aukera'}.
+   - Q1 (CONFIRMED): the 7 surnames (merz/weippert/brandner/pohanis/dragovan/sardarov/skliar) stay FETCH-ONLY,
+     EXCLUDED from the Part-B content map (identity never double-counts as content).
+   - Q2 (RULED): DROP 'riemergasse' ENTIRELY for v1 — Moravcik & other construction names are in BOTH the
+     MOVIE registry AND the hagenauer-rg7 dispute at Riemergasse 7, so identity-gating does NOT disambiguate
+     building-address content (a Hagenauer-dispute mail from such a sender would misroute to MOVIE). Revisit
+     only with live miss-data. Do NOT add riemergasse to Part A or Part B.
+   - Q3 (RULED): MOVIE-only content map this PR; AO/BB content-term expansion = FOLLOW-UP brief (the resolver
+     is generic, so ao/aukera inherit per-matter content routing for free once terms are added later).
+   - Env flip still executes at PR/deploy time, documented (not silent).
 8. Attachment-text extraction (LEAD RULING #8160): accepted OUT of scope; content = subject+full_body
    only; log attachment-text extraction as a named FOLLOW-UP in the ship report.
 
@@ -123,7 +133,13 @@ identity-routing until lead reconciles. Options posted to lead (bus, this topic)
     in the participant lane + a sender-unambiguity guard; coexist with (not duplicate) e.7/e.8.
 Escalation bus id: (see topic baker-os-v2/movie-flight-gate2). HOLDING for lead ruling Y vs Z.
 
-## NEXT CONCRETE STEP (successor starts HERE — design RATIFIED #8154, build is large/multi-file)
+## STATUS: keyword gate CLEARED (lead #8165). BUILD UNBLOCKED — fresh seat claims attempt 3->4.
+All design + keyword decisions are FROZEN (see RATIFIED DESIGN pts 1-8 above). Nothing left to ask lead
+before coding EXCEPT: verify `lead` is an allowed proposed_desk_slug (resolve_owner_slug/RESERVED_RECIPIENTS)
+— if reserved, raise for the exact review-desk slug. First deliverable (keyword list+map) DONE + signed off;
+skip it. Fresh seat: bump attempt 3->4 and go straight to the code layer below.
+
+## NEXT CONCRETE STEP (successor starts HERE — design RATIFIED #8154, keywords SIGNED OFF #8165, build is large/multi-file)
 Ratified two-factor design above. Build order (TDD-first, branch b4/movie-flight-gate2):
 1. Keyword->matter map: extend the keyword config so each active keyword carries its matter/flight
    (aukera->BB-AUK-001, MOVIE terms->MO-VIE-001, AO surnames->AO-OSK-001, lilienmatt/annaberg->BB).
