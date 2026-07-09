@@ -56,7 +56,7 @@ Ignored: bus-and-lanes, memory-and-lessons, loop-runner — no mechanics change.
 ### Surface contract
 - **Surface:** `/flight/AO-OSK-001` — Director-canonical Pattern E CEO view (flight-dashboard-build + content-contract v2.4 govern).
 - **Change:** one machine line appended inside the §4 machine card (tickets zone): `LAST DIRECT AO CONTACT — <n> days (<channel>, <date>)` with tone green ≤10d / amber 11-14 / red >14 (cockpit thresholds, now honest); on any query failure or zero rows: `LAST DIRECT AO CONTACT — no data (wiring check needed)`, neutral tone, **never green by default**.
-- **Config, not hardcode:** new OPTIONAL snapshot key `comms_contact`: `{"wa_chat_id": "491736903746@c.us", "email_patterns": ["%oskolkov%", "%aelio%"], "label": "AO"}`. Absent key (BB-AUK-001) → no line, zero behavior change. Machine reads config from the desk snapshot; desk owns who counts as "direct contact".
+- **Config, not hardcode:** new OPTIONAL snapshot key `comms_contact`: `{"wa_chat_id": "491736903746@c.us", "email_patterns": ["ao@aelioholding.com", "%oskolkov%"], "label": "AO"}`. Absent key (BB-AUK-001) → no line, zero behavior change. Machine reads config from the desk snapshot; desk owns who counts as "direct contact". _(Pattern list corrected by lead #7671 / ao-desk #7576: the exact `ao@aelioholding.com` replaces the original broad `%aelio%`, which also matched the Aelio-entity gatekeeper's mail and recreated the blind spot this signal exists to catch.)_
 - **Verify:** post-deploy page shows the line with a real date (expect gap ≈ days since 2026-07-06 unless newer contact).
 
 ### Implementation
@@ -221,7 +221,7 @@ Straightforward per above. Tombstone comments name this brief + Director directi
 -- ground truth the flight page's LAST DIRECT AO CONTACT line must match
 SELECT GREATEST(
   (SELECT MAX(timestamp) FROM whatsapp_messages WHERE chat_id = '491736903746@c.us'),
-  (SELECT MAX(created_at) FROM sent_emails WHERE to_address ILIKE ANY(ARRAY['%oskolkov%','%aelio%']))
+  (SELECT MAX(created_at) FROM sent_emails WHERE to_address ILIKE ANY(ARRAY['ao@aelioholding.com','%oskolkov%']))
 ) AS last_direct_contact
 LIMIT 1;
 
