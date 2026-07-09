@@ -65,7 +65,31 @@ visible on movie-desk check-in; lilienmatt regression probe still baden-baden-de
   AO flight rows/env or slugs.yml.
 - Tests: tests/test_airport_ticketing_bridge*.py (existing bridge conventions; live-PG cases).
 
-## BUILD-TIME FINDING (attempt 2) — #5035 CONFLICT, escalated to lead, HOLDING
+## RATIFIED DESIGN (Director ruling, relayed lead #8154) — BUILD TO THIS
+Two-factor hybrid ("match the name PLUS the content, and ideally a project number"):
+1. e.7/e.8 explicit-code + thread-continuity lanes UNTOUCHED — code always wins, strongest signal (#5035).
+2. NEW resolver = identity AND content corroboration. For a participant-fetched email:
+   - candidate set A = the active registry matters the SENDER is a participant in (sender->matter-set).
+   - candidate set B = the matters whose CONTENT keywords match subject+full_body (needs a NEW
+     keyword->matter map; today the keyword list is flat/global).
+   - route to that matter's desk/flight AT MINT iff A ∩ B == exactly ONE matter. Handles multi-matter
+     senders (Buchwalder+Riemergasse->MOVIE; Buchwalder+drawdown->AO).
+3. No corroboration / conflict / multi-match -> safe-default desk-review, NEVER guess. #5035 core: never name alone.
+4. Content haystack = subject + full_body (existing Gate-2). Attachment text: ingest does NOT extract it
+   (email_attachments has only content_sha256 + no text col; full_body = body only) -> OUT of scope,
+   note attachment-text extraction as a FOLLOW-UP (Director spec pt 4).
+5. AC (amended): seeded probe = MOVIE participant + MOVIE keyword content -> desk=movie-desk +
+   flight=MO-VIE-001 at mint; identity-only (no content corroboration) -> review lane by design;
+   lilienmatt regression unchanged.
+6. FACT for build (answered to lead): safe-default desk today = _desk_slug() = AIRPORT_TICKETING_DESK
+   (unset) = baden-baden-desk = BB cockpit pollution. NO neutral review lane exists. IMPLICATION: to
+   keep uncorroborated MOVIE review tickets OFF the BB cockpit, the build likely needs a NEUTRAL review
+   desk for identity-only/uncorroborated tickets (slug TBD, lead sign-off) instead of the global BB desk.
+7. Keyword list + keyword->matter map: proposal owed to lead, collision-checked, sign-off BEFORE env flip.
+   Never bare `movie`; `rg7` collides hagenauer-rg7. Candidates: "mandarin oriental","riemergasse" (both
+   need matter-tagging + collision-check).
+
+## (superseded) BUILD-TIME FINDING (attempt 2) — #5035 CONFLICT, escalated to lead, RESOLVED by #8154
 Discovered on build entry (before writing code): email/WA per-matter routing ALREADY EXISTS
 downstream in run_tick, but keyed on EXPLICIT PROJECT CODE / THREAD, not identity:
 - (e.7) EXPLICIT-CODE ROUTED LANE (bridge:2895 → desk_owner=resolved["desk_owner"] :2938):
@@ -92,18 +116,32 @@ identity-routing until lead reconciles. Options posted to lead (bus, this topic)
     in the participant lane + a sender-unambiguity guard; coexist with (not duplicate) e.7/e.8.
 Escalation bus id: (see topic baker-os-v2/movie-flight-gate2). HOLDING for lead ruling Y vs Z.
 
-## NEXT CONCRETE STEP (successor starts HERE — GATED on lead #5035 ruling)
-BLOCKED pending lead's Y-vs-Z ruling on the #5035 reconciliation (above). Do NOT write routing
-code until it lands. Once lead rules:
-- If Z: add matter_slug to EmailArrival; in the participant lane (~1637) resolve the sender's
-  matter via a NEW unambiguous-sender lookup (sender in exactly 1 active registry matter, else
-  ""); build_email_ticket + WA builder route via _desk_for_matter/_flight_for_matter/matter with
-  global fallback when matter_slug=="" ; keep (e.7)/(e.8) intact (they still win on explicit code).
-- If Y: no build_email_ticket routing change — just flip participant lane ON + add MOVIE keywords
-  so MOVIE mails FETCH + TICKET to safe-default desk; movie-desk claims; code/thread lanes route
-  code-carrying mails. Rework AC wording with lead (mint-desk only for code/thread mails).
-Then TDD tests, PR base main, codex G3 medium, lead merge, live probes, POST_DEPLOY_AC_VERDICT.
-Keyword list still needs lead sign-off before any env flip (never bare movie; rg7 collides).
+## NEXT CONCRETE STEP (successor starts HERE — design RATIFIED #8154, build is large/multi-file)
+Ratified two-factor design above. Build order (TDD-first, branch b4/movie-flight-gate2):
+1. Keyword->matter map: extend the keyword config so each active keyword carries its matter/flight
+   (aukera->BB-AUK-001, MOVIE terms->MO-VIE-001, AO surnames->AO-OSK-001, lilienmatt/annaberg->BB).
+   Preserve _keyword_ilike_where match/miss PARITY (do NOT touch that predicate — G3 #4957); the map
+   is a SEPARATE lookup layered on top. Content-match factor B = matters whose mapped keywords hit
+   subject+full_body.
+2. Sender->matter-set (factor A): from project_registry participants — which active matters list this
+   sender (email) as a participant. (active_participant_values already builds the email allow-set:1525.)
+3. Resolver: A ∩ B; route only if == 1 matter -> _desk_for_matter/_flight_for_matter for that matter.
+   Add matter_slug to EmailArrival (default "") + WA arrival; populate from the resolver at fetch/build.
+4. Neutral review desk for uncorroborated/conflict/multi-match (Fact 6) — propose slug to lead; do NOT
+   default to baden-baden (that pollutes BB). Until decided, this is a lead sign-off item.
+5. Participant lane ON (env flip inside PR, documented). Keyword list + map proposal to lead, collision-
+   checked, sign-off BEFORE env flip.
+6. TDD tests: (a) MOVIE participant + "mandarin oriental"/"riemergasse" content -> movie-desk/MO-VIE-001;
+   (b) multi-matter sender + MOVIE content -> MOVIE; + AO/drawdown content -> AO; (c) identity-only no
+   content -> review lane; (d) lilienmatt keyword -> baden-baden (regression byte-identical); (e) e.7/e.8
+   still win on explicit code. Live-PG cases per existing conventions (tests/test_airport_*).
+7. pytest literal green -> PR base main -> codex G3 medium (gate/movie-flight-gate2) -> lead merge ->
+   live probes (seeded MOVIE + lilienmatt regression) -> POST_DEPLOY_AC_VERDICT to lead.
+SIZE NOTE: this is now a multi-file feature (new keyword->matter subsystem + resolver + neutral desk +
+tests), > the original ~6h estimate. Predecessor did all diagnosis + design ratification; a FRESH seat
+should carry the build with clean context. Do NOT redo diagnosis/design.
+
+## (superseded) ORIGINAL/Y-vs-Z NEXT STEPS — replaced by the ratified two-factor build above
 
 ## ORIGINAL NEXT STEP (pre-#5035-finding — SUPERSEDED by the gate above)
 TDD-first on branch b4/movie-flight-gate2:
