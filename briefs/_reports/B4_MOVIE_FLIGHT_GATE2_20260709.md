@@ -3,7 +3,7 @@
 - **Brief:** `briefs/_tasks/MOVIE_FLIGHT_GATE2_ACTIVATION_1.md` @560dcdb9
 - **Dispatch:** bus #8136 (from `lead`); diagnose→design ratified across #8142–#8169 (Director two-factor #8154, keyword sign-off #8165, build-A ruling #8169)
 - **Branch:** `b4/movie-flight-gate2` (off main @253869c3)
-- **PR:** #<pending> → base `main`
+- **PR:** #510 → base `main`
 - **Date:** 2026-07-09
 - **Task class:** feature-build (production routing logic), Tier-B. No migrations, no auth surface. Env changes = post-deploy operator step (below).
 
