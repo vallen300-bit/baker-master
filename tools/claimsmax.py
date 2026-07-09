@@ -30,6 +30,7 @@ from __future__ import annotations
 
 import json
 import logging
+import re
 import threading
 from typing import Any, Optional
 
@@ -353,11 +354,33 @@ def dispatch_claimsmax(name: str, args: dict[str, Any]) -> str:
 # ─────────────────────────── formatting ───────────────────────────
 
 
+# Some ClaimsMax search rows are stale: the document was batch-ingested and
+# finalized in the documents store (real UUID + extracted text) but its search
+# projection was never back-filled — it still carries the worker-stage placeholder
+# identity (``doc_id: null``, ``filename: worker_<pid>_<sha256>.<ext>``,
+# ``snippet: null``). The 64-hex token in that filename IS the document sha256, and
+# ``get_document`` accepts a sha256, so we recover it as a fetchable sibling handle.
+# Root cause + evidence: briefs/_reports/B2_CLAIMSMAX_NULL_DOCID_DIAGNOSIS_20260709.md.
+_WORKER_SHA256_RE = re.compile(r"^worker_\d+_([0-9a-f]{64})\.", re.IGNORECASE)
+
+
+def _recover_sha256_from_worker_filename(filename: Optional[str]) -> Optional[str]:
+    """Return the lowercased sha256 embedded in a ``worker_<pid>_<sha256>.<ext>``
+    placeholder filename, or None if ``filename`` is not a worker placeholder."""
+    if not filename:
+        return None
+    match = _WORKER_SHA256_RE.match(filename)
+    if not match:
+        return None
+    return match.group(1).lower()
+
+
 def _format_search_result(payload: dict[str, Any]) -> str:
     """Trim the /search response to a slim, MCP-friendly JSON projection."""
     results = payload.get("results") or []
-    slim_results = [
-        {
+    slim_results = []
+    for r in results:
+        row = {
             "doc_id": r.get("doc_id"),
             "filename": r.get("filename"),
             "doc_date": r.get("doc_date"),
@@ -371,8 +394,17 @@ def _format_search_result(payload: dict[str, Any]) -> str:
             "snippet": r.get("snippet"),
             "score": r.get("score"),
         }
-        for r in results
-    ]
+        # Recovery mapping (worker-stage stale search rows only): when the search
+        # row has no canonical doc_id but its filename is a worker_<pid>_<sha256>
+        # placeholder, surface the recovered sha256 as a fetchable handle. doc_id
+        # stays None — honest: the search index truly has no id for this row — and
+        # non-worker rows are left byte-identical (no extra keys).
+        if row["doc_id"] is None:
+            recovered = _recover_sha256_from_worker_filename(row["filename"])
+            if recovered:
+                row["sha256"] = recovered
+                row["recovered_from"] = "worker_filename"
+        slim_results.append(row)
     out = {
         "total": payload.get("total"),
         "page": payload.get("page"),
