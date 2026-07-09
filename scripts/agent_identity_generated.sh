@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Generated agent identity data. Do not edit by hand.
-# Source: /private/tmp/claude-501/-Users-dimitry-bm-aihead1-cowork--claude-worktrees-ao-desk-terminal-setup-675778/fc5936ff-d5d3-4c4f-b594-9eafc63d8106/scratchpad/vault-land/_ops/registries/agent_registry.yml
+# Source: /Users/dimitry/baker-vault/_ops/registries/agent_registry.yml
 # SHA256: 8124126d13d43e57c935b0b97824a93cfc1292c93a37ce8900fa3db61e6e379c
 # Regenerate with: python3 scripts/generate_agent_identity_artifacts.py --write
 
