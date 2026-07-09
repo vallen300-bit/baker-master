@@ -54,6 +54,10 @@ _AUTH_BEARING_ROLES = frozenset({
 _REGISTER_TIMEOUT_S = 5.0
 _HUMAN_CONFIRM_TIMEOUT_S = 5.0
 _DRAIN_TIMEOUT_S = 8.0
+# BUS_READ_UNACKED_SCAN_FIX_1: wide pull window for the full-unacked scan. `since`
+# as the daemon selection filter silently dropped boundary/unacked messages; the
+# drain now pulls this many rows and selects acknowledged_at==null client-side.
+_DRAIN_SCAN_LIMIT = 2000
 
 # Surface 6a (V0.2): retry register-session-pubkey once on 409 race-loss.
 # The partial UNIQUE index on brisen_lab_session_keys rejects the second
@@ -523,10 +527,11 @@ def _drain_inbox() -> str | None:
         return None
 
     worker = _worker_slug()
+    # last_seen is a DISPLAY hint only (BUS_READ_UNACKED_SCAN_FIX_1) — NEVER the
+    # daemon selection filter. Full-unacked scan: wide window + client-side
+    # acknowledged_at==null filter, so boundary/out-of-order unacked never drop.
     last_seen = _read_last_seen()
-    params: dict[str, Any] = {"limit": 50}
-    if last_seen:
-        params["since"] = last_seen
+    params: dict[str, Any] = {"limit": _DRAIN_SCAN_LIMIT}
 
     base = _brisen_lab_url()
     headers = {"X-Terminal-Key": terminal_key}
@@ -547,14 +552,21 @@ def _drain_inbox() -> str | None:
     if not rows:
         return None
 
-    # Ack each (NM3: sole authoritative path). Per-msg failure isolated.
+    # Select UNACKED only (acknowledged_at==null); then split off wildcard
+    # broadcasts (to_terminals==['*']) which 403 on per-terminal ack and would
+    # permanently inflate the count (#7011) — surfaced separately, never acked.
+    unacked = [r for r in rows if isinstance(r, dict) and not r.get("acknowledged_at")]
+    ackable = [r for r in unacked if r.get("to_terminals") != ["*"]]
+    residue = [r for r in unacked if r.get("to_terminals") == ["*"]]
+    if not ackable and not residue:
+        return None
+
+    # Ack each ackable (NM3: sole authoritative path). Per-msg failure isolated.
     newest_ts: str | None = last_seen
     summary_lines: list[str] = []
     try:
         with httpx.Client(timeout=_DRAIN_TIMEOUT_S) as client:
-            for row in rows:
-                if not isinstance(row, dict):
-                    continue
+            for row in ackable:
                 mid = row.get("id")
                 if mid is None:
                     continue
@@ -562,16 +574,13 @@ def _drain_inbox() -> str | None:
                     client.post(f"{base}/msg/{mid}/ack", headers=headers)
                 except Exception:
                     continue  # per-msg failure does not abort drain
-                # Track newest created_at for next-prompt since filter
+                # Advance the display-hint marker to the newest acked created_at.
                 created = row.get("created_at")
                 if created and (newest_ts is None or str(created) > str(newest_ts)):
                     newest_ts = str(created)
-                # Compose summary line — NEVER include body if it could carry
-                # sensitive content; preview only (daemon caps at 8K).
-                # No body fallback: brief §6 forbids surfacing raw body for
-                # ratify_required messages with structured payload (capital
-                # allocation, counterparty name, decision text). If the daemon
-                # ever omits body_preview, surface a placeholder instead.
+                # Compose summary line — preview only (daemon caps at 8K); never
+                # the raw body (brief §6 forbids raw body for ratify_required).
+                # The message id is always listed so no unacked row is elided.
                 kind = row.get("kind", "?")
                 topic = row.get("topic") or ""
                 from_t = row.get("from_terminal", "?")
@@ -580,16 +589,23 @@ def _drain_inbox() -> str | None:
                     preview = "(preview unavailable)"
                 elif len(preview) > 140:
                     preview = preview[:137] + "..."
-                summary_lines.append(f"  [{kind}] {from_t} → {topic}: {preview}")
+                summary_lines.append(f"  #{mid} [{kind}] {from_t} → {topic}: {preview}")
     except Exception:
         pass
 
     if newest_ts:
         _write_last_seen(newest_ts)
 
-    if not summary_lines:
+    if not summary_lines and not residue:
         return None
-    return "📨 Brisen Lab inbox drained:\n" + "\n".join(summary_lines)
+    out = "📨 Brisen Lab inbox drained (full-unacked scan):"
+    if summary_lines:
+        out += "\n" + "\n".join(summary_lines)
+    if residue:
+        rids = ", ".join(f"#{r.get('id')}" for r in residue)
+        out += ("\n  ⚠ broadcast residue (wildcard to=['*'], not seat-ackable): "
+                f"{len(residue)} — {rids}")
+    return out
 
 
 def _drain_director_inbox() -> str | None:
@@ -617,10 +633,10 @@ def _drain_director_inbox() -> str | None:
     except Exception:
         return None
 
+    # Full-unacked scan (BUS_READ_UNACKED_SCAN_FIX_1) — since is a display hint
+    # only, never the daemon selection filter.
     last_seen = _read_director_last_seen()
-    params: dict[str, Any] = {"limit": 50}
-    if last_seen:
-        params["since"] = last_seen
+    params: dict[str, Any] = {"limit": _DRAIN_SCAN_LIMIT}
 
     base = _brisen_lab_url()
     headers = {"X-Terminal-Key": director_key}
@@ -642,15 +658,23 @@ def _drain_director_inbox() -> str | None:
     if not rows:
         return None
 
+    # Full-unacked scan: select acknowledged_at==null; drop wildcard broadcasts
+    # (to_terminals==['*']) that 403 on per-terminal ack (#7011).
+    ackable = [
+        r for r in rows
+        if isinstance(r, dict) and not r.get("acknowledged_at")
+        and r.get("to_terminals") != ["*"]
+    ]
+    if not ackable:
+        return None
+
     pinned_lines: list[str] = []
     chronological_lines: list[str] = []
     newest_ts: str | None = last_seen
 
     try:
         with httpx.Client(timeout=_DRAIN_TIMEOUT_S) as client:
-            for row in rows:
-                if not isinstance(row, dict):
-                    continue
+            for row in ackable:
                 mid = row.get("id")
                 if mid is None:
                     continue

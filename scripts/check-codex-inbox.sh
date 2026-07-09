@@ -10,7 +10,9 @@
 
 set -euo pipefail
 
-LIMIT="${1:-10}"
+# BUS_READ_UNACKED_SCAN_FIX_1: default to a full-unacked scan (2000), not 10 —
+# a small limit silently drops boundary unacked messages beyond the window.
+LIMIT="${1:-2000}"
 SCRIPT_DIR="$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)"
 # shellcheck source=scripts/brisen_lab_terminal_key.sh
 . "$SCRIPT_DIR/brisen_lab_terminal_key.sh"
@@ -53,10 +55,19 @@ msgs = d if isinstance(d, list) else d.get("messages", [])
 if not msgs:
     print("codex inbox: empty (no dispatches).")
     sys.exit(0)
+# Unacked count excludes wildcard broadcasts (to_terminals==['*']) which 403 on
+# per-terminal ack and permanently inflate the count (#7011). Seat-unacked is the
+# figure that must match Lab dashboard ground truth for this slug.
 unacked = [m for m in msgs if not m.get("acknowledged_at")]
-print("codex inbox:", len(msgs), "message(s),", len(unacked), "unacked.")
+residue = [m for m in unacked if m.get("to_terminals") == ['*']]
+seat_unacked = [m for m in unacked if m.get("to_terminals") != ['*']]
+print("codex inbox:", len(msgs), "message(s),", len(seat_unacked),
+      "unacked (seat),", len(residue), "broadcast residue.")
 for m in msgs:
-    state = "ACK" if m.get("acknowledged_at") else "UNACK"
+    if not m.get("acknowledged_at"):
+        state = "RESIDUE" if m.get("to_terminals") == ['*'] else "UNACK"
+    else:
+        state = "ACK"
     body = (m.get("body") or m.get("body_preview") or "")[:120].replace("\n", " ")
     print("  #" + str(m["id"]) + " [" + state + "] " +
           str(m.get("from_terminal","?")) + " -> " +
