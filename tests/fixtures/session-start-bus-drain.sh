@@ -192,7 +192,7 @@ if [ -z "${SINCE:-}" ]; then
     SINCE="$(python3 -c 'import datetime; print((datetime.datetime.utcnow() - datetime.timedelta(hours=24)).strftime("%Y-%m-%dT%H:%M:%SZ"))')"
 fi
 
-# --- GET /msg/<slug>?since=<since>&limit=50 ---
+# --- GET /msg/<slug>?since=<since>&limit=50&unread=true ---
 #
 # CURSOR-FORMAT-FIX (AH2 finding 2026-05-11): $SINCE contains an ISO-8601
 # timestamp with literal `+00:00` offset (daemon returns offset-format, not
@@ -200,10 +200,21 @@ fi
 # spec), daemon parses garbled timestamp -> 500. Use -G + --data-urlencode
 # so curl URL-encodes the cursor properly. Cursor stays in offset format on
 # disk; this fix is read-side only — no state-file sweep needed.
+#
+# LIFECYCLE-403-FLOOR-FIX (lead #7945, 2026-07-09): request the UNREAD (pending)
+# view, not full-history. The daemon's unread=true branch (BUS_WILDCARD_PENDING_FIX
+# #7335, bus.py) counts ONLY rows this slug is a NAMED recipient of + only
+# acknowledged_at IS NULL — so daemon lifecycle broadcasts to_terminals=['*']
+# (restart / forced-kill / refresh-cadence-sweep) drop out. Those broadcasts are
+# UNACKABLE by any named terminal (ack path requires literal slug membership ->
+# 403 not_recipient), so under the prior full-history query they piled up as a
+# permanent false-pending floor in every agent's drain (b2 saw 25, BB-desk 20->42).
+# Directed dispatches are unaffected — they are named recipients and still render.
 
 RESP="$(curl -sS --max-time 4 -G -H "X-Terminal-Key: ${KEY}" \
         --data-urlencode "since=${SINCE}" \
         --data-urlencode "limit=50" \
+        --data-urlencode "unread=true" \
         "${DAEMON_URL}/msg/${SLUG}" 2>/dev/null)" || {
     printf '[bus-drain] daemon unreachable (timeout 4s) for slug=%s — skipping.\n' "$SLUG" | _emit
     exit 0
