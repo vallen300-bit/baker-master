@@ -72,19 +72,43 @@ def _parse_database_url(url: str) -> dict:
     return params
 
 
+# --- Connection hardening (CM_SQL_SURFACE_502 2b, lead ruling #7646) -----------
+# Applied through libpq connect params, deliberately NOT a post-connect `SET`:
+# a session GUC issued after connect leaks through Neon's pgbouncer
+# transaction-mode pool to unrelated callers (the same 2026-04-29 RCA cited in
+# `_query` below — that is why we never `set_session`/`SET` for read-only
+# either). `options=-c statement_timeout=...` rides the startup packet, so it is
+# scoped to this connection's server session and cannot poison the pool.
+#   - statement_timeout (15s): caps the heavy documents.full_text scans that hung
+#     the /mcp SQL surface into intermittent 502s (blocked rung-1 hunts H2/H5).
+#     Over-length queries now fail fast + loud instead of wedging the backend.
+#   - connect_timeout (5s): fail fast on a cold/unreachable backend rather than
+#     blocking the worker thread on a stalled TCP/TLS handshake.
+_STATEMENT_TIMEOUT_MS = 15_000
+_CONNECT_TIMEOUT_S = 5
+
+
 def _get_conn_params() -> dict:
-    """Build connection params from env vars."""
+    """Build connection params from env vars.
+
+    Both the DATABASE_URL and split-POSTGRES_* paths get the statement_timeout
+    + connect_timeout hardening above so `_query` and `_write` inherit it.
+    """
     database_url = os.getenv("DATABASE_URL", "")
     if database_url:
-        return _parse_database_url(database_url)
-    return {
-        "host": os.getenv("POSTGRES_HOST", "localhost"),
-        "port": int(os.getenv("POSTGRES_PORT", "5432")),
-        "dbname": os.getenv("POSTGRES_DB", "sentinel"),
-        "user": os.getenv("POSTGRES_USER", "sentinel"),
-        "password": os.getenv("POSTGRES_PASSWORD", ""),
-        "sslmode": os.getenv("POSTGRES_SSLMODE", "require"),
-    }
+        params = _parse_database_url(database_url)
+    else:
+        params = {
+            "host": os.getenv("POSTGRES_HOST", "localhost"),
+            "port": int(os.getenv("POSTGRES_PORT", "5432")),
+            "dbname": os.getenv("POSTGRES_DB", "sentinel"),
+            "user": os.getenv("POSTGRES_USER", "sentinel"),
+            "password": os.getenv("POSTGRES_PASSWORD", ""),
+            "sslmode": os.getenv("POSTGRES_SSLMODE", "require"),
+        }
+    params["connect_timeout"] = _CONNECT_TIMEOUT_S
+    params["options"] = f"-c statement_timeout={_STATEMENT_TIMEOUT_MS}"
+    return params
 
 
 def _query(sql: str, params: tuple = None, limit: int = 50) -> list[dict]:
