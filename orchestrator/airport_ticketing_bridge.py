@@ -211,6 +211,12 @@ class AirportTicket:
     # for any non-email constructor; NOT added to payload() so the AIRPORT_TICKET v1
     # bus contract stays byte-identical.
     thread_id: str = ""
+    # MOVIE_FLIGHT_GATE2_ACTIVATION_1: neutral-review-lane tag (lead #8160). Non-empty
+    # (identity_only|conflict|multi_match) ONLY when the two-factor resolver sent a
+    # participant-fetched arrival to the review desk (=lead) instead of a matter desk. Default ""
+    # keeps every other constructor unchanged; surfaced in why_ticketed (bus-visible) for one-glance
+    # reroute. NOT added to payload() so the AIRPORT_TICKET v1 bus contract stays byte-identical.
+    review_reason: str = ""
 
     def payload(self) -> dict[str, Any]:
         return {
@@ -801,6 +807,7 @@ def build_email_ticket(
     *,
     now: Optional[datetime] = None,
     keywords: tuple[str, ...] | None = None,
+    conn: Any = None,
 ) -> Optional[AirportTicket]:
     if _is_automated_email_arrival(arrival):
         return None
@@ -816,7 +823,36 @@ def build_email_ticket(
         # identity comes from the registry match at fetch, no classifier involved.
         return None
 
-    desk_slug = resolve_owner_slug(_desk_slug()) or _desk_slug()
+    # MOVIE_FLIGHT_GATE2_ACTIVATION_1 — two-factor per-matter routing (Director ruling #8154).
+    # Resolve the matter from identity (sender's registered matters, factor A) AND content
+    # (keyword->matter map, factor B) corroboration. conn=None (DB-free unit tests) -> factor A
+    # is empty -> the resolver returns (None, "") for keyword-lane arrivals -> the global desk
+    # path below runs EXACTLY as before (byte-identical). The (e.7)/(e.8) explicit-code + thread
+    # lanes downstream in run_tick still win over this at-mint routing (code is the strongest signal).
+    _matter, review_reason = _two_factor_matter(
+        _sender_matter_set(arrival.sender_email, conn, channel="email"),
+        _content_matter_set(arrival.subject, arrival.full_body),
+        arrival.participant_fetched,
+    )
+    if _matter:
+        # Corroborated on exactly one registered matter -> that matter's desk/flight at mint.
+        desk_slug = _desk_for_matter(_matter, conn)
+        suspected_matter = _matter
+        suspected_flight = _flight_for_matter(_matter, conn)
+    elif review_reason:
+        # Neutral review lane (lead #8160): a participant-fetched arrival that did NOT corroborate
+        # a single matter mints to desk=lead + review_reason (NOT the global BB desk) so lead
+        # reroutes one-glance and the BB cockpit stays clean. Global env stays fallback for
+        # non-participant traffic only (the else branch).
+        desk_slug = resolve_owner_slug(_REVIEW_DESK) or _REVIEW_DESK
+        suspected_matter = _matter_slug()
+        suspected_flight = _flight_name()
+    else:
+        # Keyword-lane / unregistered sender: today's global-desk behavior (lilienmatt regression).
+        desk_slug = resolve_owner_slug(_desk_slug()) or _desk_slug()
+        suspected_matter = _matter_slug()
+        suspected_flight = _flight_name()
+
     if not desk_slug or desk_slug in RESERVED_RECIPIENTS:
         logger.warning("airport ticketing invalid proposed desk: %s", desk_slug)
         return None
@@ -844,6 +880,15 @@ def build_email_ticket(
         # BOX5_GATE2_PARTICIPANT_FETCH_LANE_1: fetched on registered-participant identity
         # with no keyword match (arrival.participant_fetched is True to reach here).
         why = ["fetched by registered project-participant identity (no keyword match)"]
+    # MOVIE_FLIGHT_GATE2_ACTIVATION_1 — record the routing decision (bus-visible for reroute).
+    if _matter:
+        why.append(
+            f"two-factor routed: sender identity + content corroborate matter '{_matter}'"
+        )
+    elif review_reason:
+        why.append(
+            f"review lane ({review_reason}): sender identity did not corroborate content on a single matter"
+        )
     if arrival.received_date:
         why.append(f"received_at: {arrival.received_date.isoformat()}")
 
@@ -855,8 +900,8 @@ def build_email_ticket(
         source_id=arrival.message_id,
         source_received_at=arrival.received_date,
         originator=_originator(arrival),
-        suspected_matter_slug=_matter_slug(),
-        suspected_flight=_flight_name(),
+        suspected_matter_slug=suspected_matter,
+        suspected_flight=suspected_flight,
         proposed_desk_slug=desk_slug,
         urgency_hint=_urgency_for(arrival, matched),
         luggage=tuple(luggage),
@@ -869,6 +914,7 @@ def build_email_ticket(
         # Same thread identity the luggage line records, now also a queryable column
         # so a later code-less reply on this thread can inherit its routing.
         thread_id=arrival.thread_id or arrival.message_id,
+        review_reason=review_reason,
     )
 
 
@@ -2800,7 +2846,7 @@ def run_tick(*, now: Optional[datetime] = None) -> dict[str, Any]:
             #     an exception NEVER auto-clears (blocker D3): it routes to `failed`,
             #     never to a deterministic clear, and never advances the cursor.
             try:
-                ticket = build_email_ticket(arrival, now=current)
+                ticket = build_email_ticket(arrival, now=current, conn=conn)
 
                 if ticket is None:
                     # (d) DETERMINISTIC CLEAR — REJECT_NOISE = AUTOMATED SENDER ONLY.
