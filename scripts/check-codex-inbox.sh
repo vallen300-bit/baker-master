@@ -63,7 +63,12 @@ residue = [m for m in unacked if m.get("to_terminals") == ['*']]
 seat_unacked = [m for m in unacked if m.get("to_terminals") != ['*']]
 print("codex inbox:", len(msgs), "message(s),", len(seat_unacked),
       "unacked (seat),", len(residue), "broadcast residue.")
-for m in msgs:
+# codex G3: default render is seat-unacked ONLY + a compact residue id-list — a
+# 2000-row full scan must not flood session-start bus checks with ACKed/residue
+# rows. Full history (every row, ACK/UNACK/RESIDUE) behind BUS_INBOX_SHOW_ALL=1.
+import os as _os
+_show_all = _os.environ.get("BUS_INBOX_SHOW_ALL") == "1"
+for m in (msgs if _show_all else seat_unacked):
     if not m.get("acknowledged_at"):
         state = "RESIDUE" if m.get("to_terminals") == ['*'] else "UNACK"
     else:
@@ -73,4 +78,7 @@ for m in msgs:
           str(m.get("from_terminal","?")) + " -> " +
           str(m.get("topic","?")))
     print("      " + body)
+if residue and not _show_all:
+    print("  broadcast residue (wildcard, not seat-ackable): " +
+          ", ".join("#" + str(m["id"]) for m in residue))
 PYEOF
