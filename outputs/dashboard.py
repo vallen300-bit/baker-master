@@ -2196,15 +2196,29 @@ async def mcp_streamable_http(request: Request):
             status_code=400,
         )
 
-    # Batch request (array of messages)
+    # MCP_EVENTLOOP_OFFLOAD_502_FIX_1 (b1 #7644): _handle_mcp_message runs a fully
+    # synchronous, blocking dispatch (_dispatch -> _query, blocking psycopg2). Running
+    # it inline on this async endpoint froze the single uvicorn event loop for the whole
+    # query+serialize duration — a heavy `documents` query (full_text up to 8.4 MB/row,
+    # LIMIT 500 -> ~12 MB / 4.4 s) starved every concurrent request (the 4 CM seats +
+    # health) which then hit Render's edge timeout -> intermittent 502. Offload to a
+    # worker thread (asyncio.to_thread) so one slow tool never blocks the loop — the
+    # same pattern used throughout dashboard.py for blocking work.
+
+    # Batch request (array of messages) — offload each dispatch, sequentially, to
+    # preserve the prior one-at-a-time ordering/concurrency.
     if isinstance(body, list):
-        responses = [r for msg in body if (r := _handle_mcp_message(msg)) is not None]
+        responses = []
+        for msg in body:
+            r = await asyncio.to_thread(_handle_mcp_message, msg)
+            if r is not None:
+                responses.append(r)
         if not responses:
             return JSONResponse(content=None, status_code=202)
         return JSONResponse(responses)
 
     # Single request
-    resp = _handle_mcp_message(body)
+    resp = await asyncio.to_thread(_handle_mcp_message, body)
     if resp is None:
         return JSONResponse(content=None, status_code=202)
     return JSONResponse(resp)
