@@ -8,7 +8,7 @@
   "controller": "lead",
   "comms_contact": {
     "wa_chat_id": "491736903746@c.us",
-    "email_patterns": ["%oskolkov%", "%aelio%"],
+    "email_patterns": ["ao@aelioholding.com", "%oskolkov%"],
     "label": "AO"
   },
   "header": {
