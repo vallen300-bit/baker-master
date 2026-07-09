@@ -1,12 +1,12 @@
 ---
 brief_id: AGENT_WORK_QUEUE_V1
-attempt: 1
-status: DEPLOYED-FLAG-OFF-SOAKING (awaiting post-soak AC only)
+attempt: 2
+status: DRILL-IN-PROGRESS (attempt 2 — successor seat claimed per lead #8263/#8264, Director-accelerated drill)
 repo: brisen-lab (main @f9892dd — PR #109 MERGED)
 work_branch: b1/agent-work-queue-v1
 soak_start: 2026-07-09T21:49:47Z
 soak_end_est: 2026-07-10T21:49:47Z
-updated: 2026-07-09T21:50Z
+updated: 2026-07-09T22:41Z
 ---
 
 # AGENT_WORK_QUEUE_V1 — checkpoint
