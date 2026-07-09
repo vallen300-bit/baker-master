@@ -14,7 +14,8 @@ reason_for_checkpoint: context 45-50%; lead ordered checkpoint+respawn FIRST bef
       _two_factor_matter (intersection -> matter|review_reason) + REVIEW constants + _REVIEW_DESK='lead'.
       Added to airport_ticketing_bridge.py; tests/test_movie_flight_gate2.py (14 tests GREEN); existing
       bridge tests 31 passed / 9 skip (no regression). Commit: <this commit>.
-- [ ] SLICE 2 — factor A: _sender_matter_set(conn, email) (registry participants -> matter set), DB, tests.
+- [x] SLICE 2 — factor A: _sender_matter_set(sender, conn, channel) — registry participants -> matter set,
+      shared conn, case-insensitive, channel-scoped, fault-tolerant. 9 fake-conn tests GREEN (23 total).
 - [ ] SLICE 3 — wire into build_email_ticket: add conn param; resolve (A ∩ B); route per-matter via
       _desk_for_matter/_flight_for_matter when corroborated; desk=_REVIEW_DESK + review_reason when
       participant-fetched-uncorroborated; else global (today). Add matter_slug/review_reason to

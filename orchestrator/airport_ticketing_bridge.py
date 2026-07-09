@@ -549,6 +549,65 @@ def _two_factor_matter(
     return None, ""
 
 
+def _sender_matter_set(
+    sender_value: Optional[str], conn: Any = None, channel: str = "email"
+) -> set[str]:
+    """Factor A — the set of ACTIVE registered matters this sender is a participant in.
+
+    The project registry is the single source of truth (#6850). Shares the caller's tick conn
+    (no second pool connection), mirroring _desk_for_matter/_flight_for_matter. Value compare is
+    case-insensitive (registry values may be stored mixed-case, same robustness as
+    active_participant_values). ``channel`` is 'email' for the mail lane, 'whatsapp' for WA.
+
+    conn=None or empty sender -> empty set (pure fallback so DB-free unit tests stay byte-
+    identical). Fault-tolerant: any failure rolls the shared conn back and returns set() (never
+    raises) — identity resolution failing just falls the arrival through to the global/keyword
+    path, it never blocks a tick."""
+    if conn is None or not sender_value:
+        return set()
+    target = str(sender_value).strip().lower()
+    if not target:
+        return set()
+    try:
+        with conn.cursor() as cur:
+            cur.execute(
+                "SELECT matter_slug, participants FROM project_registry "
+                "WHERE status = 'active' AND matter_slug IS NOT NULL LIMIT 500"
+            )
+            rows = cur.fetchall()
+    except Exception as e:
+        try:
+            conn.rollback()
+        except Exception:
+            pass
+        logger.warning(
+            "airport ticketing sender-matter-set lookup failed (%s): %s", sender_value, e
+        )
+        return set()
+    out: set[str] = set()
+    for row in rows:
+        if not row or not row[0]:
+            continue
+        slug = str(row[0]).strip().lower()
+        raw = row[1]
+        if isinstance(raw, str):
+            try:
+                raw = json.loads(raw)
+            except Exception:
+                raw = []
+        if not isinstance(raw, list):
+            continue
+        for p in raw:
+            if (
+                isinstance(p, dict)
+                and p.get("channel") == channel
+                and str(p.get("value") or "").strip().lower() == target
+            ):
+                out.add(slug)
+                break
+    return out
+
+
 def _desk_slug() -> str:
     return os.environ.get(_DESK_ENV, _DEFAULT_DESK).strip() or _DEFAULT_DESK
 
