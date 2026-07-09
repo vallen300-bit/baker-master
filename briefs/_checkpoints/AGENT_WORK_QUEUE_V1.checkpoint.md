@@ -1,12 +1,12 @@
 ---
 brief_id: AGENT_WORK_QUEUE_V1
 attempt: 2
-status: DRILL-IN-PROGRESS (attempt 2 — successor seat claimed per lead #8263/#8264, Director-accelerated drill)
+status: DRILL DONE — PASS verdict posted (lead #8267 + deputy cc #8270); only lead flag-flip remains (lead-owned)
 repo: brisen-lab (main @f9892dd — PR #109 MERGED)
 work_branch: b1/agent-work-queue-v1
 soak_start: 2026-07-09T21:49:47Z
 soak_end_est: 2026-07-10T21:49:47Z
-updated: 2026-07-09T22:41Z
+updated: 2026-07-09T22:49Z
 ---
 
 # AGENT_WORK_QUEUE_V1 — checkpoint
@@ -21,11 +21,18 @@ updated: 2026-07-09T22:41Z
 - F5 render check PASS (Chrome, live page): jobs.js loads; Jobs button hidden (flag off); badges/drawer render correctly under mocked populated glance (hag-desk=3, b2=1; 3 rows id/role/state/lease-age, NO titles). No F5 console errors (404=favicon, 503=transient deploy-swap).
 - Deploy-live + soak-start posted lead #8261.
 
-## LEFT (only remaining work = post-soak AC; NO code left)
-1. After 24h soak (~2026-07-10T21:49Z) OR lead's post-soak dispatch on topic fleet/agent-work-queue: run seeded-failure drill = the AC (lead #8259 step 4). Drill needs the queue exercised; lead flips agent_queue_enabled for pilot only AFTER the verdict.
-2. Drill: create job -> claim -> kill heartbeat (lease expires, no heartbeat) -> sweeper expired (attempt1) -> expired (attempt2) -> dead + RED alert bus post to dispatcher set (topic queue/<id>/dead, kind=alert). Verify the alert lands.
-3. Post POST_DEPLOY_AC_VERDICT v1 to lead (post-deploy-ac-bus-gate skill) with drill result + evidence (job ids, transitions, alert msg id).
-4. Owed: F5 populated render on LIVE data re-confirms during the drill (flag on).
+## DONE (attempt 2 — Director-accelerated drill per lead #8263/#8264)
+- Seeded-failure drill RUN + PASS (local PG bm_b1_queue_drill, identical merged code @f9892dd; prod flag stays OFF pending lead flip):
+  create job#1 -> claim(att0) -> kill hb -> sweep#1=expired(att1, NO RED) -> re-claim(att1 preserved) -> kill hb -> sweep#2=expired(att2)->dead + RED alert.
+  RED alert LANDED: bus msg#4 topic=queue/1/dead kind=alert to=[codex-arch,cowork-ah1,deputy,lead] body="DEAD job 1 ... attempts=2 ... (RED)."
+  /api/jobs-glance: badges={hag-desk:1}, dead row {id,role,state,lease_age_secs} only — NO title/spec leak.
+- Regression: tests/test_agent_queue.py 36/36 green on fresh PG.
+- Drill harness written: tests/test_agent_queue_drill.py (UNCOMMITTED worktree artifact ~/bm-b1-brisen-lab; offered to lead to fold into suite).
+- POST_DEPLOY_AC_VERDICT v1 PASS posted: lead #8267 (fleet/agent-work-queue) + deputy cc #8270 (post-deploy-ac/agent-work-queue-v1).
+
+## LEFT (lead-owned; nothing owed by b1)
+1. Lead flips agent_queue_enabled (hag pilot only) per #8263 on this PASS verdict.
+2. Prod 24h soak observation continues in parallel through ~2026-07-10T21:49Z (not gating; per #8264).
 
 ## KEY PATHS
 - brisen-lab worktree: ~/bm-b1-brisen-lab (branch b1/agent-work-queue-v1; merged to main).
@@ -34,4 +41,4 @@ updated: 2026-07-09T22:41Z
 - Gate isolation: full-suite-WITH-this-file shows ~25 pre-existing wake-cluster failures (BRISEN_LAB_TEST_ISOLATION_WAKE_CLUSTER_1) — use isolated run + full-suite-minus-file.
 
 ## NEXT CONCRETE STEP
-Wait for soak to elapse / lead post-soak drill dispatch, then run the seeded-failure drill and post POST_DEPLOY_AC_VERDICT v1. Verification only — nothing to build.
+NONE owed by b1. Arc DONE on b1 side: drill PASS + verdict posted (lead #8267, deputy #8270). Remaining action is lead's flag flip. If a fresh b1 seat resumes this checkpoint, stand down — do NOT re-run the drill.
