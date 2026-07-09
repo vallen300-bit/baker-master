@@ -48,10 +48,23 @@ def test_statement_and_connect_timeout_constants_pinned_in_source():
 
 def test_conn_params_apply_timeouts_via_options_in_source():
     src = _SRC.read_text()
-    # connect_timeout rides as a top-level libpq param.
+    # connect_timeout rides as a top-level libpq param (always applied).
     assert 'params["connect_timeout"] = _CONNECT_TIMEOUT_S' in src
     # statement_timeout rides the startup packet via options=-c ... (NOT a SET).
     assert 'params["options"] = f"-c statement_timeout={_STATEMENT_TIMEOUT_MS}"' in src
+
+
+def test_statement_timeout_gated_behind_pooler_check_in_source():
+    """The statement_timeout options= form must be guarded by a pooler check.
+
+    Neon's pgbouncer pooler rejects `options=-c statement_timeout` at startup
+    (incident #7741) — attaching it unconditionally hard-broke every pooled
+    `/mcp` query. Pin that the assignment sits behind `if not _is_pooler_host`.
+    """
+    src = _SRC.read_text()
+    assert "def _is_pooler_host(" in src
+    assert '"-pooler"' in src
+    assert "if not _is_pooler_host(" in src
 
 
 def test_statement_timeout_never_applied_as_runtime_set():
@@ -107,3 +120,50 @@ def test_get_conn_params_split_env_path_carries_timeouts(monkeypatch):
     assert params["connect_timeout"] == 5
     assert "statement_timeout=15000" in params["options"]
     assert params["host"] == "split.test"
+
+
+# ─── Pooler hotfix (#7741): statement_timeout is DIRECT-only, never on pooler ──
+
+@pytest.mark.skipif(not _server_importable(), reason="mcp SDK not installed")
+def test_get_conn_params_pooler_host_omits_statement_timeout(monkeypatch):
+    """Neon's pgbouncer pooler rejects `options=-c statement_timeout` at startup
+    ("unsupported startup parameter" — #7741). On a `-pooler` host it MUST be
+    absent; connect_timeout (client-side, pgbouncer-safe) still applies."""
+    from baker_mcp.baker_mcp_server import _get_conn_params
+
+    monkeypatch.setenv(
+        "DATABASE_URL",
+        "postgresql://u:p@ep-cool-name-123-pooler.eu-central-1.aws.neon.tech"
+        ":5432/sentinel?sslmode=require",
+    )
+    params = _get_conn_params()
+
+    assert params["connect_timeout"] == 5
+    assert "options" not in params  # the regression guard: NO statement_timeout on the pooler
+
+
+@pytest.mark.skipif(not _server_importable(), reason="mcp SDK not installed")
+def test_get_conn_params_direct_neon_host_keeps_statement_timeout(monkeypatch):
+    """On a DIRECT (non-pooler) Neon host the cap is safe and IS applied."""
+    from baker_mcp.baker_mcp_server import _get_conn_params
+
+    monkeypatch.setenv(
+        "DATABASE_URL",
+        "postgresql://u:p@ep-cool-name-123.eu-central-1.aws.neon.tech"
+        ":5432/sentinel?sslmode=require",
+    )
+    params = _get_conn_params()
+
+    assert params["connect_timeout"] == 5
+    assert params.get("options") == "-c statement_timeout=15000"
+
+
+def test_is_pooler_host_detection(monkeypatch):
+    if not _server_importable():
+        pytest.skip("mcp SDK not installed")
+    from baker_mcp.baker_mcp_server import _is_pooler_host
+
+    assert _is_pooler_host("ep-x-123-pooler.eu-central-1.aws.neon.tech") is True
+    assert _is_pooler_host("ep-x-123.eu-central-1.aws.neon.tech") is False
+    assert _is_pooler_host("") is False
+    assert _is_pooler_host(None) is False  # defensive: None host must not crash

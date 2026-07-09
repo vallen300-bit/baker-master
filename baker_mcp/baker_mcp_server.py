@@ -72,27 +72,44 @@ def _parse_database_url(url: str) -> dict:
     return params
 
 
-# --- Connection hardening (CM_SQL_SURFACE_502 2b, lead ruling #7646) -----------
-# Applied through libpq connect params, deliberately NOT a post-connect `SET`:
-# a session GUC issued after connect leaks through Neon's pgbouncer
-# transaction-mode pool to unrelated callers (the same 2026-04-29 RCA cited in
-# `_query` below — that is why we never `set_session`/`SET` for read-only
-# either). `options=-c statement_timeout=...` rides the startup packet, so it is
-# scoped to this connection's server session and cannot poison the pool.
-#   - statement_timeout (15s): caps the heavy documents.full_text scans that hung
-#     the /mcp SQL surface into intermittent 502s (blocked rung-1 hunts H2/H5).
-#     Over-length queries now fail fast + loud instead of wedging the backend.
-#   - connect_timeout (5s): fail fast on a cold/unreachable backend rather than
-#     blocking the worker thread on a stalled TCP/TLS handshake.
+# --- Connection hardening (CM_SQL_SURFACE_502 2b + pooler hotfix #7741) --------
+# connect_timeout is a CLIENT-side libpq param (bounds the TCP/TLS handshake) —
+# pgbouncer passes it through, so it is safe on both the pooled and direct
+# endpoints and is applied unconditionally.
+#
+# statement_timeout passed via `options=-c` is a SERVER STARTUP parameter, and
+# Neon's pgbouncer pooler REJECTS unknown startup parameters at connect time
+# ("unsupported startup parameter: statement_timeout" — incident lead #7741 /
+# b2 #7740). The 2b form therefore hard-broke every pooled `/mcp` query before
+# any SQL ran. It is DIRECT-ONLY: precedent triggers/scheduler_lease.py opens a
+# dedicated *direct* (non-pooled) connection precisely so it can use this form.
+# We attach it only when the host is NOT the Neon pooler. In prod this path uses
+# the pooled DATABASE_URL, so the cap does not apply there until the durable,
+# pooler-safe `SET LOCAL statement_timeout` follow-up lands (must run inside an
+# explicit txn — `_query` is autocommit today; precedent job_heartbeat.py).
+#
+# We still never issue a bare post-connect `SET` for read-only: that GUC leaks
+# through the transaction-mode pool to unrelated callers (2026-04-29 RCA, cited
+# in `_query` below).
 _STATEMENT_TIMEOUT_MS = 15_000
 _CONNECT_TIMEOUT_S = 5
+
+
+def _is_pooler_host(host: str) -> bool:
+    """True for a Neon pgbouncer pooler endpoint (host contains '-pooler').
+
+    The pooler rejects `options=-c statement_timeout` at startup (#7741); only
+    the direct endpoint accepts it. See the connection-hardening note above.
+    """
+    return "-pooler" in (host or "").lower()
 
 
 def _get_conn_params() -> dict:
     """Build connection params from env vars.
 
-    Both the DATABASE_URL and split-POSTGRES_* paths get the statement_timeout
-    + connect_timeout hardening above so `_query` and `_write` inherit it.
+    Both the DATABASE_URL and split-POSTGRES_* paths get `connect_timeout`.
+    `statement_timeout` (via `options=-c`) is attached only on a DIRECT
+    (non-pooler) host — Neon's pooler rejects it at startup (#7741).
     """
     database_url = os.getenv("DATABASE_URL", "")
     if database_url:
@@ -106,8 +123,11 @@ def _get_conn_params() -> dict:
             "password": os.getenv("POSTGRES_PASSWORD", ""),
             "sslmode": os.getenv("POSTGRES_SSLMODE", "require"),
         }
+    # Client-side, pgbouncer-safe — always applied.
     params["connect_timeout"] = _CONNECT_TIMEOUT_S
-    params["options"] = f"-c statement_timeout={_STATEMENT_TIMEOUT_MS}"
+    # Server startup param — pooler-incompatible, so direct endpoints only (#7741).
+    if not _is_pooler_host(params.get("host", "")):
+        params["options"] = f"-c statement_timeout={_STATEMENT_TIMEOUT_MS}"
     return params
 
 
