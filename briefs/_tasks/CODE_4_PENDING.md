@@ -1,17 +1,33 @@
 # CODE_4_PENDING — active dispatch mailbox for b4
 
-**ACTIVE: BB_AUK_001_AUDIT_ROUND2_DASHBOARD_UPDATE_1 — STAGE 2** (dispatched bus #5586, stage-2 GO #5635, re-pin #5637, 2026-07-05)
+---
+status: PENDING
+brief_id: MOVIE_FLIGHT_GATE2_ACTIVATION_1
+to: b4
+from: lead
+dispatched_by: lead
+dispatched_at: 2026-07-09
+reply_target: lead (bus topic baker-os-v2/movie-flight-gate2)
+task_class: feature-gap activation (config/registry expected; code only if justified)
+gate_plan: diagnose findings -> lead scope-confirm -> build -> PR -> codex G3 (medium) -> lead merge -> live probes -> POST_DEPLOY_AC_VERDICT
+arc: MO-VIE-001 launch (Director GO 2026-07-09 ~16:55Z) — Gate-2 keyword + routing activation
+harness_v2: applies (see brief)
+recommended_effort: medium (mirror of shipped AO precedent, ~3h)
+---
 
-Task: fold b3's Aukera sweep results (bus #5630/#5632, report `briefs/_reports/B3_AUKERA_FLIGHT_MANUAL_SWEEP_1_2026-07-05.md`) into the CEO dashboard
-`~/baker-vault/_ops/build/baker-os-v2/05_outputs/flight-dashboards/BB-AUK-001/dashboard-v1-pattern-d.html`.
+# ACTIVE: MOVIE_FLIGHT_GATE2_ACTIVATION_1 — dispatch to B4
 
-- Pull vault main first — file took a Director-ordered Page-v2 UI revision (@d658b7b). CONTENT nodes only; keep layout.
-- Loan-cost tile: ~EUR 1.66M PROVISIONAL (1,479,416 reserve + 184,650 structuring; v26 coupon BLANK — render "rate pending", never a fixed rate).
-- Blockers from D2: signing (~10 Jul) 9 items, RETT ~EUR 2M lead ("zwingend vor Unterschrift", 14-day criminal-report trap); drawdown (~20 Jul) 5 items, Skliar 457.8K + Grundbuch 3-5mo lead.
-- Contract v2.1/2.2 rules: verbatim anchor per claim, direction check, as-of doc version+date per tile.
-- Stamp "desk validation pending" — desk (baden-baden-desk) validates after; NOT final-final.
-- Vault commits are lead's — hand diffs to lead (bus topic `baker-os-v2/audit-round-2`).
+Full brief (main): `briefs/_tasks/MOVIE_FLIGHT_GATE2_ACTIVATION_1.md` — READ IT, source of truth.
 
-**SUPERSEDED / DO NOT REDO:** BOX5_OUTBOUND_CORRELATION_FIX_1 — SHIPPED, PR #448 MERGED 2026-07-01 (verified in main per bus #5548).
+Two hard sequence points, do not skip:
+1. Diagnose findings post FIRST (registry rows, live keyword env, KNOWN-sender widening) —
+   wait for lead scope-confirm.
+2. Keyword list = lead sign-off on bus BEFORE any env flip. NEVER bare `movie`; `rg7`
+   collides with hagenauer-rg7.
 
-Harness-V2: N/A — content-update task fully specified above + in bus thread; no production code.
+Context hygiene: state your context % in first status post; >=50% = checkpoint + respawn first.
+
+**SUPERSEDED / DO NOT REDO:**
+- BB_AUK_001_AUDIT_ROUND2_DASHBOARD_UPDATE_1 stage 2 — folded into BB-AUK dashboard arc,
+  closed (dashboard v24 live per baden-baden-desk pin 2026-07-09).
+- BOX5_OUTBOUND_CORRELATION_FIX_1 — SHIPPED, PR #448 MERGED 2026-07-01 (bus #5548).
