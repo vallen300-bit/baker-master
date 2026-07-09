@@ -9,6 +9,15 @@ reply_target: lead
 scope_confirmed: bus #8143 — option (a) CODE change (feature-build, ~6h, PR + codex G3 medium)
 reason_for_checkpoint: context 45-50%; lead ordered checkpoint+respawn FIRST before build (#8143 step 1)
 
+## POST-MERGE SEQUENCE (lead #8184 — CONFIRMED, env flip AUTHORIZED to b4)
+Hold for codex G3 (dispatched, medium, gate/movie-flight-gate2). On PASS: lead merges -> Render deploys
+-> VERIFY merged commit live on Render (health/deploy) FIRST -> THEN b4 env flip via safe_env_put:
+  BOX5_PARTICIPANT_FETCH_LANE_ENABLED=true + append 'mandarin oriental,mohg,mo-vie,mo vienna' to
+  AIRPORT_TICKETING_KEYWORDS (merge-mode single-key PUT; NEVER raw PUT) -> verify ALL env keys via
+  Render API GET -> live probes (MOVIE participant+content mint -> movie-desk/MO-VIE-001; lilienmatt
+  regression -> baden-baden) -> POST_DEPLOY_AC_VERDICT to lead (topic baker-os-v2/movie-flight-gate2).
+On G3 REQUEST_CHANGES: fix -> new commit (never amend) -> push -> re-request codex on same topic.
+
 ## BUILD SLICES (lead #8169 = build this session; commit+push+checkpoint per slice)
 - [x] SLICE 1 — pure resolver core: KEYWORD_MATTER_MAP + _content_matter_set (factor B) +
       _two_factor_matter (intersection -> matter|review_reason) + REVIEW constants + _REVIEW_DESK='lead'.
