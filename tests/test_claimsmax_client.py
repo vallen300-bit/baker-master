@@ -4,6 +4,7 @@ All HTTP is mocked via ``httpx.Client.request``. No live API contact in CI.
 """
 from __future__ import annotations
 
+import json
 from typing import Any
 from unittest.mock import MagicMock
 
@@ -354,3 +355,116 @@ def test_mcp_baker_claimsmax_ask_registered() -> None:
     assert "claim_id" in props
     assert "language" in props
     assert tool.inputSchema["required"] == ["question"]
+
+
+# ─── worker_<pid>_<sha256> recovery mapping (B2_CLAIMSMAX_NULL_DOCID_DIAGNOSIS_20260709) ───
+# ClaimsMax search rows for some batch-ingested docs are stale: doc_id=None +
+# filename "worker_<pid>_<sha256>.<ext>" + snippet=None, even though the document
+# is finalized and fetchable by the sha256 embedded in the filename. The slim
+# projection recovers that sha256 as a sibling handle so consumers can
+# get_document() it, without overwriting the honest doc_id=None search semantics.
+
+
+def _worker_row(filename: str, doc_id=None, **extra):
+    row = {
+        "doc_id": doc_id,
+        "filename": filename,
+        "doc_date": "2017-02-20",
+        "l1": "financial",
+        "l2": "finanzbericht",
+        "l3": None,
+        "snippet": None,
+        "score": 1.0,
+    }
+    row.update(extra)
+    return row
+
+
+def test_format_search_recovers_sha256_from_worker_filename() -> None:
+    """Null doc_id + worker_ filename → sha256 handle + recovered_from flag; doc_id stays None."""
+    from tools.claimsmax import _format_search_result
+
+    sha = "49d2e99f8084b276c0901fdceaf1767834b5c62302cda688233d57f9541b9ede"
+    payload = {
+        "total": 232,
+        "page": 1,
+        "per_page": 25,
+        "query_ms": 5663,
+        "results": [_worker_row(f"worker_9391_{sha}.pdf")],
+    }
+    out = json.loads(_format_search_result(payload))
+    assert out["total"] == 232  # passthrough preserved
+    r = out["results"][0]
+    assert r["doc_id"] is None  # honest: search row has no canonical id
+    assert r["sha256"] == sha  # fetchable handle recovered
+    assert r["recovered_from"] == "worker_filename"
+
+
+def test_format_search_recovers_docx_worker_filename() -> None:
+    """Recovery works regardless of extension (.docx as well as .pdf)."""
+    from tools.claimsmax import _format_search_result
+
+    sha = "6ae8e686b1a9abb7024d6d2645b4a34ba2490a7d4bc98f0a7e77a698fee60698"
+    payload = {"results": [_worker_row(f"worker_10286_{sha}.docx")]}
+    r = json.loads(_format_search_result(payload))["results"][0]
+    assert r["sha256"] == sha
+    assert r["recovered_from"] == "worker_filename"
+
+
+def test_format_search_uppercase_hash_recovered_lowercased() -> None:
+    """Hex hash is matched case-insensitively and normalized to lowercase."""
+    from tools.claimsmax import _format_search_result
+
+    sha_lower = "d27674598b5fc969f8ca6c44a52d74c9ac7d2bbaa96ca0509a9b38df23299df0"
+    payload = {"results": [_worker_row(f"worker_17427_{sha_lower.upper()}.pdf")]}
+    r = json.loads(_format_search_result(payload))["results"][0]
+    assert r["sha256"] == sha_lower
+
+
+def test_format_search_real_doc_id_untouched() -> None:
+    """A row with a real doc_id is passed through unchanged — no recovery keys."""
+    from tools.claimsmax import _format_search_result
+
+    payload = {
+        "results": [
+            _worker_row(
+                "Estates S.A. 2017 01 1 - Serie A nominative notes_2.pdf",
+                doc_id="ac5d9768-67aa-4775-b7da-922331b32bb6",
+            )
+        ]
+    }
+    r = json.loads(_format_search_result(payload))["results"][0]
+    assert r["doc_id"] == "ac5d9768-67aa-4775-b7da-922331b32bb6"
+    assert "sha256" not in r
+    assert "recovered_from" not in r
+
+
+def test_format_search_null_docid_nonworker_filename_no_recovery() -> None:
+    """Null doc_id but a non-worker filename → no recovery, doc_id stays None."""
+    from tools.claimsmax import _format_search_result
+
+    payload = {"results": [_worker_row("some_ordinary_report.pdf")]}
+    r = json.loads(_format_search_result(payload))["results"][0]
+    assert r["doc_id"] is None
+    assert "sha256" not in r
+    assert "recovered_from" not in r
+
+
+def test_format_search_worker_prefix_wrong_hash_length_no_recovery() -> None:
+    """worker_ prefix but the token is not a 64-hex sha256 → no false recovery."""
+    from tools.claimsmax import _format_search_result
+
+    payload = {"results": [_worker_row("worker_9391_deadbeef.pdf")]}
+    r = json.loads(_format_search_result(payload))["results"][0]
+    assert "sha256" not in r
+    assert "recovered_from" not in r
+
+
+def test_format_search_null_filename_does_not_crash() -> None:
+    """A result with filename=None must not raise during recovery."""
+    from tools.claimsmax import _format_search_result
+
+    payload = {"results": [_worker_row(None)]}
+    r = json.loads(_format_search_result(payload))["results"][0]
+    assert r["filename"] is None
+    assert "sha256" not in r
