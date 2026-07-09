@@ -42,9 +42,20 @@ BLOCKED (failed loud per #8272 "do NOT improvise creds"):
 Escalated to lead #8275 with 2 paths (A: lead provides prod conn + dispatcher seed path, b1 does all;
 B: lead does flip+seed, b1 does read-only live verify + render confirm). b1 leans B. AWAITING lead.
 
-## LEFT (blocked on lead #8275)
-1. Pilot flip + steps 2-4 — resume once lead answers #8275 (provides creds/authority or takes flip+seed).
-2. Prod 24h soak observation continues in parallel through ~2026-07-10T21:49Z (not gating; per #8264).
+## UPDATE: lead flipped centrally (#8284) + handed b1 a live incident lane
+- Lead executed step 1+2 (flip agent_queue_enabled=on + pilot=hag-desk, SELECT-verified 22:55:51Z, glance enabled:true). My #8275 fail-loud was confirmed correct; creds resolved lead-side via Render API.
+- NEW b1 lane (#8284): diagnose live latency/pool incident (DB endpoints 10-26s, intermittent bus_busy_retry since ~22:50Z, predates flip). Report root cause + fix BEFORE code change.
+- DELIVERED diagnosis -> lead #8296 (fleet/agent-work-queue). Two problems:
+  A. latency/bus_busy_retry = Neon autosuspend + direct-conn stale-recycle loop (get_conn db.py:157-212, 15s tcp_user_timeout per stale probe) under wake surge of 8 shared-pool startup loops (maxconn=10, no warmer).
+  B. DEFINITE bug: app.py:1754 /api/jobs-glance bare `except Exception` returns enabled:false on BusPoolExhausted -> falsely shows pilot DISABLED under load (the 0.12s enabled:false).
+  Fix proposal (no code yet): 1) glance swallow fix; 2a) keep Neon warm / warmer loop; 2b) short per-probe statement_timeout (~2s); 2c) Neon max_conn vs fleet pools. Sequence 1+2b first.
+- LIVE incident confirmed first-hand: my report post 503'd/timed out attempts 1-2, landed attempt 3 (#8296).
+
+## LEFT (awaiting lead #8296 green-light)
+1. On lead pick: write failing pytest for glance swallow + draft brisen-lab PR for chosen fixes.
+2. Step-3 live hag-desk render check — still BLOCKED on instability; lead seeds row (b1 403 cross-assign), b1 verifies render, lead cleans. Ping lead when surfaces stable.
+3. Regression sweep (as #8261) after stability. Pilot NOT declared live to Director until A+B close.
+4. Prod 24h soak observation continues in parallel through ~2026-07-10T21:49Z (not gating; per #8264).
 
 ## KEY PATHS
 - brisen-lab worktree: ~/bm-b1-brisen-lab (branch b1/agent-work-queue-v1; merged to main).
@@ -53,7 +64,7 @@ B: lead does flip+seed, b1 does read-only live verify + render confirm). b1 lean
 - Gate isolation: full-suite-WITH-this-file shows ~25 pre-existing wake-cluster failures (BRISEN_LAB_TEST_ISOLATION_WAKE_CLUSTER_1) — use isolated run + full-suite-minus-file.
 
 ## NEXT CONCRETE STEP
-AWAIT lead answer to blocker #8275 (pilot-flip creds/authority). Do NOT re-run the drill (already PASS,
-verdict #8267/#8270). Do NOT improvise prod DB creds. On lead reply: if path B, run read-only live verify
-(glance enabled:true, /jobs pilot-live, non-pilot guarded, existing surfaces 200) + confirm render evidence;
-if path A, execute flip with the exact conn/authority lead provides.
+AWAIT lead green-light on incident diagnosis #8296 (which fix set + whether to write the failing pytest +
+brisen-lab PR). Do NOT re-run the drill (PASS, #8267/#8270). Do NOT improvise prod DB or Render creds.
+Do NOT change code until lead picks the fix set. Flip is already done (lead-side). Step-3 render check waits
+on surface stability — lead seeds, b1 verifies. Pilot not live to Director until latency + glance-swallow close.
