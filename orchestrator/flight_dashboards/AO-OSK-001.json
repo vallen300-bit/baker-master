@@ -78,6 +78,94 @@
       {"date": "5–6 Jul", "event": "Istanbul: AO yes-in-principle — Aelio ~10% → 51% via new-share issue", "receipt": "Istanbul meeting"}
     ]
   },
+  "relationship": {
+    "updated_at": "2026-07-09T05:49:34+00:00",
+    "read": [
+      {
+        "point": "The Hunter — most alive during the chase, bored by maintenance. Frame every ask as a hunt, never housekeeping.",
+        "receipt": "psychology.md · Core Archetype · 22 Apr 2026"
+      },
+      {
+        "point": "Rule Zero — never let silence precede an ask. His line: “you only call me when you need money.” Max 14-day quiet gap.",
+        "receipt": "communication-rules.md · Rule Zero · 22 Apr 2026"
+      },
+      {
+        "point": "Ownership recognition is a live nerve — always “we / our project”; he publicly corrected DV in Monaco (“half of Udmurtia”).",
+        "receipt": "psychology.md · Ownership Recognition · Monaco 2–3 Apr 2026"
+      },
+      {
+        "point": "Investment filter — credible luxury brand as equity co-investor; “less money in = more interesting”; no brand = no deal.",
+        "receipt": "psychology.md · Investment Filter · 22 Apr 2026"
+      },
+      {
+        "point": "Loyalty is earned by access, gestures and selfless service (the Ettore model) — social capital beats spreadsheets.",
+        "receipt": "psychology.md · Loyalty Algorithm · 22 Apr 2026"
+      },
+      {
+        "point": "Reaches you on WhatsApp, effectively never email; decides fast once convinced. Last direct contact 6 Jul.",
+        "receipt": "vip_contacts id 1893 · last_contact 6 Jul 2026"
+      }
+    ],
+    "red_flags": [
+      {
+        "flag": "Villa Gabbiano reignition — purchase cancelled-for-now; family on site 2–16 Aug. Any re-mention re-surfaces the dissuasion memo.",
+        "receipt": "RF-VILLA · red-flags.md · 7 Jul 2026"
+      },
+      {
+        "flag": "Cadence risk — the 10 Jul written-intent ask must not land after a quiet spell (Rule Zero).",
+        "receipt": "communication-rules.md · working brief · 7 Jul 2026"
+      },
+      {
+        "flag": "Ownership over-claim — never claim sole ownership in AO’s presence (tested and failed in Monaco).",
+        "receipt": "psychology.md · Monaco 2–3 Apr 2026"
+      },
+      {
+        "flag": "Joseph hotel target — family-sourced, adviser-opposed (Constantinos: “too dangerous”). No acceleration before desk read + your gate.",
+        "receipt": "decision U-1 / D-017 · 7 Jul 2026"
+      },
+      {
+        "flag": "The 48/45 economic gap — 3% unresolved; raise only if AO does. Term-sheet math will put it on the table.",
+        "receipt": "room of 24 Jun 2026"
+      }
+    ],
+    "orbit": [
+      {
+        "name": "Constantinos Pohanis",
+        "role": "Gatekeeper · AO advisor + our Cyprus finance director (dual role)",
+        "note": "Channel for the written intent and the capital call; holds the €7.0M payment record. Last contact 8 Jul."
+      },
+      {
+        "name": "Ettore",
+        "role": "AO inner circle · relationship broker / connector",
+        "note": "Loyalty lever — access + gestures; Tuscany property source. No formal business, high personal value."
+      },
+      {
+        "name": "Joseph",
+        "role": "AO’s son-in-law",
+        "note": "Sourced the ~€1.9M/room hotel target; 22 Jul visit. Coverage key, not a standalone trigger."
+      },
+      {
+        "name": "Christophe Buchwalder",
+        "role": "External attorney",
+        "note": "Counterparty on the €1.5M vs €12M land-charge release."
+      },
+      {
+        "name": "Balazs Csepregi",
+        "role": "Brisen internal · legal / structuring",
+        "note": "Term-sheet and structuring support for the majority."
+      },
+      {
+        "name": "Siegfried Brandner",
+        "role": "Brisen internal · financing",
+        "note": "Aukera / Annaberg financing adjacency (own flight BB-AUK-001)."
+      },
+      {
+        "name": "Anna Egger",
+        "role": "MOHG Vienna ops",
+        "note": "Hotel operational contact (MO Vienna)."
+      }
+    ]
+  },
   "communications": {
     "updated_at": "2026-07-07T21:00:00+00:00",
     "counts_basis": "desk-provided gists (7 Jul) · §4 strip counts are machine-queried from the per-flight ticket ledger",
