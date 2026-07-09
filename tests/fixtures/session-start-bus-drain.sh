@@ -50,7 +50,7 @@ print(json.dumps({"hookSpecificOutput": {"hookEventName": "SessionStart", "addit
 # --- resolve sender slug from BAKER_ROLE ---
 
 # BEGIN GENERATED AGENT IDENTITY ROLE MAP
-# Generated from /private/tmp/claude-501/-Users-dimitry-bm-aihead1-cowork--claude-worktrees-ao-desk-terminal-setup-675778/fc5936ff-d5d3-4c4f-b594-9eafc63d8106/scratchpad/vault-land/_ops/registries/agent_registry.yml
+# Generated from /Users/dimitry/baker-vault/_ops/registries/agent_registry.yml
 # SHA256: 8124126d13d43e57c935b0b97824a93cfc1292c93a37ce8900fa3db61e6e379c
 case "${BAKER_ROLE:-}" in
     AG-001|ag-001|lead|LEAD|AH1|aihead1|AIHEAD1) SLUG=lead ;;
