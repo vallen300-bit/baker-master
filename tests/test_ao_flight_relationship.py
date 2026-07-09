@@ -99,7 +99,15 @@ def test_ao_snapshot_has_comms_contact_config():
     assert snap is not None
     cc = snap.get("comms_contact")
     assert cc and cc.get("wa_chat_id") == "491736903746@c.us"
-    assert "%oskolkov%" in cc.get("email_patterns", [])
+    pats = cc.get("email_patterns", [])
+    assert "%oskolkov%" in pats
+    # AO_COMMS_CONTACT_PATTERN_FIX (lead #7671, source ao-desk #7576): match the
+    # exact AO address only — the broad %aelio% domain pattern also matched the
+    # Aelio-entity gatekeeper's (Constantinos) mail, counting it as direct-AO
+    # contact and recreating the very blind spot the comms-gap signal exists to
+    # catch. Drop %aelio%; add the exact ao@aelioholding.com.
+    assert "ao@aelioholding.com" in pats
+    assert "%aelio%" not in pats
 
 
 # ───────────────────────── Fix 2: relationship card ─────────────────────────
