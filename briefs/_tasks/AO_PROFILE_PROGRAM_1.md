@@ -6,7 +6,7 @@
 - Option 5 ratified: AO desk reads profile before every counterparty-facing advice, updates after every material contact.
 - "any material advice he can not produce advice unless he reads the profile" — hard gate, materiality defined below.
 - Profile must include "all the things that for the last 20 years I owe to A.O. morally or commercially, and he owes to us morally or commercially."
-- Pipeline: Researcher methodology → cheap models dig ("Sonnet and Haiku, Librarian and CM1") → "somebody clever like Opus 4.8" synthesizes.
+- Pipeline: Researcher methodology → cheap models dig ("Sonnet and Haiku, Librarian and CM1"; NB CM seats all Sonnet 1M as of 2026-07-09, no Haiku) → "somebody clever like Opus 4.8" synthesizes.
 - Orchestrator NOT lead ("He is too busy"); deputy suggested, temporary Fable flip accepted per cowork-ah1 recommendation (Opus waves 0–3, Fable waves 4–5).
 - First live application: upcoming negotiation to increase AO's shadow-equity participation in the MOVIE project.
 
@@ -35,7 +35,7 @@ Orchestration program (multi-agent loop) + one small build item (materiality hoo
 | deputy | Orchestrator + wave-4 synthesizer | Opus 4.8 waves 0–3; **Fable flip waves 4–5** (Director executes/authorizes seat model change; revert at close) |
 | researcher | Wave-0 methodology (research-fan-out + verify-citations) | per seat |
 | librarian (AG-209) | Registry-driven corpus hunts (operational today) | Sonnet 1M |
-| CM-1 / CM-2 / CM-3 | Hunt diggers (Haiku / Sonnet) — **precondition: wake outage cleared (Director laptop reboot)** | Haiku/Sonnet |
+| CM-1 / CM-2 / CM-3 | Hunt diggers | Sonnet 1M (all CM seats now Sonnet 1M — no Haiku, Director 2026-07-09) |
 | ao-desk, movie-desk, baden-baden-desk, brisen-desk | Consultants: touchpoint census, finding annotation, gap flags | per seat |
 | codex | Cross-vendor gate on methodology (G0) + final profile (G3) | codex CLI |
 | cowork-ah1 | Program author; escalation point if deputy blocked >24h | — |
