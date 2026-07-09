@@ -14,7 +14,7 @@ Decision trail (all on bus): sacca proposal codex-arch #7987 → cowork-ah1 verd
 
 ## Estimated time: ~9h
 ## Complexity: Medium-High
-## G0 history: codex #8079 FAIL folded @rev2 — F1 row-verified dispatch guard (blocker), F2 session-heartbeat producer (new Feature 6), F3 xact-scoped advisory lock. Re-review requested.
+## G0 history: codex #8079 FAIL folded @rev2 (F1 row-verified dispatch guard, F2 session-heartbeat producer = Feature 6, F3 xact-scoped advisory lock) → codex #8099 **PASS-WITH-NITS** → 3 nits folded @rev3 (test isolation in conftest, per-recipient guard evaluation, fail-closed settings reader). **Dispatch-ready pending lead's b1/b4 wave gate.**
 ## Prerequisites
 - Current b1/b4 wave closed (lead confirms on bus before dispatch).
 - brisen-lab checkout current with origin/main at build time — **re-verify every signature referenced below; this draft was written against origin/main @15fb160-era (2026-07-09) and the repo moves fast.**
@@ -164,6 +164,11 @@ Every state change: (a) UPDATE agent_jobs + INSERT agent_job_events in one trans
 
 Lease default: `lease_h = 24` (wall-clock ceiling generous vs wake cadence — session-based agents, decision #4). Configurable via `brisen_lab_settings` key `agent_queue_lease_hours`, missing-row default 24.
 
+**Settings reader (G0 nit 3):** ONE helper `_queue_settings()` in `queue.py` is the sole reader for all three keys — every call site (endpoints, sweeper, dispatch guard, Feature 6 hook) goes through it. Contract, unit-tested incl. malformed values (fail CLOSED — never fail into enforcement-on or lease-forever):
+- `agent_queue_enabled`: truthy = exactly `'on'` (case-insensitive, stripped); missing row / any other value → **off**.
+- `agent_queue_pilot_roles`: comma-separated slugs, stripped, unknown-slug entries dropped with a log line; missing/empty/malformed → **empty set** (guard inert).
+- `agent_queue_lease_hours`: positive int, accepted range 1-168; missing/non-int/out-of-range → **24**.
+
 ### Key Constraints
 - Single-writer rule: ONLY `queue.py` endpoints write `agent_jobs`/`agent_job_events`. No other module, no direct SQL from baker-master.
 - No new auth scheme — existing X-Terminal-Key / session-key stack as-is.
@@ -171,10 +176,12 @@ Lease default: `lease_h = 24` (wall-clock ceiling generous vs wake cadence — s
 
 ### Verification
 pytest (live PG, `TEST_DATABASE_URL`-style skip guard matching existing brisen-lab tests/ conventions — verify the fixture pattern at build time):
+- **Test isolation (G0 nit 1):** extend the existing `fresh_db` fixture in `tests/conftest.py` with `TRUNCATE agent_job_events, agent_jobs RESTART IDENTITY CASCADE` (agent_jobs rows with NULL `source_msg_id` do not cascade from the `brisen_lab_msg` truncate) AND `DELETE FROM brisen_lab_settings WHERE key LIKE 'agent_queue_%'`.
 - `test_concurrent_claim_single_winner` — two parallel claim calls, one job → exactly one 200-with-row, other gets empty.
 - `test_done_requires_proof` — done without proof_ref → 400.
 - `test_verify_never_self` — verify by assigned_role slug → 403.
 - `test_bus_mirror_failure_keeps_queue_state` — monkeypatch post_daemon_message to raise; done still commits.
+- `test_queue_settings_fail_closed` — malformed values for all three keys → off / empty set / 24 (G0 nit 3).
 
 ---
 
@@ -249,7 +256,8 @@ In `_post_msg_inner`, AFTER successful insert, when `kind='dispatch'` AND recipi
 1. Extract a job reference: explicit `queue_job_id` field in the POST payload (preferred; document in bus_post conventions) OR a `/jobs/<id>` token in the body. Bare "job N" prose does NOT count.
 2. If no reference → warn.
 3. If reference found → `SELECT id, assigned_role, state FROM agent_jobs WHERE id = %(id)s LIMIT 1` and warn unless ALL hold: row exists, `assigned_role` = recipient slug, `state NOT IN ('verified','dead')`.
-4. Warn = include `"queue_warning": "<reason: no_job_ref|job_not_found|wrong_role|terminal_state>"` in the response JSON + emit audit bus post (kind='alert', to dispatcher set) — **no reject, no auto-create in V1** (#8066 block 6). Existing response shape otherwise byte-identical (posters parse it). Guard SELECT failure (DB error) → log + skip warning, never block the post.
+4. **Multi-recipient posts (G0 nit 2):** evaluate steps 2-3 for EVERY pilot recipient in `to_terminals` independently (a post can go to pilot + non-pilot slugs at once); non-pilot recipients are never evaluated.
+5. Warn = include `"queue_warning": {"<pilot_slug>": "<reason: no_job_ref|job_not_found|wrong_role|terminal_state>", ...}` in the response JSON — keyed per failing pilot recipient — + emit audit bus post (kind='alert', to dispatcher set) — **no reject, no auto-create in V1** (#8066 block 6). Existing response shape otherwise byte-identical (posters parse it). Guard SELECT failure (DB error) → log + skip warning, never block the post.
 
 ### Verification
 Seeded tests, one per guard outcome (codex G0 required set):
@@ -259,6 +267,7 @@ Seeded tests, one per guard outcome (codex G0 required set):
 - `test_pilot_dispatch_terminal_state_warns`
 - `test_pilot_dispatch_valid_job_clean`
 - `test_nonpilot_dispatch_unaffected`
+- `test_multi_recipient_mixed` — post to [hag-desk, b2] with bad ref → warning keyed to hag-desk only; b2 unaffected (G0 nit 2)
 
 ---
 
@@ -289,6 +298,7 @@ Badge shows seeded dead job within one refresh cycle; drawer renders on iPhone v
 - `bus.py` — row-verified dispatch-warning hook only (minimal diff inside `_post_msg_inner`)
 - `static/` — RED badge + jobs drawer (+ `?v=N` bump)
 - `tests/test_agent_queue.py` — NEW
+- `tests/conftest.py` — extend `fresh_db`: truncate queue tables + reset `agent_queue_*` settings (G0 nit 1)
 
 ## Do NOT Touch
 - `auth_lab.py` / `authz.py` — auth stack unchanged
