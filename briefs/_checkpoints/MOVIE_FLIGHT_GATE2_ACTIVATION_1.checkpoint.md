@@ -18,6 +18,17 @@ Hold for codex G3 (dispatched, medium, gate/movie-flight-gate2). On PASS: lead m
   regression -> baden-baden) -> POST_DEPLOY_AC_VERDICT to lead (topic baker-os-v2/movie-flight-gate2).
 On G3 REQUEST_CHANGES: fix -> new commit (never amend) -> push -> re-request codex on same topic.
 
+## POST-DEPLOY (verdict #8205 posted) — env flip DONE, routing verified live
+- PR #510 @9046e2f0 merged (codex G3 PASS #8189) + LIVE on Render; restart re-booted new env (jobs=73).
+- Env flip via safe_env_put: BOX5_PARTICIPANT_FETCH_LANE_ENABLED=true + AIRPORT_TICKETING_KEYWORDS
+  += mandarin oriental,mohg,mo-vie,mo vienna. Verified via Render GET (both set, 100 keys, no wipe).
+- Probe 1 (corroborated MOVIE -> movie-desk/MO-VIE-001): PASS via deployed-resolver-on-live-data
+  (rolf.huebner {movie}+MOVIE content; REAL multi-matter balazs {aukera,movie} disambiguated both ways;
+  aegger {movie}+identity-only -> desk=lead review). Probe 2 (lilienmatt regression -> baden-baden): PASS.
+- GAP: no ORGANIC minted ticket yet — airport_ticketing:email watermark=14:00Z; recent MOVIE emails are
+  past it so not re-fetched. Next NEW MOVIE email mints. Verdict #8205 asked lead: (a) ratify DONE + I
+  watch for first organic mint, or (b) authorize a controlled seeded-email probe (I lean a). HOLD for lead.
+
 ## BUILD SLICES (lead #8169 = build this session; commit+push+checkpoint per slice)
 - [x] SLICE 1 — pure resolver core: KEYWORD_MATTER_MAP + _content_matter_set (factor B) +
       _two_factor_matter (intersection -> matter|review_reason) + REVIEW constants + _REVIEW_DESK='lead'.
