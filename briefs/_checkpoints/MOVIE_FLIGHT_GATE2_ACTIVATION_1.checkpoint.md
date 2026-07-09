@@ -1,6 +1,6 @@
 # CHECKPOINT — MOVIE_FLIGHT_GATE2_ACTIVATION_1
 
-attempt: 4
+attempt: 4  # ARC DONE (lead ratified #8206); residual = organic-mint watch
 brief_id: MOVIE_FLIGHT_GATE2_ACTIVATION_1
 brief: briefs/_tasks/MOVIE_FLIGHT_GATE2_ACTIVATION_1.md @main (560dcdb9)
 branch: b4/movie-flight-gate2 (off main @253869c3) — PR #510
@@ -17,6 +17,18 @@ Hold for codex G3 (dispatched, medium, gate/movie-flight-gate2). On PASS: lead m
   Render API GET -> live probes (MOVIE participant+content mint -> movie-desk/MO-VIE-001; lilienmatt
   regression -> baden-baden) -> POST_DEPLOY_AC_VERDICT to lead (topic baker-os-v2/movie-flight-gate2).
 On G3 REQUEST_CHANGES: fix -> new commit (never amend) -> push -> re-request codex on same topic.
+
+## ARC CLOSED — DONE (lead ratified #8206, option a)
+Clean end-to-end: diagnose -> Director two-factor ruling #8154 -> build A (5 TDD slices) -> codex G3
+PASS #8189 (zero findings) -> lead merge PR #510 @9046e2f0 -> deploy+env flip -> live PASS (#8205).
+RESIDUAL WATCH DUTY (b4): post a one-liner on topic baker-os-v2/movie-flight-gate2 when the FIRST
+organic MOVIE mint lands (ticket id + desk + flight). As of 2026-07-09 18:20Z: no MOVIE mint yet
+(email watermark 14:00Z; recent MOVIE emails past it -> not re-fetched; next NEW MOVIE email mints).
+DEFECT ESCALATION: if nothing mints within 48h of a known MOVIE-participant email arriving AFTER the
+18:1x watermark, that is a defect signal -> escalate to lead, do NOT keep waiting.
+Watch query: SELECT id,proposed_desk_slug,suspected_flight,source_channel,created_at FROM airport_tickets
+  WHERE (proposed_desk_slug IN ('movie-desk','lead') OR suspected_flight='MO-VIE-001')
+  AND created_at > '2026-07-09 18:11:00+00' ORDER BY created_at DESC.
 
 ## POST-DEPLOY (verdict #8205 posted) — env flip DONE, routing verified live
 - PR #510 @9046e2f0 merged (codex G3 PASS #8189) + LIVE on Render; restart re-booted new env (jobs=73).
