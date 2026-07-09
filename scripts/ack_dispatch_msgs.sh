@@ -90,7 +90,8 @@ if [[ -z "$KEY" ]]; then
     exit 2
 fi
 
-# Drain own inbox (limit 50 — well above per-brief topic count of ~5).
+# Drain own inbox (full-unacked scan, limit 2000 — BUS_READ_UNACKED_SCAN_FIX_1;
+# a small window silently dropped boundary unacked dispatch messages).
 # No `-f`: parity with per-ack POST below. `-f` swallows 4xx and emits exit-22,
 # which would collapse the response body and lose the HTTP code we'd want for
 # diagnosis. Without `-f`, curl returns 0 on 4xx and writes the body to stdout;
@@ -98,7 +99,7 @@ fi
 # and yields zero matches, which routes through the "no unacked messages" exit.
 INBOX="$(curl -sS --connect-timeout 5 --max-time 15 \
     -H "X-Terminal-Key: ${KEY}" \
-    "${DAEMON_URL}/msg/${SENDER}?limit=50" 2>/dev/null)" || {
+    "${DAEMON_URL}/msg/${SENDER}?limit=2000" 2>/dev/null)" || {
     echo "[ack] inbox fetch failed (network/HTTP) — non-fatal, continuing as zero-match" >&2
     INBOX=""
 }
@@ -139,6 +140,8 @@ for m in messages:
     if m.get("acknowledged_at"):  # already acked — skip
         continue
     if m.get("acked"):            # tolerate alternate field name
+        continue
+    if m.get("to_terminals") == ["*"]:  # wildcard broadcast — 403s on per-terminal ack (#7011)
         continue
     topic = (m.get("topic") or "").lower()
     if any(p.match(topic) for p in patterns):
