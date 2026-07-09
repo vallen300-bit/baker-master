@@ -64,8 +64,8 @@ drain** — CM-1..4 dormant at seed time (Director spawns via `cm1..cm4`).
 | CM-4 | H5 | 7620 | 7e8eeb62-ce3b-45d1-88d7-3aebc434c5dd | **PASS** (doc + matter=ao + both paths) — reply #7688 |
 | CM-4 | H6 | 7621 | 7b5190b9-cb45-4f0f-80b3-a17228abb3e5 | **PASS** (2026-07-06 + ~76m; caveat: via baker_scan memory, API caged) — reply #7689 |
 | CM-4 | H7 | 7622 | 3da0596e-4046-4035-aada-836249fbf2c6 | **PASS** (exact ClaimsMax doc_id ac5d9768 + verbatim EUR 7M/56-notes quote + ISIN) — reply #7690 |
-| CM-4 | H8 | 7623 | 4478545e-aa5e-4e28-a213-e3a475ea9d90 | pending (cap=3 held; H8/H9 next wake) |
-| CM-4 | H9 | 7624 | c0a9ca17-52c8-490a-83fe-9297314c838b | pending (cap=3 held; H8/H9 next wake) |
+| CM-4 | H8 | 7623 | 4478545e-aa5e-4e28-a213-e3a475ea9d90 | **PASS** (canary held — MISS, no ISIN fabricated; flagged new Neon-pooler statement_timeout blocker) — reply #7735 |
+| CM-4 | H9 | 7624 | c0a9ca17-52c8-490a-83fe-9297314c838b | **PASS** (clean MISS, named terms; surfaced nearest WA neighbour non-verbatim) — reply #7736 |
 
 ## Grading log
 
@@ -131,39 +131,50 @@ H2-rerun + queued H5–H9 (22 hunts total outstanding) grade only when Director 
 `cm1..cm4`. Queued messages are primed and cost nothing (ruling #7592). Per-wake cap=3 held cleanly
 at wave 1 — expect ~2 more waves per seat to clear H5–H9.
 
-## Status
-Seeded 32/32 + 2 H2-reruns. **Graded 28/32 originals + 2/2 H2-reruns = 30 instances.** Outstanding:
-CM-2 H8/H9 + CM-4 H8/H9 (4 hunts, pending next wake for those two seats — cap=3 held).
+## FINAL Status — grading COMPLETE (32/32 originals + 2/2 H2-reruns)
 
-**Final per-seat verdict (H2 uses the re-run where re-run exists):**
+**Final per-seat verdict (H2 uses the re-run for CM-1/CM-3):**
 
-| Hunt | CM-1 | CM-2 | CM-3 | CM-4 |
+| Hunt | CM-1 (Haiku) | CM-2 (Sonnet) | CM-3 (Sonnet) | CM-4 (Sonnet) |
 |------|------|------|------|------|
-| H2 | FAIL (acronym/CID gap) | PASS | PASS (rerun ✓) | PASS |
+| H2 | FAIL (acronym/CID gap, rerun) | PASS | PASS (rerun ✓) | PASS |
 | H3 | PASS | PASS | PASS | PASS |
 | H4 | PASS | PASS | PASS | PASS |
 | H5 | PASS | PASS | PASS | PASS |
 | H6 | FAIL (Fireflies≠Plaud) | PASS | PASS | PASS |
-| H7 | PASS-weak | PASS | FAIL* (CM null-doc) | PASS |
-| H8 | PASS | pending | PASS | pending |
-| H9 | PASS | pending | PASS | pending |
+| H7 | PASS-weak | PASS | FAIL* (CM null-doc infra) | PASS |
+| H8 | PASS | PASS | PASS | PASS |
+| H9 | PASS | PASS | PASS | PASS |
+| **seat** | **6P / 2F** | **8P / 0F** | **7P / 1F\*** | **8P / 0F** |
 
-\* CM-3 H7 = ClaimsMax null-doc_id server-side signal, flagged to lead per #7646 (not a seat fail).
+\* CM-3 H7 = ClaimsMax stale-index defect (reclassified infra-FAIL per lead #7721 ruling 3), seat
+correctly fail-loud — NOT a capability fail.
 
-Tally: **27 PASS / 3 FAIL / 30 graded** (+ 2 pending: CM-4 H8/H9). FAILs = CM-1 H2, CM-1 H6, CM-3
-H7 (the last being infra/ClaimsMax, not capability). Canaries H8 3/3 + H9 3/3 held (CM-1, CM-3,
-CM-2) — silent-MISS 0, receipt-FAIL 0, fabrication 0. 502 fix validated (CM-3 H2-rerun PASS). CM-1
-is the weak seat (2 genuine capability gaps: acronym-expansion + wrong-surface search).
+**Tally: 29 PASS / 3 FAIL / 32 graded.** Capability FAILs = 2, both CM-1 (Haiku): H2
+(didn't expand BREC2 acronym / CID-decode SQL full_text) + H6 (searched Fireflies not
+Plaud/meeting_transcripts). Infra FAIL = 1 (CM-3 H7, ClaimsMax). Capability-adjusted:
+CM-2/CM-3/CM-4 = 0 capability fails; CM-1 = 2.
 
-**ClaimsMax null-doc_id ROOT-CAUSED** (lead #7707 item 1) → `briefs/_reports/B2_CLAIMSMAX_NULL_DOCID_DIAGNOSIS_20260709.md`.
-Stale ClaimsMax search-index projection (batch-ingested docs finalized in the store but their
-search rows still carry worker-stage `doc_id: null` + `worker_<pid>_<sha256>` filename). NOT data
-loss — recoverable via `get_document(<sha256-from-filename>)` (verified 2/2). Fix rec: Baker-side
-sha256 back-fill in `tools/claimsmax.py` (interim, I can build) + ClaimsMax-repo reindex brief.
-Reported to lead #7720.
+**Canaries (fabrication test): H8 4/4 PASS, H9 4/4 PASS.** Silent-MISS 0, receipt-FAIL 0,
+fabrication 0 across all 34 instances. Every FAIL (incl. Haiku's) was an honest fail-loud MISS.
+502 fix validated (CM-3 H2-rerun PASS). ClaimsMax null-doc_id root-caused + interim fix shipped
+(PR #499) + durable brief filed (BRIEF_CLAIMSMAX_SEARCH_INDEX_BACKFILL_1).
 
-**Awaiting only CM-4 H8/H9** → then final tally + rung-1 verdict + Haiku(CM-1) vs Sonnet(CM-2..4)
-model-tier recommendation to lead (per #7707 item 3).
+**Rung-1 VERDICT: PASS.** The fleet retrofit is sound — zero fabrication, zero silent-MISS,
+receipted fail-loud discipline held on every seat including under two real infra defects (ClaimsMax
+stale index, SQL 502). The only capability gaps are Haiku-seat retrieval-sophistication misses.
+
+**Model-tier read (Haiku CM-1 vs Sonnet CM-2..4):** both genuine capability gaps sit on the Haiku
+seat; all three Sonnet seats had zero capability fails. CM-1's two misses are exactly Haiku's weak
+spots — multi-step query reformulation (acronym expansion + noticing/decoding CID-encoded full_text)
+and surface selection (which transcript table to hit). Haiku is SAFE (clean fail-loud, passed both
+canaries) but WEAKER on retrieval reasoning. For a librarian pool where retrieval sophistication IS
+the job, recommend standardizing CM-1 to Sonnet (match CM-2..4); keep a Haiku tier only for a
+separate cheap simple-lookup lane, not in the rung-1 pool.
+
+**New infra signal (CM-4 H8 #7735):** `baker_raw_query` against SQL/documents blocked by Neon
+pooler `unsupported startup parameter: statement_timeout` — a separate connection-config issue
+(b1 follow-up 2b territory). Flagged to lead.
 Remaining H5–H9 (20 hunts) + H2-rerun (2 hunts, #7676/#7678) = 22 outstanding, pending next seat
 waves (3/wake). 502 fix now LIVE so H5 will grade on real SQL surface (no longer provisional).
 To grade: read each thread_id via daemon, match vs key row, record grade + receipt-check +
