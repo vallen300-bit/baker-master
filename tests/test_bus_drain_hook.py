@@ -451,6 +451,39 @@ def test_existing_state_file_used_as_since(stubs_dir, base_env, tmp_path):
 
 
 # ---------------------------------------------------------------------------
+# LIFECYCLE-403-FLOOR-FIX (lead #7945): the drain must request the UNREAD
+# (pending) view so daemon lifecycle broadcasts to ['*'] — unackable by any
+# named terminal (403 not_recipient) — do not pile up as a permanent false
+# floor. The daemon's unread=true branch (#7335) already excludes '*' rows;
+# the drain just has to ask for it. Guards the query param, not the daemon.
+# ---------------------------------------------------------------------------
+
+def test_curl_requests_unread_only(stubs_dir, base_env, tmp_path):
+    """Drain curl must pass unread=true (excludes unackable '*' broadcasts)."""
+    sentinel = tmp_path / "curl-args.txt"
+    _make_stub(
+        stubs_dir / "curl",
+        textwrap.dedent(f"""\
+            #!/bin/bash
+            for a in "$@"; do echo "$a"; done > {sentinel}
+            echo '{{"messages": []}}'
+            exit 0
+        """),
+    )
+    _make_stub(stubs_dir / "op", "#!/bin/bash\necho 'fake-key-1234'\n")
+
+    env = dict(base_env, BAKER_ROLE="b2")
+    result = _run_hook(env, tmp_path)
+    assert result.returncode == 0, result.stderr
+
+    captured = sentinel.read_text()
+    assert "unread=true" in captured, (
+        f"drain must request the unread-only view to drop unackable '*' "
+        f"broadcasts; curl args were:\n{captured}"
+    )
+
+
+# ---------------------------------------------------------------------------
 # Regression: overflow path — cursor must advance to rendered slice's max,
 # not the full fetched slice's max. Otherwise messages RENDER_CAP+1..N are
 # silently lost. Daemon orders ASC by created_at (bus.py:349), so shown[:30]
