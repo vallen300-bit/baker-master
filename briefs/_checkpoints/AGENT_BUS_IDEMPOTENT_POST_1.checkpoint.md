@@ -1,11 +1,12 @@
 ---
 brief_id: AGENT_BUS_IDEMPOTENT_POST_1
 attempt: 1
-status: codex rounds 1 (#8373 py P1+P2) + 2 (#8385 sh whitespace parity) BOTH FIXED — PR #514 chain 22fdab91 -> 5032dc09 pushed; re-review requested round 3 (codex #8387, lead #8388). PR #111 daemon clean throughout. AWAITING codex PASS + lead merge. Then b1 owes live prod AC + POST_DEPLOY_AC_VERDICT.
-repos: brisen-lab PR #111 (branch b1/bus-idempotent-post) + baker-master PR #514 (branch b1/bus-idempotent-post @5032dc09)
+status: CLOSED — codex-medium PASS #8389 (3 rounds); both PRs merged (baker-master #514 @d8b522be + brisen-lab #111 @053a7c77); brisen-lab deployed live ~07:00Z; live prod AC PASS; POST_DEPLOY_AC_VERDICT v1 posted lead #8410. Brief DONE end-to-end. Nothing owed.
+repos: MERGED — brisen-lab PR #111 @053a7c77 + baker-master PR #514 @d8b522be (both on main)
 dispatched_by: lead (#8362, 2026-07-10T06:11Z); re-scoped lead #8366 (C+B ratified)
-codex_rounds: R1 #8373 (py: socket.timeout retry P1 + empty-key P2) -> fix 22fdab91; R2 #8385 (sh whitespace-key parity) -> fix 5032dc09. tests/test_bus_post.py 44/44 green.
-updated: 2026-07-10T06:55Z
+codex_rounds: R1 #8373 (py socket.timeout retry P1 + empty-key P2) -> 22fdab91; R2 #8385 (sh whitespace parity) -> 5032dc09; R3 #8389 PASS. tests/test_bus_post.py 44/44.
+live_ac: PASS — one row (msg 8408) + deduped:true replay + single wake_event (CODEX_NEON_READONLY) + whitespace/empty flag rc=2 no post. Report: briefs/_reports/B1_AGENT_BUS_IDEMPOTENT_POST_1_20260710.md.
+updated: 2026-07-10T07:04Z
 ---
 
 # AGENT_BUS_IDEMPOTENT_POST_1 — checkpoint
