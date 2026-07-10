@@ -58,11 +58,20 @@ while [ "$#" -gt 0 ]; do
         --idempotency-key)
             # AGENT_BUS_IDEMPOTENT_POST_1: caller-supplied key so a retry loop that
             # spans MULTIPLE invocations reuses ONE key (the daemon dedupes on it).
-            [ "$#" -ge 2 ] && [ -n "$2" ] || { echo "ERROR: --idempotency-key requires a non-empty value" >&2; exit 2; }
-            IDEMPOTENCY_KEY="$2"; shift 2 ;;
+            # Reject empty OR whitespace-only (codex #8385): the daemon strips the key
+            # before insert (bus.py), so a blank key silently becomes keyless and never
+            # dedupes — fail loud instead. Parity with bus_post.py's flag guard.
+            [ "$#" -ge 2 ] || { echo "ERROR: --idempotency-key requires a non-empty value" >&2; exit 2; }
+            case "$2" in
+                *[![:space:]]*) IDEMPOTENCY_KEY="$2" ;;
+                *) echo "ERROR: --idempotency-key requires a non-empty value" >&2; exit 2 ;;
+            esac
+            shift 2 ;;
         --idempotency-key=*)
-            IDEMPOTENCY_KEY="${1#*=}"
-            [ -n "$IDEMPOTENCY_KEY" ] || { echo "ERROR: --idempotency-key requires a non-empty value" >&2; exit 2; }
+            case "${1#*=}" in
+                *[![:space:]]*) IDEMPOTENCY_KEY="${1#*=}" ;;
+                *) echo "ERROR: --idempotency-key requires a non-empty value" >&2; exit 2 ;;
+            esac
             shift ;;
         *) POSITIONAL+=("$1"); shift ;;
     esac
@@ -128,8 +137,15 @@ fi
 # a retry-after-commit (503/timeout that actually landed) replays the original row
 # instead of duplicating. A caller managing its own multi-invocation loop passes the key
 # in so its retries dedupe too.
+# BUS_IDEMPOTENCY_KEY env fallback (only when no flag). A whitespace-only env value is
+# treated as UNSET -> mint below (parity with bus_post.py's .strip(); the daemon would
+# strip a blank key to keyless anyway — codex #8385). Unlike the explicit flag, a blank
+# env is not a caller error, so it mints rather than failing loud (matches bus_post.py).
 if [ -z "$IDEMPOTENCY_KEY" ]; then
-    IDEMPOTENCY_KEY="${BUS_IDEMPOTENCY_KEY:-}"
+    case "${BUS_IDEMPOTENCY_KEY:-}" in
+        *[![:space:]]*) IDEMPOTENCY_KEY="$BUS_IDEMPOTENCY_KEY" ;;
+        *) : ;;   # empty or whitespace-only -> leave unset
+    esac
 fi
 if [ -z "$IDEMPOTENCY_KEY" ]; then
     IDEMPOTENCY_KEY="$(uuidgen 2>/dev/null | tr '[:upper:]' '[:lower:]' || true)"

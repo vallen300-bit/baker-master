@@ -824,3 +824,36 @@ def test_42_py_whitespace_idempotency_key_flag_fails_loud(stub_daemon, fake_op_p
     assert r.returncode != 0
     assert "non-empty" in r.stderr
     assert captured == []
+
+
+# ---- codex #8385: shell-side whitespace-key parity (matches py test_42) ----
+
+def test_43_sh_whitespace_idempotency_key_flag_fails_loud(stub_daemon, fake_op_path):
+    """codex #8385: sh must reject a whitespace-only --idempotency-key (not just empty).
+    The daemon strips the key before insert, so a blank key silently becomes keyless and
+    never dedupes — fail loud + never post instead (parity with py test_42)."""
+    url, captured = stub_daemon
+    r = _run_sh(
+        ["b2", "hello", "topic/x", "--idempotency-key", "   "],
+        _env_with({"BAKER_ROLE": "AH1", "BRISEN_LAB_DAEMON_URL": url},
+                  fake_op_dir=fake_op_path),
+    )
+    assert r.returncode == 2
+    assert "non-empty" in r.stderr
+    assert captured == []              # never posted
+
+
+def test_44_sh_whitespace_env_key_mints_not_posts_blank(stub_daemon, fake_op_path):
+    """codex #8385: a whitespace-only BUS_IDEMPOTENCY_KEY env is treated as UNSET -> a
+    real key is minted (never the blank), so dedupe still works (parity with py .strip())."""
+    url, captured = stub_daemon
+    r = _run_sh(
+        ["b2", "hello"],
+        _env_with({"BAKER_ROLE": "AH1", "BRISEN_LAB_DAEMON_URL": url,
+                   "BUS_IDEMPOTENCY_KEY": "   "},
+                  fake_op_dir=fake_op_path),
+    )
+    assert r.returncode == 0, r.stderr
+    key = captured[0]["payload"]["idempotency_key"]
+    assert key.strip(), f"minted key must be non-blank, got {key!r}"
+    assert key != "   "
