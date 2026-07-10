@@ -51,7 +51,7 @@ print(json.dumps({"hookSpecificOutput": {"hookEventName": "SessionStart", "addit
 
 # BEGIN GENERATED AGENT IDENTITY ROLE MAP
 # Generated from /Users/dimitry/baker-vault/_ops/registries/agent_registry.yml
-# SHA256: 6a3a76f1ca6d48d6164438aec44cb50778acdff1307f51782b1e7f575394a9d9
+# SHA256: 64176a5671c19677370d2616b5f23f78e4fc55ef4d92b26a13c204b0ec3894e0
 case "${BAKER_ROLE:-}" in
     AG-001|ag-001|lead|LEAD|AH1|aihead1|AIHEAD1) SLUG=lead ;;
     AG-002|ag-002|cowork-ah1|COWORK-AH1|cowork_ah1|COWORK_AH1|AH1-APP|cowork|COWORK) SLUG=cowork-ah1 ;;
@@ -81,6 +81,12 @@ case "${BAKER_ROLE:-}" in
     AG-308|ag-308|cowork-bb-desk|COWORK-BB-DESK|cowork_bb_desk|COWORK_BB_DESK|BB-APP|cowork-bb|COWORK-BB) SLUG=cowork-bb-desk ;;
     AG-309|ag-309|cowork-ao-desk|COWORK-AO-DESK|cowork_ao_desk|COWORK_AO_DESK|AO-APP|cowork-ao|COWORK-AO) SLUG=cowork-ao-desk ;;
     AG-310|ag-310|cowork-movie-desk|COWORK-MOVIE-DESK|cowork_movie_desk|COWORK_MOVIE_DESK|MOVIE-APP|cowork-movie|COWORK-MOVIE) SLUG=cowork-movie-desk ;;
+    AG-311|ag-311|cowork-hag-desk|COWORK-HAG-DESK|cowork_hag_desk|COWORK_HAG_DESK|HAG-APP|cowork-hag|COWORK-HAG|cowork-hagenauer-desk|COWORK-HAGENAUER-DESK) SLUG=cowork-hag-desk ;;
+    AG-312|ag-312|cowork-origination-desk|COWORK-ORIGINATION-DESK|cowork_origination_desk|COWORK_ORIGINATION_DESK|ORIG-APP|cowork-orig|COWORK-ORIG|cowork-origination|COWORK-ORIGINATION) SLUG=cowork-origination-desk ;;
+    AG-313|ag-313|cowork-researcher|COWORK-RESEARCHER|cowork_researcher|COWORK_RESEARCHER|RESEARCHER-APP|cowork-research|COWORK-RESEARCH) SLUG=cowork-researcher ;;
+    AG-314|ag-314|cowork-arm|COWORK-ARM|cowork_arm|COWORK_ARM|ARM-APP) SLUG=cowork-arm ;;
+    AG-315|ag-315|cowork-russo-ai|COWORK-RUSSO-AI|cowork_russo_ai|COWORK_RUSSO_AI|RUSSO-APP|cowork-russo|COWORK-RUSSO) SLUG=cowork-russo-ai ;;
+    AG-316|ag-316|cowork-librarian|COWORK-LIBRARIAN|cowork_librarian|COWORK_LIBRARIAN|LIBRARIAN-APP|cowork-lib|COWORK-LIB) SLUG=cowork-librarian ;;
     AG-401|ag-401|CM-1|CM_1|cm-1) SLUG=CM-1 ;;
     AG-402|ag-402|CM-2|CM_2|cm-2) SLUG=CM-2 ;;
     AG-403|ag-403|CM-3|CM_3|cm-3) SLUG=CM-3 ;;

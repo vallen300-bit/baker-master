@@ -164,6 +164,18 @@ def _snapshot_path_for(agent: dict[str, Any]) -> str | None:
         return "/Users/dimitry/bm-cowork-ao-desk"
     if slug == "cowork-movie-desk":
         return "/Users/dimitry/bm-cowork-movie-desk"
+    if slug == "cowork-hag-desk":
+        return "/Users/dimitry/Hagenauer"
+    if slug == "cowork-origination-desk":
+        return "/Users/dimitry/Origination"
+    if slug == "cowork-researcher":
+        return "/Users/dimitry/Researcher"
+    if slug == "cowork-arm":
+        return "/Users/dimitry/ARM"
+    if slug == "cowork-russo-ai":
+        return "/Users/dimitry/Russo"
+    if slug == "cowork-librarian":
+        return "/Users/dimitry/Librarian"
     if slug == "arm":
         return "/Users/dimitry/bm-arm"
     if slug in KNOWN_FALLBACK_SLUGS:
