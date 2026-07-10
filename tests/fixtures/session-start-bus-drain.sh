@@ -51,7 +51,7 @@ print(json.dumps({"hookSpecificOutput": {"hookEventName": "SessionStart", "addit
 
 # BEGIN GENERATED AGENT IDENTITY ROLE MAP
 # Generated from /Users/dimitry/baker-vault/_ops/registries/agent_registry.yml
-# SHA256: 64176a5671c19677370d2616b5f23f78e4fc55ef4d92b26a13c204b0ec3894e0
+# SHA256: dfcac95586c0c458d06b23df798c83530b93538385e1f632aaa0e8d33a8d67ea
 case "${BAKER_ROLE:-}" in
     AG-001|ag-001|lead|LEAD|AH1|aihead1|AIHEAD1) SLUG=lead ;;
     AG-002|ag-002|cowork-ah1|COWORK-AH1|cowork_ah1|COWORK_AH1|AH1-APP|cowork|COWORK) SLUG=cowork-ah1 ;;
@@ -78,6 +78,7 @@ case "${BAKER_ROLE:-}" in
     AG-303|ag-303|ao-desk|AO-DESK|ao_desk|AO_DESK|ao|AO) SLUG=ao-desk ;;
     AG-304|ag-304|movie-desk|MOVIE-DESK|movie_desk|MOVIE_DESK|moviedesk|MOVIEDESK|movie|MOVIE) SLUG=movie-desk ;;
     AG-305|ag-305|baden-baden-desk|BADEN-BADEN-DESK|baden_baden_desk|BADEN_BADEN_DESK|bb|BB|bb-desk|BB-DESK|baden-baden|BADEN-BADEN) SLUG=baden-baden-desk ;;
+    AG-306|ag-306|brisen-desk|BRISEN-DESK|brisen_desk|BRISEN_DESK) SLUG=brisen-desk ;;
     AG-308|ag-308|cowork-bb-desk|COWORK-BB-DESK|cowork_bb_desk|COWORK_BB_DESK|BB-APP|cowork-bb|COWORK-BB) SLUG=cowork-bb-desk ;;
     AG-309|ag-309|cowork-ao-desk|COWORK-AO-DESK|cowork_ao_desk|COWORK_AO_DESK|AO-APP|cowork-ao|COWORK-AO) SLUG=cowork-ao-desk ;;
     AG-310|ag-310|cowork-movie-desk|COWORK-MOVIE-DESK|cowork_movie_desk|COWORK_MOVIE_DESK|MOVIE-APP|cowork-movie|COWORK-MOVIE) SLUG=cowork-movie-desk ;;
