@@ -19,6 +19,7 @@ import json
 import os
 import subprocess
 import sys
+import time
 import urllib.error
 import urllib.request
 import uuid
@@ -128,21 +129,45 @@ def _fetch_key(sender: str) -> str:
 
 
 def _post(recipient: str, payload: dict, key: str) -> dict:
+    """POST with bounded retry-with-backoff (AGENT_BUS_IDEMPOTENT_POST_1, lead #8366).
+
+    Retry ONLY on HTTP 503 (bus_busy_retry) or a network/timeout-class URLError. The
+    payload already carries a single idempotency_key, reused on every attempt, so a
+    retry that follows a commit replays the original row instead of duplicating. Any
+    other HTTP status (4xx / non-503 5xx) fails loud immediately — retrying cannot fix
+    it. After the attempt budget is exhausted the final failure exits non-zero (fail
+    loud). Defaults 4 attempts / base 2s (~2/4/8s); both env-overridable
+    (BUS_POST_MAX_ATTEMPTS / BUS_POST_BACKOFF_BASE) so tests run with base 0.
+    """
     url = f"{DAEMON_URL}/msg/{recipient}"
-    req = urllib.request.Request(
-        url,
-        data=json.dumps(payload).encode("utf-8"),
-        headers={"X-Terminal-Key": key, "Content-Type": "application/json"},
-        method="POST",
+    data = json.dumps(payload).encode("utf-8")
+    max_attempts = int(os.environ.get("BUS_POST_MAX_ATTEMPTS", "4"))
+    backoff_base = float(os.environ.get("BUS_POST_BACKOFF_BASE", "2"))
+    last_err = ""
+    for attempt in range(1, max_attempts + 1):
+        req = urllib.request.Request(
+            url,
+            data=data,
+            headers={"X-Terminal-Key": key, "Content-Type": "application/json"},
+            method="POST",
+        )
+        try:
+            with urllib.request.urlopen(req, timeout=15) as resp:
+                return json.loads(resp.read().decode("utf-8"))
+        except urllib.error.HTTPError as e:
+            body = e.read().decode("utf-8", errors="replace")
+            if e.code != 503:
+                sys.exit(f"ERROR: POST {url} returned HTTP {e.code}: {body}")
+            last_err = f"HTTP 503: {body}"
+        except urllib.error.URLError as e:
+            last_err = f"URLError: {e.reason}"
+        if attempt < max_attempts:
+            sleep_s = backoff_base * (2 ** (attempt - 1))  # base 2 -> 2, 4, 8
+            if sleep_s > 0:
+                time.sleep(sleep_s)
+    sys.exit(
+        f"ERROR: POST {url} failed after {max_attempts} attempt(s): {last_err}"
     )
-    try:
-        with urllib.request.urlopen(req, timeout=15) as resp:
-            return json.loads(resp.read().decode("utf-8"))
-    except urllib.error.HTTPError as e:
-        body = e.read().decode("utf-8", errors="replace")
-        sys.exit(f"ERROR: POST {url} returned HTTP {e.code}: {body}")
-    except urllib.error.URLError as e:
-        sys.exit(f"ERROR: POST {url} failed: {e.reason}")
 
 
 def main() -> None:
@@ -157,6 +182,11 @@ def main() -> None:
         choices=["dispatch", "ack", "broadcast", "ratify_required", "ratify_decision"],
     )
     ap.add_argument("--tier", default="B", choices=["B", "A", "director_only"])
+    ap.add_argument(
+        "--idempotency-key", default=None,
+        help="reuse ONE key across a caller-managed multi-invocation retry loop "
+             "(else BUS_IDEMPOTENCY_KEY env, else auto-minted per send)",
+    )
     args = ap.parse_args()
 
     recipient_inputs = [r.strip() for r in args.to.split(",") if r.strip()]
@@ -176,11 +206,22 @@ def main() -> None:
     sender = _resolve_sender()
     key = _fetch_key(sender)
 
+    # AGENT_BUS_IDEMPOTENT_POST_1: one key per logical send, minted ONCE here and reused
+    # on every internal retry attempt. Precedence: --idempotency-key -> BUS_IDEMPOTENCY_KEY
+    # env -> fresh uuid. Distinct sends get distinct keys (so they never dedupe together);
+    # only a retry of THIS send, or a caller passing the same key, replays the original row.
+    idempotency_key = (
+        args.idempotency_key
+        or os.environ.get("BUS_IDEMPOTENCY_KEY")
+        or str(uuid.uuid4())
+    )
+
     payload: dict = {
         "kind": args.kind,
         "body": args.body,
         "to": recipients,
         "tier_required": args.tier,
+        "idempotency_key": idempotency_key,
     }
     if args.topic is not None:
         payload["topic"] = args.topic

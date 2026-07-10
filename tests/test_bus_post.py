@@ -38,6 +38,20 @@ class _StubHandler(BaseHTTPRequestHandler):
     # Per-instance overrides set by the fixture before serving.
     _status_code = 200
     _captured: list = []
+    # AGENT_BUS_IDEMPOTENT_POST_1: a per-request status SEQUENCE (e.g. [503, 503, 200])
+    # to exercise the client retry-with-backoff loop. When non-empty it takes precedence
+    # over _status_code; once exhausted the last element repeats. _status_idx advances
+    # per request and is reset by the fixture.
+    _status_sequence: list = []
+    _status_idx: int = 0
+
+    def _next_status(self) -> int:
+        seq = type(self)._status_sequence
+        if not seq:
+            return type(self)._status_code
+        idx = type(self)._status_idx
+        type(self)._status_idx = idx + 1
+        return seq[idx] if idx < len(seq) else seq[-1]
 
     def do_POST(self):  # noqa: N802 (BaseHTTPRequestHandler API)
         length = int(self.headers.get("Content-Length", "0"))
@@ -51,14 +65,18 @@ class _StubHandler(BaseHTTPRequestHandler):
             "headers": {k: v for k, v in self.headers.items()},
             "payload": payload,
         })
-        self.send_response(self._status_code)
+        code = self._next_status()
+        self.send_response(code)
         self.send_header("Content-Type", "application/json")
         self.end_headers()
-        self.wfile.write(json.dumps({
+        # 503 mirrors the real daemon's bus_busy_retry body; the client acts on the
+        # HTTP code, not the body, so the shape only needs to be valid JSON.
+        out = ({"detail": "bus_busy_retry"} if code == 503 else {
             "message_id": 12345,
             "thread_id": "thr-stub",
             "posted_at": "2026-05-06T00:00:00Z",
-        }).encode("utf-8"))
+        })
+        self.wfile.write(json.dumps(out).encode("utf-8"))
 
     def log_message(self, *_):  # silence stderr noise during tests
         pass
@@ -83,6 +101,8 @@ def stub_daemon():
     captured: list = []
     _StubHandler._captured = captured
     _StubHandler._status_code = 200
+    _StubHandler._status_sequence = []
+    _StubHandler._status_idx = 0
 
     server = HTTPServer(("127.0.0.1", port), _StubHandler)
     thread = threading.Thread(target=server.serve_forever, daemon=True)
@@ -206,32 +226,41 @@ def test_06_sh_post_succeeds(stub_daemon, fake_op_path):
     assert captured[0]["path"] == "/msg/b2"
 
 
-def test_07_sh_post_503(stub_daemon, fake_op_path):
-    """Stub daemon 503 → exit 1, stderr 'HTTP 503'."""
+def test_07_sh_post_503_retries_then_fails_loud(stub_daemon, fake_op_path):
+    """AGENT_BUS_IDEMPOTENT_POST_1: a PERSISTENT 503 now retries to the attempt budget,
+    then exits 1 (fail loud, exit code unchanged). Every attempt reuses ONE
+    idempotency_key so the daemon would replay, not duplicate, any that committed."""
     _StubHandler._status_code = 503
-    url, _ = stub_daemon
+    url, captured = stub_daemon
     r = _run_sh(
         ["b2", "hello"],
-        _env_with({"BAKER_ROLE": "AH1", "BRISEN_LAB_DAEMON_URL": url},
+        _env_with({"BAKER_ROLE": "AH1", "BRISEN_LAB_DAEMON_URL": url,
+                   "BUS_POST_BACKOFF_BASE": "0"},
                   fake_op_dir=fake_op_path),
     )
     assert r.returncode == 1
     assert "HTTP 503" in r.stderr
+    assert "after 4 attempt(s)" in r.stderr
+    assert len(captured) == 4  # default MAX_ATTEMPTS
+    keys = {req["payload"]["idempotency_key"] for req in captured}
+    assert len(keys) == 1, f"one key must be reused across the storm, got {keys}"
 
 
 def test_08_sh_post_unreachable(fake_op_path):
-    """Bad URL → exit non-zero with curl error in stderr."""
+    """Bad URL (connection failure = retryable) → retry to the budget, then exit 1."""
     r = _run_sh(
         ["b2", "hello"],
         _env_with(
             {"BAKER_ROLE": "AH1",
-             "BRISEN_LAB_DAEMON_URL": "http://127.0.0.1:1"},
+             "BRISEN_LAB_DAEMON_URL": "http://127.0.0.1:1",
+             "BUS_POST_BACKOFF_BASE": "0"},
             fake_op_dir=fake_op_path,
         ),
     )
-    # curl returns 000 on connection failure, script's HTTP != 200 path fires.
+    # curl returns non-zero on connection failure, retried to the budget then fails loud.
     assert r.returncode == 1
     assert ("HTTP" in r.stderr) or ("curl" in r.stderr.lower())
+    assert "after 4 attempt(s)" in r.stderr
 
 
 def test_09_sh_payload_escapes_special_chars(stub_daemon, fake_op_path):
@@ -486,8 +515,9 @@ def test_23_sh_thread_flag_sets_thread_id(stub_daemon, fake_op_path):
 
 
 def test_24_sh_unflagged_omits_threading_keys(stub_daemon, fake_op_path):
-    """Un-flagged post must carry NO parent_id/thread_id keys — byte-identical
-    to the pre-change request body (AC2)."""
+    """Un-flagged post carries NO parent_id/thread_id keys. It DOES now carry a single
+    always-present idempotency_key (AGENT_BUS_IDEMPOTENT_POST_1) inserted right after the
+    core fields — the only wire-shape change vs pre-change."""
     url, captured = stub_daemon
     r = _run_sh(
         ["b2", "x", "topic/x"],
@@ -499,7 +529,9 @@ def test_24_sh_unflagged_omits_threading_keys(stub_daemon, fake_op_path):
     assert "parent_id" not in payload
     assert "thread_id" not in payload
     # exact key set + order that today's callers put on the wire
-    assert list(payload.keys()) == ["kind", "body", "to", "tier_required", "topic"]
+    assert list(payload.keys()) == [
+        "kind", "body", "to", "tier_required", "idempotency_key", "topic"]
+    assert payload["idempotency_key"]  # non-empty (auto-minted)
 
 
 def test_25_sh_parent_non_integer_rejected(fake_op_path):
@@ -590,3 +622,121 @@ def test_31_sh_thread_empty_next_arg_rejected(stub_daemon, fake_op_path):
     assert r.returncode == 2
     assert "non-empty" in r.stderr
     assert captured == []
+
+
+# ---- AGENT_BUS_IDEMPOTENT_POST_1: internal retry-backoff + idempotency key (AC3) ----
+
+def test_32_sh_internal_retry_storm_reuses_one_key(stub_daemon, fake_op_path):
+    """AC3: an internal-retry storm (503, 503, 200) succeeds on the 3rd attempt and
+    reuses ONE minted key across all 3 — so the daemon collapses any that committed to a
+    single row. This is the failure mode that dup'd b1's stand-down confirm tonight."""
+    _StubHandler._status_sequence = [503, 503, 200]
+    url, captured = stub_daemon
+    r = _run_sh(
+        ["b2", "hello"],
+        _env_with({"BAKER_ROLE": "AH1", "BRISEN_LAB_DAEMON_URL": url,
+                   "BUS_POST_BACKOFF_BASE": "0"},
+                  fake_op_dir=fake_op_path),
+    )
+    assert r.returncode == 0, r.stderr
+    assert json.loads(r.stdout)["message_id"] == 12345
+    assert len(captured) == 3  # two 503s then the 200
+    keys = {req["payload"]["idempotency_key"] for req in captured}
+    assert len(keys) == 1, f"one key must be reused across the storm, got {keys}"
+
+
+def test_33_sh_auto_mint_key_present(stub_daemon, fake_op_path):
+    """No key supplied → a non-empty key is auto-minted and sent."""
+    url, captured = stub_daemon
+    r = _run_sh(
+        ["b2", "hello"],
+        _env_with({"BAKER_ROLE": "AH1", "BRISEN_LAB_DAEMON_URL": url},
+                  fake_op_dir=fake_op_path),
+    )
+    assert r.returncode == 0, r.stderr
+    key = captured[0]["payload"]["idempotency_key"]
+    assert isinstance(key, str) and len(key) >= 8
+
+
+def test_34_sh_passthrough_key_survives_reinvocation(stub_daemon, fake_op_path):
+    """AC3: a caller-managed loop that re-invokes the script across a kill/rerun passes
+    ONE key; both invocations send the SAME key so the daemon dedupes them to one row.
+    Flag (--idempotency-key) and env (BUS_IDEMPOTENCY_KEY) forms both honored."""
+    url, captured = stub_daemon
+    K = "caller-managed-key-0001"
+    r1 = _run_sh(
+        ["b2", "hello", "topic/x", "--idempotency-key", K],
+        _env_with({"BAKER_ROLE": "AH1", "BRISEN_LAB_DAEMON_URL": url},
+                  fake_op_dir=fake_op_path),
+    )
+    r2 = _run_sh(
+        ["b2", "hello", "topic/x"],
+        _env_with({"BAKER_ROLE": "AH1", "BRISEN_LAB_DAEMON_URL": url,
+                   "BUS_IDEMPOTENCY_KEY": K},
+                  fake_op_dir=fake_op_path),
+    )
+    assert r1.returncode == 0 and r2.returncode == 0, (r1.stderr, r2.stderr)
+    assert captured[0]["payload"]["idempotency_key"] == K   # flag form
+    assert captured[1]["payload"]["idempotency_key"] == K   # env form
+
+
+def test_35_sh_empty_idempotency_key_flag_rejected(stub_daemon, fake_op_path):
+    """--idempotency-key '' (empty) must fail loud, never silently auto-mint over a
+    caller's intent — mirrors the --parent/--thread empty-value guards."""
+    url, captured = stub_daemon
+    r = _run_sh(
+        ["b2", "x", "topic/x", "--idempotency-key", ""],
+        _env_with({"BAKER_ROLE": "AH1", "BRISEN_LAB_DAEMON_URL": url},
+                  fake_op_dir=fake_op_path),
+    )
+    assert r.returncode == 2
+    assert "non-empty" in r.stderr
+    assert captured == []
+
+
+def test_36_py_internal_retry_storm_reuses_one_key(stub_daemon, fake_op_path):
+    """AC3 (py): internal-retry storm (503,503,200) reuses ONE key across all attempts."""
+    _StubHandler._status_sequence = [503, 503, 200]
+    url, captured = stub_daemon
+    r = _run_py(
+        ["--to", "b2", "--body", "hello"],
+        _env_with({"BAKER_ROLE": "AH1", "BRISEN_LAB_DAEMON_URL": url,
+                   "BUS_POST_BACKOFF_BASE": "0"},
+                  fake_op_dir=fake_op_path),
+    )
+    assert r.returncode == 0, r.stderr
+    assert json.loads(r.stdout)["message_id"] == 12345
+    assert len(captured) == 3
+    keys = {req["payload"]["idempotency_key"] for req in captured}
+    assert len(keys) == 1, f"one key must be reused across the storm, got {keys}"
+
+
+def test_37_py_passthrough_key_and_persistent_503(stub_daemon, fake_op_path):
+    """py: --idempotency-key round-trips; a persistent 503 retries to the budget then
+    exits non-zero (fail loud), reusing the passed key on every attempt."""
+    _StubHandler._status_code = 503
+    url, captured = stub_daemon
+    K = "py-caller-key-0002"
+    r = _run_py(
+        ["--to", "b2", "--body", "hello", "--idempotency-key", K],
+        _env_with({"BAKER_ROLE": "AH1", "BRISEN_LAB_DAEMON_URL": url,
+                   "BUS_POST_BACKOFF_BASE": "0"},
+                  fake_op_dir=fake_op_path),
+    )
+    assert r.returncode != 0
+    assert "after 4 attempt(s)" in r.stderr
+    assert len(captured) == 4
+    assert all(req["payload"]["idempotency_key"] == K for req in captured)
+
+
+def test_38_py_auto_mint_key_present(stub_daemon, fake_op_path):
+    """py: no key supplied → a non-empty key is auto-minted and sent."""
+    url, captured = stub_daemon
+    r = _run_py(
+        ["--to", "b2", "--body", "hello"],
+        _env_with({"BAKER_ROLE": "AH1", "BRISEN_LAB_DAEMON_URL": url},
+                  fake_op_dir=fake_op_path),
+    )
+    assert r.returncode == 0, r.stderr
+    key = captured[0]["payload"]["idempotency_key"]
+    assert isinstance(key, str) and len(key) >= 8
