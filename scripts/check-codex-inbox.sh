@@ -33,7 +33,7 @@ if [[ -z "$KEY" ]]; then
 fi
 
 RESPONSE="$(curl -sS -H "X-Terminal-Key: $KEY" \
-  "https://brisen-lab.onrender.com/msg/codex?limit=${LIMIT}")"
+  "https://brisen-lab.onrender.com/msg/codex?limit=${LIMIT}&unread=true")"
 
 if [[ -z "$RESPONSE" ]] || [[ "$RESPONSE" == *"bad_terminal_key"* ]]; then
   echo "ERROR: brisen-lab rejected codex key. Response: $RESPONSE" >&2
