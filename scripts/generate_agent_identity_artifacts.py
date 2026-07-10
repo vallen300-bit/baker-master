@@ -176,6 +176,8 @@ def _snapshot_path_for(agent: dict[str, Any]) -> str | None:
         return "/Users/dimitry/Russo"
     if slug == "cowork-librarian":
         return "/Users/dimitry/Librarian"
+    if slug == "cowork-aid":
+        return "/Users/dimitry/AID"
     if slug == "arm":
         return "/Users/dimitry/bm-arm"
     if slug in KNOWN_FALLBACK_SLUGS:

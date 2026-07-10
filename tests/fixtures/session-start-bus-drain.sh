@@ -51,7 +51,7 @@ print(json.dumps({"hookSpecificOutput": {"hookEventName": "SessionStart", "addit
 
 # BEGIN GENERATED AGENT IDENTITY ROLE MAP
 # Generated from /Users/dimitry/baker-vault/_ops/registries/agent_registry.yml
-# SHA256: dfcac95586c0c458d06b23df798c83530b93538385e1f632aaa0e8d33a8d67ea
+# SHA256: 6f4d7b5200fc0c2fa1774c1b6208cccd3967e709e2e10ee208b4484f41a724d8
 case "${BAKER_ROLE:-}" in
     AG-001|ag-001|lead|LEAD|AH1|aihead1|AIHEAD1) SLUG=lead ;;
     AG-002|ag-002|cowork-ah1|COWORK-AH1|cowork_ah1|COWORK_AH1|AH1-APP|cowork|COWORK) SLUG=cowork-ah1 ;;
@@ -88,6 +88,7 @@ case "${BAKER_ROLE:-}" in
     AG-314|ag-314|cowork-arm|COWORK-ARM|cowork_arm|COWORK_ARM|ARM-APP) SLUG=cowork-arm ;;
     AG-315|ag-315|cowork-russo-ai|COWORK-RUSSO-AI|cowork_russo_ai|COWORK_RUSSO_AI|RUSSO-APP|cowork-russo|COWORK-RUSSO) SLUG=cowork-russo-ai ;;
     AG-316|ag-316|cowork-librarian|COWORK-LIBRARIAN|cowork_librarian|COWORK_LIBRARIAN|LIBRARIAN-APP|cowork-lib|COWORK-LIB) SLUG=cowork-librarian ;;
+    AG-317|ag-317|cowork-aid|COWORK-AID|cowork_aid|COWORK_AID|AID-APP|cowork-dennis|COWORK-DENNIS) SLUG=cowork-aid ;;
     AG-401|ag-401|CM-1|CM_1|cm-1) SLUG=CM-1 ;;
     AG-402|ag-402|CM-2|CM_2|cm-2) SLUG=CM-2 ;;
     AG-403|ag-403|CM-3|CM_3|cm-3) SLUG=CM-3 ;;
