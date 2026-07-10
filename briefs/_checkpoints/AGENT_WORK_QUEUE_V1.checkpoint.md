@@ -1,12 +1,12 @@
 ---
 brief_id: AGENT_WORK_QUEUE_V1
 attempt: 2
-status: DRILL DONE — PASS verdict posted (lead #8267 + deputy cc #8270); only lead flag-flip remains (lead-owned)
+status: STOOD DOWN — latency-fix lane (#8300) reassigned to b2 per lead #8329; b1 idle. Only future live render check remains (lead re-routes on pilot re-flip).
 repo: brisen-lab (main @f9892dd — PR #109 MERGED)
 work_branch: b1/agent-work-queue-v1
 soak_start: 2026-07-09T21:49:47Z
 soak_end_est: 2026-07-10T21:49:47Z
-updated: 2026-07-09T22:49Z
+updated: 2026-07-10T01:40Z
 ---
 
 # AGENT_WORK_QUEUE_V1 — checkpoint
@@ -51,11 +51,22 @@ B: lead does flip+seed, b1 does read-only live verify + render confirm). b1 lean
   Fix proposal (no code yet): 1) glance swallow fix; 2a) keep Neon warm / warmer loop; 2b) short per-probe statement_timeout (~2s); 2c) Neon max_conn vs fleet pools. Sequence 1+2b first.
 - LIVE incident confirmed first-hand: my report post 503'd/timed out attempts 1-2, landed attempt 3 (#8296).
 
-## LEFT (awaiting lead #8296 green-light)
-1. On lead pick: write failing pytest for glance swallow + draft brisen-lab PR for chosen fixes.
-2. Step-3 live hag-desk render check — still BLOCKED on instability; lead seeds row (b1 403 cross-assign), b1 verifies render, lead cleans. Ping lead when surfaces stable.
-3. Regression sweep (as #8261) after stability. Pilot NOT declared live to Director until A+B close.
-4. Prod 24h soak observation continues in parallel through ~2026-07-10T21:49Z (not gating; per #8264).
+## STAND-DOWN (lead #8329, 2026-07-10T01:37Z) — b1 latency-fix lane closed
+Sequence after diagnosis #8296: lead green-lit the fix to b1 (#8300, 23:13Z: fix 1 glance-swallow
++ fix 2b ~2s probe timeout, TDD, codex medium gate). Prior b1 seat went silent. Lead status-checked
+(#8328, 00:49Z), then STOOD b1 DOWN (#8329, 01:37Z) and reassigned the lane to **b2**.
+- Fresh b1 seat (this one) read + acked #8300/#8328/#8329 at ~01:39Z. Confirmed stand-down to lead
+  (fleet/agent-work-queue #8331 — note: posted 4x #8331-8334 due to a success-check grep bug, harmless dupes).
+- **DO NOT build the glance-swallow / probe-timeout fix — b2 owns it now.**
+- b1 owes nothing on AGENT_WORK_QUEUE_V1 except the FUTURE live render check, which lead re-routes
+  when the pilot re-flips (see LEFT #2).
+
+## LEFT (b1 idle — single deferred item)
+1. ~~Write failing pytest + PR for glance-swallow fix~~ — REASSIGNED to b2 (#8329). Not b1's.
+2. Future live hag-desk render check — deferred; lead seeds the live job (b1 403 on cross-assign),
+   b1 verifies render + confirms no title/spec leak, lead cleans. Lead re-routes to b1 when the
+   pilot re-flips and the DB surface is stable. NOT actionable until lead pings.
+3. Prod 24h soak observation ran in parallel through ~2026-07-10T21:49Z (non-gating; per #8264).
 
 ## KEY PATHS
 - brisen-lab worktree: ~/bm-b1-brisen-lab (branch b1/agent-work-queue-v1; merged to main).
@@ -64,7 +75,7 @@ B: lead does flip+seed, b1 does read-only live verify + render confirm). b1 lean
 - Gate isolation: full-suite-WITH-this-file shows ~25 pre-existing wake-cluster failures (BRISEN_LAB_TEST_ISOLATION_WAKE_CLUSTER_1) — use isolated run + full-suite-minus-file.
 
 ## NEXT CONCRETE STEP
-AWAIT lead green-light on incident diagnosis #8296 (which fix set + whether to write the failing pytest +
-brisen-lab PR). Do NOT re-run the drill (PASS, #8267/#8270). Do NOT improvise prod DB or Render creds.
-Do NOT change code until lead picks the fix set. Flip is already done (lead-side). Step-3 render check waits
-on surface stability — lead seeds, b1 verifies. Pilot not live to Director until latency + glance-swallow close.
+NONE — b1 is STOOD DOWN (lead #8329). Do NOT build the glance-swallow/probe-timeout fix (b2 owns it).
+Do NOT re-run the drill (PASS, #8267/#8270). Do NOT improvise prod DB or Render creds. Do NOT change code.
+A future b1 seat: this arc is idle for b1. The only remaining b1 item is the deferred live render check
+(LEFT #2), and it is NOT actionable until lead explicitly re-routes it on pilot re-flip. Idle until then.
