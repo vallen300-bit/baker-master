@@ -82,13 +82,20 @@ else
     SINCE="$(date -u -d '72 hours ago' +%Y-%m-%dT%H:%M:%SZ 2>/dev/null || echo '')"
 fi
 
-# --- GET /msg/<slug>?since=<since>&limit=<N> (read-only) ---
+# --- GET /msg/<slug>?since=<since>&limit=<N>&unread=true (read-only) ---
 # -G + --data-urlencode so the '+' offset in a timestamp is encoded correctly.
+# unread=true is REQUIRED (codex verdict #8761, MEDIUM, Lesson #89 class): the
+# daemon returns OLDEST-first and ignores order params, so an unfiltered fetch
+# spends the LIMIT window on already-acked rows and can truncate away the NEWEST
+# unacked dispatches → a phantom "no unacked messages". Filtering server-side to
+# unread means the LIMIT window is spent only on candidate-unacked rows. The
+# client-side unacked/wildcard filter below stays as defense-in-depth.
 if [ -n "$SINCE" ]; then
     RESP="$(curl -sS --max-time 20 -G \
         -H "X-Terminal-Key: ${KEY}" \
         --data-urlencode "since=${SINCE}" \
         --data-urlencode "limit=${LIMIT}" \
+        --data-urlencode "unread=true" \
         "${DAEMON_URL}/msg/${SLUG}" 2>/dev/null)" || {
         echo "ERROR: brisen-lab unreachable (GET /msg/${SLUG})" >&2
         exit 1
@@ -97,6 +104,7 @@ else
     RESP="$(curl -sS --max-time 20 -G \
         -H "X-Terminal-Key: ${KEY}" \
         --data-urlencode "limit=${LIMIT}" \
+        --data-urlencode "unread=true" \
         "${DAEMON_URL}/msg/${SLUG}" 2>/dev/null)" || {
         echo "ERROR: brisen-lab unreachable (GET /msg/${SLUG})" >&2
         exit 1
