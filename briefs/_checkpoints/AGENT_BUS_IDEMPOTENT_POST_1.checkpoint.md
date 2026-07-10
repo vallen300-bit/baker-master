@@ -1,13 +1,26 @@
 ---
 brief_id: AGENT_BUS_IDEMPOTENT_POST_1
 attempt: 1
-status: SHIPPED both PRs (brisen-lab #111 + baker-master #514); ship report lead #8371. AWAITING codex-medium gate + lead merge. Then b1 owes live prod AC + POST_DEPLOY_AC_VERDICT.
-repos: brisen-lab PR #111 (branch b1/bus-idempotent-post) + baker-master PR #514 (branch b1/bus-idempotent-post)
+status: codex round-1 FAIL (#8373) FIXED — PR #514 fix commit 22fdab91 pushed; re-review requested (lead #8382, codex #8383). PR #111 daemon had no findings. AWAITING codex re-review + lead merge. Then b1 owes live prod AC + POST_DEPLOY_AC_VERDICT.
+repos: brisen-lab PR #111 (branch b1/bus-idempotent-post) + baker-master PR #514 (branch b1/bus-idempotent-post @22fdab91)
 dispatched_by: lead (#8362, 2026-07-10T06:11Z); re-scoped lead #8366 (C+B ratified)
-updated: 2026-07-10T06:38Z
+updated: 2026-07-10T06:48Z
 ---
 
 # AGENT_BUS_IDEMPOTENT_POST_1 — checkpoint
+
+## CODEX ROUND 1 (#8373 FAIL) — FIXED in PR #514 commit 22fdab91
+Codex passed PR #111 (no daemon findings), FAILed PR #514 with 2 Python-client blockers — both fixed:
+- **P1** read-timeout not retried: a urllib READ timeout escapes as bare socket.timeout (py3.9) /
+  TimeoutError (3.10+), NOT urllib.error.URLError — the retry loop caught neither, so the core
+  post-commit-timeout mode crashed uncaught. Fix: `import socket`; `_post` except now
+  `(urllib.error.URLError, socket.timeout, TimeoutError)`. Tests test_39 (retry->success, 3 calls) +
+  test_40 (persistent->exhaust->SystemExit, 4 calls).
+- **P2** empty --idempotency-key silently minted: `'' or ... or uuid4()` treated empty as falsy. Fix:
+  fail loud BEFORE any post on empty/whitespace flag (parity with sh test_35); empty env still mints.
+  Tests test_41 (empty) + test_42 (whitespace).
+- tests/test_bus_post.py now 42/42 green. LIVE: bus_post.py two same-key posts -> one row (8378);
+  empty-key rc=1 no post. Re-review requested: lead #8382, codex #8383.
 
 ## SHIPPED (2026-07-10 ~06:37Z)
 - Lead re-scoped brief to 2 gaps + ruled design fork = **C+B** (#8366).
