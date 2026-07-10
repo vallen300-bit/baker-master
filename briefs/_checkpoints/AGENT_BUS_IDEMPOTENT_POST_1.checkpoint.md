@@ -1,10 +1,11 @@
 ---
 brief_id: AGENT_BUS_IDEMPOTENT_POST_1
 attempt: 1
-status: codex round-1 FAIL (#8373) FIXED — PR #514 fix commit 22fdab91 pushed; re-review requested (lead #8382, codex #8383). PR #111 daemon had no findings. AWAITING codex re-review + lead merge. Then b1 owes live prod AC + POST_DEPLOY_AC_VERDICT.
-repos: brisen-lab PR #111 (branch b1/bus-idempotent-post) + baker-master PR #514 (branch b1/bus-idempotent-post @22fdab91)
+status: codex rounds 1 (#8373 py P1+P2) + 2 (#8385 sh whitespace parity) BOTH FIXED — PR #514 chain 22fdab91 -> 5032dc09 pushed; re-review requested round 3 (codex #8387, lead #8388). PR #111 daemon clean throughout. AWAITING codex PASS + lead merge. Then b1 owes live prod AC + POST_DEPLOY_AC_VERDICT.
+repos: brisen-lab PR #111 (branch b1/bus-idempotent-post) + baker-master PR #514 (branch b1/bus-idempotent-post @5032dc09)
 dispatched_by: lead (#8362, 2026-07-10T06:11Z); re-scoped lead #8366 (C+B ratified)
-updated: 2026-07-10T06:48Z
+codex_rounds: R1 #8373 (py: socket.timeout retry P1 + empty-key P2) -> fix 22fdab91; R2 #8385 (sh whitespace-key parity) -> fix 5032dc09. tests/test_bus_post.py 44/44 green.
+updated: 2026-07-10T06:55Z
 ---
 
 # AGENT_BUS_IDEMPOTENT_POST_1 — checkpoint
