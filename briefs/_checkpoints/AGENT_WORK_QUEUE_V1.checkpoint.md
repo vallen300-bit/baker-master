@@ -1,12 +1,12 @@
 ---
 brief_id: AGENT_WORK_QUEUE_V1
 attempt: 2
-status: STOOD DOWN — latency-fix lane (#8300) reassigned to b2 per lead #8329; b1 idle. Only future live render check remains (lead re-routes on pilot re-flip).
-repo: brisen-lab (main @f9892dd — PR #109 MERGED)
+status: CLOSED end-to-end (b1 side). Pilot LIVE (hag-desk); b1 F5 render check PASS -> lead #8360. Nothing owed.
+repo: brisen-lab (main @6b75f705 — PR #110 MERGED, latency/glance fix by b2 + pilot flip)
 work_branch: b1/agent-work-queue-v1
 soak_start: 2026-07-09T21:49:47Z
 soak_end_est: 2026-07-10T21:49:47Z
-updated: 2026-07-10T01:40Z
+updated: 2026-07-10T03:29Z
 ---
 
 # AGENT_WORK_QUEUE_V1 — checkpoint
@@ -61,12 +61,19 @@ Sequence after diagnosis #8296: lead green-lit the fix to b1 (#8300, 23:13Z: fix
 - b1 owes nothing on AGENT_WORK_QUEUE_V1 except the FUTURE live render check, which lead re-routes
   when the pilot re-flips (see LEFT #2).
 
-## LEFT (b1 idle — single deferred item)
-1. ~~Write failing pytest + PR for glance-swallow fix~~ — REASSIGNED to b2 (#8329). Not b1's.
-2. Future live hag-desk render check — deferred; lead seeds the live job (b1 403 on cross-assign),
-   b1 verifies render + confirms no title/spec leak, lead cleans. Lead re-routes to b1 when the
-   pilot re-flips and the DB surface is stable. NOT actionable until lead pings.
-3. Prod 24h soak observation ran in parallel through ~2026-07-10T21:49Z (non-gating; per #8264).
+## CLOSE-OUT (lead #8359 -> b1 #8360, 2026-07-10T03:29Z) — arc CLOSED end-to-end
+b2 shipped the latency/glance fix + lead flipped the pilot LIVE (brisen-lab PR #110 @6b75f705,
+codex G3 rd-2 PASS #8354/#8355, Render live 03:26Z). Lead posted POST_DEPLOY_AC_VERDICT v1 PASS (#8359,
+QUEUE PILOT DECLARED LIVE, hag-desk only) and re-routed the deferred live render check to b1 as the last
+owed item. b1 ran it and posted PASS -> lead #8360.
+- b1 F5 render check on LIVE dashboard, all 4 AC PASS: Jobs button visible (flag on) / drawer opens
+  (<dialog id=jobs-drawer> in-viewport) / empty-state 'No active jobs.' renders / zero console errors.
+  Client-side flag confirm: live /api/jobs-glance=200 {enabled:true,jobs:[],badges:{}}. Screenshot:
+  briefs/_reports/b1_jobs_drawer_live_20260710.png.
+- Nothing owed by b1 on AGENT_WORK_QUEUE_V1. Arc closed.
+
+## LEFT
+Nothing. (Historical: glance-swallow/probe-timeout fix went to b2 #8329; prod 24h soak was non-gating.)
 
 ## KEY PATHS
 - brisen-lab worktree: ~/bm-b1-brisen-lab (branch b1/agent-work-queue-v1; merged to main).
@@ -75,7 +82,5 @@ Sequence after diagnosis #8296: lead green-lit the fix to b1 (#8300, 23:13Z: fix
 - Gate isolation: full-suite-WITH-this-file shows ~25 pre-existing wake-cluster failures (BRISEN_LAB_TEST_ISOLATION_WAKE_CLUSTER_1) — use isolated run + full-suite-minus-file.
 
 ## NEXT CONCRETE STEP
-NONE — b1 is STOOD DOWN (lead #8329). Do NOT build the glance-swallow/probe-timeout fix (b2 owns it).
-Do NOT re-run the drill (PASS, #8267/#8270). Do NOT improvise prod DB or Render creds. Do NOT change code.
-A future b1 seat: this arc is idle for b1. The only remaining b1 item is the deferred live render check
-(LEFT #2), and it is NOT actionable until lead explicitly re-routes it on pilot re-flip. Idle until then.
+NONE — AGENT_WORK_QUEUE_V1 is CLOSED end-to-end (b1 #8360, render check PASS; pilot LIVE hag-desk).
+A future b1 seat: do NOT resume this arc. If a NEW brief lands in CODE_1_PENDING.md, work that instead.
