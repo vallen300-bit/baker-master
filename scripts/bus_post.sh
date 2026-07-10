@@ -34,6 +34,7 @@ SCRIPT_DIR="$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)"
 
 PARENT_ID=""
 THREAD_ID=""
+IDEMPOTENCY_KEY=""
 POSITIONAL=()
 while [ "$#" -gt 0 ]; do
     case "$1" in
@@ -54,13 +55,31 @@ while [ "$#" -gt 0 ]; do
             THREAD_ID="${1#*=}"
             [ -n "$THREAD_ID" ] || { echo "ERROR: --thread requires a non-empty thread uuid" >&2; exit 2; }
             shift ;;
+        --idempotency-key)
+            # AGENT_BUS_IDEMPOTENT_POST_1: caller-supplied key so a retry loop that
+            # spans MULTIPLE invocations reuses ONE key (the daemon dedupes on it).
+            # Reject empty OR whitespace-only (codex #8385): the daemon strips the key
+            # before insert (bus.py), so a blank key silently becomes keyless and never
+            # dedupes — fail loud instead. Parity with bus_post.py's flag guard.
+            [ "$#" -ge 2 ] || { echo "ERROR: --idempotency-key requires a non-empty value" >&2; exit 2; }
+            case "$2" in
+                *[![:space:]]*) IDEMPOTENCY_KEY="$2" ;;
+                *) echo "ERROR: --idempotency-key requires a non-empty value" >&2; exit 2 ;;
+            esac
+            shift 2 ;;
+        --idempotency-key=*)
+            case "${1#*=}" in
+                *[![:space:]]*) IDEMPOTENCY_KEY="${1#*=}" ;;
+                *) echo "ERROR: --idempotency-key requires a non-empty value" >&2; exit 2 ;;
+            esac
+            shift ;;
         *) POSITIONAL+=("$1"); shift ;;
     esac
 done
 set -- "${POSITIONAL[@]:-}"
 
 if [ "${1:-}" = "" ] || [ "${2:-}" = "" ]; then
-    echo "Usage: bus_post.sh <recipient_slug> <body> [topic] [--parent <msg-id>] [--thread <uuid>]" >&2
+    echo "Usage: bus_post.sh <recipient_slug> <body> [topic] [--parent <msg-id>] [--thread <uuid>] [--idempotency-key <key>]" >&2
     exit 2
 fi
 
@@ -111,46 +130,95 @@ if [ -z "$KEY" ]; then
     exit 1
 fi
 
+# --- idempotency key (one per logical send, reused across retries) ---
+# AGENT_BUS_IDEMPOTENT_POST_1: precedence --idempotency-key flag -> BUS_IDEMPOTENCY_KEY
+# env -> minted here ONCE. Generated before the retry loop so every attempt of THIS
+# send carries the SAME key; the daemon dedupes on (from_terminal, idempotency_key), so
+# a retry-after-commit (503/timeout that actually landed) replays the original row
+# instead of duplicating. A caller managing its own multi-invocation loop passes the key
+# in so its retries dedupe too.
+# BUS_IDEMPOTENCY_KEY env fallback (only when no flag). A whitespace-only env value is
+# treated as UNSET -> mint below (parity with bus_post.py's .strip(); the daemon would
+# strip a blank key to keyless anyway — codex #8385). Unlike the explicit flag, a blank
+# env is not a caller error, so it mints rather than failing loud (matches bus_post.py).
+if [ -z "$IDEMPOTENCY_KEY" ]; then
+    case "${BUS_IDEMPOTENCY_KEY:-}" in
+        *[![:space:]]*) IDEMPOTENCY_KEY="$BUS_IDEMPOTENCY_KEY" ;;
+        *) : ;;   # empty or whitespace-only -> leave unset
+    esac
+fi
+if [ -z "$IDEMPOTENCY_KEY" ]; then
+    IDEMPOTENCY_KEY="$(uuidgen 2>/dev/null | tr '[:upper:]' '[:lower:]' || true)"
+    [ -n "$IDEMPOTENCY_KEY" ] || IDEMPOTENCY_KEY="$(python3 -c 'import uuid; print(uuid.uuid4())')"
+fi
+
 # --- payload construction (Python json.dumps for safe escaping) ---
 
 PAYLOAD="$(python3 -c '
 import json, sys
 recipient, body, topic = sys.argv[1], sys.argv[2], sys.argv[3]
-parent_id, thread_id = sys.argv[4], sys.argv[5]
+parent_id, thread_id, idempotency_key = sys.argv[4], sys.argv[5], sys.argv[6]
 out = {"kind": "dispatch", "body": body, "to": [recipient], "tier_required": "B"}
+# Always-present now (every send is idempotent-safe); placed right after the core
+# fields, before the optional threading keys.
+out["idempotency_key"] = idempotency_key
 if topic:
     out["topic"] = topic
-# Appended last + only when provided, so an un-flagged post is byte-identical to before.
+# Appended last + only when provided, so a threading-free post keeps a stable shape.
 if parent_id:
     out["parent_id"] = int(parent_id)
 if thread_id:
     out["thread_id"] = thread_id
 print(json.dumps(out))
-' "$RECIPIENT" "$BODY" "$TOPIC" "$PARENT_ID" "$THREAD_ID")"
+' "$RECIPIENT" "$BODY" "$TOPIC" "$PARENT_ID" "$THREAD_ID" "$IDEMPOTENCY_KEY")"
 
-# --- POST ---
+# --- POST (bounded retry-with-backoff) ---
+# AGENT_BUS_IDEMPOTENT_POST_1 (lead #8366, ratified C+B): retry ONLY on HTTP 503
+# (bus_busy_retry) or a network/timeout-class curl failure — every attempt reuses the
+# single IDEMPOTENCY_KEY above, so a retry that follows a commit replays instead of
+# duplicating. Any other HTTP (4xx / non-503 5xx) fails loud immediately (no retry).
+# After MAX_ATTEMPTS the final failure exits non-zero (exit code unchanged: 1) — fail
+# loud, do not swallow. Defaults 4 attempts / base 2s (~2/4/8s); both env-overridable
+# (BUS_POST_MAX_ATTEMPTS / BUS_POST_BACKOFF_BASE) so the test suite runs with base 0.
+
+MAX_ATTEMPTS="${BUS_POST_MAX_ATTEMPTS:-4}"
+BACKOFF_BASE="${BUS_POST_BACKOFF_BASE:-2}"
 
 RESP_FILE="$(mktemp)"
 trap 'rm -f "$RESP_FILE"' EXIT
 
-# Don't let `set -e` kill us on curl failure — we want to surface a
-# descriptive error with both the curl exit code and HTTP status.
-set +e
-HTTP="$(curl -s -o "$RESP_FILE" -w "%{http_code}" \
-    --connect-timeout 5 --max-time 30 \
-    -H "X-Terminal-Key: $KEY" \
-    -H "Content-Type: application/json" \
-    -X POST "$DAEMON_URL/msg/${RECIPIENT}" \
-    --data "$PAYLOAD")"
-CURL_EXIT=$?
-set -e
+attempt=1
+while :; do
+    set +e
+    HTTP="$(curl -s -o "$RESP_FILE" -w "%{http_code}" \
+        --connect-timeout 5 --max-time 30 \
+        -H "X-Terminal-Key: $KEY" \
+        -H "Content-Type: application/json" \
+        -X POST "$DAEMON_URL/msg/${RECIPIENT}" \
+        --data "$PAYLOAD")"
+    CURL_EXIT=$?
+    set -e
 
-if [ "$CURL_EXIT" -ne 0 ] || [ "$HTTP" != "200" ]; then
-    echo "ERROR: POST /msg/${RECIPIENT} failed (curl_exit=${CURL_EXIT}, HTTP ${HTTP})" >&2
-    cat "$RESP_FILE" >&2
-    echo >&2
-    exit 1
-fi
+    if [ "$CURL_EXIT" -eq 0 ] && [ "$HTTP" = "200" ]; then
+        cat "$RESP_FILE"
+        echo
+        exit 0
+    fi
 
-cat "$RESP_FILE"
-echo
+    # Retryable = network/timeout (curl non-zero) OR HTTP 503. Everything else is
+    # a hard failure that retrying cannot fix.
+    retryable=0
+    [ "$CURL_EXIT" -ne 0 ] && retryable=1
+    [ "$HTTP" = "503" ] && retryable=1
+
+    if [ "$retryable" -eq 0 ] || [ "$attempt" -ge "$MAX_ATTEMPTS" ]; then
+        echo "ERROR: POST /msg/${RECIPIENT} failed (curl_exit=${CURL_EXIT}, HTTP ${HTTP}) after ${attempt} attempt(s)" >&2
+        cat "$RESP_FILE" >&2
+        echo >&2
+        exit 1
+    fi
+
+    sleep_s=$(( BACKOFF_BASE * (1 << (attempt - 1)) ))   # base 2 -> 2, 4, 8
+    [ "$sleep_s" -gt 0 ] && sleep "$sleep_s"
+    attempt=$(( attempt + 1 ))
+done
