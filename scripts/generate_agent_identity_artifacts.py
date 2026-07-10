@@ -159,11 +159,11 @@ def _snapshot_path_for(agent: dict[str, Any]) -> str | None:
     if slug in {"clerk", "clerk-haiku"}:
         return "/Users/dimitry/bm-clerk"
     if slug == "cowork-bb-desk":
-        return "/Users/dimitry/bm-cowork-bb-desk"
+        return "/Users/dimitry/BB"
     if slug == "cowork-ao-desk":
-        return "/Users/dimitry/bm-cowork-ao-desk"
+        return "/Users/dimitry/AO"
     if slug == "cowork-movie-desk":
-        return "/Users/dimitry/bm-cowork-movie-desk"
+        return "/Users/dimitry/MOVIE"
     if slug == "cowork-hag-desk":
         return "/Users/dimitry/Hagenauer"
     if slug == "cowork-origination-desk":
