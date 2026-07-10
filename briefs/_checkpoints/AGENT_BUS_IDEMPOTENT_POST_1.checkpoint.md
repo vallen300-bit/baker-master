@@ -1,13 +1,31 @@
 ---
 brief_id: AGENT_BUS_IDEMPOTENT_POST_1
 attempt: 1
-status: HOLDING — recon done; scope-overlap escalated to lead #8365 (fleet/bus-idempotency). Build NOT started, pending lead answer to 2 questions. NO code written yet.
-repos: brisen-lab (work branch b1/bus-idempotent-post off main @6b75f70) + baker-master (~/bm-b1, no work branch yet)
-dispatched_by: lead (#8362, 2026-07-10T06:11Z)
-updated: 2026-07-10T06:21Z
+status: SHIPPED both PRs (brisen-lab #111 + baker-master #514); ship report lead #8371. AWAITING codex-medium gate + lead merge. Then b1 owes live prod AC + POST_DEPLOY_AC_VERDICT.
+repos: brisen-lab PR #111 (branch b1/bus-idempotent-post) + baker-master PR #514 (branch b1/bus-idempotent-post)
+dispatched_by: lead (#8362, 2026-07-10T06:11Z); re-scoped lead #8366 (C+B ratified)
+updated: 2026-07-10T06:38Z
 ---
 
 # AGENT_BUS_IDEMPOTENT_POST_1 — checkpoint
+
+## SHIPPED (2026-07-10 ~06:37Z)
+- Lead re-scoped brief to 2 gaps + ruled design fork = **C+B** (#8366).
+- brisen-lab PR #111: `deduped:true` on ON-CONFLICT replay (bus.py). Test in
+  test_ticket_id_dedup_1_daemon.py. Dedup daemon file 5/5 green (live PG).
+- baker-master PR #514: bus_post.{sh,py} internal retry-backoff (4 attempts ~2/4/8s, 503/timeout
+  only, env-tunable BUS_POST_MAX_ATTEMPTS/BUS_POST_BACKOFF_BASE) reusing ONE minted key +
+  --idempotency-key / BUS_IDEMPOTENCY_KEY passthrough. tests/test_bus_post.py 38/38 green.
+- LIVE end-to-end smoke: two same-key posts via updated bus_post.sh -> ONE row (msg 8369).
+- Autowake combined-run failures = pre-existing WAKE_CLUSTER_1 (proven identical on stashed clean tree).
+- Ship report -> lead #8371 (fleet/bus-idempotency).
+
+## LEFT (b1 owes, after lead merges both + Render deploys brisen-lab)
+1. Live prod AC: POST twice with ONE key via the merged bus_post.sh against prod -> assert single
+   brisen_lab_msg row + single wake_event + `deduped:true` on the 2nd (replay). deduped:true only
+   appears once PR #111 is deployed.
+2. POST_DEPLOY_AC_VERDICT v1 on topic fleet/bus-idempotency.
+3. Do NOT merge (B-code scope) — lead merges. Do NOT re-run drills.
 
 ## KEY FINDING (recon done, do NOT redo)
 The DAEMON side of this brief is ALREADY MERGED ON MAIN under a different ticket:
@@ -41,10 +59,11 @@ re-invoking bus_post.sh. So:
 b1 leaned B in the escalation.
 
 ## NEXT CONCRETE STEP
-AWAIT lead reply on fleet/bus-idempotency (answer to #8365: (i) close deduped:true gap yes/no; (ii) client
-approach A/B/C). Do NOT rebuild the daemon (already merged). Do NOT guess the client approach. On lead's pick:
-TDD-first, brisen-lab PR (deduped flag if approved) + baker-master PR (client scripts), one codex-medium
-covering both, live prod AC, POST_DEPLOY_AC_VERDICT v1 on fleet/bus-idempotency.
+Design fork RESOLVED = C+B (lead #8366). Both PRs SHIPPED (#111 daemon, #514 client) + ship report #8371.
+AWAIT codex-medium verdict + lead merge of BOTH. Then (b1-owed): live prod AC (post twice one key via merged
+bus_post.sh -> single row + single wake_event + deduped:true on replay) + POST_DEPLOY_AC_VERDICT v1 on
+fleet/bus-idempotency. On codex request_changes: address -> NEW commit (never amend) on the same branch -> push
+-> reply. Do NOT merge (lead does).
 
 ## KEY PATHS
 - brisen-lab checkout: ~/bm-b1-brisen-lab (branch b1/bus-idempotent-post off main @6b75f70; clean, no edits).
