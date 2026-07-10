@@ -740,3 +740,87 @@ def test_38_py_auto_mint_key_present(stub_daemon, fake_op_path):
     assert r.returncode == 0, r.stderr
     key = captured[0]["payload"]["idempotency_key"]
     assert isinstance(key, str) and len(key) >= 8
+
+
+# ---- codex #8373 fixes: read-timeout retry (P1) + empty-key fail-loud (P2) ----
+
+class _FakeResp:
+    """Minimal context-manager stand-in for a urlopen() response."""
+
+    def __init__(self, body: bytes):
+        self._body = body
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *exc):
+        return False
+
+    def read(self):
+        return self._body
+
+
+def test_39_py_post_retries_on_read_timeout(monkeypatch):
+    """codex #8373 P1: a READ timeout raises a bare socket.timeout (NOT urllib URLError).
+    _post must RETRY it (reusing the one key) — two timeouts then a 200 → success on the
+    3rd attempt. Regression: before the fix this escaped uncaught after exactly 1 call."""
+    import socket as _socket
+    mod = _load_bus_post_module()
+    monkeypatch.setenv("BUS_POST_BACKOFF_BASE", "0")
+    calls = {"n": 0}
+
+    def fake_urlopen(req, timeout=None):
+        calls["n"] += 1
+        if calls["n"] < 3:
+            raise _socket.timeout("timed out")
+        return _FakeResp(b'{"message_id": 999, "deduped": false}')
+
+    monkeypatch.setattr(mod.urllib.request, "urlopen", fake_urlopen)
+    result = mod._post("b2", {"body": "x", "idempotency_key": "k1"}, "key")
+    assert calls["n"] == 3             # retried past both read timeouts
+    assert result["message_id"] == 999
+
+
+def test_40_py_post_read_timeout_exhausts_then_fails_loud(monkeypatch):
+    """codex #8373 P1: a PERSISTENT read timeout retries to the budget then exits
+    non-zero (fail loud), not an uncaught socket.timeout traceback."""
+    import socket as _socket
+    mod = _load_bus_post_module()
+    monkeypatch.setenv("BUS_POST_BACKOFF_BASE", "0")
+    calls = {"n": 0}
+
+    def fake_urlopen(req, timeout=None):
+        calls["n"] += 1
+        raise _socket.timeout("timed out")
+
+    monkeypatch.setattr(mod.urllib.request, "urlopen", fake_urlopen)
+    with pytest.raises(SystemExit):
+        mod._post("b2", {"body": "x", "idempotency_key": "k1"}, "key")
+    assert calls["n"] == 4             # default MAX_ATTEMPTS, all retried
+
+
+def test_41_py_empty_idempotency_key_flag_fails_loud(stub_daemon, fake_op_path):
+    """codex #8373 P2: an explicitly empty --idempotency-key must fail loud and never
+    post (parity with the sh guard test_35), not silently auto-mint a fresh key."""
+    url, captured = stub_daemon
+    r = _run_py(
+        ["--to", "b2", "--body", "x", "--idempotency-key", ""],
+        _env_with({"BAKER_ROLE": "AH1", "BRISEN_LAB_DAEMON_URL": url},
+                  fake_op_dir=fake_op_path),
+    )
+    assert r.returncode != 0
+    assert "non-empty" in r.stderr
+    assert captured == []              # never posted
+
+
+def test_42_py_whitespace_idempotency_key_flag_fails_loud(stub_daemon, fake_op_path):
+    """codex #8373 P2 edge: a whitespace-only --idempotency-key is also a caller error."""
+    url, captured = stub_daemon
+    r = _run_py(
+        ["--to", "b2", "--body", "x", "--idempotency-key", "   "],
+        _env_with({"BAKER_ROLE": "AH1", "BRISEN_LAB_DAEMON_URL": url},
+                  fake_op_dir=fake_op_path),
+    )
+    assert r.returncode != 0
+    assert "non-empty" in r.stderr
+    assert captured == []

@@ -17,6 +17,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import socket
 import subprocess
 import sys
 import time
@@ -131,13 +132,18 @@ def _fetch_key(sender: str) -> str:
 def _post(recipient: str, payload: dict, key: str) -> dict:
     """POST with bounded retry-with-backoff (AGENT_BUS_IDEMPOTENT_POST_1, lead #8366).
 
-    Retry ONLY on HTTP 503 (bus_busy_retry) or a network/timeout-class URLError. The
+    Retry ONLY on HTTP 503 (bus_busy_retry) or a network/timeout-class failure. The
     payload already carries a single idempotency_key, reused on every attempt, so a
     retry that follows a commit replays the original row instead of duplicating. Any
     other HTTP status (4xx / non-503 5xx) fails loud immediately — retrying cannot fix
     it. After the attempt budget is exhausted the final failure exits non-zero (fail
     loud). Defaults 4 attempts / base 2s (~2/4/8s); both env-overridable
     (BUS_POST_MAX_ATTEMPTS / BUS_POST_BACKOFF_BASE) so tests run with base 0.
+
+    Timeout classes (codex #8373 P1): urlopen wraps a CONNECT failure/timeout in
+    urllib.error.URLError, but a READ timeout after the request is sent escapes as a
+    bare socket.timeout (Python 3.9) / TimeoutError (3.10+ alias). The read timeout IS
+    the core post-commit failure mode this brief targets, so BOTH are caught + retried.
     """
     url = f"{DAEMON_URL}/msg/{recipient}"
     data = json.dumps(payload).encode("utf-8")
@@ -159,8 +165,11 @@ def _post(recipient: str, payload: dict, key: str) -> dict:
             if e.code != 503:
                 sys.exit(f"ERROR: POST {url} returned HTTP {e.code}: {body}")
             last_err = f"HTTP 503: {body}"
-        except urllib.error.URLError as e:
-            last_err = f"URLError: {e.reason}"
+        except (urllib.error.URLError, socket.timeout, TimeoutError) as e:
+            # URLError = connect failure / wrapped connect timeout; socket.timeout /
+            # TimeoutError = a READ timeout after the request was sent (codex #8373 P1).
+            # All retryable — the same idempotency_key makes a retry a safe replay.
+            last_err = f"{type(e).__name__}: {e}"
         if attempt < max_attempts:
             sleep_s = backoff_base * (2 ** (attempt - 1))  # base 2 -> 2, 4, 8
             if sleep_s > 0:
@@ -189,6 +198,13 @@ def main() -> None:
     )
     args = ap.parse_args()
 
+    # AGENT_BUS_IDEMPOTENT_POST_1 (codex #8373 P2): an explicitly-passed but empty /
+    # whitespace-only --idempotency-key is a caller error (e.g. an empty-expanded shell
+    # var) — fail loud BEFORE any post, never silently auto-mint over caller intent
+    # (parity with bus_post.sh's flag guard + tests/test_bus_post.py empty-flag test).
+    if args.idempotency_key is not None and not args.idempotency_key.strip():
+        sys.exit("ERROR: --idempotency-key requires a non-empty value")
+
     recipient_inputs = [r.strip() for r in args.to.split(",") if r.strip()]
     # F2-FU-1: director-recipient is daemon-gated (BRISEN_LAB_DIRECTOR_RECIPIENT_BLOCKED).
     # Single control point — script passes through; daemon enforces.
@@ -207,12 +223,13 @@ def main() -> None:
     key = _fetch_key(sender)
 
     # AGENT_BUS_IDEMPOTENT_POST_1: one key per logical send, minted ONCE here and reused
-    # on every internal retry attempt. Precedence: --idempotency-key -> BUS_IDEMPOTENCY_KEY
-    # env -> fresh uuid. Distinct sends get distinct keys (so they never dedupe together);
-    # only a retry of THIS send, or a caller passing the same key, replays the original row.
+    # on every internal retry attempt. Precedence: --idempotency-key (non-empty, validated
+    # above) -> BUS_IDEMPOTENCY_KEY env (empty env treated as unset, matching bus_post.sh)
+    # -> fresh uuid. Distinct sends get distinct keys (so they never dedupe together); only
+    # a retry of THIS send, or a caller passing the same key, replays the original row.
     idempotency_key = (
         args.idempotency_key
-        or os.environ.get("BUS_IDEMPOTENCY_KEY")
+        or os.environ.get("BUS_IDEMPOTENCY_KEY", "").strip()
         or str(uuid.uuid4())
     )
 
