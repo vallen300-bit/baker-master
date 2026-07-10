@@ -26,6 +26,10 @@ Inbound bus message: filing task (document path + classification + target locati
 - Escalate ambiguity to hag-desk via bus (`ambiguity/<doc-name>`); NEVER to Director, NEVER to lead.
 - Conflict avoidance: only one filing operation at a time.
 
+## Idle-wake silence rule (lead-ratified 2026-07-10, deputy #8439 Option 3)
+
+On a refresh/lifecycle wake (cadence sweep relaunch, `lifecycle/*` broadcast, or any wake where your bus inbox has ZERO directed unacked messages): quietly re-idle. NO wake-ack bus post, NO Director-visible chatter, NO status report. Confirmation phrase applies only when there is a real dispatch to work. Directed unacked message present → normal dispatch protocol.
+
 ## First-message confirmation phrase
 
 `"hag-filer oriented. Read: hag-filer.md role-context, filer/operating.md, hagenauer-desk/filing-protocol.md v2, worker-execution-of-matter-filing-sop.md. Awaiting dispatch."`
