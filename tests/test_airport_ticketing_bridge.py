@@ -68,6 +68,40 @@ def test_automated_clickup_notification_email_does_not_ticket():
     assert bridge.build_email_ticket(automated) is None
 
 
+def test_press_digest_mio_observer_does_not_ticket():
+    """TICKETING_BRIDGE_PRESS_DIGEST_EXCLUDE_1 — the MIO OBSERVER daily Pressespiegel
+    (mio@observer.at, a media-monitoring vendor digest) carries "Mandarin Oriental" in
+    its subject, so it matched the keyword lane and mis-ticketed onto aukera-annaberg
+    every morning (bb-desk #8413/#8414 dispose WRONG_TERMINAL). It is not matter mail —
+    the sender-skip list must drop it at the automated-sender gate BEFORE the keyword
+    match, even when "mandarin oriental" is an ACTIVE keyword (as in prod)."""
+    arrival = _arrival()
+    digest = bridge.EmailArrival(
+        **{
+            **arrival.__dict__,
+            "sender_name": "MIO OBSERVER",
+            "sender_email": "mio@observer.at",
+            "subject": "Mandarin Oriental Wien - Ihr OBSERVER Pressespiegel",
+            "full_body": "Tagesaktueller Pressespiegel: Mandarin Oriental Wien.",
+        }
+    )
+    assert bridge.build_email_ticket(digest, keywords=("mandarin oriental",)) is None
+
+
+def test_mio_observer_skip_is_sender_scoped_not_keyword_wide():
+    """The cut is surgical (brief: do NOT reroute "mandarin oriental" wholesale). Only the
+    digest sender is treated as automated; a legitimate human carrying the same keyword is
+    NOT — so the keyword still routes normally for real MO Residences prospects."""
+    arrival = _arrival()
+    digest = bridge.EmailArrival(**{**arrival.__dict__, "sender_email": "mio@observer.at"})
+    human = bridge.EmailArrival(
+        **{**arrival.__dict__, "sender_email": "jernej.omahen@example.com",
+           "subject": "Re: Your interest in Mandarin Oriental Residences, Vienna"}
+    )
+    assert bridge._is_automated_email_arrival(digest) is True
+    assert bridge._is_automated_email_arrival(human) is False
+
+
 def test_format_ticket_for_bus_includes_check_in_contract():
     ticket = bridge.build_email_ticket(
         _arrival(),

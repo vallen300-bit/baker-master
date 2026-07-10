@@ -140,6 +140,14 @@ _SKIP_EMAIL_SENDER_PATTERNS = (
     "notification@",
     "@clickup.com",
     "@todoist.com",
+    # TICKETING_BRIDGE_PRESS_DIGEST_EXCLUDE_1 (lead #8416) — MIO OBSERVER daily
+    # Pressespiegel (media-monitoring vendor digest) carries "Mandarin Oriental" in its
+    # subject and mis-ticketed onto aukera-annaberg via the keyword lane every morning
+    # (bb-desk #8413/#8414 disposed WRONG_TERMINAL daily). Surgical sender-scoped cut: it
+    # is not matter mail. NOT a keyword change — "mandarin oriental" still tickets for
+    # every other sender. (The alerts->signal bridge already noise-filters this sender via
+    # MARKETING_NOISE_FILTER_1; the airport bridge has its own separate skip list.)
+    "mio@observer.at",
 )
 
 # BOX5_OUTBOUND_INGEST_1 — direction-aware ingestion (Director ruling 2026-07-01).
