@@ -18,7 +18,17 @@
 set -uo pipefail
 
 BUNDLE_DIR="${FORGE_CHECK_DIR:-$HOME/Library/Application Support/baker/forge-check}"
-INSTALLER="${BUNDLE_DIR}/install_forge_agent.sh"
+# Installer lives in the bundle's scripts/ subdir (install_forge_drift_cron.sh
+# lays it down at scripts/install_forge_agent.sh, fixtures at ../tests/fixtures).
+# FORGE_CHECK_DIR may resolve BUNDLE_DIR to the bundle ROOT (a bare `bash
+# forge_drift_check.sh` manual run) OR to <root>/scripts (the launchd plist's
+# EnvironmentVariables set FORGE_CHECK_DIR=<root>/scripts). Probe scripts/-first
+# then fall back so the check finds the installer in BOTH invocation modes and
+# never false-reports "bundle-missing". Anchor: 2026-07-10 macbook-pro-2.home —
+# a manual run defaulted BUNDLE_DIR to the bundle root and missed the scripts/
+# installer, logging ERROR bundle-missing on an otherwise-clean host.
+INSTALLER="${BUNDLE_DIR}/scripts/install_forge_agent.sh"
+[[ -f "$INSTALLER" ]] || INSTALLER="${BUNDLE_DIR}/install_forge_agent.sh"
 LOG="${FORGE_DRIFT_LOG:-$HOME/.brisen-lab/forge-drift.log}"
 LAB_URL="${LAB_URL:-https://brisen-lab.onrender.com}"
 SENDER="${FORGE_DRIFT_BUS_ROLE:-daemon}"    # bus sender slug for the alert
