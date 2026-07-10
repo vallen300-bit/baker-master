@@ -1,10 +1,10 @@
 ---
 brief_id: TICKETING_BRIDGE_PRESS_DIGEST_EXCLUDE_1
 attempt: 1
-status: SHIPPED — PR #516 (baker-master, branch b1/press-digest-exclude). Diagnosis + fix + AC reported lead #8418; codex-medium requested #8419. AWAITING codex verdict + lead merge.
-repo: baker-master, branch b1/press-digest-exclude @HEAD (off main)
+status: MERGED + b1 RELEASED — lead diff-reviewed + merged PR #516 (#8420); codex gate WAIVED for this change class (PR #515 precedent); codex #8419 stood down (#8422). Render deploys from main. ONLY open item = tomorrow-morning AC watch (bb-desk sees it first, lead flagged them); lane closes on that confirm. b1 owes nothing.
+repo: baker-master PR #516 MERGED to main (was branch b1/press-digest-exclude)
 dispatched_by: lead (#8416/#8417 dup, 2026-07-10T07:38Z), topic ticketing-bridge/keyword-misroute-mo-vie-pressespiegel
-updated: 2026-07-10T07:47Z
+updated: 2026-07-10T07:49Z
 ---
 
 # TICKETING_BRIDGE_PRESS_DIGEST_EXCLUDE_1 — checkpoint
