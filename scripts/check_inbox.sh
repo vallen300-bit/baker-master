@@ -28,14 +28,20 @@
 #   BAKER_ROLE=researcher ~/bm-b1/scripts/check_inbox.sh 500      # widen the fetch limit
 #
 # Env:
-#   BAKER_ROLE              — required. Maps to the reader's own slug.
-#   BRISEN_LAB_DAEMON_URL   — optional. Default: https://brisen-lab.onrender.com
+#   BAKER_ROLE              — required. Maps to the reader's own slug. The cage
+#                             pins this to the installed role (researcher) for
+#                             vetted invocations, so it cannot be used to read
+#                             another terminal's inbox (codex G3 #8628 F3).
 #
 # Exits non-zero on any failure with descriptive stderr.
 
 set -u
 
-DAEMON_URL="${BRISEN_LAB_DAEMON_URL:-https://brisen-lab.onrender.com}"
+# HARD-PINNED daemon URL (codex G3 #8628 F1, defense-in-depth): NO env override.
+# A BRISEN_LAB_DAEMON_URL=evil prefix must never redirect the X-Terminal-Key to
+# an attacker host. The cage's env-prefix choke point already denies any such
+# prefix on a vetted script; pinning here holds even if the cage is bypassed.
+DAEMON_URL="https://brisen-lab.onrender.com"
 SCRIPT_DIR="$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)"
 # shellcheck source=scripts/agent_identity_generated.sh
 . "$SCRIPT_DIR/agent_identity_generated.sh"
