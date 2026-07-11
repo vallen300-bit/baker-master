@@ -8637,6 +8637,9 @@ _BUS_CONSOLE_TEMPLATE = os.path.join(
     os.path.dirname(os.path.abspath(__file__)), "templates", "bus_console_template.html"
 )
 _BUS_CONSOLE_LAST_OK: str | None = None  # iso ts of the last successful bus read
+_BUS_CONSOLE_TOTAL_BUDGET_S = 10.0   # hard wall-clock ceiling for one proxy read
+_BUS_CONSOLE_PERSLUG_WORKERS = 8     # bounded fan-out concurrency for the fallback
+_BUS_CONSOLE_PERSLUG_MAX = 60        # never fan out to more than this many slugs
 
 
 def _bus_console_base_url() -> str:
@@ -8667,29 +8670,56 @@ def _bus_console_normalize(m: dict) -> dict:
     }
 
 
-def _bus_console_perslug(base: str, headers: dict, limit: int):
-    """Fallback fleet read: loop the registry slugs when /msg/all is unavailable."""
+def _bus_console_perslug(base: str, headers: dict, limit: int, deadline: float):
+    """Fallback fleet read when /msg/all is unavailable. Bounded: caps the slug
+    count, fans out with bounded concurrency, and honors the overall `deadline`
+    (monotonic ts) — never an unbounded sequential loop that could stall the
+    worker during bus degradation (codex G3 P1 fix)."""
     import requests as _requests
+    from concurrent.futures import ThreadPoolExecutor, wait as _fwait
+
+    def _remaining() -> float:
+        return deadline - time.monotonic()
 
     slugs: list = []
     try:
-        tr = _requests.get(f"{base}/api/v2/terminals", timeout=8)
+        tr = _requests.get(f"{base}/api/v2/terminals", timeout=min(5.0, max(0.5, _remaining())))
         if tr.status_code == 200:
             j = tr.json()
             raw = j if isinstance(j, list) else (j.get("terminals") or [])
             slugs = [s if isinstance(s, str) else (s.get("slug") or s.get("alias")) for s in raw]
-            slugs = [s for s in slugs if s]
+            slugs = [s for s in slugs if s][:_BUS_CONSOLE_PERSLUG_MAX]
     except Exception:
         logger.exception("bus_console: terminals registry fetch failed")
-    per = max(5, limit // max(1, len(slugs) or 1))
-    out: list = []
-    for slug in slugs:
+    if not slugs or _remaining() <= 0:
+        return [], "per-slug-loop"
+    per = max(5, limit // max(1, len(slugs)))
+
+    def _one(slug):
         try:
-            r = _requests.get(f"{base}/msg/{slug}", headers=headers, params={"limit": per}, timeout=6)
+            r = _requests.get(f"{base}/msg/{slug}", headers=headers,
+                              params={"limit": per}, timeout=min(4.0, max(0.5, _remaining())))
             if r.status_code == 200:
-                out.extend(_bus_console_extract(r.json()))
+                return _bus_console_extract(r.json())
         except Exception:
-            continue
+            return []
+        return []
+
+    out: list = []
+    ex = ThreadPoolExecutor(max_workers=_BUS_CONSOLE_PERSLUG_WORKERS)
+    try:
+        futures = [ex.submit(_one, s) for s in slugs]
+        done, _not_done = _fwait(futures, timeout=max(0.0, _remaining()))
+        for fut in done:
+            try:
+                out.extend(fut.result())
+            except Exception:
+                continue
+    finally:
+        # Do NOT block on stragglers — each in-flight call is already timeout-
+        # bounded; abandon any past the deadline so the request returns promptly.
+        ex.shutdown(wait=False)
+
     seen, dedup = set(), []
     for m in out:
         mid = m.get("id")
@@ -8712,21 +8742,26 @@ def _bus_console_fetch(recipient: str | None = None, limit: int = 200) -> dict:
                 "source": None, "rows": [], "count": 0}
     base = _bus_console_base_url()
     headers = {"X-Terminal-Key": key}
+    deadline = time.monotonic() + _BUS_CONSOLE_TOTAL_BUDGET_S
+
+    def _remaining() -> float:
+        return max(0.1, deadline - time.monotonic())
+
     try:
         if recipient and recipient != "all":
             r = _requests.get(f"{base}/msg/{recipient}", headers=headers,
-                              params={"limit": limit}, timeout=8)
+                              params={"limit": limit}, timeout=min(8.0, _remaining()))
             r.raise_for_status()
             msgs = _bus_console_extract(r.json())
             source = f"msg/{recipient}"
         else:
             r = _requests.get(f"{base}/msg/all", headers=headers,
-                              params={"limit": limit}, timeout=8)
+                              params={"limit": limit}, timeout=min(8.0, _remaining()))
             if r.status_code == 200:
                 msgs = _bus_console_extract(r.json())
                 source = "msg/all"
             else:
-                msgs, source = _bus_console_perslug(base, headers, limit)
+                msgs, source = _bus_console_perslug(base, headers, limit, deadline)
         rows = [_bus_console_normalize(m) for m in msgs]
         rows.sort(key=lambda x: x.get("created_at") or "", reverse=True)
         rows = rows[:limit]
@@ -8769,7 +8804,10 @@ async def bus_console_json(request: Request):
         limit = min(500, max(1, int(request.query_params.get("limit", "200"))))
     except (TypeError, ValueError):
         limit = 200
-    result = _bus_console_fetch(recipient=recipient, limit=limit)
+    # Offload the blocking (requests-based) proxy read to a worker thread so it
+    # never stalls the event loop / FastAPI worker during bus degradation
+    # (codex G3 P1 fix). The fetch itself is total-deadline bounded.
+    result = await asyncio.to_thread(_bus_console_fetch, recipient=recipient, limit=limit)
     # Server-side filters (belt-and-suspenders; the page also filters client-side
     # for instant UX). Applied only to the returned rows — never suppresses the
     # bus_ok / banner signal.

@@ -158,3 +158,53 @@ def test_bus_console_no_key_configured(monkeypatch):
     result = dashboard._bus_console_fetch(limit=10)
     assert result["bus_ok"] is False
     assert "not configured" in result["bus_error"]
+
+
+# --- regression: /api/bus-console.json must NOT block the event loop --------
+# (codex G3 P1: the async endpoint calls a blocking requests-based fetch; it
+# must be offloaded to a thread so a slow upstream can't starve the worker.)
+def test_bus_console_json_does_not_block_event_loop(monkeypatch):
+    import asyncio
+    import time as _time
+    from starlette.requests import Request
+    from outputs import dashboard
+
+    monkeypatch.setenv("ARRIVALS_BOARD_PIN", PIN)
+    monkeypatch.setattr(dashboard, "_BAKER_API_KEY", "test-key", raising=False)
+
+    # Simulate a SLOW blocking upstream (like a stalled requests.get).
+    def slow_fetch(recipient=None, limit=200):
+        _time.sleep(0.30)
+        return {"bus_ok": True, "bus_error": None, "source": "msg/all", "rows": [], "count": 0}
+    monkeypatch.setattr(dashboard, "_bus_console_fetch", slow_fetch)
+
+    def _make_request():
+        scope = {
+            "type": "http", "method": "GET", "path": "/api/bus-console.json",
+            "query_string": b"key=test-key", "headers": [], "client": ("test", 1),
+        }
+        return Request(scope)
+
+    async def scenario():
+        ticks = 0
+        stop = False
+
+        async def ticker():
+            nonlocal ticks
+            while not stop:
+                await asyncio.sleep(0.01)
+                ticks += 1
+
+        t = asyncio.create_task(ticker())
+        await asyncio.sleep(0)  # let the ticker start before the fetch
+        resp = await dashboard.bus_console_json(_make_request())
+        ticks_at_finish = ticks  # ticks accumulated DURING the ~0.30s fetch
+        stop = True
+        await t
+        return ticks_at_finish, resp.status_code
+
+    ticks, status = asyncio.run(scenario())
+    assert status == 200
+    # If the 0.30s blocking fetch ran on the loop thread, the ticker is starved
+    # during that window (~0 ticks). Offloaded to a thread → ~30 ticks elapse.
+    assert ticks >= 15, f"event loop was blocked during fetch (ticks={ticks})"
