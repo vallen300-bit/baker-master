@@ -1,7 +1,7 @@
 # CODE_4_PENDING — active dispatch mailbox for b4
 
 ---
-status: PENDING
+status: COMPLETE  # ratified #8206, PR #510 merged @9046e2f0; AO_MATERIALITY_HOOK_1 also closed (G3 R4 PASS #8437); marked 2026-07-11 per b4 #8850
 brief_id: MOVIE_FLIGHT_GATE2_ACTIVATION_1
 to: b4
 from: lead
