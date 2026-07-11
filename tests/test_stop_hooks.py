@@ -23,6 +23,8 @@ Coverage (per brief §AC):
   A5 — fail-loud warns when "completed" claim has no verification phrase.
   A6 — fail-loud silent when verification phrase present.
   A8 — drift-detection: deployed user-global matches the repo fixture (skipped on CI).
+  A8b — drift-detection: repo fixture matches the baker-vault canonical-of-record
+        (Option B, lead #8942; skipped when the vault path is absent, e.g. CI).
 
 Plus defensive cases:
   - Both hooks silent when transcript path is missing / malformed.
@@ -43,6 +45,18 @@ REC_FIXTURE = REPO_ROOT / "tests" / "fixtures" / "recommendation-check.sh"
 FAIL_LOUD_FIXTURE = REPO_ROOT / "tests" / "fixtures" / "fail-loud-check.sh"
 USER_GLOBAL_REC = Path.home() / ".claude" / "hooks" / "recommendation-check.sh"
 USER_GLOBAL_FAIL_LOUD = Path.home() / ".claude" / "hooks" / "fail-loud-check.sh"
+
+# Option B (lead #8942): recommendation-check.sh is canonical-of-record in
+# baker-vault at _ops/hooks/, matching the researcher-cage symlink convention.
+# The ~/.claude/hooks copy is a symlink to this path. This fixture stays the
+# hermetic test-execution source; the drift-check below keeps it byte-identical
+# to the vault canonical. Path is resolved via BAKER_VAULT_PATH when set, else
+# the conventional shared checkout — and the check SKIPS when absent (CI stays
+# hermetic; vault is never wired into CI).
+VAULT_REC = (
+    Path(os.environ["BAKER_VAULT_PATH"]) if os.environ.get("BAKER_VAULT_PATH")
+    else Path.home() / "baker-vault"
+) / "_ops" / "hooks" / "recommendation-check.sh"
 
 
 def _write_transcript(tmp_path: Path, assistant_text: str) -> Path:
@@ -348,4 +362,25 @@ def test_user_global_fail_loud_matches_repo():
         "drift detected: ~/.claude/hooks/fail-loud-check.sh differs from "
         "tests/fixtures/fail-loud-check.sh — re-run "
         "`cp tests/fixtures/fail-loud-check.sh ~/.claude/hooks/fail-loud-check.sh`"
+    )
+
+
+# ---------------------------------------------------------------------------
+# A8b — drift detection vs the baker-vault canonical-of-record (Option B, #8942)
+# recommendation-check.sh is authored in baker-vault _ops/hooks/; the fixture
+# here must stay byte-identical to it. Skipped when the vault path is absent
+# (CI / boxes without a baker-vault checkout) — vault is never wired into CI.
+# ---------------------------------------------------------------------------
+
+def test_vault_canonical_recommendation_matches_repo():
+    if not VAULT_REC.exists():
+        pytest.skip(
+            f"baker-vault canonical not present at {VAULT_REC} "
+            "(expected on CI; set BAKER_VAULT_PATH on boxes with a checkout)"
+        )
+    assert REC_FIXTURE.read_bytes() == VAULT_REC.read_bytes(), (
+        "drift detected: tests/fixtures/recommendation-check.sh differs from the "
+        f"baker-vault canonical-of-record at {VAULT_REC}. The vault copy is "
+        "canonical (Option B, lead #8942) — reconcile the fixture to it "
+        "(both must stay byte-identical so the deployed symlink matches)."
     )
