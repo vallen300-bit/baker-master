@@ -1,0 +1,201 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1"/>
+<title>BUS CONSOLE — Brisen Lab</title>
+<style>
+  :root{
+    --bg:#090B0A; --panel:#101411; --line:#3A453B; --head:#0C100D;
+    --amber:#FFD267; --amber-dim:#A88435; --white:#FFFDF3;
+    --green:#69DF83; --red:#FF796A; --dim:#8E917E; --pend:#6E7568;
+    --unack:#241d0c; --unack-line:#5c471c;
+    --mono:'SF Mono','IBM Plex Mono',ui-monospace,Menlo,Consolas,monospace;
+  }
+  *{box-sizing:border-box}
+  html,body{margin:0;background:var(--bg);color:var(--white);font-family:var(--mono);font-size:13px}
+  a{color:var(--amber)}
+  header{display:grid;grid-template-columns:1fr auto;align-items:center;gap:12px;
+    padding:14px 20px;background:var(--head);border-bottom:1px solid var(--line)}
+  .brand{display:flex;align-items:baseline;gap:12px}
+  .brand h1{margin:0;color:var(--amber);font-size:18px;letter-spacing:3px;font-weight:600}
+  .brand .sub{color:var(--dim);letter-spacing:1px;font-size:11px}
+  .clock{color:var(--amber-dim);font-size:12px;text-align:right}
+  .clock .live{color:var(--green)}
+  .clock .stale{color:var(--red)}
+  .toolbar{display:flex;flex-wrap:wrap;gap:16px;align-items:center;
+    padding:10px 20px;background:var(--panel);border-bottom:1px solid var(--line)}
+  .toolbar label{color:var(--dim);letter-spacing:1px;text-transform:uppercase;font-size:10px}
+  select,button{background:var(--head);color:var(--white);border:1px solid var(--line);
+    font-family:var(--mono);font-size:12px;padding:5px 8px;border-radius:3px}
+  button{cursor:pointer;color:var(--amber)}
+  button:hover{border-color:var(--amber-dim)}
+  input[type=checkbox]{accent-color:var(--amber)}
+  .chk{display:flex;align-items:center;gap:6px;color:var(--white)}
+  #banner{display:none;margin:0;padding:10px 20px;background:#2a0f0d;color:var(--red);
+    border-bottom:1px solid var(--red);letter-spacing:1px}
+  #banner.show{display:block}
+  table{width:100%;border-collapse:collapse;table-layout:fixed}
+  colgroup col.c-time{width:9%} colgroup col.c-from{width:11%} colgroup col.c-to{width:12%}
+  colgroup col.c-topic{width:24%} colgroup col.c-kind{width:9%} colgroup col.c-prev{width:29%}
+  colgroup col.c-ack{width:6%}
+  thead th{position:sticky;top:0;background:var(--head);color:var(--amber-dim);
+    text-align:left;font-weight:600;letter-spacing:1px;text-transform:uppercase;font-size:10px;
+    padding:8px 10px;border-bottom:1px solid var(--line)}
+  tbody td{padding:8px 10px;border-bottom:1px solid #1b211c;vertical-align:top;
+    overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  tbody tr{cursor:pointer}
+  tbody tr:hover{background:#141a15}
+  tbody tr.unacked{background:var(--unack)}
+  tbody tr.unacked td{border-bottom-color:var(--unack-line)}
+  .kind{color:var(--amber-dim)}
+  .from{color:var(--white)} .to{color:var(--dim)}
+  .topic{color:var(--amber)} .prev{color:var(--dim)}
+  .ack-yes{color:var(--green)} .ack-no{color:var(--red);font-weight:600}
+  tr.expand td{white-space:normal;background:#0c100d;color:var(--white);font-size:12px;
+    padding:10px 14px;border-bottom:1px solid var(--line)}
+  tr.expand .meta{color:var(--dim);margin-bottom:6px}
+  .empty{padding:30px 20px;color:var(--dim);text-align:center;letter-spacing:1px}
+  footer{padding:8px 20px;color:var(--pend);font-size:10px;letter-spacing:1px;border-top:1px solid var(--line)}
+</style>
+</head>
+<body>
+<header>
+  <div class="brand">
+    <h1>BUS CONSOLE</h1>
+    <span class="sub">BRISEN LAB · AGENT MESSAGE BUS · READ-ONLY</span>
+  </div>
+  <div class="clock">
+    <div id="status" class="live">—</div>
+    <div id="stamp">—</div>
+  </div>
+</header>
+
+<div class="toolbar">
+  <div><label>Recipient</label><br/><select id="f-recipient"><option value="">ALL</option></select></div>
+  <div class="chk"><input type="checkbox" id="f-unacked"/><label for="f-unacked" style="text-transform:none">Unacked only</label></div>
+  <div style="flex:1"></div>
+  <div id="count" style="color:var(--dim)">0 rows</div>
+  <button id="refresh">↻ REFRESH</button>
+</div>
+
+<p id="banner"></p>
+
+<table>
+  <colgroup>
+    <col class="c-time"/><col class="c-from"/><col class="c-to"/><col class="c-topic"/>
+    <col class="c-kind"/><col class="c-prev"/><col class="c-ack"/>
+  </colgroup>
+  <thead><tr>
+    <th>Time</th><th>From</th><th>To</th><th>Topic</th><th>Kind</th><th>Preview</th><th>Ack</th>
+  </tr></thead>
+  <tbody id="rows"></tbody>
+</table>
+
+<footer id="src">source: —</footer>
+
+<script>
+// NOTE: all row content is built with createElement + textContent (never
+// innerHTML with data) — XSS-safe by construction. No terminal key is ever
+// present here; the page reads the same-origin, cookie-gated proxy endpoint.
+(function(){
+  var REFRESH_MS = 30000;           // auto-refresh; brief cap <=60s
+  var data = [];                    // last fetched rows
+  var expanded = {};                // id -> bool
+  var tbody = document.getElementById("rows");
+
+  function fmtTime(iso){
+    if(!iso) return "—";
+    try{ var d=new Date(iso);
+      return d.toLocaleString([], {month:"2-digit",day:"2-digit",hour:"2-digit",minute:"2-digit",second:"2-digit"});
+    }catch(e){ return String(iso); }
+  }
+  function cell(cls, text){
+    var td=document.createElement("td");
+    if(cls) td.className=cls;
+    td.textContent=(text==null?"":String(text));
+    return td;
+  }
+  function toStr(r){ return (r.to||[]).join(","); }
+
+  function populateRecipients(rows){
+    var sel=document.getElementById("f-recipient"), cur=sel.value, set={};
+    rows.forEach(function(r){ (r.to||[]).forEach(function(t){ set[t]=1; }); if(r.from) set[r.from]=1; });
+    var keys=Object.keys(set).sort();
+    while(sel.options.length>1) sel.remove(1);
+    keys.forEach(function(k){ var o=document.createElement("option"); o.value=k; o.textContent=k; sel.appendChild(o); });
+    sel.value=cur;
+  }
+
+  function apply(rows){
+    var rcp=document.getElementById("f-recipient").value;
+    var unackedOnly=document.getElementById("f-unacked").checked;
+    return rows.filter(function(r){
+      if(unackedOnly && r.acknowledged_at) return false;
+      if(rcp){ var hit = r.from===rcp || (r.to||[]).indexOf(rcp)>=0; if(!hit) return false; }
+      return true;
+    });
+  }
+
+  function render(){
+    var rows=apply(data);
+    document.getElementById("count").textContent=rows.length+" rows";
+    tbody.replaceChildren();
+    if(!rows.length){
+      var tr=document.createElement("tr"); var td=cell("empty","No messages match the current filter.");
+      td.colSpan=7; tr.appendChild(td); tbody.appendChild(tr); return;
+    }
+    rows.forEach(function(r){
+      var acked=!!r.acknowledged_at;
+      var tr=document.createElement("tr");
+      tr.className=acked?"":"unacked";
+      tr.appendChild(cell("", fmtTime(r.created_at)));
+      tr.appendChild(cell("from", r.from));
+      tr.appendChild(cell("to", toStr(r)));
+      tr.appendChild(cell("topic", r.topic));
+      tr.appendChild(cell("kind", r.kind));
+      tr.appendChild(cell("prev", r.body_preview));
+      tr.appendChild(cell(acked?"ack-yes":"ack-no", acked?"✓":"○"));
+      tr.addEventListener("click", function(){ expanded[r.id]=!expanded[r.id]; render(); });
+      tbody.appendChild(tr);
+      if(expanded[r.id]){
+        var er=document.createElement("tr"); er.className="expand";
+        var etd=document.createElement("td"); etd.colSpan=7;
+        var meta=document.createElement("div"); meta.className="meta";
+        meta.textContent="#"+r.id+" · "+r.from+" → "+toStr(r)+" · "+r.kind+" · "+r.topic
+          +" · "+fmtTime(r.created_at)+(acked?(" · acked "+fmtTime(r.acknowledged_at)):" · UNACKED");
+        var body=document.createElement("div"); body.textContent=(r.body_preview==null?"":String(r.body_preview));
+        etd.appendChild(meta); etd.appendChild(body); er.appendChild(etd); tbody.appendChild(er);
+      }
+    });
+  }
+
+  function setStatus(ok, err, since){
+    var st=document.getElementById("status"), bn=document.getElementById("banner");
+    document.getElementById("stamp").textContent=fmtTime(new Date().toISOString());
+    if(ok){ st.className="live"; st.textContent="● LIVE"; bn.className=""; bn.textContent=""; }
+    else{ st.className="stale"; st.textContent="● BUS UNREACHABLE";
+      bn.textContent="BUS UNREACHABLE since "+(since?fmtTime(since):"session start")+(err?(" — "+err):"");
+      bn.className="show"; }
+  }
+
+  function load(){
+    fetch("/api/bus-console.json?limit=200",{credentials:"same-origin"})
+      .then(function(r){ if(!r.ok) throw new Error("HTTP "+r.status); return r.json(); })
+      .then(function(j){
+        setStatus(j.bus_ok, j.bus_error, j.unreachable_since);
+        document.getElementById("src").textContent="source: "+(j.source||"—")+" · fetched "+fmtTime(j.fetched_at)+" · "+(j.count||0)+" fetched";
+        if(j.rows){ data=j.rows; populateRecipients(data); render(); }
+      })
+      .catch(function(e){ setStatus(false, String(e), null); });
+  }
+
+  document.getElementById("refresh").addEventListener("click", load);
+  document.getElementById("f-recipient").addEventListener("change", render);
+  document.getElementById("f-unacked").addEventListener("change", render);
+  load();
+  setInterval(load, REFRESH_MS);
+})();
+</script>
+</body>
+</html>
