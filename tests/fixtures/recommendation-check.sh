@@ -42,7 +42,11 @@ except Exception:
 # and architect are NOT Director-facing (HARD RULE, Director 2026-05-29;
 # Architect exempt per Tier-0 Rule 5). Resolution mirrors session-start-role.sh:
 # 1) $BAKER_ROLE env (Terminal profile), 2) cwd from hook input JSON.
-case "${BAKER_ROLE:-}" in
+# Match case-insensitively: Cowork/Terminal profiles export BAKER_ROLE uppercase
+# (e.g. "B4"), and a set-but-unmatched value skips the cwd fallback below — so an
+# uppercase role would misfire the hook (b3 bus #8286, misfired on a b4 reply).
+BAKER_ROLE_LC="$(printf '%s' "${BAKER_ROLE:-}" | tr '[:upper:]' '[:lower:]')"
+case "$BAKER_ROLE_LC" in
     b[0-9]|b[0-9][0-9]|codex|codex-arch|codexarch|architect) exit 0 ;;
 esac
 if [ -z "${BAKER_ROLE:-}" ]; then

@@ -68,22 +68,38 @@ def _run_hook(fixture: Path, transcript_path: Path) -> subprocess.CompletedProce
         "transcript_path": str(transcript_path),
         "cwd": str(transcript_path.parent),
     })
+    # Hermetic: strip BAKER_ROLE so these Director-facing "should fire" cases are
+    # deterministic regardless of the runner's shell. A b-code shell exports
+    # BAKER_ROLE (e.g. "B4"), which the recommendation-check role exemption would
+    # otherwise honour and silence the hook — a false negative that only shows up
+    # off-CI. Role-exemption behaviour is covered explicitly below via
+    # _run_hook_with_env.
+    env = {k: v for k, v in os.environ.items() if k != "BAKER_ROLE"}
     return subprocess.run(
         ["bash", str(fixture)],
         input=payload,
         capture_output=True,
         text=True,
         timeout=8,
+        env=env,
     )
 
 
 def _additional_context(stdout: str) -> str | None:
-    """Parse the hook's stdout JSON envelope, return additionalContext or None."""
+    """Parse the hook's stdout JSON envelope, return the warning text or None.
+
+    Schema-tolerant: the hooks were revised 2026-05-12 to emit the Stop-hook
+    block form ``{"decision":"block","reason":...}`` (the ``hookSpecificOutput``
+    /``additionalContext`` field is not supported on Stop hooks). Fall back to
+    the legacy shape so older fixtures still parse.
+    """
     out = stdout.strip()
     if not out:
         return None
     payload = json.loads(out)
-    return payload["hookSpecificOutput"]["additionalContext"]
+    if "reason" in payload:
+        return payload["reason"]
+    return payload.get("hookSpecificOutput", {}).get("additionalContext")
 
 
 # ---------------------------------------------------------------------------
@@ -253,6 +269,55 @@ def test_hook_silent_when_input_is_garbage(fixture: Path):
     )
     assert result.returncode == 0
     assert result.stdout.strip() == ""
+
+
+# ---------------------------------------------------------------------------
+# Role exemption — recommendation requirement is Director-facing only.
+# B-codes (b1..b5), codex, codex-arch, architect are NOT Director-facing
+# (HARD RULE, Director 2026-05-29). The exemption must resolve the role
+# case-insensitively: Cowork/Terminal profiles export BAKER_ROLE uppercase
+# (e.g. "B4"), and because a set-but-unmatched value skips the cwd fallback,
+# an uppercase role would otherwise fire the hook. Anchor: b3 #8286 —
+# uppercase-BAKER_ROLE bug misfired on a b4 reply.
+# ---------------------------------------------------------------------------
+
+def _run_hook_with_env(fixture: Path, transcript_path: Path, extra_env: dict) -> subprocess.CompletedProcess:
+    payload = json.dumps({
+        "hook_event_name": "Stop",
+        "session_id": "test-session",
+        "transcript_path": str(transcript_path),
+        "cwd": str(transcript_path.parent),  # tmp_path — does NOT match bm-b* pattern
+    })
+    env = {**os.environ, **extra_env}
+    return subprocess.run(
+        ["bash", str(fixture)],
+        input=payload, capture_output=True, text=True, timeout=8, env=env,
+    )
+
+
+@pytest.mark.parametrize("role", ["B4", "B1", "B5", "CODEX", "CODEX-ARCH", "Architect", "b4", "codex"])
+def test_recommendation_check_exempts_bcode_role_case_insensitive(tmp_path, role):
+    """Non-Director-facing role (any case) → silent even with question + no Recommendation."""
+    transcript = _write_transcript(
+        tmp_path,
+        "Should we ship now or wait? Both have tradeoffs.",
+    )
+    result = _run_hook_with_env(REC_FIXTURE, transcript, {"BAKER_ROLE": role})
+    assert result.returncode == 0, result.stderr
+    assert result.stdout.strip() == "", (
+        f"role {role!r} should be exempt but hook fired: {result.stdout!r}"
+    )
+
+
+def test_recommendation_check_still_fires_for_director_facing_role(tmp_path):
+    """A Director-facing role (e.g. lead) is NOT exempt — hook still fires."""
+    transcript = _write_transcript(
+        tmp_path,
+        "Should we ship now or wait? Both have tradeoffs.",
+    )
+    result = _run_hook_with_env(REC_FIXTURE, transcript, {"BAKER_ROLE": "lead"})
+    assert result.returncode == 0, result.stderr
+    assert result.stdout.strip() != "", "Director-facing role should still fire the hook"
 
 
 # ---------------------------------------------------------------------------
