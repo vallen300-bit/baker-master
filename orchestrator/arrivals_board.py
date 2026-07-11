@@ -310,7 +310,15 @@ def _row_html(row: dict[str, Any], today: date) -> str:
     matter = _display_text(row.get("matter_slug"))
     desk = _display_text(row.get("desk_owner"))
     status = effective_status(row, today=today)
-    status_cls = "grn" if status == "ON TIME" else "inv" if status == "FINAL APPROACH" else ""
+    status_cls = (
+        "grn"
+        if status == "ON TIME"
+        else "red"
+        if status == "DELAYED"
+        else "inv"
+        if status == "FINAL APPROACH"
+        else ""
+    )
     status_extra = "blinkgrp" if status == "FINAL APPROACH" else ""
     airline = _display_text(row.get("airline"), fallback=matter)
     destination = _display_text(row.get("destination"))
