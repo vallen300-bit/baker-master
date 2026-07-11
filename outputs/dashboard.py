@@ -8627,6 +8627,207 @@ async def arrivals_board_json(request: Request):
     return response
 
 
+# --- BUS_CONSOLE_LIVE_PAGE_1 (b4): Director-facing read-only agent-bus console ---
+# Reuses the ARRIVALS PIN-cookie gate (_arrivals_board_access) verbatim — the
+# /arrivals helpers are untouched. The brisen-lab bus is read SERVER-SIDE with a
+# privileged read key (env BRISEN_LAB_CONSOLE_KEY); no terminal key is ever sent
+# to the browser (the page reads the same-origin, cookie-gated proxy below).
+
+_BUS_CONSOLE_TEMPLATE = os.path.join(
+    os.path.dirname(os.path.abspath(__file__)), "templates", "bus_console_template.html"
+)
+_BUS_CONSOLE_LAST_OK: str | None = None  # iso ts of the last successful bus read
+_BUS_CONSOLE_TOTAL_BUDGET_S = 10.0   # hard wall-clock ceiling for one proxy read
+_BUS_CONSOLE_PERSLUG_WORKERS = 8     # bounded fan-out concurrency for the fallback
+_BUS_CONSOLE_PERSLUG_MAX = 60        # never fan out to more than this many slugs
+
+
+def _bus_console_base_url() -> str:
+    return os.getenv("BRISEN_LAB_DAEMON_URL", "https://brisen-lab.onrender.com").rstrip("/")
+
+
+def _bus_console_extract(payload) -> list:
+    if isinstance(payload, dict):
+        return payload.get("messages") or payload.get("rows") or []
+    if isinstance(payload, list):
+        return payload
+    return []
+
+
+def _bus_console_normalize(m: dict) -> dict:
+    body_prev = m.get("body_preview")
+    if not body_prev:
+        body_prev = (m.get("body") or "")[:280]
+    return {
+        "id": m.get("id"),
+        "from": m.get("from_terminal") or m.get("from"),
+        "to": m.get("to_terminals") or m.get("to") or [],
+        "topic": m.get("topic"),
+        "kind": m.get("kind"),
+        "body_preview": body_prev,
+        "created_at": m.get("created_at"),
+        "acknowledged_at": m.get("acknowledged_at"),
+    }
+
+
+def _bus_console_perslug(base: str, headers: dict, limit: int, deadline: float):
+    """Fallback fleet read when /msg/all is unavailable. Bounded: caps the slug
+    count, fans out with bounded concurrency, and honors the overall `deadline`
+    (monotonic ts) — never an unbounded sequential loop that could stall the
+    worker during bus degradation (codex G3 P1 fix)."""
+    import requests as _requests
+    from concurrent.futures import ThreadPoolExecutor, wait as _fwait
+
+    def _remaining() -> float:
+        return deadline - time.monotonic()
+
+    slugs: list = []
+    try:
+        tr = _requests.get(f"{base}/api/v2/terminals", timeout=min(5.0, max(0.5, _remaining())))
+        if tr.status_code == 200:
+            j = tr.json()
+            raw = j if isinstance(j, list) else (j.get("terminals") or [])
+            slugs = [s if isinstance(s, str) else (s.get("slug") or s.get("alias")) for s in raw]
+            slugs = [s for s in slugs if s][:_BUS_CONSOLE_PERSLUG_MAX]
+    except Exception:
+        logger.exception("bus_console: terminals registry fetch failed")
+    if not slugs or _remaining() <= 0:
+        return [], "per-slug-loop"
+    per = max(5, limit // max(1, len(slugs)))
+
+    def _one(slug):
+        try:
+            r = _requests.get(f"{base}/msg/{slug}", headers=headers,
+                              params={"limit": per}, timeout=min(4.0, max(0.5, _remaining())))
+            if r.status_code == 200:
+                return _bus_console_extract(r.json())
+        except Exception:
+            return []
+        return []
+
+    out: list = []
+    ex = ThreadPoolExecutor(max_workers=_BUS_CONSOLE_PERSLUG_WORKERS)
+    try:
+        futures = [ex.submit(_one, s) for s in slugs]
+        done, _not_done = _fwait(futures, timeout=max(0.0, _remaining()))
+        for fut in done:
+            try:
+                out.extend(fut.result())
+            except Exception:
+                continue
+    finally:
+        # Do NOT block on stragglers — each in-flight call is already timeout-
+        # bounded; abandon any past the deadline so the request returns promptly.
+        ex.shutdown(wait=False)
+
+    seen, dedup = set(), []
+    for m in out:
+        mid = m.get("id")
+        if mid in seen:
+            continue
+        seen.add(mid)
+        dedup.append(m)
+    return dedup, "per-slug-loop"
+
+
+def _bus_console_fetch(recipient: str | None = None, limit: int = 200) -> dict:
+    """Server-side proxy read of the brisen-lab bus. Never raises — returns an
+    honest {bus_ok, bus_error, source, rows, count} envelope on any failure."""
+    global _BUS_CONSOLE_LAST_OK
+    import requests as _requests
+
+    key = os.getenv("BRISEN_LAB_CONSOLE_KEY", "").strip()
+    if not key:
+        return {"bus_ok": False, "bus_error": "BRISEN_LAB_CONSOLE_KEY not configured",
+                "source": None, "rows": [], "count": 0}
+    base = _bus_console_base_url()
+    headers = {"X-Terminal-Key": key}
+    deadline = time.monotonic() + _BUS_CONSOLE_TOTAL_BUDGET_S
+
+    def _remaining() -> float:
+        return max(0.1, deadline - time.monotonic())
+
+    try:
+        if recipient and recipient != "all":
+            r = _requests.get(f"{base}/msg/{recipient}", headers=headers,
+                              params={"limit": limit}, timeout=min(8.0, _remaining()))
+            r.raise_for_status()
+            msgs = _bus_console_extract(r.json())
+            source = f"msg/{recipient}"
+        else:
+            r = _requests.get(f"{base}/msg/all", headers=headers,
+                              params={"limit": limit}, timeout=min(8.0, _remaining()))
+            if r.status_code == 200:
+                msgs = _bus_console_extract(r.json())
+                source = "msg/all"
+            else:
+                msgs, source = _bus_console_perslug(base, headers, limit, deadline)
+        rows = [_bus_console_normalize(m) for m in msgs]
+        rows.sort(key=lambda x: x.get("created_at") or "", reverse=True)
+        rows = rows[:limit]
+        _BUS_CONSOLE_LAST_OK = datetime.now(timezone.utc).isoformat()
+        return {"bus_ok": True, "bus_error": None, "source": source,
+                "rows": rows, "count": len(rows)}
+    except Exception as e:
+        logger.exception("bus_console: fetch failed")
+        return {"bus_ok": False, "bus_error": f"{type(e).__name__}: {e}"[:200],
+                "source": None, "rows": [], "count": 0}
+
+
+@app.get("/bus-console", include_in_schema=False, response_class=HTMLResponse)
+async def bus_console_page(request: Request):
+    """BUS_CONSOLE_LIVE_PAGE_1: Director read-only agent-bus console (PIN-gated)."""
+    allowed, set_cookie = _arrivals_board_access(request)
+    if not allowed:
+        return HTMLResponse("Not Found", status_code=404)
+    try:
+        with open(_BUS_CONSOLE_TEMPLATE, encoding="utf-8") as fh:
+            html = fh.read()
+    except Exception:
+        logger.exception("bus_console_page: template read failed")
+        return HTMLResponse("Service unavailable", status_code=503)
+    response = HTMLResponse(html)
+    if set_cookie:
+        _set_arrivals_board_cookie(response)
+    return response
+
+
+@app.get("/api/bus-console.json", include_in_schema=False)
+async def bus_console_json(request: Request):
+    """BUS_CONSOLE_LIVE_PAGE_1: server-side bus proxy (key never reaches browser)."""
+    allowed, set_cookie = _arrivals_board_access(request)
+    if not allowed:
+        return JSONResponse({"detail": "Not Found"}, status_code=404)
+    recipient = request.query_params.get("recipient") or None
+    unacked_only = str(request.query_params.get("unacked_only", "")).lower() in ("1", "true", "yes", "on")
+    try:
+        limit = min(500, max(1, int(request.query_params.get("limit", "200"))))
+    except (TypeError, ValueError):
+        limit = 200
+    # Offload the blocking (requests-based) proxy read to a worker thread so it
+    # never stalls the event loop / FastAPI worker during bus degradation
+    # (codex G3 P1 fix). The fetch itself is total-deadline bounded.
+    result = await asyncio.to_thread(_bus_console_fetch, recipient=recipient, limit=limit)
+    # Server-side filters (belt-and-suspenders; the page also filters client-side
+    # for instant UX). Applied only to the returned rows — never suppresses the
+    # bus_ok / banner signal.
+    rows = result.get("rows") or []
+    if recipient:
+        rows = [r for r in rows if r.get("from") == recipient or recipient in (r.get("to") or [])]
+    if unacked_only:
+        rows = [r for r in rows if not r.get("acknowledged_at")]
+    result["rows"] = rows
+    result["count"] = len(rows)
+    result["fetched_at"] = datetime.now(timezone.utc).isoformat()
+    result["recipient"] = recipient
+    result["unacked_only"] = unacked_only
+    result["unreachable_since"] = None if result.get("bus_ok") else _BUS_CONSOLE_LAST_OK
+    response = JSONResponse(jsonable_encoder(result))
+    if set_cookie:
+        _set_arrivals_board_cookie(response)
+    return response
+
+
 @app.get("/wip", include_in_schema=False, response_class=HTMLResponse)
 async def wip_page(request: Request):
     """Server-rendered WIP-materials browser page (?key= gated)."""
