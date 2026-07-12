@@ -1,5 +1,5 @@
 ---
-status: PENDING
+status: CLOSED (arc completed 2026-07-10 — commit 4e73aa6a: F5 render check PASS #8360, pilot LIVE hag-desk; mailbox flag never flipped, corrected 2026-07-12 during BUS_FLEET_COMMS_AUDIT_1 dispatch)
 brief_id: AGENT_WORK_QUEUE_V1
 to: b1
 from: lead
