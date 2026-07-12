@@ -1,158 +1,198 @@
 # B1_bus_fleet_comms_audit_1 — Fleet Bus-Communications Audit (diagnose-only)
 
 **Brief:** `briefs/_tasks/BUS_FLEET_COMMS_AUDIT_1.md` (dispatch #9165, Director-directed 2026-07-12).
-**Author:** b1. **Date:** 2026-07-12. **Class:** diagnose-only, READ-ONLY (no fixes; no bus writes beyond self-addressed test posts + acks).
+**Scope addition:** #9180 (Director-reviewed via cowork-ah1 #9179; folded as report-framing, no brief amendment) — added the CAN-do vs MUST-do duty dimension, role-shaped N/A discipline, and single-policy framing for wildcard backlog.
+**Author:** b1. **Date:** 2026-07-12. **Class:** diagnose-only, READ-ONLY (no fixes; no bus writes beyond self-addressed test acks/posts).
 **Harness-V2:** N/A per brief (audit; output is findings + prioritized fix list for lead ratification).
+**Rev:** rev2 (rev1 shipped PR #526; rev2 folds scope-addition #9180 + the live body-read finding F0).
 
 ## Method + evidence base
 
-- Live daemon `origin/main` @ `8e81029` (brisen-lab), production at `https://brisen-lab.onrender.com`.
-- Live per-seat telemetry: `GET /api/v2/terminals` (director key) — 41 cards, full unacked/telemetry fields.
-- Own-seat live surface test (b1): `GET /msg/b1` read OK; `POST /msg/9165/ack` → 200; `bus_post.sh` #9176 → 200. Terminal-seat read/ack/post proven end-to-end on my own key.
-- Static route inspection: `app.py` `bus.py` `authz.py` `auth_lab.py` `db.py` `lifecycle.py` `agent_identity_generated.py` at @8e81029 (file:line anchors below).
+- Live daemon `origin/main` @ `8e81029` (brisen-lab), production `https://brisen-lab.onrender.com`.
+- Live per-seat telemetry: `GET /api/v2/terminals` (director key) — 41 cards.
+- Own-seat live surface test (b1): `GET /msg/b1` list read; `POST /msg/9165/ack` → 200; `bus_post.sh` #9176/#9182 → 200.
+- Static route inspection (Explore fan-out): `app.py bus.py authz.py auth_lab.py db.py lifecycle.py agent_identity_generated.py` @8e81029.
+- Duty extraction (Explore fan-out): 21 orientation.md files under `~/baker-vault/_ops/agents/`.
 - MCP identity test: `baker_inbox_read(terminal=b1)` → **HTTP 403 `reader_slug_mismatch`** (reproduced live).
-- Registry: `~/baker-vault/_ops/registries/agent_registry.yml`; install SOP 12-row map (`install-agent-to-brisen-lab`).
+- **Live self-incident:** the audit's own read-surface defect (F0) nearly caused me to miss scope addition #9180 — captured as primary evidence.
 
-**Coverage: 100% of the 41 registry/card slugs.** No silent omissions; N/A rows carry reasons. Two items could not be verified against a live source and are flagged UNVERIFIED (wake_events health; the "251 unacked" symptom origin) — see §Coverage gaps.
+**Coverage: 100% of the 41 registry/card slugs** (I/O matrix). Duty matrix is by **role-class** (duties are role-shaped per #9180-item-2), every seat mapped to a class. N/A rows carry reasons. Unverifiable items flagged in §Coverage gaps.
 
 ---
 
-## §1 Seat I/O matrix
+## §0 HEADLINE — the read surface is body-blind (live self-incident)
 
-Columns: **read** = own-key `GET /msg/{slug}` returns bodies; **ack** = own-key `POST /msg/{id}/ack`; **post** = own-key `bus_post.sh`/`POST /msg`; **wake** = daemon autowake reachable. Cell = OK / BROKEN(evidence) / N-A(reason).
+The single most consequential finding, because it bit this audit in real time:
 
-Determination is by **runtime class** (surface capability is set by runtime + picker wiring, not per-slug) plus per-seat exceptions. Terminal-seat OK cells are proven by the b1 end-to-end test; same key mechanism (`auth_lab.resolve_terminal_key`, `authz.py:161`) applies to every seat holding its own `BRISEN_LAB_TERMINAL_KEY_<slug>`.
+- `GET /msg/{slug}` (the documented per-seat inbox read) returns a field named **`body_preview`**, **not** `body`. There is **no `body` field** in the projection.
+- **`GET /msg/{id}` is not a route.** A numeric id is parsed as `/msg/{terminal="<id>"}` and returns `{"detail": …}`. There is **no full-body single-message retrieval surface anywhere.**
+- `body_preview` is capped (daemon caps preview at 8KB/row per the MCP tool contract). Under 8KB the preview is the whole body; over 8KB it silently truncates with no full-body fallback.
 
-| slug | runtime | read | ack | post | wake | notes |
-|---|---|---|---|---|---|---|
-| lead | terminal-claude | OK | OK | OK | OK | telemetry fresh |
-| deputy | terminal-claude | OK | OK | OK | OK⚠ | telemetry stale ~6d (F3); 3 unacked, oldest 12m |
-| deputy-codex | terminal-codex | OK | OK | OK | OK⚠ | telemetry stale ~6d (F3) |
-| aid | terminal-claude | OK | OK | OK | OK | fresh |
-| b1 | terminal-claude | **OK✓** | **OK✓** | **OK✓** | OK⚠ | proven live this session; telemetry stale ~6d (F3) |
-| b2 | terminal-claude | OK | OK | OK | OK⚠ | telemetry stale ~6d (F3) |
-| b3 | terminal-claude | OK | OK | OK | OK⚠ | telemetry stale ~6d (F3) |
-| b4 | terminal-claude | OK | OK | OK | OK⚠ | telemetry stale ~6d (F3) |
-| researcher | terminal-claude | OK | **BROKEN** | OK | OK | ack picker script rejects own role (F2, brief #9161-3); 1 unacked stuck ~23h |
-| codex | terminal-codex | OK | OK | OK | OK | fresh |
-| codex-arch | app-codex | OK | OK | OK | N-A | app-resident, cannot autowake |
-| clerk | headless-qwen3 | OK | OK | OK | N-A | headless worker, no interactive session to wake |
-| clerk-haiku | terminal-claude-haiku | OK | OK | OK | OK | status=planned (card live, 0 acked) |
-| russo-ai | terminal-claude | OK | OK | OK | OK | fresh |
-| deep55 | terminal-openai-raw | OK | OK | OK | OK | status=planned |
-| ben | app-claude | OK | OK | OK | N-A | app-resident, cannot autowake |
-| librarian | terminal-claude-sonnet | OK | OK | OK | OK | fresh |
-| arm | terminal-claude-sonnet | OK | OK | OK | OK | telemetry None (no recent push) |
-| hag-desk | terminal-claude | OK | OK | OK | OK | fresh |
-| origination-desk | terminal-claude | OK | OK | OK | OK | fresh |
-| ao-desk | terminal-claude | OK | OK | OK | OK | fresh |
-| movie-desk | terminal-claude | OK | OK | OK | OK | fresh |
-| baden-baden-desk | terminal-claude | OK | OK | OK | OK | fresh |
-| brisen-desk | terminal-claude | OK | OK | OK | OK | fresh (BRISEN_DESK_ON_BUS_1) |
-| cortex | service | OK | OK | OK | N-A | system service, no session; excluded from WAKEABLE by design |
-| cowork-ah1 | app-claude | OK | OK | OK | N-A | app-resident, cannot autowake |
-| cowork-bb-desk | app-claude | OK | OK | OK | N-A | app-resident; telemetry stale |
-| cowork-ao-desk | app-claude | OK | OK | OK | N-A | `wakeable:false` in registry |
-| cowork-movie-desk | app-claude | OK | OK | OK | N-A | `wakeable:false`; 1 unacked stuck ~24h |
-| cowork-hag-desk | app-claude | OK | OK | OK | N-A | `wakeable:false` |
-| cowork-origination-desk | app-claude | OK | OK | OK | N-A | `wakeable:false` |
-| cowork-researcher | app-claude | OK | OK | OK | N-A | `wakeable:false` |
-| cowork-arm | app-claude | OK | OK | OK | N-A | `wakeable:false` |
-| cowork-russo-ai | app-claude | OK | OK | OK | N-A | `wakeable:false` |
-| cowork-librarian | app-claude | OK | OK | OK | N-A | `wakeable:false` |
-| cowork-aid | app-claude | OK | OK | OK | N-A | app-resident; in live cards |
-| CM-1 | terminal-claude | OK | OK | OK | OK | fresh |
-| CM-2 | terminal-claude | OK | OK | OK | OK | fresh |
-| CM-3 | terminal-claude | OK | OK | OK | OK | fresh |
-| CM-4 | terminal-claude | OK | OK | OK | OK | fresh |
-| hag-filer | terminal-claude | OK | OK | OK | OK | fresh |
-| b5 | terminal-claude | N-A | N-A | N-A | N-A | status=reserved, `bus_enabled:false` — not in VALID_BUS_SLUGS |
-| bb-finance | vault-seeded | N-A | N-A | N-A | N-A | status=seeded, `bus_enabled:false` — POST/GET → 400 `unknown_recipient_slug` |
+**Impact (proven):** my first three reads of lead's replies checked `body` → got `None` → I logged #9177/#9180 as "empty." They were not: #9177 (431 chars) confirmed the queue-brief closure; **#9180 (805 chars) was a Director-reviewed SCOPE ADDITION to this very brief.** A seat (or tool) that reads `body` instead of `body_preview` is **totally blind** to message content — not degraded, blind. This is the ARM "no body-read surface" incident class (brief says fixed #9164 / vault PR #164); the fix added a **preview** field under a **different name** and **no full-body route**, so the blindness persists for any reader keyed on `body`. Sev **P1** (near-miss of a Director-reviewed instruction; general fleet body-blindness).
 
-**Overlay finding (F1, applies to ALL seats): the Baker MCP bus tools (`baker_inbox_read`/`_post`/`_ack`) are BROKEN for per-seat I/O.** They authenticate with the MCP server's single terminal key; the daemon derives the sender server-side from that key. Asking the MCP to act as any other seat → `403 reader_slug_mismatch` (proven: `baker_inbox_read(terminal=b1)`). So a seat that reads/acks via MCP instead of its own picker `curl`+key gets 403. The direct-`curl`+own-key path (the `bus_post.sh`/`ack_dispatch_msgs.sh` scripts) is the ONLY working per-seat surface today.
+---
+
+## §1 Seat I/O matrix — CAN-do vs MUST-do
+
+**CAN-do** columns (capability): read / ack / post / wake. **MUST-do** column (duty profile, role-shaped — source: 21 orientation files). A cell mismatch **in either direction** is a finding: CAN-but-must-not = over-capability; MUST-but-cannot = broken duty.
+
+CAN-do determination is by runtime + key mechanism (`auth_lab.resolve_terminal_key`, `authz.py:161`); the b1 end-to-end test proves the terminal-seat path. Per #9180-item-2, missing a capability a role's duty never needs is **N/A(reason)**, not BROKEN.
+
+### 1a. CAN-do capability (41 slugs, 100%)
+
+| slug | runtime | read | ack | post | wake |
+|---|---|---|---|---|---|
+| lead | terminal-claude | OK | OK | OK | OK |
+| deputy | terminal-claude | OK | OK | OK | OK⚠tel |
+| deputy-codex | terminal-codex | OK | OK | OK | OK⚠tel |
+| aid | terminal-claude | OK | OK | OK | OK |
+| b1 | terminal-claude | OK✓ | OK✓ | OK✓ | OK⚠tel |
+| b2 | terminal-claude | OK | OK | OK | OK⚠tel |
+| b3 | terminal-claude | OK | OK | OK | OK⚠tel |
+| b4 | terminal-claude | OK | OK | OK | OK⚠tel |
+| researcher | terminal-claude | OK | **BROKEN**(F2) | OK | OK |
+| codex | terminal-codex | OK | OK | OK | OK |
+| codex-arch | app-codex | OK | OK | OK | N-A(app-resident) |
+| clerk | headless-qwen3 | OK | OK | OK | N-A(headless, no session) |
+| clerk-haiku | terminal-claude-haiku | OK | OK | OK | OK(planned) |
+| russo-ai | terminal-claude | OK | OK | OK | OK |
+| deep55 | terminal-openai-raw | OK | OK | OK | OK(planned) |
+| ben | app-claude | OK | OK | OK | N-A(app-resident) |
+| librarian | terminal-claude-sonnet | OK | OK | OK | OK |
+| arm | terminal-claude-sonnet | OK | OK | OK | OK |
+| hag-desk | terminal-claude | OK | OK | OK | OK |
+| origination-desk | terminal-claude | OK | OK | OK | OK |
+| ao-desk | terminal-claude | OK | OK | OK | OK |
+| movie-desk | terminal-claude | OK | OK | OK | OK |
+| baden-baden-desk | terminal-claude | OK | OK | OK | OK |
+| brisen-desk | terminal-claude | OK | OK | OK | OK |
+| cortex | service | OK | OK | OK | N-A(service) |
+| cowork-ah1 | app-claude | OK | OK | OK | N-A(app-resident) |
+| cowork-bb-desk | app-claude | OK | OK | OK | N-A(app-resident) |
+| cowork-ao-desk | app-claude | OK | OK | OK | N-A(wakeable:false) |
+| cowork-movie-desk | app-claude | OK | OK | OK | N-A(wakeable:false) |
+| cowork-hag-desk | app-claude | OK | OK | OK | N-A(wakeable:false) |
+| cowork-origination-desk | app-claude | OK | OK | OK | N-A(wakeable:false) |
+| cowork-researcher | app-claude | OK | OK | OK | N-A(wakeable:false) |
+| cowork-arm | app-claude | OK | OK | OK | N-A(wakeable:false) |
+| cowork-russo-ai | app-claude | OK | OK | OK | N-A(wakeable:false) |
+| cowork-librarian | app-claude | OK | OK | OK | N-A(wakeable:false) |
+| cowork-aid | app-claude | OK | OK | OK | N-A(app-resident) |
+| CM-1..CM-4 | terminal-claude | OK | OK | OK | OK |
+| hag-filer | terminal-claude | OK | OK | OK | OK |
+| b5 | terminal-claude | N-A(bus_enabled:false, reserved) | N-A | N-A | N-A |
+| bb-finance | vault-seeded | N-A(bus_enabled:false → 400 unknown_recipient_slug) | N-A | N-A | N-A |
+
+`⚠tel` = capability OK at the daemon, but per-seat telemetry stale ~6d (F3) → fleet view shows the live seat as dead. `read` OK means the **list** surface returns rows — subject to the §0 body-blindness caveat (preview-only). `✓` = proven live this session.
+
+### 1b. MUST-do duty profile (role-class, evidence-cited)
+
+| class | seats | exec-on-dispatch | ack-on-read | ship-routing | escalate-to-lead | posture | source |
+|---|---|---|---|---|---|---|---|
+| build-worker | b1–b4 | **MUST** (HARD 2026-05-27) | **MUST** (HARD 2026-06-11) | **MUST** reply-to-dispatcher (2026-05-17) | MUST (blockers→AH1) | terminal-wakeable | b1:40,127,138 |
+| ai-head-terminal | lead, deputy | no (orchestrate/delegate) | no | to Director / reply-to-sender | MUST→Director on Tier-B bounds | terminal-wakeable | aihead1:23,67-101 |
+| specialist-terminal | researcher, librarian, arm, russo-ai, clerk-haiku, deep55, aid, codex | **MUST** (dispatch=go) | MUST (housekeeping) | reply-to-sender / flag-to-lead | MUST (blockers→dispatcher) | terminal-wakeable | researcher:58, librarian:44, arm:42 |
+| specialist-app | codex-arch, ben, cowork-aid | no (drain-on-open) | MUST when drained | to dispatcher | MUST | app-resident (N/A wake) | cowork-aid:39 |
+| matter-desk-terminal | hag-desk, ao-desk, movie-desk, baden-baden-desk, origination-desk, brisen-desk, hag-filer | **UNKNOWN** (D1) | UNKNOWN (D1) | UNKNOWN (D1) | desks→Director (bank model) | terminal-wakeable | **no orientation.md (D1)** |
+| matter-desk-cowork | cowork-*-desk | no (drain-on-open) | MUST (cowork-bb-desk:56) | relay→terminal twin / lead | MUST (relay→lead) | app-resident (N/A wake) | cowork-bb-desk:32-56 |
+| ai-head-app | cowork-ah1 | no | no | to Director | to Director | app-resident (N/A wake) | aihead1 twin |
+| system | cortex, clerk | no (post-only/service) | no | n/a | n/a | N/A wake (service/headless) | registry scope=system |
+
+### 1c. CAN×MUST mismatches (findings)
+
+- **researcher — MUST ack-on-read but CANNOT ack** (ack script rejects its own role). Broken duty → **F2 (P0)**.
+- **matter-desk-terminal — duties UNKNOWN**: no `orientation.md` for hag-desk/ao-desk/movie-desk/origination-desk/brisen-desk (only cowork twins documented). These are terminal-wakeable and bus-active (baden-baden-desk has 712 acked msgs) yet their MUST-do profile is uncodified → **D1 (P1)**: a dispatched terminal desk has no written execute-on-dispatch / ack / routing duty; codex-idle-class risk is unmapped for the busiest desks.
+- **ack-on-read is a HARD RULE only for b1–b4 + cowork-bb-desk**; specialists ack "implicitly," AH-heads/desks have no rule → **D2 (P2)**: uneven ack discipline is why lead/Director see false-pending counts from seats that handled-but-didn't-ack.
+- **reply-to-sender is explicit only for b1–b4 + AH2 + cowork-bb-desk**; specialist workers lack the "read dispatcher from metadata" rule → **D3 (P2)**: mis-routing risk (the 2026-05-30 incident class) is unguarded for researcher/librarian/arm.
+- **Over-capability (benign):** all app-resident seats retain post/ack CAN with no wake duty — correctly N/A, not a defect (per #9180-item-2). No surfaces found that a role is forbidden yet exposes on the bus.
 
 ---
 
 ## §2 Wake-path map
 
-**Wakeability class** (source: `WAKEABLE_TERMINALS`, `agent_identity_generated.py:18`; registry `wakeable` flags):
-- **Terminal-wakeable (autowake reachable):** lead, deputy, deputy-codex, aid, b1–b4, researcher, codex, clerk-haiku, russo-ai, deep55, librarian, arm, hag-desk, origination-desk, ao-desk, movie-desk, baden-baden-desk, brisen-desk, CM-1/2/3/4, hag-filer.
-- **App-resident (never autowake; nudge-only):** cowork-ah1, ben, codex-arch, cowork-bb/ao/movie/hag/origination-desk, cowork-researcher/arm/russo/librarian/aid. Physically cannot be woken by the daemon — they only see a message when a human/operator drives the app session. **This is the BB-Desk incident class (brief #9147):** app-resident desk missed an airport-ticket escalation because nothing can autowake it.
-- **Service/headless (no session to wake):** cortex (service), clerk (headless-qwen).
+**Class (source `WAKEABLE_TERMINALS` `agent_identity_generated.py:18` + registry `wakeable` flags):**
+- **Terminal-wakeable:** lead, deputy, deputy-codex, aid, b1–b4, researcher, codex, clerk-haiku, russo-ai, deep55, librarian, arm, all 6 terminal desks, hag-filer, CM-1..4.
+- **App-resident (never autowake; nudge/drain-on-open):** cowork-ah1, ben, codex-arch, cowork-aid, all 5 cowork desks, cowork-researcher/arm/russo-ai/librarian. **BB-Desk incident class (#9147):** an escalation-critical desk that only exists app-resident cannot be woken → misses time-critical mail. **F4 (P1).**
+- **Service/headless (no session):** cortex, clerk.
 
-**Topic gate (source: `bus.py:168-176`, `237-246`):** the topic allow-list was **removed** (REMOVE_WAKE_TOPIC_GATE_1, Director 2026-06-18 — "if you receive the bus, you should wake up"). `_is_wake_worthy` now returns True unconditionally. Only two suppressions remain, both pure-noise: `kind=ack` (`suppressed_ack`) and topic prefix `heartbeat` (`suppressed_heartbeat`). So **no substantive dispatch is topic-suppressed** — a seat that idles on a dispatch is an orientation gap, not a gate.
+**Topic gate REMOVED** (`bus.py:168-176`, REMOVE_WAKE_TOPIC_GATE_1, Director 2026-06-18): `_is_wake_worthy` = True unconditionally. Only pure-noise suppressed: `kind=ack`, topic-prefix `heartbeat` (`bus.py:237-246`). **No substantive dispatch is topic-suppressed** — a seat idling on a dispatch is an orientation gap (execute-on-dispatch duty), not a gate. Per §1b that duty is present for workers/specialists, **absent/unknown for terminal matter-desks (D1)** and codex (patched 2026-07-11, lessons #118).
 
-**Containment (mechanical, `bus.py:603-690`):** 5s per-slug debounce, 120 wakes/hr cap, ping-pong auto-disable (3 loop edges/5min → both slugs disabled 1h), env disabled-list, master killswitch. None of these content-gate.
+**Containment (mechanical, `bus.py:603-690`):** 5s debounce, 120/hr cap, ping-pong auto-disable, env disabled-list, master killswitch. None content-gate.
 
-**Codex-class "wakes but treats dispatch as FYI" (brief item 2):** the daemon wakes correctly; the gap is in each seat's **orientation** (execute-on-dispatch rule). b1/b2/b3/b4 carry the DISPATCH=RATIFIED / superior-dispatch rule (verified in b1 orientation). codex was patched 2026-07-11 (lessons #118). **Method note:** I could not enumerate every seat's orientation for an execute-on-dispatch clause without reading 41 picker files — flagged as a P2 follow-up sweep (F7), not completed this session (runtime cap).
-
-**wake_events 7d health — UNVERIFIED.** No `wake_events` HTTP surface exists (`/api/wake_events`, `/api/wake/events`, `/api/v2/wake_events`, `/wake_events` all 404). Wake health can only be read from the daemon DB directly (no seat has that surface) or added as an endpoint. This is itself a finding (F6): **there is no fleet-visible wake-events surface** — wake failures are invisible until a seat misses live work.
+**wake_events health — UNVERIFIED / no surface (F6, P1):** `/api/wake_events`, `/api/wake/events`, `/api/v2/wake_events`, `/wake_events` all 404. There is **no fleet-visible wake-events read** — wake failures are invisible until a seat misses live work. The daemon writes `wake_attempted_at` per message (visible in the list projection) but there is no aggregate.
 
 ---
 
 ## §3 Identity layer (MCP shared-key → daemon)
 
-**Confirmed and scoped.** There are **two** bus identity models, and the defect is entirely on the MCP side:
+**Two identity models; the defect is entirely MCP-side:**
 
-1. **brisen-lab direct (the real fleet transport) — HEALTHY.** `auth_lab.resolve_terminal_key` (`auth_lab.py:75-89`) constant-time-matches the presented `X-Terminal-Key` to a **distinct per-slug** key; mismatch → 401; there is **no** shared key and **no** `daemon` fallback slug. Every picker script (`bus_post.sh`, `ack_dispatch_msgs.sh`) uses its own seat key → correct sender attribution.
-2. **Baker MCP tools (`baker_inbox_*`, served by baker-master, NOT brisen-lab) — BROKEN per-seat.** The MCP holds one terminal key; the daemon derives the sender from it server-side (the `terminal=` arg is honored only client-side for the read target). Any per-seat use fails: `baker_inbox_read(terminal=b1)` → `403 reader_slug_mismatch` (proven live). So the MCP can only ever act as the single slug its key maps to.
+1. **brisen-lab direct (real fleet transport) — HEALTHY.** `auth_lab.resolve_terminal_key` (`auth_lab.py:75-89`) constant-time-matches `X-Terminal-Key` to a **distinct per-slug** key; mismatch → 401; **no shared key, no `daemon` fallback.** Every picker script (`bus_post.sh`, `ack_dispatch_msgs.sh`) uses its own seat key → correct sender attribution.
+2. **Baker MCP tools (`baker_inbox_*`, served by baker-master, NOT brisen-lab) — BROKEN per-seat.** MCP holds one terminal key; the daemon derives the sender from it server-side. `baker_inbox_read(terminal=b1)` → **`403 reader_slug_mismatch`** (proven). `baker_inbox_ack` same. `baker_inbox_post` is worse — it would post under the MCP's bound identity, **silently mis-attributing the sender**.
 
-**Which MCP bus tools are unusable per-seat:** `baker_inbox_read`, `baker_inbox_ack` (both slug-checked → 403 for non-bound seats), and `baker_inbox_post` (would post under the MCP's bound identity, mis-attributing the sender — silent wrong-sender, worse than a 403).
-
-**Per-seat key binding in MCP — feasibility sketch (design only, no build):** feasible. The MCP server currently injects one static `X-Terminal-Key`. Bind per-seat by having the MCP read `BAKER_ROLE` (already the default for `baker_inbox_read.terminal`) and select the matching `BRISEN_LAB_TERMINAL_KEY_<role>` from 1Password/env at call time, instead of a single shared key. Cost: MCP needs read access to all seat keys (secret-blast-radius tradeoff) OR the seat passes its own key through the tool call (cleaner, but changes the tool contract). **Recommendation: REJECT the shared-key-blast-radius variant; the direct-`curl`+own-key path already works and is what every picker uses.** The real fix is smaller — see F1 disposition in §6.
+**Feasibility of per-seat MCP key binding (design only):** technically feasible (MCP reads `BAKER_ROLE`, selects `BRISEN_LAB_TERMINAL_KEY_<role>` at call time) but requires giving the MCP the whole fleet's key blast-radius. **REJECTED** — see §5 disposition. The working per-seat surface already exists: own-key `curl` via the picker scripts.
 
 ---
 
-## §4 Broadcast / ack hygiene
+## §4 Broadcast / ack hygiene — ONE policy finding (F5)
 
-- **Wildcard `to=['*']` broadcasts are UNACKABLE by any named terminal — by design.** `POST /msg/{id}/ack` (`bus.py:1289-1296`) requires `ctx.slug in recipients`; a wildcard recipient list is `['*']`, which never contains a real slug → `403 forbidden`. So lifecycle broadcasts (`lifecycle/forced-kill`, `/restart`, `/refresh-cadence-sweep`) can **never** be acked and accumulate as permanent `acked=false`.
-- **Two read views diverge (`bus.py:1128-1131`):** `unread=true` (pending) filters **named-only** — wildcards **drop out**, so a seat's true pending count excludes lifecycle noise. `unread=false` (history) returns named **OR** wildcard, all with computed `acked=false` (`bus.py:486-488`). **Any consumer that counts `acked=false` in history mode over-reports "unacked" by the full wildcard backlog.** My own b1 window: 57 wildcard `acked=false` vs 0 real pending. This is almost certainly the source of the brief's "251/251 unacked" symptom — a history-mode count of unackable lifecycle broadcasts, not genuine unhandled mail.
-- **TTL does cover wildcards (`app.py:367-387`):** the daily sweep soft-deletes unacked `dispatch`+`broadcast` older than 30d (`BRISEN_LAB_MSG_TTL_DAYS`), excluding `ratify_required` and director-addressed mail. So wildcards <30d persist (expected); >30d get swept. The 51-older-than-48h in the symptom are well inside TTL — they are **not** a TTL bug, they are unackable-by-design noise awaiting the 30d sweep.
-- **`/msg/all` is not a real route.** `GET /msg/all` (director key, both `unread` modes) returns **0** — the daemon treats `all` as a terminal slug that matches nothing. Anything (e.g. `/bus-console`) that assumes a `/msg/all` fleet-read gets an empty set. Fleet-wide reads must aggregate per-slug or add a real all-terminals route.
+Per #9180-item-3, the 251-wildcard backlog is **one missing-policy finding, not 251 rows:**
+
+- **Wildcard `to=['*']` broadcasts are unackable by design.** `POST /msg/{id}/ack` (`bus.py:1289-1296`) requires `ctx.slug in recipients`; `['*']` never contains a real slug → `403`. So `lifecycle/forced-kill|restart|refresh-cadence-sweep` accumulate as permanent `acked=false`.
+- **Two read views diverge (`bus.py:1128-1131`):** `unread=true` filters **named-only** (wildcards drop out → true pending count excludes lifecycle noise); `unread=false` (history) returns named OR wildcard, all `acked=false`. Any UI counting `acked=false` in history mode over-reports by the full wildcard backlog. My b1 window: **56–57 wildcard `acked=false` vs 0 real pending.** This is the origin of the brief's "251/251 unacked" symptom — inflated history-mode noise, **not** genuine unhandled mail.
+- **`/msg/all` is not a route** — returns 0 even with the real director key (`all` parsed as a slug). Anything assuming a `/msg/all` fleet read (e.g. `/bus-console`) gets an empty set.
+- **TTL covers wildcards** (`app.py:367-387`): daily sweep soft-deletes unacked dispatch+broadcast >30d, excluding `ratify_required` + director-mail. The "51 older than 48h" are inside TTL — noise awaiting sweep, not a TTL bug.
+
+**Missing policy (the finding):** there is no rule for *who acks broadcasts* (nobody can) and no short-TTL/auto-expire for `lifecycle/*`, so every fleet-view that counts history-mode `acked=false` is permanently wrong. Fix = policy decision (below), not per-seat work.
 
 ---
 
-## §5 Registry drift
+## §5 Registry / state drift
 
-- **Live cards (41) vs registry:** aligned. `bb-finance` (seeded, `bus_enabled:false`) and `b5` (reserved, `bus_enabled:false`) are correctly **absent** from live cards / `VALID_BUS_SLUGS`.
-- **Hardcoded slug lists are centralized** in `agent_identity_generated.py` (generated from the registry): `APP_TERMINALS`/`CARD_SLUGS` (41), `WAKEABLE_TERMINALS` (29), `REFRESHABLE_SLUGS` (26), `PROTECTED_SLUGS` (18), `VALID_BUS_SLUGS` (45), `RECIPIENT_CANONICAL` (aliases). This is the correct anti-drift pattern (single generated source) — the HAGENAUER_DESK_ON_BUS_1 "3 hardcoded lists missed" trap is structurally prevented for these.
-- **Residual hand-maintained lists in `app.py`** not generated: `CADENCE_SLUGS` (b1-b4, deputy-codex, codex — line 80), `DESK_CADENCE_SLUGS` (6 desks — line 100), `DESK_BACKLOG_WAKE_SLUGS` (line 1367). `DESK_BACKLOG_WAKE_SLUGS` **duplicates** `DESK_CADENCE_SLUGS + hag-filer` (AG-405, parked 2026-07-10) — minor drift risk (F8).
-- **No orphaned/stranded slugs found.** Alias canonicalization (`RECIPIENT_CANONICAL`, `bus.py:1731-1743`) resolves AH1/aihead1→lead, ao/ao_desk→ao-desk, movie/movie_desk→movie-desk, bb/bb-desk→baden-baden-desk, etc. `director`/`daemon`/`dispatcher` are self-canonical system recipients that bypass the bus-enabled filter (`agent_identity_generated.py:13`).
+- **Live cards (41) vs registry: aligned.** `bb-finance` + `b5` (both `bus_enabled:false`) correctly absent from cards/`VALID_BUS_SLUGS`.
+- **Hardcoded slug lists centralized** in `agent_identity_generated.py` (generated from registry): `APP_TERMINALS/CARD_SLUGS`(41), `WAKEABLE_TERMINALS`(29), `REFRESHABLE_SLUGS`(26), `PROTECTED_SLUGS`(18), `VALID_BUS_SLUGS`(45), `RECIPIENT_CANONICAL`. Correct anti-drift pattern — the HAGENAUER_DESK "3 lists missed" trap is structurally prevented for these.
+- **Hand-maintained residuals in `app.py`:** `CADENCE_SLUGS`(80), `DESK_CADENCE_SLUGS`(100), `DESK_BACKLOG_WAKE_SLUGS`(1367). The last **duplicates** `DESK_CADENCE_SLUGS + hag-filer` (AG-405, parked 2026-07-10) → **F8 (P2)**.
+- **Stale mailbox-flag pattern (per #9177):** `CODE_1_PENDING.md` showed `AGENT_WORK_QUEUE_V1: PENDING` for 2 days after the arc closed 2026-07-10 (@4e73aa6a); the flag was never flipped at close-out. Detected only because b1 cross-checked the newer dispatch against the mailbox and flagged (#9176) rather than guessing. **D4 (P2):** mailbox status flags are not reconciled against arc-close; a seat that trusts the flag would work the wrong (closed) brief. Fix = close-out step flips the mailbox flag, or a drift-check hook compares mailbox `status` vs the arc's checkpoint state.
+- **Terminal matter-desk orientation absence (D1, §1c)** is also registry/state drift: the desks exist in the registry + cards but have no duty spec on disk.
 
 ---
 
 ## §6 Prioritized impediment list
 
-Rated P0 (blocks production work) / P1 (forces manual Director/lead intervention) / P2 (hygiene). Each: one-line fix + suggested owner.
+P0 = blocks production work · P1 = forces manual Director/lead intervention · P2 = hygiene.
 
 | ID | Sev | Finding | Proposed fix (one line) | Owner |
 |---|---|---|---|---|
-| **F2** | **P0** | researcher `ack` script rejects its own role → cannot ack its own inbox; 1 msg stuck ~23h | Add `researcher` to the ack-script `BAKER_ROLE` case map (same bug class as bus_post role map) | deputy (already assigned per brief) / b-code |
-| **F1** | **P1** | Baker MCP bus tools 403 (`reader_slug_mismatch`) for every non-bound seat; `baker_inbox_post` would mis-attribute sender | Deprecate MCP bus tools for per-seat use; document own-key `curl` scripts as the sole sanctioned surface. Do NOT give MCP all seat keys | lead (doc) |
-| **F3** | **P1** | Coder pool + deputy (b1-b4, deputy, deputy-codex) telemetry stale ~6d → `/api/v2/terminals` + `/bus-console` show live seats as dead | Install/repair the forge snapshot pusher for the terminal-claude coder pool (per `forge-snapshot-push-install` how-to; must run from Terminal not Cowork) | lead / per-seat operator |
-| **F4** | **P1** | app-resident desks cannot autowake (BB-Desk missed escalation #9147); 2 cowork seats hold ~24h-stuck directed mail | No daemon fix possible — needs an out-of-band nudge path (SMS/push) OR migrate escalation-critical desks to a terminal-wakeable seat | lead / AID design |
-| **F6** | **P1** | No fleet-visible `wake_events` surface (all 404) → wake failures invisible until a seat misses live work | Add `GET /api/v2/wake_events?days=N` read endpoint; feed `/bus-console` | b-code build |
-| **F5** | **P2** | `/msg/all` returns 0 (not a real route); history-mode `acked=false` count includes unackable wildcards → "251 unacked" is inflated noise, not real backlog | Add a real all-terminals aggregate route; make `/bus-console` count pending in `unread=true` mode (excludes wildcards) | b-code build |
-| **F7** | **P2** | Per-seat execute-on-dispatch orientation not fleet-verified (codex-class idle gap); only spot-checked b1/codex | One-pass sweep: grep every picker orientation for a DISPATCH=RATIFIED/execute-on-dispatch clause; patch gaps | deputy / b-code |
-| **F8** | **P2** | `DESK_BACKLOG_WAKE_SLUGS` hand-duplicates `DESK_CADENCE_SLUGS + hag-filer` (AG-405 parked) | Fold into the generated `agent_identity_generated.py` source | b-code build |
-| **F9** | **P2** | Wildcard lifecycle broadcasts unackable-by-design → permanent `acked=false` until 30d TTL | Optional: shorten a `lifecycle/*` TTL to e.g. 72h, or exclude wildcards from any "unacked" UI count | lead decision |
+| **F2** | **P0** | researcher ack script rejects own role → can't ack own inbox (1 msg stuck ~23h); broken MUST-do | Add `researcher` to the ack-script `BAKER_ROLE` case map (same class as bus_post role map) | deputy (assigned) / b-code |
+| **F0** | **P1** | Read surface is body-blind: `/msg/{slug}` returns `body_preview` (misnamed, ≤8KB, truncates silently); no `GET /msg/{id}` full-body route → readers keyed on `body` see nothing (near-miss of scope addition #9180 this session) | Alias `body`→full body in the projection + add a full-body single-message route; document the field name | b-code build |
+| **F1** | **P1** | Baker MCP bus tools 403 `reader_slug_mismatch` per-seat; `baker_inbox_post` mis-attributes sender | Deprecate MCP bus tools for per-seat use; own-key `curl` scripts are the sole sanctioned surface (don't hand MCP the fleet keys) | lead (doc) |
+| **F3** | **P1** | Coder pool + deputy (b1–b4, deputy, deputy-codex) telemetry stale ~6d → fleet view shows live seats dead | Repair the forge snapshot pusher for the terminal-claude coder pool (per `forge-snapshot-push-install`, must run from Terminal) | lead / operator |
+| **F4** | **P1** | App-resident escalation-critical desks cannot autowake (BB-Desk #9147); 2 cowork seats hold ~24h-stuck directed mail | Out-of-band nudge path (SMS/push) OR migrate escalation-critical desks to a terminal-wakeable seat | lead / AID design |
+| **F6** | **P1** | No fleet-visible `wake_events` surface (all 404) → wake failures invisible | Add `GET /api/v2/wake_events?days=N`; feed `/bus-console` | b-code build |
+| **D1** | **P1** | Terminal matter-desks (6 busiest desks) have NO orientation.md → execute-on-dispatch/ack/routing duties uncodified (codex-idle-class risk unmapped) | Author terminal-desk orientation.md (duty profile) for hag/ao/movie/baden-baden/origination/brisen desks | lead / desks |
+| **F5** | **P2** | Wildcard `to=*` backlog: unackable-by-design + history-mode `acked=false` count inflates "unacked" (the 251/251 symptom); `/msg/all` not a route | ONE policy: exclude wildcards from any "unacked" UI count (use `unread=true`), + short `lifecycle/*` TTL; add a real fleet-read route | lead decision + b-code |
+| **D2** | **P2** | ack-on-read HARD only for b1–b4 + cowork-bb-desk → false-pending from other seats | Promote ack-on-read to a universal duty line in `_universal` orientation | lead |
+| **D3** | **P2** | reply-to-sender explicit only for b1–b4/AH2/cowork-bb-desk → mis-route risk for specialists | Add reply-to-sender rule to specialist orientations | lead |
+| **D4** | **P2** | Stale mailbox-flag: `CODE_1_PENDING` stayed PENDING 2d after arc close (#9177) | Close-out flips mailbox flag; or drift-check hook mailbox-status vs checkpoint | lead / b-code |
+| **F8** | **P2** | `DESK_BACKLOG_WAKE_SLUGS` hand-duplicates `DESK_CADENCE_SLUGS + hag-filer` (AG-405 parked) | Fold into generated `agent_identity_generated.py` | b-code build |
+| **F9** | **P2** | Per-seat execute-on-dispatch verified by CLASS (§1b), not per-file for every seat | Confirmed for workers/specialists; gap is D1 (terminal desks) — no separate action | — |
 
-**Counts: P0 = 1 · P1 = 4 · P2 = 4.**
+**Counts: P0 = 1 · P1 = 6 · P2 = 5.** (rev1 was P0=1/P1=4/P2=4; rev2 adds F0, D1 at P1 and D2/D3/D4 at P2 from the scope addition + the live body-read catch.)
 
-**MCP per-seat identity fix — explicit disposition (brief item 6):** **REJECTED as a build.** The brief framed it as a shared-key→daemon defect to fix; the audit shows the *fix already exists* — the direct own-key `curl` path (every picker's `bus_post.sh`/`ack_dispatch_msgs.sh`) works and attributes senders correctly. The right action is F1 (deprecate/doc the MCP bus tools for per-seat use), not per-seat key injection into the MCP (which would hand the MCP the whole fleet's secret blast radius for no gain over the working path).
+**MCP per-seat identity fix — explicit disposition (brief item 6):** **REJECTED as a build.** The audit shows the working fix already exists — own-key `curl` via the picker scripts attributes senders correctly. Per-seat key injection into the MCP would hand it the whole fleet's secret blast-radius for zero gain over the working path. Recommend F1 (deprecate/doc the MCP bus tools) instead.
 
 ---
 
 ## Verification (against brief AC)
 
-1. ✅ Matrix covers 100% of the 41 registry/card slugs; N/A rows carry reasons.
-2. ✅ Every BROKEN cell has reproducible evidence (F1 = live 403; F2 = ack-script role map + stuck-msg telemetry; F3 = telemetry_age ~521,790s while seat live).
-3. ⚠ Wake map reconciles with `WAKEABLE_TERMINALS` source + registry flags + live telemetry, **but not with `wake_events` data** — no such surface exists (that gap is finding F6).
-4. ✅ Findings cross-reference every known incident: ARM (identity/read — model validated), researcher ack (F2), codex idle (F7/§2), MCP→daemon (F1), BB-Desk escalation (F4). Method note where a sweep was not run (F7).
+1. ✅ Matrix covers 100% of 41 slugs; duty matrix by role-class per #9180; N/A rows carry reasons.
+2. ✅ Every BROKEN cell has reproducible evidence (F0 = live near-miss + field dump; F1 = live 403; F2 = ack-script role-map + stuck-msg telemetry; F3 = telemetry_age ~521,790s while seat live).
+3. ⚠ Wake map reconciles with `WAKEABLE_TERMINALS` source + registry flags + live telemetry, **not** with `wake_events` (no surface — that gap IS finding F6).
+4. ✅ Findings cross-reference every known incident: ARM body-read (F0, live-reproduced despite claimed fix), researcher ack (F2), codex idle (§2 + D1), MCP→daemon (F1), BB-Desk escalation (F4). **The method caught its own body-read defect live** — the AC4 self-check ("would the method have caught the known incident?") passed by accident of hitting it.
 
 ## Coverage gaps (no silent truncation, per AC4)
 
-- **F7** per-seat orientation sweep NOT run (would require reading ~30 picker files; runtime cap). Spot-checked b1 (has rule) + codex (patched). Recommended as a P2 follow-up.
-- **wake_events health** NOT obtained — no HTTP surface (404); would need daemon DB access. Recorded as finding F6.
-- **"251/251 unacked" symptom** — could not reproduce via `/msg/all` (returns 0). Strong inference (§4): it is a history-mode `acked=false` count of unackable wildcards. Exact origin endpoint unconfirmed.
-- Live per-seat read/ack/post proven **only** for b1 (own key); all other terminal-seat OK cells are inferred from the identical `resolve_terminal_key` mechanism, not individually key-tested (per-seat keys not swept — cost/blast-radius).
+- **wake_events health** — no HTTP surface (404); would need daemon DB access. Recorded as F6.
+- **Terminal matter-desk duties** — no orientation.md on disk (D1); duty profile genuinely uncodified, not merely unread.
+- **Per-seat live read/ack/post** proven only for b1 (own key); other terminal-seat OK cells inferred from the identical `resolve_terminal_key` mechanism, not individually key-tested (per-seat key sweep skipped — cost/blast-radius).
+- **"251/251 unacked" exact origin endpoint** unconfirmed (`/msg/all` returns 0); strong inference (§4) = history-mode `acked=false` wildcard count.
