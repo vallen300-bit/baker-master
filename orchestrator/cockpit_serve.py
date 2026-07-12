@@ -117,13 +117,31 @@ def _read_file_content(path: str) -> str:
     return raw.decode("utf-8")
 
 
-# Floating "back to Arrivals" control injected into every served cockpit — the
-# desk cockpit files have no board-return control of their own (they are also
-# opened standalone). Serving-layer injection keeps the vault files untouched and
+# "Back to Arrivals" control injected into every served cockpit — the desk
+# cockpit files have no board-return control of their own (they are also opened
+# standalone). Serving-layer injection keeps the vault files untouched and
 # covers every flight at once. Same-origin /arrivals; the PIN cookie already set.
-# Style mirrors the cockpit's own native ".backlink" pill (Back to overview):
-# reuses the Pattern-E theme tokens so it inherits light/dark, with hard fallbacks
-# for any cockpit that lacks them. Floating (fixed) so it stays reachable on scroll.
+#
+# Pattern-E cockpits (sidebar <aside> present) get the Director-ratified form
+# (12 Jul 2026): "← Arrivals" as the FIRST sidebar element, in the cockpit's own
+# .golink accent register ("open →" / "sources →" card links), replacing the
+# redundant desk kicker ("AO Desk" etc — hidden via `aside>.kicker`; the nested
+# .projects/.asks section kickers are unaffected). var(--brand) inherits the
+# cockpit's light/dark theme; fallback is the ratified light-mode brand.
+_BACK_CRUMB_STYLE = (
+    '<style id="arrivals-back">'
+    "aside>.kicker{display:none}"
+    ".arrivals-back{display:inline-block;margin:2px 0 16px;padding:0 10px;"
+    "font:600 12.5px/1 -apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,sans-serif;"
+    "color:var(--brand,#006399);text-decoration:none;cursor:pointer}"
+    ".arrivals-back:hover{text-decoration:underline}"
+    "</style>"
+)
+_BACK_CRUMB = '<a class="arrivals-back" href="/arrivals">&#8592; Arrivals</a>'
+_ASIDE_RE = re.compile(r"<aside(?:\s[^>]*)?>", re.IGNORECASE)
+
+# Fallback for cockpits without a sidebar: floating fixed pill (pre-12-Jul form),
+# mirrors the cockpit's native ".backlink" pill so it stays reachable on scroll.
 _BACK_BUTTON = (
     '<a href="/arrivals" '
     'style="position:fixed;top:14px;left:14px;z-index:99999;display:inline-block;'
@@ -135,11 +153,15 @@ _BACK_BUTTON = (
 
 
 def _inject_back_button(html: str) -> str:
-    """Insert the floating ARRIVALS return control just before </body> (last
-    occurrence, case-insensitive). If the document has no </body>, append — a
-    fixed-position anchor renders regardless of where it lands."""
+    """Insert the ARRIVALS return control: sidebar breadcrumb right after the
+    first <aside> when one exists, else the floating pill before the last
+    </body> (or appended — a fixed-position anchor renders anywhere)."""
     if not html:
         return _BACK_BUTTON
+    m = _ASIDE_RE.search(html)
+    if m:
+        at = m.end()
+        return html[:at] + _BACK_CRUMB_STYLE + _BACK_CRUMB + html[at:]
     idx = html.lower().rfind("</body>")
     if idx == -1:
         return html + _BACK_BUTTON
