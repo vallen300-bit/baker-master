@@ -60,6 +60,40 @@ def _emit(text: str, *, block: bool) -> None:
     print(json.dumps(out))
 
 
+def _write_band_file(session_id: Optional[str], meter: dict) -> None:
+    # P0.1 emit (B2, lead #9733): the Stop hook is the one place with the
+    # measured transcript, so it writes the machine band to a local file keyed by
+    # session_id (== the heartbeat ticker's SESSION_UUID). The ticker reads this
+    # file and carries the fields in its next /api/heartbeat POST. Network I/O
+    # stays OUT of the hook so the exit-0 contract is never at risk. Written for
+    # EVERY band incl. ok, so a fresh healthy seat reports band=ok (retires the
+    # E16 fresh-seat false alarm) — not only when a warning fires.
+    if not session_id:
+        return
+    # Only [A-Za-z0-9._-] in the filename; a malformed session_id can never
+    # escape the band dir.
+    safe = "".join(c for c in str(session_id) if c.isalnum() or c in "._-")
+    if not safe:
+        return
+    try:
+        band_dir = Path(os.environ.get("CONTEXT_BAND_DIR") or (Path.home() / "forge-agent" / "context-band"))
+        band_dir.mkdir(parents=True, exist_ok=True)
+        record = {
+            "session_id": str(session_id),
+            "context_percent": meter["context_percent"],
+            "band": meter["band"],
+            "measured": meter["measured"],
+            "window_tokens": meter["window_tokens"],
+        }
+        tmp = band_dir / (safe + ".json.tmp")
+        final = band_dir / (safe + ".json")
+        tmp.write_text(json.dumps(record))
+        tmp.replace(final)  # atomic swap so the ticker never reads a half file
+    except Exception:
+        # Advisory metering must never break the session; swallow everything.
+        return
+
+
 def _coerce_int(value: object) -> Optional[int]:
     try:
         parsed = int(str(value))
@@ -151,6 +185,10 @@ if meter is None:
     raise SystemExit(0)
 tokens_est = meter["tokens"]
 percent = meter["context_percent"]
+
+# Emit the machine band for the heartbeat to carry — for EVERY band, before the
+# soft-gate early-exit, so a healthy ok seat still reports (retires E16).
+_write_band_file(payload.get("session_id"), meter)
 
 if percent < soft:
     raise SystemExit(0)

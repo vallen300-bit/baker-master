@@ -154,3 +154,72 @@ def test_hook_and_meter_agree_ok_band_is_silent(tmp_path):
     assert meter["band"] == "ok"
     result = _run_hook(t, window=1_000_000, soft=70, hard=85)
     assert result.stdout.strip() == "", "ok band must produce no warning"
+
+
+# --- P0.1 emit: the Stop hook writes the machine band file -------------------
+
+def _run_hook_with_band(transcript: Path, *, window: int, soft: int, hard: int,
+                        session_id: str | None, band_dir: Path):
+    payload = {
+        "hook_event_name": "Stop",
+        "transcript_path": str(transcript),
+        "cwd": str(transcript.parent),
+    }
+    if session_id is not None:
+        payload["session_id"] = session_id
+    env = os.environ.copy()
+    env.pop("ROLLOVER_SETTINGS_PATH", None)
+    env["ROLLOVER_WINDOW_TOKENS"] = str(window)
+    env["ROLLOVER_SOFT_PERCENT"] = str(soft)
+    env["ROLLOVER_HARD_PERCENT"] = str(hard)
+    env["CONTEXT_BAND_DIR"] = str(band_dir)
+    return subprocess.run(
+        ["bash", str(HOOK)], input=json.dumps(payload), capture_output=True,
+        text=True, env=env, timeout=8,
+    )
+
+
+def test_band_file_written_for_ok_seat(tmp_path):
+    # A fresh healthy seat (20%, ok band, below soft -> silent warning) MUST still
+    # emit its band so the dispatcher sees it as ok (retires E16 false alarm).
+    band_dir = tmp_path / "band"
+    t = _usage_transcript(tmp_path, 200_000)
+    result = _run_hook_with_band(t, window=1_000_000, soft=70, hard=85,
+                                 session_id="sess-ok-1", band_dir=band_dir)
+    assert result.stdout.strip() == "", "ok seat still silent to the human"
+    rec = json.loads((band_dir / "sess-ok-1.json").read_text())
+    assert rec["band"] == "ok"
+    assert rec["context_percent"] == 20
+    assert rec["measured"] is True
+    assert rec["window_tokens"] == 1_000_000
+    assert rec["session_id"] == "sess-ok-1"
+
+
+def test_band_file_written_for_hard_seat_matches_hook(tmp_path):
+    band_dir = tmp_path / "band"
+    t = _bytes_transcript(tmp_path, 900_000)  # bytes/4 -> 90% -> hard, measured=false
+    result = _run_hook_with_band(t, window=1_000_000, soft=70, hard=85,
+                                 session_id="sess-hard-1", band_dir=band_dir)
+    hook_pct, hook_band = _hook_percent_and_band(result.stdout, 70, 85)
+    rec = json.loads((band_dir / "sess-hard-1.json").read_text())
+    assert rec["band"] == hook_band == "hard"
+    assert rec["context_percent"] == hook_pct == 90
+    assert rec["measured"] is False
+
+
+def test_band_file_skipped_without_session_id(tmp_path):
+    band_dir = tmp_path / "band"
+    t = _usage_transcript(tmp_path, 200_000)
+    _run_hook_with_band(t, window=1_000_000, soft=70, hard=85,
+                        session_id=None, band_dir=band_dir)
+    assert not band_dir.exists() or not any(band_dir.iterdir()), \
+        "no session_id -> no band file (nothing to key it on)"
+
+
+def test_band_file_atomic_no_tmp_left(tmp_path):
+    band_dir = tmp_path / "band"
+    t = _usage_transcript(tmp_path, 800_000)
+    _run_hook_with_band(t, window=1_000_000, soft=70, hard=85,
+                        session_id="sess-atomic", band_dir=band_dir)
+    assert (band_dir / "sess-atomic.json").exists()
+    assert not list(band_dir.glob("*.tmp")), "temp file must be swapped away"
