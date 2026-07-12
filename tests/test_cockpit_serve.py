@@ -143,9 +143,37 @@ def test_inject_back_button_sidebar_breadcrumb():
     assert out.index("<aside>") < out.index('class="arrivals-back"') < out.index('class="kicker"')
     # Desk kicker (direct aside child) hidden; nested section kickers unaffected.
     assert "aside>.kicker{display:none}" in out
-    # Accent register mirrors .golink: brand var with light-mode fallback.
-    assert "var(--brand,#006399)" in out
+    # Accent register mirrors .golink: brand var with fallback chain.
+    assert "var(--brand,var(--blue,#006399))" in out
     # Case-insensitive aside with attributes still gets the breadcrumb.
     attr = cs._inject_back_button('<ASIDE class="s"><h1>t</h1></ASIDE>')
     assert 'class="arrivals-back"' in attr
     assert "position:fixed" not in attr
+
+
+def test_inject_back_button_content_pages():
+    """No sidebar: breadcrumb opens the content flow — after <main> or the
+    snapshot .wrap div, or before a bare <h1>. Fixed pill only when the page has
+    none of these anchors. Covers /flight/* dashboards and /flights/* snapshots."""
+    snap = '<body><div class="banner">b</div><div class="wrap"><h1>Flight X</h1></div></body>'
+    out = cs._inject_back_button(snap)
+    assert out.count('href="/arrivals"') == 1
+    assert "position:fixed" not in out
+    assert out.index('<div class="wrap">') < out.index('class="arrivals-back"') < out.index("<h1>")
+
+    dash = "<body><main><h2>BB-AUK-001</h2></main></body>"
+    out = cs._inject_back_button(dash)
+    assert "position:fixed" not in out
+    assert out.index("<main>") < out.index('class="arrivals-back"') < out.index("<h2>")
+
+    bare = "<body><h1>Flights</h1></body>"
+    out = cs._inject_back_button(bare)
+    assert "position:fixed" not in out
+    assert out.index('class="arrivals-back"') < out.index("<h1>")
+
+    # Token chain: cockpit --brand, dashboard --blue, snapshot hard fallback.
+    assert "var(--brand,var(--blue,#006399))" in out
+
+    # No anchors at all: floating pill fallback unchanged.
+    plain = cs._inject_back_button("<body><div>x</div></body>")
+    assert "position:fixed" in plain
