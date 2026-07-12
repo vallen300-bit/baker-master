@@ -4,7 +4,7 @@ dispatch: lead #9721 (Director parallelism) + #9894 (priority-now) + #9898 (desi
 owner: b2
 attempt: 2
 updated: 2026-07-12
-status: DESIGN APPROVED (lead #9898, Option B) — BUILD not started; checkpoint+respawn at design boundary per lead #9898 (35% discipline)
+status: SHIPPED (attempt 2) — build complete, 2 PRs open awaiting lead merge (baker-master#542, baker-vault#186). Ship report briefs/_reports/B2_RESEARCH_MEMORY_INDEX_20260712.md; bus ship lead #9936. Item-8 build lane DONE; remaining lane = edge-scout PR #183 (Fri 2026-07-17).
 ---
 
 # Checkpoint — Researcher Tranche-2 #8 Research memory / index
