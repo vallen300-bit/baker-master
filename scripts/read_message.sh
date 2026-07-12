@@ -57,6 +57,12 @@ done
 for v in "$PAGE" "$PAGE_SIZE"; do
     [ -z "$v" ] || case "$v" in *[!0-9]*) fail "--page/--page-size must be numeric" 1 ;; esac
 done
+# Pagination requires BOTH flags together (codex #9269 polish): a lone --page or
+# --page-size would otherwise be silently ignored. A zero page/page-size is invalid.
+if [ -n "$PAGE" ] || [ -n "$PAGE_SIZE" ]; then
+    { [ -n "$PAGE" ] && [ -n "$PAGE_SIZE" ]; } || fail "--page and --page-size must be given together" 1
+    { [ "$PAGE" != "0" ] && [ "$PAGE_SIZE" != "0" ]; } || fail "--page and --page-size must be >= 1" 1
+fi
 
 # --- resolve researcher key (env -> cache -> 1P) ---
 KEYHELPER=""
