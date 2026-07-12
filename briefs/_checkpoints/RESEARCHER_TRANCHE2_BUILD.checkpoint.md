@@ -38,8 +38,16 @@ Four items, **each its own PR, sequenced as listed**:
 - **DONE + BOTH GATES CLEARED.** PR **vallen300-bit/baker-vault#175** @424a72f. Codex design-gate #9312 (folded) + codex BUILD-PASS #9433 (findings none). Handed to lead for merge #9434 (no self-merge #9255). Files: method.md Step 8.6 + §4.2; `wiki/research/_continuation/_TEMPLATE.md`; `scripts/validate_continuation.sh`. Validator exercised 5 paths.
 - **NEXT CONCRETE STEP:** start **item-2 (#6 per-type output schemas)** — DESIGN first (read `~/.claude/skills/research-fan-out/SKILL.md` + `_ops/agents/researcher/research-types.md`; design typed output contract per channel to kill paraphrase drift across fan-out sub-agents; wire into research-fan-out) → send codex design-gate → build in vault worktree → codex build-gate → lead merge. (Lead offered parallel-start on #9434; proceed unless lead says hold.)
 
+## Item-2 (#6 per-type output schemas) status — DESIGN-CHANGES received, folding
+- Design doc: `briefs/_reports/B1_researcher_tranche2_item2_output_schemas_DESIGN_20260712.md` (branch b1/researcher-tranche2-item1).
+- Codex #9456 = DESIGN-CHANGES (2 gaps) + all 5 rulings settled:
+  - **F1 HIGH:** base schema MUST add a required `claim` field to every `findings[]` row (method §8 mandates Claim/URL/Pub date/Byline/Accessed/Tier/Confidence/Quote — my base omitted `claim`).
+  - **F2 MED:** the 8 per-type field sets are NOT actually 1:1 with `research-types.md` "What to find" (e.g. Type 1 has 8 bullets, my schema had 4; Type 6 needs 3 practitioners + last-5-posts/specialisation/what-worked). Fix: read each type's full What-to-find bullets and expand each schema to cover them (or map each bullet→field).
+  - **Rulings:** Q1 base+8 YES · Q2 strict JSON YES · Q3 prompt + **deterministic pre-synthesis JSON/schema conformance check**, invalid channel → §7 channel-failure · Q4 editing research-fan-out itself is in-scope, do NOT edit referenced skills · Q5 **edit `_ops/skills/research-fan-out/` (vault canonical) ONLY** — `~/.claude/skills/research-fan-out` is a SYMLINK to vault, no dual edit.
+- **NEXT CONCRETE STEP:** fold F1 (add `claim`) + F2 (expand 8 schemas from `_ops/agents/researcher/research-types.md` What-to-find bullets), then BUILD in a vault worktree: edit `_ops/skills/research-fan-out/SKILL.md` §5 (output contract → typed schema) + §6 (add deterministic conformance-check → §7 failure) + new `_ops/skills/research-fan-out/output-schemas.md` (base+8 schemas, JSON examples) + `method.md §10` pointer. Then codex build-gate → lead merge. Codex already gave the fix path — no design re-gate needed, go straight to build after folding.
+
 ## Remaining items
-- #6 per-type output schemas (wire into research-fan-out), #7 recency-override ship-gate, #8 research-memory (DESIGN-FIRST: store question — new store vs reuse Baker memory/vault-wiki). Each: design → codex design-gate → build (vault worktree) → codex build-gate → lead merge.
+- #7 recency-override ship-gate, #8 research-memory (DESIGN-FIRST: store question — new store vs reuse Baker memory/vault-wiki). Each: design → codex design-gate → build (vault worktree) → codex build-gate → lead merge.
 
 ## Build mechanics note (for successor)
 baker-vault commits are BLOCKED in the shared `~/baker-vault` checkout (vault-writer-isolation hook; only `lead` commits there). Build pattern: `git -C ~/baker-vault worktree add -b <branch> ~/bm-b1-vault-<task> origin/main` → edit/commit/push/PR in the worktree → `git -C ~/baker-vault worktree remove <path>`. baker-vault PRs target `vallen300-bit/baker-vault`.
