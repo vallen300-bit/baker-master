@@ -34,10 +34,9 @@ Four items, **each its own PR, sequenced as listed**:
 4. **Venue:** baker-vault = PASS (method.md + template + helper + `wiki/research/_continuation/`). baker-master only if a runtime consumer is later introduced.
 - **Build shape confirmed: Option A** (method.md Step 8.6 + `_TEMPLATE.md` + cage-safe `validate_continuation.sh`). No new skill surface, no auto-dispatch.
 
-## Item-1 status (BUILT — at codex build-gate)
-- **DONE:** built in baker-vault (isolated worktree per vault-writer-isolation guard). PR **vallen300-bit/baker-vault#175**, branch `b1/researcher-tranche2-item1-continuation` @424a72f. Files: method.md Step 8.6 + §4.2; `wiki/research/_continuation/_TEMPLATE.md`; `scripts/validate_continuation.sh`. Validator exercised (clean/missing/inconsistent/bad-class/conform all correct).
-- **Build-gate sent to codex #9428** (topic build-verify/researcher-tranche2-item1). Awaiting build-PASS.
-- **NEXT CONCRETE STEP:** on codex build-PASS → hand PR #175 to **lead** for merge (NO self-merge, #9255). On build-CHANGES → fold in the same worktree pattern (recreate worktree, patch, re-gate). Then start **item-2 (#6 per-type output schemas)** design → codex design-gate.
+## Item-1 status (COMPLETE — both gates cleared, at lead merge)
+- **DONE + BOTH GATES CLEARED.** PR **vallen300-bit/baker-vault#175** @424a72f. Codex design-gate #9312 (folded) + codex BUILD-PASS #9433 (findings none). Handed to lead for merge #9434 (no self-merge #9255). Files: method.md Step 8.6 + §4.2; `wiki/research/_continuation/_TEMPLATE.md`; `scripts/validate_continuation.sh`. Validator exercised 5 paths.
+- **NEXT CONCRETE STEP:** start **item-2 (#6 per-type output schemas)** — DESIGN first (read `~/.claude/skills/research-fan-out/SKILL.md` + `_ops/agents/researcher/research-types.md`; design typed output contract per channel to kill paraphrase drift across fan-out sub-agents; wire into research-fan-out) → send codex design-gate → build in vault worktree → codex build-gate → lead merge. (Lead offered parallel-start on #9434; proceed unless lead says hold.)
 
 ## Remaining items
 - #6 per-type output schemas (wire into research-fan-out), #7 recency-override ship-gate, #8 research-memory (DESIGN-FIRST: store question — new store vs reuse Baker memory/vault-wiki). Each: design → codex design-gate → build (vault worktree) → codex build-gate → lead merge.
