@@ -36,6 +36,7 @@ DESK_CODES: dict[str, str] = {
     "HAG": "hagenauer-desk",
     "BR": "brisen-desk",
     "ORIG": "origination-desk",
+    "FA": "arm",
 }
 
 # Tolerant extractor for DESK-MATTER-###. First separator REQUIRED (disambiguates
