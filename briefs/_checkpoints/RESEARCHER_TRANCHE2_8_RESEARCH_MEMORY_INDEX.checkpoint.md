@@ -2,7 +2,7 @@
 brief_id: RESEARCHER_TRANCHE2_8_RESEARCH_MEMORY_INDEX
 dispatch: lead #9721 (Director parallelism) + #9894 (priority-now) + #9898 (design APPROVED, rulings)
 owner: b2
-attempt: 1
+attempt: 2
 updated: 2026-07-12
 status: DESIGN APPROVED (lead #9898, Option B) — BUILD not started; checkpoint+respawn at design boundary per lead #9898 (35% discipline)
 ---
