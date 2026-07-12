@@ -26,12 +26,28 @@
 # context-cost watchdog's job (context-cost-watchdog-delta spec, cowork-ah1).
 
 PAYLOAD="$(cat 2>/dev/null || true)"
-ROLLOVER_HOOK_PAYLOAD="$PAYLOAD" python3 - <<'PY'
+# Directory of THIS hook, so the heredoc Python can import the shared
+# context_meter module (rubric #1: one band computation, no drift). Resolve the
+# real path so a symlinked hook still finds its sibling module.
+_HOOK_SRC="${BASH_SOURCE[0]:-$0}"
+CONTEXT_METER_DIR="$(cd "$(dirname "$_HOOK_SRC")" >/dev/null 2>&1 && pwd -P || true)"
+ROLLOVER_HOOK_PAYLOAD="$PAYLOAD" CONTEXT_METER_DIR="$CONTEXT_METER_DIR" python3 - <<'PY'
 import json
-import math
 import os
+import sys
 from pathlib import Path
 from typing import Optional
+
+# Import the shared band computation (same module the band-file emitter uses).
+_meter_dir = os.environ.get("CONTEXT_METER_DIR") or str(Path(__file__).resolve().parent)
+if _meter_dir and _meter_dir not in sys.path:
+    sys.path.insert(0, _meter_dir)
+try:
+    import context_meter
+except Exception:
+    # If the shared module cannot be imported, the hook must still no-op
+    # cleanly (exit-0 contract) rather than crash the session.
+    raise SystemExit(0)
 
 
 def _emit(text: str, *, block: bool) -> None:
@@ -42,6 +58,40 @@ def _emit(text: str, *, block: bool) -> None:
         out["decision"] = "block"
         out["reason"] = text
     print(json.dumps(out))
+
+
+def _write_band_file(session_id: Optional[str], meter: dict) -> None:
+    # P0.1 emit (B2, lead #9733): the Stop hook is the one place with the
+    # measured transcript, so it writes the machine band to a local file keyed by
+    # session_id (== the heartbeat ticker's SESSION_UUID). The ticker reads this
+    # file and carries the fields in its next /api/heartbeat POST. Network I/O
+    # stays OUT of the hook so the exit-0 contract is never at risk. Written for
+    # EVERY band incl. ok, so a fresh healthy seat reports band=ok (retires the
+    # E16 fresh-seat false alarm) — not only when a warning fires.
+    if not session_id:
+        return
+    # Only [A-Za-z0-9._-] in the filename; a malformed session_id can never
+    # escape the band dir.
+    safe = "".join(c for c in str(session_id) if c.isalnum() or c in "._-")
+    if not safe:
+        return
+    try:
+        band_dir = Path(os.environ.get("CONTEXT_BAND_DIR") or (Path.home() / "forge-agent" / "context-band"))
+        band_dir.mkdir(parents=True, exist_ok=True)
+        record = {
+            "session_id": str(session_id),
+            "context_percent": meter["context_percent"],
+            "band": meter["band"],
+            "measured": meter["measured"],
+            "window_tokens": meter["window_tokens"],
+        }
+        tmp = band_dir / (safe + ".json.tmp")
+        final = band_dir / (safe + ".json")
+        tmp.write_text(json.dumps(record))
+        tmp.replace(final)  # atomic swap so the ticker never reads a half file
+    except Exception:
+        # Advisory metering must never break the session; swallow everything.
+        return
 
 
 def _coerce_int(value: object) -> Optional[int]:
@@ -89,54 +139,6 @@ def _settings_int(docs: list, flat_key: str, nested_key: str) -> Optional[int]:
     return None
 
 
-def _context_tokens_from_usage(path: Path) -> Optional[int]:
-    # True context occupancy = the LAST turn's API-reported usage, not the
-    # transcript's on-disk byte count. The JSONL stores full tool-result dumps +
-    # envelopes + every prior turn verbatim and never shrinks on compaction, so
-    # bytes/4 runs 1.5x-4.6x high and only climbs (CONTEXT_METER_FIX_1). Each
-    # assistant turn carries message.usage; the running context is
-    #   input_tokens + cache_read_input_tokens + cache_creation_input_tokens
-    # (output_tokens excluded — matches Claude Code's own /context measure).
-    # Returns None when no usage is present so the caller falls back to bytes/4.
-    last: Optional[int] = None
-    try:
-        with path.open(encoding="utf-8", errors="replace") as handle:
-            for line in handle:
-                # Cheap pre-filter: skip the (large, frequent) tool-result lines
-                # that carry no usage before paying for a json.loads.
-                if '"usage"' not in line:
-                    continue
-                try:
-                    obj = json.loads(line)
-                except (json.JSONDecodeError, ValueError):
-                    continue
-                # A JSONL line may be any valid JSON value (e.g. a list) that still
-                # contains the substring "usage" and passes the prefilter above.
-                # Guard before .get() so a non-dict record falls through to the
-                # bytes/4 fallback instead of raising (keeps the hook fault-tolerant).
-                if not isinstance(obj, dict):
-                    continue
-                message = obj.get("message")
-                usage = message.get("usage") if isinstance(message, dict) else None
-                if not isinstance(usage, dict):
-                    usage = obj.get("usage") if isinstance(obj.get("usage"), dict) else None
-                if not isinstance(usage, dict):
-                    continue
-                total = 0
-                found = False
-                for key in ("input_tokens", "cache_read_input_tokens", "cache_creation_input_tokens"):
-                    value = usage.get(key)
-                    if isinstance(value, bool) or not isinstance(value, int):
-                        continue
-                    total += value
-                    found = True
-                if found:
-                    last = total
-    except OSError:
-        return None
-    return last if last and last > 0 else None
-
-
 try:
     payload = json.loads(os.environ.get("ROLLOVER_HOOK_PAYLOAD", "") or "{}")
 except json.JSONDecodeError:
@@ -175,12 +177,18 @@ hard = (
 if not (0 < soft <= 100) or not (0 < hard <= 100) or soft > hard:
     soft, hard = 70, 85
 
-# Prefer the transcript's own API-reported context usage; fall back to bytes/4
-# only when no usage field is present (non-Claude / empty / malformed transcript).
-tokens_est = _context_tokens_from_usage(path)
-if tokens_est is None:
-    tokens_est = math.ceil(size_bytes / 4)
-percent = int((tokens_est / window_tokens) * 100)
+# One band computation, shared with the heartbeat band-file emitter (rubric #1).
+# Prefers the transcript's own API-reported usage; falls back to bytes/4 only
+# when no usage field is present (non-Claude / empty / malformed transcript).
+meter = context_meter.compute(path, window_tokens, soft, hard)
+if meter is None:
+    raise SystemExit(0)
+tokens_est = meter["tokens"]
+percent = meter["context_percent"]
+
+# Emit the machine band for the heartbeat to carry — for EVERY band, before the
+# soft-gate early-exit, so a healthy ok seat still reports (retires E16).
+_write_band_file(payload.get("session_id"), meter)
 
 if percent < soft:
     raise SystemExit(0)
