@@ -125,3 +125,27 @@ def test_inject_back_button_placement():
     # Multiple bodies: attach to the last.
     multi = cs._inject_back_button("<body>a</body>x<body>b</body>")
     assert multi.rfind('href="/arrivals"') < multi.rfind("</body>")
+
+
+def test_inject_back_button_sidebar_breadcrumb():
+    """Pattern-E cockpits (sidebar present): '← Arrivals' becomes the first
+    sidebar element in the .golink accent register, the redundant desk kicker is
+    hidden, and the floating fixed pill is NOT used (Director-ratified 12 Jul)."""
+    page = (
+        "<html><head><style>.x{}</style></head><body>"
+        '<aside><div class="kicker">AO Desk</div><h1>AO</h1></aside>'
+        "<main>x</main></body></html>"
+    )
+    out = cs._inject_back_button(page)
+    assert out.count('href="/arrivals"') == 1
+    assert "position:fixed" not in out
+    # Link is the first thing inside <aside>, before the kicker.
+    assert out.index("<aside>") < out.index('class="arrivals-back"') < out.index('class="kicker"')
+    # Desk kicker (direct aside child) hidden; nested section kickers unaffected.
+    assert "aside>.kicker{display:none}" in out
+    # Accent register mirrors .golink: brand var with light-mode fallback.
+    assert "var(--brand,#006399)" in out
+    # Case-insensitive aside with attributes still gets the breadcrumb.
+    attr = cs._inject_back_button('<ASIDE class="s"><h1>t</h1></ASIDE>')
+    assert 'class="arrivals-back"' in attr
+    assert "position:fixed" not in attr
