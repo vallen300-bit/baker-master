@@ -71,13 +71,18 @@ KEY="$(brisen_lab_read_terminal_key "$SLUG" "${BRISEN_LAB_TERMINAL_KEY:-}" 2>/de
 
 # --- single high-limit fetch of the OWN mailbox (read-only). NO since-floor:
 # codex #9250 — a since-floor would drop older thread members while claiming
-# completeness. thread_complete is derived from whether we hit FETCH_LIMIT. ---
+# completeness. thread_complete is derived from whether we hit FETCH_LIMIT.
+# The daemon list is OLDEST-first + limit-bounded with NO cursor contract
+# (check_inbox.sh:75-92): a message beyond the oldest FETCH_LIMIT is unreachable. ---
 RESP="$(curl -sS --max-time 25 -G \
     -H "X-Terminal-Key: ${KEY}" \
     --data-urlencode "limit=${FETCH_LIMIT}" \
     "${DAEMON}/msg/${SLUG}" 2>/dev/null)" || fail "brisen-lab unreachable (GET /msg/${SLUG})" 3
 [ -n "$RESP" ] || fail "empty response from daemon" 3
-printf '%s' "$RESP" | grep -q 'bad_terminal_key' && fail "brisen-lab rejected researcher key" 3
+# NOTE: auth/error detection is done in python by inspecting the PARSED top-level
+# structure (dict without "messages" => error). A substring scan for 'bad_terminal_key'
+# over the raw body would false-reject any inbox whose message text contains that
+# literal (codex build-gate #9257 F1 HIGH — reproduced by this very dispatch).
 
 printf '%s' "$RESP" | \
   MSGID="$MSGID" THREAD="$THREAD" PAGE="$PAGE" PAGE_SIZE="$PAGE_SIZE" \
@@ -96,6 +101,12 @@ try:
 except Exception as exc:
     print("read_message: could not parse daemon response: %s" % exc, file=sys.stderr)
     sys.exit(1)
+# Error detection on the PARSED structure, not a raw-body substring scan (codex F1):
+# a successful list response is a dict with a "messages" list (or a bare list). An
+# error response is a dict WITHOUT "messages" (e.g. {"detail":"bad_terminal_key"}).
+if isinstance(data, dict) and "messages" not in data:
+    print("read_message: daemon error response: %s" % json.dumps(data), file=sys.stderr)
+    sys.exit(3)
 msgs = data if isinstance(data, list) else data.get("messages", [])
 window_truncated = len(msgs) >= fetch_limit   # hit the limit => cannot prove completeness
 
@@ -151,11 +162,18 @@ if thread:
 hit = next((m for m in msgs if str(m.get("id")) == msgid), None)
 if hit is None:
     if window_truncated:
-        print("read_message: msg #%s not found in the newest %d messages — it may be older than"
-              " the fetch window (no cursor contract to page further)." % (msgid, fetch_limit),
+        # The list API is OLDEST-first + limit-bounded with no cursor, so the fetched
+        # window is the OLDEST fetch_limit messages; a message NEWER than that window
+        # cannot be paged to. This is a known daemon-API limitation (a by-id / newest
+        # endpoint is a tranche-2 follow-up) — reported, never silently a "not found".
+        print("read_message: msg #%s not found in the fetched window (the OLDEST %d messages;"
+              " the list API is oldest-first with no cursor, so a newer message beyond this"
+              " window is unreachable — needs a daemon by-id endpoint)." % (msgid, fetch_limit),
               file=sys.stderr)
     else:
-        print("read_message: msg #%s is not in researcher\x27s mailbox." % msgid, file=sys.stderr)
+        # window NOT full => we hold the entire mailbox, so the id genuinely does not exist
+        print("read_message: msg #%s is not in researcher\x27s mailbox (full mailbox scanned)."
+              % msgid, file=sys.stderr)
     sys.exit(4)
 emit_header(hit)
 emit_body(body_of(hit))
