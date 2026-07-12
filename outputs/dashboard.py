@@ -8493,12 +8493,13 @@ async def flights_index(request: Request):
     if not (_mcp_verify_key(request) or _arrivals_board_cookie_ok(request)):
         return HTMLResponse("Unauthorized", status_code=401)
     from orchestrator import flight_snapshot
+    from orchestrator.cockpit_serve import _inject_back_button
     try:
         flights = flight_snapshot.list_registered_flights()
     except Exception:
         logger.exception("flights_index failed")
         flights = []
-    return HTMLResponse(flight_snapshot.render_index_html(flights))
+    return HTMLResponse(_inject_back_button(flight_snapshot.render_index_html(flights)))
 
 
 @app.get("/flights/{project_code}", include_in_schema=False, response_class=HTMLResponse)
@@ -8511,6 +8512,7 @@ async def flight_snapshot_page(request: Request, project_code: str):
     if not (_mcp_verify_key(request) or _arrivals_board_cookie_ok(request)):
         return HTMLResponse("Unauthorized", status_code=401)
     from orchestrator import flight_snapshot
+    from orchestrator.cockpit_serve import _inject_back_button
     try:
         snap = flight_snapshot.build_flight_snapshot(project_code)
     except Exception:
@@ -8518,7 +8520,7 @@ async def flight_snapshot_page(request: Request, project_code: str):
         return HTMLResponse("Internal error", status_code=500)
     if snap is None:
         return HTMLResponse("Unknown flight", status_code=404)
-    return HTMLResponse(flight_snapshot.render_snapshot_html(snap))
+    return HTMLResponse(_inject_back_button(flight_snapshot.render_snapshot_html(snap)))
 
 
 def _flight_dashboard_enabled() -> bool:
@@ -8537,6 +8539,7 @@ async def flight_dashboard_page(request: Request, project_code: str):
     if not _mcp_verify_key(request):
         return HTMLResponse("Unauthorized", status_code=401)
     from orchestrator import flight_dashboard
+    from orchestrator.cockpit_serve import _inject_back_button
     try:
         data = flight_dashboard.build_flight_dashboard(project_code)
     except Exception:
@@ -8544,7 +8547,7 @@ async def flight_dashboard_page(request: Request, project_code: str):
         return HTMLResponse("Internal error", status_code=500)
     if data is None:
         return HTMLResponse("Unknown flight", status_code=404)
-    return HTMLResponse(flight_dashboard.render_dashboard_html(data))
+    return HTMLResponse(_inject_back_button(flight_dashboard.render_dashboard_html(data)))
 
 
 @app.get("/cockpit/{project_code}", include_in_schema=False, response_class=HTMLResponse)

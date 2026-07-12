@@ -133,12 +133,18 @@ _BACK_CRUMB_STYLE = (
     "aside>.kicker{display:none}"
     ".arrivals-back{display:inline-block;margin:2px 0 16px;padding:0 10px;"
     "font:600 12.5px/1 -apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,sans-serif;"
-    "color:var(--brand,#006399);text-decoration:none;cursor:pointer}"
+    "color:var(--brand,var(--blue,#006399));text-decoration:none;cursor:pointer}"
     ".arrivals-back:hover{text-decoration:underline}"
     "</style>"
 )
 _BACK_CRUMB = '<a class="arrivals-back" href="/arrivals">&#8592; Arrivals</a>'
 _ASIDE_RE = re.compile(r"<aside(?:\s[^>]*)?>", re.IGNORECASE)
+# Content pages without a sidebar (flight snapshot .wrap, flight dashboard main):
+# the breadcrumb opens the content flow instead. padding:0 — these pages have no
+# kicker grid to align to.
+_CONTENT_CRUMB_STYLE = _BACK_CRUMB_STYLE.replace("padding:0 10px;", "padding:0;")
+_CONTENT_OPEN_RE = re.compile(r'<main(?:\s[^>]*)?>|<div class="wrap">', re.IGNORECASE)
+_H1_RE = re.compile(r"<h1(?:\s[^>]*)?>", re.IGNORECASE)
 
 # Fallback for cockpits without a sidebar: floating fixed pill (pre-12-Jul form),
 # mirrors the cockpit's native ".backlink" pill so it stays reachable on scroll.
@@ -153,15 +159,25 @@ _BACK_BUTTON = (
 
 
 def _inject_back_button(html: str) -> str:
-    """Insert the ARRIVALS return control: sidebar breadcrumb right after the
-    first <aside> when one exists, else the floating pill before the last
-    </body> (or appended — a fixed-position anchor renders anywhere)."""
+    """Insert the ARRIVALS return control (Director-ratified breadcrumb, 12 Jul):
+    right after the first <aside> when a sidebar exists; else at the top of the
+    content flow (after <main>/<div class="wrap">, or before the first <h1>);
+    else the floating-pill fallback before the last </body> (or appended — a
+    fixed-position anchor renders anywhere)."""
     if not html:
         return _BACK_BUTTON
     m = _ASIDE_RE.search(html)
     if m:
         at = m.end()
         return html[:at] + _BACK_CRUMB_STYLE + _BACK_CRUMB + html[at:]
+    m = _CONTENT_OPEN_RE.search(html)
+    if m:
+        at = m.end()
+        return html[:at] + _CONTENT_CRUMB_STYLE + _BACK_CRUMB + html[at:]
+    m = _H1_RE.search(html)
+    if m:
+        at = m.start()
+        return html[:at] + _CONTENT_CRUMB_STYLE + _BACK_CRUMB + html[at:]
     idx = html.lower().rfind("</body>")
     if idx == -1:
         return html + _BACK_BUTTON
