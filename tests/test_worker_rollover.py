@@ -20,6 +20,35 @@ def _write_transcript(tmp_path: Path, token_estimate: int) -> Path:
     return path
 
 
+def _usage_line(*, input_tokens: int = 0, cache_read: int = 0, cache_creation: int = 0, output: int = 50) -> str:
+    # A transcript assistant turn as Claude Code writes it: the running context is
+    # input_tokens + cache_read_input_tokens + cache_creation_input_tokens.
+    return json.dumps({
+        "type": "assistant",
+        "message": {"role": "assistant", "usage": {
+            "input_tokens": input_tokens,
+            "cache_read_input_tokens": cache_read,
+            "cache_creation_input_tokens": cache_creation,
+            "output_tokens": output,
+        }},
+    })
+
+
+def _write_usage_transcript(tmp_path: Path, *context_tokens: int, pad_tokens: int = 0) -> Path:
+    # Build a transcript whose on-disk bytes are dominated by a usage-free junk
+    # line (a stand-in for tool-result dumps), so bytes/4 would read very high
+    # while the real per-turn usage is whatever we assert. Emits one usage line
+    # per value in `context_tokens`, in order (the LAST is the live context).
+    path = tmp_path / "transcript.jsonl"
+    lines = []
+    if pad_tokens:
+        lines.append(json.dumps({"type": "tool_result", "content": "x" * (pad_tokens * 4)}))
+    for total in context_tokens:
+        lines.append(_usage_line(input_tokens=2, cache_read=total - 2))
+    path.write_text("\n".join(lines) + "\n")
+    return path
+
+
 def _run_hook(transcript: Path, *, window: int | None = None, settings: Path | None = None):
     payload = json.dumps({
         "hook_event_name": "Stop",
@@ -198,6 +227,88 @@ def test_context_hook_hard_percent_still_default_85_with_soft_50(tmp_path):
     assert ctx is not None
     assert "context ~85%" in ctx
     assert "HARD: write or refresh" in ctx
+
+
+def test_context_hook_uses_transcript_usage_not_bytes(tmp_path):
+    # CONTEXT_METER_FIX_1: the estimator must read the transcript's own API-reported
+    # usage, not bytes/4. Here usage = 750k (75% of 1M -> soft band) while the file's
+    # bytes/4 would be ~950k (95% -> hard band). The hook must report ~75%, soft.
+    transcript = _write_usage_transcript(tmp_path, 750_000, pad_tokens=950_000)
+    assert transcript.stat().st_size // 4 > 900_000, "junk pad must make bytes/4 read hard-band"
+    result = _run_hook(transcript, window=1_000_000)
+    assert result.returncode == 0, result.stderr
+    ctx = _additional_context(result.stdout)
+    assert ctx is not None
+    assert "context ~75%" in ctx, ctx
+    assert "Refresh the checkpoint" in ctx      # soft path, not the bytes/4 hard path
+    assert "HARD: write or refresh" not in ctx
+    assert _decision(result.stdout) is None      # 75% usage must not block
+
+
+def test_context_hook_takes_last_usage_as_live_context(tmp_path):
+    # Context shrinks on compaction: an earlier 900k turn then a later 200k turn
+    # (post-compaction) must read as the LATEST (20%), not the peak.
+    transcript = _write_usage_transcript(tmp_path, 900_000, 200_000)
+    result = _run_hook(transcript, window=1_000_000)
+    assert result.returncode == 0, result.stderr
+    # 20% is below the default soft band -> silent (healthy seat, not force-checkpointed).
+    assert result.stdout.strip() == "", result.stdout
+
+
+def test_context_hook_fresh_seat_reads_below_5_percent(tmp_path):
+    # AC: a fresh seat reads <5%. Tiny usage (30k = 3%) even with a large byte pad
+    # (bytes/4 would be ~60%). Force emit with soft=1 so we can read the percent back.
+    transcript = _write_usage_transcript(tmp_path, 30_000, pad_tokens=600_000)
+    result = _run_hook(transcript, window=1_000_000)
+    assert result.returncode == 0, result.stderr
+    # default soft 70 -> a 3% seat is silent (would NOT be force-rolled).
+    assert result.stdout.strip() == "", result.stdout
+    # And when surfaced with soft=1, the reported percent is < 5.
+    env = os.environ.copy()
+    env["ROLLOVER_WINDOW_TOKENS"] = "1000000"
+    env["ROLLOVER_SOFT_PERCENT"] = "1"
+    env["ROLLOVER_HARD_PERCENT"] = "85"
+    env.pop("ROLLOVER_SETTINGS_PATH", None)
+    payload = json.dumps({"hook_event_name": "Stop", "transcript_path": str(transcript), "cwd": str(transcript.parent)})
+    surfaced = subprocess.run(["bash", str(HOOK)], input=payload, capture_output=True, text=True, env=env, timeout=8)
+    ctx = _additional_context(surfaced.stdout)
+    assert ctx is not None
+    import re
+    pct = int(re.search(r"context ~(\d+)%", ctx).group(1))
+    assert pct < 5, ctx
+
+
+def test_context_hook_falls_back_to_bytes4_without_usage(tmp_path):
+    # A transcript with no usage field (non-Claude / empty / malformed) must keep
+    # the legacy bytes/4 behavior so nothing regresses for those seats.
+    path = tmp_path / "transcript.jsonl"
+    path.write_text("\n".join(json.dumps({"type": "tool_result", "content": "x" * 400}) for _ in range(7)) + "\n")
+    # ~7 lines of ~430 bytes -> tune to land at/above 70% of a small window.
+    size = path.stat().st_size
+    window = int((size / 4) / 0.70)  # so bytes/4 ~= 70% of window
+    result = _run_hook(path, window=window)
+    assert result.returncode == 0, result.stderr
+    ctx = _additional_context(result.stdout)
+    assert ctx is not None
+    # Fell back to bytes/4 and warned in the soft band (no usage present).
+    assert "Refresh the checkpoint" in ctx or "HARD: write or refresh" in ctx
+
+
+def test_context_hook_tolerates_non_dict_usage_record(tmp_path):
+    # Codex F1: a valid JSONL line that is a non-dict JSON value but still contains
+    # the substring "usage" (e.g. ["usage"]) must not crash the estimator. It must
+    # skip that record and fall back to bytes/4 -- no traceback, band still reported.
+    path = tmp_path / "transcript.jsonl"
+    lines = [json.dumps(["usage"])]                       # non-dict record w/ "usage"
+    lines.append(json.dumps({"type": "tool_result", "content": "x" * 4000}))  # byte pad, no usage
+    path.write_text("\n".join(lines) + "\n")
+    window = int((path.stat().st_size / 4) / 0.80)        # bytes/4 ~= 80% of window
+    result = _run_hook(path, window=window)
+    assert result.returncode == 0, result.stderr
+    assert "Traceback" not in result.stderr, result.stderr   # must not raise
+    ctx = _additional_context(result.stdout)
+    assert ctx is not None                                # reached bytes/4 fallback, warned
+    assert "context ~" in ctx
 
 
 def test_installer_adds_stop_hook_and_window_idempotently(tmp_path):

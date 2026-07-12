@@ -89,6 +89,54 @@ def _settings_int(docs: list, flat_key: str, nested_key: str) -> Optional[int]:
     return None
 
 
+def _context_tokens_from_usage(path: Path) -> Optional[int]:
+    # True context occupancy = the LAST turn's API-reported usage, not the
+    # transcript's on-disk byte count. The JSONL stores full tool-result dumps +
+    # envelopes + every prior turn verbatim and never shrinks on compaction, so
+    # bytes/4 runs 1.5x-4.6x high and only climbs (CONTEXT_METER_FIX_1). Each
+    # assistant turn carries message.usage; the running context is
+    #   input_tokens + cache_read_input_tokens + cache_creation_input_tokens
+    # (output_tokens excluded — matches Claude Code's own /context measure).
+    # Returns None when no usage is present so the caller falls back to bytes/4.
+    last: Optional[int] = None
+    try:
+        with path.open(encoding="utf-8", errors="replace") as handle:
+            for line in handle:
+                # Cheap pre-filter: skip the (large, frequent) tool-result lines
+                # that carry no usage before paying for a json.loads.
+                if '"usage"' not in line:
+                    continue
+                try:
+                    obj = json.loads(line)
+                except (json.JSONDecodeError, ValueError):
+                    continue
+                # A JSONL line may be any valid JSON value (e.g. a list) that still
+                # contains the substring "usage" and passes the prefilter above.
+                # Guard before .get() so a non-dict record falls through to the
+                # bytes/4 fallback instead of raising (keeps the hook fault-tolerant).
+                if not isinstance(obj, dict):
+                    continue
+                message = obj.get("message")
+                usage = message.get("usage") if isinstance(message, dict) else None
+                if not isinstance(usage, dict):
+                    usage = obj.get("usage") if isinstance(obj.get("usage"), dict) else None
+                if not isinstance(usage, dict):
+                    continue
+                total = 0
+                found = False
+                for key in ("input_tokens", "cache_read_input_tokens", "cache_creation_input_tokens"):
+                    value = usage.get(key)
+                    if isinstance(value, bool) or not isinstance(value, int):
+                        continue
+                    total += value
+                    found = True
+                if found:
+                    last = total
+    except OSError:
+        return None
+    return last if last and last > 0 else None
+
+
 try:
     payload = json.loads(os.environ.get("ROLLOVER_HOOK_PAYLOAD", "") or "{}")
 except json.JSONDecodeError:
@@ -127,7 +175,11 @@ hard = (
 if not (0 < soft <= 100) or not (0 < hard <= 100) or soft > hard:
     soft, hard = 70, 85
 
-tokens_est = math.ceil(size_bytes / 4)
+# Prefer the transcript's own API-reported context usage; fall back to bytes/4
+# only when no usage field is present (non-Claude / empty / malformed transcript).
+tokens_est = _context_tokens_from_usage(path)
+if tokens_est is None:
+    tokens_est = math.ceil(size_bytes / 4)
 percent = int((tokens_est / window_tokens) * 100)
 
 if percent < soft:
