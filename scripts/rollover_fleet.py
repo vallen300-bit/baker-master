@@ -61,14 +61,30 @@ def _hook_registered(settings: dict) -> bool:
     return False
 
 
+# The hook needs BOTH its runner and the shared band computation present in the
+# picker; registering a command that points at an absent script no-ops silently.
+REQUIRED_HOOK_FILES = (
+    ".claude/hooks/context-threshold-check.sh",
+    ".claude/hooks/context_meter.py",
+)
+
+
+def _script_present(root: Path) -> bool:
+    return all((root / rel).exists() for rel in REQUIRED_HOOK_FILES)
+
+
 def _classify(picker_path: str) -> str:
-    """WIRED / MISSING_HOOK / NO_SETTINGS / PATH_ABSENT for one picker dir.
-    settings.local.json (per-seat override) OR settings.json satisfies wiring."""
+    """WIRED / MISSING_SCRIPT / MISSING_HOOK / NO_SETTINGS / PATH_ABSENT for one
+    picker dir. WIRED requires the Stop hook REGISTERED in settings.local.json (or
+    settings.json) AND the hook script files actually PRESENT — registration alone
+    is false-green: the command points at a script that no-ops when absent
+    (settings-registered-but-script-absent case, lead #9975)."""
     root = Path(picker_path)
     if not root.exists():
         return "PATH_ABSENT"
     claude = root / ".claude"
     found_settings = False
+    registered = False
     for name in ("settings.local.json", "settings.json"):
         p = claude / name
         if not p.exists():
@@ -76,9 +92,12 @@ def _classify(picker_path: str) -> str:
         found_settings = True
         try:
             if _hook_registered(json.loads(p.read_text())):
-                return "WIRED"
+                registered = True
+                break
         except (OSError, json.JSONDecodeError):
             continue
+    if registered:
+        return "WIRED" if _script_present(root) else "MISSING_SCRIPT"
     return "MISSING_HOOK" if found_settings else "NO_SETTINGS"
 
 
