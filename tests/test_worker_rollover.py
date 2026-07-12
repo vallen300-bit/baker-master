@@ -294,6 +294,23 @@ def test_context_hook_falls_back_to_bytes4_without_usage(tmp_path):
     assert "Refresh the checkpoint" in ctx or "HARD: write or refresh" in ctx
 
 
+def test_context_hook_tolerates_non_dict_usage_record(tmp_path):
+    # Codex F1: a valid JSONL line that is a non-dict JSON value but still contains
+    # the substring "usage" (e.g. ["usage"]) must not crash the estimator. It must
+    # skip that record and fall back to bytes/4 -- no traceback, band still reported.
+    path = tmp_path / "transcript.jsonl"
+    lines = [json.dumps(["usage"])]                       # non-dict record w/ "usage"
+    lines.append(json.dumps({"type": "tool_result", "content": "x" * 4000}))  # byte pad, no usage
+    path.write_text("\n".join(lines) + "\n")
+    window = int((path.stat().st_size / 4) / 0.80)        # bytes/4 ~= 80% of window
+    result = _run_hook(path, window=window)
+    assert result.returncode == 0, result.stderr
+    assert "Traceback" not in result.stderr, result.stderr   # must not raise
+    ctx = _additional_context(result.stdout)
+    assert ctx is not None                                # reached bytes/4 fallback, warned
+    assert "context ~" in ctx
+
+
 def test_installer_adds_stop_hook_and_window_idempotently(tmp_path):
     settings = tmp_path / "settings.json"
     settings.write_text(json.dumps({"hooks": {"SessionStart": [{"hooks": []}]}}))

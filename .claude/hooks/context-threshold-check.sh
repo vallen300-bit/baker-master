@@ -110,6 +110,12 @@ def _context_tokens_from_usage(path: Path) -> Optional[int]:
                     obj = json.loads(line)
                 except (json.JSONDecodeError, ValueError):
                     continue
+                # A JSONL line may be any valid JSON value (e.g. a list) that still
+                # contains the substring "usage" and passes the prefilter above.
+                # Guard before .get() so a non-dict record falls through to the
+                # bytes/4 fallback instead of raising (keeps the hook fault-tolerant).
+                if not isinstance(obj, dict):
+                    continue
                 message = obj.get("message")
                 usage = message.get("usage") if isinstance(message, dict) else None
                 if not isinstance(usage, dict):
