@@ -58,7 +58,7 @@ brisen-lab lifecycle records the latest `band`/`context_percent` per seat (from 
 
 - **done rubric:** (1) single shared band computation, no drift; (2) machine band field live in status posts; (3) universal seat wiring with a fail-loud coverage audit; (4) lifecycle exposes per-seat band-state queryable by the dispatcher; (5) live AC: fresh seat reads ok, full seat reads hard, `POST_DEPLOY_AC_VERDICT v1` posted.
 - **done-state class:** fleet-blocking production reliability → live AC required, not unit-green alone.
-- **gate plan:** deputy authors → **lead reviews (this brief) BEFORE worker dispatch** → builder implements → independent codex verify BEFORE merge (#9255) → lead merges → deploy → deputy verifies live band reporting as bus-health owner.
+- **gate plan:** deputy authors → **lead reviews (this brief) BEFORE worker dispatch** → builder (b1) implements → **independent Claude-side review by lead BEFORE merge** (was "independent codex verify"; changed 2026-07-12 per Director codex-suspension order #9711 — codex seats unavailable until Director lifts; #9255 independent-verdict-before-merge rule still holds, Claude-side) → lead merges → deploy → deputy verifies live band reporting as bus-health owner.
 - **Harness-V2:** covered inline.
 
 ## Dedupe / cross-links

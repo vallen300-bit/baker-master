@@ -61,7 +61,7 @@ Apply the same structure b2 shipped in `research-monitors-prefetch.sh` (f27da57)
 
 - **done rubric:** (1) shared-checkout reset/commit/push removed; (2) all writes via isolated worktree + cleanup trap; (3) scratch-clone run proves no shared-tree damage + successful worktree push; (4) BOTH repo source AND Mini deployed copy fixed (a repo-only fix does NOT stop the live job); (5) `POST_DEPLOY_AC_VERDICT v1` before Fri 07-17 17:00Z.
 - **done-state class:** live production launchd job with shared-vault write side-effects → deployed-copy verification required, not repo-merge alone.
-- **gate plan:** deputy authors → b2 implements (owns f27da57) → independent codex verify BEFORE merge (#9255) → lead merges → **redeploy to Mini** → deputy verifies deployed copy on the Mini before the Friday fire.
+- **gate plan:** deputy authors → b2 implements (owns f27da57) → **independent Claude-side review by lead BEFORE merge** (was "independent codex verify"; changed 2026-07-12 per Director codex-suspension order #9711 — codex seats unavailable until Director lifts; #9255 independent-verdict-before-merge rule still holds, Claude-side) → lead merges → **redeploy to Mini** → deputy verifies deployed copy on the Mini before the Friday fire.
 - **Harness-V2:** covered inline.
 
 ## Cross-links

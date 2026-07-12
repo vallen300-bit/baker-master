@@ -57,7 +57,7 @@ When the pool is genuinely saturated past #118's bounded-acquire budget, return 
 
 - **done rubric:** (1) ack read-back 100% incl. concurrency; (2) idempotent re-ack preserved; (3) idempotency key on all writes + wake fires exactly once on dedup; (4) explicit busy signal replaces bare 503, clients honor it, no retry-born duplicates; (5) live soak AC + `POST_DEPLOY_AC_VERDICT v1`.
 - **done-state class:** production correctness → live soak AC required.
-- **gate plan:** deputy authors → **lead reviews BEFORE worker dispatch** → (P1.1 gated on E1 diagnosis outcome) → builder implements → independent codex verify BEFORE merge (#9255) → lead merges → deploy → deputy verifies live as bus-health owner.
+- **gate plan:** deputy authors → **lead reviews BEFORE worker dispatch** → (P1.1 gated on E1 diagnosis outcome) → builder (b4) implements → **independent Claude-side review by lead BEFORE merge** (was "independent codex verify"; changed 2026-07-12 per Director codex-suspension order #9711 — codex seats unavailable until Director lifts; #9255 independent-verdict-before-merge rule still holds, Claude-side) → lead merges → deploy → deputy verifies live as bus-health owner.
 - **Harness-V2:** covered inline.
 
 ## Dedupe / cross-links
