@@ -34,6 +34,48 @@ TIMEOUT="${HEARTBEAT_HTTP_TIMEOUT:-5}"          # short, fire-and-forget
 IDLE_KEEPALIVE_INTERVAL="${HEARTBEAT_IDLE_KEEPALIVE_INTERVAL:-90}"
 LOG="$HOME/forge-agent/heartbeat-ticker.log"
 
+# Context-band directory the Stop hook writes to (keyed by session_uuid).
+CONTEXT_BAND_DIR="${CONTEXT_BAND_DIR:-$HOME/forge-agent/context-band}"
+
+# Echo a JSON fragment ',"context_percent":N,"band":"X","measured":B,"window_tokens":N'
+# for this session's band file, or "" when absent/unreadable/stale. Guarded
+# entirely inside python3; on ANY error prints nothing so the beat body stays
+# valid (fire-and-forget). Staleness: a band file older than the freshness
+# window is ignored so a dead session's last band can't linger.
+_band_json() {
+  CONTEXT_BAND_FILE="$CONTEXT_BAND_DIR/$SESSION_UUID.json" python3 - <<'PY' 2>/dev/null || true
+import json, os, time
+p = os.environ.get("CONTEXT_BAND_FILE", "")
+try:
+    st = os.stat(p)
+except OSError:
+    raise SystemExit(0)
+# Ignore a band file older than 15 min (session likely gone; advisory only).
+if time.time() - st.st_mtime > 900:
+    raise SystemExit(0)
+try:
+    with open(p, encoding="utf-8") as fh:
+        rec = json.load(fh)
+except (OSError, ValueError):
+    raise SystemExit(0)
+if not isinstance(rec, dict):
+    raise SystemExit(0)
+pct = rec.get("context_percent")
+band = rec.get("band")
+measured = rec.get("measured")
+window = rec.get("window_tokens")
+if not isinstance(pct, int) or band not in ("ok", "soft", "hard"):
+    raise SystemExit(0)
+frag = {"context_percent": pct, "band": band}
+if isinstance(measured, bool):
+    frag["measured"] = measured
+if isinstance(window, int):
+    frag["window_tokens"] = window
+# Comma-prefixed so it splices into an existing object body.
+print("," + json.dumps(frag)[1:-1])
+PY
+}
+
 # POST one heartbeat. $1 = idle flag ("true" -> idle keepalive: refresh
 # last_alive_at, leave amber off; anything else -> working beat: idle omitted).
 # Fire-and-forget: short timeout, capture ONLY the numeric HTTP status (never the
@@ -41,10 +83,15 @@ LOG="$HOME/forge-agent/heartbeat-ticker.log"
 # the ticker. Logs class/status only on a non-2xx, keeping the log tiny + key-free.
 _post_heartbeat() {
   local idle_flag="$1" body code
+  # P0.1 carry (B2): the Stop hook writes the measured context band to a local
+  # file keyed by session; carry its fields on the beat so the daemon can meter
+  # context mechanically. Best-effort: any parse failure yields "" (plain body).
+  local band_json
+  band_json="$(_band_json)"
   if [ "$idle_flag" = "true" ]; then
-    body="{\"session_uuid\":\"$SESSION_UUID\",\"terminal_alias\":\"$TERMINAL_ALIAS\",\"idle\":true}"
+    body="{\"session_uuid\":\"$SESSION_UUID\",\"terminal_alias\":\"$TERMINAL_ALIAS\",\"idle\":true$band_json}"
   else
-    body="{\"session_uuid\":\"$SESSION_UUID\",\"terminal_alias\":\"$TERMINAL_ALIAS\"}"
+    body="{\"session_uuid\":\"$SESSION_UUID\",\"terminal_alias\":\"$TERMINAL_ALIAS\"$band_json}"
   fi
   code=$(curl -s -o /dev/null -w "%{http_code}" -X POST "$LAB_URL/api/heartbeat" \
     -H "X-Forge-Key: $FORGE_KEY" \
