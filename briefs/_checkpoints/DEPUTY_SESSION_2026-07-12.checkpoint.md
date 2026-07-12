@@ -51,3 +51,6 @@ Claim = the attempt-bump commit in the successor, NOT a bus ack (acks unreliable
   (E2 dup-post)**. Append new field defects here.
 - I am dispatcher/verifier, NOT orchestrator. Reply-to-sender on verdicts. b1/b2 reserved
   for lead; b3/b4 my lane.
+
+## Successor claim
+- attempt: 1 — deputy successor claimed 2026-07-12T15:0x, working §A priority order (b1/b3 respawn-confirm first). Claim = this commit, not a bus ack.
