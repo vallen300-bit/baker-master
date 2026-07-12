@@ -8,79 +8,63 @@
 <title>BRISEN AIR · ARRIVALS</title>
 <script>try{if(localStorage.getItem('brisen-board-view')==='light')document.documentElement.dataset.theme='light'}catch(e){}</script>
 <style>
-  /* Board v6 — live content contract preserved; V8 visual treatment ported. */
+  /* Board v6 — frozen Director-ratified register (arrivals-board-v6.html, 8 Jul) restored
+     faithfully; live content bindings (__ROWS__/__STAMP__, meta/red status classes) preserved. */
   :root{
-    --bg:#090B0A; --panel:#101411; --line:#3A453B; --head:#0C100D;
+    --bg:#0A0B0A; --panel:#101210; --line:#1E211D; --head:#0C0E0C;
     --flap-hi:#232823; --flap-lo:#151915; --seam:rgba(0,0,0,.55);
-    --tile-shadow:inset 0 1px 0 rgba(255,255,255,.07),0 1px 2px rgba(0,0,0,.48);
-    --amber:#FFD267; --amber-dim:#A88435;
-    --white:#FFFDF3; --green:#69DF83; --red:#FF796A; --dim:#8E917E; --pend:#6E7568;
+    --tile-shadow:inset 0 1px 0 rgba(255,255,255,.05),0 1px 1.5px rgba(0,0,0,.45);
+    --amber:#FFC64B; --amber-dim:#8F7431;
+    --white:#EFECE2; --green:#41D96E; --red:#FF796A; --dim:#63604F; --pend:#575343;
     --mono:'SF Mono','IBM Plex Mono',ui-monospace,Menlo,Consolas,monospace;
   }
   html[data-theme="light"]{
-    --bg:#E9E9E4; --panel:#F7F6F1; --line:#CFCFC5; --head:#EFEEE8;
+    --bg:#E9E9E4; --panel:#F7F6F1; --line:#D8D6CC; --head:#EFEEE8;
     --flap-hi:#F1EFE7; --flap-lo:#E0DED3; --seam:rgba(0,0,0,.13);
-    --tile-shadow:inset 0 1px 0 rgba(255,255,255,.65),0 1px 2px rgba(0,0,0,.12);
-    --amber:#765500; --amber-dim:#A98F4F;
-    --white:#22211B; --green:#177A38; --red:#D9574D; --dim:#77756A; --pend:#A5A294;
+    --tile-shadow:inset 0 1px 0 rgba(255,255,255,.65),0 1px 1.5px rgba(0,0,0,.12);
+    --amber:#8A6300; --amber-dim:#A98F4F;
+    --white:#22211B; --green:#177A38; --red:#D9574D; --dim:#8B887A; --pend:#A5A294;
   }
   *{box-sizing:border-box;margin:0;padding:0}
-  body{width:100%;background:var(--bg);color:var(--amber);font:14px/1.5 var(--mono);text-transform:uppercase;-webkit-font-smoothing:antialiased}
-  main{max-width:1480px;width:100%;margin:0 auto;padding:34px 38px 56px}
+  body{background:var(--bg);color:var(--amber);font:14px/1.5 var(--mono);text-transform:uppercase;-webkit-font-smoothing:antialiased}
+  main{max-width:1330px;margin:0 auto;padding:28px 18px 60px}
 
-  header{display:grid;grid-template-columns:minmax(0,1fr) auto auto;align-items:center;gap:28px;background:var(--panel);border:1px solid var(--line);border-radius:8px;padding:22px 26px;box-shadow:0 18px 48px rgba(0,0,0,.28),0 0 0 1px rgba(255,255,255,.025)}
-  h1{margin:0;color:var(--amber);font:700 37px/1 var(--mono);letter-spacing:.16em}
-  .brand{margin-top:10px;color:var(--dim);font:600 11px/1 var(--mono);letter-spacing:.14em}
-  .btn{min-height:38px;padding:0 13px;border:1px solid var(--line);border-radius:5px;background:var(--head);color:var(--dim);cursor:pointer;font:700 10px/1 var(--mono);letter-spacing:.13em;text-transform:uppercase}
-  .btn:hover,.btn:focus-visible{color:var(--amber);border-color:var(--amber-dim);outline:none}
+  header{display:flex;align-items:center;gap:16px;background:var(--panel);border:2px solid var(--line);border-radius:6px;padding:14px 20px}
+  h1{font:700 24px/1.1 var(--mono);letter-spacing:.2em;color:var(--amber)}
+  .brand{font:600 10px var(--mono);letter-spacing:.28em;color:var(--dim);margin-top:4px}
+  .btn{font:700 10.5px var(--mono);letter-spacing:.14em;color:var(--dim);border:1px solid var(--line);border-radius:5px;background:var(--head);padding:6px 12px;cursor:pointer;text-transform:uppercase}
+  .btn:hover{color:var(--amber);border-color:var(--amber-dim)}
   .tools{margin-left:auto;display:flex;gap:8px;align-items:center}
-  .clock{text-align:right}
-  .clock .t{font:700 31px/1 var(--mono);color:var(--white);letter-spacing:.07em}
-  .clock .d{font:600 11px/1 var(--mono);color:var(--dim);letter-spacing:.13em;margin-top:7px}
+  .clock{text-align:right;margin-left:10px}
+  .clock .t{font:700 22px var(--mono);color:var(--white);letter-spacing:.1em}
+  .clock .d{font:600 10px var(--mono);color:var(--dim);letter-spacing:.18em;margin-top:2px}
 
   .tile{display:inline-flex;align-items:center;justify-content:center;position:relative;
-    width:14px;height:23px;border-radius:3px;
+    width:15px;height:23px;border-radius:2px;
     background:linear-gradient(180deg,var(--flap-hi) 0%,var(--flap-hi) 48%,var(--flap-lo) 52%,var(--flap-lo) 100%);
     box-shadow:var(--tile-shadow);
-    font:700 11px/1 var(--mono);color:var(--amber);flex:0 0 auto}
+    font:700 11.5px var(--mono);color:var(--amber);flex:0 0 auto}
   .tile::after{content:"";position:absolute;left:0;right:0;top:50%;height:1px;background:var(--seam)}
   .tile.blank{background:transparent;box-shadow:none}
   .tile.blank::after{display:none}
   .tile.wht{color:var(--white)}
   .tile.grn{color:var(--green)}
   .tile.red{color:var(--red)}
-  .tile.wht{width:9px;height:21px;font-size:9px}
   .tile.inv{background:var(--amber);color:var(--bg);box-shadow:0 0 8px rgba(255,198,75,.22)}
-  /* meta = tech columns (arrives / desk / updated): smaller so they don't compete
-     with the load-bearing flight name, destination and status. */
-  .tile.meta{width:8px;height:18px;font-size:8px;color:var(--dim)}
-  .flap{display:flex;flex-wrap:nowrap;gap:1px;white-space:nowrap;align-items:center}
+  .flap{display:flex;flex-wrap:nowrap;gap:2px;white-space:nowrap}
   .blinkgrp{animation:blink 1.2s steps(1) infinite}
   @keyframes blink{50%{opacity:.3}}
 
-  table{width:100%;table-layout:fixed;border-collapse:collapse;background:var(--panel);border:1px solid var(--line);border-radius:8px;overflow:hidden;box-shadow:0 24px 65px rgba(0,0,0,.38),0 5px 18px rgba(0,0,0,.32),0 0 0 1px rgba(255,255,255,.025)}
-  col.arrives{width:9%} col.flight{width:15%} col.airline{width:13%} col.destination{width:21%} col.desk{width:15%} col.status{width:16%} col.updated{width:11%}
-  thead th{font:700 10px/1 var(--mono);letter-spacing:.15em;color:var(--dim);text-align:left;padding:15px 18px;border-bottom:1px solid var(--line);background:var(--head);white-space:nowrap}
-  tbody td{height:76px;padding:14px 18px;vertical-align:middle;border-bottom:1px solid var(--line);white-space:nowrap;overflow:hidden}
+  table{width:100%;table-layout:auto;border-collapse:separate;border-spacing:0;margin-top:16px;background:var(--panel);border:2px solid var(--line);border-radius:6px;overflow:hidden}
+  thead th{font:700 10.5px var(--mono);letter-spacing:.2em;color:var(--dim);text-align:left;padding:11px 10px;border-bottom:2px solid var(--line);background:var(--head);white-space:nowrap}
+  tbody td{padding:13px 10px;vertical-align:middle;border-bottom:1px solid var(--line);white-space:nowrap}
   tbody tr:last-child td{border-bottom:none}
   tbody tr.live{cursor:pointer}
   tbody tr.live:hover td{background:var(--head)}
   tbody tr.pending .tile{color:var(--pend)}
-  tbody tr.live:focus-within,tbody tr.live:focus{outline:2px solid var(--amber);outline-offset:-2px}
 
-  .foot{display:flex;gap:18px;flex-wrap:wrap;margin-top:14px;font:600 8px/1.4 var(--mono);letter-spacing:.12em;color:var(--dim)}
+  .foot{display:flex;gap:22px;flex-wrap:wrap;margin-top:14px;font:600 10px var(--mono);letter-spacing:.2em;color:var(--dim)}
   .foot .stamp{margin-left:auto}
-  .foot span{white-space:nowrap}
-  @media (max-width:1180px){
-    main{padding-left:22px;padding-right:22px}
-    header{gap:18px;padding-left:20px;padding-right:20px}
-    thead th,tbody td{padding-left:12px;padding-right:12px}
-    col.arrives{width:10%} col.flight{width:19%} col.airline{width:14%} col.destination{width:18%} col.desk{width:13%} col.status{width:16%} col.updated{width:10%}
-    .tile{width:12px;height:21px;font-size:10px}
-    .tile.meta{width:7px;height:17px;font-size:8px}
-    .tile.wht{width:8px;height:19px;font-size:8px}
-  }
-  html[data-theme="light"] header,html[data-theme="light"] table{box-shadow:0 18px 45px rgba(49,52,45,.16),0 0 0 1px rgba(255,255,255,.55)}
 </style>
 </head>
 <body>
@@ -102,10 +86,6 @@
 
   <div style="overflow-x:auto">
   <table>
-    <colgroup>
-      <col class="arrives"><col class="flight"><col class="airline">
-      <col class="destination"><col class="desk"><col class="status"><col class="updated">
-    </colgroup>
     <thead>
       <tr>
         <th>ARRIVES</th><th>FLIGHT NO</th><th>AIRLINE</th><th>DESTINATION</th>
@@ -138,7 +118,7 @@ __ROWS__
       s.textContent=ch===' '?' ':ch;
       el.appendChild(s);
       if(ch===' ')return;
-      var settle=950+i*70+Math.random()*650, t0=performance.now();
+      var settle=220+i*30+Math.random()*320, t0=performance.now();
       (function spin(){
         if(performance.now()-t0<settle){
           s.textContent=GLYPHS[Math.floor(Math.random()*GLYPHS.length)];
