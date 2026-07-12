@@ -322,6 +322,16 @@ def test_seed_bb_pilot_registry_constants_consistent():
     assert seed.DESK_OWNER == reg.DESK_CODES[prefix] == "baden-baden-desk"
 
 
+def test_fa_desk_code_routes_to_arm():
+    """FA (Flight Academy) desk-code registration — FA-ACA-### numbers route to the
+    ARM Chief-Pilot desk. Guards the DESK_CODES authority for the Flight Academy
+    install (vault side landed @bacd50f; slugs.yml has flight-academy @ v24)."""
+    assert reg.DESK_CODES["FA"] == "arm"
+    prefix = "FA-ACA-001".split("-", 1)[0]
+    assert prefix == "FA"
+    assert reg.DESK_CODES[prefix] == "arm"
+
+
 # --- BOX5_HARD_FAST_LANE_1: extract_project_codes (pure regex, NO live PG) -----
 
 
