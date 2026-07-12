@@ -76,9 +76,10 @@ case "$ROLE" in
     architect|ARCHITECT)                SENDER="architect" ;;
     cortex|CORTEX)                      SENDER="cortex" ;;
     aid|AID)                            SENDER="aid" ;;
+    researcher|RESEARCHER)              SENDER="researcher" ;;
     *)
         echo "[ack] BAKER_ROLE unset or unrecognized: '${ROLE}'" >&2
-        echo "[ack]   Valid: b1-b5, AH1/lead, AH2/deputy, architect, cortex, aid" >&2
+        echo "[ack]   Valid: b1-b5, AH1/lead, AH2/deputy, architect, cortex, aid, researcher" >&2
         exit 2
         ;;
 esac
