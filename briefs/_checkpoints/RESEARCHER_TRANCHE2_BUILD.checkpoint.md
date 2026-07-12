@@ -3,9 +3,10 @@ brief_id: RESEARCHER_TRANCHE2_BUILD
 dispatch: "#9299 (deputy, Director order #9258 via lead #9297)"
 owner: b1
 attempt: 1
-checkpoint_reason: item-6 MERGED (vault#179); descope — #8 reassigned to b2 (#9723); b1 carries item #7 ONLY; item-7 design authored, at LEAD design-review
+checkpoint_reason: "ARC CLOSED 2026-07-12 (lead #9741) — items 1(#5)/2(#6)/7 shipped+MERGED; #8 reassigned to b2. b1 idle, awaiting fresh dispatch."
 created: 2026-07-12
-updated: 2026-07-12 (item-6 merged + #7-only trim)
+updated: 2026-07-12 (ARC CLOSED — item-7 merged vault#181)
+status: CLOSED
 ---
 
 # Checkpoint — Researcher Tranche-2 build arc
