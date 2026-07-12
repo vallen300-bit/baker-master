@@ -20,11 +20,18 @@ WIRED_SETTINGS = {
 }
 
 
-def _make_picker(root: Path, settings: dict | None, *, name="settings.json"):
+def _make_picker(root: Path, settings: dict | None, *, name="settings.json",
+                 with_script: bool = True):
     claude = root / ".claude"
     claude.mkdir(parents=True, exist_ok=True)
     if settings is not None:
         (claude / name).write_text(json.dumps(settings))
+    if with_script:
+        # The hook + shared computation the registration points at.
+        hooks = claude / "hooks"
+        hooks.mkdir(parents=True, exist_ok=True)
+        (hooks / "context-threshold-check.sh").write_text("#!/usr/bin/env bash\n")
+        (hooks / "context_meter.py").write_text("# stub\n")
     return root
 
 
@@ -46,6 +53,21 @@ def test_classify_wired(tmp_path):
 def test_classify_wired_via_settings_local(tmp_path):
     p = _make_picker(tmp_path / "seat", WIRED_SETTINGS, name="settings.local.json")
     assert rf._classify(str(p)) == "WIRED"
+
+
+def test_classify_missing_script_when_registered_but_no_hook_files(tmp_path):
+    # The false-green case (lead #9975): settings register the hook, but the
+    # script files are absent -> the command no-ops -> NOT wired.
+    p = _make_picker(tmp_path / "seat", WIRED_SETTINGS, with_script=False)
+    assert rf._classify(str(p)) == "MISSING_SCRIPT"
+
+
+def test_classify_missing_script_when_only_one_hook_file(tmp_path):
+    p = _make_picker(tmp_path / "seat", WIRED_SETTINGS, with_script=False)
+    (p / ".claude" / "hooks").mkdir(parents=True, exist_ok=True)
+    # Only the runner, not the shared context_meter.py -> still MISSING_SCRIPT.
+    (p / ".claude" / "hooks" / "context-threshold-check.sh").write_text("#!/bin/bash\n")
+    assert rf._classify(str(p)) == "MISSING_SCRIPT"
 
 
 def test_classify_missing_hook(tmp_path):
