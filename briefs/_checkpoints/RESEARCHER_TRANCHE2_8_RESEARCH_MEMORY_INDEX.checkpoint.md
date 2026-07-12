@@ -53,13 +53,16 @@ status: SHIPPED (attempt 2) — build complete, 2 PRs open awaiting lead merge (
   `/private/tmp/b2-edge-scout-wt`. **PR #183 baker-vault OPEN** (opened this seat).
 - Ports f27da57 into `scripts/edge-scout-prefetch.sh` (+36/-10, one file). Static AC clean
   (no reset --hard / cd-VAULT-commit on shared checkout); `bash -n` OK; `--dry-run` 4/4 feeds.
-- **Left:** (a) scratch-clone non-dry-run verify with an ISOLATED local fake-origin (never push
-  to real main); (b) lead Claude-side review; (c) Mini deployed-copy redeploy
-  (`~/Library/Application Support/baker/edge-scout-prefetch.sh`) — deputy verifies on Mini;
-  (d) POST_DEPLOY_AC_VERDICT v1 before the Friday fire.
+- **Left:** ~~(a) scratch-clone non-dry-run verify~~ **DONE 2026-07-12 (bus lead #9939 / deputy
+  #9940):** isolated fake-origin + scratch clone, PR-branch script non-dry-run — 4/4 feeds,
+  worktree-isolated commit pushed HEAD:main to FAKE origin, scratch uncommitted sentinel
+  SURVIVED (#157 risk fixed), real ~/baker-vault untouched. (b) lead Claude-side review of
+  PR #183 (PENDING lead); (c) Mini deployed-copy redeploy
+  (`~/Library/Application Support/baker/edge-scout-prefetch.sh`) — deputy verifies on Mini
+  (PENDING deputy); (d) POST_DEPLOY_AC_VERDICT v1 before the Friday fire (after Mini redeploy).
 
 ## Next concrete step (successor)
-1. Claim by bumping `attempt:` on THIS checkpoint (commit), per claim-discipline.
-2. Build item-8 Option B per "What's left" (lead's rulings are locked — no re-litigation).
-3. Interleave edge-scout PR #183 close (scratch-verify + hand Mini deploy to lead/deputy)
-   so it merges before Fri 07-17 17:00Z — deadline is b2's to protect.
+Item-8 SHIPPED (baker-master#542 + baker-vault#186, awaiting lead merge). Edge-scout
+scratch-verify DONE; only external steps remain (lead review, deputy Mini redeploy,
+POST_DEPLOY_AC after redeploy). If both PRs merged + edge-scout deployed → arc COMPLETE.
+Otherwise: poll PR #542/#186 merge status + chase deputy on Mini redeploy before Fri 07-17 17:00Z.
