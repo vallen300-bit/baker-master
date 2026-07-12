@@ -214,7 +214,7 @@ def list_board_rows() -> list[dict[str, Any]]:
                       FROM project_registry r
                       LEFT JOIN flight_board_state s ON s.project_code = r.project_number
                      WHERE r.status = 'active'
-                     ORDER BY r.project_number
+                     ORDER BY s.arrives_on ASC NULLS LAST, r.project_number
                      LIMIT 200
                     """
                 )
