@@ -54,3 +54,4 @@ Claim = the attempt-bump commit in the successor, NOT a bus ack (acks unreliable
 
 ## Successor claim
 - attempt: 1 — deputy successor claimed 2026-07-12T15:0x, working §A priority order (b1/b3 respawn-confirm first). Claim = this commit, not a bus ack.
+- **NEW (lead #9419, queued):** ARM cage gaps from codex-arch #9417 — author single-PR brief: (1) secrets-read-deny Read-path hook (mirror librarian) -> deputy-codex/b4, codex gate + lead merge; (2) check SPEC_ARM v1.2 for arm_sql.sh, fold or N/A; (3) reconcile install record (v1.2 is DRAFT-until-ramp; ratified thing was Flight Academy install #9217, not v1.2).
