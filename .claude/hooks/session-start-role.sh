@@ -34,6 +34,10 @@ if [ -z "$ROLE" ]; then
     */bm-CM-3|*/bm-CM-3/.claude/worktrees/*) ROLE="CM-3" ;;
     */bm-CM-4|*/bm-CM-4/.claude/worktrees/*) ROLE="CM-4" ;;
     */bm-hag-filer|*/bm-hag-filer/.claude/worktrees/*) ROLE="hag-filer" ;;
+    # bm-researcher is a standalone (non-baker-master) picker dir; this same hook is
+    # copied there to give researcher the route-cues clause injection at SessionStart
+    # (ROUTE_CUES_TO_SUPERIOR_PROPAGATION_1, 2026-07-12, lead ruling #9173 middle-path).
+    */bm-researcher|*/bm-researcher/.claude/worktrees/*) ROLE="researcher" ;;
     *)      ROLE="" ;;
   esac
 fi
@@ -66,20 +70,29 @@ if [ ! -f "$CTX_FILE" ]; then
   exit 0
 fi
 
-# Director-facing roles also get the laconic register appended at injection time
-# (AH2_LACONIC_TIER0_RETIRE_1, 2026-06-10 — retires the Tier-0 Read of
-# ~/.claude/skills/laconic/SKILL.md, ~5k tokens/session). Mirrors lead's pattern
-# in bm-aihead1 where role-context/lead.md IS a symlink to the register; here
-# deputy.md carries role identity, so the register is concatenated after it.
+# Assemble the injected context in three layers:
+#   1. Role identity (always — $CTX_FILE).
+#   2. Route-permission-cues-to-superior clause — appended for EVERY Director-facing /
+#      bus-enabled seat, INCLUDING b-codes (which are banned from the full laconic
+#      register). Standalone separable artifact so non-laconic seats get the routing
+#      rule without the rest of the register; laconic-default.md + superior-dispatch-
+#      authority.md reference it rather than restate it.
+#      (ROUTE_CUES_TO_SUPERIOR_PROPAGATION_1, 2026-07-12 — standing directive #6727.)
+#   3. Full laconic register — appended ONLY for the Director-facing verdict seats
+#      (deputy / deputy-codex / aihead2). deputy-codex is the Codex sibling of
+#      deputy/AH2 and emits Director-facing verdicts, so it mirrors deputy
+#      (AH2_LACONIC_TIER0_RETIRE_1, 2026-06-10 — retires the Tier-0 Read of
+#      ~/.claude/skills/laconic/SKILL.md, ~5k tokens/session).
 LACONIC_FILE="$HOME/baker-vault/_ops/role-contexts/laconic-default.md"
-case "$ROLE_LC" in
-  deputy|aihead2)
-    if [ -f "$LACONIC_FILE" ]; then
-      cat "$CTX_FILE" "$LACONIC_FILE" | _emit
-      exit 0
-    fi
-    ;;
-esac
+ROUTE_CUES_FILE="$HOME/baker-vault/_ops/role-contexts/route-cues-to-superior.md"
 
-_emit < "$CTX_FILE"
+{
+  cat "$CTX_FILE"
+  [ -f "$ROUTE_CUES_FILE" ] && cat "$ROUTE_CUES_FILE"
+  case "$ROLE_LC" in
+    deputy|deputy-codex|aihead2)
+      [ -f "$LACONIC_FILE" ] && cat "$LACONIC_FILE"
+      ;;
+  esac
+} | _emit
 exit 0
