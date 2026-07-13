@@ -1,0 +1,82 @@
+# BRIEF: CASE_ONE_P5_DELIVERY_CONFIRMATION_1 — per-message delivery state machine (wake→ack→started) + active auto-retry→auto-escalate control loop + cross-seat read-only DELIVERY-STATUS query
+
+> Case One bus-hardening **P5** (closed-loop delivery confirmation, E19/E20/E21 + tonight's two
+> silent-non-start dispatches). Authored by deputy (AH2, standing bus-health owner) from lead
+> dispatch #10164 (Director GO) + the live defect ledger @HEAD (E19/E20/E21 + E20 addendum).
+> **TO LEAD FOR REVIEW BEFORE WORKER DISPATCH.** Codex reinstated (item-10 re-gate ran deputy-codex
+> #10159) → cross-vendor codex gate available; #9255 independent-verdict-before-merge holds. Final
+> phase; sequenced AFTER P1–P4 (all merged tonight) whose ack/lease/heartbeat/receipt layers P5 consumes.
+
+dispatched_by: lead (pending review)
+assigned_to: <builder — lead assigns after review>
+task_class: backend-delivery (brisen-lab bus daemon: per-message delivery-state record + active retry/escalate loop + cross-seat delivery-status read API) + fleet client (dispatcher/lead delivery-status helper) + P4 dashboard binding (consume, don't rebuild)
+Harness-V2: Context Contract + done rubric + gate plan inline.
+effort: high
+
+## Context
+
+**Context Contract.** Repos: brisen-lab (`bus.py` — delivery-state advance on the P3 typed envelope; the active wake-retry→escalate loop; a fleet-visible read-only `/delivery/status` query; `db.py`) + fleet client (a dispatcher/lead `delivery_status.sh` one-liner) + the P4 delivery-health dashboard (bind the new query — do NOT rebuild the page). **No new service** — the delivery-state record + control loop ride the existing Postgres store + P2 `wake_events`/lease + P4 receipts. Builds ON already-shipped pieces — do NOT redo them.
+
+Closed-loop delivery confirmation is the sixth and final story, and tonight is its proof: **two consecutive dispatches on the item-10 lane, to two different seats, each sat silent (~38 min then ~77 min) and each started only after a SECOND wake — with the Director, not the system, noticing both times** (E20 + E20 addendum). A third dispatch was delivered but its seat never woke at all until the Director manually woke it (E19). And when the Director asked the dispatcher (me) whether a seat even knew about its dispatch, I could not tell him — bus reads are auth-scoped to my own inbox (E21). Autonomy that degrades to human-supervised the moment a wake is silently dropped is not autonomy; P5 closes that loop.
+
+### SCOPE DEDUPE (MANDATORY — lead #9563 discipline). Already shipped / owned elsewhere; this brief must NOT re-cover. Builder MUST diff against the merged P2/P4 schemas BEFORE writing — if any P5 field already exists there, EXTEND it, never fork:
+- **P1.1 ack read-back (#120)** — SHIPPED. The `acked` signal is now trustworthy; P5 CONSUMES it as the `acked` transition of the delivery state machine. Do NOT re-diagnose or re-fix ack persistence.
+- **P2 lease + heartbeat + progress marker (#126/#547)** — SHIPPED. The lease `last_heartbeat_at` + progress marker IS the liveness/"processing" signal. P5's `started` transition is defined as *the first heartbeat/progress event bound to THIS dispatch's `job_ref` after its wake* — P5 reads P2's heartbeat, it does NOT add a second heartbeat channel. Reuse P2's **thrash guard** for the retry bound — do NOT invent a second counter.
+- **P2 closed-loop kill→spawn→verify** — SHIPPED. That loop is over **seat lifecycle**. P5's loop is over a **message's delivery** (wake→ack→started for one dispatch). Distinct objects; do NOT conflate the seat-respawn loop with the per-dispatch delivery loop.
+- **P3 server-mapped identity + typed envelope (#124/#545) + #548 id-mint** — SHIPPED. The delivery record keys on the P3 envelope `message_id` + server-derived `owner_seat`; cross-seat status authz reuses P3 server identity. Do NOT rebuild identity or the envelope.
+- **P4.3 delivery receipts + dead-letter + traceparent** — SHIPPED (#546/#125). P5 does NOT recreate the receipt/dead-letter tables — it ADVANCES the receipt through the wake→ack→started states and uses the dead-letter table as the terminal sink for a dispatch that never reaches `started`. If P4's receipt already carries ack/delivery timestamps, P5 adds only the `wake_fired`/`started` transitions + SLA fields; builder confirms the delta against the merged P4 migration first.
+- **P4.2 alerting + P4.4 delivery-health dashboard (deputy = named owner)** — SHIPPED. P4 **observes/surfaces** (a dashboard + symptoms-only alerts a human reads). P5 is the missing **active control** (auto-retry the wake, then auto-escalate) + the **cross-seat query** the dashboard renders. P5 does NOT rebuild the dashboard page — it exposes `/delivery/status` and the dashboard binds it. **The P4-vs-P5 line is: P4 = see it; P5 = act on it + let orchestration roles query it.**
+
+## Problem
+
+Three delivery-confirmation gaps remain after P1–P4:
+
+1. **"Delivered" is not defined as "started" — a dispatch can sit un-started with no state (E19/E20).** Today a post is "sent"; there is no per-message record that advances wake→ack→started and no SLA on reaching `started`. Two dispatches tonight sat silent until a SECOND wake (E20 + addendum, ~38 min / ~77 min); a third was never woken at all (E19). The heartbeat (P2) and the receipt (P4) exist, but nothing binds *"this specific dispatch reached first-action within SLA"* — so a delivered-but-un-started dispatch is indistinguishable from a worked one.
+2. **No active control loop — the system waits for a human to notice silence (E19/E20).** P4 surfaces "undelivered past SLA" on a dashboard and alerts, but nothing *acts*: no auto-retry of the wake on an SLA miss, no auto-escalation to the dispatcher+lead. Every one of tonight's three silent legs was rescued by the Director noticing, not by the system. Observability without an actuator still needs a human in the loop.
+3. **Orchestration roles are BLIND to cross-seat delivery state (E21).** Bus reads are auth-scoped to a seat's own inbox, so the dispatcher — whose whole job is watching delivery — cannot see whether another seat's dispatch was acked or started. Tonight I could only cite lead's assertion that deputy-codex knew, then micro-escalated a one-line ack-ping to the Director for permission. Delivery-checking must be a standing dispatcher authority backed by a queryable view, not a human round-trip.
+
+## Fix (three pieces, build on P1/P2/P3/P4)
+
+### P5.1 — Per-message delivery state machine, wake→ack→started, with an SLA (E19/E20 fix)
+Each `kind=assignment` dispatch gets a delivery record (extend the P4 receipt, do not fork) that advances through explicit states: `posted → wake_fired → acked → started`, where **`started` = the first P2 heartbeat/progress event bound to this dispatch's `job_ref` after its wake**. **Delivered = reached `started` within the SLA**; anything short is `undelivered` with the exact stalled state named. `wake_fired` reads P2's `wake_events` ledger (never the vestigial `wake_attempted_at`); `acked` reads the P1.1 trustworthy ack; `started` reads the P2 progress marker. SLA is **config, not constants** (per lead's standing P2 rider — cadence/grace tunable on live data), with a sane default (e.g. ack-SLA and started-SLA as two thresholds). The record is a machine field so the dispatcher/lead read state, never infer it.
+
+### P5.2 — Active closed-loop delivery control: auto-retry wake → auto-escalate (E19/E20 fix — the actuator P4 lacks)
+On an **ack-SLA miss**: auto re-fire the wake (bounded by the **P2 thrash guard** — reuse it, N per window M), because tonight the *second* wake is what activated both silent seats. On a **started-SLA miss after N bounded retries**: **auto-escalate** a structured `undelivered_dispatch` event to the **dispatcher (deputy) + lead** and land the dispatch in the P4 dead-letter with a reason — **no human required to notice the silence.** Escalation is fail-loud and idempotent (one escalation per dispatch, not per retry — no alarm-fatigue, per E15). This is the single behavior that would have caught all three of tonight's legs without the Director.
+
+### P5.3 — Cross-seat read-only DELIVERY-STATUS query + standing dispatcher authority (E21 fix)
+A fleet-visible, **metadata-only** endpoint `GET /delivery/status` (params: seat / job_ref / message_id / since) returning per-message `{message_id, from, to, wake_state, acked, started, timestamps, sla_state}` **across seats** — **bodies stay auth-scoped** (delivery telemetry becomes fleet-visible; content does not). Authz: orchestration roles (dispatcher=deputy, lead) get a delivery-telemetry read scope over all seats via P3 server identity; other seats see only their own. A `delivery_status.sh` one-liner lets the dispatcher answer *"does seat X know about dispatch N"* in one call — exactly the question I could not answer tonight — and the P4 dashboard binds the same endpoint. **Standing-authority clause (structural, per #10164): a delivery-status check is the dispatcher's OWN call — the bus-post/gate path must never route a delivery-status ping as a Director permission ask** (kills the micro-escalation anti-pattern E21 flagged, literally this session's GO?-to-Director slip).
+
+## Files Modified
+
+- brisen-lab: migration extending the P4 receipt with `wake_state`/`started_at`/`sla_state` + SLA config (only fields not already present — confirm against merged P4 migration); `bus.py` (delivery-state advance on wake/ack/heartbeat; the auto-retry→escalate loop reusing the P2 thrash guard + `wake_events` + P4 dead-letter; `GET /delivery/status` metadata-only cross-seat query with P3-identity authz scope); `db.py` (cross-seat delivery read with body redaction). Reuse P2/P4 — extend, don't fork.
+- Fleet client: `delivery_status.sh` (dispatcher/lead one-liner over `/delivery/status`); the bus-post/gate path gains the standing-authority guard so a delivery-status check never emits a Director-addressed permission ask.
+- P4 dashboard: bind the delivery-state/`/delivery/status` fields (consume the endpoint; NO page rebuild).
+- Tests in brisen-lab (state-machine transitions incl. out-of-order events; ack-SLA-miss auto-rewake bounded by thrash guard; started-SLA-miss auto-escalate to deputy+lead + dead-letter, exactly-once escalation; `/delivery/status` returns cross-seat metadata but NEVER bodies; non-orchestration seat is scoped to self) + a fleet round-trip test (dispatch → suppress first wake → assert auto-rewake → assert started; dispatch → never start → assert escalation without any human step).
+
+## Verification
+
+1. **Delivery state machine (E19/E20):** post an assignment → record shows `posted→wake_fired→acked→started` as each real event lands; a dispatch that stalls at `wake_fired` reads `undelivered(no-ack)` past ack-SLA, one stalled at `acked` reads `undelivered(no-start)` past started-SLA. `started` binds to the P2 heartbeat for that `job_ref`, not any heartbeat.
+2. **Active loop (E19/E20 — the tonight repro):** simulate tonight — deliver a dispatch, suppress the first wake → on ack-SLA miss the loop auto re-fires the wake (bounded by P2 thrash guard) and the seat starts on the second wake, **with no human step**. Then a dispatch that never starts → after N bounded retries it auto-escalates to deputy+lead + lands in dead-letter, exactly once. Reproduce all three of tonight's legs (E19, E20, E20-addendum) → each surfaces/self-heals without a Director nudge.
+3. **Cross-seat query (E21 — the repro of this session):** as deputy, `GET /delivery/status?seat=deputy-codex` returns deputy-codex's per-message wake/ack/started metadata (the question I could not answer) — and returns **no message bodies**; a non-orchestration seat querying another seat is scoped to itself. Confirm a delivery-status check from the dispatcher path emits **no** Director-addressed permission ask.
+4. **Live AC:** post-deploy fleet drill — dispatch to a real seat, confirm the state machine advances to `started`; force an SLA miss on a real lane, confirm auto-rewake then auto-escalate reach deputy+lead without a human; confirm the dispatcher answers a live "does X know about N" from `/delivery/status` in one call; confirm the P4 dashboard renders the new states. Emit `POST_DEPLOY_AC_VERDICT v1`. Deputy (bus-health owner) folds delivery-confirmation metrics into the dispatcher sweep.
+
+## Quality Checkpoints / Acceptance criteria
+
+- **done rubric:** (1) per-message delivery state machine wake→ack→started with config SLA, delivered≙started-within-SLA, machine-readable; (2) active auto-retry wake on ack-SLA miss (thrash-bounded) → auto-escalate to deputy+lead + dead-letter on started-SLA miss, exactly-once, no human needed; (3) cross-seat metadata-only `/delivery/status` + `delivery_status.sh`, bodies stay auth-scoped, orchestration-role authz, standing dispatcher authority (no Director permission ask for a status check); (4) all four built on merged P1/P2/P3/P4 with NO re-fork of ack/lease/heartbeat/receipt/dashboard; (5) live fleet drill AC + `POST_DEPLOY_AC_VERDICT v1`.
+- **done-state class:** production delivery-correctness → live fleet drill AC required (a control loop that mis-fires is worse than none — the escalation must be exactly-once and the rewake must respect the thrash guard).
+- **gate plan:** deputy authors → **lead reviews BEFORE worker dispatch** → builder implements → **independent verdict BEFORE merge** (codex reinstated — item-10 re-gate ran deputy-codex #10159, so cross-vendor codex gate is available; lead picks codex OR a Claude-side B-code line-review; #9255 independent-verdict-before-merge holds) → lead merges → deploy → deputy verifies live as bus-health owner.
+- **Harness-V2:** Context Contract + done rubric + gate plan covered inline.
+
+## Dedupe / cross-links
+
+- Builds on P1 (trustworthy ack — the `acked` transition), P2 (heartbeat/progress = the `started` signal; lease; thrash guard; `wake_events`), P3 (server identity + typed envelope = the delivery record key + cross-seat authz), P4 (delivery receipts + dead-letter = the record P5 advances + the escalation sink; the dashboard P5 binds). Sequence P5 build AFTER confirming P1–P4 are merged (per #10165 they are, tonight).
+- **The one-line P4/P5 boundary:** P4 makes delivery failures *visible* (dashboard + alerts a human reads); P5 makes the system *act* on them (auto-rewake → auto-escalate) and lets orchestration roles *query* cross-seat state. If the builder finds any P5.1/P5.3 field already shipped inside P4's receipt work, collapse P5 to a thin extension of it and say so (fail-loud, no silent re-fork).
+- Evidence: live-defect log E19 (delivered, seat never woke), E20 + addendum (two silent non-starts, human noticed both), E21 (dispatcher blind to cross-seat delivery state; micro-escalation to Director) — `wiki/matters/flight-academy/Inter-Agent Communication Design for LLM Agent Fleets/2026-07-12-live-defect-evidence-log.md` @HEAD.
+- Motivating case for the whole phase: tonight the Director was the delivery monitor three times over. P5 is the actuator + the cross-seat eyes that retire that role.
+
+## LEAD REVIEW RIDERS (lead, 2026-07-13 — PASS with 3 riders, binding)
+
+- **R1 — no `kind=assignment` exists.** `VALID_KINDS = {dispatch, ack, broadcast, ratify_required, ratify_decision}`. The delivery-record trigger predicate is **`kind=dispatch` AND `execute_obligation=true`** (excludes broadcasts, daemon lifecycle, FYI replies — E15 alarm-fatigue guard). Do not add a new kind.
+- **R2 — `started` must work for NON-queue dispatches.** Tonight's E20 legs were plain bus dispatches with NO `job_ref` — if `started` binds only to P2 queue heartbeats, every plain dispatch dead-letters and the loop drowns in false escalations. Define a fallback start signal for job_ref-less dispatches: first subsequent bus post from the recipient seat referencing the message id / thread id (ack alone does NOT count — E22), with the P2 job_ref binding used when a job_ref exists.
+- **R3 — escalation posts are exempt from their own SLA loop.** An `undelivered_dispatch` escalation to deputy+lead must not itself mint a delivery record that can re-escalate (no recursion); tag it structurally.
+- E22 (ack-then-idle, logged post-authoring @d1b6dce) is covered by the started-SLA design — cite it in the ship report.
