@@ -11,7 +11,14 @@ DAEMON_ATTRIBUTED_EMISSION_1 — brief `_ops/agents/aihead2/BRIEF_DAEMON_ATTRIBU
 (deputy spec; lead dispatch #10730, ruling #10702/#10712). Reply topic: case-one/daemon-attributed-emission.
 ACK+claim #10738. Ship #10750.
 
-## STATUS: CODEX PASS — MERGE-ELIGIBLE, handed to lead (b1 build complete)
+## STATUS: CLOSED — PR #134 MERGED @59103ae (lead #10769)
+- lead #10769: MERGED @59103ae; lead-verified 2 files +168/-5 scope-exact, codex PASS #10751 on
+  hard-refreshed main. DAEMON_ATTRIBUTED_EMISSION_1 arc CLOSED. On merge -> ARM re-run --label ->
+  48h zero-shared-key clean window arms (lead/ARM-owned).
+- Both b1 flags ACCEPTED: 2664 ratify_decision + intent=NULL folded into b3's hygiene micro-PR.
+- b1 build complete. Nothing further.
+
+## (history) CODEX PASS — MERGE-ELIGIBLE, handed to lead (b1 build complete)
 - codex #10751: PASS, NO findings (hard-refreshed main — no stale-base repeat of #130). Confirmed
   both daemon inserts stamp source+unattributed=FALSE, client gate unchanged, tests cover all paths.
 - Flagged lead merge-eligible #10754. Merge = lead's action; on merge ARM re-runs --label and the
