@@ -28,8 +28,13 @@
 # bus. Each marker is a tiny JSON file the producer atomically rewrites:
 #   report.json  {"delivered_at": "<iso8601>"}      — ARM report synthesis writes this each daily report.
 #   canary.json  {"ok": true, "checked_at": "<iso>"} — the canary verifier writes this each round-trip check.
+#   semantic.json {"schema":"semantic_delivery_verdict_v1","evaluated_at":"<iso>",
+#                  "semantic_ok": true, ...}          — b2's SEMANTIC_DELIVERY_EVALUATOR_1
+#                  (#10544) writes this; consumed here as a 3rd kind (silent-skip
+#                  until enforced — see SEMANTIC_ENFORCE / MISSING-MARKER POLICY).
 # The SOURCES array is the single extension point (mirrors arm_cadence_poll.sh):
-# add "<key> <marker-file> <max_age_s> <kind>" rows as new out-of-band signals land.
+# add "<key> <marker-file> <max_age_s> <kind>" rows as new out-of-band signals land;
+# a NEW kind also needs a matching branch in the freshness eval (field + ok clause).
 #
 # MISSING-MARKER POLICY (graceful degradation for producers-not-yet-shipped):
 # the canary cron + report pipeline are separate briefs that may not be live on
@@ -80,13 +85,34 @@ MISSING_IS_RED="${ARM_ALARM_MISSING_IS_RED:-0}"
 # re-alarm backstop for a still-active incident.
 COOLDOWN_S="${ARM_ALARM_COOLDOWN_S:-21600}"   # 6h
 
-# SOURCES: "<key> <marker-file> <max_age_s> <kind>". kind ∈ {report, canary}.
-#   report: stale if now-delivered_at > max_age (default 26h = 24h + 2h grace).
-#   canary: stale if now-checked_at > max_age OR the marker's ok flag is false.
-# Extension point — add rows here as new out-of-band signals land; no code change.
+# SEMANTIC consumer gate (rider (a), lead #10630). b2's SEMANTIC_DELIVERY_
+# EVALUATOR_1 (#10544) is the producer of semantic.json; it may not be live/
+# installed yet. Until it is, an ABSENT semantic.json is a SILENT-SKIP — not
+# AMBER, not RED, not even a log line — so this job neither false-pages nor
+# log-spams for a producer that has not shipped. Flip ARM_ALARM_SEMANTIC_ENFORCE=1
+# once b2's evaluator is guaranteed live; an absent semantic.json then follows the
+# normal MISSING_IS_RED policy like every other kind. A PRESENT semantic.json is
+# ALWAYS evaluated regardless of this flag (defensive: if the file exists, the
+# producer is live). Coordinate the enforce-flip with b2 on evaluator cadence.
+SEMANTIC_ENFORCE="${ARM_ALARM_SEMANTIC_ENFORCE:-0}"
+# Marker-version guard (coordinated with b2 #10544): supported semantic marker
+# schema. A PRESENT marker whose "schema" is an unknown major version is skipped
+# (no page) rather than mis-evaluated — a contract we cannot interpret must never
+# false-fire. A missing "schema" field is tolerated (evaluated on the v1 fields).
+SEMANTIC_SCHEMA_PREFIX="${ARM_ALARM_SEMANTIC_SCHEMA_PREFIX:-semantic_delivery_verdict_v1}"
+
+# SOURCES: "<key> <marker-file> <max_age_s> <kind>". kind ∈ {report, canary, semantic}.
+#   report:   stale if now-delivered_at > max_age (default 26h = 24h + 2h grace).
+#   canary:   stale if now-checked_at   > max_age OR the marker's ok flag is false.
+#   semantic: stale if now-evaluated_at > max_age OR the marker semantic_ok is false
+#             (SEMANTIC_DELIVERY_EVALUATOR_1 #10544 — b2 writes the marker, this job
+#             consumes it; absent-marker handling is gated by SEMANTIC_ENFORCE above).
+# Extension point — add rows here as new out-of-band signals land. A NEW kind needs
+# a matching branch in the freshness eval below (field map + any ok-flag clause).
 SOURCES=(
   "report ${MARKER_DIR}/report.json ${ARM_ALARM_REPORT_MAX_AGE_S:-93600} report"
   "canary ${MARKER_DIR}/canary.json ${ARM_ALARM_CANARY_MAX_AGE_S:-93600} canary"
+  "semantic ${MARKER_DIR}/semantic.json ${ARM_ALARM_SEMANTIC_MAX_AGE_S:-93600} semantic"
 )
 
 mkdir -p "$ALARM_DIR" "$MARKER_DIR" 2>/dev/null || true
@@ -130,6 +156,12 @@ for entry in "${SOURCES[@]}"; do
   set -- $entry
   key="$1"; mfile="$2"; maxage="$3"; kind="$4"
   if [ ! -f "$mfile" ]; then
+    # rider (a): semantic producer (b2 #10544) not guaranteed live yet. Until
+    # SEMANTIC_ENFORCE=1, an absent semantic.json is a TRUE silent skip — no
+    # verdict, no AMBER, no log line — so it neither pages nor spams pre-ship.
+    if [ "$kind" = "semantic" ] && [ "$SEMANTIC_ENFORCE" != "1" ]; then
+      continue
+    fi
     if [ "$MISSING_IS_RED" = "1" ]; then
       VERDICTS+=("${key}"$'\t'"missing"$'\t'"marker never written: $mfile")
     else
@@ -139,7 +171,8 @@ for entry in "${SOURCES[@]}"; do
     continue
   fi
   # Parse the marker; compute freshness/ok. Python keeps ISO parsing robust.
-  verdict="$(MK_FILE="$mfile" MK_KIND="$kind" MK_MAX="$maxage" MK_NOW="$NOW" python3 - <<'PY' 2>/dev/null
+  verdict="$(MK_FILE="$mfile" MK_KIND="$kind" MK_MAX="$maxage" MK_NOW="$NOW" \
+    MK_SCHEMA_PREFIX="$SEMANTIC_SCHEMA_PREFIX" python3 - <<'PY' 2>/dev/null
 import json, os, sys
 from datetime import datetime, timezone
 f = os.environ["MK_FILE"]; kind = os.environ["MK_KIND"]
@@ -154,7 +187,17 @@ try:
     d = json.load(open(f))
 except Exception as e:
     print("stale\tunparseable marker: %s" % e); sys.exit(0)
-field = "delivered_at" if kind == "report" else "checked_at"
+# marker-version guard (semantic only): an unknown schema major is skipped, not
+# paged — a contract we cannot interpret must never false-fire. Missing schema is
+# tolerated (evaluated on the v1 fields).
+if kind == "semantic":
+    schema = d.get("schema")
+    prefix = os.environ.get("MK_SCHEMA_PREFIX", "semantic_delivery_verdict_v1")
+    if schema is not None and not str(schema).startswith(prefix):
+        print("OK\tsemantic schema %r unknown (want %s*): skipped, not paged"
+              % (schema, prefix)); sys.exit(0)
+field = {"report": "delivered_at", "canary": "checked_at",
+         "semantic": "evaluated_at"}.get(kind, "checked_at")
 ts = d.get(field)
 if not ts:
     print("stale\tmarker missing %s field" % field); sys.exit(0)
@@ -164,6 +207,8 @@ except Exception as e:
     print("stale\tbad %s timestamp: %s" % (field, e)); sys.exit(0)
 if kind == "canary" and d.get("ok") is False:
     print("failed\tcanary ok=false (checked %ss ago)" % age); sys.exit(0)
+if kind == "semantic" and d.get("semantic_ok") is False:
+    print("failed\tsemantic_ok=false (evaluated %ss ago)" % age); sys.exit(0)
 if age > maxage:
     print("stale\t%s is %ss old (> %ss)" % (field, age, maxage)); sys.exit(0)
 print("OK\t%s fresh (%ss old)" % (field, age))
