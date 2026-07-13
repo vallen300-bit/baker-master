@@ -1,7 +1,7 @@
 # CHECKPOINT — CASE_ONE_P3_CONTRACT_IDENTITY_1
 
-attempt: 1
-seat: b3 (pre-build checkpoint — respawn requested per lead's >=35%-context rider, dispatch #10023)
+attempt: 2
+seat: b3 (fresh successor seat — claimed arc 2026-07-13, build in progress)
 branch: b3/case-one-p3-contract-identity-1
 created: 2026-07-13
 
