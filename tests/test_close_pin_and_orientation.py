@@ -105,6 +105,39 @@ def test_scripts_exist_executable_syntax_clean():
     assert r.returncode == 0, r.stderr
 
 
+# ---------------------------------------------- fail-loud on broken gate (B1)
+def test_close_pin_import_failure_fails_loud_on_stop(tmp_path):
+    # codex #10226 blocker 1: if the shared predicate can't import, the gate must NOT
+    # exit silent. Copy the hook WITHOUT its sibling module -> import fails -> Stop
+    # must emit a loud GATE DOWN warning.
+    import shutil
+    d = tmp_path / "hooks"
+    d.mkdir()
+    shutil.copy(CLOSE_PIN, d / "close-pin-check.sh")  # no live_state_predicate.py
+    payload = {"hook_event_name": "Stop", "cwd": str(tmp_path), "session_id": "x"}
+    r = subprocess.run(["bash", str(d / "close-pin-check.sh")], input=json.dumps(payload),
+                       capture_output=True, text=True,
+                       env={**os.environ, "BAKER_ROLE": "b4"}, timeout=10)
+    assert r.returncode == 0, r.stderr
+    msg = _system_message(r.stdout)
+    assert msg and "GATE DOWN" in msg
+
+
+def test_close_pin_import_failure_breadcrumb_on_sessionend(tmp_path):
+    import shutil
+    d = tmp_path / "hooks"
+    d.mkdir()
+    shutil.copy(CLOSE_PIN, d / "close-pin-check.sh")
+    (tmp_path / "briefs" / "_checkpoints").mkdir(parents=True)
+    payload = {"hook_event_name": "SessionEnd", "cwd": str(tmp_path), "reason": "logout"}
+    r = subprocess.run(["bash", str(d / "close-pin-check.sh")], input=json.dumps(payload),
+                       capture_output=True, text=True,
+                       env={**os.environ, "BAKER_ROLE": "b4"}, timeout=10)
+    assert r.returncode == 0, r.stderr
+    crumb = tmp_path / "briefs" / "_checkpoints" / ".close-pin-failed"
+    assert crumb.exists() and "PREDICATE IMPORT FAILED" in crumb.read_text()
+
+
 # --------------------------------------------------------------- predicate (5)
 def test_predicate_clean_seat_not_dirty(tmp_path):
     root = _worker_picker(tmp_path, active_brief=False)
@@ -124,20 +157,33 @@ def test_predicate_live_no_checkpoint_is_dirty(tmp_path):
 
 def test_predicate_fresh_checkpoint_clears_dirty(tmp_path):
     root = _worker_picker(tmp_path, active_brief=True, fresh_checkpoint=True)
-    # session start well BEFORE the checkpoint's now-mtime -> checkpoint is fresh.
+    # No later edit; checkpoint written after the mailbox -> covers the live state.
     t = _transcript(tmp_path, iso_ts="2020-01-01T00:00:00Z")
     v = lsp.evaluate(str(root), "b4", str(t))
     assert v["fresh_checkpoint"] is True
     assert v["dirty"] is False
 
 
-def test_predicate_biases_to_fire_when_session_start_unknown(tmp_path):
-    # No transcript -> session_start_ts unknown -> a checkpoint CANNOT be proven
-    # fresh -> treated as stale -> dirty (false-miss = 0).
+def test_predicate_later_edit_after_checkpoint_is_dirty(tmp_path):
+    # codex #10226 blocker 3: an active mailbox + a checkpoint + a LATER Write/Edit
+    # must be dirty. Freshness is vs the latest state change, not session start.
     root = _worker_picker(tmp_path, active_brief=True, fresh_checkpoint=True)
-    v = lsp.evaluate(str(root), "b4", None)
-    assert v["session_start_ts"] is None
-    assert v["fresh_checkpoint"] is False
+    cp = root / "briefs" / "_checkpoints" / "CASE_ONE_E23_1.checkpoint.md"
+    old = 1_000_000_000  # 2001 — checkpoint is OLD
+    os.utime(cp, (old, old))
+    t = _transcript(tmp_path, edit=True)  # edit happened "now", after the checkpoint
+    v = lsp.evaluate(str(root), "b4", str(t))
+    assert v["fresh_checkpoint"] is False, v
+    assert v["dirty"] is True
+
+
+def test_predicate_unreadable_transcript_biases_to_fire(tmp_path):
+    # An unreadable transcript is treated as a recent edit (false-miss = 0). With no
+    # checkpoint to cover it, the seat is dirty even with no mailbox/pinned.
+    root = _worker_picker(tmp_path, active_brief=False)  # no mailbox
+    unreadable = root / "briefs"  # a directory path -> open() raises -> bias to fire
+    v = lsp.evaluate(str(root), "b4", str(unreadable))
+    assert v["has_live_state"] is True
     assert v["dirty"] is True
 
 

@@ -47,15 +47,9 @@ import subprocess
 import sys
 from pathlib import Path
 
-hook_dir = os.environ.get("CLOSE_PIN_HOOK_DIR") or str(Path(__file__).resolve().parent)
-if hook_dir and hook_dir not in sys.path:
-    sys.path.insert(0, hook_dir)
-try:
-    import live_state_predicate
-except Exception:
-    # Shared predicate missing/unimportable -> the hook must still no-op cleanly.
-    raise SystemExit(0)
-
+# Parse the payload FIRST (stdlib only) so that even a broken predicate import can
+# still be surfaced against the right event (blocker #1: the fail-loud gate must
+# not itself fail silent).
 try:
     payload = json.loads(os.environ.get("CLOSE_PIN_PAYLOAD", "") or "{}")
 except json.JSONDecodeError:
@@ -70,6 +64,35 @@ session_id = payload.get("session_id") or ""
 role = (os.environ.get("BAKER_ROLE") or "").strip()
 
 cwd_p = Path(str(cwd)).expanduser()
+
+hook_dir = os.environ.get("CLOSE_PIN_HOOK_DIR") or str(Path(__file__).resolve().parent)
+if hook_dir and hook_dir not in sys.path:
+    sys.path.insert(0, hook_dir)
+try:
+    import live_state_predicate
+except Exception as _imp_exc:
+    # The shared predicate is unimportable — this gate cannot evaluate. It must NOT
+    # exit silent (that is the exact fail-loud failure codex flagged, blocker #1).
+    # Surface the broken gate by the loudest channel the event allows, then exit 0
+    # (never crash the session).
+    _why = ("[close-pin] GATE DOWN: live_state_predicate could not be imported "
+            "({}). This seat's close-pin enforcement is NOT running — persist your "
+            "state manually (pin-protocol LIGHT floor) and report the broken hook to "
+            "your dispatching superior.".format(_imp_exc))
+    if event == "Stop":
+        print(json.dumps({"systemMessage": _why}))
+    else:
+        # SessionEnd/other: output is ignored by the harness, so leave a durable
+        # breadcrumb naming the failure (audit surface), never a silent skip.
+        try:
+            d = cwd_p / "briefs" / "_checkpoints"
+            d.mkdir(parents=True, exist_ok=True)
+            d.joinpath(".close-pin-failed").write_text(
+                "PREDICATE IMPORT FAILED seat={} event={}: {}\n".format(
+                    role or "?", event or "?", _imp_exc))
+        except OSError:
+            pass
+    raise SystemExit(0)
 
 
 # ---- config: settings.local.json (per-seat) then settings.json (base) ----------

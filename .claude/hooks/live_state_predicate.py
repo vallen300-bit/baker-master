@@ -20,8 +20,11 @@ Design contract (brief P-E23.1 trigger predicate):
 "dirty" = has_live_state AND NOT fresh_checkpoint, where:
   has_live_state  : an ACTIVE brief mailbox, a written draft this session (a
                     Write/Edit tool-use in the transcript), or an OPEN PINNED item.
-  fresh_checkpoint: a checkpoint/handover file was written at or after this
-                    session's start (i.e. the seat already persisted this session).
+  fresh_checkpoint: a checkpoint/handover file was written at or after the LATEST
+                    live-state CHANGE — not merely after session start. A checkpoint
+                    that predates a later Write/Edit does NOT cover that edit, so it
+                    is stale (codex #10226 blocker 3: mtime-after-session-start
+                    wrongly suppressed dirty when a later edit existed).
 """
 from __future__ import annotations
 
@@ -29,6 +32,7 @@ import json
 import os
 import re
 import sys
+import time
 from pathlib import Path
 from typing import Optional
 
@@ -38,42 +42,32 @@ _TRANSCRIPT_TAIL_BYTES = 512 * 1024
 _EDIT_TOOL_RE = re.compile(r'"name"\s*:\s*"(Write|Edit|MultiEdit|NotebookEdit)"')
 
 
-def _session_start_ts(transcript_path: Optional[str]) -> Optional[float]:
-    """Best-effort epoch seconds for when this session began. Prefer the first
-    transcript line's ISO `timestamp`; fall back to the file's birth/ctime. Returns
-    None when nothing is knowable — the caller then biases toward 'stale'."""
-    if not transcript_path:
+def _parse_iso(ts) -> Optional[float]:
+    if not ts:
         return None
-    p = Path(str(transcript_path))
     try:
-        with p.open("r", errors="ignore") as fh:
-            first = fh.readline()
-        if first:
-            try:
-                obj = json.loads(first)
-                ts = obj.get("timestamp")
-                if ts:
-                    # ISO-8601, tolerate a trailing Z.
-                    from datetime import datetime
+        from datetime import datetime
 
-                    return datetime.fromisoformat(str(ts).replace("Z", "+00:00")).timestamp()
-            except Exception:
-                pass
-    except OSError:
-        pass
-    # Fall back to file birth time (macOS) then ctime.
+        return datetime.fromisoformat(str(ts).replace("Z", "+00:00")).timestamp()
+    except Exception:
+        return None
+
+
+def _mtime(path) -> Optional[float]:
     try:
-        st = p.stat()
-        return getattr(st, "st_birthtime", None) or st.st_ctime
+        return Path(str(path)).stat().st_mtime
     except OSError:
         return None
 
 
-def _transcript_has_edit(transcript_path: Optional[str]) -> bool:
-    """True if the transcript records a Write/Edit/MultiEdit tool-use — i.e. this
-    session produced a draft/file change that is live state worth persisting."""
+def _last_edit(transcript_path: Optional[str]) -> tuple:
+    """Return (has_edit, ts) where ts is when the LATEST Write/Edit happened.
+    Prefer the timestamp on the last edit line; fall back to the transcript's mtime
+    (an upper bound for the last activity). BIAS: an unreadable transcript is
+    treated as a very recent edit (has_edit True, ts=now) so freshness can never be
+    proven by an unverifiable transcript."""
     if not transcript_path:
-        return False
+        return (False, None)
     p = Path(str(transcript_path))
     try:
         size = p.stat().st_size
@@ -81,10 +75,46 @@ def _transcript_has_edit(transcript_path: Optional[str]) -> bool:
             if size > _TRANSCRIPT_TAIL_BYTES:
                 fh.seek(size - _TRANSCRIPT_TAIL_BYTES)
             blob = fh.read()
-        return bool(_EDIT_TOOL_RE.search(blob.decode("utf-8", errors="ignore")))
     except OSError:
-        # Cannot read the transcript -> bias to fire (assume an edit happened).
-        return True
+        return (True, time.time())  # unreadable -> assume a recent edit (bias to fire)
+    text = blob.decode("utf-8", errors="ignore")
+    last_ts = None
+    found = False
+    for line in reversed(text.splitlines()):
+        if _EDIT_TOOL_RE.search(line):
+            found = True
+            try:
+                last_ts = _parse_iso(json.loads(line).get("timestamp"))
+            except Exception:
+                last_ts = None
+            break
+    if found and last_ts is None:
+        # Edit present but its line carried no parseable timestamp: use the
+        # transcript mtime (>= the last edit) so a later edit still beats an older
+        # checkpoint.
+        last_ts = _mtime(p) or time.time()
+    return (found, last_ts)
+
+
+def _session_start_ts(transcript_path: Optional[str]) -> Optional[float]:
+    """First transcript line's ISO `timestamp` (informational only — no longer used
+    for freshness). Falls back to birth/ctime, then None."""
+    if not transcript_path:
+        return None
+    p = Path(str(transcript_path))
+    try:
+        with p.open("r", errors="ignore") as fh:
+            first = fh.readline()
+        ts = _parse_iso(json.loads(first).get("timestamp")) if first else None
+        if ts is not None:
+            return ts
+    except Exception:
+        pass
+    try:
+        st = p.stat()
+        return getattr(st, "st_birthtime", None) or st.st_ctime
+    except OSError:
+        return None
 
 
 def _active_mailbox(cwd: Path, role: str) -> Optional[str]:
@@ -137,57 +167,79 @@ def _checkpoint_dir(cwd: Path) -> Path:
     return cwd / "briefs" / "_checkpoints"
 
 
-def _fresh_checkpoint(cwd: Path, session_start_ts: Optional[float]) -> Optional[str]:
-    """Return the path of a checkpoint/handover written at/after session start, else
-    None. When session_start_ts is unknown we CANNOT prove freshness -> return None
-    (treated as stale, biasing toward dirty)."""
-    if session_start_ts is None:
-        return None
+def _newest_checkpoint(cwd: Path) -> tuple:
+    """Return (mtime, path) of the newest checkpoint .md, else (None, None). Only
+    .md files count (the .close-pin-warnlog / .close-pin-failed dot-markers are not
+    checkpoints and must not be read as persistence)."""
     cdir = _checkpoint_dir(cwd)
     if not cdir.is_dir():
-        return None
+        return (None, None)
+    best_ts = None
+    best_path = None
     try:
         for f in cdir.iterdir():
-            if not f.is_file():
+            if not f.is_file() or f.suffix != ".md":
                 continue
             try:
-                if f.stat().st_mtime >= session_start_ts - 1:  # 1s slop
-                    return str(f)
+                mt = f.stat().st_mtime
             except OSError:
                 continue
+            if best_ts is None or mt > best_ts:
+                best_ts, best_path = mt, str(f)
     except OSError:
-        return None
-    return None
+        return (None, None)
+    return (best_ts, best_path)
 
 
 def evaluate(cwd: str, role: str, transcript_path: Optional[str] = None) -> dict:
     """The single dirty verdict. Never raises; on internal error returns dirty=True
-    with reason 'predicate_error' (fail-toward-firing)."""
+    with reason 'predicate_error' (fail-toward-firing).
+
+    Freshness (blocker-3 fix): a checkpoint is fresh only if it was written at/after
+    the LATEST live-state change (max of the active signals' timestamps), NOT merely
+    after session start. So a checkpoint that predates a later Write/Edit is stale.
+    """
     try:
         cwd_p = Path(str(cwd or ".")).expanduser()
-        session_start_ts = _session_start_ts(transcript_path)
 
-        reasons: list[str] = []
+        # Each signal carries the timestamp of the state it represents, so a later
+        # change beats an older checkpoint.
+        signals: list = []  # (reason, ts|None)
         mailbox = _active_mailbox(cwd_p, role)
         if mailbox:
-            reasons.append(f"active brief mailbox: {mailbox}")
-        if _transcript_has_edit(transcript_path):
-            reasons.append("this session wrote a draft/file (Write/Edit tool-use)")
+            signals.append((f"active brief mailbox: {mailbox}", _mtime(mailbox)))
+        has_edit, edit_ts = _last_edit(transcript_path)
+        if has_edit:
+            signals.append(("this session wrote a draft/file (Write/Edit tool-use)", edit_ts))
         pinned = _open_pinned_item(cwd_p)
         if pinned:
-            reasons.append(f"unresolved OPEN item in {pinned}")
+            signals.append((f"unresolved OPEN item in {pinned}", _mtime(pinned)))
 
-        has_live_state = bool(reasons)
-        fresh = _fresh_checkpoint(cwd_p, session_start_ts)
-        fresh_checkpoint = fresh is not None
+        reasons = [r for r, _ in signals]
+        has_live_state = bool(signals)
+        ts_values = [ts for _, ts in signals if ts is not None]
+        latest_change = max(ts_values) if ts_values else None
+
+        cp_ts, cp_path = _newest_checkpoint(cwd_p)
+        if not has_live_state:
+            fresh_checkpoint = True  # nothing to cover
+        elif cp_ts is None:
+            fresh_checkpoint = False  # live state, no checkpoint at all
+        elif latest_change is None:
+            fresh_checkpoint = False  # live state we can't timestamp -> bias to fire
+        else:
+            fresh_checkpoint = (cp_ts + 1) >= latest_change  # 1s slop
+
         dirty = has_live_state and not fresh_checkpoint
         return {
             "dirty": dirty,
             "has_live_state": has_live_state,
             "reasons": reasons,
             "fresh_checkpoint": fresh_checkpoint,
-            "fresh_checkpoint_path": fresh,
-            "session_start_ts": session_start_ts,
+            "fresh_checkpoint_path": cp_path if fresh_checkpoint else None,
+            "latest_state_change_ts": latest_change,
+            "newest_checkpoint_ts": cp_ts,
+            "session_start_ts": _session_start_ts(transcript_path),
             "checkpoint_dir": str(_checkpoint_dir(cwd_p)),
         }
     except Exception as exc:  # noqa: BLE001 — must never break the hook
@@ -197,6 +249,8 @@ def evaluate(cwd: str, role: str, transcript_path: Optional[str] = None) -> dict
             "reasons": [f"predicate_error: {exc}"],
             "fresh_checkpoint": False,
             "fresh_checkpoint_path": None,
+            "latest_state_change_ts": None,
+            "newest_checkpoint_ts": None,
             "session_start_ts": None,
             "checkpoint_dir": "",
         }

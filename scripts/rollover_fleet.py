@@ -24,6 +24,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import stat
 import subprocess
 import sys
 from pathlib import Path
@@ -90,8 +91,32 @@ REQUIRED_HOOK_FILES = (
 )
 
 
+def _file_runnable(path: Path) -> bool:
+    """A hook file is 'present' only if it can actually RUN when the harness invokes
+    it — not merely if it exists (codex #10226 blocker 2: a hook that lost its exec
+    bit false-greened). Shell hooks need the user exec bit AND must parse (`bash
+    -n`); Python modules must compile (`py_compile`)."""
+    if not path.exists():
+        return False
+    if path.suffix == ".sh":
+        try:
+            if not (path.stat().st_mode & stat.S_IXUSR):
+                return False
+            return subprocess.run(["bash", "-n", str(path)],
+                                  capture_output=True, timeout=15).returncode == 0
+        except Exception:
+            return False
+    if path.suffix == ".py":
+        try:
+            return subprocess.run([sys.executable, "-m", "py_compile", str(path)],
+                                  capture_output=True, timeout=15).returncode == 0
+        except Exception:
+            return False
+    return path.exists()
+
+
 def _script_present(root: Path) -> bool:
-    return all((root / rel).exists() for rel in REQUIRED_HOOK_FILES)
+    return all(_file_runnable(root / rel) for rel in REQUIRED_HOOK_FILES)
 
 
 def _classify(picker_path: str) -> str:

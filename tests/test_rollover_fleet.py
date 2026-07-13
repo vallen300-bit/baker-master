@@ -6,6 +6,7 @@ from __future__ import annotations
 
 import importlib.util
 import json
+import stat
 from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
@@ -34,12 +35,18 @@ def _make_picker(root: Path, settings: dict | None, *, name="settings.json",
     if settings is not None:
         (claude / name).write_text(json.dumps(settings))
     if with_script:
-        # Every hook script + shared module the registrations point at (all must be
-        # present, else WIRED is false-green — the command no-ops on an absent file).
+        # Every hook script + shared module the registrations point at, written so it
+        # is actually RUNNABLE (exec bit + parses / compiles) — WIRED is false-green
+        # otherwise (a hook that only exists but can't run no-ops silently).
         hooks = claude / "hooks"
         hooks.mkdir(parents=True, exist_ok=True)
         for rel in rf.REQUIRED_HOOK_FILES:
-            (claude.parent / rel).write_text("# stub\n")
+            f = claude.parent / rel
+            if f.suffix == ".sh":
+                f.write_text("#!/usr/bin/env bash\nexit 0\n")
+                f.chmod(f.stat().st_mode | stat.S_IXUSR)
+            else:  # .py
+                f.write_text("# stub\n")
     return root
 
 
@@ -75,6 +82,25 @@ def test_classify_missing_script_when_only_one_hook_file(tmp_path):
     (p / ".claude" / "hooks").mkdir(parents=True, exist_ok=True)
     # Only the runner, not the shared context_meter.py -> still MISSING_SCRIPT.
     (p / ".claude" / "hooks" / "context-threshold-check.sh").write_text("#!/bin/bash\n")
+    assert rf._classify(str(p)) == "MISSING_SCRIPT"
+
+
+def test_classify_missing_script_when_hook_not_executable(tmp_path):
+    # codex #10226 blocker 2: a registered hook that exists but LOST its exec bit
+    # must NOT false-green as WIRED — the harness can't run it.
+    p = _make_picker(tmp_path / "seat", WIRED_SETTINGS, with_script=True)
+    hook = p / ".claude" / "hooks" / "close-pin-check.sh"
+    hook.chmod(hook.stat().st_mode & ~stat.S_IXUSR & ~stat.S_IXGRP & ~stat.S_IXOTH)
+    assert rf._classify(str(p)) == "MISSING_SCRIPT"
+
+
+def test_classify_missing_script_when_shell_hook_syntax_broken(tmp_path):
+    # A hook that exists + is executable but does not parse (`bash -n`) is not
+    # runnable either -> MISSING_SCRIPT, not WIRED.
+    p = _make_picker(tmp_path / "seat", WIRED_SETTINGS, with_script=True)
+    hook = p / ".claude" / "hooks" / "session-open-orientation.sh"
+    hook.write_text("#!/usr/bin/env bash\nif [ ; then\n")  # broken syntax
+    hook.chmod(hook.stat().st_mode | stat.S_IXUSR)
     assert rf._classify(str(p)) == "MISSING_SCRIPT"
 
 
