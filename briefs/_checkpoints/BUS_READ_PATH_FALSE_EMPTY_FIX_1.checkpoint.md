@@ -11,12 +11,23 @@ BUS_READ_PATH_FALSE_EMPTY_FIX_1 (E27) — PR brisen-lab #130. Dispatch/rulings: 
 (REVERSED the A1.5 split: gate ALL DB to_thread sites in this PR, not the narrowed ~35).
 Status ping: lead #10680. My status posts: #10697, verdict #10703 (topic case-one/plan-v3-a1-status).
 
-## STATUS: CODEX PASS — MERGE-ELIGIBLE, handed to lead to merge (b1 work complete)
-- codex verdict #10716: PASS-WITH-NOTE, NO code finding (note = codex env only: no local pytest +
-  stale worktree, reviewed PR ref/diff statically; execution gap covered by b1's green local-PG run).
-- Merge-eligibility posted to lead #10718. Merge is lead's action. On merge, rider-3 releases
-  (deputy daemon-attributed-emission fix dispatches behind me).
-- Nothing further from b1 on this arc unless lead requests changes.
+## STATUS: MERGE-BLOCK RESOLVED + RE-VERIFIED GREEN — awaiting codex DELTA verdict (#10721)
+- First codex verdict #10716: PASS (no code finding).
+- Then lead #10719: MERGE BLOCKED — branch was 8 behind main (#127 P5 / #129 canary / #131 boot-fix
+  / #132 preflight landed after branch; several touch bus.py). ACTION: merge main in, absorb new DB
+  sites into the sweep, re-run, re-push, codex DELTA re-gate.
+- DONE: merged origin/main -> merge commit f237a64 (pushed, no force-push).
+  - Conflicts: bus.py ack (took origin/main's shared module-level _ack_core_sync, routed via
+    db_gate.db_call not raw to_thread — E1 read-back preserved) + db.py FIFO comment (trivial).
+  - Absorbed new DB sites: canary.py x4 (added import db_gate) + app.py canary.latest_run_sync.
+    104 db_gate.db_call sites now; only remaining awaited to_thread = tier_classification
+    path.read_text (filesystem, not DB — out of scope).
+  - Re-verify green: subset 58/58; full 612 pass / 1 skip / 26 fail = autowake/identity baseline
+    (SUBSET of prior 27; merge fixed one identity-artifact-drift failure). Zero new failures.
+- codex DELTA re-gate requested #10721 (effort=medium, scoped to resolution + newly-gated sites).
+- lead flagged #10723. Awaiting codex delta verdict.
+
+## (history) codex PASS #10716 on the pre-merge branch head ca5561b
 
 ## (history) prior status: VERIFIED GREEN + UN-WIP PUSHED + CODEX RE-REQUESTED
 - Branch head now ca5561b (un-WIP commit; supersedes 46609b0 "DO NOT MERGE" marker; NO force-push).
