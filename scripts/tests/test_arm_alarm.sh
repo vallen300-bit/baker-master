@@ -27,9 +27,11 @@ NOTIFY_CMD='printf "%s\n" "$ARM_ALARM_TITLE" >> '"$NOTIFY_LOG"
 now="$(date +%s)"
 iso() { python3 -c "import sys,datetime; print(datetime.datetime.fromtimestamp(int(sys.argv[1]),datetime.timezone.utc).strftime('%Y-%m-%dT%H:%M:%SZ'))" "$1"; }
 
-# Fresh helpers: write a report/canary marker with an age (seconds).
+# Fresh helpers: write a report/canary/semantic marker with an age (seconds).
 write_report() { mkdir -p "$1/markers"; printf '{"delivered_at": "%s"}\n' "$(iso $(( now - $2 )) )" > "$1/markers/report.json"; }
 write_canary() { mkdir -p "$1/markers"; printf '{"ok": %s, "checked_at": "%s"}\n' "$3" "$(iso $(( now - $2 )) )" > "$1/markers/canary.json"; }
+# write_semantic <dir> <age_s> <semantic_ok true|false> [schema]
+write_semantic() { mkdir -p "$1/markers"; printf '{"schema":"%s","evaluated_at":"%s","semantic_ok":%s}\n' "${4:-semantic_delivery_verdict_v1}" "$(iso $(( now - $2 )) )" "$3" > "$1/markers/semantic.json"; }
 
 # run_worker <alarm_dir> [extra NAME=val ...] — invoke with recorders + fast
 # thresholds. Uses env so the caller's extra NAME=val args apply as environment
@@ -182,6 +184,49 @@ run_worker "$D" ARM_ALARM_NOW=1005 "${FAILENV[@]}" >/dev/null 2>&1   # within ba
 run_worker "$D" ARM_ALARM_NOW=1020 "${FAILENV[@]}" >/dev/null 2>&1   # backoff elapsed -> fail#2, next_retry 1040
 [ "$(jqf "$D/state.json" report:stale send_fail_count)" = "2" ] && ok || bad "backoff-elapsed retry did not increment send_fail_count"
 [ "$(jqf "$D/state.json" report:stale next_retry_at)" = "1040" ] && ok || bad "backoff did not grow 10->20 (next_retry_at=$(jqf "$D/state.json" report:stale next_retry_at), expected 1040)"
+
+# === SEMANTIC kind regression tests (micro-lane lead #10630) ================
+# rider (b) is covered by tests 2-16 above staying green (report/canary unchanged
+# with semantic added to SOURCES); the tests below cover the new kind itself.
+
+# --- 17. absent semantic + SEMANTIC_ENFORCE=0 (default) => TRUE silent skip ---
+# report+canary fresh so only the semantic source is in question. Absent semantic
+# must not page AND must not log (not even AMBER) pre-ship (rider a).
+D="$TMP/sem_absent"; write_report "$D" 60; write_canary "$D" 60 true
+reset_recorders; run_worker "$D"; rc=$?
+[ "$rc" -eq 0 ] && ok || bad "sem-absent run exit=$rc"
+[ "$(emails)" -eq 0 ] && ok || bad "absent semantic false-paged with ENFORCE=0 ($(emails))"
+grep -qi 'semantic' "$D/alarm.log" && bad "absent semantic logged (should be TRUE silent skip)" || ok
+
+# --- 18. present semantic_ok=false (fresh) => alarm even though timestamp fresh
+D="$TMP/sem_fail"; write_report "$D" 60; write_canary "$D" 60 true; write_semantic "$D" 60 false
+reset_recorders; run_worker "$D"; [ "$(emails)" -eq 1 ] && ok || bad "semantic_ok=false did not alarm ($(emails))"
+grep -q 'semantic' "$EMAIL_LOG" && ok || bad "semantic-fail alarm did not name semantic source"
+[ "$(wc -l < "$NOTIFY_LOG" | tr -d ' ')" -eq 1 ] && ok || bad "semantic alarm sent no notification"
+
+# --- 19. present semantic stale evaluated_at => stale alarm ------------------
+D="$TMP/sem_stale"; write_report "$D" 60; write_canary "$D" 60 true; write_semantic "$D" 7200 true
+reset_recorders; run_worker "$D" ARM_ALARM_SEMANTIC_MAX_AGE_S=3600
+[ "$(emails)" -eq 1 ] && ok || bad "stale semantic did not alarm ($(emails))"
+grep -q 'semantic:stale' "$D/alarm.log" && ok || bad "stale semantic not logged semantic:stale"
+
+# --- 20. present semantic fresh + semantic_ok=true => NO alarm --------------
+D="$TMP/sem_ok"; write_report "$D" 60; write_canary "$D" 60 true; write_semantic "$D" 60 true
+reset_recorders; run_worker "$D"; [ "$(emails)" -eq 0 ] && ok || bad "healthy semantic marker fired an alarm ($(emails))"
+
+# --- 21. unknown schema major => skipped, NOT paged (marker-version guard) ---
+D="$TMP/sem_badver"; write_report "$D" 60; write_canary "$D" 60 true
+write_semantic "$D" 60 false semantic_delivery_verdict_v2   # ok=false but unknown schema
+reset_recorders; run_worker "$D"; [ "$(emails)" -eq 0 ] && ok || bad "unknown-schema semantic false-paged ($(emails))"
+
+# --- 22. SEMANTIC_ENFORCE=1 + absent => normal MISSING policy (AMBER, then RED)
+D="$TMP/sem_enforce"; write_report "$D" 60; write_canary "$D" 60 true   # only semantic absent
+reset_recorders; run_worker "$D" ARM_ALARM_SEMANTIC_ENFORCE=1
+[ "$(emails)" -eq 0 ] && ok || bad "enforce=1 absent semantic paged under MISSING_IS_RED=0 ($(emails))"
+grep -qi 'AMBER' "$D/alarm.log" && ok || bad "enforce=1 absent semantic not logged AMBER"
+reset_recorders; run_worker "$D" ARM_ALARM_SEMANTIC_ENFORCE=1 ARM_ALARM_MISSING_IS_RED=1
+[ "$(emails)" -ge 1 ] && ok || bad "enforce=1 + MISSING_IS_RED=1 did not alarm on absent semantic ($(emails))"
+grep -q 'semantic' "$EMAIL_LOG" && ok || bad "enforced absent-semantic alarm did not name semantic source"
 
 echo "arm_alarm tests: $PASS passed, $FAIL failed"
 [ "$FAIL" -eq 0 ]
