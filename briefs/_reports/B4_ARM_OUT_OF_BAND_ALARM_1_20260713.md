@@ -24,7 +24,7 @@ email + a macOS notification), deduped per incident key. It never touches the bu
 | `scripts/install_arm_alarm_job.sh` | Idempotent single-job install (TCC-safe, no secret) + `--check` drift mode. Interval clamped **≤300s** so the SLO cannot be misconfigured away. |
 | `scripts/arm_alarm_drift_check.sh` | Fail-open sentinel; logs + bus-posts lead if the alarm JOB is not installed/healthy (install-health meta-check — allowed on the bus; distinct from the alarm's own out-of-band send). |
 | `scripts/launchd/com.baker.arm-alarm.plist` | Crash-only KeepAlive, StartInterval=180, RunAtLoad. |
-| `scripts/tests/test_arm_alarm.sh` | 36 hermetic checks (senders injected as recorders — no real email/launchctl/bus). |
+| `scripts/tests/test_arm_alarm.sh` | 52 hermetic checks (senders injected as recorders — no real email/launchctl/bus), incl. delivery-truth + bounded-backoff. |
 
 ## Done rubric (the micro-brief's 5 asks)
 - **Owner** ✅ — ARM custodian; operationally the host-side launchd job `com.baker.arm-alarm` on the always-on ARM host. Drift-post accountable = `lead`.
@@ -34,9 +34,24 @@ email + a macOS notification), deduped per incident key. It never touches the bu
 - **Test evidence** ✅ — see below.
 - **Separate from bus reliability controls** ✅ — worker makes no bus call (test 1 asserts no `X-Terminal-Key`/`LAB_URL`/`curl …/msg`); it is a distinct launchd job, not an edit to the arm-cadence poller.
 
+## Codex G2 fix (#10455 → re-route to codex)
+First cut had a **delivery-truth** bug codex caught: the worker marked an incident
+"alarmed" and suppressed re-alarms in a shell loop that ran *after* state was
+committed, and `subprocess.run(check=False)` treated an Outlook failure as success —
+so a failed out-of-band send (Outlook/M365 down, the exact scenario this exists for)
+was silently lost. **Fixed:** delivery now lives *inside* the reconcile program; an
+incident is marked alarmed / cooldown-suppressed **only after ≥1 channel returns a
+real success** (osascript returncode checked). If both channels fail: log `SEND-FAIL`,
+set `delivery_pending`, and **retry each poll with bounded exponential backoff**
+(`ARM_ALARM_BACKOFF_BASE_S`..`_CAP_S`) — never suppressed. A recovery for an alarm
+that was never delivered clears silently (`CLEAR-UNDELIVERED`). Transport sits behind
+the `ARM_ALARM_SEND_CMD`/`_NOTIFY_CMD` adapter seam (#10425) so push can be added later
+without touching trigger/dedupe. New regression tests 13–16 cover both-fail, partial
+(1-of-2), retry-then-succeed, undelivered-recovery, and backoff growth.
+
 ## Test evidence
 ```
-arm_alarm tests: 36 passed, 0 failed
+arm_alarm tests: 52 passed, 0 failed
 arm_cadence tests: 20 passed, 0 failed   # sibling, no regression
 ```
 Coverage: fresh=no-alarm, stale-report=1-alarm, dedupe-within-cooldown, cooldown-backstop

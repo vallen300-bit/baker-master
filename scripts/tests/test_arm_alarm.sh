@@ -83,7 +83,7 @@ reset_recorders; run_worker "$D" ARM_ALARM_COOLDOWN_S=21600; rc=$?
 # --- 5. cooldown backstop: still stale, cooldown=0 => re-alarm ---------------
 reset_recorders; run_worker "$D" ARM_ALARM_COOLDOWN_S=0; rc=$?
 [ "$(emails)" -eq 1 ] && ok || bad "cooldown backstop did not re-alarm with cooldown=0 ($(emails))"
-grep -q 'STILL FAILING' "$EMAIL_LOG" && ok || bad "re-alarm not marked STILL FAILING"
+grep -q 'STILL-FAILING' "$EMAIL_LOG" && ok || bad "re-alarm not marked STILL-FAILING"
 
 # --- 6. recovery: report marker fresh again => recovery notice + re-arm ------
 write_report "$D" 60   # fresh now
@@ -134,6 +134,54 @@ ARM_ALARM_CHECK_DIR="$ROOT/scripts" \
 rc=$?
 [ "$rc" -eq 0 ] && ok || bad "drift sentinel not fail-open (exit=$rc)"
 grep -q 'arm-alarm-drift' "$TMP/drift.log" 2>/dev/null && ok || bad "drift sentinel wrote no log line"
+
+# === DELIVERY-TRUTH regression tests (codex G2 #10455) ======================
+# state field reader.
+jqf() { python3 -c "import json,sys; d=json.load(open(sys.argv[1])); k=sys.argv[2]; print(d['incidents'].get(k,{}).get(sys.argv[3],''))" "$1" "$2" "$3" 2>/dev/null; }
+
+# --- 13. BOTH channels fail => incident NOT marked alarmed; retry, no suppress -
+D="$TMP/bothfail"; write_report "$D" 7200; write_canary "$D" 60 true
+reset_recorders
+run_worker "$D" ARM_ALARM_SEND_CMD='exit 1' ARM_ALARM_NOTIFY_CMD='exit 1' ARM_ALARM_BACKOFF_BASE_S=0
+[ "$(emails)" -eq 0 ] && ok || bad "failed-delivery still recorded an email ($(emails))"
+grep -q 'SEND-FAIL' "$D/alarm.log" && ok || bad "both-channel failure not logged SEND-FAIL"
+[ "$(jqf "$D/state.json" report:stale delivery_pending)" = "True" ] && ok || bad "failed delivery did not set delivery_pending"
+[ "$(jqf "$D/state.json" report:stale active)" != "True" ] && ok || bad "failed delivery wrongly marked incident active (delivery-truth bug)"
+# next poll (working sender, backoff=0 so immediately due) => now delivers
+reset_recorders
+run_worker "$D" ARM_ALARM_BACKOFF_BASE_S=0
+[ "$(emails)" -eq 1 ] && ok || bad "failed incident was suppressed instead of retried ($(emails))"
+[ "$(jqf "$D/state.json" report:stale active)" = "True" ] && ok || bad "successful retry did not mark incident active"
+[ "$(jqf "$D/state.json" report:stale delivery_pending)" = "False" ] && ok || bad "successful retry did not clear delivery_pending"
+
+# --- 14. PARTIAL success (email fails, notification ok) => delivered once -----
+D="$TMP/partial"; write_report "$D" 7200; write_canary "$D" 60 true
+reset_recorders
+run_worker "$D" ARM_ALARM_SEND_CMD='exit 1'   # email fails; notify recorder succeeds
+[ "$(emails)" -eq 0 ] && ok || bad "email channel recorded a send despite exit 1 ($(emails))"
+[ "$(wc -l < "$NOTIFY_LOG" | tr -d ' ')" -ge 1 ] && ok || bad "notification channel not attempted on email failure"
+[ "$(jqf "$D/state.json" report:stale active)" = "True" ] && ok || bad "partial success (1 channel) did not mark incident delivered"
+
+# --- 15. RECOVERY of an UNDELIVERED alarm => cleared silently, no recovery mail
+D="$TMP/undeliv"; write_report "$D" 7200; write_canary "$D" 60 true
+run_worker "$D" ARM_ALARM_SEND_CMD='exit 1' ARM_ALARM_NOTIFY_CMD='exit 1' ARM_ALARM_BACKOFF_BASE_S=0 >/dev/null 2>&1
+write_report "$D" 60   # marker fresh again before any alarm ever delivered
+reset_recorders
+run_worker "$D" ARM_ALARM_BACKOFF_BASE_S=0
+[ "$(emails)" -eq 0 ] && ok || bad "undelivered-then-recovered sent a spurious recovery email ($(emails))"
+grep -q 'CLEAR-UNDELIVERED' "$D/alarm.log" && ok || bad "undelivered recovery not logged CLEAR-UNDELIVERED"
+
+# --- 16. BOUNDED BACKOFF grows across failed retries (deterministic clock) ----
+D="$TMP/backoff"; mkdir -p "$D/markers"
+printf '{"delivered_at": "1970-01-01T00:00:00Z"}\n' > "$D/markers/report.json"  # always stale
+FAILENV=(ARM_ALARM_SEND_CMD='exit 1' ARM_ALARM_NOTIFY_CMD='exit 1' ARM_ALARM_REPORT_MAX_AGE_S=1 ARM_ALARM_CANARY_MAX_AGE_S=1 ARM_ALARM_BACKOFF_BASE_S=10 ARM_ALARM_BACKOFF_CAP_S=1000)
+run_worker "$D" ARM_ALARM_NOW=1000 "${FAILENV[@]}" >/dev/null 2>&1   # fail#1 -> next_retry 1010
+[ "$(jqf "$D/state.json" report:stale next_retry_at)" = "1010" ] && ok || bad "backoff#1 next_retry_at != 1010 (got $(jqf "$D/state.json" report:stale next_retry_at))"
+run_worker "$D" ARM_ALARM_NOW=1005 "${FAILENV[@]}" >/dev/null 2>&1   # within backoff -> suppressed, still fail#1
+[ "$(jqf "$D/state.json" report:stale send_fail_count)" = "1" ] && ok || bad "retry fired before backoff elapsed (send_fail_count=$(jqf "$D/state.json" report:stale send_fail_count))"
+run_worker "$D" ARM_ALARM_NOW=1020 "${FAILENV[@]}" >/dev/null 2>&1   # backoff elapsed -> fail#2, next_retry 1040
+[ "$(jqf "$D/state.json" report:stale send_fail_count)" = "2" ] && ok || bad "backoff-elapsed retry did not increment send_fail_count"
+[ "$(jqf "$D/state.json" report:stale next_retry_at)" = "1040" ] && ok || bad "backoff did not grow 10->20 (next_retry_at=$(jqf "$D/state.json" report:stale next_retry_at), expected 1040)"
 
 echo "arm_alarm tests: $PASS passed, $FAIL failed"
 [ "$FAIL" -eq 0 ]
