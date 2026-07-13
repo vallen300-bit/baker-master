@@ -14,10 +14,17 @@ _spec = importlib.util.spec_from_file_location(
 rf = importlib.util.module_from_spec(_spec)
 _spec.loader.exec_module(rf)
 
-WIRED_SETTINGS = {
-    "hooks": {"Stop": [{"hooks": [{"type": "command",
-                                   "command": rf.HOOK_COMMAND, "timeout": 10}]}]}
-}
+# WIRED now requires EVERY hook the installer registers (E23 extended the set):
+# context band + close-pin (Stop+SessionEnd) + orientation (SessionStart).
+def _wired_hooks() -> dict:
+    hooks: dict = {}
+    for event, command in rf.REQUIRED_HOOKS:
+        hooks.setdefault(event, [{"hooks": []}])[0]["hooks"].append(
+            {"type": "command", "command": command, "timeout": 10})
+    return {"hooks": hooks}
+
+
+WIRED_SETTINGS = _wired_hooks()
 
 
 def _make_picker(root: Path, settings: dict | None, *, name="settings.json",
@@ -27,11 +34,12 @@ def _make_picker(root: Path, settings: dict | None, *, name="settings.json",
     if settings is not None:
         (claude / name).write_text(json.dumps(settings))
     if with_script:
-        # The hook + shared computation the registration points at.
+        # Every hook script + shared module the registrations point at (all must be
+        # present, else WIRED is false-green — the command no-ops on an absent file).
         hooks = claude / "hooks"
         hooks.mkdir(parents=True, exist_ok=True)
-        (hooks / "context-threshold-check.sh").write_text("#!/usr/bin/env bash\n")
-        (hooks / "context_meter.py").write_text("# stub\n")
+        for rel in rf.REQUIRED_HOOK_FILES:
+            (claude.parent / rel).write_text("# stub\n")
     return root
 
 
