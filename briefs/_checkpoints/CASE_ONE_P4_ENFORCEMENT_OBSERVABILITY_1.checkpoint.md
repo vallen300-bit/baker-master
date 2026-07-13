@@ -12,13 +12,19 @@ CASE_ONE_P4_ENFORCEMENT_OBSERVABILITY_1 — brief `briefs/BRIEF_CASE_ONE_P4_ENFO
 ## Claim
 attempt:1 was the prior seat's pre-build checkpoint (respawn requested). This attempt:2 commit is the fresh-seat claim per checkpoint claim-discipline. Bus #10036 confirms riders; no newer b3-addressed message supersedes.
 
-## What's done
-- Bus checked: P4 dispatch #10036 confirmed, riders verbatim-matched.
-- Brief read in full from origin/main.
-- P4 branch created off origin/main; this claim commit.
+## STATUS: BUILT + SHIPPED — awaiting two-gate (lead Claude-side review → lead merges)
+- baker-master PR #546 @7d957253 (branch b3/case-one-p4-enforcement-observability-1)
+- brisen-lab PR #125 @2c1c5f8 (branch b3/case-one-p4-enforcement-observability-1)
+- G1 self-verify PASS. Gates pending: lead independent Claude-side review (codex suspended #9711) → lead merges → deploy → deputy live drill + POST_DEPLOY_AC_VERDICT.
+- Ship report: briefs/_reports/B3_CASE_ONE_P4_ENFORCEMENT_OBSERVABILITY_1_2026-07-13.md. Bus ship post to lead.
+- All 5 pieces + BOTH riders built. Tests: gate 23/23, context_meter 15/15, brisen-lab P4 8/8, full brisen-lab suite 27-fail baseline (pre-existing autowake/identity)/534 pass — no new failures.
+- NOTE for lead: a stray nested `brisen-lab/` clone (own .git, from a prior P3 session) sits untracked in ~/bm-b3 — NOT committed (only specific files staged); flagged for cleanup.
 
-## What's left
-Entire P4 build — five pieces + two binding riders:
+## What's left (post-merge, deputy-owned)
+- Live fleet drill AC + POST_DEPLOY_AC_VERDICT v1 after Render deploy settles.
+- Deputy assumes the named bus-health-owner sweep against /delivery-health.
+
+## (built) Five pieces + two binding riders:
 - **P4.1 (E3):** session-start freshness re-assertion hook (+ mid-session cadence); worker-side GO-reroute gate in bus-post path (reroute Director-addressed GO/confirm on already-dispatched job_ref to superior `reports_to`; fail-loud/logged).
 - **P4.2 (E15):** dispatch-warning ONLY on `kind=assignment`; symptoms-only actionable alerts; demote 503/`bus_busy_retry` flood to a rate metric.
 - **P4.3 (E20):** W3C `traceparent` on P3 envelope; delivery_receipt table/endpoint; dead_letter table; recipient-scope `GET /artifact/{ref}` (rider 2).
