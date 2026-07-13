@@ -11,7 +11,14 @@ BUS_READ_PATH_FALSE_EMPTY_FIX_1 (E27) — PR brisen-lab #130. Dispatch/rulings: 
 (REVERSED the A1.5 split: gate ALL DB to_thread sites in this PR, not the narrowed ~35).
 Status ping: lead #10680. My status posts: #10697, verdict #10703 (topic case-one/plan-v3-a1-status).
 
-## STATUS: VERIFIED GREEN + UN-WIP PUSHED + CODEX RE-REQUESTED — awaiting codex verdict
+## STATUS: CODEX PASS — MERGE-ELIGIBLE, handed to lead to merge (b1 work complete)
+- codex verdict #10716: PASS-WITH-NOTE, NO code finding (note = codex env only: no local pytest +
+  stale worktree, reviewed PR ref/diff statically; execution gap covered by b1's green local-PG run).
+- Merge-eligibility posted to lead #10718. Merge is lead's action. On merge, rider-3 releases
+  (deputy daemon-attributed-emission fix dispatches behind me).
+- Nothing further from b1 on this arc unless lead requests changes.
+
+## (history) prior status: VERIFIED GREEN + UN-WIP PUSHED + CODEX RE-REQUESTED
 - Branch head now ca5561b (un-WIP commit; supersedes 46609b0 "DO NOT MERGE" marker; NO force-push).
 - Read-path tests: 19/19 pass.
 - Full brisen-lab suite (local throwaway PG): 586 passed, 1 skipped, 27 failed = documented
