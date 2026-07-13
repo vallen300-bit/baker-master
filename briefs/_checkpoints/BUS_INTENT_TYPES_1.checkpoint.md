@@ -11,9 +11,19 @@ BUS_INTENT_TYPES_1 — brief `~/bm-b3/briefs/BRIEF_BUS_INTENT_TYPES_1.md` @f9a33
 + lead ruling fold @654ff8eb (reply-case = command, not deferred; regression included).
 Dispatch: lead bus #10711 (acked #10711, claimed #10713). Effort: high. Repo: brisen-lab.
 
-## STATUS: REBASED + GREEN + PR OPENED — awaiting codex bus gate → lead merge
-- brisen-lab PR #133 (branch `b3/bus-intent-types-1` @cdd3e0c, rebased onto post-#130
-  origin/main @661bebd per lead GO #10729). Force-pushed.
+## STATUS: PR #133 — codex P1 #10742 FIXED, awaiting codex RE-review → lead merge
+- brisen-lab PR #133 (branch `b3/bus-intent-types-1` @c92fa3b). Rebased onto post-#130
+  origin/main @661bebd (GO #10729), then hot-fix c92fa3b for codex #10742 P1.
+- CODEX ROUND 1 FAIL #10742 (P1): idempotent replay echoed request-derived intent, not the
+  stored row → a divergent-kind replay could report event for a stored command. FIXED
+  c92fa3b: intent added to INSERT RETURNING + conflict re-SELECT; response echoes
+  row["intent"] (stored) on both fresh + dedup paths. Load-bearing regression test added
+  (verified FAILS pre-fix). Re-review requested codex #10744; lead reported #10745.
+- FLAGGED to lead (#10745, out of scope): P3 execute_obligation response echo has the
+  identical latent divergent-kind-replay bug; recommended a small P3 follow-up (not folded
+  in — P3-owned, codex flagged only intent). source is safe (from_terminal in key scope).
+- Intent tests now 8/8 (added the replay regression). Full suite 26f/612p = post-#130
+  baseline, zero new failures.
 - SEQUENCING RIDER CLEARED (#10729): #130 merged @661bebd. Rebase had ONE conflict (bus.py
   /msg list SELECT: #130 added `COUNT(*) OVER () AS _match_total`, I added `intent` — kept
   both). All other intent insertions auto-merged.
