@@ -24,6 +24,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import stat
 import subprocess
 import sys
 from pathlib import Path
@@ -34,8 +35,19 @@ if str(REPO_ROOT) not in sys.path:
 
 from orchestrator.agent_identity_data import SNAPSHOT_TERMINALS  # noqa: E402
 
-HOOK_COMMAND = ".claude/hooks/context-threshold-check.sh"
+HOOK_COMMAND = ".claude/hooks/context-threshold-check.sh"  # P0 (kept for back-compat)
 PER_SEAT_INSTALLER = REPO_ROOT / "scripts" / "install-rollover-stop-hook.py"
+
+# CASE_ONE_E23: the audit now covers the full hook set the per-seat installer
+# wires — the P0 context band PLUS the close-pin gate (Stop + SessionEnd) and the
+# session-open orientation hook. Kept in lockstep with install-rollover-stop-hook's
+# REQUIRED_HOOKS so a picker is WIRED only when EVERY (event, command) is present.
+REQUIRED_HOOKS = [
+    ("Stop", ".claude/hooks/context-threshold-check.sh"),
+    ("Stop", ".claude/hooks/close-pin-check.sh"),
+    ("SessionEnd", ".claude/hooks/close-pin-check.sh"),
+    ("SessionStart", ".claude/hooks/session-open-orientation.sh"),
+]
 
 
 def picker_map() -> dict:
@@ -53,24 +65,58 @@ def picker_map() -> dict:
     return pickers
 
 
-def _hook_registered(settings: dict) -> bool:
-    for entry in settings.get("hooks", {}).get("Stop", []) or []:
+def _event_has_command(settings: dict, event: str, command: str) -> bool:
+    for entry in settings.get("hooks", {}).get(event, []) or []:
         for hook in entry.get("hooks") or []:
-            if hook.get("command") == HOOK_COMMAND:
+            if hook.get("command") == command:
                 return True
     return False
 
 
-# The hook needs BOTH its runner and the shared band computation present in the
-# picker; registering a command that points at an absent script no-ops silently.
+def _hook_registered(settings: dict) -> bool:
+    """WIRED requires EVERY required (event, command) present — the P0 band hook
+    plus the two E23 hooks. A picker with only some of them is not fully wired."""
+    return all(_event_has_command(settings, ev, cmd) for ev, cmd in REQUIRED_HOOKS)
+
+
+# Each registered command must point at a script that actually EXISTS in the
+# picker, else it no-ops silently (the false-green case, lead #9975). We require
+# every hook script plus the shared modules both hook families import.
 REQUIRED_HOOK_FILES = (
     ".claude/hooks/context-threshold-check.sh",
     ".claude/hooks/context_meter.py",
+    ".claude/hooks/close-pin-check.sh",
+    ".claude/hooks/session-open-orientation.sh",
+    ".claude/hooks/live_state_predicate.py",
 )
 
 
+def _file_runnable(path: Path) -> bool:
+    """A hook file is 'present' only if it can actually RUN when the harness invokes
+    it — not merely if it exists (codex #10226 blocker 2: a hook that lost its exec
+    bit false-greened). Shell hooks need the user exec bit AND must parse (`bash
+    -n`); Python modules must compile (`py_compile`)."""
+    if not path.exists():
+        return False
+    if path.suffix == ".sh":
+        try:
+            if not (path.stat().st_mode & stat.S_IXUSR):
+                return False
+            return subprocess.run(["bash", "-n", str(path)],
+                                  capture_output=True, timeout=15).returncode == 0
+        except Exception:
+            return False
+    if path.suffix == ".py":
+        try:
+            return subprocess.run([sys.executable, "-m", "py_compile", str(path)],
+                                  capture_output=True, timeout=15).returncode == 0
+        except Exception:
+            return False
+    return path.exists()
+
+
 def _script_present(root: Path) -> bool:
-    return all((root / rel).exists() for rel in REQUIRED_HOOK_FILES)
+    return all(_file_runnable(root / rel) for rel in REQUIRED_HOOK_FILES)
 
 
 def _classify(picker_path: str) -> str:
@@ -116,11 +162,13 @@ def cmd_audit(_args) -> int:
         print(f"  [{status:12}] {path}  ({', '.join(sorted(slugs))})")
     if unwired:
         # FAIL-LOUD: name every gap; never a silent pass.
-        print(f"\nFAIL: {len(unwired)} picker(s) NOT wired for context metering:")
+        print(f"\nFAIL: {len(unwired)} picker(s) NOT fully wired for rollover + "
+              f"session-state hooks (context band / close-pin / orientation):")
         for status, path, slugs in unwired:
             print(f"  - {status}: {path}  seats={sorted(slugs)}")
         return 1
-    print("\nPASS: every enumerated picker has the context-threshold Stop hook.")
+    print("\nPASS: every enumerated picker has all rollover + session-state hooks "
+          "(context band, close-pin Stop+SessionEnd, session-open orientation).")
     return 0
 
 

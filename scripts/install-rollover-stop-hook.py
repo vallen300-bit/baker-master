@@ -1,8 +1,14 @@
 #!/usr/bin/env python3
-"""Install the worker rollover Stop hook into a Claude settings.json file.
+"""Install the fleet rollover + session-state hooks into a Claude settings.json.
 
-Idempotent. The hook uses per-picker config from ``rollover_window_tokens``;
-pass ``--window-tokens`` for the engine window of that picker.
+Idempotent. Registers every hook in ``REQUIRED_HOOKS`` under its event, and sets
+``rollover_window_tokens`` when ``--window-tokens`` is given.
+
+CASE_ONE_P0 wired the context-threshold Stop hook here. CASE_ONE_E23 extends the
+SAME installer (no second wiring mechanism, per brief) to also register the
+close-pin gate (Stop + SessionEnd) and the session-open orientation hook
+(SessionStart). One installer registers them all so a picker is either fully wired
+or fail-loud in the audit.
 """
 from __future__ import annotations
 
@@ -10,11 +16,19 @@ import argparse
 import json
 from pathlib import Path
 
-HOOK = {
-    "type": "command",
-    "command": ".claude/hooks/context-threshold-check.sh",
-    "timeout": 10,
-}
+# (event, command) pairs. All share the same command-hook shape (timeout 10). The
+# close-pin gate is wired on BOTH Stop (can block/warn) and SessionEnd (persist at
+# real close) — one script, event-aware inside.
+REQUIRED_HOOKS: list = [
+    ("Stop", ".claude/hooks/context-threshold-check.sh"),           # P0 context band
+    ("Stop", ".claude/hooks/close-pin-check.sh"),                   # E23.1 warn/block
+    ("SessionEnd", ".claude/hooks/close-pin-check.sh"),             # E23.1 persist
+    ("SessionStart", ".claude/hooks/session-open-orientation.sh"),  # E23.2 orient
+]
+
+
+def _hook_dict(command: str) -> dict:
+    return {"type": "command", "command": command, "timeout": 10}
 
 
 def _load(path: Path) -> dict:
@@ -23,18 +37,20 @@ def _load(path: Path) -> dict:
     return json.loads(path.read_text())
 
 
-def _ensure_stop_hook(settings: dict) -> bool:
+def _ensure_hook(settings: dict, event: str, command: str) -> bool:
+    """Register (event, command) idempotently. Returns True if it changed the doc."""
     hooks_root = settings.setdefault("hooks", {})
-    stop_entries = hooks_root.setdefault("Stop", [])
-    for entry in stop_entries:
+    entries = hooks_root.setdefault(event, [])
+    want = _hook_dict(command)
+    for entry in entries:
         for hook in entry.get("hooks") or []:
-            if hook.get("command") == HOOK["command"]:
-                if hook != HOOK:
+            if hook.get("command") == command:
+                if hook != want:
                     hook.clear()
-                    hook.update(HOOK)
+                    hook.update(want)
                     return True
                 return False
-    stop_entries.append({"hooks": [dict(HOOK)]})
+    entries.append({"hooks": [dict(want)]})
     return True
 
 
@@ -55,7 +71,10 @@ def main() -> None:
 
     path = Path(args.settings)
     settings = _load(path)
-    changed = _ensure_stop_hook(settings)
+    changed = False
+    for event, command in REQUIRED_HOOKS:
+        if _ensure_hook(settings, event, command):
+            changed = True
     if args.window_tokens is not None:
         if args.window_tokens <= 0:
             raise SystemExit("--window-tokens must be positive")
