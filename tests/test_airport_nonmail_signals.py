@@ -319,6 +319,109 @@ def test_wa_identity_suppressed_null_received_at(monkeypatch):
     assert bridge._wa_identity_suppressed(ident, now) is True
 
 
+# ---------------------------------------------------------------------------
+# TICKETING_AO_IDENTITY_REROUTE_1 (lead ruling #10238, Option A) — AO identity-only WA
+# routes to the ao-desk review lane instead of being suppressed / dumped on the BB default.
+# Pure unit (DB-free via _SeqConn); the live-PG fetch tagging test is in the LIVE-PG section.
+# ---------------------------------------------------------------------------
+def test_wa_identity_route_matters_reader(monkeypatch):
+    monkeypatch.delenv("AIRPORT_WA_IDENTITY_ROUTE_MATTERS", raising=False)
+    assert bridge._wa_identity_route_matters() == ("ao",)  # default
+    monkeypatch.setenv("AIRPORT_WA_IDENTITY_ROUTE_MATTERS", "ao, origination")
+    assert bridge._wa_identity_route_matters() == ("ao", "origination")
+    monkeypatch.setenv("AIRPORT_WA_IDENTITY_ROUTE_MATTERS", "   ")
+    assert bridge._wa_identity_route_matters() == ("ao",)  # blank -> default
+
+
+def test_wa_identity_route_map_pure(monkeypatch):
+    # one ACTIVE 'ao' row (two WA participants + an email participant) + a non-route 'aukera' row.
+    rows = [
+        ("ao", [
+            {"channel": "whatsapp", "value": "35799492642@c.us"},
+            {"channel": "whatsapp", "value": "41799605092@c.us"},
+            {"channel": "email", "value": "cpohanis@brisengroup.com"},
+        ]),
+        ("aukera", [{"channel": "whatsapp", "value": "49999@c.us"}]),
+    ]
+    m = bridge._wa_identity_route_map(_SeqConn(rows), ("ao",))
+    assert m == {"35799492642@c.us": "ao", "41799605092@c.us": "ao"}  # email + non-route excluded
+    assert bridge._wa_identity_route_map(None, ("ao",)) == {}  # no conn -> {}
+    assert bridge._wa_identity_route_map(_SeqConn(rows), ()) == {}  # no route matters -> {}
+    boom = _BoomConn()
+    assert bridge._wa_identity_route_map(boom, ("ao",)) == {}  # fault-tolerant
+    assert boom.rollbacks == 1
+
+
+def test_wa_identity_suppressed_route_matter_exempt(monkeypatch):
+    monkeypatch.delenv("AIRPORT_WA_IDENTITY_TICKET_MAX_AGE_HOURS", raising=False)  # suppress-all
+    now = datetime(2026, 7, 13, 12, tzinfo=timezone.utc)
+    recv = datetime(2026, 7, 13, 11, tzinfo=timezone.utc)
+    # AO-route participant identity-only WA -> NEVER suppressed (money/route-relevant, not noise)
+    routed = _wa(full_text="2.3m arrives tomorrow", participant_matched=True,
+                 identity_route_matter="ao", received_at=recv)
+    assert bridge._wa_identity_suppressed(routed, now) is False
+    # regression: the SAME shape without the route tag stays suppressed (BB/movie untouched)
+    plain = _wa(full_text="2.3m arrives tomorrow", participant_matched=True,
+                identity_route_matter="", received_at=recv)
+    assert bridge._wa_identity_suppressed(plain, now) is True
+
+
+def test_build_whatsapp_ticket_ao_identity_route_lane(monkeypatch):
+    monkeypatch.delenv("AIRPORT_TICKETING_DESK", raising=False)   # global desk = baden-baden-desk
+    monkeypatch.delenv("AIRPORT_TICKETING_FLIGHT", raising=False)
+    monkeypatch.delenv("AIRPORT_TICKETING_KEYWORDS", raising=False)
+    # Pohanis/Director sender shape: identity-only (no keyword), tagged 'ao' at fetch. Cursor
+    # order: _sender_matter_set (empty) -> _desk_for_matter('ao')=ao-desk -> _flight_for_matter=AO-OSK-001.
+    conn = _SeqConn([], [("ao-desk",)], [("AO-OSK-001",)])
+    arrival = _wa(
+        message_id="wa-ao-1",
+        sender="35799492642@c.us",
+        sender_name="Constantinos Pohanis",
+        chat_id="35799492642@c.us",
+        full_text="2.3m will arrive tomorrow, Eli will update me on what to do with the money",
+        participant_matched=True,
+        identity_route_matter="ao",
+    )
+    ticket = bridge.build_whatsapp_ticket(arrival, conn=conn)
+    assert ticket is not None
+    assert ticket.proposed_desk_slug == "ao-desk"        # AO review lane, NOT baden-baden-desk
+    assert ticket.suspected_matter_slug == "ao"
+    assert ticket.suspected_flight == "AO-OSK-001"       # AO flight, NOT aukera-annaberg-financing
+    assert ticket.review_reason == bridge.REVIEW_REASON_IDENTITY_ONLY  # still a REVIEW ticket (#5035)
+    assert any("identity-route review lane" in w for w in ticket.why_ticketed)
+
+
+def test_build_whatsapp_ticket_identity_only_no_route_stays_lead(monkeypatch):
+    """Regression: an identity-only WA with NO route tag keeps the neutral lead review lane +
+    global matter/flight — the pre-change behavior for BB/movie participants is untouched."""
+    monkeypatch.delenv("AIRPORT_TICKETING_DESK", raising=False)
+    monkeypatch.delenv("AIRPORT_TICKETING_FLIGHT", raising=False)
+    monkeypatch.delenv("AIRPORT_TICKETING_MATTER_SLUG", raising=False)
+    conn = _SeqConn([])  # only _sender_matter_set touches the conn; review lane is conn-free
+    arrival = _wa(full_text="call you later", participant_matched=True, identity_route_matter="")
+    ticket = bridge.build_whatsapp_ticket(arrival, conn=conn)
+    assert ticket is not None
+    assert ticket.proposed_desk_slug == "lead"
+    assert ticket.suspected_matter_slug == "lilienmatt"
+    assert ticket.suspected_flight == "aukera-annaberg-financing"
+    assert ticket.review_reason == bridge.REVIEW_REASON_IDENTITY_ONLY
+
+
+def test_build_whatsapp_ticket_route_desk_unresolved_falls_to_lead_not_bb(monkeypatch):
+    """Defense-in-depth: if the route matter's desk does NOT resolve to a distinct valid desk
+    (_desk_for_matter returns the global BB fallback), a route-tagged arrival falls to the lead
+    review lane — NEVER the global baden-baden-desk (the exact mis-route being fixed)."""
+    monkeypatch.delenv("AIRPORT_TICKETING_DESK", raising=False)  # global = baden-baden-desk
+    # Cursor order: _sender_matter_set (empty) -> desk_owner_for_matter('ao') returns [] -> None
+    # -> _desk_for_matter falls back to global baden-baden-desk == global_desk -> guard -> lead.
+    conn = _SeqConn([], [])
+    arrival = _wa(full_text="Eli money movement", participant_matched=True, identity_route_matter="ao")
+    ticket = bridge.build_whatsapp_ticket(arrival, conn=conn)
+    assert ticket is not None
+    assert ticket.proposed_desk_slug == "lead"
+    assert ticket.proposed_desk_slug != "baden-baden-desk"
+
+
 def test_dedup_keys_distinct_per_channel():
     same_id, desk = "shared-id", "baden-baden-desk"
     email_k = bridge._dedup_key("email", same_id, desk)
@@ -458,6 +561,39 @@ def test_fetch_whatsapp_arrivals_keyword_and_participant_lanes(nm_conn):
     assert "nmtest-w-none" not in ids
     part_row = next(a for a in got if a.message_id == "nmtest-w-part")
     assert part_row.participant_matched is True
+
+
+def test_fetch_whatsapp_arrivals_tags_ao_identity_route(nm_conn, monkeypatch):
+    """LIVE-PG: TICKETING_AO_IDENTITY_REROUTE_1 end-to-end at fetch. An identity-only WA from a
+    registered AO-OSK-001 participant is tagged identity_route_matter='ao'; a non-AO participant
+    (the fixture's BB matter) identity-only WA is NOT tagged (BB/movie routing untouched)."""
+    from kbl.project_registry_store import register_project
+
+    monkeypatch.delenv("AIRPORT_WA_IDENTITY_ROUTE_MATTERS", raising=False)  # default 'ao'
+    register_project(
+        nm_conn,
+        project_number="AO-OSK-001",
+        desk_owner="ao-desk",
+        matter_slug="ao",
+        participants=[{"channel": "whatsapp", "value": "35799492642@c.us"}],
+    )
+    nm_conn.commit()
+
+    since = datetime(2026, 6, 1, tzinfo=timezone.utc)
+    # AO participant, identity-only (no keyword) -> tagged 'ao'.
+    _insert_wa(nm_conn, "nmtest-w-ao", sender="35799492642@c.us", chat_id="35799492642@c.us",
+               text="2.3m will arrive tomorrow, Eli will update me")
+    # BB participant (fixture 41790000000), identity-only -> NOT tagged.
+    _insert_wa(nm_conn, "nmtest-w-bbid", sender="41790000000", chat_id="41790000000@c.us",
+               text="no terms here")
+
+    got = bridge.fetch_whatsapp_arrivals(nm_conn, since=since, limit=50)
+    ao = next(a for a in got if a.message_id == "nmtest-w-ao")
+    bb = next(a for a in got if a.message_id == "nmtest-w-bbid")
+    assert ao.participant_matched is True
+    assert ao.identity_route_matter == "ao"
+    assert bb.participant_matched is True
+    assert bb.identity_route_matter == ""
 
 
 # ===========================================================================

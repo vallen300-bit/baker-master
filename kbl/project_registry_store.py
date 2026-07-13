@@ -469,3 +469,50 @@ def seed_bb_pilot(conn: Any) -> int:
         register_project(conn, **r)
         n += 1
     return n
+
+
+def seed_ao_participants(conn: Any) -> int:
+    """Seed AO-OSK-001 with the AO-counterparty WhatsApp identities so identity-only AO WA
+    routes to the ao-desk review lane instead of being suppressed / dumped on the BB default
+    (TICKETING_AO_IDENTITY_REROUTE_1, lead ruling #10238 Option A). Callable one-off; NOT
+    auto-run (same posture as seed_bb_pilot). register_project upserts on match_key, so
+    re-running is idempotent for THESE rows.
+
+    CAVEAT (same as seed_bb_pilot): register_project REPLACES the whole participants list on
+    conflict. AO-OSK-001 currently has participants=[], so this is additive today; if the AO
+    participant set later grows via another process, re-running this seed would clobber it —
+    update this list, don't blind-rerun. Eli/Joseph counterparty numbers are NOT included: no
+    contact identity exists for them yet (they are body-mentioned, not senders) — AO desk
+    supplies them later. Director + Pohanis are factually AO participants; being multi-matter is
+    fine — identity-only still never auto-routes to a matter desk (review lane only, #5035)."""
+    rows = [
+        dict(
+            project_number="AO-OSK-001",
+            desk_owner="ao-desk",
+            matter_slug="ao",
+            participants=[
+                {
+                    "role": "internal-principal",
+                    "channel": "whatsapp",
+                    "value": "35799492642@c.us",
+                    "confidence": "high",
+                    "display_name": "Constantinos Pohanis (WA)",
+                    "source": "lead ruling #10238 / handoff oskolkov 2026-07-07 Eli/Joseph cluster",
+                },
+                {
+                    "role": "internal-principal",
+                    "channel": "whatsapp",
+                    "value": "41799605092@c.us",
+                    "confidence": "high",
+                    "display_name": "Dimitry Vallen (Director, WA)",
+                    "source": "lead ruling #10238 / handoff oskolkov 2026-07-07 Eli/Joseph cluster",
+                },
+            ],
+            aliases=[],
+        ),
+    ]
+    n = 0
+    for r in rows:
+        register_project(conn, **r)
+        n += 1
+    return n
