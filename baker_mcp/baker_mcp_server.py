@@ -922,6 +922,10 @@ TOOLS = [
                     "type": "string",
                     "description": "Deprecated / no-op. The sender is derived server-side from the X-Terminal-Key; this field does not affect routing or sender attribution. Kept for backward compatibility only.",
                 },
+                "idempotency_key": {
+                    "type": "string",
+                    "description": "Optional CASE_ONE_P3 envelope id (CloudEvents id / P1 idempotency key). Omit and a unique id is minted per send; supply the SAME key across retries of one logical send for an idempotent replay (dedup keys on this id only, never on body content).",
+                },
             },
             "required": ["to", "kind", "body"],
         },
@@ -1503,6 +1507,15 @@ def _brisen_lab_post_via_http(args: dict) -> str:
         "kind": kind,
         "body": body,
     }
+    # CASE_ONE_P3_CONTRACT_IDENTITY_1 — construct the typed envelope `id` (CloudEvents
+    # id / P1 idempotency key). Previously this path sent NO key, so the daemon had to
+    # synthesize one (legacy=true) and every post was un-idempotent. Supply a unique id
+    # per logical send (caller may override via idempotency_key for a retry-safe replay)
+    # so the MCP path dedups on id like every other fleet client and never false-dedups.
+    idem = args.get("idempotency_key")
+    if not (isinstance(idem, str) and idem.strip()):
+        idem = str(uuid.uuid4())
+    payload["idempotency_key"] = idem
     if args.get("topic"):
         payload["topic"] = args["topic"]
     if args.get("parent_id") is not None:
