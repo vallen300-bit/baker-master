@@ -11,16 +11,17 @@ BUS_INTENT_TYPES_1 — brief `~/bm-b3/briefs/BRIEF_BUS_INTENT_TYPES_1.md` @f9a33
 + lead ruling fold @654ff8eb (reply-case = command, not deferred; regression included).
 Dispatch: lead bus #10711 (acked #10711, claimed #10713). Effort: high. Repo: brisen-lab.
 
-## STATUS: BUILT + GREEN + PUSHED — HOLDING codex gate for b1 #130 rebase
-- brisen-lab branch `b3/bus-intent-types-1` @committed+pushed (off @79ae875). NO PR opened yet.
-- G1 self-verify PASS: 7/7 new intent tests green on isolated throwaway PG; full brisen-lab
-  suite 26 failed/603 passed = EXACTLY the clean-main baseline (proved by running my code
-  changes with the new test file excluded → 26/603 identical). Zero new failures. The 26 are
-  pre-existing autowake/wake-topic/identity module-global-state cross-file isolation failures.
-- SEQUENCING RIDER (dispatch #10711): b1 #130 rewrites bus.py ~1900-2270. My diff derives
-  `intent` at ~:1955 and adds it to the INSERT block ~:2010 — INSIDE that region. Per the
-  rider I must rebase AFTER #130 merges. As of this checkpoint #130 is NOT merged
-  (origin/main HEAD = 79ae875, the #132 merge). Holding the codex gate until #130 lands.
+## STATUS: REBASED + GREEN + PR OPENED — awaiting codex bus gate → lead merge
+- brisen-lab PR #133 (branch `b3/bus-intent-types-1` @cdd3e0c, rebased onto post-#130
+  origin/main @661bebd per lead GO #10729). Force-pushed.
+- SEQUENCING RIDER CLEARED (#10729): #130 merged @661bebd. Rebase had ONE conflict (bus.py
+  /msg list SELECT: #130 added `COUNT(*) OVER () AS _match_total`, I added `intent` — kept
+  both). All other intent insertions auto-merged.
+- G1 self-verify PASS post-rebase: 7/7 new intent tests green on isolated throwaway PG; full
+  suite 26 failed/612 passed = IDENTICAL to the true post-#130 baseline (origin/main
+  bus.py+db.py, intent test file ignored → 26/612). Zero new failures. The 26 are pre-existing
+  autowake/wake-topic/identity module-global-state cross-file isolation failures.
+- Ship report: briefs/_reports/B3_BUS_INTENT_TYPES_1_2026-07-13.md.
 
 ## What's built (all additive; label, not a gate)
 - db.py: `intent TEXT` on brisen_lab_msg — CREATE TABLE col + catalog-guarded idempotent
