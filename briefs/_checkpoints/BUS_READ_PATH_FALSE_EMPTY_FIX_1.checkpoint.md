@@ -20,9 +20,13 @@ Status ping: lead #10680. My status posts: #10697, verdict #10703 (topic case-on
   zero ungated DB to_thread remain (only comments + db_gate's own fallback).
 - PR #130 body updated with the verification section.
 - lead #10705 confirmed plan + resolved routing: codex re-request (NOT lead Claude-side review).
-- codex re-requested: bus #10707 (reasoning_effort=medium, topic codex-verify/e27-read-path).
-- lead flagged: #10709. Rider-3 sequencing: deputy daemon-attributed-emission fix dispatches
-  behind me on my green + codex PASS; I must flag lead the moment #130 merge-eligibility is clear.
+- codex re-requested: bus #10707, then CORRECTED to reasoning_effort=HIGH in #10714 per lead
+  ruling #10710 (transport fix, 98 sites, fleet-critical). Topic codex-verify/e27-read-path.
+- lead ruling #10710: codex suspension LIFTED (codex live); codex authored the FAIL so he
+  re-verifies; WIP commit message accepted as-is (squash collapses, do NOT force-push); on
+  codex PASS, post verdict ref to lead and lead merges. Acked #10710; flagged lead #10709/#10715.
+- Rider-3 sequencing: deputy daemon-attributed-emission fix dispatches behind me on my green +
+  codex PASS; I must flag lead the moment #130 merge-eligibility is clear.
 
 ## What's left
 - Await codex verdict on #10707. If codex PASS -> flag lead #130 merge-eligible (rider-3 trigger).
