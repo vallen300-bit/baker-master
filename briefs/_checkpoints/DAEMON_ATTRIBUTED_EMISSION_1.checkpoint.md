@@ -17,6 +17,13 @@ ACK+claim #10738. Ship #10750.
 - Flagged lead merge-eligible #10754. Merge = lead's action; on merge ARM re-runs --label and the
   48h zero-shared-key clean window arms (last code blocker per #10730).
 - Nothing further from b1 unless lead requests changes or rules on the bus.py:2664 follow-up.
+- lead #10760: acked ship; ruled 2664 correct-not-to-touch (routed to b3 hygiene micro-PR + P3 echo fix, after #134).
+- POST-#133 CHECK (lead FYI: BUS_INTENT_TYPES_1 merged @4f4abe3 after I branched): #134 is CLEAN on
+  current main — git merge-tree exit 0, no conflicts (both touch bus.py, different regions); #133's
+  new `intent` column is TEXT NULLABLE so daemon inserts omitting it write NULL, no runtime break.
+  #134 needs NO rebase. Reported #10768.
+- NEW observation flagged #10768 (out of scope, lead's call): post-#133 only the CLIENT path derives
+  intent; the two daemon insert paths write intent=NULL. Candidate fold into b3's hygiene micro-PR.
 
 ## (history) BUILT + G1 GREEN + PR OPEN — awaiting codex gate then lead merge
 - PR brisen-lab #134 (branch b1/daemon-attributed-emission-1). Build on post-#130 main @661bebd.
