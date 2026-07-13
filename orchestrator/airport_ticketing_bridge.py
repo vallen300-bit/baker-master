@@ -273,6 +273,13 @@ class WhatsAppArrival:
     full_text: str
     received_at: Optional[datetime]
     participant_matched: bool = False
+    # TICKETING_AO_IDENTITY_REROUTE_1 (lead ruling #10238, Option A): the identity-route matter
+    # slug this WA sender is a registered participant of (e.g. 'ao'), set at fetch time when the
+    # arrival is identity-only. Non-empty => this identity-only WA is money/route-relevant, NOT
+    # noise: it is exempt from task-6 suppression and routes to that matter's desk review lane
+    # (build_whatsapp_ticket) instead of the global lead review desk / BB default. Default ""
+    # keeps every other constructor byte-identical and the reroute a pure no-op.
+    identity_route_matter: str = ""
 
 
 def bridge_enabled() -> bool:
@@ -456,6 +463,13 @@ def _wa_identity_suppressed(
     watermark past a suppressed arrival (it is intentionally handled)."""
     if not _wa_identity_only(arrival, keywords):
         return False
+    # TICKETING_AO_IDENTITY_REROUTE_1 carve (lead ruling #10238, Option A): a registered
+    # participant of an identity-route matter (e.g. AO) is money/route-relevant, not noise —
+    # NEVER suppress it. build_whatsapp_ticket routes it to that matter's desk review lane. This
+    # honors #6619's INTENT (suppress chatter, not a EUR 2.3m money movement) without touching
+    # #6619's default suppress-all posture for genuine identity-only chatter.
+    if getattr(arrival, "identity_route_matter", ""):
+        return False
     max_age = _wa_identity_ticket_max_age_hours()
     if max_age < 0:
         return False  # DISABLED (legacy escape hatch): identity-only still tickets
@@ -465,6 +479,75 @@ def _wa_identity_suppressed(
         return True  # cannot prove recency -> suppress (noise-reduction default)
     age_hours = (now - arrival.received_at).total_seconds() / 3600.0
     return age_hours >= max_age
+
+
+# TICKETING_AO_IDENTITY_REROUTE_1 (lead ruling #10238, Option A) — identity-route matters.
+# A registered participant of one of these matters whose WhatsApp arrives identity-only (no
+# keyword) is NOT chatter: it is money/route-relevant traffic that must reach that matter's desk
+# review lane, never be eaten by the task-6 suppression (#6619 INTENT: suppress noise, not a
+# EUR 2.3m money movement) and never fall to the global BB default. Comma-separated matter slugs;
+# default 'ao' (the Eli/Joseph AO-counterparty cluster). Activation is COUPLED to the registry:
+# the reroute only fires for a sender who is a registered participant of one of these matters, so
+# it is a pure no-op until seed_ao_participants populates AO-OSK-001 (kbl.project_registry_store).
+_WA_IDENTITY_ROUTE_MATTERS_ENV = "AIRPORT_WA_IDENTITY_ROUTE_MATTERS"
+_DEFAULT_WA_IDENTITY_ROUTE_MATTERS = ("ao",)
+
+
+def _wa_identity_route_matters() -> tuple[str, ...]:
+    raw = os.environ.get(_WA_IDENTITY_ROUTE_MATTERS_ENV, "")
+    vals = [p.strip().lower() for p in raw.split(",") if p.strip()]
+    return tuple(vals) if vals else _DEFAULT_WA_IDENTITY_ROUTE_MATTERS
+
+
+def _wa_identity_route_map(
+    conn: Any, route_matters: tuple[str, ...], channel: str = "whatsapp"
+) -> dict[str, str]:
+    """value(lower) -> route matter_slug, for ``channel`` participants of ACTIVE registry rows
+    whose matter_slug is in ``route_matters``. Built ONCE per fetch on the tick conn (mirrors
+    _sender_matter_set's query shape). Fault-tolerant: {} on any error / empty input — the
+    reroute then no-ops and WA behavior is byte-identical. Deterministic: on the (today
+    impossible with a single 'ao' route matter) chance a value is a participant of two route
+    matters, the first in registry row order wins."""
+    if conn is None or not route_matters:
+        return {}
+    wanted = {m.strip().lower() for m in route_matters if m and m.strip()}
+    if not wanted:
+        return {}
+    try:
+        with conn.cursor() as cur:
+            cur.execute(
+                "SELECT matter_slug, participants FROM project_registry "
+                "WHERE status = 'active' AND matter_slug IS NOT NULL LIMIT 500"
+            )
+            rows = cur.fetchall()
+    except Exception as e:
+        try:
+            conn.rollback()
+        except Exception:
+            pass
+        logger.warning("airport wa identity-route map lookup failed: %s", e)
+        return {}
+    out: dict[str, str] = {}
+    for row in rows:
+        if not row or not row[0]:
+            continue
+        slug = str(row[0]).strip().lower()
+        if slug not in wanted:
+            continue
+        raw = row[1]
+        if isinstance(raw, str):
+            try:
+                raw = json.loads(raw)
+            except Exception:
+                raw = []
+        if not isinstance(raw, list):
+            continue
+        for p in raw:
+            if isinstance(p, dict) and p.get("channel") == channel:
+                v = str(p.get("value") or "").strip().lower()
+                if v and v not in out:
+                    out[v] = slug
+    return out
 
 
 def _match_active_keywords(
@@ -1054,10 +1137,35 @@ def build_whatsapp_ticket(
         _content_matter_set("", arrival.full_text),
         arrival.participant_matched,
     )
+    # TICKETING_AO_IDENTITY_REROUTE_1 (lead ruling #10238, Option A): route an identity-only WA
+    # from a registered participant of an identity-route matter (arrival.identity_route_matter,
+    # tagged at fetch) to THAT matter's desk review lane — ao-desk / AO-OSK-001 — instead of the
+    # global lead review desk. Fires only when the two-factor resolver did NOT corroborate a
+    # single matter (the corroborated `_matter` branch still wins). Stays a REVIEW ticket
+    # (review_reason preserved, bus-visible): identity still never auto-routes to a matter desk
+    # on its own (#5035) — the owning desk checks in.
+    route_matter = getattr(arrival, "identity_route_matter", "")
+    routed_to_route_matter = False
     if _matter:
         desk_slug = _desk_for_matter(_matter, conn)
         suspected_matter = _matter
         suspected_flight = _flight_for_matter(_matter, conn)
+    elif review_reason and route_matter:
+        route_desk = _desk_for_matter(route_matter, conn)
+        global_desk = resolve_owner_slug(_desk_slug()) or _desk_slug()
+        # _desk_for_matter returns the global desk on an unresolved/invalid owner; a distinct,
+        # non-reserved desk means the route matter resolved cleanly. Otherwise fall to the neutral
+        # lead review lane — NEVER the global BB desk for a route-tagged arrival (the exact
+        # mis-route we are fixing).
+        if route_desk and route_desk not in RESERVED_RECIPIENTS and route_desk != global_desk:
+            desk_slug = route_desk
+            suspected_matter = route_matter
+            suspected_flight = _flight_for_matter(route_matter, conn)
+            routed_to_route_matter = True
+        else:
+            desk_slug = resolve_owner_slug(_REVIEW_DESK) or _REVIEW_DESK
+            suspected_matter = _matter_slug()
+            suspected_flight = _flight_name()
     elif review_reason:
         desk_slug = resolve_owner_slug(_REVIEW_DESK) or _REVIEW_DESK
         suspected_matter = _matter_slug()
@@ -1087,6 +1195,11 @@ def build_whatsapp_ticket(
     if _matter:
         why.append(
             f"two-factor routed: sender identity + content corroborate matter '{_matter}'"
+        )
+    elif routed_to_route_matter:
+        why.append(
+            f"identity-route review lane: registered '{route_matter}' participant, identity-only "
+            f"WA routed to its desk for check-in ({review_reason})"
         )
     elif review_reason:
         why.append(
@@ -1242,6 +1355,10 @@ def fetch_whatsapp_arrivals(
         return []
 
     part_set = set(participants)
+    # TICKETING_AO_IDENTITY_REROUTE_1: value(lower) -> route matter slug, built ONCE per fetch.
+    # Empty unless AO-OSK-001 (etc.) has registered participants, so the reroute no-ops until
+    # seed_ao_participants runs. Only consulted for identity-only arrivals below.
+    route_map = _wa_identity_route_map(conn, _wa_identity_route_matters())
     arrivals: list[WhatsAppArrival] = []
     for row in rows:
         received = row[5]
@@ -1254,6 +1371,13 @@ def fetch_whatsapp_arrivals(
         participant_matched = (not kw_hit) and (
             sender.strip().lower() in part_set or chat_id.strip().lower() in part_set
         )
+        identity_route_matter = ""
+        if participant_matched and route_map:
+            identity_route_matter = (
+                route_map.get(sender.strip().lower())
+                or route_map.get(chat_id.strip().lower())
+                or ""
+            )
         arrivals.append(
             WhatsAppArrival(
                 message_id=str(row[0] or ""),
@@ -1263,6 +1387,7 @@ def fetch_whatsapp_arrivals(
                 full_text=full_text,
                 received_at=received if isinstance(received, datetime) else None,
                 participant_matched=participant_matched,
+                identity_route_matter=identity_route_matter,
             )
         )
     return arrivals
