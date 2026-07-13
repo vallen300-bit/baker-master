@@ -41,6 +41,7 @@ python-multipart>=0.0.9    # FastAPI file upload parsing
 pdfplumber>=0.10.0         # PDF text extraction
 openpyxl>=3.1.0            # Excel .xlsx extraction
 PyMuPDF>=1.24.0            # PDF→image raster for OCR re-extract (OCR_REEXTRACT_MISSING_1)
+pypdf==6.14.2             # researcher local-PDF text extraction engine (scripts/pdf_extract.sh, ITEM-10)
 
 # Image extraction (INGEST-3)
 pillow-heif>=0.16.0        # HEIC → JPEG conversion
