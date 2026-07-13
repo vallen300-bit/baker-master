@@ -27,7 +27,13 @@ Status ping: lead #10680. My status posts: #10697, verdict #10703 (topic case-on
 - codex DELTA re-gate requested #10721 (effort=medium, scoped to resolution + newly-gated sites).
 - lead flagged #10723.
 
-## BLOCKED — awaiting lead ruling #10726 (codex FAIL vs #10719 conflict)
+## STATUS: CLOSED — PR #130 MERGED @661bebd (squash), lead ruling #10727
+- lead #10727: codex FAIL #10724 OVERRIDDEN as stale-base false positive; lead verified the 9-file
+  authoritative diff independently; override logged as the audit record. E27 arc CLOSED.
+- Merge SHA on main: 661bebd. b1 E27 work complete. Nothing further from b1.
+- (Rider-3: deputy daemon-attributed-emission fix dispatches behind this merge — lead-owned.)
+
+## (history) was BLOCKED — awaiting lead ruling #10726 (codex FAIL vs #10719 conflict)
 - codex #10724: FAIL — claims PR #130 is "16 files + adds canary_nightly_loop / /api/canary/* /
   fleet_preflight / dashboards" = scope drift; wants canary/preflight split out.
 - DIAGNOSED as a stale-base false positive: authoritative diff (GitHub PR API + git 3-dot vs
