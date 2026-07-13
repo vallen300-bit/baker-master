@@ -223,3 +223,78 @@ def test_band_file_atomic_no_tmp_left(tmp_path):
                         session_id="sess-atomic", band_dir=band_dir)
     assert (band_dir / "sess-atomic.json").exists()
     assert not list(band_dir.glob("*.tmp")), "temp file must be swapped away"
+
+
+# --- P4.5 band self-read symlink (#9986, CASE_ONE_P4) ------------------------
+
+def _run_hook_with_role(transcript: Path, *, window: int, soft: int, hard: int,
+                        session_id: str | None, band_dir: Path, role: str | None):
+    payload = {
+        "hook_event_name": "Stop",
+        "transcript_path": str(transcript),
+        "cwd": str(transcript.parent),
+    }
+    if session_id is not None:
+        payload["session_id"] = session_id
+    env = os.environ.copy()
+    env.pop("ROLLOVER_SETTINGS_PATH", None)
+    env["ROLLOVER_WINDOW_TOKENS"] = str(window)
+    env["ROLLOVER_SOFT_PERCENT"] = str(soft)
+    env["ROLLOVER_HARD_PERCENT"] = str(hard)
+    env["CONTEXT_BAND_DIR"] = str(band_dir)
+    if role is None:
+        env.pop("BAKER_ROLE", None)
+    else:
+        env["BAKER_ROLE"] = role
+    return subprocess.run(
+        ["bash", str(HOOK)], input=json.dumps(payload), capture_output=True,
+        text=True, env=env, timeout=8,
+    )
+
+
+def test_alias_symlink_points_at_own_band_file(tmp_path):
+    # With BAKER_ROLE set, the emitter maintains an <alias>.current symlink in the
+    # band dir pointing at THIS seat's <session_uuid>.json, so the seat can
+    # self-read its own band by a name it knows.
+    band_dir = tmp_path / "band"
+    t = _usage_transcript(tmp_path, 200_000)
+    _run_hook_with_role(t, window=1_000_000, soft=70, hard=85,
+                        session_id="sess-role-1", band_dir=band_dir, role="B3")
+    link = band_dir / "b3.current"  # alias lowercased
+    assert link.is_symlink(), "alias .current symlink must exist"
+    # Relative target (portable within the dir).
+    assert os.readlink(link) == "sess-role-1.json"
+    # Resolves to the real band file and its content matches.
+    resolved = link.resolve()
+    assert resolved == (band_dir / "sess-role-1.json").resolve()
+    rec = json.loads(link.read_text())
+    assert rec["session_id"] == "sess-role-1"
+    assert rec["band"] == "ok"
+    assert rec["context_percent"] == 20
+
+
+def test_alias_symlink_updates_to_latest_session(tmp_path):
+    # A second run for a different session under the same role re-points the
+    # stable alias link atomically (no stale target, no leftover .tmp link).
+    band_dir = tmp_path / "band"
+    t1 = _usage_transcript(tmp_path, 200_000)
+    _run_hook_with_role(t1, window=1_000_000, soft=70, hard=85,
+                        session_id="sess-a", band_dir=band_dir, role="b3")
+    t2 = _usage_transcript(tmp_path, 800_000)
+    _run_hook_with_role(t2, window=1_000_000, soft=70, hard=85,
+                        session_id="sess-b", band_dir=band_dir, role="b3")
+    link = band_dir / "b3.current"
+    assert os.readlink(link) == "sess-b.json"
+    assert not list(band_dir.glob("*.current.tmp")), "temp link must be swapped away"
+
+
+def test_no_alias_symlink_without_baker_role(tmp_path):
+    # BAKER_ROLE unset -> no symlink, and the band file still writes cleanly
+    # (advisory feature; its absence must not break the emit or raise).
+    band_dir = tmp_path / "band"
+    t = _usage_transcript(tmp_path, 200_000)
+    result = _run_hook_with_role(t, window=1_000_000, soft=70, hard=85,
+                                 session_id="sess-norole", band_dir=band_dir, role=None)
+    assert result.returncode == 0
+    assert (band_dir / "sess-norole.json").exists(), "band file still written"
+    assert not list(band_dir.glob("*.current")), "no alias link without BAKER_ROLE"

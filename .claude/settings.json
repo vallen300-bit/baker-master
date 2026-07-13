@@ -7,6 +7,22 @@
             "type": "command",
             "command": ".claude/hooks/session-start-role.sh",
             "timeout": 10
+          },
+          {
+            "type": "command",
+            "command": ".claude/hooks/standing-rules-reassert.sh",
+            "timeout": 10
+          }
+        ]
+      }
+    ],
+    "UserPromptSubmit": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": ".claude/hooks/standing-rules-reassert.sh",
+            "timeout": 10
           }
         ]
       }

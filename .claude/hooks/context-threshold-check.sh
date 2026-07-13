@@ -89,6 +89,31 @@ def _write_band_file(session_id: Optional[str], meter: dict) -> None:
         final = band_dir / (safe + ".json")
         tmp.write_text(json.dumps(record))
         tmp.replace(final)  # atomic swap so the ticker never reads a half file
+        # P4.5 band self-read (#9986, CASE_ONE_P4): a seat is named by its
+        # <session_uuid>.json but doesn't easily know its own uuid. Maintain a
+        # stable <alias>.current symlink (alias = BAKER_ROLE, lowercased) that
+        # points at this seat's current band file, so the seat can self-read its
+        # own band by a name it knows. Advisory: if BAKER_ROLE is unset, or the
+        # symlink can't be made, skip silently — the session must survive it.
+        alias = (os.environ.get("BAKER_ROLE") or "").strip().lower()
+        if alias:
+            try:
+                link = band_dir / (alias + ".current")
+                link_tmp = band_dir / (alias + ".current.tmp")
+                # Relative target (just the filename) so the link stays portable
+                # within the band dir.
+                try:
+                    link_tmp.unlink()
+                except FileNotFoundError:
+                    pass
+                os.symlink(final.name, link_tmp)
+                os.replace(link_tmp, link)  # atomic swap of the alias link
+            except OSError:
+                # Symlink is advisory only; never let it raise out of the hook.
+                try:
+                    link_tmp.unlink()
+                except OSError:
+                    pass
     except Exception:
         # Advisory metering must never break the session; swallow everything.
         return

@@ -120,6 +120,25 @@ if ! SENDER="$(agent_identity_resolve_role "${BAKER_ROLE:-}")"; then
     exit 1
 fi
 
+# --- CASE_ONE_P4_ENFORCEMENT_OBSERVABILITY_1 (E3): worker-side GO-reroute gate ---
+# STRUCTURAL enforcement of "route a GO/confirm on already-dispatched work to your
+# superior, not the Director". Only invoked when the recipient is the Director, so
+# every non-director post stays byte-identical. CONSERVATIVE (lead rider #10036): the
+# gate reroutes ONLY a GO/confirm about referenced already-dispatched work, and NEVER a
+# ratify_required / Tier-B/C / business message (protected veto inside the gate). Env
+# kill switch BAKER_GO_REROUTE_DISABLED bypasses. The reroute target is the sender's
+# reports_to superior — which is `lead` for every seat that can reroute today, so the
+# rider's "cc lead" is inherent (target == lead); the gate also writes an audit line to
+# ~/.brisen-lab/go-reroute.log on every reroute. If a future seat reports to a non-lead
+# superior, add an explicit lead cc here.
+if printf '%s' "$RECIPIENT" | grep -qiE '^director$'; then
+    REROUTED_RECIPIENT="$(python3 "$SCRIPT_DIR/go_reroute_gate.py" "$RECIPIENT" "$BODY" "$SENDER" || printf '%s' "$RECIPIENT")"
+    if [ -n "$REROUTED_RECIPIENT" ] && [ "$REROUTED_RECIPIENT" != "$RECIPIENT" ]; then
+        echo "[bus_post] GO-reroute gate: director -> ${REROUTED_RECIPIENT} (sender=${SENDER}); logged to ~/.brisen-lab/go-reroute.log" >&2
+        RECIPIENT="$REROUTED_RECIPIENT"
+    fi
+fi
+
 # --- credential fetch ---
 # Precedence: literal env → ~/.brisen-lab/keys/<slug> cache → op fallback.
 
