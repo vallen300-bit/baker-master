@@ -11,7 +11,14 @@ DAEMON_ATTRIBUTED_EMISSION_1 — brief `_ops/agents/aihead2/BRIEF_DAEMON_ATTRIBU
 (deputy spec; lead dispatch #10730, ruling #10702/#10712). Reply topic: case-one/daemon-attributed-emission.
 ACK+claim #10738. Ship #10750.
 
-## STATUS: BUILT + G1 GREEN + PR OPEN — awaiting codex gate then lead merge
+## STATUS: CODEX PASS — MERGE-ELIGIBLE, handed to lead (b1 build complete)
+- codex #10751: PASS, NO findings (hard-refreshed main — no stale-base repeat of #130). Confirmed
+  both daemon inserts stamp source+unattributed=FALSE, client gate unchanged, tests cover all paths.
+- Flagged lead merge-eligible #10754. Merge = lead's action; on merge ARM re-runs --label and the
+  48h zero-shared-key clean window arms (last code blocker per #10730).
+- Nothing further from b1 unless lead requests changes or rules on the bus.py:2664 follow-up.
+
+## (history) BUILT + G1 GREEN + PR OPEN — awaiting codex gate then lead merge
 - PR brisen-lab #134 (branch b1/daemon-attributed-emission-1). Build on post-#130 main @661bebd.
 - Fix (surgical, 2 files):
   - post_daemon_message._insert (bus.py ~1189): + source=from_slug, unattributed=FALSE.
