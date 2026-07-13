@@ -11,20 +11,24 @@ BUS_READ_PATH_FALSE_EMPTY_FIX_1 (E27) — PR brisen-lab #130. Dispatch/rulings: 
 (REVERSED the A1.5 split: gate ALL DB to_thread sites in this PR, not the narrowed ~35).
 Status ping: lead #10680. My status posts: #10697, verdict #10703 (topic case-one/plan-v3-a1-status).
 
-## STATUS: BUILT + VERIFIED GREEN — awaiting lead review gate
-- Branch head 46609b0 (pushed) = full DB-concurrency sweep (93 to_thread -> db_gate.db_call).
-  Message still says "DO NOT MERGE — unverified" but it IS now verified. Not reworded (no force-push).
+## STATUS: VERIFIED GREEN + UN-WIP PUSHED + CODEX RE-REQUESTED — awaiting codex verdict
+- Branch head now ca5561b (un-WIP commit; supersedes 46609b0 "DO NOT MERGE" marker; NO force-push).
 - Read-path tests: 19/19 pass.
 - Full brisen-lab suite (local throwaway PG): 586 passed, 1 skipped, 27 failed = documented
   pre-existing autowake/identity baseline (env/registry drift), ZERO new failures from the sweep.
 - Sweep complete: 98 db_gate.db_call sites across app/bus/lifecycle/job_queue/research_bus;
   zero ungated DB to_thread remain (only comments + db_gate's own fallback).
 - PR #130 body updated with the verification section.
+- lead #10705 confirmed plan + resolved routing: codex re-request (NOT lead Claude-side review).
+- codex re-requested: bus #10707 (reasoning_effort=medium, topic codex-verify/e27-read-path).
+- lead flagged: #10709. Rider-3 sequencing: deputy daemon-attributed-emission fix dispatches
+  behind me on my green + codex PASS; I must flag lead the moment #130 merge-eligibility is clear.
 
 ## What's left
-- Lead review gate: open routing question posted in #10703 — re-request codex (per #10460) OR
-  lead takes Claude-side review (codex suspended per P4 note #9711). Lead's call.
-- On merge: nothing further from b1 for this PR (no post-deploy AC named for E27 in scope here).
+- Await codex verdict on #10707. If codex PASS -> flag lead #130 merge-eligible (rider-3 trigger).
+- If codex findings -> address as NEW commit on b1/bus-read-path-false-empty-fix-1 (never amend
+  pushed commits), re-run suites, re-push, re-request codex. Report failing sites verbatim if red.
+- Merge itself is lead's action; nothing else from b1 post-merge for this PR.
 
 ## Scratch to flag
 - ~/bm-b1/brisen-lab has untracked prior-seat scratch: doc_backfill_driver*.sh, driver_*_stdout.log,
