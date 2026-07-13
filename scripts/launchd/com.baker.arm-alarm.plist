@@ -1,0 +1,47 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>__LABEL__</string>
+  <key>ProgramArguments</key>
+  <array>
+    <string>/bin/bash</string>
+    <string>__WORKER_PATH__</string>
+  </array>
+  <key>StartInterval</key>
+  <integer>__CADENCE__</integer>
+  <key>RunAtLoad</key>
+  <true/>
+  <!-- ARM_OUT_OF_BAND_ALARM_1: auto-resurrect the alarm watchdog so the
+       meta-watchdog is itself watched. RunAtLoad resumes it on reboot/login;
+       KeepAlive (crash-only) resumes it after a failed exit. CRASH-ONLY dict
+       form (same rationale as arm-cadence + the forge pusher, bus #5267): a
+       bare KeepAlive=true would relaunch this fast-exit periodic script on
+       EVERY exit (~10s throttle), collapsing the <=5-min StartInterval into a
+       hot-loop and defeating the <=5m SLO. {SuccessfulExit: false} restarts
+       ONLY on a non-zero exit. arm_alarm_check.sh exits 0 on every completed
+       run (even when it fires an alarm) precisely so this does NOT hot-loop; a
+       non-zero exit means a genuine crash worth self-healing. -->
+  <key>KeepAlive</key>
+  <dict>
+    <key>SuccessfulExit</key>
+    <false/>
+  </dict>
+  <key>StandardOutPath</key>
+  <string>__LOG__</string>
+  <key>StandardErrorPath</key>
+  <string>__ERRLOG__</string>
+  <key>EnvironmentVariables</key>
+  <dict>
+    <key>PATH</key>
+    <string>/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin</string>
+    <key>ARM_ALARM_DIR</key>
+    <string>__ALARM_DIR__</string>
+    <key>ARM_ALARM_LOG</key>
+    <string>__ALARM_LOG__</string>
+    <key>ARM_ALARM_EMAIL_TO</key>
+    <string>__EMAIL_TO__</string>
+  </dict>
+</dict>
+</plist>
