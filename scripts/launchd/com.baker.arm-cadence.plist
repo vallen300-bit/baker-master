@@ -1,0 +1,47 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>__LABEL__</string>
+  <key>ProgramArguments</key>
+  <array>
+    <string>/bin/bash</string>
+    <string>__WORKER_PATH__</string>
+  </array>
+  <key>StartInterval</key>
+  <integer>__CADENCE__</integer>
+  <key>RunAtLoad</key>
+  <true/>
+  <!-- ARM_CADENCE_LAUNCHD_JOB_1: auto-resurrect the poller so the watchdog is
+       itself watched (charter §3: "the watchdog must be watched"). RunAtLoad
+       resumes it on reboot/login; KeepAlive (crash-only) resumes it after a
+       failed exit. CRASH-ONLY dict form (same rationale as the forge pusher +
+       lease emitter, bus #5267): a bare KeepAlive=true would relaunch this
+       fast-exit periodic script on EVERY exit (~10s throttle), collapsing the
+       30-min StartInterval into a hot-loop. {SuccessfulExit: false} restarts
+       ONLY on a non-zero exit. arm_cadence_poll.sh exits 0 on every completed
+       run (even a degraded/unreachable poll) precisely so this does NOT
+       hot-loop; a non-zero exit means a genuine crash worth self-healing. -->
+  <key>KeepAlive</key>
+  <dict>
+    <key>SuccessfulExit</key>
+    <false/>
+  </dict>
+  <key>StandardOutPath</key>
+  <string>__LOG__</string>
+  <key>StandardErrorPath</key>
+  <string>__ERRLOG__</string>
+  <key>EnvironmentVariables</key>
+  <dict>
+    <key>PATH</key>
+    <string>/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin</string>
+    <key>LAB_URL</key>
+    <string>https://brisen-lab.onrender.com</string>
+    <key>ARM_CADENCE_SNAPSHOT_DIR</key>
+    <string>__SNAP_DIR__</string>
+    <key>ARM_CADENCE_LOG</key>
+    <string>__CADENCE_LOG__</string>
+  </dict>
+</dict>
+</plist>

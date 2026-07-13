@@ -1,33 +1,33 @@
 # CODE_4_PENDING — active dispatch mailbox for b4
 
 ---
-status: COMPLETE  # ratified #8206, PR #510 merged @9046e2f0; AO_MATERIALITY_HOOK_1 also closed (G3 R4 PASS #8437); marked 2026-07-11 per b4 #8850
-brief_id: MOVIE_FLIGHT_GATE2_ACTIVATION_1
+status: ACTIVE
+brief_id: ARM_CADENCE_LAUNCHD_JOB_1
 to: b4
-from: lead
+from: lead (bus dispatch #10331)
 dispatched_by: lead
-dispatched_at: 2026-07-09
-reply_target: lead (bus topic baker-os-v2/movie-flight-gate2)
-task_class: feature-gap activation (config/registry expected; code only if justified)
-gate_plan: diagnose findings -> lead scope-confirm -> build -> PR -> codex G3 (medium) -> lead merge -> live probes -> POST_DEPLOY_AC_VERDICT
-arc: MO-VIE-001 launch (Director GO 2026-07-09 ~16:55Z) — Gate-2 keyword + routing activation
-harness_v2: applies (see brief)
-recommended_effort: medium (mirror of shipped AO precedent, ~3h)
+dispatched_at: 2026-07-13
+reply_target: lead (ship report + gate verdict to lead)
+task_class: fleet infra — KeepAlive launchd watchdog (host-side, read-only poller)
+gate_plan: build -> PR to main -> codex review -> lead merge -> install (host-side) + POST_DEPLOY_AC (drift-check + launchctl list)
+harness_v2: applies
+recommended_effort: medium
+charter_spec: ~/baker-vault/_ops/build/baker-os-v2/05_outputs/domain-agent-program/DRAFT_SPEC_ARM_BUS_CUSTODIAN_AMENDMENT_V1.md (RATIFIED v1.1 @c435b18) — D2 + §4
 ---
 
-# ACTIVE: MOVIE_FLIGHT_GATE2_ACTIVATION_1 — dispatch to B4
+# ACTIVE: ARM_CADENCE_LAUNCHD_JOB_1 — dispatch to b4 (bus #10331)
 
-Full brief (main): `briefs/_tasks/MOVIE_FLIGHT_GATE2_ACTIVATION_1.md` — READ IT, source of truth.
+ARM custodian machine-cadence watchdog. Director-ratified charter D2 + §4.
 
-Two hard sequence points, do not skip:
-1. Diagnose findings post FIRST (registry rows, live keyword env, KNOWN-sender widening) —
-   wait for lead scope-confirm.
-2. Keyword list = lead sign-off on bus BEFORE any env flip. NEVER bare `movie`; `rg7`
-   collides with hagenauer-rg7.
+- KeepAlive-hardened launchd job (forge-snapshot-pusher pattern), deploy to
+  `~/Library/Application Support/` — NOT `~/Desktop` (TCC lesson).
+- Polls `GET /api/bus_health` (+ `arm_sql` telemetry as P1–P4 tables land) every
+  30 min. curl/SQL only, ZERO LLM per poll.
+- Writes a snapshot that ARM's report synthesis reads at wake.
+- Include install script + drift check.
+- Gate: codex review, then lead merge. Effort: medium.
 
-Context hygiene: state your context % in first status post; >=50% = checkpoint + respawn first.
-
-**SUPERSEDED / DO NOT REDO:**
-- BB_AUK_001_AUDIT_ROUND2_DASHBOARD_UPDATE_1 stage 2 — folded into BB-AUK dashboard arc,
-  closed (dashboard v24 live per baden-baden-desk pin 2026-07-09).
-- BOX5_OUTBOUND_CORRELATION_FIX_1 — SHIPPED, PR #448 MERGED 2026-07-01 (bus #5548).
+**Prior seat state (reconciled 2026-07-13):** BUS_CONSOLE_LIVE_PAGE_1 CLOSED
+(PR #525 merged, POST_DEPLOY_AC PASS #9124). CASE_ONE_E23_SESSION_STATE_PERSISTENCE_1
+CLOSED (PR #551 merged @f609697e, 3 codex blockers #10226 fixed). Stale
+BUS_CONSOLE autostub checkpoint deleted.
