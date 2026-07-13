@@ -25,7 +25,22 @@ Status ping: lead #10680. My status posts: #10697, verdict #10703 (topic case-on
   - Re-verify green: subset 58/58; full 612 pass / 1 skip / 26 fail = autowake/identity baseline
     (SUBSET of prior 27; merge fixed one identity-artifact-drift failure). Zero new failures.
 - codex DELTA re-gate requested #10721 (effort=medium, scoped to resolution + newly-gated sites).
-- lead flagged #10723. Awaiting codex delta verdict.
+- lead flagged #10723.
+
+## BLOCKED — awaiting lead ruling #10726 (codex FAIL vs #10719 conflict)
+- codex #10724: FAIL — claims PR #130 is "16 files + adds canary_nightly_loop / /api/canary/* /
+  fleet_preflight / dashboards" = scope drift; wants canary/preflight split out.
+- DIAGNOSED as a stale-base false positive: authoritative diff (GitHub PR API + git 3-dot vs
+  origin/main) = 9 files, +632/-126, E27-only. The "extra" files are ALREADY on main (in the
+  merge-base); they only show in a 2-dot diff vs the OLD pre-merge branch point (21 files) — what
+  a reviewer with STALE local main sees. Codex self-noted its worktree "predates this PR" in #10716.
+- The only canary/app touches in the REAL diff are the db_gate gating #10719 ORDERED (canary.py 9
+  lines, app.py canary_status 1 line). Codex's remedy (split canary) would revert #10719's gating.
+- Escalated to lead #10726 with two options: (1) override codex FAIL as stale-base false-positive +
+  merge; (2) pull the canary/app gating into a separate follow-up PR (leaves merged canary DB sites
+  ungated until it lands). Did NOT touch code — split defies #10719, override is lead's gate call.
+- NEXT: wait for lead ruling. Offered to ask codex to hard-refresh its main before any re-request.
+- Branch state unchanged: merge commit f237a64 pushed; suite green (612 pass / 26 baseline / 0 new).
 
 ## (history) codex PASS #10716 on the pre-merge branch head ca5561b
 
