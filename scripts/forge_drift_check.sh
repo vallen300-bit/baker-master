@@ -66,16 +66,26 @@ if [[ -r "$KEY_FILE" ]]; then
   # ratify_decision) — "alert" 400s (bad_kind) and the curl below swallows it, so
   # the drift would silently never reach lead (codex G3 #5653 HIGH). Use
   # "dispatch"; tier "A" is in VALID_TIERS.
+  #
+  # BUS_POST_ENVELOPE_ID_MINT_1: mint a per-post envelope id (idempotency_key).
+  # Once BRISEN_LAB_REQUIRE_ENVELOPE_ID flips on the daemon, a body-POST with no id
+  # hard-400s "missing_envelope_id" — and this curl swallows failures (|| true +
+  # >/dev/null), so the drift alert would silently vanish exactly like the bad_kind
+  # trap above. A fresh uuid4 per invocation is unique, so distinct drift posts NEVER
+  # false-dedup (mirrors bus_post.sh's mint). Sibling scripts audited for the flag
+  # flip: forge_drift_check.sh (this) is the only non-bus_post.{sh,py} body-POSTer;
+  # ack-only POSTs (POST /msg/<id>/ack) carry no body and need no id.
   curl -fsS --max-time 6 -X POST "${LAB_URL}/msg/lead" \
     -H "X-Terminal-Key: ${KEY}" -H "Content-Type: application/json" \
     -d "$(FORGE_BODY="$BODY" HOST="$HOST" python3 -c '
-import json, os
+import json, os, uuid
 print(json.dumps({
     "kind": "dispatch",
     "body": os.environ["FORGE_BODY"],
     "to": ["lead"],
     "tier_required": "A",
     "topic": "drift/forge-agent-" + os.environ["HOST"],
+    "idempotency_key": str(uuid.uuid4()),
 }))')" >/dev/null 2>&1 || true
 fi
 exit 0
