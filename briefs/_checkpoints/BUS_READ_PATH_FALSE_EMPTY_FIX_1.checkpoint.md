@@ -2,8 +2,9 @@
 brief_id: BUS_READ_PATH_FALSE_EMPTY_FIX_1
 dispatched_by: lead (#10329) + Plan v3 riders deputy-codex (#10403)
 reply_target: lead + deputy-codex
-attempt: 1
-updated: 2026-07-13T19:15Z
+attempt: 2
+updated: 2026-07-13 (fresh seat claim)
+claimed_by: B1 fresh seat (attempt->2) — implementing Option A per riders 1-5
 status: RULING LANDED (lead #10553, thread #10539/#10542) — Option A ACCEPTED (my rec):
   single threading.BoundedSemaphore(pool_cap) chokepoint INSIDE get_conn; REVERT the async
   db_gate sweep. Checkpoint bumped with ruling per lead's "you're deep + E17-interactive —
