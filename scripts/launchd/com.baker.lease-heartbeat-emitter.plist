@@ -1,0 +1,47 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>__LABEL__</string>
+  <key>ProgramArguments</key>
+  <array>
+    <string>/bin/bash</string>
+    <string>__WORKER_PATH__</string>
+  </array>
+  <key>StartInterval</key>
+  <integer>__CADENCE__</integer>
+  <key>RunAtLoad</key>
+  <true/>
+  <!-- CASE_ONE_P2_LIVENESS_LIFECYCLE_1 (P2.2): auto-resurrect the emitter so it
+       never dies silently (the exact snapshot-pusher-outage failure mode P2 hardens
+       against). RunAtLoad resumes it on reboot/login; KeepAlive (crash-only) resumes
+       it after a failed exit. CRASH-ONLY dict form (same rationale as the forge
+       pusher, bus #5267): a bare KeepAlive=true would relaunch this fast-exit periodic
+       script on EVERY exit (~10s throttle), collapsing the StartInterval cadence into
+       a hot-loop. {SuccessfulExit: false} restarts ONLY on a non-zero exit, so the
+       cadence is preserved while a genuine crash still self-heals. The worker exits 0
+       on every completed emit (even transient failures) precisely so this does NOT
+       hot-loop. -->
+  <key>KeepAlive</key>
+  <dict>
+    <key>SuccessfulExit</key>
+    <false/>
+  </dict>
+  <key>StandardOutPath</key>
+  <string>__LOG__</string>
+  <key>StandardErrorPath</key>
+  <string>__ERRLOG__</string>
+  <key>EnvironmentVariables</key>
+  <dict>
+    <key>PATH</key>
+    <string>/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin</string>
+    <key>BAKER_ROLE</key>
+    <string>__SEAT__</string>
+    <key>BRISEN_LAB_TERMINAL_KEY</key>
+    <string>__KEY__</string>
+    <key>LAB_URL</key>
+    <string>https://brisen-lab.onrender.com</string>
+  </dict>
+</dict>
+</plist>
