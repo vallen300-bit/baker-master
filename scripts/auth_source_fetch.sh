@@ -46,7 +46,8 @@ www.nature.com
 www.sciencedirect.com
 onlinelibrary.wiley.com
 www.jstor.org
-pubs.acs.org"
+pubs.acs.org
+natesnewsletter.substack.com"
 
 fail() { echo "auth_source_fetch: $1" >&2; exit "${2:-1}"; }
 
