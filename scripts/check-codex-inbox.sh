@@ -32,8 +32,54 @@ if [[ -z "$KEY" ]]; then
   exit 2
 fi
 
-RESPONSE="$(curl -sS -H "X-Terminal-Key: $KEY" \
-  "https://brisen-lab.onrender.com/msg/codex?limit=${LIMIT}&unread=true")"
+# CLIENT_AUTHORITATIVE_READ_CONTRACT_1 (E27 recurrence, lead #10901): capture the
+# HTTP status. The daemon read path (#130) fail-closes a degraded read to HTTP 503
+# `bus_busy_retry`; a plain `curl -sS` (no status check) that then does
+# `d.get("messages", [])` turns that 503 body into `[]` → a FALSE "empty (no
+# dispatches)". So a non-200 is a LOUD error, never empty; bounded-retry the
+# transient ones (transport fail / 5xx / 429).
+_RETRY_MAX="${CHECK_INBOX_RETRY_MAX:-3}"
+_RETRY_SLEEP="${CHECK_INBOX_RETRY_SLEEP:-2}"
+HTTP_CODE=""
+RESPONSE=""
+_attempt=0
+while : ; do
+  # -w appends '\n<status>' AFTER the body: last line = status, rest = body.
+  if OUT="$(curl -sS --max-time 20 -w '\n%{http_code}' -H "X-Terminal-Key: $KEY" \
+      "https://brisen-lab.onrender.com/msg/codex?limit=${LIMIT}&unread=true" 2>/dev/null)"; then
+    HTTP_CODE="${OUT##*$'\n'}"
+    RESPONSE="${OUT%$'\n'*}"
+  else
+    HTTP_CODE="000"
+    RESPONSE=""
+  fi
+  case "$HTTP_CODE" in
+    000 | 5[0-9][0-9] | 429)
+      _attempt=$((_attempt + 1))
+      if [[ "$_attempt" -le "$_RETRY_MAX" ]]; then
+        if [[ "$_RETRY_SLEEP" -gt 0 ]] 2>/dev/null; then sleep "$_RETRY_SLEEP"; fi
+        continue
+      fi
+      ;;
+  esac
+  break
+done
+
+if [[ "$HTTP_CODE" == "000" ]]; then
+  echo "ERROR: brisen-lab unreachable (GET /msg/codex) after $((_RETRY_MAX + 1)) attempt(s)."
+  echo "ERROR: brisen-lab unreachable (GET /msg/codex) after $((_RETRY_MAX + 1)) attempt(s)." >&2
+  exit 4
+fi
+if [[ "$HTTP_CODE" != "200" ]]; then
+  _DETAIL="$(printf '%s' "$RESPONSE" | python3 -c 'import json,sys
+try:
+    print(json.load(sys.stdin).get("detail",""))
+except Exception:
+    print("")' 2>/dev/null || true)"
+  echo "ERROR: brisen-lab GET /msg/codex returned HTTP ${HTTP_CODE}${_DETAIL:+ (${_DETAIL})} — NOT empty; bus busy/degraded, retry shortly."
+  echo "ERROR: brisen-lab GET /msg/codex returned HTTP ${HTTP_CODE} ${_DETAIL} — NOT empty." >&2
+  exit 4
+fi
 
 if [[ -z "$RESPONSE" ]] || [[ "$RESPONSE" == *"bad_terminal_key"* ]]; then
   echo "ERROR: brisen-lab rejected codex key. Response: $RESPONSE" >&2
@@ -51,8 +97,17 @@ with open(sys.argv[1]) as f:
         d = json.load(f)
     except Exception as e:
         print("parse_error:", e); sys.exit(1)
+# Defensive double-guard: a detail-only error body must never render as empty.
+if isinstance(d, dict) and "detail" in d and "messages" not in d:
+    print("ERROR: daemon error body (not empty):", d.get("detail")); sys.exit(4)
 msgs = d if isinstance(d, list) else d.get("messages", [])
+# complete==True is the ONLY authoritative all-clear (BUS_READ_PATH_FALSE_EMPTY_FIX_1
+# envelope). A bare list is the legacy shape with no envelope → complete for back-compat.
+complete = True if isinstance(d, list) else d.get("complete", True)
 if not msgs:
+    if complete is False:
+        print("codex inbox: PARTIAL read (complete=false) — NOT empty; widen limit or drain cursor.")
+        sys.exit(5)
     print("codex inbox: empty (no dispatches).")
     sys.exit(0)
 # Unacked count excludes wildcard broadcasts (to_terminals==['*']) which 403 on
