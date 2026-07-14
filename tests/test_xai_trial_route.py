@@ -137,7 +137,7 @@ def test_happy_path_settles_and_forces_grok45(enabled, monkeypatch):
     monkeypatch.setattr(trial.ledger, "settle",
                         lambda ref, actual, route, **k: settled.update(
                             {"ref": ref, "actual": actual, "route": route})
-                        or {"released_residual_usd": 0.0})
+                        or {"settled": True, "released_residual_usd": 0.0})
     logged = {}
     monkeypatch.setattr(trial, "_settle_into_api_cost_log",
                         lambda ti, to, actual, ms: logged.update({"actual": actual}))
@@ -147,9 +147,38 @@ def test_happy_path_settles_and_forces_grok45(enabled, monkeypatch):
     assert client.calls[0]["model"] == "grok-4.5"  # allowlist enforced
     assert out["_trial"]["route"] == "b4_runtime"
     assert out["_trial"]["model"] == "grok-4.5"
+    assert out["_trial"]["settle_ok"] is True
     # actual = 1000*2/M + 1000*6/M = 0.008
     assert settled["actual"] == pytest.approx(0.008)
     assert logged["actual"] == pytest.approx(0.008)
+
+
+def test_settle_failure_retained_and_audited(enabled, monkeypatch):
+    """P1-2: a persistent settle failure must NOT release the reserve, must NOT
+    claim outcome=ok, and must surface settle_ok=False (spend stays counted)."""
+    monkeypatch.setattr(trial.ledger, "reserve",
+                        lambda **k: {"granted": True, "reason": "ok"})
+    attempts = {"n": 0}
+
+    def _fail_settle(ref, actual, route, **k):
+        attempts["n"] += 1
+        return {"settled": False, "reason": "ledger_unavailable"}
+    monkeypatch.setattr(trial.ledger, "settle", _fail_settle)
+    released = []
+    monkeypatch.setattr(trial.ledger, "release",
+                        lambda *a, **k: released.append(a))
+    audit = {}
+    monkeypatch.setattr(trial.ledger, "write_call_audit",
+                        lambda **k: audit.update(k))
+    monkeypatch.setattr(trial, "_settle_into_api_cost_log", lambda *a, **k: None)
+
+    client = _FakeClient(payload={"text": "a", "model": "grok-4.5",
+                                  "tokens_in": 100, "tokens_out": 50, "cost_usd": 0.0})
+    out = trial.run_grok_ask(client=client, prompt="hi", route="b4_runtime")
+    assert attempts["n"] == trial._SETTLE_MAX_ATTEMPTS   # retried
+    assert released == []                                # reservation RETAINED
+    assert audit.get("outcome") == "settle_failed"       # audit reflects failure
+    assert out["_trial"]["settle_ok"] is False
 
 
 def test_call_failure_releases_reservation(enabled, monkeypatch):

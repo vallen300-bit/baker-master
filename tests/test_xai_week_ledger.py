@@ -81,6 +81,35 @@ def test_reserve_settle_releases_residual(pg_conn):
     assert b2["effective_used_usd"] == pytest.approx(0.30)
 
 
+def test_settle_actual_exceeds_reserve_tops_up(pg_conn):
+    # P1-1: actual spend > reservation must post the excess to the cap, not drop it.
+    week = _uniq_week(20)
+    ref = uuid.uuid4().hex
+    ledger.reserve("b4_runtime", 1.00, ref, week=week, conn=pg_conn)
+    s = ledger.settle(ref, 1.50, "b4_runtime", week=week, conn=pg_conn)  # actual > reserved
+    assert s["settled"] is True
+    assert s["topup_usd"] == pytest.approx(0.50)
+    assert s["released_residual_usd"] == pytest.approx(0.0)
+    b = ledger.remaining_budget(week=week, conn=pg_conn)
+    assert b["settled_usd"] == pytest.approx(1.50)
+    assert b["open_reserves_usd"] == pytest.approx(0.0)
+    # The full actual spend (incl. the excess over the reservation) hits the cap.
+    assert b["effective_used_usd"] == pytest.approx(1.50)
+
+
+def test_cap_counts_overspend_on_next_reserve(pg_conn, monkeypatch):
+    # After an over-settle, the next reserve sees the true (higher) usage.
+    week = _uniq_week(21)
+    monkeypatch.setattr(ledger, "WEEKLY_CAP_USD", 2.0)
+    ref = uuid.uuid4().hex
+    ledger.reserve("b4_runtime", 1.0, ref, week=week, conn=pg_conn)
+    ledger.settle(ref, 1.8, "b4_runtime", week=week, conn=pg_conn)  # overspend to 1.8
+    # remaining = 2.0 - 1.8 = 0.2; a 0.5 reserve must be blocked.
+    r = ledger.reserve("b4_runtime", 0.5, uuid.uuid4().hex, week=week, conn=pg_conn)
+    assert r["granted"] is False
+    assert r["reason"] == "weekly_cap_reached"
+
+
 def test_release_frees_full_hold(pg_conn):
     week = _uniq_week(11)
     ref = uuid.uuid4().hex

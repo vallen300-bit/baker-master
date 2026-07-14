@@ -36,6 +36,21 @@ Researcher fan-out is **agent-side** (researcher SKILL, not baker-master). This 
 2. `GROK45_ENABLED_ROUTES` unset ⇒ trial inert: `baker_grok_ask` still serves grok-4.3; raw `model=grok-4.5` rejected.
 3. On first route activation (lead GO, env PUT + manual deploy): one governed call reserves→settles, writes an `xai_call_audit` row, mirrors into `api_cost_log`; weekly remaining math correct.
 
+## Re-gate fixes (codex FAIL #11309 → 2 P1s, both fixed)
+- **P1-1 (cap undercount when actual > reserved):** `settle()` now tops up the
+  reservation by `(actual − held)` in the same txn when actual exceeds the hold,
+  so `effective_used = reserved − released` reflects true spend (incl. overspend).
+  Previously only a residual release was written, so overspend never reached the
+  cap. Regression: `test_settle_actual_exceeds_reserve_tops_up` +
+  `test_cap_counts_overspend_on_next_reserve` (live-PG).
+- **P1-2 (swallowed settle failure):** `run_grok_ask` now retries `settle()`
+  (bounded, `BAKER_XAI_SETTLE_MAX_ATTEMPTS`=3); on persistent failure it does NOT
+  release the reserve (retained → cap stays conservative until TTL sweep), logs
+  ERROR, writes the audit row `outcome=settle_failed` (never `ok`), and surfaces
+  `_trial.settle_ok=False`. Spend still lands in `api_cost_log` (independent daily
+  surface). Regression: `test_settle_failure_retained_and_audited`.
+- Re-verified: 24 pass on a fresh Postgres (mcp dispatcher tests skip locally).
+
 ## Activation runbook (staged, lead-owned)
 - Set `GROK45_ENABLED_ROUTES=b4_runtime` via single-key Render env PUT (`tools.render_env_guard.safe_env_put` — never array PUT) + **manual deploy** (env PUT alone does not restart).
 - Add routes one at a time (`,researcher_channel`, `,researcher_shadow_synth`) on subsequent GOs.

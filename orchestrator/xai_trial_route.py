@@ -45,6 +45,7 @@ KNOWN_ROUTES: frozenset[str] = frozenset(
 _TOOL_ALLOWANCE_USD = float(os.getenv("BAKER_XAI_TOOL_ALLOWANCE_USD", "0.05"))
 _RESERVE_INPUT_FLOOR_TOKENS = int(os.getenv("BAKER_XAI_RESERVE_INPUT_FLOOR", "512"))
 _RESERVE_DEFAULT_MAX_OUT = int(os.getenv("BAKER_XAI_RESERVE_DEFAULT_MAX_OUT", "4000"))
+_SETTLE_MAX_ATTEMPTS = int(os.getenv("BAKER_XAI_SETTLE_MAX_ATTEMPTS", "3"))
 
 
 class GrokTrialError(RuntimeError):
@@ -201,18 +202,47 @@ def run_grok_ask(
     tokens_out = int(payload.get("tokens_out") or 0)
     est_usd = round(_token_cost_usd(tokens_in, tokens_out), 6)
     actual_usd = _actual_usd(payload, tokens_in, tokens_out)
-    settle_res = ledger.settle(request_ref, actual_usd, route)
+
+    # P1-2 fix: a swallowed settle failure would drop this spend from the weekly
+    # cap (the reserve would later TTL-sweep to a release), silently undercounting.
+    # Retry with bounded backoff; on persistent failure DO NOT release — retain
+    # the reservation so the cap stays conservative (over-counts, never under),
+    # log loud, and mark the audit row settle_failed (never outcome=ok).
+    settle_res = {"settled": False, "reason": "not_attempted"}
+    for attempt in range(_SETTLE_MAX_ATTEMPTS):
+        settle_res = ledger.settle(request_ref, actual_usd, route)
+        if settle_res.get("settled"):
+            break
+        logger.warning("grok trial settle attempt %d/%d failed route=%s ref=%s reason=%s",
+                       attempt + 1, _SETTLE_MAX_ATTEMPTS, route, request_ref,
+                       settle_res.get("reason"))
+    settle_ok = bool(settle_res.get("settled"))
+
+    # api_cost_log is the independent daily surface — record the spend regardless
+    # so the daily total never undercounts even if the weekly ledger settle failed.
     _settle_into_api_cost_log(tokens_in, tokens_out, actual_usd, matter_slug)
+
     ledger.write_call_audit(
         model=TRIAL_MODEL, route=route, request_ref=request_ref,
         tokens_in=tokens_in, tokens_out=tokens_out, reserved_usd=reserve_usd,
-        est_usd=est_usd, actual_usd=actual_usd, outcome="ok", matter_slug=matter_slug,
+        est_usd=est_usd, actual_usd=actual_usd,
+        outcome="ok" if settle_ok else "settle_failed",
+        error_class=None if settle_ok else str(settle_res.get("reason") or "settle_failed"),
+        matter_slug=matter_slug,
     )
+    if not settle_ok:
+        logger.error(
+            "grok trial SETTLE FAILED route=%s ref=%s actual=%.6f reason=%s — "
+            "reservation RETAINED (cap conservative); spend logged to api_cost_log",
+            route, request_ref, actual_usd, settle_res.get("reason"),
+        )
+
     payload = dict(payload)
     payload["_trial"] = {
         "route": route, "request_ref": request_ref, "model": TRIAL_MODEL,
         "reserved_usd": reserve_usd, "actual_usd": actual_usd, "est_usd": est_usd,
         "residual_released_usd": settle_res.get("released_residual_usd", 0.0),
+        "settle_ok": settle_ok,
     }
     return payload
 

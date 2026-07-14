@@ -319,12 +319,26 @@ def settle(request_ref: str, actual_usd: float, route: str,
         cur = conn.cursor()
         cur.execute("SELECT pg_advisory_xact_lock(%s, %s)", (_LOCK_NAMESPACE, _lock_key(week)))
         held = _held_for_ref(cur, week, request_ref)
+        # P1-1 fix: actual spend can EXCEED the reservation (trial_route settles
+        # max(payload cost, token-rate cost) as the conservative actual). If we
+        # only ever released a residual, that excess would never reach the cap
+        # (effective_used = reserved − released stays at the reserved amount).
+        # Top up the reservation by the shortfall in the SAME txn so the cap
+        # reflects true spend. Not cap-gated — this records spend already
+        # incurred, it does not request new budget.
+        topup = actual - held
+        if topup > 0:
+            cur.execute(
+                """INSERT INTO xai_week_ledger (week_start, route, kind, amount_usd, request_ref)
+                   VALUES (%s, %s, 'reserve', %s, %s)""",
+                (week, route, round(topup, 6), request_ref),
+            )
         cur.execute(
             """INSERT INTO xai_week_ledger (week_start, route, kind, amount_usd, request_ref)
                VALUES (%s, %s, 'settle', %s, %s)""",
             (week, route, actual, request_ref),
         )
-        residual = held - actual
+        residual = held - actual  # only positive when actual < held
         if residual > 0:
             cur.execute(
                 """INSERT INTO xai_week_ledger (week_start, route, kind, amount_usd, request_ref)
@@ -335,6 +349,7 @@ def settle(request_ref: str, actual_usd: float, route: str,
         cur.close()
         return {"settled": True, "reason": "ok", "actual_usd": round(actual, 6),
                 "released_residual_usd": round(max(0.0, residual), 6),
+                "topup_usd": round(max(0.0, topup), 6),
                 "week_start": str(week)}
     except Exception as e:
         try:
