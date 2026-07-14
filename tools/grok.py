@@ -324,24 +324,20 @@ def dispatch_grok(name: str, args: dict[str, Any]) -> str:
             requested_model = args.get("model")
             from orchestrator import xai_trial_route as _trial
 
-            # Unknown route → reject LOUD at the dispatcher, never fall through to
-            # normal grok-4.3 (P1, codex #11369). A route param that is present but
-            # outside the brief-scoped KNOWN_ROUTES is a silent-downgrade hazard:
-            # is_route_enabled() returns False for it, so without this guard it would
-            # slip past the governed branch below into the grok-4.3 path. A route
-            # that IS known but simply not enabled is the designed grok-4.3
-            # fallthrough (kept below). No route param → normal path untouched.
-            if route is not None and not _trial.is_route_known(route):
-                return "Error: grok trial blocked: " + json.dumps(
-                    {"reason": "route_unknown", "route": route,
-                     "known_routes": sorted(_trial.KNOWN_ROUTES)},
-                    ensure_ascii=False,
-                )
-
-            # Governed trial path: grok-4.5 under the weekly ledger, but only for
-            # a route that is currently enabled. The trial governor logs cost +
-            # audit itself, so we do NOT double-log via _log_grok_cost.
-            if route and _trial.is_route_enabled(route):
+            # Enter the trial governor for a route that is ENABLED or UNKNOWN.
+            # run_grok_ask is the SINGLE rejection point (codex #11381): it writes
+            # exactly one xai_call_audit row per attempt — including the
+            # blocked_route_unknown row for an unknown route — then raises
+            # GrokTrialError, which we surface loud with NO fallback. Routing the
+            # unknown case through here (rather than an early dispatcher return)
+            # keeps requirement #4 intact: no attempt goes un-audited, and no path
+            # writes a double row. A route that is KNOWN but simply not enabled is
+            # the designed grok-4.3 fallthrough below (not a trial attempt → no
+            # audit row). No route param → normal path untouched. The trial governor
+            # logs cost + audit itself, so we do NOT double-log via _log_grok_cost.
+            if route is not None and (
+                _trial.is_route_enabled(route) or not _trial.is_route_known(route)
+            ):
                 try:
                     payload = _trial.run_grok_ask(
                         client=_get_client(),
