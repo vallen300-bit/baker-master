@@ -15,10 +15,11 @@ summary: The two lifecycle broadcast inserts (restart _atomic_session_expiry_and
 Fixed: route through source='daemon', unattributed=FALSE, intent=_derive_intent(kind) — same as
 #135 item 3. Load-bearing test on both inserts.
 
-status: SHIPPED — brisen-lab PR #138 (commit 87610ef, off origin/main @5a22441). G1 PASS
-(2/2 load-bearing green, zero new failures). Acked #10892 + claimed. Awaiting codex gate.
+status: COMPLETE — brisen-lab PR #138 MERGED @970cfce (lead #10947). Item 1 (code) merged +
+item 2 (docs BRIEF_BUS_INTENT_TYPES_1.md @fdd6f5af) landed. All three daemon insert paths now
+attributed. G1 PASS → codex PASS #10939 → lead merge. Both #10892 + #10900 acked. Standing by.
 
-gate: G1 self-verify (done) -> codex on BUS -> lead merge.
+gate: G1 self-verify (done) -> codex PASS #10939 -> lead merge @970cfce (done).
 
 ## prior (superseded, completed + shipped)
 HAG_FILER_HARNESS_RETROFIT_1 (#10892 supersedes; that arc closed earlier).

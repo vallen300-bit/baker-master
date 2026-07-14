@@ -12,10 +12,10 @@ updated: 2026-07-14
 LIFECYCLE_INSERT_ATTRIBUTION_1 — lead dispatch #10892 (deputy finding #10877). ONE micro-PR.
 Effort low. Repo: brisen-lab.
 
-## STATUS: CODEX PASS — awaiting lead merge of PR #138
-- brisen-lab PR #138 (commit 87610ef). Gate chain: G1 (done) → codex PASS (#10939) → lead merge (relayed #10942).
-- Codex PASS #10939: no blocking findings; codex's own pytest skipped DB tests (no TEST_DATABASE_URL
-  in its shell) — I ran them green on isolated local PG, load-bearing proven, on-record in ship report.
+## STATUS: CLOSED — PR #138 MERGED @970cfce (lead #10947)
+- brisen-lab PR #138 (commit 87610ef) MERGED @970cfce. Gate chain complete: G1 → codex PASS #10939 → lead merge.
+- Lead #10947: 2 files +84/-6 scope-exact; coverage split (codex static + my executed DB tests) noted + accepted.
+  Item 1 (code) merged, item 2 (docs @fdd6f5af) landed. All three daemon insert paths now attributed. Standing by.
 - G1 PASS: 2/2 new tests green, BOTH load-bearing (verified to fail vs origin/main lifecycle.py, source=None).
   Full suite 26f/666p = zero new failures vs post-#137 baseline (deterministic failing-set diff empty;
   26 = pre-existing autowake/wake-gate isolation).
