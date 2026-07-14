@@ -324,6 +324,20 @@ def dispatch_grok(name: str, args: dict[str, Any]) -> str:
             requested_model = args.get("model")
             from orchestrator import xai_trial_route as _trial
 
+            # Unknown route → reject LOUD at the dispatcher, never fall through to
+            # normal grok-4.3 (P1, codex #11369). A route param that is present but
+            # outside the brief-scoped KNOWN_ROUTES is a silent-downgrade hazard:
+            # is_route_enabled() returns False for it, so without this guard it would
+            # slip past the governed branch below into the grok-4.3 path. A route
+            # that IS known but simply not enabled is the designed grok-4.3
+            # fallthrough (kept below). No route param → normal path untouched.
+            if route is not None and not _trial.is_route_known(route):
+                return "Error: grok trial blocked: " + json.dumps(
+                    {"reason": "route_unknown", "route": route,
+                     "known_routes": sorted(_trial.KNOWN_ROUTES)},
+                    ensure_ascii=False,
+                )
+
             # Governed trial path: grok-4.5 under the weekly ledger, but only for
             # a route that is currently enabled. The trial governor logs cost +
             # audit itself, so we do NOT double-log via _log_grok_cost.

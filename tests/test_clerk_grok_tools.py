@@ -93,6 +93,33 @@ def test_grok_missing_required_arg_is_fault_tolerant(fake_grok):
     assert fake_grok.calls == []  # never reached the client
 
 
+# ── codex #11369 regression: unknown route rejected at the PRODUCTION dispatcher ─
+# Live probe that failed round-2: GROK45_ENABLED_ROUTES=bogus_route + route=bogus_route
+# silently called grok-4.3 (silent downgrade). The dispatcher must reject loud and
+# NEVER reach the client — is_route_enabled() returns False for an unknown route, so
+# without the dispatcher guard the call slips into the normal grok-4.3 path.
+
+def test_grok_ask_unknown_route_rejected_loud_at_dispatcher(fake_grok, monkeypatch):
+    monkeypatch.setenv("GROK45_ENABLED_ROUTES", "bogus_route")
+    res = ClerkToolRegistry().execute(
+        "baker_grok_ask", {"prompt": "define IRR", "route": "bogus_route"}
+    )
+    assert res.startswith("Error: grok trial blocked")
+    assert "route_unknown" in res
+    assert fake_grok.calls == []  # NO silent grok-4.3 downgrade
+
+
+def test_grok_ask_known_but_disabled_route_falls_through_to_grok_43(fake_grok, monkeypatch):
+    # A KNOWN route that simply is not enabled keeps the designed grok-4.3 path —
+    # the fix must not over-reject known-but-off routes.
+    monkeypatch.setenv("GROK45_ENABLED_ROUTES", "")
+    out = json.loads(ClerkToolRegistry().execute(
+        "baker_grok_ask", {"prompt": "define IRR", "route": "b4_runtime"}
+    ))
+    assert out["text"] == "answer: define IRR"
+    assert fake_grok.calls == [("ask", "define IRR")]  # normal grok-4.3
+
+
 # ── G0 #2391 regression: cost breaker tripped -> ZERO HTTP, blocked ───────────
 
 def test_grok_breaker_tripped_makes_zero_calls(monkeypatch):

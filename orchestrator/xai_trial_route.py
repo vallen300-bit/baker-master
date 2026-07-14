@@ -65,6 +65,14 @@ def enabled_routes() -> frozenset[str]:
     return frozenset(p.strip() for p in raw.split(",") if p.strip())
 
 
+def is_route_known(route: Optional[str]) -> bool:
+    """True when ``route`` is a recognized brief-scoped trial route key. Used by
+    the dispatcher to distinguish a *known-but-disabled* route (designed grok-4.3
+    fallthrough) from an *unknown* route (must reject loud — a silent downgrade
+    otherwise, codex #11369)."""
+    return bool(route) and route in KNOWN_ROUTES
+
+
 def is_route_enabled(route: Optional[str]) -> bool:
     """A route is trial-active only if it is a brief-scoped KNOWN trial route AND
     listed in ``GROK45_ENABLED_ROUTES``. P2: KNOWN_ROUTES is ENFORCED here (not
