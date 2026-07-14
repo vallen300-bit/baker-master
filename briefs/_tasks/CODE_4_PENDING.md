@@ -1,7 +1,7 @@
 # CODE_4_PENDING — active dispatch mailbox for b4
 
 ---
-status: ACTIVE
+status: MERGED — POST_DEPLOY_AC PASS (awaiting lead per-route activation GO)
 brief_id: GROK_4_5_WEEK_TRIAL
 to: b4
 from: lead (bus dispatch #11256, Director-ratified Option A)
@@ -47,8 +47,26 @@ pushes until lead's verdict relay. Prior rounds: round-3 unknown-route downgrade
 #11369 @ad773fa1; round-2 P1-3/P1-4/P2 @a9528884→#11338; round-1 2 P1s @e3210423.
 All 5 requirements built + researcher substrate. 77 pass, 12 skipped across the 4
 grok/xai suites (python3.12). Ship report:
-briefs/_reports/B4_grok_4_5_week_trial_20260714.md. Awaiting codex re-gate →
-lead merge → POST_DEPLOY_AC.
+briefs/_reports/B4_grok_4_5_week_trial_20260714.md.
+
+MERGED @7d51c2dd → main (lead #11420). Codex round-5 residual (#11398: with
+XAI_API_KEY absent, unknown-route rejection dies at _get_client() before the
+blocked_route_unknown audit writes — zero rows on that double-fault) WAIVED as
+merge-gating by Director authority (visibility-only, double-fault-only, money path
+verified over 4 rounds).
+
+POST_DEPLOY_AC vs live main @7d51c2dd: PASS.
+- AC1 (tables exist in prod): xai_call_audit + xai_week_ledger both present.
+- AC2 (trial inert, no route enabled): prod baker_grok_ask rejects raw model=grok-4.5
+  with the trial-only error (proves new dispatcher code live); normal call serves
+  grok-4.3 (cost $0.0003); inert path wrote 0 audit + 0 ledger rows.
+- AC3 (first governed reserve→settle+audit row): deferred to lead per-route
+  activation GO — no route flips before that.
+
+OWED (non-gating, this week; normal gate): validate/reject+audit BEFORE client
+construction (lazy client or pre-_get_client validation) so an unknown route with
+XAI_API_KEY absent still writes the blocked_route_unknown row, plus the missing-key
+unknown-route regression codex specified (#11398).
 
 **Prior seat state (all CLOSED 2026-07-13/14):**
 - ARM_OUT_OF_BAND_ALARM_1 — shipped + merged (PR #556 @codex-PASS #10635 / lead #10639); semantic consumer micro-lane merged; arm-semantic-enforce gate merged @a089d90 (#11197).
