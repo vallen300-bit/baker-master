@@ -1,4 +1,14 @@
-# BRIEF: CLIENT_STARTED_EMISSION_1 — client emits an explicit `started` signal on dispatch pickup
+# BRIEF: CLIENT_STARTED_EMISSION_1 — client emits an explicit `started` signal on first action
+
+> **AMENDED per G0 #11118 + lead ruling #11121 (2026-07-14).** Seam resolved to **first-action**, NOT
+> pickup: codex G0 (#11107) showed `started` is the *terminal* delivery state (`mark_delivery_started_sync`
+> sets `delivery_state=started` + `sla_state=delivered`, brisen-lab `db.py:1192-1200`), so pickup-emission
+> would mark a picked-up-then-abandoned dispatch as *delivered*. Lead #11076's "pickup" wording is
+> SUPERSEDED. `started` now fires on the recipient's **first non-ack post** tied to the dispatch (reply
+> path), not on drain. Option B (new pickup state/schema) rejected — scope not justified. Two codex
+> corrections folded in: (a) gate on `kind=dispatch`, not `execute_obligation` alone; (b) the client emit
+> must NOT be added to the READ-ONLY `scripts/check_inbox.sh` (#557 contract). Fix-2 + rubric item 5 below
+> are rewritten to this shape; deputy checks conformance at the correctness gate.
 
 > **Companion / hard prerequisite of `CASE_ONE_BTUNE_STARTED_SLO_TERMINAL_1`.** That brief flips the obligation-closed judgment from `acked` to `started`; it CANNOT arm (`BRISEN_LAB_OBLIGATION_STARTED_TERMINAL=1`) until this brief is live, because today `started_at` is almost never set (367/487 delivery rows are acked-not-started). Owner: **b1** (owns the #557 client read-contract context). Lead #11076 named the dependency.
 
@@ -22,14 +32,14 @@ Ignore unrelated rails: standing-contract, build-command-center, skills-and-play
 - **Inputs:** existing `POST /msg/<id>/ack` endpoint (`bus.py:10`) as the shape template; `mark_delivery_started_sync(msg_id, recipient)` (`db.py:1183`, COALESCE + `escalated_at IS NULL` guarded — do not weaken); the client drain path (`scripts/check_inbox.sh`, `~/.claude/hooks/session-start-bus-drain.sh`).
 - **Outputs:** an explicit, authenticated `started` write path fired by the recipient's own client when it picks up a **command-kind** dispatch into a live session.
 - **Out of contract (do NOT touch):** the daemon inference `detect_delivery_started_sync` stays as a *fallback* (belt-and-suspenders — keep both); the ack endpoint; the escalation guard; Event-kind traffic (never emits started).
-- **Semantic choice to resolve at G0 (surface, don't silently pick):** "pickup = started" (emit on drain) vs "first-action = started" (emit on first non-ack threaded reply / job-create). Lead #11076 said *pickup*. Trade-off to weigh: pickup-emission marks started for a dispatch a worker drains but then ignores, which **weakens E22 (ack-then-idle) escalation** (the started-SLA currently catches ack-then-idle — `bus.py:1360`). Recommendation: emit on pickup per lead, BUT keep the started-SLA→escalate path measuring *progress after started* via the existing job-heartbeat so a picked-up-then-abandoned dispatch still escalates on a **secondary** idle timer. b1 + codex to confirm the exact seam at G0.
+- **Semantic choice — RESOLVED at G0 (#11118 → lead ruling #11121): FIRST-ACTION.** "first-action = started" (emit on the recipient's first non-ack post tied to the dispatch), NOT "pickup = started" (emit on drain). Reason: `started` is the terminal delivery state (`sla_state=delivered`); emitting it on mere pickup would mark a picked-up-then-abandoned dispatch as delivered and corrupt the started-SLO the companion brief keys on. First outbound engagement is the honest, script-detectable "work began" signal; a BLOCKED report also counts as started (engagement happened; blocking escalates separately). No secondary E22 timer is added here — post-started monitoring would need its own state/query/alert contract (`list_open_delivery_records_sync` excludes `delivery_state=started`, `db.py:1312-1316`) and belongs to a separate companion, out of this brief's scope. Daemon inference (`detect_delivery_started_sync`) stays as fallback.
 
 **Done rubric / done-state class (deterministic):**
 1. Unit (brisen-lab): `POST /msg/<id>/started` with the recipient's key sets `started_at` via `mark_delivery_started_sync`; idempotent (second call = no-op, COALESCE holds).
 2. Unit: `POST /msg/<id>/started` from a NON-recipient key → 403 (scope check, mirror ack-endpoint auth).
 3. Unit: endpoint respects the escalation guard — a started POST arriving after `escalated_at` set does NOT un-escalate (`db.py:1190-1196` invariant preserved).
-4. Unit: Event-kind message → client never emits started (command-kind `execute_obligation=TRUE` only).
-5. Unit (client): drain path, on surfacing a command-kind dispatch, POSTs started for that msg_id; on endpoint 404/5xx it logs + continues (non-fatal — rollout-window safe).
+4. Unit: non-dispatch row → endpoint rejects (409/`not_dispatch`). Covers both Event-kind (`execute_obligation=FALSE`) AND `ratify_required` (`execute_obligation=TRUE` but `kind!='dispatch'`) — the codex-G0 scope correction. Only `kind='dispatch' AND execute_obligation` accepts started.
+5. Unit (client): the **reply path** (`bus_post.sh` + codex reply scripts), when a role posts a non-ack message whose thread OR topic matches an inbound un-started `kind=dispatch` command it holds, POSTs `/started` for that msg_id once; a BLOCKED report counts as first-action; on endpoint 404/5xx it logs + continues (non-fatal — rollout-window safe). NOT wired into the READ-ONLY `check_inbox.sh`.
 6. Suite: no new failures vs the 27-fail brisen-lab baseline; baker-master client tests green.
 7. Live `POST_DEPLOY_AC_VERDICT`: after deploy, a real command-kind dispatch drained by a live worker shows `started_at` set within seconds of pickup (query below).
 
@@ -51,7 +61,7 @@ No HTTP path writes `started_at` on demand; only the daemon control-tick infers 
 - TDD/verification: applies. First vertical test = rubric item 1 (recipient POST sets started_at); then the 403 (item 2) and escalation-guard (item 3) tests before wiring the client.
 
 ### Implementation
-Add `POST /msg/<id>/started` mirroring the ack handler: resolve key → slug; verify slug ∈ `to_terminals` for the message (403 otherwise); verify `execute_obligation = TRUE` (command-kind; else 409/ignore — started is meaningless for Event-kind); call `mark_delivery_started_sync(msg_id, recipient)` inside `db_gate.db_call`. Return the `{ok|already_started|forbidden|not_command}` shape the ack endpoint uses. LIMIT on any lookup; `conn.rollback()` on except.
+Add `POST /msg/<id>/started` mirroring the ack handler: resolve key → slug; verify slug ∈ `to_terminals` for the message (403 otherwise); verify the row is a **worker-start dispatch — `kind = 'dispatch'` AND `execute_obligation = TRUE`** (else 409/ignore). **Codex G0 #11107 correction:** gate on `kind='dispatch'`, NOT `execute_obligation` alone — `ratify_required` rows also carry `execute_obligation=true` (`bus.py:76-81`) but are not worker-start dispatches; P5 itself tracks only `kind=dispatch AND execute_obligation` (`bus.py:84-91`, `db.py:1316`). Then call `mark_delivery_started_sync(msg_id, recipient)` inside `db_gate.db_call`. Return the `{ok|already_started|forbidden|not_dispatch}` shape mirroring the ack endpoint. LIMIT on any lookup; `conn.rollback()` on except.
 
 ### Key Constraints
 Do NOT remove `detect_delivery_started_sync` — keep the daemon inference as a fallback so a client that hasn't upgraded yet still gets started-detection. The two paths are idempotent (COALESCE), so double-marking is safe.
@@ -67,42 +77,45 @@ ORDER BY started_at DESC LIMIT 20;
 
 ---
 
-## Fix 2: client drain/pickup emits started (baker-master)
+## Fix 2: client reply path emits started on first action (baker-master)
 
 ### Problem
-The worker's client drains a command-kind dispatch but never tells the daemon it started.
+A worker replies to a command-kind dispatch (its first outbound engagement = "work began") but never tells the daemon it started, so `started_at` stays null and the started-SLO has no signal.
 
 ### Current State
-`scripts/check_inbox.sh` + `~/.claude/hooks/session-start-bus-drain.sh` surface unacked dispatches. Ack is a separate explicit `POST /msg/<id>/ack`. No started emission.
+Outbound posts go through `scripts/bus_post.sh` (+ `bus_post.py`) and the codex reply helpers `scripts/codex-bus-reply.sh` / `scripts/codexarch-bus-reply.sh`. Replies to a dispatch carry `--parent <dispatch-msg-id>` (and/or a matching thread/topic). `scripts/check_inbox.sh` is the READ-ONLY drain surface (#557 contract, lines 19-24) and MUST NOT be modified. Ack is a separate explicit `POST /msg/<id>/ack`. No started emission exists anywhere on the client.
 
 ### Engineering Craft Gates
-- Diagnose: applies (this is the root of the 367/487 gap). Feedback loop: drain a seeded command dispatch as a test slug, assert `started_at` lands. Hypothesis: no client emission path exists [confirmed].
-- Prototype: N/A. TDD: rubric item 5 (drain emits; 404 non-fatal) is the first vertical test.
+- Diagnose: applies (root of the 367/487 acked-not-started gap). Feedback loop: as a test slug, receive a seeded `kind=dispatch` command, post a non-ack reply, assert `started_at` lands. Hypothesis: no client first-action emission path exists [confirmed].
+- Prototype: N/A. TDD: rubric item 5 (reply → started; ack-post does NOT; 404 non-fatal) is the first vertical test.
 
 ### Implementation
-In the drain path, for each surfaced message where `execute_obligation = TRUE` (command-kind) addressed to this slug, fire `POST /msg/<id>/started` (best-effort: capture HTTP status; 404/5xx → log + continue, never block the drain — mirrors the #557 authoritative-read discipline b1 owns). Fire once per (msg,slug); dedupe within a drain so a re-drain doesn't spam (idempotent server-side anyway).
+In the outbound reply path (`bus_post.sh` + the two codex reply helpers), after a **successful non-ack post**, if the post is tied to an inbound un-started `kind=dispatch` command held by this slug — matched by `--parent <dispatch-msg-id>` (primary, most direct signal) or a matching thread/topic — fire `POST /msg/<id>/started` for that dispatch msg_id, best-effort: capture HTTP status; 404/5xx → log + continue, never block or fail the post (mirrors the #557 authoritative-read discipline b1 owns). The endpoint is the authoritative gate (validates recipient + `kind=dispatch` + idempotent COALESCE), so an optimistic client fire for a non-qualifying parent is safely rejected (403/409) and ignored. Fire at most once per (msg,slug). A BLOCKED report is a non-ack post → counts as first-action/started (engagement happened; the block escalates on its own path).
 
 ### Key Constraints
-- Command-kind ONLY. Never emit started for Event-kind.
-- Non-fatal on every failure path (a started-emit failure must not break inbox drain).
+- `kind=dispatch` command replies ONLY, and ONLY on **non-ack** outbound posts (an `ack` POST must NEVER trigger started — ack ≠ started is the whole point).
+- Do NOT modify `scripts/check_inbox.sh` (READ-ONLY, #557). The emit lives in the outbound/reply path.
+- Non-fatal on every failure path (a started-emit failure must not break or alter the outbound post's own result/exit code).
 - No secret in scripts; reuse the existing `brisen_lab_read_terminal_key` credential path.
 
 ### Verification
-Rubric item 5 + live: a real dispatch drained by a live worker shows `started_at` within seconds (Fix-1 SQL).
+Rubric item 5 + live: a real worker's first reply to a `kind=dispatch` command shows `started_at` set within seconds (Fix-1 SQL).
 
 ## Files Modified
 - brisen-lab `app.py`/`bus.py` — new `POST /msg/<id>/started` route.
-- baker-master `scripts/check_inbox.sh` + `~/.claude/hooks/session-start-bus-drain.sh` — started emission on command-kind pickup.
+- baker-master `scripts/bus_post.sh` (+ `bus_post.py` for parity) + `scripts/codex-bus-reply.sh` + `scripts/codexarch-bus-reply.sh` — started emission on first non-ack `kind=dispatch` reply.
 - tests both repos.
 
 ## Do NOT Touch
 - `detect_delivery_started_sync` (keep as fallback), the ack endpoint, the `mark_delivery_started_sync` escalation guard, Event-kind paths.
+- `scripts/check_inbox.sh` — READ-ONLY drain surface (#557 contract, lines 19-24). The client emit does NOT go here.
+- The started-SLA / escalation path (`bus.py:1360`, `list_open_delivery_records_sync`) — no post-started monitoring added here (that's a separate companion; G0 #11118).
 
 ## Quality Checkpoints
 1. Recipient started-POST sets `started_at`; non-recipient → 403.
 2. Escalation-guard invariant preserved (late started can't un-escalate).
 3. Event-kind never emits/accepts started.
-4. Client drain emits started on command-kind pickup; endpoint-absent = non-fatal.
+4. Client reply path emits started on first non-ack `kind=dispatch` reply (never on an ack post, never from `check_inbox.sh`); endpoint-absent = non-fatal.
 5. Live acked-not-started population begins draining toward ~0 (feeds companion Rollout step 4 + rubric item 9).
 6. No new failures vs baselines (both repos).
 
@@ -117,4 +130,4 @@ LIMIT 1;
 ```
 
 ## Routing
-G0 codex-arch (pickup-vs-first-action + E22) → b1 builds → codex correctness → lead PASS → merge (endpoint then client) → deputy `POST_DEPLOY_AC_VERDICT`. Gates the `=1` flip in `CASE_ONE_BTUNE_STARTED_SLO_TERMINAL_1` Rollout step 5.
+G0 ✅ DONE — routed to codex bus terminal (#11102), verdict REQUEST_CHANGES (#11107), resolved to first-action by lead ruling #11121 (#11118). → b1 builds (this branch) → codex correctness gate (deputy checks conformance to this amended shape) → lead PASS → merge (endpoint then client) → deputy `POST_DEPLOY_AC_VERDICT`. Gates the `=1` flip in `CASE_ONE_BTUNE_STARTED_SLO_TERMINAL_1` Rollout step 5.
