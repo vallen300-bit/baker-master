@@ -857,3 +857,104 @@ def test_44_sh_whitespace_env_key_mints_not_posts_blank(stub_daemon, fake_op_pat
     key = captured[0]["payload"]["idempotency_key"]
     assert key.strip(), f"minted key must be non-blank, got {key!r}"
     assert key != "   "
+
+
+# ---- CLIENT_STARTED_EMISSION_1 — rubric 5: client `started` emission ----
+# A recipient's FIRST NON-ACK reply to a dispatch optimistically fires
+# POST /msg/<parent>/started. The endpoint is the authoritative gate (brisen-lab
+# tests/test_case_one_p5_delivery_confirmation.py); here we assert the CLIENT wiring:
+# it fires when (and only when) the reply threads onto a parent, it is best-effort
+# (a started miss never changes the post's exit code), the kill switch suppresses it,
+# and an ack post never emits.
+
+def test_45_sh_started_emitted_on_parent_reply(stub_daemon, fake_op_path):
+    """--parent 42 → after the main post lands, a best-effort POST /msg/42/started fires.
+    Two requests captured, in order: the reply, then the started signal. Exit 0."""
+    url, captured = stub_daemon
+    r = _run_sh(
+        ["lead", "on it", "heartbeat/x", "--parent", "42"],
+        _env_with({"BAKER_ROLE": "b1", "BRISEN_LAB_DAEMON_URL": url},
+                  fake_op_dir=fake_op_path),
+    )
+    assert r.returncode == 0, r.stderr
+    paths = [req["path"] for req in captured]
+    assert paths == ["/msg/lead", "/msg/42/started"], paths
+    # The started POST carries the sender's terminal key and an empty body.
+    started = captured[1]
+    assert "X-Terminal-Key" in started["headers"]
+    assert started["payload"] == {}
+
+
+def test_46_sh_no_started_without_parent(stub_daemon, fake_op_path):
+    """A non-reply post (no --parent) never fires a started signal — exactly one POST."""
+    url, captured = stub_daemon
+    r = _run_sh(
+        ["lead", "fyi", "note/x"],
+        _env_with({"BAKER_ROLE": "b1", "BRISEN_LAB_DAEMON_URL": url},
+                  fake_op_dir=fake_op_path),
+    )
+    assert r.returncode == 0, r.stderr
+    paths = [req["path"] for req in captured]
+    assert paths == ["/msg/lead"], paths
+    assert not any(p.endswith("/started") for p in paths)
+
+
+def test_47_sh_started_kill_switch_suppresses(stub_daemon, fake_op_path):
+    """BAKER_STARTED_EMISSION_DISABLED=1 suppresses the started fire even with --parent."""
+    url, captured = stub_daemon
+    r = _run_sh(
+        ["lead", "on it", "heartbeat/x", "--parent", "42"],
+        _env_with({"BAKER_ROLE": "b1", "BRISEN_LAB_DAEMON_URL": url,
+                   "BAKER_STARTED_EMISSION_DISABLED": "1"},
+                  fake_op_dir=fake_op_path),
+    )
+    assert r.returncode == 0, r.stderr
+    paths = [req["path"] for req in captured]
+    assert paths == ["/msg/lead"], paths
+
+
+def test_48_sh_started_miss_never_alters_exit_code(stub_daemon, fake_op_path):
+    """Best-effort: the main post lands 200, but the started signal gets a 404 (e.g. the
+    parent is not a dispatch / the sender is not a recipient). The post's exit code stays
+    0 and a one-line best-effort note is logged to stderr. Sequence [200, 404]: the reply
+    is request 1 (200), the started is request 2 (404)."""
+    _StubHandler._status_sequence = [200, 404]
+    url, captured = stub_daemon
+    r = _run_sh(
+        ["lead", "on it", "heartbeat/x", "--parent", "42"],
+        _env_with({"BAKER_ROLE": "b1", "BRISEN_LAB_DAEMON_URL": url},
+                  fake_op_dir=fake_op_path),
+    )
+    assert r.returncode == 0, r.stderr
+    paths = [req["path"] for req in captured]
+    assert paths == ["/msg/lead", "/msg/42/started"], paths
+    assert "started-emit best-effort miss" in r.stderr
+    assert "parent=42" in r.stderr
+
+
+def test_49_py_started_emitted_on_parent_reply(stub_daemon, fake_op_path):
+    """bus_post.py parity: --parent-id 42 on a dispatch reply fires POST /msg/42/started."""
+    url, captured = stub_daemon
+    r = _run_py(
+        ["--to", "lead", "--body", "on it", "--parent-id", "42"],
+        _env_with({"BAKER_ROLE": "b1", "BRISEN_LAB_DAEMON_URL": url},
+                  fake_op_dir=fake_op_path),
+    )
+    assert r.returncode == 0, r.stderr
+    paths = [req["path"] for req in captured]
+    assert paths == ["/msg/lead", "/msg/42/started"], paths
+
+
+def test_50_py_started_not_emitted_on_ack(stub_daemon, fake_op_path):
+    """bus_post.py: an ack post (kind=ack) NEVER emits started, even threaded on a parent —
+    ack alone is not a start (E22). Exactly one POST, no /started."""
+    url, captured = stub_daemon
+    r = _run_py(
+        ["--to", "lead", "--body", "ack", "--kind", "ack", "--parent-id", "42"],
+        _env_with({"BAKER_ROLE": "b1", "BRISEN_LAB_DAEMON_URL": url},
+                  fake_op_dir=fake_op_path),
+    )
+    assert r.returncode == 0, r.stderr
+    paths = [req["path"] for req in captured]
+    assert paths == ["/msg/lead"], paths
+    assert not any(p.endswith("/started") for p in paths)

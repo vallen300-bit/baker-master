@@ -28,6 +28,11 @@ fi
 TOPIC="$1"
 BODY="$2"
 RECIPIENT="${3:-lead}"   # reply-to-sender; default lead for backward compat
+# CLIENT_STARTED_EMISSION_1 (G0 #11121): optional 4th arg = the dispatch id this reply
+# answers. Forwarded to bus_post.sh as --parent, which best-effort fires the parent's
+# started signal (codex-arch's first non-ack reply => that dispatch is `started`). Omit
+# for a non-reply post (byte-identical to before).
+PARENT="${4:-}"
 
 # Locate canonical bus_post.sh — try FRESH code clones in order. Never the
 # ~/Desktop/baker-code clone: it lags origin/main and its sourced
@@ -47,4 +52,8 @@ if [[ -z "${BUS_POST:-}" ]]; then
   exit 2
 fi
 
-BAKER_ROLE=codex-arch exec "$BUS_POST" "$RECIPIENT" "$BODY" "$TOPIC"
+if [[ -n "$PARENT" ]]; then
+  BAKER_ROLE=codex-arch exec "$BUS_POST" "$RECIPIENT" "$BODY" "$TOPIC" --parent "$PARENT"
+else
+  BAKER_ROLE=codex-arch exec "$BUS_POST" "$RECIPIENT" "$BODY" "$TOPIC"
+fi

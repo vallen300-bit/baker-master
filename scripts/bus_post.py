@@ -179,6 +179,31 @@ def _post(recipient: str, payload: dict, key: str) -> dict:
     )
 
 
+def _emit_started_best_effort(parent_id: int, key: str) -> None:
+    """CLIENT_STARTED_EMISSION_1: optimistically POST /msg/<parent_id>/started so the
+    recipient's first non-ack reply marks the parent dispatch `started`. BEST-EFFORT:
+    any HTTP error (403 not_recipient / 409 not_dispatch / 404 / 5xx) or network/timeout
+    is swallowed after a one-line stderr note — the parent post has already committed and
+    its exit status must not change. The endpoint is the authoritative gate; this is just
+    the optimistic client fire (the daemon inference is the server-side fallback)."""
+    url = f"{DAEMON_URL}/msg/{parent_id}/started"
+    req = urllib.request.Request(
+        url, data=b"", headers={"X-Terminal-Key": key}, method="POST",
+    )
+    try:
+        with urllib.request.urlopen(req, timeout=15):
+            return
+    except urllib.error.HTTPError as e:
+        note = f"HTTP {e.code}"
+    except (urllib.error.URLError, socket.timeout, TimeoutError) as e:
+        note = f"{type(e).__name__}: {e}"
+    print(
+        f"[bus_post] started-emit best-effort miss for parent={parent_id} ({note}); "
+        "post already landed, continuing",
+        file=sys.stderr,
+    )
+
+
 def main() -> None:
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument("--to", required=True, help="comma-separated recipient slug(s), alias(es), or AG id(s)")
@@ -251,6 +276,20 @@ def main() -> None:
     # POST /msg/{terminal} is single-pathed but accepts multi-recipient body.
     result = _post(recipients[0], payload, key)
     print(json.dumps(result))
+
+    # CLIENT_STARTED_EMISSION_1 (G0 #11118 / lead #11121, first-action): a recipient's
+    # FIRST NON-ACK reply to a dispatch marks that dispatch `started`. Fire the parent's
+    # started signal when this reply threads onto a parent (--parent-id) AND is not an ack
+    # (bus_post.py, unlike bus_post.sh, CAN post kind=ack — guard on it). The
+    # /msg/<id>/started endpoint is the AUTHORITATIVE gate; this client fire is BEST-EFFORT
+    # and its outcome NEVER changes this send's exit status. Kill switch:
+    # BAKER_STARTED_EMISSION_DISABLED=1.
+    if (
+        args.parent_id is not None
+        and args.kind != "ack"
+        and os.environ.get("BAKER_STARTED_EMISSION_DISABLED", "") != "1"
+    ):
+        _emit_started_best_effort(args.parent_id, key)
 
 
 if __name__ == "__main__":

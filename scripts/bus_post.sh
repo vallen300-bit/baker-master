@@ -221,6 +221,28 @@ while :; do
     if [ "$CURL_EXIT" -eq 0 ] && [ "$HTTP" = "200" ]; then
         cat "$RESP_FILE"
         echo
+        # --- CLIENT_STARTED_EMISSION_1 (G0 #11118 / lead #11121, first-action) ---
+        # A recipient's FIRST NON-ACK reply to a dispatch marks that dispatch `started`
+        # (the terminal delivery state). bus_post.sh ALWAYS posts kind=dispatch and never
+        # an ack (acks go via the /ack endpoint from check_inbox.sh), so every post here
+        # is a non-ack reply. When this post threads onto a parent (--parent), optimistically
+        # fire the parent's started signal. The /msg/<id>/started endpoint is the
+        # AUTHORITATIVE gate (validates recipient-scope + kind='dispatch'); this client fire
+        # is BEST-EFFORT — a 404/403/409/5xx/network miss is logged and the post's exit code
+        # is NEVER altered. The daemon's detect_delivery_started_sync stays the server-side
+        # fallback for thread-only replies / un-upgraded clients. Kill switch:
+        # BAKER_STARTED_EMISSION_DISABLED=1.
+        if [ -n "$PARENT_ID" ] && [ "${BAKER_STARTED_EMISSION_DISABLED:-}" != "1" ]; then
+            set +e
+            ST_HTTP="$(curl -s -o /dev/null -w '%{http_code}' \
+                --connect-timeout 5 --max-time 15 \
+                -H "X-Terminal-Key: $KEY" \
+                -X POST "$DAEMON_URL/msg/${PARENT_ID}/started" 2>/dev/null)"
+            set -e
+            if [ "$ST_HTTP" != "200" ]; then
+                echo "[bus_post] started-emit best-effort miss for parent=${PARENT_ID} (HTTP ${ST_HTTP:-none}); post already landed, continuing" >&2
+            fi
+        fi
         exit 0
     fi
 
