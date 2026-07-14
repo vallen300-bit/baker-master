@@ -129,3 +129,10 @@ Observed manifestation in the merged delivery-status dataset (554 unique rows, w
 | 10965 | b2 | dispatch | 2026-07-14T07:59:22 | gate-request/semantic-delivery-evaluator-1 |
 
 **Count by recipient:** lead=50, deputy=13, b3=10, b2=8, deputy-codex=8, b1=5, b4=4, researcher=4, codex-arch=4, codex=3, baden-baden-desk=2, dispatcher=1, cowork-ah1=1, arm=1
+
+## POST_DEPLOY_AC (epoch cutover dep-d9b0unt8, 2026-07-14 ~10:34Z)
+Env applied after manual redeploy (Render env PUT does NOT auto-deploy — root cause of the ~25min stall, lead #11135). **Result: PASS-with-finding.**
+- receipt_epoch flipped `2026-07-13T16:22:33Z` → `2026-07-14T08:00:00Z`.
+- obligation_ack_coherence: 170 → **17**; undelivered_post_epoch: 7 → **1**. A-clear mechanism works.
+- **Finding-3 leak CONFIRMED (codex-arch #11125):** 7 pre-cutoff messages leaked past the 08:00Z filter via backfilled receipts (receipt `posted_at` = drain-time NOW, not original message time): **ids 10380, 10503, 10970, 10988, 10990, 10996, 10999** (all <11000; delivery posted_at ≥ 08:00Z). Pre-cutoff status inferred from monotonic serial IDs (no raw SQL per #11101).
+- Recommendation: fold into `RECEIPT_WRITE_DURABILITY_1` — anchor the epoch/obligation filter on message `created_at`, not drain-time receipt `posted_at`. Low urgency (switch OFF; count honest at 17).
