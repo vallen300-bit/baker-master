@@ -4,6 +4,10 @@
 # The caller supplies the target ref and optionally asks us to reproduce the
 # invoking checkout's tracked/untracked changes. The invoking checkout is never
 # used as Codex's cwd, so a review cannot switch its branch or leave artifacts.
+#
+# Review runs must not overlap another branch-creating operation in the same
+# checkout. Cleanup removes local branch refs absent at run start and reports
+# each deletion so an unexpected concurrent branch is observable.
 
 set -euo pipefail
 
@@ -84,7 +88,13 @@ cleanup_worktree() {
     while IFS= read -r branch_ref; do
         [ -n "$branch_ref" ] || continue
         if ! grep -Fqx "$branch_ref" "$INITIAL_BRANCHES"; then
-            git -C "$REPO" update-ref -d "$branch_ref" >/dev/null 2>&1 || true
+            if git -C "$REPO" update-ref -d "$branch_ref"; then
+                printf 'codex-review-worktree: removed review-created ref %s\n' \
+                    "$branch_ref" >&2
+            else
+                printf 'codex-review-worktree: could not remove review-created ref %s\n' \
+                    "$branch_ref" >&2
+            fi
         fi
     done < <(git -C "$REPO" for-each-ref --format='%(refname)' refs/heads)
     git -C "$REPO" worktree prune >/dev/null 2>&1 || true

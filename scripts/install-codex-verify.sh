@@ -23,9 +23,15 @@ install_one() {
     }
     mkdir -p "$INSTALL_DIR"
     temp="$(mktemp "$INSTALL_DIR/.codex-verify.XXXXXX")"
+    cleanup_temp() {
+        [ -z "${temp:-}" ] || rm -f -- "$temp"
+    }
+    trap cleanup_temp RETURN
     cp -p "$source" "$temp"
     chmod 755 "$temp"
     mv -f "$temp" "$target"
+    temp=""
+    trap - RETURN
 }
 
 install_one "$SCRIPT_DIR/codex-review-worktree.sh" "$INSTALL_DIR/codex-review-worktree.sh"
