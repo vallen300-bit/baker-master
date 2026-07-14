@@ -59,7 +59,12 @@ if [[ "${1:-}" == "--check" ]]; then
   [[ -x "$WORKER_DEPLOY" ]] || { emit "[FAIL] worker not executable at $WORKER_DEPLOY"; rc=1; }
   [[ -f "$INSTALLED_PLIST" ]] || { emit "[FAIL] plist missing at $INSTALLED_PLIST"; rc=1; }
   if command -v launchctl >/dev/null 2>&1; then
-    if ! launchctl list 2>/dev/null | grep -q "$LABEL"; then
+    # SIGPIPE-safe under `set -o pipefail`: `launchctl list | grep -q` lets grep
+    # short-circuit on the first match, launchctl then dies on SIGPIPE (rc141) and
+    # pipefail trips the whole pipeline -> a false "not loaded" (match-position
+    # lottery). Capture first, then grep pipe-free.
+    _ll="$(launchctl list 2>/dev/null || true)"
+    if ! grep -q "$LABEL" <<<"$_ll"; then
       emit "[FAIL] launchd job $LABEL not loaded"; rc=1
     fi
   fi
