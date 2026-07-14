@@ -2,7 +2,7 @@
 
 - brief_id: CLIENT_STARTED_EMISSION_1
 - seat: B1
-- attempt: 1
+- attempt: 2 (fresh seat resume 2026-07-14, prior seat silent ~80min per lead #11201)
 - branch (baker-master): b1/client-started-emission-1 (off main @48e84ec7)
 - branch (brisen-lab): b1/client-started-emission-1 (off main @33932d6) — Fix 1 landed @e822591
 - status: IN_PROGRESS — spec locked; Fix-1 ENDPOINT written+compiles; Fix-1 TESTS + Fix-2 remain
