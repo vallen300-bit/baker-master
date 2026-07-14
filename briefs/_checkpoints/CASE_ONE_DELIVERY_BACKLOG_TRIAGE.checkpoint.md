@@ -1,0 +1,29 @@
+# CHECKPOINT — CASE_ONE delivery-backlog-triage queue (deputy)
+
+seat: deputy (AH2, Claude Opus 4.8, 1M) — fresh seat, resumed lead #11022 6-item queue
+updated: 2026-07-14 ~10:23Z
+source-of-truth queue: vault branch deputy/checkpoint-11022-workqueue @bd4c801 (`_ops/agents/aihead2/session-checkpoint-2026-07-14-delivery-triage.md`)
+
+## Seat identity (resolved)
+Fresh seat = CANONICAL (lead #11052: original pid 16839 DEAD; #11047 stand-down SUPERSEDED). No duplicate.
+
+## DONE (do NOT redo)
+- **(2) 16-thread triage** — reported #11056; corrected #11069; lead accepted #11071. Net open lead decisions = ZERO (aircon #10155 closed; #10236→b1 Option A; BB-AUK #11073 disposed as ARM infra mis-routes; #10433 watermark-rider flagged, lead gets deputy-codex confirm).
+- **(3) PR #557 verify** — verdict #11062: #557 is client-read-only, does NOT cover delivered_at-NULL receipt drops (separate gap). Lead accepted.
+- **(4) B-tune brief** — BRIEF_CASE_ONE_BTUNE_STARTED_SLO_TERMINAL_1 + companion BRIEF_CLIENT_STARTED_EMISSION_1. Amended per lead #11076 (supersedes note / kill-switch default-OFF + 5-step arming ladder / companion+rubric9). Lead PASS #11092; MERGED to main @48e84ec7.
+- **(5) A-clear** — path-1 epoch bump confirmed (semantic_delivery_evaluator epoch-gated). Lead set BRISEN_LAB_RECEIPT_EPOCH=2026-07-14T08:00:00Z (#11110). Audit artifact briefs/_reports/A_CLEAR_AUDIT_2026-07-14.md @7ea3637 (114 IDs).
+- **(6) HV2-BL-001** — REMOVED from queue → deputy-codex (#11057).
+
+## PENDING (owned)
+- **(A) POST_DEPLOY_AC for the epoch flip** — ⚠️ Render redeploy NOT yet cut over as of 10:20Z (endpoint still shows OLD epoch 2026-07-13T16:22:33Z, obligation_ack_coherence=FALSE 170). WHEN deploy lands: GET /api/semantic_delivery, confirm receipt_epoch=2026-07-14T08:00:00Z + obligations_open drops, post POST_DEPLOY_AC v1 to lead. Ladder step 1 = DONE pending this.
+- **(B) Correctness gate PR #142** (deputy-codex B-tune, brisen-lab, branch deputy/case-one-btune-started-slo, OPEN). Coherence verdict POSTED #11126: CHANGE REQUIRED — exclude ratify_required from started-terminal predicate (scope to kind=dispatch, match b1 + P5); un-ratified Director Q would page at 15min started-SLA = E15. FULL diff read (app.py/db.py/semantic_delivery_evaluator.py/delivery_health.html/tests) STILL OWED beyond the coherence finding.
+- **(C) Correctness gate b1 client-started-emission** @27857c18 (CLIENT_STARTED_EMISSION_1). Cross-vendor: I authored the brief. Confirmed dispatch-only scope (correct). Full review owed.
+
+## Mechanics / discipline
+- Bus read-path FLAPS (F-503/E27): retry check_inbox 3-4x; full bodies via unread-window fetch loop (since=<recent> limit=500 unread=true); ack POST /msg/<id>/ack (retry on 000/503). Reply-to-sender (lead) on all verdicts.
+- Vault writes: shared ~/baker-vault stays on main; isolated worktree only (#157).
+- brisen-lab clone for diffs: ~/bm-b3-brisen-lab (git checkout origin/main -- <file>).
+- No raw SQL against bus DB (lead #11101).
+
+## Bus refs
+Seat-resolve #11052 · triage #11056/#11069/#11071 · PR557 #11062 · brief PASS #11092 · A-clear ruling #11101 / executed #11110 / report #11108 · coherence flag #11124 / verdict #11126.
