@@ -44,3 +44,26 @@ Seat-resolve #11052 · triage #11056/#11069/#11071 · PR557 #11062 · brief PASS
 ## FLEET_DEPLOY_PARITY_1 build line-review (2026-07-14 ~13:34Z, lead gate #11284 → verdict #11300)
 - **PASS (author-conformance).** PR #562 @787ebc0 (deputy-codex, 17 files +956/-36) faithfully implements the brief + #11248 F5 fold. F1 host sha-parity additive+correct (deployed vs repo WORKER_SRC, sources lib/parity.sh, +plist worker-path parity); F2 sweep missing=RED; F3 db_unreachable→RED-with-names (poller exit-0 preserved, fresh degraded stays OK); F4 MISSING_IS_RED default-OFF ladder-gated; F5 fleet_client_parity local-vs-origin/main + capability-probe + rollup + session-start surface. Off-bus preserved. Suites 77/26/8/7 green.
 - SCOPE: author-vs-brief only; independent Claude-side correctness gate = b4 (#11250), #9255 holds before merge. On merge+deploy → deputy runs live host+client two-sided drill (#11247 client repro) + POST_DEPLOY_AC_VERDICT v1; step-4 drain gated on F5 all-CLEAN.
+
+## POST-DEPLOY AC + PARITY REMEDIATION — SESSION 2026-07-14 ~13:55–14:34Z (deputy)
+**Both post-deploy dispatches (#11287 receipt-durability, #11323 fleet-parity) WORKED TO COMPLETION. Parity arc CLOSED by lead #11364.**
+
+### RECEIPT_WRITE_DURABILITY_1 (#144 @733cb19) — POST_DEPLOY_AC PASS 3/3 (verdict #11334, accepted)
+- AC1 7-ID leak excluded: PASS (undelivered_post_epoch=0; R2 m.created_at anchor).
+- AC2 delivered_at pin: PASS (live drill msg 11329 pinned 13:57:19Z post-drain; R1 durable write closes #557).
+- AC3 receipt_missing coherent: PASS (bucket=4 = 11070/11098/11125/11126, all pre-deploy 09:36–10:23Z; 0 post-deploy drops).
+- Lead ruling: leave the 4 legacy acked-no-receipt as-is (cosmetic, no backfill).
+
+### FLEET_DEPLOY_PARITY_1 (#562 @5cdf5fec) — two-sided drill + remediation DONE (verdicts #11337/#11352/#11357/#11362)
+- Host sweep caught real drift post-merge; client rollup caught b2+b3 stale (missing started-emit + emit_started.py). Feature works.
+- Remediation (lead GO #11341/#11353/#11364): b2 --ff-only to 5cdf5fec (local hook dirt preserved); b3 targeted 3-file checkout from origin/main (branch+10 commits untouched) = functional-CLEAN (byte-match origin, capability live) but sweep flags UNTRACKED-MODIFIED — lead ACCEPTED for gating.
+- **Cadence --check false-negative ROOT-CAUSED + FIXED:** `set -o pipefail` + `launchctl list | grep -q` → grep short-circuits → launchctl SIGPIPE(rc141) → pipefail trips → false "not loaded" (match-position lottery). Fix = capture-then-grep pipe-free, all 3 install_arm_*_job.sh. **PR #564 MERGED @0f69fe17.** Host reinstalled from merged main → sweep TRUE all-CLEAN (3/3). No drift for tomorrow's sweep.
+
+### STEP-4 = HELD (lead #11364). Diagnostic split (6h, 176 acked-not-started):
+- (a) in-SLA legit in-flight: 7. (b) past-SLA real work-backlog (recipient emits started elsewhere): 100 = lead 72 + deputy 28. (c) past-SLA structural non-emitters: 69 = deputy-codex 19/b1 14/b4 10/bb-desk 9/dispatcher 8/codex 7/ao-desk 1/b2 1.
+- HEADLINE: lead's seat is CLEAN (bucket b — drain path emits started; the 72 are genuine queue depth, not a bug). Client-staleness NOT the driver.
+
+### 3 FOLLOW-ONS (lead #11364, logged this lane, sequenced — see bus #11365):
+1. **(A) (c)-EXCLUSION in evaluator** [deputy authors brief; GATES ladder resume] — semantic_delivery_evaluator drops codex/deputy-codex/dispatcher/b1-b4/no-live-emission-desks from started-SLO + obligation_ack_coherence denominator; seat re-enters only on live-proven emission. **STARTING FIRST.**
+2. **(B) emit-on-pickup feasibility** [non-blocking] — assess which (c)-seats have a real pickup/drain hook to extend CLIENT_STARTED_EMISSION_1 (dispatcher+build-workers likely yes; codex app-resident likely NO). Report retrofittable set.
+3. **(C) fold lead-72 (b)-bucket into existing backlog triage** — one triage with obligation_ack_coherence=32. Ladder resumes only after (A) in evaluator AND (C) says residual is defect-shaped.
