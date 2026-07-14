@@ -5,7 +5,7 @@
 - attempt: 2 (fresh seat resume 2026-07-14, prior seat silent ~80min per lead #11201)
 - branch (baker-master): b1/client-started-emission-1 (off main @48e84ec7)
 - branch (brisen-lab): b1/client-started-emission-1 (off main @33932d6) — Fix 1 landed @e822591
-- status: CODEX-DELTA PUSHED — codex #11214/#11216 REQUEST_CHANGES folds landed on both PRs (#143 brisen-lab, #561 baker-master). Awaiting codex RE-GATE of the delta → lead PASS → merge (endpoint #143 THEN client #561) → deputy POST_DEPLOY_AC_VERDICT.
+- status: CODEX ROUND-3 FOLD PUSHED — #11225 last client gap fixed: bus_post.py started-emit gated on kind=='dispatch' (was != 'ack'); broadcast/ratify_decision+parent/thread no longer false-start. Tests 56/57 added, test_bus_post.py 57 pass. Server side CLEAN per codex. Awaiting codex re-gate of this single point → lead merges #143 THEN #561 → deputy POST_DEPLOY_AC_VERDICT. (Prior rounds: #11214/#11216 folds — Director-bypass, already_started, emit_started.py parent-or-thread, TOTAL guard — all landed.)
   Folds: (a) Director-bypass removed on /started (strict recipient membership, codex #11216); (b) already_started contract — mark_delivery_started_sync returns started/already_started/escalated, route echoes {ok,state}, at-least-once client + server-COALESCE single authority (lead #11215); (c) NEW scripts/emit_started.py single control point, PARENT OR THREAD match (topic dropped, collision hazard), TOTAL best-effort guard incl generic OSError; (d) brief amended. Counts: P5 endpoint 25 pass; full brisen-lab 27 fail (=baseline wake/identity env) /677 pass; test_bus_post.py 55 pass.
 - dispatched_by: lead (#11095), G0 ruling #11121 (OPTION A first-action)
 
