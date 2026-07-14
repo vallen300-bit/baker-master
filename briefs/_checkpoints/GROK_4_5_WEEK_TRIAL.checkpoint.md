@@ -1,12 +1,20 @@
 # CHECKPOINT: GROK_4_5_WEEK_TRIAL
 
-attempt: 1
+attempt: 2
 brief_id: GROK_4_5_WEEK_TRIAL_1
 branch: b4/grok-4-5-week-trial
 dispatched_by: lead (bus #11256); binding spec briefs/BRIEF_GROK_4_5_WEEK_TRIAL_1.md @967a5c7; rulings #11260
 updated: 2026-07-14
 
-## What's done — RE-SHIPPED (PR #563 @e3210423, awaiting codex re-gate)
+## Round 2 — RE-SHIPPED with P1-3 / P1-4 / P2 fixes (codex re-gate FAIL #11331 → order #11338)
+- Aligned this seat to reviewed PR head a9528884 (dropped a content-identical parallel local commit line 07a6ebd3; verified only unrelated ARM scripts differed, GROK files byte-identical). Head-freeze discipline per #11338.
+- P1-3 (UTC week rollover): xai_trial_route.run_grok_ask captures reserve_week once (ledger.week_start()) and threads it through reserve/settle/release. 2 regressions.
+- P1-4 (idempotent settle): ledger.settle() checks _has_settle under the per-week lock → no-op (reason=already_settled) on retry-after-lost-ack; partial unique index uq_xai_week_ledger_settle_ref added to migration 20260714a + ensure_ DDL. 2 regressions.
+- P2 (unknown routes): is_route_enabled enforces KNOWN_ROUTES; run_grok_ask rejects unknown route loud (route_unknown, distinct from route_disabled) + audit row. 2 regressions.
+- Tests: 30 pass, 2 skipped on fresh Postgres scratch (24 prior + 6 new). Singleton guard OK. Compile-clean.
+- NEXT: freeze head at re-ship post to lead → codex re-gate → lead merge → POST_DEPLOY_AC.
+
+## What's done — round 1 (PR #563 @e3210423)
 - ACK'd #11256 + #11260. Pulled brief. Built all 5 requirements + researcher-substrate.
 - Files: cost_monitor grok-4.5 entry; migration 20260714a + xai_week_ledger.py; xai_trial_route.py; tools/grok.py route arg; store_back bootstrap.
 - Tests: 24 pass (15 unit + 9 live-PG vs local scratch DB). Singleton guard OK.

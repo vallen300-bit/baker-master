@@ -1,7 +1,7 @@
 # B4 Ship Report — GROK_4_5_WEEK_TRIAL_1
 
 - **Brief:** `briefs/BRIEF_GROK_4_5_WEEK_TRIAL_1.md` (bus #11256, lead; rulings #11260; Director-ratified Option A)
-- **Branch/PR:** `b4/grok-4-5-week-trial` → **PR #563** (base main) @898e0c8a
+- **Branch/PR:** `b4/grok-4-5-week-trial` → **PR #563** (base main); re-shipped head FROZEN at round-2 fix commit (see "Re-gate fixes round 2")
 - **Date:** 2026-07-14
 - **Dispatcher / reply target:** lead
 - **Gate:** b4 build → codex cross-vendor review → lead merge → staged per-route activation
@@ -27,9 +27,9 @@
 Researcher fan-out is **agent-side** (researcher SKILL, not baker-master). This PR is the baker-master **substrate** that governs any Grok call tagged with an enabled trial route (recognizes all 3 route keys). The researcher passing `route=researcher_channel` and running the shadow synth is a **separate researcher lane** — not in this baker-master build.
 
 ## Tests
-- `tests/test_xai_trial_route.py` — 15 unit (route flag, allowlist, reserve math, actual-USD floor, orchestration, dispatcher guards).
-- `tests/test_xai_week_ledger.py` — 3 unit + 9 live-PG (reserve/settle/release, cap hard-block, warn, stale sweep, no double-sweep).
-- Local run: `24 passed` (live-PG against local Postgres scratch DB `baker_ledger_scratch`; 2 mcp-dep dispatcher tests skip locally, run in CI). Singleton guard OK. All touched files compile-clean.
+- `tests/test_xai_trial_route.py` — 19 unit (route flag + unknown-route enforcement, allowlist, reserve math, actual-USD floor, orchestration incl. week-threading, dispatcher guards).
+- `tests/test_xai_week_ledger.py` — 3 unit + 11 live-PG (reserve/settle/release, cap hard-block, warn, stale sweep, no double-sweep, idempotent settle, unique-index guard).
+- Local run: **`30 passed, 2 skipped`** (live-PG against a fresh local Postgres scratch DB; 2 mcp-dep dispatcher tests skip locally, run in CI). Singleton guard OK. All touched files compile-clean.
 
 ## POST_DEPLOY_AC plan (emit verdict to lead after merge+deploy)
 1. Tables `xai_week_ledger` + `xai_call_audit` exist in prod (store_back bootstrap on boot).
@@ -50,6 +50,37 @@ Researcher fan-out is **agent-side** (researcher SKILL, not baker-master). This 
   `_trial.settle_ok=False`. Spend still lands in `api_cost_log` (independent daily
   surface). Regression: `test_settle_failure_retained_and_audited`.
 - Re-verified: 24 pass on a fresh Postgres (mcp dispatcher tests skip locally).
+
+## Re-gate fixes round 2 (codex re-gate FAIL #11331 → #11338: 2 P1s + 1 P2)
+- **P1-3 (UTC week rollover mis-accounting):** `run_grok_ask` now captures the
+  reservation week ONCE (`reserve_week = ledger.week_start()`) and threads it
+  through `reserve` / `settle` / `release`. Previously each defaulted to
+  `week_start()` at its own call time, so a call crossing Monday 00:00Z reserved
+  in the old week and settled in the new one (cross-week mis-accounting + a hold
+  lingering in the old week until the TTL sweep). Regressions:
+  `test_reservation_week_threaded_to_settle`,
+  `test_reservation_week_threaded_to_release_on_failure`.
+- **P1-4 (non-idempotent settle retry):** `settle()` is now idempotent. Under the
+  per-week advisory lock it checks `_has_settle(ref)` and returns a no-op
+  (`reason=already_settled`, `idempotent=True`) if a settle row already exists —
+  so a settle whose ack is lost AFTER DB commit is retried safely (no second
+  settle/top-up row, no double cap burn). Backed at the DB layer by a partial
+  unique index `uq_xai_week_ledger_settle_ref (request_ref) WHERE kind='settle'`
+  (added to both the migration and the `ensure_*` bootstrap DDL). Regressions:
+  `test_settle_is_idempotent_on_retry`, `test_settle_unique_index_blocks_raw_double_settle`.
+- **P2 (unknown routes accepted):** `is_route_enabled` now ENFORCES `KNOWN_ROUTES`
+  membership (a typo'd/stale env route can never enable), and `run_grok_ask`
+  rejects an unknown route loud with a DISTINCT `route_unknown` cause (separate
+  from `route_disabled`) + a `blocked_route_unknown` audit row. Regressions:
+  `test_is_route_enabled_rejects_unknown_route_in_env`,
+  `test_unknown_route_rejected_loud_and_skips_client`.
+- **Head-freeze discipline (per #11338):** aligned this seat to the reviewed PR
+  head `a9528884` before touching anything (dropped a content-identical parallel
+  local commit line), built the round-2 fixes on top, and freeze the head at the
+  re-ship post so codex re-gates a stationary target.
+- Re-verified: **30 pass, 2 skipped** on a fresh Postgres scratch DB
+  (`24 prior + 6 new`; 2 mcp-dep dispatcher tests skip locally). Singleton guard OK.
+  All touched files compile-clean.
 
 ## Activation runbook (staged, lead-owned)
 - Set `GROK45_ENABLED_ROUTES=b4_runtime` via single-key Render env PUT (`tools.render_env_guard.safe_env_put` — never array PUT) + **manual deploy** (env PUT alone does not restart).

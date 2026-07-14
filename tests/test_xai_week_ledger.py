@@ -110,6 +110,58 @@ def test_cap_counts_overspend_on_next_reserve(pg_conn, monkeypatch):
     assert r["reason"] == "weekly_cap_reached"
 
 
+def test_settle_is_idempotent_on_retry(pg_conn):
+    # P1-4: a settle whose ack is lost after commit gets retried. The retry must be
+    # a no-op — no second settle/top-up row, no double cap burn.
+    week = _uniq_week(22)
+    ref = uuid.uuid4().hex
+    ledger.reserve("b4_runtime", 1.00, ref, week=week, conn=pg_conn)
+    s1 = ledger.settle(ref, 0.40, "b4_runtime", week=week, conn=pg_conn)
+    assert s1["settled"] is True
+    assert not s1.get("idempotent")
+    b1 = ledger.remaining_budget(week=week, conn=pg_conn)
+    assert b1["settled_usd"] == pytest.approx(0.40)
+    assert b1["effective_used_usd"] == pytest.approx(0.40)
+
+    # Simulate the lost-ack retry: same ref, same actual.
+    s2 = ledger.settle(ref, 0.40, "b4_runtime", week=week, conn=pg_conn)
+    assert s2["settled"] is True
+    assert s2.get("idempotent") is True
+    assert s2["reason"] == "already_settled"
+
+    # Even a retry with a DIFFERENT actual must not re-settle.
+    s3 = ledger.settle(ref, 0.99, "b4_runtime", week=week, conn=pg_conn)
+    assert s3.get("idempotent") is True
+
+    b2 = ledger.remaining_budget(week=week, conn=pg_conn)
+    # Unchanged from the first settle — no double count.
+    assert b2["settled_usd"] == pytest.approx(0.40)
+    assert b2["effective_used_usd"] == pytest.approx(0.40)
+    # Exactly one settle row exists for this ref.
+    cur = pg_conn.cursor()
+    cur.execute("SELECT COUNT(*) FROM xai_week_ledger WHERE request_ref=%s AND kind='settle'",
+                (ref,))
+    assert cur.fetchone()[0] == 1
+    cur.close()
+
+
+def test_settle_unique_index_blocks_raw_double_settle(pg_conn):
+    # P1-4 DB-level guard: a direct second settle INSERT (bypassing _has_settle)
+    # is rejected by the partial unique index.
+    import psycopg2
+    week = _uniq_week(23)
+    ref = uuid.uuid4().hex
+    ledger.reserve("b4_runtime", 1.00, ref, week=week, conn=pg_conn)
+    ledger.settle(ref, 0.50, "b4_runtime", week=week, conn=pg_conn)
+    cur = pg_conn.cursor()
+    with pytest.raises(psycopg2.IntegrityError):
+        cur.execute(
+            "INSERT INTO xai_week_ledger (week_start, route, kind, amount_usd, request_ref) "
+            "VALUES (%s,'b4_runtime','settle',%s,%s)", (week, 0.10, ref))
+    pg_conn.rollback()
+    cur.close()
+
+
 def test_release_frees_full_hold(pg_conn):
     week = _uniq_week(11)
     ref = uuid.uuid4().hex

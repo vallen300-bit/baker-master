@@ -33,6 +33,15 @@ def test_enabled_routes_parses_comma_list(monkeypatch):
     assert trial.is_route_enabled("researcher_shadow_synth") is False
 
 
+def test_is_route_enabled_rejects_unknown_route_in_env(monkeypatch):
+    # P2: a route string that is NOT a brief-scoped KNOWN_ROUTES key must never
+    # enable, even if someone lists it (typo, stale config) in the env.
+    monkeypatch.setenv("GROK45_ENABLED_ROUTES", "b4_runtime, bogus_route")
+    assert "bogus_route" not in trial.KNOWN_ROUTES
+    assert trial.is_route_enabled("bogus_route") is False
+    assert trial.is_route_enabled("b4_runtime") is True
+
+
 # ─────────────────────────── reservation math ───────────────────────────
 
 def test_estimate_reserve_is_conservative():
@@ -91,6 +100,51 @@ def enabled(monkeypatch):
     monkeypatch.setenv("GROK45_ENABLED_ROUTES", "b4_runtime")
     # neutralize DB-touching audit writes
     monkeypatch.setattr(trial.ledger, "write_call_audit", lambda **k: None)
+
+
+def test_unknown_route_rejected_loud_and_skips_client(enabled, monkeypatch):
+    # P2: an unknown route fails loud with a DISTINCT reason (route_unknown), not
+    # route_disabled, and never touches the client.
+    client = _FakeClient()
+    with pytest.raises(trial.GrokTrialError) as ei:
+        trial.run_grok_ask(client=client, prompt="hi", route="not_a_real_route")
+    assert ei.value.info["reason"] == "route_unknown"
+    assert "known_routes" in ei.value.info
+    assert client.calls == []
+
+
+def test_reservation_week_threaded_to_settle(enabled, monkeypatch):
+    # P1-3: the week captured at reserve time must be passed to settle, so a call
+    # crossing Monday 00:00Z settles in the SAME week it reserved in.
+    seen = {}
+    monkeypatch.setattr(trial.ledger, "reserve",
+                        lambda **k: (seen.update({"reserve_week": k.get("week")}),
+                                     {"granted": True, "reason": "ok"})[1])
+    monkeypatch.setattr(trial.ledger, "settle",
+                        lambda ref, actual, route, **k: (
+                            seen.update({"settle_week": k.get("week")}),
+                            {"settled": True, "released_residual_usd": 0.0})[1])
+    monkeypatch.setattr(trial, "_settle_into_api_cost_log", lambda *a, **k: None)
+    client = _FakeClient()
+    trial.run_grok_ask(client=client, prompt="hi", route="b4_runtime")
+    assert seen["reserve_week"] is not None
+    assert seen["reserve_week"] == seen["settle_week"]
+
+
+def test_reservation_week_threaded_to_release_on_failure(enabled, monkeypatch):
+    # P1-3: the same pinned week must reach release() when the call fails.
+    seen = {}
+    monkeypatch.setattr(trial.ledger, "reserve",
+                        lambda **k: (seen.update({"reserve_week": k.get("week")}),
+                                     {"granted": True, "reason": "ok"})[1])
+    monkeypatch.setattr(trial.ledger, "release",
+                        lambda ref, route, **k: seen.update({"release_week": k.get("week")}))
+    monkeypatch.setattr(trial.ledger, "settle", lambda *a, **k: {"settled": True})
+    client = _FakeClient(raises=RuntimeError("xai 500"))
+    with pytest.raises(trial.GrokTrialError):
+        trial.run_grok_ask(client=client, prompt="hi", route="b4_runtime")
+    assert seen["reserve_week"] is not None
+    assert seen["reserve_week"] == seen["release_week"]
 
 
 def test_route_disabled_raises_and_skips_client(monkeypatch):

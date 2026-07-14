@@ -33,12 +33,13 @@ BUILD (5 requirements per #11256):
    est + actual spend, tool/schema result, outcome.
 5. Route flag default-OFF per role — activation = lead GO one route at a time.
 
-STATUS: SHIPPED — PR #563 (base main) @898e0c8a, awaiting codex cross-vendor
-gate → lead merge → POST_DEPLOY_AC. Blocker on spec corpus cleared by lead
-#11260 (verbatim corpus + rulings landed as briefs/BRIEF_GROK_4_5_WEEK_TRIAL_1.md
-@967a5c7). All 5 requirements built + researcher substrate. 24 tests pass
-(15 unit + 9 live-PG vs local scratch DB). Ship report:
-briefs/_reports/B4_grok_4_5_week_trial_20260714.md. Ship posted to lead #11299.
+STATUS: RE-SHIPPED round 2 — PR #563 (base main). Codex re-gate FAIL #11331
+(fix order #11338: P1-3 UTC week rollover, P1-4 non-idempotent settle, P2 unknown
+routes) all FIXED on the reviewed head a9528884. Round-1 codex FAIL #11309 (2 P1s)
+already fixed @e3210423. All 5 requirements built + researcher substrate. 30 tests
+pass, 2 skipped (24 prior + 6 new, fresh scratch DB). Head FROZEN at re-ship.
+Ship report: briefs/_reports/B4_grok_4_5_week_trial_20260714.md. Awaiting codex
+re-gate → lead merge → POST_DEPLOY_AC.
 
 **Prior seat state (all CLOSED 2026-07-13/14):**
 - ARM_OUT_OF_BAND_ALARM_1 — shipped + merged (PR #556 @codex-PASS #10635 / lead #10639); semantic consumer micro-lane merged; arm-semantic-enforce gate merged @a089d90 (#11197).

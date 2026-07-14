@@ -98,6 +98,13 @@ def ensure_xai_week_ledger_tables(conn) -> None:
             CREATE INDEX IF NOT EXISTS idx_xai_week_ledger_request_ref
             ON xai_week_ledger (request_ref)
         """)
+        # P1-4: at most ONE settle row per request_ref — DB-level guarantee that a
+        # settle retried after a lost ack cannot double-count (belt to the in-txn
+        # _has_settle no-op braces).
+        cur.execute("""
+            CREATE UNIQUE INDEX IF NOT EXISTS uq_xai_week_ledger_settle_ref
+            ON xai_week_ledger (request_ref) WHERE kind = 'settle'
+        """)
         cur.execute("""
             CREATE TABLE IF NOT EXISTS xai_call_audit (
                 id            SERIAL PRIMARY KEY,
@@ -286,6 +293,16 @@ def reserve(route: str, amount_usd: float, request_ref: str,
             _store()._put_conn(conn)
 
 
+def _has_settle(cur, week: date, request_ref: str) -> bool:
+    """True if a settle row already exists for ``request_ref`` this week (P1-4)."""
+    cur.execute(
+        """SELECT 1 FROM xai_week_ledger
+           WHERE week_start = %s AND request_ref = %s AND kind = 'settle' LIMIT 1""",
+        (week, request_ref),
+    )
+    return cur.fetchone() is not None
+
+
 def _held_for_ref(cur, week: date, request_ref: str) -> float:
     """Amount still held for one request_ref = reserved − settled − released."""
     cur.execute(
@@ -304,9 +321,15 @@ def settle(request_ref: str, actual_usd: float, route: str,
     """Record ACTUAL spend for ``request_ref`` and release the unused residual.
 
     Writes a ``settle`` row (actual) and, if the reserve exceeded actual, a
-    ``release`` row for the residual so it returns to the weekly pool. Idempotent
-    enough for one-shot use; a second settle would double-count, so callers must
-    settle each ref once.
+    ``release`` row for the residual so it returns to the weekly pool.
+
+    IDEMPOTENT (P1-4): a settle that COMMITS but whose ack/return is lost to a
+    network fault makes the caller retry. Under the per-week advisory lock we
+    first check for an existing settle row for this ref and no-op if present
+    (``reason='already_settled'``) — so a retry-after-commit never inserts a
+    second settle/top-up and never double-burns the weekly cap. A partial unique
+    index (``uq_xai_week_ledger_settle_ref``) enforces the one-settle-per-ref
+    invariant at the DB layer as well.
     """
     week = week or week_start()
     actual = max(0.0, float(actual_usd or 0.0))
@@ -318,6 +341,17 @@ def settle(request_ref: str, actual_usd: float, route: str,
     try:
         cur = conn.cursor()
         cur.execute("SELECT pg_advisory_xact_lock(%s, %s)", (_LOCK_NAMESPACE, _lock_key(week)))
+        # P1-4: idempotent no-op if this ref already settled (retry after lost ack).
+        if _has_settle(cur, week, request_ref):
+            conn.commit()  # release the xact lock; no new rows
+            cur.close()
+            logger.info(
+                "xAI settle idempotent no-op route=%s ref=%s (already settled this week)",
+                route, request_ref,
+            )
+            return {"settled": True, "reason": "already_settled",
+                    "actual_usd": 0.0, "released_residual_usd": 0.0,
+                    "topup_usd": 0.0, "idempotent": True, "week_start": str(week)}
         held = _held_for_ref(cur, week, request_ref)
         # P1-1 fix: actual spend can EXCEED the reservation (trial_route settles
         # max(payload cost, token-rate cost) as the conservative actual). If we

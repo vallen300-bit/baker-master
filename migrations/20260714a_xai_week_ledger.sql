@@ -39,6 +39,13 @@ CREATE INDEX IF NOT EXISTS idx_xai_week_ledger_week
 CREATE INDEX IF NOT EXISTS idx_xai_week_ledger_request_ref
     ON xai_week_ledger (request_ref);
 
+-- P1-4 (idempotent settle): at most ONE settle row per request_ref. A settle
+-- whose ack is lost after DB commit gets retried by the caller; this partial
+-- unique index guarantees the retry cannot double-count the weekly cap even if
+-- the in-transaction _has_settle guard is ever bypassed.
+CREATE UNIQUE INDEX IF NOT EXISTS uq_xai_week_ledger_settle_ref
+    ON xai_week_ledger (request_ref) WHERE kind = 'settle';
+
 CREATE TABLE IF NOT EXISTS xai_call_audit (
     id            SERIAL PRIMARY KEY,
     logged_at     TIMESTAMPTZ NOT NULL DEFAULT NOW(),

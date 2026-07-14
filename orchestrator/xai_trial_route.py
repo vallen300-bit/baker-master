@@ -66,7 +66,11 @@ def enabled_routes() -> frozenset[str]:
 
 
 def is_route_enabled(route: Optional[str]) -> bool:
-    return bool(route) and route in enabled_routes()
+    """A route is trial-active only if it is a brief-scoped KNOWN trial route AND
+    listed in ``GROK45_ENABLED_ROUTES``. P2: KNOWN_ROUTES is ENFORCED here (not
+    merely documented) so a typo'd or unrecognized route string in the env can
+    never flip a call onto the governed grok-4.5 path."""
+    return bool(route) and route in KNOWN_ROUTES and route in enabled_routes()
 
 
 # ─────────────────────────── reservation estimate ───────────────────────────
@@ -140,6 +144,17 @@ def run_grok_ask(
     """
     request_ref = request_ref or uuid.uuid4().hex
 
+    # (0) Unknown route — a route string outside the brief-scoped KNOWN_ROUTES is a
+    # config/programming error, not a merely-disabled route. Reject loud + distinct
+    # (P2) so a typo'd route key can never silently become a live trial call.
+    if route not in KNOWN_ROUTES:
+        info = {"reason": "route_unknown", "route": route,
+                "known_routes": sorted(KNOWN_ROUTES)}
+        ledger.write_call_audit(model=TRIAL_MODEL, route=(str(route) if route else "(none)"),
+                                request_ref=request_ref, outcome="blocked_route_unknown",
+                                error_class="route_unknown", matter_slug=matter_slug)
+        raise GrokTrialError(info)
+
     # (1) Route flag — disabled routes never call xAI.
     if not is_route_enabled(route):
         info = {"reason": "route_disabled", "route": route,
@@ -159,9 +174,17 @@ def run_grok_ask(
         raise GrokTrialError(info)
 
     # (3) Conservative reservation BEFORE the call. `ask` uses no search tool.
+    # P1-3: capture the reservation week ONCE (at reserve time) and thread it
+    # through settle/release. A call that starts just before Monday 00:00Z would
+    # otherwise reserve in the old week and settle in the NEW week (each defaulting
+    # to week_start() at its own call time) — cross-week misaccounting plus a hold
+    # that lingers in the old week until the TTL sweep. Pinning the week keeps the
+    # whole reserve→settle/release lifecycle in one week.
+    reserve_week = ledger.week_start()
     reserve_usd = estimate_reserve_usd(prompt, instructions, max_output_tokens,
                                        include_tool_allowance=False)
-    res = ledger.reserve(route=route, amount_usd=reserve_usd, request_ref=request_ref)
+    res = ledger.reserve(route=route, amount_usd=reserve_usd, request_ref=request_ref,
+                         week=reserve_week)
     if not res.get("granted"):
         info = {"reason": res.get("reason", "reserve_denied"), "route": route,
                 "reserved_usd": reserve_usd,
@@ -186,7 +209,7 @@ def run_grok_ask(
             timeout=timeout,
         )
     except Exception as e:
-        ledger.release(request_ref, route, reason="call_failed")
+        ledger.release(request_ref, route, reason="call_failed", week=reserve_week)
         info = {"reason": "grok_call_failed", "route": route,
                 "error_class": type(e).__name__, "cause": str(e),
                 "reserved_usd": reserve_usd, "spend_usd": 0.0}
@@ -208,9 +231,11 @@ def run_grok_ask(
     # Retry with bounded backoff; on persistent failure DO NOT release — retain
     # the reservation so the cap stays conservative (over-counts, never under),
     # log loud, and mark the audit row settle_failed (never outcome=ok).
+    # Settle is idempotent (P1-4: unique settle key per ref), so retrying after a
+    # commit whose ack was lost is a safe no-op — it never double-burns the cap.
     settle_res = {"settled": False, "reason": "not_attempted"}
     for attempt in range(_SETTLE_MAX_ATTEMPTS):
-        settle_res = ledger.settle(request_ref, actual_usd, route)
+        settle_res = ledger.settle(request_ref, actual_usd, route, week=reserve_week)
         if settle_res.get("settled"):
             break
         logger.warning("grok trial settle attempt %d/%d failed route=%s ref=%s reason=%s",
