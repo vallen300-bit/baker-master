@@ -179,29 +179,28 @@ def _post(recipient: str, payload: dict, key: str) -> dict:
     )
 
 
-def _emit_started_best_effort(parent_id: int, key: str) -> None:
-    """CLIENT_STARTED_EMISSION_1: optimistically POST /msg/<parent_id>/started so the
-    recipient's first non-ack reply marks the parent dispatch `started`. BEST-EFFORT:
-    any HTTP error (403 not_recipient / 409 not_dispatch / 404 / 5xx) or network/timeout
-    is swallowed after a one-line stderr note — the parent post has already committed and
-    its exit status must not change. The endpoint is the authoritative gate; this is just
-    the optimistic client fire (the daemon inference is the server-side fallback)."""
-    url = f"{DAEMON_URL}/msg/{parent_id}/started"
-    req = urllib.request.Request(
-        url, data=b"", headers={"X-Terminal-Key": key}, method="POST",
-    )
+def _emit_started_best_effort(sender: str, key: str, parent_id, thread_id) -> None:
+    """CLIENT_STARTED_EMISSION_1: fire the recipient's first-action `started` signal via
+    the shared emitter (scripts/emit_started.py — the SINGLE control point, also used by
+    bus_post.sh). It resolves the target (parent primary, thread fallback; topic dropped
+    per lead #11216) and best-effort POSTs the authoritative /msg/<id>/started endpoint.
+
+    TOTAL best-effort (lead #11215 / codex #11216): the helper ALWAYS exits 0, AND this
+    call is wrapped so a subprocess-spawn failure (e.g. a generic OSError) can NEVER
+    propagate and alter bus_post.py's exit status — the outbound post has already
+    committed and printed its result."""
+    helper = Path(__file__).resolve().parent / "emit_started.py"
+    argv = [sys.executable, str(helper), "--daemon", DAEMON_URL,
+            "--key", key, "--sender", sender]
+    if parent_id is not None:
+        argv += ["--parent", str(parent_id)]
+    if thread_id is not None:
+        argv += ["--thread", str(thread_id)]
     try:
-        with urllib.request.urlopen(req, timeout=15):
-            return
-    except urllib.error.HTTPError as e:
-        note = f"HTTP {e.code}"
-    except (urllib.error.URLError, socket.timeout, TimeoutError) as e:
-        note = f"{type(e).__name__}: {e}"
-    print(
-        f"[bus_post] started-emit best-effort miss for parent={parent_id} ({note}); "
-        "post already landed, continuing",
-        file=sys.stderr,
-    )
+        subprocess.run(argv, timeout=30)
+    except Exception as e:  # noqa: BLE001 — TOTAL: never let the emit affect the caller.
+        print(f"[bus_post] started-emit spawn failed ({type(e).__name__}: {e}); "
+              "post already landed, continuing", file=sys.stderr)
 
 
 def main() -> None:
@@ -278,18 +277,18 @@ def main() -> None:
     print(json.dumps(result))
 
     # CLIENT_STARTED_EMISSION_1 (G0 #11118 / lead #11121, first-action): a recipient's
-    # FIRST NON-ACK reply to a dispatch marks that dispatch `started`. Fire the parent's
-    # started signal when this reply threads onto a parent (--parent-id) AND is not an ack
-    # (bus_post.py, unlike bus_post.sh, CAN post kind=ack — guard on it). The
-    # /msg/<id>/started endpoint is the AUTHORITATIVE gate; this client fire is BEST-EFFORT
-    # and its outcome NEVER changes this send's exit status. Kill switch:
+    # FIRST NON-ACK reply to a dispatch marks that dispatch `started`. Fire when this reply
+    # threads onto a dispatch (by --parent-id, or by --thread-id when no parent) AND is not
+    # an ack (bus_post.py, unlike bus_post.sh, CAN post kind=ack — guard on it). The
+    # /msg/<id>/started endpoint is the AUTHORITATIVE gate; this client fire is TOTAL
+    # best-effort and its outcome NEVER changes this send's exit status. Kill switch:
     # BAKER_STARTED_EMISSION_DISABLED=1.
     if (
-        args.parent_id is not None
+        (args.parent_id is not None or args.thread_id is not None)
         and args.kind != "ack"
         and os.environ.get("BAKER_STARTED_EMISSION_DISABLED", "") != "1"
     ):
-        _emit_started_best_effort(args.parent_id, key)
+        _emit_started_best_effort(sender, key, args.parent_id, args.thread_id)
 
 
 if __name__ == "__main__":

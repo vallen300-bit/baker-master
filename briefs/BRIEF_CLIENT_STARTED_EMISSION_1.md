@@ -39,7 +39,8 @@ Ignore unrelated rails: standing-contract, build-command-center, skills-and-play
 2. Unit: `POST /msg/<id>/started` from a NON-recipient key → 403 (scope check, mirror ack-endpoint auth).
 3. Unit: endpoint respects the escalation guard — a started POST arriving after `escalated_at` set does NOT un-escalate (`db.py:1190-1196` invariant preserved).
 4. Unit: non-dispatch row → endpoint rejects (409/`not_dispatch`). Covers both Event-kind (`execute_obligation=FALSE`) AND `ratify_required` (`execute_obligation=TRUE` but `kind!='dispatch'`) — the codex-G0 scope correction. Only `kind='dispatch' AND execute_obligation` accepts started.
-5. Unit (client): the **reply path** (`bus_post.sh` + codex reply scripts), when a role posts a non-ack message whose thread OR topic matches an inbound un-started `kind=dispatch` command it holds, POSTs `/started` for that msg_id once; a BLOCKED report counts as first-action; on endpoint 404/5xx it logs + continues (non-fatal — rollout-window safe). NOT wired into the READ-ONLY `check_inbox.sh`.
+5. Unit (client): the **reply path** (`bus_post.sh` + `bus_post.py` + codex reply scripts), when a role posts a non-ack message tied to an inbound un-started `kind=dispatch` command it holds — matched by `--parent <id>` (primary) **OR** `--thread <uuid>` (topic-match **DROPPED per lead ruling #11216 — collision hazard**: our topics are long-lived + heavily reused, so topic-matching would ambiguously false-start unrelated dispatches) — POSTs `/started` for that msg_id; a BLOCKED report counts as first-action; on endpoint 404/5xx/network/any error it logs + continues (**TOTAL** non-fatal — rollout-window safe). NOT wired into the READ-ONLY `check_inbox.sh`.
+   - **Dedupe (lead ruling #11215):** the client emits **at-least-once** (no client-side dedupe state — persistent client dedupe would add new failure modes to dedupe a call that is already idempotent server-side). The server COALESCE in `mark_delivery_started_sync` is the **single dedupe authority**; a repeat POST is harmless by design and the endpoint reports `state='already_started'` (zero state change, escalation guard intact).
 6. Suite: no new failures vs the 27-fail brisen-lab baseline; baker-master client tests green.
 7. Live `POST_DEPLOY_AC_VERDICT`: after deploy, a real command-kind dispatch drained by a live worker shows `started_at` set within seconds of pickup (query below).
 
@@ -90,7 +91,28 @@ Outbound posts go through `scripts/bus_post.sh` (+ `bus_post.py`) and the codex 
 - Prototype: N/A. TDD: rubric item 5 (reply → started; ack-post does NOT; 404 non-fatal) is the first vertical test.
 
 ### Implementation
-In the outbound reply path (`bus_post.sh` + the two codex reply helpers), after a **successful non-ack post**, if the post is tied to an inbound un-started `kind=dispatch` command held by this slug — matched by `--parent <dispatch-msg-id>` (primary, most direct signal) or a matching thread/topic — fire `POST /msg/<id>/started` for that dispatch msg_id, best-effort: capture HTTP status; 404/5xx → log + continue, never block or fail the post (mirrors the #557 authoritative-read discipline b1 owns). The endpoint is the authoritative gate (validates recipient + `kind=dispatch` + idempotent COALESCE), so an optimistic client fire for a non-qualifying parent is safely rejected (403/409) and ignored. Fire at most once per (msg,slug). A BLOCKED report is a non-ack post → counts as first-action/started (engagement happened; the block escalates on its own path).
+The client emission lives in ONE shared control point, `scripts/emit_started.py`, invoked by
+`bus_post.sh`, `bus_post.py`, and (via `bus_post.sh --parent`) the two codex reply helpers.
+After a **successful non-ack post**, if the post is tied to an inbound un-started
+`kind=dispatch` command held by this slug — target resolved by `--parent <dispatch-msg-id>`
+(primary, most direct signal) **OR** `--thread <uuid>` (bounded `unread=true&kind=dispatch`
+read that resolves the dispatch addressed to this slug in that thread; an already-acked
+thread-only dispatch falls through to the server-side `detect_delivery_started_sync`
+fallback) — fire `POST /msg/<id>/started` for that dispatch msg_id.
+
+**Topic-match is DROPPED (lead ruling #11216 — collision hazard):** our topics are long-lived
+and heavily reused (a single case-one topic carried 30+ messages), so topic-matching would
+ambiguously false-start unrelated dispatches. Parent and thread are unambiguous; topic is not.
+
+**TOTAL best-effort:** capture every failure axis (HTTP 4xx/5xx, network/timeout, a generic
+`OSError`, a malformed daemon response) → log one line + continue; `emit_started.py` ALWAYS
+exits 0 and can NEVER alter the outbound post's exit code (mirrors the #557 authoritative-read
+discipline b1 owns). The endpoint is the authoritative gate (validates **recipient membership —
+NO Director bypass, codex #11216** + `kind=dispatch` + idempotent COALESCE), so an optimistic
+client fire for a non-qualifying parent is safely rejected (403/409) and ignored. The client
+fires **at-least-once** (server COALESCE is the single dedupe authority, no client dedupe
+state). A BLOCKED report is a non-ack post → counts as first-action/started (engagement
+happened; the block escalates on its own path).
 
 ### Key Constraints
 - `kind=dispatch` command replies ONLY, and ONLY on **non-ack** outbound posts (an `ack` POST must NEVER trigger started — ack ≠ started is the whole point).
@@ -102,8 +124,8 @@ In the outbound reply path (`bus_post.sh` + the two codex reply helpers), after 
 Rubric item 5 + live: a real worker's first reply to a `kind=dispatch` command shows `started_at` set within seconds (Fix-1 SQL).
 
 ## Files Modified
-- brisen-lab `app.py`/`bus.py` — new `POST /msg/<id>/started` route.
-- baker-master `scripts/bus_post.sh` (+ `bus_post.py` for parity) + `scripts/codex-bus-reply.sh` + `scripts/codexarch-bus-reply.sh` — started emission on first non-ack `kind=dispatch` reply.
+- brisen-lab `bus.py` — new `POST /msg/<id>/started` route + `_started_validate_sync` (strict recipient membership, NO Director bypass — codex #11216) + `db.py` `mark_delivery_started_sync` returns `started`/`already_started`/`escalated` (at-least-once contract, lead #11215).
+- baker-master `scripts/emit_started.py` (NEW — single shared control point: parent-or-thread resolution + TOTAL best-effort emit) invoked by `scripts/bus_post.sh` (+ `bus_post.py` for parity) + `scripts/codex-bus-reply.sh` + `scripts/codexarch-bus-reply.sh` (optional `[parent_msg_id]` 4th arg) — started emission on first non-ack `kind=dispatch` reply.
 - tests both repos.
 
 ## Do NOT Touch
