@@ -5,7 +5,7 @@
 - attempt: 2 (fresh seat resume 2026-07-14, prior seat silent ~80min per lead #11201)
 - branch (baker-master): b1/client-started-emission-1 (off main @48e84ec7)
 - branch (brisen-lab): b1/client-started-emission-1 (off main @33932d6) — Fix 1 landed @e822591
-- status: IN_PROGRESS — spec locked; Fix-1 ENDPOINT written+compiles; Fix-1 TESTS + Fix-2 remain
+- status: PRs OPEN — Fix-1 (endpoint+tests) brisen-lab PR #143; Fix-2 (client emission+tests) baker-master PR #561. Both pushed. Awaiting codex correctness → lead PASS → merge (endpoint #143 THEN client #561) → deputy POST_DEPLOY_AC_VERDICT.
 - dispatched_by: lead (#11095), G0 ruling #11121 (OPTION A first-action)
 
 ## Ratified shape (LOCKED — do not relitigate)
@@ -51,7 +51,10 @@ delivered. Option B (new schema) rejected. No post-started E22 timer here
 - baker-master reply path: scripts/bus_post.sh (+.py), codex-bus-reply.sh, codexarch-bus-reply.sh.
 
 ## Next concrete step
-Write Fix-1 rubric 1-4 tests in brisen-lab tests/ (mirror test_case_one_p5_delivery_confirmation.py),
-run them + the suite. Then Fix 2 client reply-path emission + rubric 5. Gate chain: b1 self-verify →
-codex correctness (deputy conformance to amended shape) → lead PASS → merge endpoint-then-client →
-deputy POST_DEPLOY_AC_VERDICT.
+Build DONE both sides + PRs open (brisen-lab #143 endpoint+tests @HEAD; baker-master #561
+client emission+tests @HEAD). Await codex correctness review, then lead PASS. On merge:
+land endpoint #143 FIRST, then client #561 (early client fire needs a gate to hit). After
+deploy, deputy runs POST_DEPLOY_AC_VERDICT. Successor: nothing to build — respond to review
+findings only (hot-fix loop = NEW commit, never amend). Local test DB used: /tmp pg
+bm_b1_started_test (live-PG); full p5 23 pass, full brisen-lab suite 26 fail = wake-daemon
+env baseline (≤27), test_bus_post.py 50 pass.
