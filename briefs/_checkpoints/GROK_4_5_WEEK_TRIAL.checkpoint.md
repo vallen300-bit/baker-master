@@ -6,9 +6,13 @@ branch: b4/grok-4-5-week-trial
 dispatched_by: lead (bus #11256); binding spec briefs/BRIEF_GROK_4_5_WEEK_TRIAL_1.md @967a5c7; rulings #11260
 updated: 2026-07-14
 
-## What's done
-- ACK'd #11256 + #11260. Pulled brief on main. Branch cut b4/grok-4-5-week-trial.
-- Recon complete (see below). grok-4.5 pricing VERIFIED via official xAI docs: $2.00/M in, $6.00/M out; model id exactly `grok-4.5`.
+## What's done — SHIPPED (PR #563 @898e0c8a, awaiting codex gate)
+- ACK'd #11256 + #11260. Pulled brief. Built all 5 requirements + researcher-substrate.
+- Files: cost_monitor grok-4.5 entry; migration 20260714a + xai_week_ledger.py; xai_trial_route.py; tools/grok.py route arg; store_back bootstrap.
+- Tests: 24 pass (15 unit + 9 live-PG vs local scratch DB). Singleton guard OK.
+- PR #563 opened base main. Ship report briefs/_reports/B4_grok_4_5_week_trial_20260714.md.
+- NEXT: bus ship post to lead → codex cross-vendor gate → lead merge → POST_DEPLOY_AC. If codex REQUEST_CHANGES: address on new commit (never amend), re-push, reply on thread.
+- grok-4.5 pricing VERIFIED via official xAI docs: $2.00/M in, $6.00/M out; model id exactly `grok-4.5`.
 
 ## Binding design (from lead rulings #11260)
 1. Weekly ledger = new table `xai_week_ledger` (id, week_start DATE, route TEXT, kind CHECK IN('reserve','settle','release'), amount_usd NUMERIC, request_ref TEXT, created_at). Remaining = cap − (settled_this_week + open_reserves), computed in ONE txn under pg advisory lock keyed on week_start. Reserve BEFORE call (conservative max_in+max_out+tool allowance); settle actual + release residual after; stale reserve TTL sweep 30min (audit-note on sweep). Cap 150 / warn 120 / hard-block at cap. Do NOT overload api_cost_log for reservations; DO settle actuals into api_cost_log (source=grok_realtime, cost_usd_override from xAI payload).
