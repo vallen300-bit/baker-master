@@ -82,33 +82,72 @@ else
     SINCE="$(date -u -d '72 hours ago' +%Y-%m-%dT%H:%M:%SZ 2>/dev/null || echo '')"
 fi
 
-# --- GET /msg/<slug>?since=<since>&limit=<N>&unread=true (read-only) ---
+# --- authoritative status-aware fetch + bounded retry ---
+# CLIENT_AUTHORITATIVE_READ_CONTRACT_1 (E27 recurrence, lead #10901): the daemon
+# read path (#130) fail-closes a degraded read to HTTP 503 `bus_busy_retry` and
+# ships an authoritative-completeness envelope (`complete`). A plain `curl -sS`
+# (no status check) that then does `data.get("messages", [])` turns that 503 body
+# into `[]` → a FALSE "no unacked messages" — exactly the 05:48Z E27 recurrence.
+# So: capture the HTTP status (`-w`); a non-200 is a LOUD error, never empty;
+# bounded-retry the transient ones (transport fail / 5xx / 429); and claim an
+# all-clear ONLY on 200 AND complete:true.
+#
 # -G + --data-urlencode so the '+' offset in a timestamp is encoded correctly.
 # unread=true is REQUIRED (codex verdict #8761, MEDIUM, Lesson #89 class): the
-# daemon returns OLDEST-first and ignores order params, so an unfiltered fetch
-# spends the LIMIT window on already-acked rows and can truncate away the NEWEST
-# unacked dispatches → a phantom "no unacked messages". Filtering server-side to
-# unread means the LIMIT window is spent only on candidate-unacked rows. The
-# client-side unacked/wildcard filter below stays as defense-in-depth.
+# daemon's unread branch is server-side filtered so the LIMIT window is spent only
+# on candidate-unacked rows. The client-side unacked/wildcard filter stays as
+# defense-in-depth.
+_RETRY_MAX="${CHECK_INBOX_RETRY_MAX:-3}"
+_RETRY_SLEEP="${CHECK_INBOX_RETRY_SLEEP:-2}"
+
+CURL_ARGS=(-sS --max-time 20 -w '\n%{http_code}' -G
+           -H "X-Terminal-Key: ${KEY}"
+           --data-urlencode "limit=${LIMIT}"
+           --data-urlencode "unread=true")
 if [ -n "$SINCE" ]; then
-    RESP="$(curl -sS --max-time 20 -G \
-        -H "X-Terminal-Key: ${KEY}" \
-        --data-urlencode "since=${SINCE}" \
-        --data-urlencode "limit=${LIMIT}" \
-        --data-urlencode "unread=true" \
-        "${DAEMON_URL}/msg/${SLUG}" 2>/dev/null)" || {
-        echo "ERROR: brisen-lab unreachable (GET /msg/${SLUG})" >&2
-        exit 1
-    }
-else
-    RESP="$(curl -sS --max-time 20 -G \
-        -H "X-Terminal-Key: ${KEY}" \
-        --data-urlencode "limit=${LIMIT}" \
-        --data-urlencode "unread=true" \
-        "${DAEMON_URL}/msg/${SLUG}" 2>/dev/null)" || {
-        echo "ERROR: brisen-lab unreachable (GET /msg/${SLUG})" >&2
-        exit 1
-    }
+    CURL_ARGS+=(--data-urlencode "since=${SINCE}")
+fi
+
+HTTP_CODE=""
+RESP=""
+_attempt=0
+while : ; do
+    # -w appends '\n<status>' AFTER the body: last line = status, rest = body.
+    if OUT="$(curl "${CURL_ARGS[@]}" "${DAEMON_URL}/msg/${SLUG}" 2>/dev/null)"; then
+        HTTP_CODE="${OUT##*$'\n'}"
+        RESP="${OUT%$'\n'*}"
+    else
+        HTTP_CODE="000"   # transport failure (timeout / connection refused)
+        RESP=""
+    fi
+    case "$HTTP_CODE" in
+        000 | 5[0-9][0-9] | 429)
+            _attempt=$((_attempt + 1))
+            if [ "$_attempt" -le "$_RETRY_MAX" ]; then
+                if [ "$_RETRY_SLEEP" -gt 0 ] 2>/dev/null; then sleep "$_RETRY_SLEEP"; fi
+                continue
+            fi
+            ;;
+    esac
+    break
+done
+
+# Transport failure after retries → loud, NEVER an all-clear.
+if [ "$HTTP_CODE" = "000" ]; then
+    echo "ERROR: brisen-lab unreachable (GET /msg/${SLUG}) after $((_RETRY_MAX + 1)) attempt(s)" >&2
+    exit 1
+fi
+
+# Non-200 → LOUD error surfacing the daemon detail (esp. 503 bus_busy_retry).
+# This is the E27-recurrence guard: a busy/degraded daemon must NOT read as empty.
+if [ "$HTTP_CODE" != "200" ]; then
+    _DETAIL="$(printf '%s' "$RESP" | python3 -c 'import json,sys
+try:
+    print(json.load(sys.stdin).get("detail",""))
+except Exception:
+    print("")' 2>/dev/null || true)"
+    echo "ERROR: brisen-lab GET /msg/${SLUG} returned HTTP ${HTTP_CODE}${_DETAIL:+ (${_DETAIL})} — NOT an all-clear; the bus is busy/degraded, retry shortly." >&2
+    exit 4
 fi
 
 if [ -z "$RESP" ] || printf '%s' "$RESP" | grep -q 'bad_terminal_key'; then
@@ -116,7 +155,7 @@ if [ -z "$RESP" ] || printf '%s' "$RESP" | grep -q 'bad_terminal_key'; then
     exit 3
 fi
 
-# --- render unacked, excluding wildcard broadcasts (read-only, no state) ---
+# --- render unacked; all-clear ONLY when the read is authoritative (complete) ---
 # Wildcard broadcasts (to_terminals==['*']: daemon restart / forced-kill /
 # refresh-cadence-sweep) are UNACKABLE by a named terminal, so they would show
 # as a permanent false-pending floor — drop them, same as the drain hook.
@@ -129,7 +168,24 @@ try:
 except Exception as exc:
     print("ERROR: could not parse daemon response: %s" % exc, file=sys.stderr)
     sys.exit(1)
+
+# Defensive double-guard (belt-and-suspenders with the bash status check above):
+# a detail-only error body must never fall through to an empty all-clear.
+if isinstance(data, dict) and "detail" in data and "messages" not in data:
+    print("ERROR: daemon error body (not an all-clear): %s" % data.get("detail"),
+          file=sys.stderr)
+    sys.exit(4)
+
 msgs = data if isinstance(data, list) else data.get("messages", [])
+# complete==True means the daemon counted the FULL match set before LIMIT — the
+# ONLY authoritative all-clear (BUS_READ_PATH_FALSE_EMPTY_FIX_1 envelope). A dict
+# is an authoritative all-clear ONLY when complete IS TRUE *exactly*; a MISSING or
+# false `complete` is the partial/error path, never an all-clear (codex P1 #10944,
+# E27 recurrence — `data.get("complete", True)` turned a `200 {"messages":[]}` with
+# no envelope into a FALSE all-clear). A bare list is a legacy shape the live daemon
+# no longer emits (verified 2026-07-14: GET /msg returns a dict carrying `complete`),
+# so it has no completeness envelope and likewise cannot be an authoritative all-clear.
+complete = (data.get("complete") is True) if isinstance(data, dict) else False
 
 def is_wildcard(m):
     to = m.get("to_terminals")
@@ -141,10 +197,16 @@ unacked = [m for m in msgs
 unacked.sort(key=lambda m: m.get("created_at", ""))
 
 if not unacked:
+    if complete is False:
+        print("%s inbox: PARTIAL read (complete=false) — the page did not cover the "
+              "full unacked set; widen limit or drain the cursor. NOT an all-clear." % slug,
+              file=sys.stderr)
+        sys.exit(5)
     print("%s inbox: no unacked messages." % slug)
     sys.exit(0)
 
-print("%s inbox: %d unacked." % (slug, len(unacked)))
+print("%s inbox: %d unacked.%s" % (
+    slug, len(unacked), "" if complete else " (PARTIAL — more may remain past this page)"))
 for m in unacked:
     body = (m.get("body") or m.get("body_preview") or "").replace("\n", " ")
     if len(body) > 200:
