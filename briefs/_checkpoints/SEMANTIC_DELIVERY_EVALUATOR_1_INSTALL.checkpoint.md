@@ -64,18 +64,26 @@ sde.gather_evidence(conn, now, sla_s, receipt_epoch_env, canary_epoch_env, bus_h
 ## What's DONE
 - Fix arc PR #136 merged @4f77475 (cadence-snapshot wrapper unwrap, codex PASS #10878, 33/33).
 - Escalation #10909 -> lead ruled Option 2 #10915 (acked).
-- Full server-side evidence mapping resolved (above). Auth pattern read (app.py _bus_health_access_ok
-  ~L1863; strict variant needed). Canary accessor canary.latest_run_sync() canary.py:127 (returns
-  verdict/started_at/age_s). DB evidence sde.gather_db_evidence reads brisen_lab_delivery_receipt (server has it).
+- (a) ENDPOINT BUILT: brisen-lab GET /api/semantic_delivery (app.py, after bus_health_api) — strict
+  terminal-key gate + _semantic_seat_oldest_ages() helper + reuse of sde.gather_evidence/evaluate +
+  db_unreachable fail-loud fallback. Branch b2/semantic-delivery-endpoint-1 off origin/main e488f9d.
+  PR brisen-lab #139 OPEN. tests_unit 35/35 (+2). app.py compiles.
+- (b) CUSTODIAN SCRIPTS BUILT (baker-master repo ~/bm-b2/scripts): arm_semantic_poll.sh +
+  install_arm_semantic_job.sh + launchd/com.baker.arm-semantic.plist. bash -n clean, plist parses,
+  dry-run install OK. Poller: fetch authed endpoint -> atomic write semantic.json; fetch-fail = NO
+  overwrite (stale ages out -> pages). Installer mirrors arm-cadence + lease-emitter key injection
+  (chmod 600 plist). Seat identity default = 'daemon' (ARM_SEMANTIC_SEAT override) — CONFIG DECISION
+  flagged to lead (reversible).
+- Repo boundary CONFIRMED: endpoint = brisen-lab (gated PR #139); ARM scripts = baker-master (ops
+  tooling, committed on work branch b2/semantic-delivery-evaluator-1, NOT the brisen-lab gate).
 
 ## Next concrete step
-1. app.py: add strict terminal-key gate + GET /api/semantic_delivery calling a _compute_semantic_verdict()
-   that mirrors CLI _run (reuse sde.gather_evidence + sde.evaluate; fail-loud db_unreachable path).
-   Resolve the bus_health seat-reuse micro-decision (factor helper vs dedicated MAX-age query).
-2. scripts/arm_semantic_poll.sh + install_arm_semantic_job.sh + launchd/com.baker.arm-semantic.plist
-   (mirror arm-cadence + lease-emitter key injection).
-3. G1 (tests_unit + poller bash -n + endpoint test), then request codex gate (hard-refresh main), then lead merge.
-4. After merge: install poller locally, prove semantic.json fresh, send install receipt -> lead GOes ENFORCE=1.
+1. Request codex gate on brisen-lab PR #139 (hard-refresh main); point codex at the 3 baker-master
+   script paths too. On PASS -> lead merges #139.
+2. After #139 merge + Render deploy: run install_arm_semantic_job.sh locally (resolves daemon key,
+   loads launchd job), let one poll fire, prove ~/.brisen-lab/arm-alarm/markers/semantic.json fresh
+   (evaluated_at recent, semantic_ok present) -> send install receipt + marker-freshness proof to lead.
+3. Lead GOes ARM_ALARM_SEMANTIC_ENFORCE=1 (NOT b2 — production alarm = lead's explicit GO).
 
 ## Claim discipline
 Successor claims by the attempt:-bump commit on THIS checkpoint. If attempt already bumped, stand down.

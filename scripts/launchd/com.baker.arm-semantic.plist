@@ -1,0 +1,46 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>__LABEL__</string>
+  <key>ProgramArguments</key>
+  <array>
+    <string>/bin/bash</string>
+    <string>__WORKER_PATH__</string>
+  </array>
+  <key>StartInterval</key>
+  <integer>__CADENCE__</integer>
+  <key>RunAtLoad</key>
+  <true/>
+  <!-- SEMANTIC_DELIVERY_EVALUATOR_1 producer poller. CRASH-ONLY KeepAlive (same
+       rationale as arm-cadence): a bare KeepAlive=true would relaunch this
+       fast-exit periodic script on every exit and collapse the StartInterval into
+       a hot-loop. arm_semantic_poll.sh exits 0 on every completed run (even a
+       skipped write), so {SuccessfulExit: false} restarts ONLY on a genuine crash. -->
+  <key>KeepAlive</key>
+  <dict>
+    <key>SuccessfulExit</key>
+    <false/>
+  </dict>
+  <key>StandardOutPath</key>
+  <string>__LOG__</string>
+  <key>StandardErrorPath</key>
+  <string>__ERRLOG__</string>
+  <key>EnvironmentVariables</key>
+  <dict>
+    <key>PATH</key>
+    <string>/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin</string>
+    <key>LAB_URL</key>
+    <string>https://brisen-lab.onrender.com</string>
+    <key>ARM_ALARM_MARKER_DIR</key>
+    <string>__MARKER_DIR__</string>
+    <key>ARM_SEMANTIC_SEAT</key>
+    <string>__SEAT__</string>
+    <key>ARM_SEMANTIC_KEY</key>
+    <string>__KEY__</string>
+    <key>ARM_SEMANTIC_LOG</key>
+    <string>__SEMANTIC_LOG__</string>
+  </dict>
+</dict>
+</plist>
