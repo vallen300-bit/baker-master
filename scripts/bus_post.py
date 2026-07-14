@@ -277,15 +277,19 @@ def main() -> None:
     print(json.dumps(result))
 
     # CLIENT_STARTED_EMISSION_1 (G0 #11118 / lead #11121, first-action): a recipient's
-    # FIRST NON-ACK reply to a dispatch marks that dispatch `started`. Fire when this reply
-    # threads onto a dispatch (by --parent-id, or by --thread-id when no parent) AND is not
-    # an ack (bus_post.py, unlike bus_post.sh, CAN post kind=ack — guard on it). The
-    # /msg/<id>/started endpoint is the AUTHORITATIVE gate; this client fire is TOTAL
-    # best-effort and its outcome NEVER changes this send's exit status. Kill switch:
+    # first-action reply to a dispatch marks that dispatch `started`. Fire ONLY when THIS
+    # post is itself a kind='dispatch' reply threaded onto a dispatch (by --parent-id, or
+    # by --thread-id when no parent). Gate on `kind == 'dispatch'`, NOT merely `!= 'ack'`
+    # (codex round-3 #11225): bus_post.py can post broadcast / ratify_required /
+    # ratify_decision too, and a non-dispatch post tied to a dispatch parent must NEVER
+    # false-start the SLO — only a worker-start dispatch reply is first-action. (bus_post.sh
+    # only ever posts kind=dispatch, so it needs no such guard.) The /msg/<id>/started
+    # endpoint is the AUTHORITATIVE gate; this client fire is TOTAL best-effort and its
+    # outcome NEVER changes this send's exit status. Kill switch:
     # BAKER_STARTED_EMISSION_DISABLED=1.
     if (
         (args.parent_id is not None or args.thread_id is not None)
-        and args.kind != "ack"
+        and args.kind == "dispatch"
         and os.environ.get("BAKER_STARTED_EMISSION_DISABLED", "") != "1"
     ):
         _emit_started_best_effort(sender, key, args.parent_id, args.thread_id)

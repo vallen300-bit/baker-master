@@ -1077,3 +1077,40 @@ def test_55_emit_started_total_guard_swallows_generic_oserror(monkeypatch):
     monkeypatch.setattr(mod, "_resolve_thread_dispatch", _boom)
     # No exception must escape (thread path triggers _resolve_thread_dispatch → OSError).
     mod.resolve_and_emit("http://127.0.0.1:1", "k", "b1", None, "T-uuid")
+
+
+def test_56_py_broadcast_with_parent_does_not_emit(stub_daemon, fake_op_path):
+    """codex round-3 #11225: bus_post.py must fire started ONLY for kind='dispatch'
+    replies (not merely non-ack). A broadcast threaded onto a dispatch parent must NOT
+    false-start the SLO — exactly one POST, no /started."""
+    url, captured = stub_daemon
+    r = _run_py(
+        ["--to", "lead", "--body", "fyi", "--kind", "broadcast", "--parent-id", "42"],
+        _env_with({"BAKER_ROLE": "b1", "BRISEN_LAB_DAEMON_URL": url},
+                  fake_op_dir=fake_op_path),
+    )
+    assert r.returncode == 0, r.stderr
+    paths = [req["path"] for req in captured]
+    assert paths == ["/msg/lead"], paths
+    assert not any(p.endswith("/started") for p in paths)
+
+
+def test_57_py_ratify_decision_with_thread_does_not_emit(stub_daemon, fake_op_path):
+    """codex round-3 #11225: a ratify_decision threaded onto a dispatch (via --thread-id)
+    must NOT emit started — only a worker-start dispatch reply is first-action. No GET
+    resolution read and no /started POST fire; exactly one POST."""
+    _StubHandler._get_messages = [
+        {"id": 99, "thread_id": "T-uuid", "kind": "dispatch",
+         "execute_obligation": True, "to_terminals": ["b1"]},
+    ]
+    url, captured = stub_daemon
+    r = _run_py(
+        ["--to", "lead", "--body", "ok", "--kind", "ratify_decision",
+         "--thread-id", "T-uuid"],
+        _env_with({"BAKER_ROLE": "b1", "BRISEN_LAB_DAEMON_URL": url},
+                  fake_op_dir=fake_op_path),
+    )
+    assert r.returncode == 0, r.stderr
+    paths = [req["path"] for req in captured]
+    assert paths == ["/msg/lead"], paths
+    assert not any(c.get("method") == "GET" for c in captured), captured
