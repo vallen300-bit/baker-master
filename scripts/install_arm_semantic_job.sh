@@ -33,6 +33,8 @@
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+# shellcheck source=scripts/lib/parity.sh
+. "${SCRIPT_DIR}/lib/parity.sh"
 
 LABEL="com.baker.arm-semantic"
 WORKER_SRC="${SCRIPT_DIR}/arm_semantic_poll.sh"
@@ -71,6 +73,38 @@ if [[ "${1:-}" == "--check" ]]; then
   fi
   if [[ -f "$WORKER_DEPLOY" ]] && ! bash -n "$WORKER_DEPLOY" 2>/dev/null; then
     emit "[FAIL] deployed worker fails syntax probe"; rc=1
+  fi
+  if [[ -f "$WORKER_SRC" && -f "$WORKER_DEPLOY" ]]; then
+    repo_sha="$(_sha256 "$WORKER_SRC" 2>/dev/null || true)"
+    deploy_sha="$(_sha256 "$WORKER_DEPLOY" 2>/dev/null || true)"
+    if [[ -z "$repo_sha" || -z "$deploy_sha" ]]; then
+      emit "[FAIL] unable to hash repo/deployed worker for parity"; rc=1
+    elif [[ "$repo_sha" != "$deploy_sha" ]]; then
+      emit "[FAIL] deployed worker drifted from repo source (deployed ${deploy_sha:0:8} != repo ${repo_sha:0:8} - re-run install)"
+      rc=1
+    fi
+  fi
+  if [[ -f "$INSTALLED_PLIST" ]]; then
+    ival="$(python3 -c "
+import plistlib,sys
+try:
+    d=plistlib.load(open(sys.argv[1],'rb')); print(int(d.get('StartInterval',0)))
+except Exception: print(-1)
+" "$INSTALLED_PLIST" 2>/dev/null || echo -1)"
+    plist_worker="$(python3 -c "
+import plistlib,sys
+try:
+    d=plistlib.load(open(sys.argv[1],'rb')); a=d.get('ProgramArguments',[]); print(a[1] if len(a)>1 else '')
+except Exception: print('')
+" "$INSTALLED_PLIST" 2>/dev/null || echo '')"
+    if [[ "$ival" -le 0 ]]; then
+      emit "[FAIL] installed StartInterval=${ival}s is invalid"; rc=1
+    elif [[ "$ival" -ne "$CADENCE" ]]; then
+      emit "[FAIL] installed StartInterval=${ival}s differs from expected ${CADENCE}s"; rc=1
+    fi
+    if [[ "$plist_worker" != "$WORKER_DEPLOY" ]]; then
+      emit "[FAIL] installed plist worker path differs (installed ${plist_worker:-<missing>} != expected $WORKER_DEPLOY)"; rc=1
+    fi
   fi
   # Marker freshness: semantic.json should be younger than 3x the cadence. A stale
   # marker means the poller silently stopped producing.

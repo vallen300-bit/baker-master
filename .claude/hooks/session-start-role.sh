@@ -70,6 +70,20 @@ if [ ! -f "$CTX_FILE" ]; then
   exit 0
 fi
 
+# FLEET_DEPLOY_PARITY_1 (F5): surface the current checkout's client-script parity
+# in the existing SessionStart context. This is a local cached-ref check: the
+# dispatcher can run the fetching roll-up separately, while a seat self-reports
+# stale code before it can emit a misleading started/drain signal.
+CLIENT_PARITY_SUMMARY=""
+CLIENT_PARITY="$REPO_ROOT/scripts/fleet_client_parity.sh"
+if [ -f "$CLIENT_PARITY" ] && [ -f "$REPO_ROOT/scripts/arm_fleet_manifest.json" ]; then
+  CLIENT_PARITY_OUT="$(FLEET_CLIENT_REPO="$REPO_ROOT" bash "$CLIENT_PARITY" \
+    --no-fetch --capability-probe 2>&1 || true)"
+  CLIENT_PARITY_SUMMARY="$(printf '%s\n' "$CLIENT_PARITY_OUT" \
+    | grep -E '^(CLEAN|STALE|RED|UNTRACKED-MODIFIED|SEAT) ' \
+    | tr '\n' ';' | sed 's/;$//' | cut -c1-1200)"
+fi
+
 # Assemble the injected context in three layers:
 #   1. Role identity (always — $CTX_FILE).
 #   2. Route-permission-cues-to-superior clause — appended for EVERY Director-facing /
@@ -88,6 +102,9 @@ ROUTE_CUES_FILE="$HOME/baker-vault/_ops/role-contexts/route-cues-to-superior.md"
 
 {
   cat "$CTX_FILE"
+  if [ -n "$CLIENT_PARITY_SUMMARY" ]; then
+    printf '\n[fleet-client-parity] %s\n' "$CLIENT_PARITY_SUMMARY"
+  fi
   [ -f "$ROUTE_CUES_FILE" ] && cat "$ROUTE_CUES_FILE"
   case "$ROLE_LC" in
     deputy|deputy-codex|aihead2)

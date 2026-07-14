@@ -64,8 +64,9 @@ if [ -n "$PORT" ]; then
 import json,sys
 d=json.load(open(sys.argv[1]))
 assert d["ok"] is True, "ok flag"
+assert d["health"] == "ok", "healthy snapshot health"
 bh=d["sources"]["bus_health"]
-assert bh["http"]=="200" and bh["ok"] is True, "bus_health source"
+assert bh["http"]=="200" and bh["ok"] is True and bh["health"] == "ok", "bus_health source"
 assert bh["data"]["seats"][0]["seat"]=="lead", "embedded data"
 ' "$SNAP_DIR/latest.json" && ok || bad "snapshot content invalid"
     # a timestamped history file also exists
@@ -84,7 +85,7 @@ LAB_URL="http://127.0.0.1:1" ARM_CADENCE_SNAPSHOT_DIR="$SNAP2" \
 rc=$?
 [ "$rc" -eq 0 ] && ok || bad "poller not tolerant of unreachable endpoint (exit=$rc)"
 if [ -f "$SNAP2/latest.json" ]; then
-  python3 -c 'import json,sys; d=json.load(open(sys.argv[1])); assert d["ok"] is False; assert d["sources"]["bus_health"]["ok"] is False' "$SNAP2/latest.json" && ok || bad "degraded snapshot not marked ok=false"
+  python3 -c 'import json,sys; d=json.load(open(sys.argv[1])); assert d["ok"] is False; assert d["health"] == "db_unreachable"; assert d["sources"]["bus_health"]["ok"] is False; assert d["sources"]["bus_health"]["health"] == "db_unreachable"' "$SNAP2/latest.json" && ok || bad "degraded snapshot missing db_unreachable health"
 else
   bad "poller wrote no snapshot on unreachable endpoint"
 fi
@@ -96,7 +97,57 @@ ARM_CADENCE_DRYRUN=1 ARM_CADENCE_DEPLOY_DIR="$DEPLOY" ARM_CADENCE_SNAPSHOT_DIR="
   bash "$INSTALLER" >/dev/null 2>&1
 [ -x "$DEPLOY/arm_cadence_poll.sh" ] && ok || bad "dry-run did not deploy executable worker"
 
-# --- 5. installer --check reports DRIFT when nothing is installed ------------
+# --- 5. installer parity: current deploy CLEAN, one-byte drift RED ----------
+printf '{"captured_at":"%s","health":"ok","ok":true}\n' \
+  "$(date -u +%Y-%m-%dT%H:%M:%SZ)" > "$SNAP_DIR/latest.json"
+CHECK_HOME="$TMP/check-home"
+mkdir -p "$CHECK_HOME/Library/LaunchAgents" "$TMP/bin"
+cat > "$TMP/bin/launchctl" <<'SH'
+#!/usr/bin/env bash
+printf '123 0 com.baker.arm-cadence\n'
+SH
+chmod +x "$TMP/bin/launchctl"
+python3 - "$PLIST" "$DEPLOY/arm_cadence_poll.sh" "$CHECK_HOME/Library/LaunchAgents/com.baker.arm-cadence.plist" <<'PY'
+import sys
+tpl, worker, out = sys.argv[1:]
+body = open(tpl).read()
+for old, new in (
+    ("__WORKER_PATH__", worker),
+    ("__LABEL__", "com.baker.arm-cadence"),
+    ("__CADENCE__", "1800"),
+    ("__LOG__", "/tmp/arm-cadence.log"),
+    ("__ERRLOG__", "/tmp/arm-cadence.err.log"),
+    ("__SNAP_DIR__", "/tmp/arm-cadence"),
+    ("__CADENCE_LOG__", "/tmp/arm-cadence.log"),
+):
+    body = body.replace(old, new)
+open(out, "w").write(body)
+PY
+PATH="$TMP/bin:$PATH" HOME="$CHECK_HOME" ARM_CADENCE_DEPLOY_DIR="$DEPLOY" \
+  ARM_CADENCE_SNAPSHOT_DIR="$SNAP_DIR" bash "$INSTALLER" --check >"$TMP/parity-clean.out" 2>&1
+rc=$?
+[ "$rc" -eq 0 ] && ok || bad "current cadence worker parity did not pass"
+grep -q 'RESULT: CLEAN' "$TMP/parity-clean.out" && ok || bad "cadence parity CLEAN missing"
+printf '\n# deliberate parity drift\n' >> "$DEPLOY/arm_cadence_poll.sh"
+PATH="$TMP/bin:$PATH" HOME="$CHECK_HOME" ARM_CADENCE_DEPLOY_DIR="$DEPLOY" \
+  ARM_CADENCE_SNAPSHOT_DIR="$SNAP_DIR" bash "$INSTALLER" --check >"$TMP/parity-drift.out" 2>&1
+rc=$?
+[ "$rc" -ne 0 ] && ok || bad "cadence worker parity drift returned 0"
+grep -q 'deployed worker drifted from repo source' "$TMP/parity-drift.out" && ok || bad "cadence parity failure not named"
+cp "$POLLER" "$DEPLOY/arm_cadence_poll.sh"
+python3 - "$CHECK_HOME/Library/LaunchAgents/com.baker.arm-cadence.plist" <<'PY'
+import sys
+p = sys.argv[1]
+body = open(p).read().replace("<integer>1800</integer>", "<integer>1799</integer>")
+open(p, "w").write(body)
+PY
+PATH="$TMP/bin:$PATH" HOME="$CHECK_HOME" ARM_CADENCE_DEPLOY_DIR="$DEPLOY" \
+  ARM_CADENCE_SNAPSHOT_DIR="$SNAP_DIR" bash "$INSTALLER" --check >"$TMP/interval-drift.out" 2>&1
+rc=$?
+[ "$rc" -ne 0 ] && ok || bad "cadence interval drift returned 0"
+grep -q 'StartInterval=1799s differs from expected 1800s' "$TMP/interval-drift.out" && ok || bad "cadence interval drift not named"
+
+# --- 6. installer --check reports DRIFT when nothing is installed ------------
 # Point the check at empty dirs so it must fail (no plist, no snapshot).
 ARM_CADENCE_DEPLOY_DIR="$TMP/empty" ARM_CADENCE_SNAPSHOT_DIR="$TMP/empty-snap" \
   bash "$INSTALLER" --check >"$TMP/check.out" 2>&1
@@ -104,7 +155,7 @@ rc=$?
 [ "$rc" -ne 0 ] && ok || bad "--check returned 0 on a non-installed job"
 grep -q 'RESULT: DRIFT' "$TMP/check.out" && ok || bad "--check did not print RESULT: DRIFT"
 
-# --- 6. drift sentinel is fail-open (exit 0) + logs on drift -----------------
+# --- 7. drift sentinel is fail-open (exit 0) + logs on drift -----------------
 ARM_CADENCE_CHECK_DIR="$ROOT/scripts" \
   ARM_CADENCE_DEPLOY_DIR="$TMP/empty" ARM_CADENCE_SNAPSHOT_DIR="$TMP/empty-snap" \
   ARM_CADENCE_DRIFT_LOG="$TMP/drift.log" ARM_CADENCE_DRIFT_BUS_ROLE="__nokey__" \
