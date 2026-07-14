@@ -1,21 +1,24 @@
 # CODE_3_PENDING — dispatch (supersedes prior)
 
-dispatch: HAG_FILER_HARNESS_RETROFIT_1
-brief: ~/baker-vault/_ops/build/baker-os-v2/05_outputs/domain-agent-program/BRIEF_HAG_FILER_HARNESS_RETROFIT_1.md @5fa8a0a (vault main; §7 lead rulings locked)
+dispatch: LIFECYCLE_INSERT_ATTRIBUTION_1
+brief: inline in lead bus #10892 (deputy finding #10877). Micro, one PR.
 to: b3
 from: lead
 dispatched_by: lead
 ship_to: lead (ship report + gate verdicts to lead)
-class: P1 harness retrofit (hag-filer) — wiring-first per lead addendum bus #6509
-effort: medium
+class: micro attribution fix (brisen-lab lifecycle.py daemon inserts)
+effort: low
 
-summary: Wire the EXISTING lane1-meta-document-guard.sh into the hag-filer picker
-settings.json (it exists, was never wired) + filing done-gate + git-identity fix
-(commits currently author as b3) + model pin + tool trim. Do not rebuild the guard.
-Rulings §7: build-time path confirm + bus receipt AND room-ledger entry.
+summary: The two lifecycle broadcast inserts (restart _atomic_session_expiry_and_audit_broadcast
++ forced-kill _atomic_forced_kill_broadcast) are the THIRD daemon direct-insert path missed by
+#134/#135 — INSERT omitted source/unattributed/intent (live rows #10851/#10853/#10855 NULL).
+Fixed: route through source='daemon', unattributed=FALSE, intent=_derive_intent(kind) — same as
+#135 item 3. Load-bearing test on both inserts.
 
-claimed: bus #6518 (fresh b3 seat, 2026-07-07 ~14:32Z). Bus #6492 + addendum #6509
-are authoritative; this mailbox refreshed to match (stale BOX5_ROUTING_REVERSAL_E_1
-entry superseded — that dispatch was completed and shipped earlier).
+status: SHIPPED — brisen-lab PR #138 (commit 87610ef, off origin/main @5a22441). G1 PASS
+(2/2 load-bearing green, zero new failures). Acked #10892 + claimed. Awaiting codex gate.
 
-gate: G1 self-verify -> G2 deputy cross-lane -> G3 codex on BUS (effort=medium) -> lead merge.
+gate: G1 self-verify (done) -> codex on BUS -> lead merge.
+
+## prior (superseded, completed + shipped)
+HAG_FILER_HARNESS_RETROFIT_1 (#10892 supersedes; that arc closed earlier).
