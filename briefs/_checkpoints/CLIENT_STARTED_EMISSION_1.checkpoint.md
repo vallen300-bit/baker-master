@@ -5,7 +5,8 @@
 - attempt: 2 (fresh seat resume 2026-07-14, prior seat silent ~80min per lead #11201)
 - branch (baker-master): b1/client-started-emission-1 (off main @48e84ec7)
 - branch (brisen-lab): b1/client-started-emission-1 (off main @33932d6) — Fix 1 landed @e822591
-- status: PRs OPEN — Fix-1 (endpoint+tests) brisen-lab PR #143; Fix-2 (client emission+tests) baker-master PR #561. Both pushed. Awaiting codex correctness → lead PASS → merge (endpoint #143 THEN client #561) → deputy POST_DEPLOY_AC_VERDICT.
+- status: CODEX-DELTA PUSHED — codex #11214/#11216 REQUEST_CHANGES folds landed on both PRs (#143 brisen-lab, #561 baker-master). Awaiting codex RE-GATE of the delta → lead PASS → merge (endpoint #143 THEN client #561) → deputy POST_DEPLOY_AC_VERDICT.
+  Folds: (a) Director-bypass removed on /started (strict recipient membership, codex #11216); (b) already_started contract — mark_delivery_started_sync returns started/already_started/escalated, route echoes {ok,state}, at-least-once client + server-COALESCE single authority (lead #11215); (c) NEW scripts/emit_started.py single control point, PARENT OR THREAD match (topic dropped, collision hazard), TOTAL best-effort guard incl generic OSError; (d) brief amended. Counts: P5 endpoint 25 pass; full brisen-lab 27 fail (=baseline wake/identity env) /677 pass; test_bus_post.py 55 pass.
 - dispatched_by: lead (#11095), G0 ruling #11121 (OPTION A first-action)
 
 ## Ratified shape (LOCKED — do not relitigate)
