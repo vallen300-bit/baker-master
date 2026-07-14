@@ -14,10 +14,16 @@ Fresh seat = CANONICAL (lead #11052: original pid 16839 DEAD; #11047 stand-down 
 - **(5) A-clear** — path-1 epoch bump confirmed (semantic_delivery_evaluator epoch-gated). Lead set BRISEN_LAB_RECEIPT_EPOCH=2026-07-14T08:00:00Z (#11110). Audit artifact briefs/_reports/A_CLEAR_AUDIT_2026-07-14.md @7ea3637 (114 IDs).
 - **(6) HV2-BL-001** — REMOVED from queue → deputy-codex (#11057).
 
+## DONE since first checkpoint
+- **(A) POST_DEPLOY_AC epoch flip = PASS-with-finding** (verdict #11157, ACCEPTED #11158). Render env PUT does NOT auto-deploy (root cause of ~25min stall; lead manual-deployed dep-d9b0unt8). receipt_epoch flipped to 2026-07-14T08:00:00Z; obligations 170→17; undelivered 7→1. **Finding-3 leak CONFIRMED:** 7 pre-cutoff ids (10380/10503/10970/10988/10990/10996/10999) leaked via drain-time backfilled receipts → RATIFIED to fold into RECEIPT_WRITE_DURABILITY_1 (anchor filter on message created_at). Logged in A_CLEAR_AUDIT_2026-07-14.md @753e788.
+- **(B) PR #142 correctness gate = PASS** (verdicts #11126/#11132/#11149/#11157). Coherence (exclude ratify_required) CHANGE-REQ ratified → deputy-codex fixed @a2d5cf8 (dispatch-only predicate + regression test) → I re-verified PASS. Kill-switch default-OFF, receipt_missing bucket, rubric-complete tests, schema (finding-6) all PASS. **Lead MERGED @9c8e689 switch-OFF (#11158); ENFORCE arming HELD for drill gate.**
+
 ## PENDING (owned)
-- **(A) POST_DEPLOY_AC for the epoch flip** — ⚠️ Render redeploy NOT yet cut over as of 10:20Z (endpoint still shows OLD epoch 2026-07-13T16:22:33Z, obligation_ack_coherence=FALSE 170). WHEN deploy lands: GET /api/semantic_delivery, confirm receipt_epoch=2026-07-14T08:00:00Z + obligations_open drops, post POST_DEPLOY_AC v1 to lead. Ladder step 1 = DONE pending this.
-- **(B) Correctness gate PR #142** (deputy-codex B-tune, brisen-lab, branch deputy/case-one-btune-started-slo, OPEN). Coherence verdict POSTED #11126: CHANGE REQUIRED — exclude ratify_required from started-terminal predicate (scope to kind=dispatch, match b1 + P5); un-ratified Director Q would page at 15min started-SLA = E15. FULL diff read (app.py/db.py/semantic_delivery_evaluator.py/delivery_health.html/tests) STILL OWED beyond the coherence finding.
-- **(C) Correctness gate b1 client-started-emission** @27857c18 (CLIENT_STARTED_EMISSION_1). Cross-vendor: I authored the brief. Confirmed dispatch-only scope (correct). Full review owed.
+- **AUTHORING QUEUE (lead #11158, in order, both → lead review before build dispatch):**
+  1. **FLEET_DEPLOY_PARITY_1** — hash-parity in installer `--check` + fleet deploy manifest + two-sided drill set (= written GO-gate per ladder step). Folds codex-arch #11125 findings 1/2/8 + finding-4 (marker RED db_unreachable / cadence DEGRADED / alarm drops failure names / MISSING_IS_RED). Use write-brief skill + agent-spec/install-SOP context.
+  2. **RECEIPT_WRITE_DURABILITY_1** — receipt write-path repair (F-503 recycled-conn drop) + created_at-anchored epoch/obligation filter (fixes finding-3 leak). Folds the #557-gap receipt-write repair too.
+- **(C) Correctness gate b1 client-started-emission** — BLOCKED: no PR pushed yet (only @27857c18 WIP ref, not fetchable). Gate when b1 pushes. Cross-vendor (I authored the brief). b1 scope confirmed dispatch-only (correct side of the coherence issue).
+- **Finding-9 (Monday-audit watch):** tomorrow's credential rescan is CONDITIONAL — flag in the Mon 09:30Z Harness-V2/gold-audit run.
 
 ## Mechanics / discipline
 - Bus read-path FLAPS (F-503/E27): retry check_inbox 3-4x; full bodies via unread-window fetch loop (since=<recent> limit=500 unread=true); ack POST /msg/<id>/ack (retry on 000/503). Reply-to-sender (lead) on all verdicts.
