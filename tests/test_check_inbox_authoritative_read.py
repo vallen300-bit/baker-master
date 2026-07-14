@@ -116,6 +116,19 @@ def test_200_incomplete_empty_is_not_all_clear(tmp_path, bin_dir):
     assert "PARTIAL" in out
 
 
+def test_200_missing_complete_is_not_all_clear(tmp_path, bin_dir):
+    """codex P1 #10944 probe: a 200 dict with NO `complete` field must NOT read as
+    all-clear. The bug was `data.get("complete", True)` — a missing envelope defaulted
+    to True and printed "no unacked messages" over a genuinely-unacked dispatch (the
+    E27 recurrence class). Missing complete = partial/error path, never an all-clear."""
+    _make_curl_stub(bin_dir, '{"messages":[],"unacked_total":0}', "200")
+    r = _run(tmp_path)
+    out = r.stdout + r.stderr
+    assert r.returncode != 0, f"missing-complete must NOT be all-clear: {out!r}"
+    assert "no unacked messages" not in out, f"missing complete lied as all-clear: {out!r}"
+    assert "PARTIAL" in out, f"missing complete should take the partial path: {out!r}"
+
+
 def test_200_with_unacked_renders(tmp_path, bin_dir):
     body = (
         '{"messages":[{"id":10860,"from_terminal":"codex","to_terminals":["researcher"],'

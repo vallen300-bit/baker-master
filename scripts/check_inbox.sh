@@ -178,9 +178,14 @@ if isinstance(data, dict) and "detail" in data and "messages" not in data:
 
 msgs = data if isinstance(data, list) else data.get("messages", [])
 # complete==True means the daemon counted the FULL match set before LIMIT — the
-# ONLY authoritative all-clear (BUS_READ_PATH_FALSE_EMPTY_FIX_1 envelope). A bare
-# list is the legacy shape with no envelope → treat as complete for back-compat.
-complete = True if isinstance(data, list) else data.get("complete", True)
+# ONLY authoritative all-clear (BUS_READ_PATH_FALSE_EMPTY_FIX_1 envelope). A dict
+# is an authoritative all-clear ONLY when complete IS TRUE *exactly*; a MISSING or
+# false `complete` is the partial/error path, never an all-clear (codex P1 #10944,
+# E27 recurrence — `data.get("complete", True)` turned a `200 {"messages":[]}` with
+# no envelope into a FALSE all-clear). A bare list is a legacy shape the live daemon
+# no longer emits (verified 2026-07-14: GET /msg returns a dict carrying `complete`),
+# so it has no completeness envelope and likewise cannot be an authoritative all-clear.
+complete = (data.get("complete") is True) if isinstance(data, dict) else False
 
 def is_wildcard(m):
     to = m.get("to_terminals")

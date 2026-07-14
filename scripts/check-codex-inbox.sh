@@ -102,8 +102,13 @@ if isinstance(d, dict) and "detail" in d and "messages" not in d:
     print("ERROR: daemon error body (not empty):", d.get("detail")); sys.exit(4)
 msgs = d if isinstance(d, list) else d.get("messages", [])
 # complete==True is the ONLY authoritative all-clear (BUS_READ_PATH_FALSE_EMPTY_FIX_1
-# envelope). A bare list is the legacy shape with no envelope → complete for back-compat.
-complete = True if isinstance(d, list) else d.get("complete", True)
+# envelope). A dict is an all-clear ONLY when complete IS TRUE *exactly*; a MISSING or
+# false `complete` is the partial/error path, never all-clear (codex P1 #10944, E27
+# recurrence — `d.get("complete", True)` turned a `200 {"messages":[]}` with no envelope
+# into a FALSE all-clear). A bare list is a legacy shape the live daemon no longer emits
+# (verified 2026-07-14: GET /msg returns a dict carrying `complete`) → no envelope, so
+# it cannot be an authoritative all-clear either.
+complete = (d.get("complete") is True) if isinstance(d, dict) else False
 if not msgs:
     if complete is False:
         print("codex inbox: PARTIAL read (complete=false) — NOT empty; widen limit or drain cursor.")
