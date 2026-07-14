@@ -1,7 +1,7 @@
 # CODE_4_PENDING — active dispatch mailbox for b4
 
 ---
-status: ACTIVE
+status: LIVE — merged @7d51c2dd, activated all 3 routes on grok-4.5, follow-up PR #565 open
 brief_id: GROK_4_5_WEEK_TRIAL
 to: b4
 from: lead (bus dispatch #11256, Director-ratified Option A)
@@ -33,22 +33,27 @@ BUILD (5 requirements per #11256):
    est + actual spend, tool/schema result, outcome.
 5. Route flag default-OFF per role — activation = lead GO one route at a time.
 
-STATUS: RE-SHIPPED round 4 — PR #563 (base main). Codex round-4 FAIL #11381 (one
-P1): round-3's unknown-route rejection returned early at the dispatcher, skipping
-run_grok_ask, so the blocked_route_unknown xai_call_audit row was never written —
-zero audit rows on a rejected attempt, violating requirement #4 (one row per attempt
-incl. blocked/error). FIXED @1ea845c1: rejection centralized through run_grok_ask —
-dispatcher enters the governor for an ENABLED or UNKNOWN route; run_grok_ask writes
-exactly one audit row (matter_slug preserved) + raises, surfaced loud, no fallback;
-known-but-disabled stays designed grok-4.3 fallthrough (no row); no-route untouched.
-Regression extended with audit-row assertion; verified it FAILS on round-3 code.
-FREEZE DISCIPLINE (lead #11385, 2nd occurrence): after posting SHIP this round, ZERO
-pushes until lead's verdict relay. Prior rounds: round-3 unknown-route downgrade
-#11369 @ad773fa1; round-2 P1-3/P1-4/P2 @a9528884→#11338; round-1 2 P1s @e3210423.
-All 5 requirements built + researcher substrate. 77 pass, 12 skipped across the 4
-grok/xai suites (python3.12). Ship report:
-briefs/_reports/B4_grok_4_5_week_trial_20260714.md. Awaiting codex re-gate →
-lead merge → POST_DEPLOY_AC.
+STATUS: LIVE on grok-4.5. Main brief MERGED @7d51c2dd (PR #563, rounds 1-4 codex
+P1s all fixed). POST_DEPLOY_AC PASS (#11425). Director order #11429 (supersede staged
+canary): activated ALL 3 routes immediately.
+
+ACTIVATION (Director order #11429) — DONE + AC3 PASS (#11434):
+- Env flip (merge-mode PUT via render_env_guard, never array): GROK45_ENABLED_ROUTES=
+  b4_runtime,researcher_channel,researcher_shadow_synth on srv-d6dgsbctgctc73f55730.
+- Manual deploy dep-d9b5t8beo5us73e0hjg0 (commit 7d51c2dd) → live.
+- AC3: governed route=b4_runtime call → grok-4.5, one audit row (provider=xai,
+  outcome=ok), ledger reserve→settle→release (0.001146→0.000906, residual 0.000240),
+  settle_ok=true. researcher_channel + researcher_shadow_synth also proven grok-4.5.
+- Week ledger 2026-07-13: 3 ok calls, effective_used 0.002160 USD, remaining 149.9978
+  (cap 150 / warn 120 / fail-closed intact, ledger untouched).
+
+FOLLOW-UP (owed non-gating, codex #11398) — SHIPPED PR #565 (base main):
+lazy client_factory — run_grok_ask builds the client only AFTER route+model
+validation, so an unknown route with XAI_API_KEY absent still writes
+blocked_route_unknown (fixes the double-fault). 80 pass, 12 skipped. Awaiting
+codex normal gate → lead merge.
+
+Ship report: briefs/_reports/B4_grok_4_5_week_trial_20260714.md.
 
 **Prior seat state (all CLOSED 2026-07-13/14):**
 - ARM_OUT_OF_BAND_ALARM_1 — shipped + merged (PR #556 @codex-PASS #10635 / lead #10639); semantic consumer micro-lane merged; arm-semantic-enforce gate merged @a089d90 (#11197).
