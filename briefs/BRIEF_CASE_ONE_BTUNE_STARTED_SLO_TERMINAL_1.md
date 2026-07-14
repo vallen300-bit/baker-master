@@ -1,5 +1,9 @@
 # BRIEF: CASE_ONE_BTUNE_STARTED_SLO_TERMINAL_1 — started-SLO must key on `started`, not `acked`, for command-kind
 
+> **⚠️ SUPERSEDES (flip flagged, not silent — Mnilax surface-don't-average; lead #11076):** This brief INVERTS the "acked = terminal SUCCESS" position — my own earlier triage rec (i) and lead's ratified **#11023 item-4**. On the merits the E11 argument wins: ack ≠ execution; `started_at` is the delivery model's own success marker (`db.py:673`); treating `acked` as terminal would blind the semantic evaluator to exactly the P5 silent-leg class it exists to catch. Lead ratified the flip (#11076); **#11023 item-4 wording is hereby superseded.** Because this reverses a ratified decision, it ships **kill-switch-OFF behind a stepped arming ladder** (see Rollout), never a silent day-one flip.
+>
+> **Companion prerequisite (HARD gate):** the `BRISEN_LAB_OBLIGATION_STARTED_TERMINAL=1` flip is hard-gated on `CLIENT_STARTED_EMISSION_1` (client drain/check-inbox path must emit `started_at` on dispatch pickup; owner b1). Today 367/487 delivery rows are acked-not-started **because clients almost never emit `started`** — so a default-ON flip would read those as OPEN on day one = instant E15. See Rollout ladder + `BRIEF_CLIENT_STARTED_EMISSION_1.md`.
+
 ## Context
 Deputy delivery-backlog triage (lead #11022 item 4). Two findings converge:
 1. The obligation / unacked-SLO alarm treats a message as terminally satisfied the moment `acknowledged_at` is set (acked). But the delivery model's own definition of success is *reached `started` within the started-SLA* (`db.py:673` — "delivered ≙ reached `started` within SLA; else `undelivered`"). An **acked-but-never-started** command-kind obligation is therefore counted as fulfilled while the work never began — the "silent leg" failure class (P5 legs sat ~38m/~77m un-executed).
@@ -34,9 +38,17 @@ Ignore unrelated rails: standing-contract, build-command-center, skills-and-play
 5. Unit: acked+no-receipt row appears in `receipt_missing` bucket, distinct + non-zero.
 6. Kill switch: `BRISEN_LAB_OBLIGATION_STARTED_TERMINAL=0` reverts to legacy predicate (test both states).
 7. Suite: no new failures vs the 27-fail brisen-lab baseline.
-8. Live: `POST_DEPLOY_AC_VERDICT` — `GET /api/semantic_delivery` reflects a real acked-un-started command leg as open, not green.
+8. Live: `POST_DEPLOY_AC_VERDICT` — `GET /api/semantic_delivery` reflects a real acked-un-started command leg as open, not green (with the switch ON in a drill env; merge state is OFF).
+9. **Flip precondition (lead #11076):** before any `=1` flip, the live open-obligation count under the new predicate is ≤ the lead-agreed threshold (target ~0 acked-not-started once `CLIENT_STARTED_EMISSION_1` is live). This is a *rollout-ladder gate*, not a build-time test — the builder ships the query that measures it; lead reads it before GO.
 
-**Gate plan:** G1 builder self-verify (all 8 rubric items) → codex correctness review (cross-vendor; codex seats lifted #9711) → lead PASS → lead merges → Render deploy → **deputy** runs the live drill + posts `POST_DEPLOY_AC_VERDICT v1` (deputy is named bus-health owner).
+**Gate plan:** G1 builder self-verify (rubric items 1–8) → codex correctness review (cross-vendor; codex seats lifted #9711) → lead PASS → lead merges **switch OFF** → Render deploy → **deputy** runs the live drill + posts `POST_DEPLOY_AC_VERDICT v1` (deputy is named bus-health owner). Rubric item 9 + the `=1` flip are gated later by the Rollout ladder, each step lead-GO'd.
+
+### Rollout — stepped arming ladder (each step = explicit lead GO; lead #11076)
+1. **A-clear** the ~88 never-acked-but-shipped overhang (queue item 5, HELD for lead sign-off) — clean the legacy baseline first.
+2. **Merge this brief switch-OFF**; arm ENFORCE on the *legacy* acked-based predicate (no behaviour change vs today, just the reader plumbed through the shared predicate + `receipt_missing` bucket live).
+3. **`CLIENT_STARTED_EMISSION_1` ships** (companion, owner b1) — clients emit `started_at` on dispatch pickup.
+4. **Live acked-not-started population drains to ~0** (rubric item 9 ≤ threshold) as real `started` signals flow.
+5. **Flip `BRISEN_LAB_OBLIGATION_STARTED_TERMINAL=1`** — HARD-gated on steps 3+4. Only now does `acked`-terminal actually invert on the live alarm.
 
 ---
 
@@ -77,7 +89,7 @@ Introduce a single shared "open obligation" predicate and route the command-kind
 ### Key Constraints
 - **Command-kind ONLY** (plan v3 #10397 zero-silent-loss; ARM charter v1.1a). Never gate on Event-kind — that is E15 alarm-fatigue.
 - **Additive, non-regressive.** Do NOT touch `brisen_lab_msg_unacked` (`db.py:769`) or `idx_msg_open_ratifies` (`db.py:761`) — badge counts + Director open-Q count stay acked-based. New predicate needs its own partial index if a seq scan appears: `WHERE execute_obligation = TRUE AND started_at IS NULL AND escalated_at IS NULL AND deleted_at IS NULL`.
-- **ENV KILL SWITCH:** `BRISEN_LAB_OBLIGATION_STARTED_TERMINAL=1` (default ON once merged; `0` reverts the obligation reader to the legacy acked-based predicate) so a live regression is reversible via Render env PUT without redeploy — mirrors the P2 tune-on-live rider.
+- **ENV KILL SWITCH — DEFAULT OFF AT MERGE** (`BRISEN_LAB_OBLIGATION_STARTED_TERMINAL`, unset/`0` = legacy acked-based predicate; `1` = new `started`-based predicate). **Merges OFF.** Rationale (lead #11076): 367/487 live rows are acked-not-started because clients almost never emit `started_at` yet — a default-ON flip would read those as OPEN day one = instant E15, the exact failure tune-before-arm exists to prevent. The `=1` flip happens only at the end of the Rollout ladder, each step lead-GO'd, and is HARD-gated on `CLIENT_STARTED_EMISSION_1`. Reversible via Render env PUT without redeploy.
 - Every query has a LIMIT; every `except` does `conn.rollback()`; reuse `db_gate.db_call`.
 
 ### Verification
@@ -151,5 +163,11 @@ WHERE d.acknowledged_at IS NOT NULL
 LIMIT 1000;
 ```
 
+## Related finding (non-blocking; lead #11073) — default-flight fallback mints real-matter tickets from infra emails
+During item-2 triage, the BB-AUK-001 escalation (#10554/#10597/#10653) resolved to **mis-routes**: `[ARM OUT-OF-BAND RECOVERY/ALARM]` canary + fire-drill emails from Director's own mailbox were minted as *aukera-annaberg-financing* tickets under the **global-default flight env** (same default-fallback family as b1's #10236, email path this time). Fix direction (a separate brief, not this one — scope discipline): infra-sender/subject filter *upstream* of ticket mint, OR default unmatched infra traffic to a **review lane** instead of a real matter flight. Recommend spinning `DEFAULT_FLIGHT_INFRA_FILTER_1` (owner: whoever owns the ticket-mint path). Not a delivery-SLO concern; noted here per lead's append instruction so it is not lost.
+
+## Companion brief (this arc): `CLIENT_STARTED_EMISSION_1`
+Authored alongside this amendment (owner **b1** — owns the #557 client read-contract context). Client drain/check-inbox path emits `started_at` on dispatch pickup so `started`-based obligation-closing has a real signal to read. **The `=1` flip in this brief's Rollout ladder is HARD-gated on it.** See `BRIEF_CLIENT_STARTED_EMISSION_1.md`.
+
 ## Routing
-Lead reviews → deputy-codex builds (cross-vendor gate: codex correctness) per B-code lane. Command-kind-only scope reconciles with P4.2 (dispatch-warning on `kind=assignment`) — do NOT double-gate; this predicate is the *obligation-closed* judgment, P4.2 is the *dispatch-warning* judgment. Follow-up spun out: `RECEIPT_WRITE_DURABILITY_1` (write-path repair) — flagged to lead, not in this brief.
+Lead reviews → deputy-codex builds (cross-vendor gate: codex correctness) per B-code lane; **merges switch-OFF**, `=1` flip deferred to the Rollout ladder. Command-kind-only scope reconciles with P4.2 (dispatch-warning on `kind=assignment`) — do NOT double-gate; this predicate is the *obligation-closed* judgment, P4.2 is the *dispatch-warning* judgment. Follow-ups spun out (flagged to lead, NOT in this brief): `RECEIPT_WRITE_DURABILITY_1` (receipt write-path repair), `CLIENT_STARTED_EMISSION_1` (companion prerequisite, owner b1), `DEFAULT_FLIGHT_INFRA_FILTER_1` (ticket-mint infra filter).
