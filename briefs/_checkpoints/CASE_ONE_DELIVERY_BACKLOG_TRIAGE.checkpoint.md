@@ -35,3 +35,8 @@ Fresh seat = CANONICAL (lead #11052: original pid 16839 DEAD; #11047 stand-down 
 
 ## Bus refs
 Seat-resolve #11052 · triage #11056/#11069/#11071 · PR557 #11062 · brief PASS #11092 · A-clear ruling #11101 / executed #11110 / report #11108 · coherence flag #11124 / verdict #11126.
+
+## POST_DEPLOY_AC — CLIENT_STARTED_EMISSION_1 (2026-07-14 ~12:48Z, lead #11230 → verdict #11247)
+- **PASS 4/4.** brisen-lab #143 @3cd2aa1 LIVE + baker-master #561 @fecbbba on main. Drill: (1) /msg/11230/started 405→200 {started}; (2) client emission live — self-dispatch 11243 (started_at NULL) → reply --parent 11243 (updated bus_post.sh) → started_at set ~5s; (3) non-recipient #11218 → 403 not_recipient; (4) repeat #11230 → 200 already_started, no state change.
+- **FINDING (flagged lead #11247):** client emission is per-seat bus_post.sh. My deputy clone was STALE (pre-#561) until I git-pulled mid-drill → first 2 emit attempts silently no-op'd. Ladder step 4 (acked-not-started ~0) needs the updated bus_post.sh distributed to EVERY fleet client. = FLEET_DEPLOY_PARITY_1 class. Recommended fleet bus_post.sh sync sweep before arming step 4/5.
+- Ladder step 3 build COMPLETE + verified. Drill artifacts 11243-11246 acked/cleaned. Local clone now @fecbbba (has emission).
