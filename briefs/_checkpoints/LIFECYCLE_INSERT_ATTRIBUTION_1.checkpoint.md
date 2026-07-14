@@ -12,8 +12,10 @@ updated: 2026-07-14
 LIFECYCLE_INSERT_ATTRIBUTION_1 — lead dispatch #10892 (deputy finding #10877). ONE micro-PR.
 Effort low. Repo: brisen-lab.
 
-## STATUS: BUILT + GREEN + PR #138 OPENED — awaiting codex gate → lead merge
-- brisen-lab PR #138 (commit 87610ef). Gate chain: G1 (done) → codex → lead merge.
+## STATUS: CODEX PASS — awaiting lead merge of PR #138
+- brisen-lab PR #138 (commit 87610ef). Gate chain: G1 (done) → codex PASS (#10939) → lead merge (relayed #10942).
+- Codex PASS #10939: no blocking findings; codex's own pytest skipped DB tests (no TEST_DATABASE_URL
+  in its shell) — I ran them green on isolated local PG, load-bearing proven, on-record in ship report.
 - G1 PASS: 2/2 new tests green, BOTH load-bearing (verified to fail vs origin/main lifecycle.py, source=None).
   Full suite 26f/666p = zero new failures vs post-#137 baseline (deterministic failing-set diff empty;
   26 = pre-existing autowake/wake-gate isolation).
