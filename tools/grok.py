@@ -340,7 +340,7 @@ def dispatch_grok(name: str, args: dict[str, Any]) -> str:
             ):
                 try:
                     payload = _trial.run_grok_ask(
-                        client=_get_client(),
+                        client_factory=_get_client,
                         prompt=args["prompt"],
                         route=route,
                         max_output_tokens=int(args.get("max_tokens", 4000)),

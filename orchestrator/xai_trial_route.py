@@ -27,7 +27,7 @@ import logging
 import math
 import os
 import uuid
-from typing import Any, Optional
+from typing import Any, Callable, Optional
 
 from orchestrator import xai_week_ledger as ledger
 
@@ -131,7 +131,7 @@ def _actual_usd(payload: dict, tokens_in: int, tokens_out: int) -> float:
 # ─────────────────────────── governed call ───────────────────────────
 
 def run_grok_ask(
-    client: Any,
+    client_factory: Callable[[], Any],
     *,
     prompt: str,
     route: str,
@@ -145,10 +145,18 @@ def run_grok_ask(
     """Run a governed grok-4.5 ``ask`` on a trial route. Returns the client
     payload dict augmented with ``_trial`` metadata on success.
 
+    ``client_factory`` is a zero-arg callable that BUILDS the Grok client; it is
+    invoked LAZILY, only after route + model validation passes (codex #11398). The
+    client ctor reads ``XAI_API_KEY`` and raises when it is absent — constructing
+    it eagerly at the caller (``client=_get_client()``) meant an unknown route +
+    missing key raised before the ``blocked_route_unknown`` audit row was written,
+    leaving that double-fault un-audited. Building it here, post-validation,
+    guarantees every rejected attempt is audited first.
+
     Raises :class:`GrokTrialError` (fail loud, no fallback) when the route is
-    disabled, an off-allowlist model is requested, or the weekly cap blocks it.
-    A downstream Grok failure releases the reservation and re-raises as a
-    GrokTrialError carrying route + cause + spend.
+    unknown/disabled, an off-allowlist model is requested, the client cannot be
+    built, or the weekly cap blocks it. A downstream Grok failure releases the
+    reservation and re-raises as a GrokTrialError carrying route + cause + spend.
     """
     request_ref = request_ref or uuid.uuid4().hex
 
@@ -180,6 +188,23 @@ def run_grok_ask(
                                 outcome="blocked_model_not_allowed",
                                 error_class="model_not_allowed", matter_slug=matter_slug)
         raise GrokTrialError(info)
+
+    # (2b) Build the client ONLY now — after route + model validation, before any
+    # reservation. Lazy construction closes codex #11398: an unknown route + absent
+    # XAI_API_KEY used to raise at the eager `client=_get_client()` arg BEFORE case
+    # (0) could write the blocked_route_unknown row. A client-init failure on an
+    # otherwise-valid route is itself a rejected attempt → audit it (before any
+    # reserve is taken, so no hold leaks) and fail loud.
+    try:
+        client = client_factory()
+    except Exception as e:
+        ledger.write_call_audit(model=TRIAL_MODEL, route=route, request_ref=request_ref,
+                                outcome="blocked_client_init",
+                                error_class="client_init_failed", matter_slug=matter_slug)
+        info = {"reason": "client_init_failed", "route": route,
+                "cause": f"{type(e).__name__}: {e}"}
+        logger.error("grok trial client init failed route=%s cause=%s", route, info["cause"])
+        raise GrokTrialError(info) from e
 
     # (3) Conservative reservation BEFORE the call. `ask` uses no search tool.
     # P1-3: capture the reservation week ONCE (at reserve time) and thread it

@@ -107,10 +107,54 @@ def test_unknown_route_rejected_loud_and_skips_client(enabled, monkeypatch):
     # route_disabled, and never touches the client.
     client = _FakeClient()
     with pytest.raises(trial.GrokTrialError) as ei:
-        trial.run_grok_ask(client=client, prompt="hi", route="not_a_real_route")
+        trial.run_grok_ask(client_factory=lambda: client, prompt="hi", route="not_a_real_route")
     assert ei.value.info["reason"] == "route_unknown"
     assert "known_routes" in ei.value.info
     assert client.calls == []
+
+
+def test_unknown_route_audits_before_client_build(monkeypatch):
+    # codex #11398 double-fault: an unknown route + a client factory that raises
+    # (e.g. XAI_API_KEY absent) must STILL write the blocked_route_unknown audit row
+    # and NEVER invoke the factory — validation precedes client construction. The old
+    # eager `client=_get_client()` arg raised before case (0) could audit → 0 rows.
+    monkeypatch.setenv("GROK45_ENABLED_ROUTES", "b4_runtime")
+    rows = []
+    monkeypatch.setattr(trial.ledger, "write_call_audit", lambda **k: rows.append(k))
+    built = []
+
+    def boom():
+        built.append(True)
+        raise RuntimeError("XAI_API_KEY missing")
+
+    with pytest.raises(trial.GrokTrialError) as ei:
+        trial.run_grok_ask(client_factory=boom, prompt="hi", route="not_a_real_route")
+    assert ei.value.info["reason"] == "route_unknown"
+    assert built == []  # factory never called — route validated first
+    assert len(rows) == 1
+    assert rows[0]["outcome"] == "blocked_route_unknown"
+    assert rows[0]["error_class"] == "route_unknown"
+
+
+def test_client_init_failure_on_valid_route_audits_and_skips_reserve(monkeypatch):
+    # A valid, enabled route whose client cannot be built (missing key) is itself a
+    # rejected attempt: audit blocked_client_init, fail loud, and take NO reservation
+    # (the build happens before reserve, so no hold leaks).
+    monkeypatch.setenv("GROK45_ENABLED_ROUTES", "b4_runtime")
+    rows = []
+    monkeypatch.setattr(trial.ledger, "write_call_audit", lambda **k: rows.append(k))
+    reserved = []
+    monkeypatch.setattr(trial.ledger, "reserve",
+                        lambda **k: reserved.append(k) or {"granted": True, "reason": "ok"})
+
+    def boom():
+        raise RuntimeError("XAI_API_KEY missing")
+
+    with pytest.raises(trial.GrokTrialError) as ei:
+        trial.run_grok_ask(client_factory=boom, prompt="hi", route="b4_runtime")
+    assert ei.value.info["reason"] == "client_init_failed"
+    assert reserved == []  # no hold taken
+    assert [r["outcome"] for r in rows] == ["blocked_client_init"]
 
 
 def test_reservation_week_threaded_to_settle(enabled, monkeypatch):
@@ -126,7 +170,7 @@ def test_reservation_week_threaded_to_settle(enabled, monkeypatch):
                             {"settled": True, "released_residual_usd": 0.0})[1])
     monkeypatch.setattr(trial, "_settle_into_api_cost_log", lambda *a, **k: None)
     client = _FakeClient()
-    trial.run_grok_ask(client=client, prompt="hi", route="b4_runtime")
+    trial.run_grok_ask(client_factory=lambda: client, prompt="hi", route="b4_runtime")
     assert seen["reserve_week"] is not None
     assert seen["reserve_week"] == seen["settle_week"]
 
@@ -142,7 +186,7 @@ def test_reservation_week_threaded_to_release_on_failure(enabled, monkeypatch):
     monkeypatch.setattr(trial.ledger, "settle", lambda *a, **k: {"settled": True})
     client = _FakeClient(raises=RuntimeError("xai 500"))
     with pytest.raises(trial.GrokTrialError):
-        trial.run_grok_ask(client=client, prompt="hi", route="b4_runtime")
+        trial.run_grok_ask(client_factory=lambda: client, prompt="hi", route="b4_runtime")
     assert seen["reserve_week"] is not None
     assert seen["reserve_week"] == seen["release_week"]
 
@@ -152,7 +196,7 @@ def test_route_disabled_raises_and_skips_client(monkeypatch):
     monkeypatch.setattr(trial.ledger, "write_call_audit", lambda **k: None)
     client = _FakeClient()
     with pytest.raises(trial.GrokTrialError) as ei:
-        trial.run_grok_ask(client=client, prompt="hi", route="b4_runtime")
+        trial.run_grok_ask(client_factory=lambda: client, prompt="hi", route="b4_runtime")
     assert ei.value.info["reason"] == "route_disabled"
     assert client.calls == []
 
@@ -162,7 +206,7 @@ def test_model_not_allowed_fails_loud(enabled, monkeypatch):
                         lambda **k: {"granted": True, "reason": "ok"})
     client = _FakeClient()
     with pytest.raises(trial.GrokTrialError) as ei:
-        trial.run_grok_ask(client=client, prompt="hi", route="b4_runtime",
+        trial.run_grok_ask(client_factory=lambda: client, prompt="hi", route="b4_runtime",
                            model="grok-4.3")
     assert ei.value.info["reason"] == "model_not_allowed"
     assert client.calls == []  # no fallback, no call
@@ -178,7 +222,7 @@ def test_weekly_cap_block_skips_client(enabled, monkeypatch):
                         lambda *a, **k: released.append(a))
     client = _FakeClient()
     with pytest.raises(trial.GrokTrialError) as ei:
-        trial.run_grok_ask(client=client, prompt="hi", route="b4_runtime")
+        trial.run_grok_ask(client_factory=lambda: client, prompt="hi", route="b4_runtime")
     assert ei.value.info["reason"] == "weekly_cap_reached"
     assert client.calls == []
     assert released == []  # nothing was reserved, so nothing to release
@@ -197,7 +241,7 @@ def test_happy_path_settles_and_forces_grok45(enabled, monkeypatch):
                         lambda ti, to, actual, ms: logged.update({"actual": actual}))
     client = _FakeClient(payload={"text": "a", "model": "grok-4.5",
                                   "tokens_in": 1000, "tokens_out": 1000, "cost_usd": 0.0})
-    out = trial.run_grok_ask(client=client, prompt="hi", route="b4_runtime")
+    out = trial.run_grok_ask(client_factory=lambda: client, prompt="hi", route="b4_runtime")
     assert client.calls[0]["model"] == "grok-4.5"  # allowlist enforced
     assert out["_trial"]["route"] == "b4_runtime"
     assert out["_trial"]["model"] == "grok-4.5"
@@ -228,7 +272,7 @@ def test_settle_failure_retained_and_audited(enabled, monkeypatch):
 
     client = _FakeClient(payload={"text": "a", "model": "grok-4.5",
                                   "tokens_in": 100, "tokens_out": 50, "cost_usd": 0.0})
-    out = trial.run_grok_ask(client=client, prompt="hi", route="b4_runtime")
+    out = trial.run_grok_ask(client_factory=lambda: client, prompt="hi", route="b4_runtime")
     assert attempts["n"] == trial._SETTLE_MAX_ATTEMPTS   # retried
     assert released == []                                # reservation RETAINED
     assert audit.get("outcome") == "settle_failed"       # audit reflects failure
@@ -246,7 +290,7 @@ def test_call_failure_releases_reservation(enabled, monkeypatch):
                         lambda *a, **k: settle_called.append(a))
     client = _FakeClient(raises=RuntimeError("xai 500"))
     with pytest.raises(trial.GrokTrialError) as ei:
-        trial.run_grok_ask(client=client, prompt="hi", route="b4_runtime")
+        trial.run_grok_ask(client_factory=lambda: client, prompt="hi", route="b4_runtime")
     assert ei.value.info["reason"] == "grok_call_failed"
     assert ei.value.info["error_class"] == "RuntimeError"
     assert len(released) == 1          # reservation released

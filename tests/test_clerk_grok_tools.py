@@ -138,6 +138,29 @@ def test_grok_ask_known_but_disabled_route_falls_through_to_grok_43(fake_grok, c
     assert capture_audit == []  # designed fallthrough is not a trial attempt
 
 
+def test_grok_ask_unknown_route_audits_even_when_client_ctor_fails(capture_audit, monkeypatch):
+    # codex #11398 double-fault: XAI_API_KEY absent + bogus route. The dispatcher now
+    # passes a client FACTORY (_get_client) lazily, so run_grok_ask validates the
+    # route and writes blocked_route_unknown BEFORE the client ctor can raise on the
+    # missing key. Previously the eager client=_get_client() arg raised first → 0 rows.
+    built = []
+
+    def boom_client():
+        built.append(True)
+        raise RuntimeError("XAI_API_KEY missing")
+
+    monkeypatch.setattr("tools.grok._get_client", boom_client)
+    monkeypatch.setenv("GROK45_ENABLED_ROUTES", "bogus_route")
+    res = ClerkToolRegistry().execute(
+        "baker_grok_ask", {"prompt": "ping", "route": "bogus_route", "matter_slug": "mo-vie"}
+    )
+    assert res.startswith("Error: grok trial blocked")
+    assert "route_unknown" in res
+    assert built == []  # factory never invoked — route validated first
+    assert len(capture_audit) == 1
+    assert capture_audit[0]["outcome"] == "blocked_route_unknown"
+
+
 # ── G0 #2391 regression: cost breaker tripped -> ZERO HTTP, blocked ───────────
 
 def test_grok_breaker_tripped_makes_zero_calls(monkeypatch):
