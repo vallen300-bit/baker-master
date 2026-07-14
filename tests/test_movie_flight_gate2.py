@@ -227,14 +227,31 @@ def test_wire_multimatter_sender_disambiguated_by_content(monkeypatch):
 
 def test_wire_identity_only_goes_to_lead_review_lane(monkeypatch):
     monkeypatch.setattr(bridge, "_sender_matter_set", lambda *a, **k: {"movie"})
-    # No content keyword -> identity_only -> review lane (desk=lead), NOT movie-desk / BB.
+    # No content keyword -> identity_only -> review lane (desk=lead), with no matter/flight
+    # assignment, NOT movie-desk / BB.
     t = bridge.build_email_ticket(
         _email("Quick question", "call me later", participant_fetched=True), conn=object()
     )
     assert t is not None
     assert t.proposed_desk_slug == "lead"
+    assert t.suspected_matter_slug == ""
+    assert t.suspected_flight == ""
     assert t.review_reason == bridge.REVIEW_REASON_IDENTITY_ONLY
     assert any("review lane (identity_only)" in w for w in t.why_ticketed)
+
+
+def test_wire_identity_only_multi_project_participant_is_unassigned(monkeypatch):
+    """A multi-project identity without corroborating content cannot inherit a live flight."""
+    monkeypatch.setattr(bridge, "_sender_matter_set", lambda *a, **k: {"movie", "ao"})
+    t = bridge.build_email_ticket(
+        _email("Forecast", "numbers for next week", participant_fetched=True),
+        conn=object(),
+    )
+    assert t is not None
+    assert t.proposed_desk_slug == "lead"
+    assert t.suspected_matter_slug == ""
+    assert t.suspected_flight == ""
+    assert t.review_reason == bridge.REVIEW_REASON_IDENTITY_ONLY
 
 
 def test_wire_conflict_goes_to_lead_review_lane(monkeypatch):
