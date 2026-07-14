@@ -1,0 +1,146 @@
+#!/usr/bin/env bash
+# Repository source for the live ~/.local/bin/codex-verify wrapper.
+# Keep this file synchronized with the installed wrapper; the installed copy
+# may be used from repositories that do not contain this checkout.
+
+set -euo pipefail
+
+MODEL="gpt-5.6-luna"
+MODEL_CATALOG="$HOME/.codex/model-catalog-gpt56-luna-1050k.json"
+CONTEXT_WINDOW="1050000"
+COMPACT_LIMIT="945000"
+EFFORT="medium"
+MODE="exec"
+PROMPT=""
+EXTRA=()
+TARGET_REF="HEAD"
+COPY_UNCOMMITTED=1
+
+while [[ $# -gt 0 ]]; do
+    case "$1" in
+        --review|--r)
+            MODE="review"
+            shift
+            ;;
+        --uncommitted)
+            EXTRA+=("--uncommitted")
+            COPY_UNCOMMITTED=1
+            shift
+            ;;
+        --base)
+            EXTRA+=("--base" "$2")
+            COPY_UNCOMMITTED=0
+            shift 2
+            ;;
+        --commit)
+            TARGET_REF="$2"
+            EXTRA+=("--commit" "$2")
+            COPY_UNCOMMITTED=0
+            shift 2
+            ;;
+        -m|--model)
+            MODEL="$2"
+            shift 2
+            ;;
+        -e|--effort)
+            EFFORT="$2"
+            shift 2
+            ;;
+        -h|--help)
+            sed -n '2,16p' "$0" | sed 's/^# \{0,1\}//'
+            exit 0
+            ;;
+        --)
+            shift
+            PROMPT="$*"
+            break
+            ;;
+        -*)
+            echo "codex-verify: unknown flag: $1" >&2
+            exit 2
+            ;;
+        *)
+            PROMPT="$*"
+            break
+            ;;
+    esac
+done
+
+if [[ -z "$PROMPT" ]] && ! [[ -t 0 ]]; then
+    PROMPT="$(cat)"
+fi
+
+if ! codex login status 2>&1 | grep -q "Logged in"; then
+    KEY="$(op item get 'API OpenAI' --vault 'Baker API Keys' --fields credential --reveal 2>/dev/null || true)"
+    if [[ -z "$KEY" ]]; then
+        echo "codex-verify: could not fetch OpenAI key from 1Password." >&2
+        exit 3
+    fi
+    echo "$KEY" | codex login --with-api-key >/dev/null
+fi
+
+if [[ "$MODE" == "review" ]]; then
+    if [[ -z "$PROMPT" ]] && [[ ${#EXTRA[@]} -eq 0 ]]; then
+        echo "codex-verify --review: need a review target or prompt" >&2
+        exit 2
+    fi
+    if [[ ${#EXTRA[@]} -gt 0 ]]; then
+        COMMAND=(codex review
+            -c "model=$MODEL"
+            -c "model_catalog_json=$MODEL_CATALOG"
+            -c "model_context_window=$CONTEXT_WINDOW"
+            -c "model_auto_compact_token_limit=$COMPACT_LIMIT"
+            -c "model_reasoning_effort=$EFFORT"
+            "${EXTRA[@]}")
+    else
+        COMMAND=(codex review
+            -c "model=$MODEL"
+            -c "model_catalog_json=$MODEL_CATALOG"
+            -c "model_context_window=$CONTEXT_WINDOW"
+            -c "model_auto_compact_token_limit=$COMPACT_LIMIT"
+            -c "model_reasoning_effort=$EFFORT"
+            "$PROMPT")
+    fi
+    REQUIRE_GIT=1
+else
+    if [[ -z "$PROMPT" ]]; then
+        echo "codex-verify: no prompt given (positional arg or stdin)" >&2
+        exit 2
+    fi
+    COMMAND=(codex exec --skip-git-repo-check
+        -m "$MODEL"
+        -c "model_catalog_json=$MODEL_CATALOG"
+        -c "model_context_window=$CONTEXT_WINDOW"
+        -c "model_auto_compact_token_limit=$COMPACT_LIMIT"
+        -c "model_reasoning_effort=$EFFORT"
+        "$PROMPT")
+    REQUIRE_GIT=0
+fi
+
+HELPER="${CODEX_REVIEW_WORKTREE_HELPER:-}"
+if [[ -z "$HELPER" ]]; then
+    for candidate in \
+        "$HOME/.local/bin/codex-review-worktree.sh" \
+        "$HOME/baker-vault/scripts/codex-review-worktree.sh" \
+        "$HOME/bm-aihead1/scripts/codex-review-worktree.sh" \
+        "$HOME/bm-aihead2/scripts/codex-review-worktree.sh"; do
+        if [[ -x "$candidate" ]]; then
+            HELPER="$candidate"
+            break
+        fi
+    done
+fi
+if [[ -z "$HELPER" || ! -x "$HELPER" ]]; then
+    echo "codex-verify: isolated-worktree helper not found" >&2
+    exit 4
+fi
+
+HELPER_ARGS=(--ref "$TARGET_REF")
+if [[ "$COPY_UNCOMMITTED" -eq 1 ]]; then
+    HELPER_ARGS+=(--copy-uncommitted)
+fi
+if [[ "$REQUIRE_GIT" -eq 1 ]]; then
+    HELPER_ARGS+=(--require-git)
+fi
+
+"$HELPER" "${HELPER_ARGS[@]}" -- "${COMMAND[@]}"
