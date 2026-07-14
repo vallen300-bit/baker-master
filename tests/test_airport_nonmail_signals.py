@@ -392,8 +392,7 @@ def test_build_whatsapp_ticket_ao_identity_route_lane(monkeypatch):
 
 
 def test_build_whatsapp_ticket_identity_only_no_route_stays_lead(monkeypatch):
-    """Regression: an identity-only WA with NO route tag keeps the neutral lead review lane +
-    global matter/flight — the pre-change behavior for BB/movie participants is untouched."""
+    """Regression: an identity-only WA with NO route tag stays unassigned in lead review."""
     monkeypatch.delenv("AIRPORT_TICKETING_DESK", raising=False)
     monkeypatch.delenv("AIRPORT_TICKETING_FLIGHT", raising=False)
     monkeypatch.delenv("AIRPORT_TICKETING_MATTER_SLUG", raising=False)
@@ -402,8 +401,8 @@ def test_build_whatsapp_ticket_identity_only_no_route_stays_lead(monkeypatch):
     ticket = bridge.build_whatsapp_ticket(arrival, conn=conn)
     assert ticket is not None
     assert ticket.proposed_desk_slug == "lead"
-    assert ticket.suspected_matter_slug == "lilienmatt"
-    assert ticket.suspected_flight == "aukera-annaberg-financing"
+    assert ticket.suspected_matter_slug == ""
+    assert ticket.suspected_flight == ""
     assert ticket.review_reason == bridge.REVIEW_REASON_IDENTITY_ONLY
 
 

@@ -117,6 +117,41 @@ def test_format_ticket_for_bus_includes_check_in_contract():
     assert "Check-in required: reply with VALID, FAKE, DUPLICATE" in body
 
 
+def test_unassigned_review_ticket_uses_neutral_bus_topic(monkeypatch):
+    monkeypatch.setattr(bridge, "_sender_matter_set", lambda *a, **k: {"movie", "ao"})
+    ticket = bridge.build_email_ticket(
+        bridge.EmailArrival(
+            message_id="review-message",
+            thread_id="review-thread",
+            sender_name="Multi-project participant",
+            sender_email="participant@example.com",
+            subject="Forecast",
+            full_body="Numbers for next week",
+            received_date=None,
+            source="graph",
+            participant_fetched=True,
+        ),
+        conn=object(),
+    )
+    assert ticket is not None
+    assert ticket.suspected_matter_slug == ""
+    assert ticket.suspected_flight == ""
+    assert "suspected_matter_slug: unknown" in bridge.format_ticket_for_bus(ticket)
+    assert "suspected_flight: unknown" in bridge.format_ticket_for_bus(ticket)
+
+    posted = {}
+    monkeypatch.setattr(bridge, "_bridge_key", lambda: "test-key")
+    monkeypatch.setattr(
+        bridge,
+        "_request_json",
+        lambda method, url, *, key, payload, timeout=15: posted.update(payload) or {},
+    )
+    result = bridge.post_ticket_to_bus(ticket)
+
+    assert result["ok"] is True
+    assert posted["topic"] == "airport-ticketing/review-unassigned"
+
+
 def test_issue_ticket_duplicate_does_not_post(monkeypatch):
     ticket = bridge.build_email_ticket(_arrival())
     assert ticket is not None

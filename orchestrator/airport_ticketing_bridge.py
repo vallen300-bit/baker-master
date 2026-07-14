@@ -605,6 +605,12 @@ KEYWORD_MATTER_MAP: dict[str, str] = {
 # Neutral review-lane desk for uncorroborated participant-fetched arrivals (lead #8160). `lead`
 # is a live bus recipient and NOT in RESERVED_RECIPIENTS, so it is a valid proposed desk slug.
 _REVIEW_DESK = "lead"
+# Unassigned review tickets must not carry either the operator's default matter or a live
+# matter flight. Empty stored values keep downstream matter/flight joins from treating review
+# evidence as a real assignment; bus routing uses this explicit neutral topic instead.
+_REVIEW_TOPIC = "review-unassigned"
+_REVIEW_SUSPECTED_MATTER = ""
+_REVIEW_SUSPECTED_FLIGHT = ""
 
 REVIEW_REASON_IDENTITY_ONLY = "identity_only"
 REVIEW_REASON_CONFLICT = "conflict"
@@ -933,11 +939,11 @@ def build_email_ticket(
     elif review_reason:
         # Neutral review lane (lead #8160): a participant-fetched arrival that did NOT corroborate
         # a single matter mints to desk=lead + review_reason (NOT the global BB desk) so lead
-        # reroutes one-glance and the BB cockpit stays clean. Global env stays fallback for
-        # non-participant traffic only (the else branch).
+        # reroutes one-glance and the BB cockpit stays clean. Keep suspected matter/flight empty:
+        # this is evidence for review, not a matter assignment.
         desk_slug = resolve_owner_slug(_REVIEW_DESK) or _REVIEW_DESK
-        suspected_matter = _matter_slug()
-        suspected_flight = _flight_name()
+        suspected_matter = _REVIEW_SUSPECTED_MATTER
+        suspected_flight = _REVIEW_SUSPECTED_FLIGHT
     else:
         # Keyword-lane / unregistered sender: today's global-desk behavior (lilienmatt regression).
         desk_slug = resolve_owner_slug(_desk_slug()) or _desk_slug()
@@ -1129,9 +1135,10 @@ def build_whatsapp_ticket(
     # MOVIE_FLIGHT_GATE2_ACTIVATION_1 — two-factor per-matter routing for WA, parity with email
     # (Director #8154). Factor A = WA sender's registered matters (channel=whatsapp); factor B =
     # content keyword->matter over the message text. conn=None or a sender-format mismatch ->
-    # factor A empty -> global fallback (byte-identical to prior WA behavior, PR #482 — never a
-    # misroute). identity-only WA is already suppressed upstream, so the review lane fires here
-    # only on a genuine conflict/multi-match; identity+content corroboration routes per-matter.
+    # factor A empty -> keyword-lane global fallback, while participant-matched arrivals enter
+    # the neutral review lane. Identity-only WA is normally suppressed upstream; when it is
+    # retained (for example via an explicit route exception), the review lane remains visible
+    # without inheriting the global matter/flight.
     _matter, review_reason = _two_factor_matter(
         _sender_matter_set(arrival.sender, conn, channel="whatsapp"),
         _content_matter_set("", arrival.full_text),
@@ -1164,12 +1171,12 @@ def build_whatsapp_ticket(
             routed_to_route_matter = True
         else:
             desk_slug = resolve_owner_slug(_REVIEW_DESK) or _REVIEW_DESK
-            suspected_matter = _matter_slug()
-            suspected_flight = _flight_name()
+            suspected_matter = _REVIEW_SUSPECTED_MATTER
+            suspected_flight = _REVIEW_SUSPECTED_FLIGHT
     elif review_reason:
         desk_slug = resolve_owner_slug(_REVIEW_DESK) or _REVIEW_DESK
-        suspected_matter = _matter_slug()
-        suspected_flight = _flight_name()
+        suspected_matter = _REVIEW_SUSPECTED_MATTER
+        suspected_flight = _REVIEW_SUSPECTED_FLIGHT
     else:
         desk_slug = resolve_owner_slug(_desk_slug()) or _desk_slug()
         suspected_matter = _matter_slug()
@@ -2216,18 +2223,20 @@ def format_ticket_for_bus(ticket: AirportTicket) -> str:
     luggage = "\n".join(f"- {item}" for item in ticket.luggage) or "- none"
     why = "\n".join(f"- {item}" for item in ticket.why_ticketed) or "- none"
     limits = "\n".join(f"- {item}" for item in ticket.known_limits) or "- none"
+    suspected_matter = ticket.suspected_matter_slug or "unknown"
+    suspected_flight = ticket.suspected_flight or "unknown"
     return (
         f"TO: {ticket.proposed_desk_slug}\n"
         "FROM: ticketing-desk\n"
-        f"RE: AIRPORT_TICKET {ticket.suspected_flight}\n\n"
+        f"RE: AIRPORT_TICKET {suspected_flight}\n\n"
         "AIRPORT_TICKET v1\n"
         f"ticket_id: {ticket.ticket_id}\n"
         f"created_at: {ticket.created_at.isoformat()}\n"
         f"source_channel: {ticket.source_channel}\n"
         f"source_id: {ticket.source_id}\n"
         f"originator: {ticket.originator}\n"
-        f"suspected_matter_slug: {ticket.suspected_matter_slug}\n"
-        f"suspected_flight: {ticket.suspected_flight}\n"
+        f"suspected_matter_slug: {suspected_matter}\n"
+        f"suspected_flight: {suspected_flight}\n"
         f"proposed_desk_slug: {ticket.proposed_desk_slug}\n"
         f"urgency_hint: {ticket.urgency_hint}\n"
         "luggage:\n"
@@ -2249,12 +2258,17 @@ def post_ticket_to_bus(ticket: AirportTicket) -> dict[str, Any]:
     if not key:
         return {"ok": False, "error": "ticketing_key_missing"}
     base = os.environ.get(_BUS_URL_ENV, _DEFAULT_BUS_URL).rstrip("/")
+    topic = (
+        _REVIEW_TOPIC
+        if ticket.review_reason and not ticket.suspected_flight
+        else ticket.suspected_flight
+    )
     payload = {
         "kind": "dispatch",
         "body": format_ticket_for_bus(ticket),
         "to": [recipient],
         "tier_required": "B",
-        "topic": f"airport-ticketing/{ticket.suspected_flight}",
+        "topic": f"airport-ticketing/{topic}",
         # TICKET_ID_DEDUP_1 (B1) — at-least-once delivery guard. post_ticket_to_bus is
         # NOT idempotent by nature: a bus-post read-timeout is AMBIGUOUS (the daemon
         # likely created the message but the response was lost), and the failed-retry
