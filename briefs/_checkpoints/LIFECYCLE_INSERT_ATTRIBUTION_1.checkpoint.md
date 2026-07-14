@@ -27,9 +27,17 @@ Both now stamp source='daemon', unattributed=FALSE, intent=_derive_intent(kind) 
 _daemon_intent helper (lazy-imports bus._derive_intent — bus imports lifecycle, so top-level
 import is circular; mirrors _lifecycle_span otel deferral).
 
+## Item 2 (addendum #10900, docs-only) — DONE
+Corrected briefs/BRIEF_BUS_INTENT_TYPES_1.md to match shipped code @e488f9d per Option A #10888:
+ARM SLO predicate = unchanged P5 _is_delivery_tracked; intent==command is the queryable charter
+LABEL, not a firing conjunct. Fixed §Fix2 + §Verification4 (named) + 2 verbatim repeats
+(Files-Modified bullet, done-rubric item 3). Commit fdd6f5af on bm-b3 branch, pushed. Reported
+lead #10921 with scope note (2 extra lines beyond named sections). Deputy loops codex-arch re-gate.
+
 ## Next concrete step
-Await codex verdict on PR #138. On PASS → relay to lead for merge. On request_changes → hot-fix
-loop (new commit, never amend; re-verify; reply). No deploy AC of its own (hygiene follow-up).
+Await codex verdict on PR #138 (item 1). On PASS → relay to lead for merge. On request_changes →
+hot-fix loop (new commit, never amend; re-verify; reply). Item 2 awaits deputy codex-arch re-gate.
+No deploy AC of its own (hygiene follow-up). Both #10892 + #10900 acked; inbox clean.
 
 ## Test-DB note
 Isolated throwaway local PG: createdb -h /tmp <db>, TEST_DATABASE_URL=postgresql://localhost/<db>?host=/tmp,
