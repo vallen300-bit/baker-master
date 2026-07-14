@@ -44,6 +44,9 @@ class _StubHandler(BaseHTTPRequestHandler):
     # per request and is reset by the fixture.
     _status_sequence: list = []
     _status_idx: int = 0
+    # CLIENT_STARTED_EMISSION_1: messages the GET /msg/<slug> drain returns, so the
+    # started emitter's thread-resolution read has something to match. Set by the test.
+    _get_messages: list = []
 
     def _next_status(self) -> int:
         seq = type(self)._status_sequence
@@ -52,6 +55,20 @@ class _StubHandler(BaseHTTPRequestHandler):
         idx = type(self)._status_idx
         type(self)._status_idx = idx + 1
         return seq[idx] if idx < len(seq) else seq[-1]
+
+    def do_GET(self):  # noqa: N802 (BaseHTTPRequestHandler API)
+        # CLIENT_STARTED_EMISSION_1 thread-resolution read: GET /msg/<slug>?unread=true&
+        # kind=dispatch. Returns the canned _get_messages in the daemon envelope shape.
+        self._captured.append({
+            "path": self.path, "method": "GET",
+            "headers": {k: v for k, v in self.headers.items()},
+        })
+        self.send_response(200)
+        self.send_header("Content-Type", "application/json")
+        self.end_headers()
+        out = {"messages": type(self)._get_messages, "complete": True,
+               "unacked_total": len(type(self)._get_messages), "next_cursor": None}
+        self.wfile.write(json.dumps(out).encode("utf-8"))
 
     def do_POST(self):  # noqa: N802 (BaseHTTPRequestHandler API)
         length = int(self.headers.get("Content-Length", "0"))
@@ -62,6 +79,7 @@ class _StubHandler(BaseHTTPRequestHandler):
             payload = {"_raw": body}
         self._captured.append({
             "path": self.path,
+            "method": "POST",
             "headers": {k: v for k, v in self.headers.items()},
             "payload": payload,
         })
@@ -103,6 +121,7 @@ def stub_daemon():
     _StubHandler._status_code = 200
     _StubHandler._status_sequence = []
     _StubHandler._status_idx = 0
+    _StubHandler._get_messages = []
 
     server = HTTPServer(("127.0.0.1", port), _StubHandler)
     thread = threading.Thread(target=server.serve_forever, daemon=True)
@@ -857,3 +876,241 @@ def test_44_sh_whitespace_env_key_mints_not_posts_blank(stub_daemon, fake_op_pat
     key = captured[0]["payload"]["idempotency_key"]
     assert key.strip(), f"minted key must be non-blank, got {key!r}"
     assert key != "   "
+
+
+# ---- CLIENT_STARTED_EMISSION_1 — rubric 5: client `started` emission ----
+# A recipient's FIRST NON-ACK reply to a dispatch optimistically fires
+# POST /msg/<id>/started via the shared emitter scripts/emit_started.py. The endpoint is
+# the authoritative gate (brisen-lab tests/test_case_one_p5_delivery_confirmation.py);
+# here we assert the CLIENT wiring: it fires when (and only when) the reply threads onto a
+# dispatch — target resolved by --parent (primary) OR by --thread (bounded unread read;
+# topic-match dropped per lead #11216 collision hazard) — it is TOTAL best-effort (any
+# miss, incl. a generic OSError, never changes the post's exit code), the kill switch
+# suppresses it, and an ack post never emits.
+
+def test_45_sh_started_emitted_on_parent_reply(stub_daemon, fake_op_path):
+    """--parent 42 → after the main post lands, a best-effort POST /msg/42/started fires.
+    Two requests captured, in order: the reply, then the started signal. Exit 0."""
+    url, captured = stub_daemon
+    r = _run_sh(
+        ["lead", "on it", "heartbeat/x", "--parent", "42"],
+        _env_with({"BAKER_ROLE": "b1", "BRISEN_LAB_DAEMON_URL": url},
+                  fake_op_dir=fake_op_path),
+    )
+    assert r.returncode == 0, r.stderr
+    paths = [req["path"] for req in captured]
+    assert paths == ["/msg/lead", "/msg/42/started"], paths
+    # The started POST carries the sender's terminal key and an empty body.
+    started = captured[1]
+    assert "X-Terminal-Key" in started["headers"]
+    assert started["payload"] == {}
+
+
+def test_46_sh_no_started_without_parent(stub_daemon, fake_op_path):
+    """A non-reply post (no --parent) never fires a started signal — exactly one POST."""
+    url, captured = stub_daemon
+    r = _run_sh(
+        ["lead", "fyi", "note/x"],
+        _env_with({"BAKER_ROLE": "b1", "BRISEN_LAB_DAEMON_URL": url},
+                  fake_op_dir=fake_op_path),
+    )
+    assert r.returncode == 0, r.stderr
+    paths = [req["path"] for req in captured]
+    assert paths == ["/msg/lead"], paths
+    assert not any(p.endswith("/started") for p in paths)
+
+
+def test_47_sh_started_kill_switch_suppresses(stub_daemon, fake_op_path):
+    """BAKER_STARTED_EMISSION_DISABLED=1 suppresses the started fire even with --parent."""
+    url, captured = stub_daemon
+    r = _run_sh(
+        ["lead", "on it", "heartbeat/x", "--parent", "42"],
+        _env_with({"BAKER_ROLE": "b1", "BRISEN_LAB_DAEMON_URL": url,
+                   "BAKER_STARTED_EMISSION_DISABLED": "1"},
+                  fake_op_dir=fake_op_path),
+    )
+    assert r.returncode == 0, r.stderr
+    paths = [req["path"] for req in captured]
+    assert paths == ["/msg/lead"], paths
+
+
+def test_48_sh_started_miss_never_alters_exit_code(stub_daemon, fake_op_path):
+    """Best-effort: the main post lands 200, but the started signal gets a 404 (e.g. the
+    parent is not a dispatch / the sender is not a recipient). The post's exit code stays
+    0 and a one-line best-effort note is logged to stderr. Sequence [200, 404]: the reply
+    is request 1 (200), the started is request 2 (404)."""
+    _StubHandler._status_sequence = [200, 404]
+    url, captured = stub_daemon
+    r = _run_sh(
+        ["lead", "on it", "heartbeat/x", "--parent", "42"],
+        _env_with({"BAKER_ROLE": "b1", "BRISEN_LAB_DAEMON_URL": url},
+                  fake_op_dir=fake_op_path),
+    )
+    assert r.returncode == 0, r.stderr
+    paths = [req["path"] for req in captured]
+    assert paths == ["/msg/lead", "/msg/42/started"], paths
+    assert "started-emit best-effort miss" in r.stderr
+    assert "target=42" in r.stderr
+
+
+def test_49_py_started_emitted_on_parent_reply(stub_daemon, fake_op_path):
+    """bus_post.py parity: --parent-id 42 on a dispatch reply fires POST /msg/42/started."""
+    url, captured = stub_daemon
+    r = _run_py(
+        ["--to", "lead", "--body", "on it", "--parent-id", "42"],
+        _env_with({"BAKER_ROLE": "b1", "BRISEN_LAB_DAEMON_URL": url},
+                  fake_op_dir=fake_op_path),
+    )
+    assert r.returncode == 0, r.stderr
+    paths = [req["path"] for req in captured]
+    assert paths == ["/msg/lead", "/msg/42/started"], paths
+
+
+def test_50_py_started_not_emitted_on_ack(stub_daemon, fake_op_path):
+    """bus_post.py: an ack post (kind=ack) NEVER emits started, even threaded on a parent —
+    ack alone is not a start (E22). Exactly one POST, no /started."""
+    url, captured = stub_daemon
+    r = _run_py(
+        ["--to", "lead", "--body", "ack", "--kind", "ack", "--parent-id", "42"],
+        _env_with({"BAKER_ROLE": "b1", "BRISEN_LAB_DAEMON_URL": url},
+                  fake_op_dir=fake_op_path),
+    )
+    assert r.returncode == 0, r.stderr
+    paths = [req["path"] for req in captured]
+    assert paths == ["/msg/lead"], paths
+    assert not any(p.endswith("/started") for p in paths)
+
+
+# ---- CLIENT_STARTED_EMISSION_1 — parent-OR-thread match + TOTAL best-effort guard ----
+
+EMIT_STARTED_PY = REPO_ROOT / "scripts" / "emit_started.py"
+
+
+def _load_emit_started_module():
+    spec = importlib.util.spec_from_file_location("emit_started_under_test",
+                                                  EMIT_STARTED_PY)
+    mod = importlib.util.module_from_spec(spec)
+    assert spec.loader is not None
+    spec.loader.exec_module(mod)  # type: ignore[union-attr]
+    return mod
+
+
+def test_51_sh_started_via_thread_resolution(stub_daemon, fake_op_path):
+    """No --parent, but --thread <T>: the emitter resolves the dispatch in that thread via
+    the bounded unread read (GET /msg/<sender>?unread=true&kind=dispatch) and fires
+    /started for the resolved id. Stub returns a dispatch id=99 in thread T addressed to
+    the sender b1."""
+    _StubHandler._get_messages = [
+        {"id": 99, "thread_id": "T-uuid", "kind": "dispatch",
+         "execute_obligation": True, "to_terminals": ["b1"]},
+    ]
+    url, captured = stub_daemon
+    r = _run_sh(
+        ["lead", "on it", "note/x", "--thread", "T-uuid"],
+        _env_with({"BAKER_ROLE": "b1", "BRISEN_LAB_DAEMON_URL": url},
+                  fake_op_dir=fake_op_path),
+    )
+    assert r.returncode == 0, r.stderr
+    # The main post, then a GET resolution read, then the started POST for the resolved id.
+    assert captured[0]["path"] == "/msg/lead"
+    gets = [c for c in captured if c.get("method") == "GET"]
+    assert gets and gets[0]["path"].startswith("/msg/b1?"), captured
+    assert any(c["path"] == "/msg/99/started" for c in captured), captured
+
+
+def test_52_sh_thread_no_match_no_started(stub_daemon, fake_op_path):
+    """--thread <T> but no dispatch in the drain matches that thread → the emitter resolves
+    nothing and fires NO started. The resolution read may happen, but no /started POST."""
+    _StubHandler._get_messages = [
+        {"id": 77, "thread_id": "OTHER", "kind": "dispatch",
+         "execute_obligation": True, "to_terminals": ["b1"]},
+    ]
+    url, captured = stub_daemon
+    r = _run_sh(
+        ["lead", "on it", "note/x", "--thread", "T-uuid"],
+        _env_with({"BAKER_ROLE": "b1", "BRISEN_LAB_DAEMON_URL": url},
+                  fake_op_dir=fake_op_path),
+    )
+    assert r.returncode == 0, r.stderr
+    assert not any(c["path"].endswith("/started") for c in captured), captured
+
+
+def test_53_py_started_via_thread_resolution(stub_daemon, fake_op_path):
+    """bus_post.py parity: --thread-id <T> with no --parent-id resolves the dispatch and
+    fires /started for it."""
+    _StubHandler._get_messages = [
+        {"id": 99, "thread_id": "T-uuid", "kind": "dispatch",
+         "execute_obligation": True, "to_terminals": ["b1"]},
+    ]
+    url, captured = stub_daemon
+    r = _run_py(
+        ["--to", "lead", "--body", "on it", "--thread-id", "T-uuid"],
+        _env_with({"BAKER_ROLE": "b1", "BRISEN_LAB_DAEMON_URL": url},
+                  fake_op_dir=fake_op_path),
+    )
+    assert r.returncode == 0, r.stderr
+    assert any(c["path"] == "/msg/99/started" for c in captured), captured
+
+
+def test_54_emit_started_total_guard_unreachable_exits_zero():
+    """The shared emitter is TOTAL best-effort: pointed at an unreachable daemon with a
+    --parent target, it logs a miss and STILL exits 0 (a connection failure is an
+    OSError/URLError — must never propagate to the caller)."""
+    r = subprocess.run(
+        [sys.executable, str(EMIT_STARTED_PY),
+         "--daemon", "http://127.0.0.1:1", "--key", "k", "--sender", "b1",
+         "--parent", "42"],
+        capture_output=True, text=True, timeout=15,
+    )
+    assert r.returncode == 0, r.stderr
+    assert "best-effort" in r.stderr
+
+
+def test_55_emit_started_total_guard_swallows_generic_oserror(monkeypatch):
+    """codex #11216 (1): a generic OSError raised inside the resolution path must be
+    swallowed by the TOTAL outer guard — resolve_and_emit returns normally, never raises.
+    Force the thread-resolution read to raise a bare OSError."""
+    mod = _load_emit_started_module()
+
+    def _boom(*_a, **_k):
+        raise OSError("simulated low-level socket error")
+    monkeypatch.setattr(mod, "_resolve_thread_dispatch", _boom)
+    # No exception must escape (thread path triggers _resolve_thread_dispatch → OSError).
+    mod.resolve_and_emit("http://127.0.0.1:1", "k", "b1", None, "T-uuid")
+
+
+def test_56_py_broadcast_with_parent_does_not_emit(stub_daemon, fake_op_path):
+    """codex round-3 #11225: bus_post.py must fire started ONLY for kind='dispatch'
+    replies (not merely non-ack). A broadcast threaded onto a dispatch parent must NOT
+    false-start the SLO — exactly one POST, no /started."""
+    url, captured = stub_daemon
+    r = _run_py(
+        ["--to", "lead", "--body", "fyi", "--kind", "broadcast", "--parent-id", "42"],
+        _env_with({"BAKER_ROLE": "b1", "BRISEN_LAB_DAEMON_URL": url},
+                  fake_op_dir=fake_op_path),
+    )
+    assert r.returncode == 0, r.stderr
+    paths = [req["path"] for req in captured]
+    assert paths == ["/msg/lead"], paths
+    assert not any(p.endswith("/started") for p in paths)
+
+
+def test_57_py_ratify_decision_with_thread_does_not_emit(stub_daemon, fake_op_path):
+    """codex round-3 #11225: a ratify_decision threaded onto a dispatch (via --thread-id)
+    must NOT emit started — only a worker-start dispatch reply is first-action. No GET
+    resolution read and no /started POST fire; exactly one POST."""
+    _StubHandler._get_messages = [
+        {"id": 99, "thread_id": "T-uuid", "kind": "dispatch",
+         "execute_obligation": True, "to_terminals": ["b1"]},
+    ]
+    url, captured = stub_daemon
+    r = _run_py(
+        ["--to", "lead", "--body", "ok", "--kind", "ratify_decision",
+         "--thread-id", "T-uuid"],
+        _env_with({"BAKER_ROLE": "b1", "BRISEN_LAB_DAEMON_URL": url},
+                  fake_op_dir=fake_op_path),
+    )
+    assert r.returncode == 0, r.stderr
+    paths = [req["path"] for req in captured]
+    assert paths == ["/msg/lead"], paths
+    assert not any(c.get("method") == "GET" for c in captured), captured

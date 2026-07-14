@@ -221,6 +221,24 @@ while :; do
     if [ "$CURL_EXIT" -eq 0 ] && [ "$HTTP" = "200" ]; then
         cat "$RESP_FILE"
         echo
+        # --- CLIENT_STARTED_EMISSION_1 (G0 #11118 / lead #11121, first-action) ---
+        # A recipient's FIRST NON-ACK reply to a dispatch marks that dispatch `started`.
+        # bus_post.sh ALWAYS posts kind=dispatch and never an ack (acks go via the /ack
+        # endpoint from check_inbox.sh), so every post here is a non-ack reply. When this
+        # post threads onto a dispatch (by --parent, or by --thread when no parent), fire
+        # its started signal via the shared emitter. scripts/emit_started.py is the SINGLE
+        # control point: it resolves the target (parent primary, thread fallback — topic
+        # dropped per lead #11216 collision hazard), fires the authoritative
+        # /msg/<id>/started endpoint, and is TOTAL best-effort — it ALWAYS exits 0 and can
+        # never alter this post's exit code (the extra `|| true` is belt-and-suspenders).
+        # Kill switch: BAKER_STARTED_EMISSION_DISABLED=1.
+        if { [ -n "$PARENT_ID" ] || [ -n "$THREAD_ID" ]; } \
+           && [ "${BAKER_STARTED_EMISSION_DISABLED:-}" != "1" ]; then
+            python3 "$SCRIPT_DIR/emit_started.py" \
+                --daemon "$DAEMON_URL" --key "$KEY" --sender "$SENDER" \
+                ${PARENT_ID:+--parent "$PARENT_ID"} \
+                ${THREAD_ID:+--thread "$THREAD_ID"} || true
+        fi
         exit 0
     fi
 

@@ -179,6 +179,30 @@ def _post(recipient: str, payload: dict, key: str) -> dict:
     )
 
 
+def _emit_started_best_effort(sender: str, key: str, parent_id, thread_id) -> None:
+    """CLIENT_STARTED_EMISSION_1: fire the recipient's first-action `started` signal via
+    the shared emitter (scripts/emit_started.py — the SINGLE control point, also used by
+    bus_post.sh). It resolves the target (parent primary, thread fallback; topic dropped
+    per lead #11216) and best-effort POSTs the authoritative /msg/<id>/started endpoint.
+
+    TOTAL best-effort (lead #11215 / codex #11216): the helper ALWAYS exits 0, AND this
+    call is wrapped so a subprocess-spawn failure (e.g. a generic OSError) can NEVER
+    propagate and alter bus_post.py's exit status — the outbound post has already
+    committed and printed its result."""
+    helper = Path(__file__).resolve().parent / "emit_started.py"
+    argv = [sys.executable, str(helper), "--daemon", DAEMON_URL,
+            "--key", key, "--sender", sender]
+    if parent_id is not None:
+        argv += ["--parent", str(parent_id)]
+    if thread_id is not None:
+        argv += ["--thread", str(thread_id)]
+    try:
+        subprocess.run(argv, timeout=30)
+    except Exception as e:  # noqa: BLE001 — TOTAL: never let the emit affect the caller.
+        print(f"[bus_post] started-emit spawn failed ({type(e).__name__}: {e}); "
+              "post already landed, continuing", file=sys.stderr)
+
+
 def main() -> None:
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument("--to", required=True, help="comma-separated recipient slug(s), alias(es), or AG id(s)")
@@ -251,6 +275,24 @@ def main() -> None:
     # POST /msg/{terminal} is single-pathed but accepts multi-recipient body.
     result = _post(recipients[0], payload, key)
     print(json.dumps(result))
+
+    # CLIENT_STARTED_EMISSION_1 (G0 #11118 / lead #11121, first-action): a recipient's
+    # first-action reply to a dispatch marks that dispatch `started`. Fire ONLY when THIS
+    # post is itself a kind='dispatch' reply threaded onto a dispatch (by --parent-id, or
+    # by --thread-id when no parent). Gate on `kind == 'dispatch'`, NOT merely `!= 'ack'`
+    # (codex round-3 #11225): bus_post.py can post broadcast / ratify_required /
+    # ratify_decision too, and a non-dispatch post tied to a dispatch parent must NEVER
+    # false-start the SLO — only a worker-start dispatch reply is first-action. (bus_post.sh
+    # only ever posts kind=dispatch, so it needs no such guard.) The /msg/<id>/started
+    # endpoint is the AUTHORITATIVE gate; this client fire is TOTAL best-effort and its
+    # outcome NEVER changes this send's exit status. Kill switch:
+    # BAKER_STARTED_EMISSION_DISABLED=1.
+    if (
+        (args.parent_id is not None or args.thread_id is not None)
+        and args.kind == "dispatch"
+        and os.environ.get("BAKER_STARTED_EMISSION_DISABLED", "") != "1"
+    ):
+        _emit_started_best_effort(sender, key, args.parent_id, args.thread_id)
 
 
 if __name__ == "__main__":
