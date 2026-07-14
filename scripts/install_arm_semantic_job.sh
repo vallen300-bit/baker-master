@@ -94,8 +94,12 @@ fi
 [[ -f "$KEYHELPER_SRC" ]] || { echo "FATAL: key helper missing at $KEYHELPER_SRC" >&2; exit 2; }
 [[ -f "$TEMPLATE"      ]] || { echo "FATAL: plist template missing at $TEMPLATE" >&2; exit 2; }
 
-# 1. Deploy worker + key helper to the TCC-safe dir; ensure marker dir exists.
-mkdir -p "$DEPLOY_DIR" "$MARKER_DIR"
+# 1. Deploy worker + key helper to the TCC-safe dir; ensure marker + the plist's
+#    LaunchAgents parent + the log dirs exist. On a FRESH HOME ~/Library/LaunchAgents
+#    and ~/Library/Logs may not exist yet, and the plist redirect (step 4) would fail
+#    "No such file or directory" (codex gate P1 #10958).
+mkdir -p "$DEPLOY_DIR" "$MARKER_DIR" \
+         "$(dirname "$INSTALLED_PLIST")" "$(dirname "$LOG")" "$(dirname "$ERRLOG")"
 cp "$WORKER_SRC" "$WORKER_DEPLOY";       chmod +x "$WORKER_DEPLOY"
 cp "$KEYHELPER_SRC" "$KEYHELPER_DEPLOY"; chmod 600 "$KEYHELPER_DEPLOY"
 
