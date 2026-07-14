@@ -33,18 +33,20 @@ BUILD (5 requirements per #11256):
    est + actual spend, tool/schema result, outcome.
 5. Route flag default-OFF per role — activation = lead GO one route at a time.
 
-STATUS: RE-SHIPPED round 3 — PR #563 (base main), head FROZEN @ad773fa1. Codex
-round-3 FAIL #11369 (one residual P1): unknown route bypassed the PRODUCTION
-dispatcher — GROK45_ENABLED_ROUTES=bogus_route + route=bogus_route silently called
-grok-4.3 (silent downgrade). is_route_enabled() returns False for an unknown route,
-so tools/grok.py fell through to the normal grok-4.3 path; run_grok_ask's own
-unknown-route rejection was never reached. FIXED @ad773fa1: dispatcher now rejects
-an unknown route LOUD (route_unknown) before the governed branch; known-but-disabled
-still falls through to grok-4.3 (designed, kept); no-route path untouched. Added
-is_route_known() helper + dispatcher-level regression via the tools/grok.py entry
-(verified it FAILS without the guard). Round-2 P1-3/P1-4/P2 fixed @a9528884→#11338;
-round-1 2 P1s @e3210423. All 5 requirements built + researcher substrate. 77 pass,
-12 skipped across the 4 grok/xai suites (python3.12). Ship report:
+STATUS: RE-SHIPPED round 4 — PR #563 (base main). Codex round-4 FAIL #11381 (one
+P1): round-3's unknown-route rejection returned early at the dispatcher, skipping
+run_grok_ask, so the blocked_route_unknown xai_call_audit row was never written —
+zero audit rows on a rejected attempt, violating requirement #4 (one row per attempt
+incl. blocked/error). FIXED @1ea845c1: rejection centralized through run_grok_ask —
+dispatcher enters the governor for an ENABLED or UNKNOWN route; run_grok_ask writes
+exactly one audit row (matter_slug preserved) + raises, surfaced loud, no fallback;
+known-but-disabled stays designed grok-4.3 fallthrough (no row); no-route untouched.
+Regression extended with audit-row assertion; verified it FAILS on round-3 code.
+FREEZE DISCIPLINE (lead #11385, 2nd occurrence): after posting SHIP this round, ZERO
+pushes until lead's verdict relay. Prior rounds: round-3 unknown-route downgrade
+#11369 @ad773fa1; round-2 P1-3/P1-4/P2 @a9528884→#11338; round-1 2 P1s @e3210423.
+All 5 requirements built + researcher substrate. 77 pass, 12 skipped across the 4
+grok/xai suites (python3.12). Ship report:
 briefs/_reports/B4_grok_4_5_week_trial_20260714.md. Awaiting codex re-gate →
 lead merge → POST_DEPLOY_AC.
 
