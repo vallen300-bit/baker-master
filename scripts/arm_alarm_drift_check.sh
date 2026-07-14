@@ -27,6 +27,9 @@ INSTALLER="${BUNDLE_DIR}/scripts/install_arm_alarm_job.sh"
 [[ -f "$INSTALLER" ]] || INSTALLER="${BUNDLE_DIR}/install_arm_alarm_job.sh"
 # Fall back to a sibling in THIS checkout (dev / CI runs without a deployed bundle).
 [[ -f "$INSTALLER" ]] || INSTALLER="$(cd "$(dirname "$0")" && pwd)/install_arm_alarm_job.sh"
+FLEET_PARITY="${BUNDLE_DIR}/scripts/arm_fleet_parity.sh"
+[[ -f "$FLEET_PARITY" ]] || FLEET_PARITY="${BUNDLE_DIR}/arm_fleet_parity.sh"
+[[ -f "$FLEET_PARITY" ]] || FLEET_PARITY="$(cd "$(dirname "$0")" && pwd)/arm_fleet_parity.sh"
 
 LOG="${ARM_ALARM_DRIFT_LOG:-$HOME/.brisen-lab/arm-alarm-drift.log}"
 LAB_URL="${LAB_URL:-https://brisen-lab.onrender.com}"
@@ -43,14 +46,20 @@ fi
 
 # Run the check; capture output + exit code (never let it abort the sentinel).
 OUT="$(bash "$INSTALLER" --check 2>&1)"; RC=$?
+FLEET_OUT=""; FLEET_RC=0
+if [[ -f "$FLEET_PARITY" ]]; then
+  FLEET_OUT="$(bash "$FLEET_PARITY" 2>&1)"; FLEET_RC=$?
+fi
 
-if [[ "$RC" -eq 0 ]]; then
+if [[ "$RC" -eq 0 && "$FLEET_RC" -eq 0 ]]; then
   printf '%s arm-alarm-drift %s CLEAN\n' "$TS" "$HOST" >> "$LOG" 2>/dev/null || true
   exit 0
 fi
 
 # DRIFT. Log the failing lines (compact, grep-able) then bus-post to lead.
-FAILS="$(printf '%s\n' "$OUT" | grep -E '\[FAIL\]|RESULT: DRIFT' | tr '\n' ';' | sed 's/;$//')"
+FAILS="$(printf '%s\n%s\n' "$OUT" "$FLEET_OUT" \
+  | grep -E '\[FAIL\]|RESULT: DRIFT|^(RED|DRIFT) ' \
+  | tr '\n' ';' | sed 's/;$//')"
 printf '%s arm-alarm-drift %s DRIFT %s\n' "$TS" "$HOST" "${FAILS:-see-bundle}" >> "$LOG" 2>/dev/null || true
 
 # Best-effort bus post to lead. Key from ~/.brisen-lab/keys/<sender>; skip

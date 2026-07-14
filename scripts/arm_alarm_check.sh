@@ -101,18 +101,23 @@ SEMANTIC_ENFORCE="${ARM_ALARM_SEMANTIC_ENFORCE:-0}"
 # false-fire. A missing "schema" field is tolerated (evaluated on the v1 fields).
 SEMANTIC_SCHEMA_PREFIX="${ARM_ALARM_SEMANTIC_SCHEMA_PREFIX:-semantic_delivery_verdict_v1}"
 
-# SOURCES: "<key> <marker-file> <max_age_s> <kind>". kind ∈ {report, canary, semantic}.
+# SOURCES: "<key> <marker-file> <max_age_s> <kind>". kind ∈ {report, canary,
+# semantic, cadence}.
 #   report:   stale if now-delivered_at > max_age (default 26h = 24h + 2h grace).
 #   canary:   stale if now-checked_at   > max_age OR the marker's ok flag is false.
 #   semantic: stale if now-evaluated_at > max_age OR the marker semantic_ok is false
 #             (SEMANTIC_DELIVERY_EVALUATOR_1 #10544 — b2 writes the marker, this job
 #             consumes it; absent-marker handling is gated by SEMANTIC_ENFORCE above).
+#   cadence: stale if now-captured_at > max_age OR the snapshot carries
+#            health=db_unreachable. A fresh health=degraded snapshot is recorded
+#            but does not page: parseable non-200 is not a connection failure.
 # Extension point — add rows here as new out-of-band signals land. A NEW kind needs
 # a matching branch in the freshness eval below (field map + any ok-flag clause).
 SOURCES=(
   "report ${MARKER_DIR}/report.json ${ARM_ALARM_REPORT_MAX_AGE_S:-93600} report"
   "canary ${MARKER_DIR}/canary.json ${ARM_ALARM_CANARY_MAX_AGE_S:-93600} canary"
   "semantic ${MARKER_DIR}/semantic.json ${ARM_ALARM_SEMANTIC_MAX_AGE_S:-93600} semantic"
+  "cadence ${ARM_ALARM_CADENCE_SNAPSHOT:-$HOME/.brisen-lab/arm-cadence/latest.json} ${ARM_ALARM_CADENCE_MAX_AGE_S:-5400} cadence"
 )
 
 mkdir -p "$ALARM_DIR" "$MARKER_DIR" 2>/dev/null || true
@@ -149,7 +154,7 @@ trap 'rm -rf "$LOCK_DIR" 2>/dev/null' EXIT
 
 # --- evaluate every source into a verdict -----------------------------------
 # Emits, per source, one line: "<key>\t<incident-type|OK>\t<detail>".
-#   incident-type: stale | failed | missing | OK
+#   incident-type: stale | failed | missing | db_unreachable | OK
 declare -a VERDICTS=()
 for entry in "${SOURCES[@]}"; do
   # shellcheck disable=SC2086
@@ -197,8 +202,18 @@ if kind == "semantic":
     if schema is not None and not str(schema).startswith(prefix):
         print("OK\tsemantic schema %r unknown (want %s*): skipped, not paged"
               % (schema, prefix)); sys.exit(0)
+if kind == "cadence":
+    health = d.get("health")
+    source_health = [
+        value.get("health")
+        for value in (d.get("sources") or {}).values()
+        if isinstance(value, dict)
+    ]
+    if health == "db_unreachable" or "db_unreachable" in source_health:
+        print("db_unreachable\tcadence health=db_unreachable")
+        sys.exit(0)
 field = {"report": "delivered_at", "canary": "checked_at",
-         "semantic": "evaluated_at"}.get(kind, "checked_at")
+         "semantic": "evaluated_at", "cadence": "captured_at"}.get(kind, "checked_at")
 ts = d.get(field)
 if not ts:
     print("stale\tmarker missing %s field" % field); sys.exit(0)
@@ -212,6 +227,9 @@ if kind == "semantic" and d.get("semantic_ok") is False:
     print("failed\tsemantic_ok=false (evaluated %ss ago)" % age); sys.exit(0)
 if age > maxage:
     print("stale\t%s is %ss old (> %ss)" % (field, age, maxage)); sys.exit(0)
+if kind == "cadence" and d.get("health") == "degraded":
+    print("OK\tcadence health=degraded (%ss old); non-200 is not db_unreachable" % age)
+    sys.exit(0)
 print("OK\t%s fresh (%ss old)" % (field, age))
 PY
 )"
@@ -312,20 +330,29 @@ for a in sys.argv[1:]:
 
 logs = []
 failing = set()
+summary_parts = []
+for key, (itype, detail) in verdicts.items():
+    if itype == "OK":
+        continue
+    if itype == "db_unreachable":
+        summary_parts.append("%s(%s)" % (itype, key))
+    else:
+        summary_parts.append("%s:%s" % (key, itype))
+red_summary = "RED: %s" % ", ".join(summary_parts) if summary_parts else "RED"
 for key, (itype, detail) in verdicts.items():
     if itype == "OK":
         continue
     ik = "%s:%s" % (key, itype); failing.add(ik)
     rec = inc.get(ik) or {}
     active = bool(rec.get("active")); pending = bool(rec.get("delivery_pending"))
-    subject = "[ARM OUT-OF-BAND ALARM] %s (%s) on %s" % (key, itype, host)
+    subject = "[ARM OUT-OF-BAND ALARM] %s on %s" % (red_summary, host)
     body = ("ARM out-of-band watchdog fired OFF the bus.\n\n"
-            "  incident : %s\n  source   : %s\n  type     : %s\n  detail   : %s\n  host     : %s\n\n"
+            "  red      : %s\n  incident : %s\n  source   : %s\n  type     : %s\n  detail   : %s\n  host     : %s\n\n"
             "This alarm bypassed the bus on purpose: a canary failure or report-miss "
             "means the bus alarm lane cannot be trusted to deliver.\n\n"
             "Remediate: check the ARM host - is report synthesis / the canary cron running? "
             "Is the bus reachable? See ~/.brisen-lab/arm-alarm.log and the arm-cadence snapshot.\n"
-            % (ik, key, itype, detail, host))
+            % (red_summary, ik, key, itype, detail, host))
     # Is an alarm delivery DUE this poll?
     due = False; reason = ""
     if not active and not pending:
@@ -342,7 +369,7 @@ for key, (itype, detail) in verdicts.items():
         inc[ik] = rec
         continue
     if reason == "still-failing":
-        subject = "[ARM OUT-OF-BAND ALARM STILL-FAILING] %s (%s) on %s" % (key, itype, host)
+        subject = "[ARM OUT-OF-BAND ALARM STILL-FAILING] %s on %s" % (red_summary, host)
     e_ok, n_ok = deliver(subject, body)
     if e_ok or n_ok:
         # DELIVERED — now (and only now) mark it alarmed + advance cooldown.

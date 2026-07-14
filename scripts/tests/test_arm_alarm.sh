@@ -32,6 +32,11 @@ write_report() { mkdir -p "$1/markers"; printf '{"delivered_at": "%s"}\n' "$(iso
 write_canary() { mkdir -p "$1/markers"; printf '{"ok": %s, "checked_at": "%s"}\n' "$3" "$(iso $(( now - $2 )) )" > "$1/markers/canary.json"; }
 # write_semantic <dir> <age_s> <semantic_ok true|false> [schema]
 write_semantic() { mkdir -p "$1/markers"; printf '{"schema":"%s","evaluated_at":"%s","semantic_ok":%s}\n' "${4:-semantic_delivery_verdict_v1}" "$(iso $(( now - $2 )) )" "$3" > "$1/markers/semantic.json"; }
+write_cadence() {
+  mkdir -p "$(dirname "$1")"
+  printf '{"captured_at":"%s","health":"%s","ok":%s}\n' \
+    "$(iso $(( now - $3 )) )" "$2" "$4" > "$1"
+}
 
 # run_worker <alarm_dir> [extra NAME=val ...] — invoke with recorders + fast
 # thresholds. Uses env so the caller's extra NAME=val args apply as environment
@@ -39,6 +44,7 @@ write_semantic() { mkdir -p "$1/markers"; printf '{"schema":"%s","evaluated_at":
 run_worker() {
   local dir="$1"; shift
   env ARM_ALARM_DIR="$dir" ARM_ALARM_LOG="$dir/alarm.log" \
+    ARM_ALARM_CADENCE_SNAPSHOT="$dir/cadence.json" \
     ARM_ALARM_SEND_CMD="$SEND_CMD" ARM_ALARM_NOTIFY_CMD="$NOTIFY_CMD" \
     ARM_ALARM_REPORT_MAX_AGE_S=3600 ARM_ALARM_CANARY_MAX_AGE_S=3600 \
     "$@" bash "$WORKER"
@@ -102,7 +108,24 @@ D="$TMP/canaryfail"; write_report "$D" 60; write_canary "$D" 60 false
 reset_recorders; run_worker "$D"; [ "$(emails)" -eq 1 ] && ok || bad "canary ok=false did not alarm ($(emails))"
 grep -q 'canary' "$EMAIL_LOG" && ok || bad "canary-fail alarm did not name canary source"
 
-# --- 8. missing marker: AMBER default (no alarm), RED when flipped -----------
+# --- 8. cadence health: db_unreachable is RED, parseable degraded is not -----
+D="$TMP/cadence-db"; write_report "$D" 60; write_canary "$D" 60 true
+write_cadence "$D/cadence.json" db_unreachable 60 false
+reset_recorders; run_worker "$D"; [ "$(emails)" -eq 1 ] && ok || bad "db_unreachable cadence did not alarm ($(emails))"
+grep -q 'db_unreachable(cadence)' "$EMAIL_LOG" && ok || bad "db_unreachable alarm did not name cadence"
+
+D="$TMP/cadence-degraded"; write_report "$D" 60; write_canary "$D" 60 true
+write_cadence "$D/cadence.json" degraded 60 false
+reset_recorders; run_worker "$D"; [ "$(emails)" -eq 0 ] && ok || bad "parseable degraded cadence false-paged ($(emails))"
+
+# --- 9. cadence stale after a fresh marker is RED ----------------------------
+D="$TMP/cadence-stale"; write_report "$D" 60; write_canary "$D" 60 true
+write_cadence "$D/cadence.json" ok 7200 true
+reset_recorders; run_worker "$D" ARM_ALARM_CADENCE_MAX_AGE_S=3600
+[ "$(emails)" -eq 1 ] && ok || bad "stale cadence did not alarm ($(emails))"
+grep -q 'cadence:stale' "$D/alarm.log" && ok || bad "stale cadence not logged cadence:stale"
+
+# --- 10. missing marker: AMBER default (no alarm), RED when flipped -----------
 D="$TMP/missing"; mkdir -p "$D/markers"   # no marker files at all
 reset_recorders; run_worker "$D"; rc=$?
 [ "$rc" -eq 0 ] && ok || bad "missing-marker default run exit=$rc"
@@ -111,24 +134,60 @@ grep -q 'AMBER' "$D/alarm.log" && ok || bad "missing marker not logged AMBER"
 reset_recorders; run_worker "$D" ARM_ALARM_MISSING_IS_RED=1
 [ "$(emails)" -ge 1 ] && ok || bad "MISSING_IS_RED=1 did not alarm on absent markers ($(emails))"
 
-# --- 9. installer dry-run deploys the worker (no launchctl) ------------------
+# --- 11. installer dry-run deploys the worker (no launchctl) -----------------
 DEPLOY="$TMP/deploy"
 ARM_ALARM_DRYRUN=1 ARM_ALARM_DEPLOY_DIR="$DEPLOY" ARM_ALARM_DIR="$TMP/adir" \
   bash "$INSTALLER" >/dev/null 2>&1
 [ -x "$DEPLOY/arm_alarm_check.sh" ] && ok || bad "dry-run did not deploy executable worker"
 
-# --- 10. installer interval clamp: >300 clamps to 300 (dry-run echo) ---------
+# --- 12. installer interval clamp: >300 clamps to 300 (dry-run echo) ----------
 OUT="$(ARM_ALARM_DRYRUN=1 ARM_ALARM_INTERVAL_S=99999 ARM_ALARM_DEPLOY_DIR="$TMP/d2" ARM_ALARM_DIR="$TMP/a2" bash "$INSTALLER" 2>&1)"
 echo "$OUT" | grep -q 'interval=300s' && ok || bad "interval not clamped to 300s (got: $(echo "$OUT" | grep -o 'interval=[0-9]*s'))"
 
-# --- 11. installer --check reports DRIFT when nothing is installed -----------
+# --- 13. installer parity: current deploy CLEAN, one-byte drift RED ----------
+CHECK_HOME="$TMP/check-home"
+mkdir -p "$CHECK_HOME/Library/LaunchAgents" "$TMP/bin"
+cat > "$TMP/bin/launchctl" <<'SH'
+#!/usr/bin/env bash
+printf '123 0 com.baker.arm-alarm\n'
+SH
+chmod +x "$TMP/bin/launchctl"
+python3 - "$PLIST" "$DEPLOY/arm_alarm_check.sh" "$CHECK_HOME/Library/LaunchAgents/com.baker.arm-alarm.plist" <<'PY'
+import sys
+tpl, worker, out = sys.argv[1:]
+body = open(tpl).read()
+for old, new in (
+    ("__WORKER_PATH__", worker),
+    ("__LABEL__", "com.baker.arm-alarm"),
+    ("__CADENCE__", "180"),
+    ("__LOG__", "/tmp/arm-alarm.log"),
+    ("__ERRLOG__", "/tmp/arm-alarm.err.log"),
+    ("__ALARM_DIR__", "/tmp/arm-alarm"),
+    ("__ALARM_LOG__", "/tmp/arm-alarm.log"),
+    ("__EMAIL_TO__", "test@example.invalid"),
+):
+    body = body.replace(old, new)
+open(out, "w").write(body)
+PY
+PATH="$TMP/bin:$PATH" HOME="$CHECK_HOME" ARM_ALARM_DEPLOY_DIR="$DEPLOY" \
+  ARM_ALARM_DIR="$TMP/check-alarm" bash "$INSTALLER" --check >"$TMP/parity-clean.out" 2>&1
+[ "$?" -eq 0 ] && ok || bad "current worker parity did not pass"
+grep -q 'RESULT: CLEAN' "$TMP/parity-clean.out" && ok || bad "parity CLEAN missing"
+printf '\n# deliberate parity drift\n' >> "$DEPLOY/arm_alarm_check.sh"
+PATH="$TMP/bin:$PATH" HOME="$CHECK_HOME" ARM_ALARM_DEPLOY_DIR="$DEPLOY" \
+  ARM_ALARM_DIR="$TMP/check-alarm" bash "$INSTALLER" --check >"$TMP/parity-drift.out" 2>&1
+rc=$?
+[ "$rc" -ne 0 ] && ok || bad "worker parity drift returned 0"
+grep -q 'deployed worker drifted from repo source' "$TMP/parity-drift.out" && ok || bad "worker parity failure not named"
+
+# --- 14. installer --check reports DRIFT when nothing is installed ------------
 ARM_ALARM_DEPLOY_DIR="$TMP/empty" ARM_ALARM_DIR="$TMP/empty-a" \
   bash "$INSTALLER" --check >"$TMP/check.out" 2>&1
 rc=$?
 [ "$rc" -ne 0 ] && ok || bad "--check returned 0 on a non-installed job"
 grep -q 'RESULT: DRIFT' "$TMP/check.out" && ok || bad "--check did not print RESULT: DRIFT"
 
-# --- 12. drift sentinel is fail-open (exit 0) + logs on drift ----------------
+# --- 15. drift sentinel is fail-open (exit 0) + logs on drift -----------------
 ARM_ALARM_CHECK_DIR="$ROOT/scripts" \
   ARM_ALARM_DEPLOY_DIR="$TMP/empty" ARM_ALARM_DIR="$TMP/empty-a" \
   ARM_ALARM_DRIFT_LOG="$TMP/drift.log" ARM_ALARM_DRIFT_BUS_ROLE="__nokey__" \
@@ -141,7 +200,7 @@ grep -q 'arm-alarm-drift' "$TMP/drift.log" 2>/dev/null && ok || bad "drift senti
 # state field reader.
 jqf() { python3 -c "import json,sys; d=json.load(open(sys.argv[1])); k=sys.argv[2]; print(d['incidents'].get(k,{}).get(sys.argv[3],''))" "$1" "$2" "$3" 2>/dev/null; }
 
-# --- 13. BOTH channels fail => incident NOT marked alarmed; retry, no suppress -
+# --- 16. BOTH channels fail => incident NOT marked alarmed; retry, no suppress -
 D="$TMP/bothfail"; write_report "$D" 7200; write_canary "$D" 60 true
 reset_recorders
 run_worker "$D" ARM_ALARM_SEND_CMD='exit 1' ARM_ALARM_NOTIFY_CMD='exit 1' ARM_ALARM_BACKOFF_BASE_S=0
@@ -156,7 +215,7 @@ run_worker "$D" ARM_ALARM_BACKOFF_BASE_S=0
 [ "$(jqf "$D/state.json" report:stale active)" = "True" ] && ok || bad "successful retry did not mark incident active"
 [ "$(jqf "$D/state.json" report:stale delivery_pending)" = "False" ] && ok || bad "successful retry did not clear delivery_pending"
 
-# --- 14. PARTIAL success (email fails, notification ok) => delivered once -----
+# --- 17. PARTIAL success (email fails, notification ok) => delivered once -----
 D="$TMP/partial"; write_report "$D" 7200; write_canary "$D" 60 true
 reset_recorders
 run_worker "$D" ARM_ALARM_SEND_CMD='exit 1'   # email fails; notify recorder succeeds
@@ -164,7 +223,7 @@ run_worker "$D" ARM_ALARM_SEND_CMD='exit 1'   # email fails; notify recorder suc
 [ "$(wc -l < "$NOTIFY_LOG" | tr -d ' ')" -ge 1 ] && ok || bad "notification channel not attempted on email failure"
 [ "$(jqf "$D/state.json" report:stale active)" = "True" ] && ok || bad "partial success (1 channel) did not mark incident delivered"
 
-# --- 15. RECOVERY of an UNDELIVERED alarm => cleared silently, no recovery mail
+# --- 18. RECOVERY of an UNDELIVERED alarm => cleared silently, no recovery mail
 D="$TMP/undeliv"; write_report "$D" 7200; write_canary "$D" 60 true
 run_worker "$D" ARM_ALARM_SEND_CMD='exit 1' ARM_ALARM_NOTIFY_CMD='exit 1' ARM_ALARM_BACKOFF_BASE_S=0 >/dev/null 2>&1
 write_report "$D" 60   # marker fresh again before any alarm ever delivered
@@ -173,7 +232,7 @@ run_worker "$D" ARM_ALARM_BACKOFF_BASE_S=0
 [ "$(emails)" -eq 0 ] && ok || bad "undelivered-then-recovered sent a spurious recovery email ($(emails))"
 grep -q 'CLEAR-UNDELIVERED' "$D/alarm.log" && ok || bad "undelivered recovery not logged CLEAR-UNDELIVERED"
 
-# --- 16. BOUNDED BACKOFF grows across failed retries (deterministic clock) ----
+# --- 19. BOUNDED BACKOFF grows across failed retries (deterministic clock) ----
 D="$TMP/backoff"; mkdir -p "$D/markers"
 printf '{"delivered_at": "1970-01-01T00:00:00Z"}\n' > "$D/markers/report.json"  # always stale
 FAILENV=(ARM_ALARM_SEND_CMD='exit 1' ARM_ALARM_NOTIFY_CMD='exit 1' ARM_ALARM_REPORT_MAX_AGE_S=1 ARM_ALARM_CANARY_MAX_AGE_S=1 ARM_ALARM_BACKOFF_BASE_S=10 ARM_ALARM_BACKOFF_CAP_S=1000)
@@ -189,7 +248,7 @@ run_worker "$D" ARM_ALARM_NOW=1020 "${FAILENV[@]}" >/dev/null 2>&1   # backoff e
 # rider (b) is covered by tests 2-16 above staying green (report/canary unchanged
 # with semantic added to SOURCES); the tests below cover the new kind itself.
 
-# --- 17. absent semantic + SEMANTIC_ENFORCE=0 (default) => TRUE silent skip ---
+# --- 20. absent semantic + SEMANTIC_ENFORCE=0 (default) => TRUE silent skip ---
 # report+canary fresh so only the semantic source is in question. Absent semantic
 # must not page AND must not log (not even AMBER) pre-ship (rider a).
 D="$TMP/sem_absent"; write_report "$D" 60; write_canary "$D" 60 true
@@ -198,33 +257,33 @@ reset_recorders; run_worker "$D"; rc=$?
 [ "$(emails)" -eq 0 ] && ok || bad "absent semantic false-paged with ENFORCE=0 ($(emails))"
 grep -qi 'semantic' "$D/alarm.log" && bad "absent semantic logged (should be TRUE silent skip)" || ok
 
-# --- 18. present semantic_ok=false + ENFORCE=0 => TRUE silent skip ----------
+# --- 21. present semantic_ok=false + ENFORCE=0 => TRUE silent skip ----------
 D="$TMP/sem_fail"; write_report "$D" 60; write_canary "$D" 60 true; write_semantic "$D" 60 false
 reset_recorders; run_worker "$D"; [ "$(emails)" -eq 0 ] && ok || bad "present semantic false-paged with ENFORCE=0 ($(emails))"
 grep -qi 'semantic' "$D/alarm.log" && bad "present semantic logged while ENFORCE=0" || ok
 
-# --- 19. present semantic_ok=false + ENFORCE=1 => alarm ----------------------
+# --- 22. present semantic_ok=false + ENFORCE=1 => alarm ----------------------
 reset_recorders; run_worker "$D" ARM_ALARM_SEMANTIC_ENFORCE=1
 [ "$(emails)" -eq 1 ] && ok || bad "enforced semantic_ok=false did not alarm ($(emails))"
 grep -q 'semantic' "$EMAIL_LOG" && ok || bad "enforced semantic alarm did not name semantic source"
 [ "$(wc -l < "$NOTIFY_LOG" | tr -d ' ')" -eq 1 ] && ok || bad "enforced semantic alarm sent no notification"
 
-# --- 20. present semantic stale evaluated_at => stale alarm ------------------
+# --- 23. present semantic stale evaluated_at => stale alarm ------------------
 D="$TMP/sem_stale"; write_report "$D" 60; write_canary "$D" 60 true; write_semantic "$D" 7200 true
 reset_recorders; run_worker "$D" ARM_ALARM_SEMANTIC_ENFORCE=1 ARM_ALARM_SEMANTIC_MAX_AGE_S=3600
 [ "$(emails)" -eq 1 ] && ok || bad "stale semantic did not alarm ($(emails))"
 grep -q 'semantic:stale' "$D/alarm.log" && ok || bad "stale semantic not logged semantic:stale"
 
-# --- 21. present semantic fresh + semantic_ok=true => NO alarm --------------
+# --- 24. present semantic fresh + semantic_ok=true => NO alarm --------------
 D="$TMP/sem_ok"; write_report "$D" 60; write_canary "$D" 60 true; write_semantic "$D" 60 true
 reset_recorders; run_worker "$D" ARM_ALARM_SEMANTIC_ENFORCE=1; [ "$(emails)" -eq 0 ] && ok || bad "healthy semantic marker fired an alarm ($(emails))"
 
-# --- 22. unknown schema major => skipped, NOT paged (marker-version guard) ---
+# --- 25. unknown schema major => skipped, NOT paged (marker-version guard) ---
 D="$TMP/sem_badver"; write_report "$D" 60; write_canary "$D" 60 true
 write_semantic "$D" 60 false semantic_delivery_verdict_v2   # ok=false but unknown schema
 reset_recorders; run_worker "$D"; [ "$(emails)" -eq 0 ] && ok || bad "unknown-schema semantic false-paged ($(emails))"
 
-# --- 23. SEMANTIC_ENFORCE=1 + absent => normal MISSING policy (AMBER, then RED)
+# --- 26. SEMANTIC_ENFORCE=1 + absent => normal MISSING policy (AMBER, then RED)
 D="$TMP/sem_enforce"; write_report "$D" 60; write_canary "$D" 60 true   # only semantic absent
 reset_recorders; run_worker "$D" ARM_ALARM_SEMANTIC_ENFORCE=1
 [ "$(emails)" -eq 0 ] && ok || bad "enforce=1 absent semantic paged under MISSING_IS_RED=0 ($(emails))"

@@ -1,0 +1,56 @@
+{
+  "version": 1,
+  "host_jobs": [
+    {
+      "job_label": "com.baker.arm-alarm",
+      "installer": "scripts/install_arm_alarm_job.sh",
+      "worker_src": "scripts/arm_alarm_check.sh",
+      "deploy_dir_env": "ARM_ALARM_DEPLOY_DIR",
+      "expected_interval_s": 180,
+      "host_role": "arm"
+    },
+    {
+      "job_label": "com.baker.arm-cadence",
+      "installer": "scripts/install_arm_cadence_job.sh",
+      "worker_src": "scripts/arm_cadence_poll.sh",
+      "deploy_dir_env": "ARM_CADENCE_DEPLOY_DIR",
+      "expected_interval_s": 1800,
+      "host_role": "arm"
+    },
+    {
+      "job_label": "com.baker.arm-semantic",
+      "installer": "scripts/install_arm_semantic_job.sh",
+      "worker_src": "scripts/arm_semantic_poll.sh",
+      "deploy_dir_env": "ARM_SEMANTIC_DEPLOY_DIR",
+      "expected_interval_s": 1800,
+      "host_role": "arm"
+    }
+  ],
+  "client_scripts": [
+    {
+      "path": "scripts/bus_post.sh",
+      "capability_marker": "CLIENT_STARTED_EMISSION_1",
+      "distributed_to": ["ai-heads", "b-codes", "desks", "codex-seats"]
+    },
+    {
+      "path": "scripts/bus_post.py",
+      "capability_marker": "CLIENT_STARTED_EMISSION_1",
+      "distributed_to": ["ai-heads", "b-codes", "desks", "codex-seats"]
+    },
+    {
+      "path": "scripts/emit_started.py",
+      "capability_marker": "CLIENT_STARTED_EMISSION_1",
+      "distributed_to": ["ai-heads", "b-codes", "desks", "codex-seats"]
+    },
+    {
+      "path": "scripts/agent_identity_generated.sh",
+      "capability_marker": "AGENT_IDENTITY_BUS_AGENT_SLUGS",
+      "distributed_to": ["ai-heads", "b-codes", "desks", "codex-seats"]
+    },
+    {
+      "path": "scripts/brisen_lab_terminal_key.sh",
+      "capability_marker": "brisen_lab_read_terminal_key",
+      "distributed_to": ["ai-heads", "b-codes", "desks", "codex-seats"]
+    }
+  ]
+}

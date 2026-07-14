@@ -82,9 +82,9 @@ TMP_SNAP="$(mktemp -t arm_cadence_snap.XXXXXX)"
 trap 'rm -rf "$LOCK_DIR" 2>/dev/null; rm -f "$TMP_BODY" "$TMP_SNAP" 2>/dev/null' EXIT
 
 # --- capture each source into a per-key JSON fragment -----------------------
-# Build a JSON object: {captured_at, host, source_url, poller_version, ok,
-# sources: {<key>: {http, ok, data|error}}}. Python does the assembly so the
-# raw endpoint JSON is embedded structurally (not string-spliced).
+# Build a JSON object: {captured_at, host, source_url, poller_version, ok, health,
+# sources: {<key>: {http, ok, health, data|error}}}. Python does the assembly so
+# the raw endpoint JSON is embedded structurally (not string-spliced).
 FRAGMENTS=()   # "key<TAB>http<TAB>bodyfile"
 OVERALL_OK=1
 for entry in "${SOURCES[@]}"; do
@@ -111,26 +111,45 @@ sources = {}
 args = sys.argv[1:]
 for i in range(0, len(args), 3):
     key, http, bf = args[i], args[i+1], args[i+2]
-    entry = {"http": http, "ok": http == "200"}
+    if http == "000":
+        entry = {
+            "http": http,
+            "ok": False,
+            "health": "db_unreachable",
+            "error": "endpoint connection failed",
+        }
+        ok = False
+        sources[key] = entry
+        continue
+    entry = {"http": http, "ok": http == "200",
+             "health": "ok" if http == "200" else "degraded"}
     try:
         with open(bf) as fh:
             raw = fh.read()
         entry["data"] = json.loads(raw) if raw.strip() else None
         if entry["data"] is None and http == "200":
             entry["ok"] = False
+            entry["health"] = "degraded"
             entry["error"] = "empty body"
     except Exception as exc:  # non-JSON / parse failure — record, do not crash
         entry["ok"] = False
+        entry["health"] = "degraded"
         entry["error"] = "unparseable: %s" % (exc,)
     if not entry.get("ok"):
         ok = False
     sources[key] = entry
+health = "ok"
+if any(v.get("health") == "db_unreachable" for v in sources.values()):
+    health = "db_unreachable"
+elif any(not v.get("ok") for v in sources.values()):
+    health = "degraded"
 snap = {
     "captured_at": ts,
     "host": host,
     "source_url": url,
     "poller_version": int(ver),
     "ok": ok,
+    "health": health,
     "sources": sources,
 }
 json.dump(snap, sys.stdout, indent=2, sort_keys=True)
@@ -156,7 +175,8 @@ done
 
 # --- prune history beyond RETAIN (keep latest.json always) ------------------
 if [[ "$RETAIN" =~ ^[0-9]+$ ]] && [ "$RETAIN" -gt 0 ]; then
-  # shellcheck disable=SC2012 — filenames are ISO-8601, ls sorts chronologically.
+  # shellcheck disable=SC2012
+  # Filenames are ISO-8601, so ls sorts them chronologically.
   ls -1t "${SNAP_DIR}"/*.json 2>/dev/null | grep -v '/latest\.json$' \
     | tail -n +"$((RETAIN + 1))" | while read -r old; do rm -f "$old" 2>/dev/null; done
 fi
