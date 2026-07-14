@@ -33,13 +33,20 @@ BUILD (5 requirements per #11256):
    est + actual spend, tool/schema result, outcome.
 5. Route flag default-OFF per role — activation = lead GO one route at a time.
 
-STATUS: RE-SHIPPED round 2 — PR #563 (base main). Codex re-gate FAIL #11331
-(fix order #11338: P1-3 UTC week rollover, P1-4 non-idempotent settle, P2 unknown
-routes) all FIXED on the reviewed head a9528884. Round-1 codex FAIL #11309 (2 P1s)
-already fixed @e3210423. All 5 requirements built + researcher substrate. 30 tests
-pass, 2 skipped (24 prior + 6 new, fresh scratch DB). Head FROZEN at re-ship.
-Ship report: briefs/_reports/B4_grok_4_5_week_trial_20260714.md. Awaiting codex
-re-gate → lead merge → POST_DEPLOY_AC.
+STATUS: RE-SHIPPED round 3 — PR #563 (base main), head FROZEN @ad773fa1. Codex
+round-3 FAIL #11369 (one residual P1): unknown route bypassed the PRODUCTION
+dispatcher — GROK45_ENABLED_ROUTES=bogus_route + route=bogus_route silently called
+grok-4.3 (silent downgrade). is_route_enabled() returns False for an unknown route,
+so tools/grok.py fell through to the normal grok-4.3 path; run_grok_ask's own
+unknown-route rejection was never reached. FIXED @ad773fa1: dispatcher now rejects
+an unknown route LOUD (route_unknown) before the governed branch; known-but-disabled
+still falls through to grok-4.3 (designed, kept); no-route path untouched. Added
+is_route_known() helper + dispatcher-level regression via the tools/grok.py entry
+(verified it FAILS without the guard). Round-2 P1-3/P1-4/P2 fixed @a9528884→#11338;
+round-1 2 P1s @e3210423. All 5 requirements built + researcher substrate. 77 pass,
+12 skipped across the 4 grok/xai suites (python3.12). Ship report:
+briefs/_reports/B4_grok_4_5_week_trial_20260714.md. Awaiting codex re-gate →
+lead merge → POST_DEPLOY_AC.
 
 **Prior seat state (all CLOSED 2026-07-13/14):**
 - ARM_OUT_OF_BAND_ALARM_1 — shipped + merged (PR #556 @codex-PASS #10635 / lead #10639); semantic consumer micro-lane merged; arm-semantic-enforce gate merged @a089d90 (#11197).
