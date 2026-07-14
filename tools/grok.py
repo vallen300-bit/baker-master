@@ -199,8 +199,10 @@ GROK_TOOLS: list[Tool] = [
             "Plain Grok Responses-API call (no Live Search). Returns Grok's "
             "text answer plus token + cost metadata. Use for general reasoning "
             "on the matter Desk side when the prompt does NOT need real-time "
-            "X / web data. Default model grok-4.3; pass model='grok-4.20-0309-reasoning' "
-            "for the heavy reasoning variant."
+            "X / web data. Default model grok-4.3. Pass a trial `route` "
+            "(GROK_4_5_WEEK_TRIAL) to run the governed grok-4.5 path with weekly "
+            "reservation ledger + per-call audit; grok-4.5 is trial-only and "
+            "reachable ONLY through an enabled route."
         ),
         inputSchema={
             "type": "object",
@@ -217,6 +219,16 @@ GROK_TOOLS: list[Tool] = [
                 "model": {
                     "type": "string",
                     "description": "Override model id (default grok-4.3).",
+                },
+                "route": {
+                    "type": "string",
+                    "description": (
+                        "Trial route key (GROK_4_5_WEEK_TRIAL). When listed in "
+                        "GROK45_ENABLED_ROUTES the call runs grok-4.5 under the "
+                        "weekly reservation ledger. Known: b4_runtime, "
+                        "researcher_channel, researcher_shadow_synth. Omit for a "
+                        "normal grok-4.3 call."
+                    ),
                 },
                 "instructions": {
                     "type": "string",
@@ -308,10 +320,41 @@ def dispatch_grok(name: str, args: dict[str, Any]) -> str:
             return json.dumps(payload, ensure_ascii=False)
 
         if name == "baker_grok_ask":
+            route = (args.get("route") or "").strip() or None
+            requested_model = args.get("model")
+            from orchestrator import xai_trial_route as _trial
+
+            # Governed trial path: grok-4.5 under the weekly ledger, but only for
+            # a route that is currently enabled. The trial governor logs cost +
+            # audit itself, so we do NOT double-log via _log_grok_cost.
+            if route and _trial.is_route_enabled(route):
+                try:
+                    payload = _trial.run_grok_ask(
+                        client=_get_client(),
+                        prompt=args["prompt"],
+                        route=route,
+                        max_output_tokens=int(args.get("max_tokens", 4000)),
+                        instructions=args.get("instructions"),
+                        model=requested_model,
+                        matter_slug=matter_slug,
+                        timeout=timeout,
+                    )
+                    return json.dumps(payload, ensure_ascii=False)
+                except _trial.GrokTrialError as e:
+                    # Fail loud with route + cause + spend; NO fallback model.
+                    return "Error: grok trial blocked: " + json.dumps(e.info, ensure_ascii=False)
+
+            # grok-4.5 is trial-only — never reachable off a governed route.
+            if requested_model == _trial.TRIAL_MODEL:
+                return (
+                    "Error: grok-4.5 is trial-only (GROK_4_5_WEEK_TRIAL); invoke via an "
+                    "enabled route in GROK45_ENABLED_ROUTES, not a raw model override"
+                )
+
             payload = _get_client().ask(
                 prompt=args["prompt"],
                 max_output_tokens=int(args.get("max_tokens", 4000)),
-                model=args.get("model") or "grok-4.3",
+                model=requested_model or "grok-4.3",
                 instructions=args.get("instructions"),
                 timeout=timeout,
             )

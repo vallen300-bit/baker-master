@@ -37,6 +37,11 @@ MODEL_COSTS = {
     "gemini-2.5-pro": {"input": 1.25, "output": 10.00},
     # xAI (GROK_API_CAPABILITY_1; pricing per xAI docs 2026-05-17)
     "grok-4.3": {"input": 1.25, "output": 2.50},
+    # xAI Grok 4.5 flagship — GROK_4_5_WEEK_TRIAL_1. Pricing VERIFIED against the
+    # official xAI models page 2026-07-14 ($2.00/M input, $6.00/M output); do NOT
+    # reuse grok-4.3 rates by assumption (brief #11213 explicit). Without this entry
+    # calculate_cost_eur would fall to DEFAULT_COSTS ($15/$75) and mis-bill the trial.
+    "grok-4.5": {"input": 2.00, "output": 6.00},
     # Perplexity Sonar (CLERK_FULL_CAPABILITY_POLICY_1 PR 2d-2; pricing per
     # Perplexity docs 2026-06-07). These are the TOKEN rates only — the per-request
     # search fee is NOT token-attributable. For Perplexity calls the real spend is
