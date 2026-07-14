@@ -420,9 +420,11 @@ class SentinelStoreBack:
                 ensure_cost_alert_state_table,
             )
             from orchestrator.agent_metrics import ensure_agent_tool_calls_table
+            from orchestrator.xai_week_ledger import ensure_xai_week_ledger_tables
             ensure_api_cost_log_table(conn)
             ensure_agent_tool_calls_table(conn)
             ensure_cost_alert_state_table(conn)
+            ensure_xai_week_ledger_tables(conn)
         except Exception as e:
             logger.warning(f"Could not ensure Phase 4A tables: {e}")
         finally:

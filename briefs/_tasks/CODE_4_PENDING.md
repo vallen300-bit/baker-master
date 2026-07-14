@@ -2,33 +2,57 @@
 
 ---
 status: ACTIVE
-brief_id: ARM_OUT_OF_BAND_ALARM_1
+brief_id: GROK_4_5_WEEK_TRIAL
 to: b4
-from: deputy-codex (bus dispatch #10404); endorsed as b4's new lane by lead #10416
-dispatched_by: deputy-codex
-dispatched_at: 2026-07-13
-reply_target: lead (ship report + gate verdict to lead; ack/start to deputy-codex)
-task_class: fleet infra — out-of-band (non-bus) alarm launchd watchdog
-gate_plan: build -> PR to main -> codex review -> lead merge -> install (host-side) + POST_DEPLOY_AC (drift-check + launchctl list)
+from: lead (bus dispatch #11256, Director-ratified Option A)
+dispatched_by: lead
+dispatched_at: 2026-07-14
+reply_target: lead (ack/start/ship/blocker all to lead)
+task_class: baker-runtime infra — trial model route with cost governance
+gate_plan: build -> G1 -> codex cross-vendor review -> lead merge -> staged activation (route flag default-OFF, lead GO one route at a time)
 harness_v2: applies
-recommended_effort: medium
-charter_spec: ~/baker-vault/_ops/build/baker-os-v2/05_outputs/domain-agent-program/DRAFT_SPEC_ARM_BUS_CUSTODIAN_AMENDMENT_V1.md (RATIFIED v1.1 @c435b18) — D3 canary + §3 report-miss
+recommended_effort: high
+spec_corpus: bus #11199 (work-order constraints, binding) + #11204 (deputy-codex phase-1 inventory) + #11213 (phase-2 Option-A design) — NOT in b4 mailbox; relay requested from lead #11258
 ---
 
-# ACTIVE: ARM_OUT_OF_BAND_ALARM_1 — dispatch to b4 (bus #10404, deputy-codex)
+# ACTIVE: GROK_4_5_WEEK_TRIAL — dispatch to b4 (bus #11256, lead)
 
-Out-of-band alarm path (Plan v3). Non-bus alarm for canary failure + report-miss.
+One-week trial of grok-4.5 on Baker-runtime calls, with hard cost governance.
+Interactive CM-1/CM-2/Librarian seats stay Sonnet — this trials Baker-runtime
+calls only; b4-role runtime is the first activation candidate.
 
-- Host-side KeepAlive launchd job, deploy to `~/Library/Application Support/` (TCC).
-- Reads local freshness markers only (never the bus); emails out-of-band via
-  Outlook.app (Director ruling this session) + macOS notification.
-- Define owner, trigger, ≤5m alarm SLO, dedupe; keep separate from bus controls.
-- Include install script + drift check + test evidence.
-- Gate: codex review, then lead merge. Effort: medium.
+BUILD (5 requirements per #11256):
+1. Exact-model allowlist `grok-4.5` for the trial route — no 4.3 fallback, no
+   auto-fallback anywhere; fail loud with route + cause + spend.
+2. MODEL_COSTS entry for grok-4.5 (real xAI pricing — verify current) so
+   cost_monitor prices it correctly.
+3. Weekly xAI reservation ledger: cap 150 USD, warn 120, hard-block at cap;
+   conservative pre-call reservation (max-in + max-out + tool allowance);
+   settle + release after response; PERSISTED (not in-memory).
+4. Per-call audit fields: provider=xai, exact model, route, tokens in/out,
+   est + actual spend, tool/schema result, outcome.
+5. Route flag default-OFF per role — activation = lead GO one route at a time.
 
-**Prior brief CLOSED (2026-07-13):** ARM_CADENCE_LAUNCHD_JOB_1 shipped + merged
-(PR #553 @cb51bf1b, codex G2 PASS #10360, installed by lead, POST_DEPLOY_AC PASS
-#10363 per lead #10416). Its stale autostub checkpoint is deleted.
+STATUS: RE-SHIPPED round 4 — PR #563 (base main). Codex round-4 FAIL #11381 (one
+P1): round-3's unknown-route rejection returned early at the dispatcher, skipping
+run_grok_ask, so the blocked_route_unknown xai_call_audit row was never written —
+zero audit rows on a rejected attempt, violating requirement #4 (one row per attempt
+incl. blocked/error). FIXED @1ea845c1: rejection centralized through run_grok_ask —
+dispatcher enters the governor for an ENABLED or UNKNOWN route; run_grok_ask writes
+exactly one audit row (matter_slug preserved) + raises, surfaced loud, no fallback;
+known-but-disabled stays designed grok-4.3 fallthrough (no row); no-route untouched.
+Regression extended with audit-row assertion; verified it FAILS on round-3 code.
+FREEZE DISCIPLINE (lead #11385, 2nd occurrence): after posting SHIP this round, ZERO
+pushes until lead's verdict relay. Prior rounds: round-3 unknown-route downgrade
+#11369 @ad773fa1; round-2 P1-3/P1-4/P2 @a9528884→#11338; round-1 2 P1s @e3210423.
+All 5 requirements built + researcher substrate. 77 pass, 12 skipped across the 4
+grok/xai suites (python3.12). Ship report:
+briefs/_reports/B4_grok_4_5_week_trial_20260714.md. Awaiting codex re-gate →
+lead merge → POST_DEPLOY_AC.
 
-**Earlier seat state:** BUS_CONSOLE_LIVE_PAGE_1 CLOSED (PR #525). CASE_ONE_E23_
-SESSION_STATE_PERSISTENCE_1 CLOSED (PR #551 @f609697e).
+**Prior seat state (all CLOSED 2026-07-13/14):**
+- ARM_OUT_OF_BAND_ALARM_1 — shipped + merged (PR #556 @codex-PASS #10635 / lead #10639); semantic consumer micro-lane merged; arm-semantic-enforce gate merged @a089d90 (#11197).
+- ARM_CADENCE_LAUNCHD_JOB_1 — PR #553 @cb51bf1b, POST_DEPLOY_AC PASS #10363.
+- RESEARCHER_FULL_CAPABILITY_PHASE1_1 — vault PR #196 @71a316b, arc FULLY CLOSED (#11150).
+- MOHG keyword-bleed fix — arc closed #11188.
+- GROK_4_5 quick-gate PR #560/#559 verify — arm-semantic-enforce PASS/merged #11197.
