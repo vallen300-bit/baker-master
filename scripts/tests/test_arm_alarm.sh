@@ -198,28 +198,33 @@ reset_recorders; run_worker "$D"; rc=$?
 [ "$(emails)" -eq 0 ] && ok || bad "absent semantic false-paged with ENFORCE=0 ($(emails))"
 grep -qi 'semantic' "$D/alarm.log" && bad "absent semantic logged (should be TRUE silent skip)" || ok
 
-# --- 18. present semantic_ok=false (fresh) => alarm even though timestamp fresh
+# --- 18. present semantic_ok=false + ENFORCE=0 => TRUE silent skip ----------
 D="$TMP/sem_fail"; write_report "$D" 60; write_canary "$D" 60 true; write_semantic "$D" 60 false
-reset_recorders; run_worker "$D"; [ "$(emails)" -eq 1 ] && ok || bad "semantic_ok=false did not alarm ($(emails))"
-grep -q 'semantic' "$EMAIL_LOG" && ok || bad "semantic-fail alarm did not name semantic source"
-[ "$(wc -l < "$NOTIFY_LOG" | tr -d ' ')" -eq 1 ] && ok || bad "semantic alarm sent no notification"
+reset_recorders; run_worker "$D"; [ "$(emails)" -eq 0 ] && ok || bad "present semantic false-paged with ENFORCE=0 ($(emails))"
+grep -qi 'semantic' "$D/alarm.log" && bad "present semantic logged while ENFORCE=0" || ok
 
-# --- 19. present semantic stale evaluated_at => stale alarm ------------------
+# --- 19. present semantic_ok=false + ENFORCE=1 => alarm ----------------------
+reset_recorders; run_worker "$D" ARM_ALARM_SEMANTIC_ENFORCE=1
+[ "$(emails)" -eq 1 ] && ok || bad "enforced semantic_ok=false did not alarm ($(emails))"
+grep -q 'semantic' "$EMAIL_LOG" && ok || bad "enforced semantic alarm did not name semantic source"
+[ "$(wc -l < "$NOTIFY_LOG" | tr -d ' ')" -eq 1 ] && ok || bad "enforced semantic alarm sent no notification"
+
+# --- 20. present semantic stale evaluated_at => stale alarm ------------------
 D="$TMP/sem_stale"; write_report "$D" 60; write_canary "$D" 60 true; write_semantic "$D" 7200 true
-reset_recorders; run_worker "$D" ARM_ALARM_SEMANTIC_MAX_AGE_S=3600
+reset_recorders; run_worker "$D" ARM_ALARM_SEMANTIC_ENFORCE=1 ARM_ALARM_SEMANTIC_MAX_AGE_S=3600
 [ "$(emails)" -eq 1 ] && ok || bad "stale semantic did not alarm ($(emails))"
 grep -q 'semantic:stale' "$D/alarm.log" && ok || bad "stale semantic not logged semantic:stale"
 
-# --- 20. present semantic fresh + semantic_ok=true => NO alarm --------------
+# --- 21. present semantic fresh + semantic_ok=true => NO alarm --------------
 D="$TMP/sem_ok"; write_report "$D" 60; write_canary "$D" 60 true; write_semantic "$D" 60 true
-reset_recorders; run_worker "$D"; [ "$(emails)" -eq 0 ] && ok || bad "healthy semantic marker fired an alarm ($(emails))"
+reset_recorders; run_worker "$D" ARM_ALARM_SEMANTIC_ENFORCE=1; [ "$(emails)" -eq 0 ] && ok || bad "healthy semantic marker fired an alarm ($(emails))"
 
-# --- 21. unknown schema major => skipped, NOT paged (marker-version guard) ---
+# --- 22. unknown schema major => skipped, NOT paged (marker-version guard) ---
 D="$TMP/sem_badver"; write_report "$D" 60; write_canary "$D" 60 true
 write_semantic "$D" 60 false semantic_delivery_verdict_v2   # ok=false but unknown schema
 reset_recorders; run_worker "$D"; [ "$(emails)" -eq 0 ] && ok || bad "unknown-schema semantic false-paged ($(emails))"
 
-# --- 22. SEMANTIC_ENFORCE=1 + absent => normal MISSING policy (AMBER, then RED)
+# --- 23. SEMANTIC_ENFORCE=1 + absent => normal MISSING policy (AMBER, then RED)
 D="$TMP/sem_enforce"; write_report "$D" 60; write_canary "$D" 60 true   # only semantic absent
 reset_recorders; run_worker "$D" ARM_ALARM_SEMANTIC_ENFORCE=1
 [ "$(emails)" -eq 0 ] && ok || bad "enforce=1 absent semantic paged under MISSING_IS_RED=0 ($(emails))"

@@ -170,6 +170,7 @@ for entry in "${SOURCES[@]}"; do
     fi
     continue
   fi
+  if [ "$kind" = "semantic" ] && [ "$SEMANTIC_ENFORCE" != "1" ]; then continue; fi
   # Parse the marker; compute freshness/ok. Python keeps ISO parsing robust.
   verdict="$(MK_FILE="$mfile" MK_KIND="$kind" MK_MAX="$maxage" MK_NOW="$NOW" \
     MK_SCHEMA_PREFIX="$SEMANTIC_SCHEMA_PREFIX" python3 - <<'PY' 2>/dev/null
