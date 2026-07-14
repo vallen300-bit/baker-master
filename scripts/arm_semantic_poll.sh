@@ -27,7 +27,9 @@
 #   ARM_SEMANTIC_KEY           optional. Terminal key (injected by the plist). Falls
 #                              back to the key cache / 1Password via the key helper.
 #   ARM_SEMANTIC_SEAT          optional. Seat slug whose key authenticates the fetch.
-#                              Default 'daemon'. (Endpoint accepts any valid seat key.)
+#                              Default 'arm' (the ARM custodian's own identity, lead
+#                              #10948 — NOT 'daemon', which is shared-key-adjacent and
+#                              would re-muddy attribution). Endpoint accepts any valid seat key.
 #   ARM_SEMANTIC_LOG           optional. Log file. Default ~/.brisen-lab/arm-semantic.log
 
 set -u
@@ -36,7 +38,7 @@ set -o pipefail
 LAB_URL="${LAB_URL:-https://brisen-lab.onrender.com}"
 MARKER_DIR="${ARM_ALARM_MARKER_DIR:-$HOME/.brisen-lab/arm-alarm/markers}"
 MARKER="${MARKER_DIR}/semantic.json"
-SEAT="${ARM_SEMANTIC_SEAT:-daemon}"
+SEAT="${ARM_SEMANTIC_SEAT:-arm}"
 LOG="${ARM_SEMANTIC_LOG:-$HOME/.brisen-lab/arm-semantic.log}"
 
 SCRIPT_DIR="$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)"

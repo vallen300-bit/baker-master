@@ -23,7 +23,8 @@
 #
 # Env:
 #   ARM_SEMANTIC_INTERVAL_S  optional. StartInterval seconds. Default 1800 (30 min).
-#   ARM_SEMANTIC_SEAT        optional. Seat slug whose key authenticates. Default 'daemon'.
+#   ARM_SEMANTIC_SEAT        optional. Seat slug whose key authenticates. Default 'arm'
+#                            (ARM custodian's own identity, lead #10948 — not 'daemon').
 #   ARM_SEMANTIC_KEY / BRISEN_LAB_TERMINAL_KEY  optional. Key override (else cache/1P).
 #   ARM_SEMANTIC_DEPLOY_DIR  optional (tests). Worker deploy dir override.
 #   ARM_SEMANTIC_MARKER_DIR  optional. Marker dir (also injected into plist env).
@@ -46,7 +47,7 @@ LOG="$HOME/Library/Logs/arm-semantic.log"
 ERRLOG="$HOME/Library/Logs/arm-semantic.err.log"
 MARKER_DIR="${ARM_SEMANTIC_MARKER_DIR:-$HOME/.brisen-lab/arm-alarm/markers}"
 SEMANTIC_LOG="${ARM_SEMANTIC_LOG:-$HOME/.brisen-lab/arm-semantic.log}"
-SEAT="${ARM_SEMANTIC_SEAT:-daemon}"
+SEAT="${ARM_SEMANTIC_SEAT:-arm}"
 
 # Cadence: config, not a constant. Clamp to a sane floor (>=60s). Default 1800s —
 # well under ARM_ALARM_SEMANTIC_MAX_AGE_S (93600) so the marker never goes stale
