@@ -19,8 +19,31 @@ from __future__ import annotations
 
 import json
 import math
+import os
 from pathlib import Path
 from typing import Optional
+
+
+def _iter_lines_from_tail(path: Path, *, chunk_size: int = 64 * 1024):
+    """Yield non-empty JSONL lines newest-first without scanning old content."""
+    with path.open("rb") as handle:
+        handle.seek(0, os.SEEK_END)
+        position = handle.tell()
+        carry = b""
+        while position:
+            read_size = min(chunk_size, position)
+            position -= read_size
+            handle.seek(position)
+            carry = handle.read(read_size) + carry
+            parts = carry.split(b"\n")
+            carry = parts[0]
+            for line in reversed(parts[1:]):
+                line = line.rstrip(b"\r")
+                if line:
+                    yield line
+        carry = carry.rstrip(b"\r")
+        if carry:
+            yield carry
 
 
 def context_tokens_from_usage(path: Path) -> Optional[int]:
@@ -33,43 +56,37 @@ def context_tokens_from_usage(path: Path) -> Optional[int]:
     (output_tokens excluded — matches Claude Code's own /context measure).
     Returns None when no usage is present so the caller falls back to bytes/4.
     """
-    last: Optional[int] = None
     try:
-        with path.open(encoding="utf-8", errors="replace") as handle:
-            for line in handle:
-                # Cheap pre-filter: skip the (large, frequent) tool-result lines
-                # that carry no usage before paying for a json.loads.
-                if '"usage"' not in line:
+        for raw_line in _iter_lines_from_tail(path):
+            # Cheap pre-filter: skip the (large, frequent) tool-result lines
+            # that carry no usage before paying for a json.loads.
+            if b'"usage"' not in raw_line:
+                continue
+            try:
+                obj = json.loads(raw_line)
+            except (json.JSONDecodeError, ValueError):
+                # Malformed tail lines are expected during an active write; keep
+                # walking toward the most recent complete assistant record.
+                continue
+            if not isinstance(obj, dict) or obj.get("type") != "assistant":
+                continue
+            message = obj.get("message")
+            usage = message.get("usage") if isinstance(message, dict) else None
+            if not isinstance(usage, dict):
+                continue
+            total = 0
+            found = False
+            for key in ("input_tokens", "cache_read_input_tokens", "cache_creation_input_tokens"):
+                value = usage.get(key)
+                if isinstance(value, bool) or not isinstance(value, int):
                     continue
-                try:
-                    obj = json.loads(line)
-                except (json.JSONDecodeError, ValueError):
-                    continue
-                # A JSONL line may be any valid JSON value (e.g. a list) that still
-                # contains the substring "usage" and passes the prefilter above.
-                # Guard before .get() so a non-dict record falls through to the
-                # bytes/4 fallback instead of raising (keeps the hook fault-tolerant).
-                if not isinstance(obj, dict):
-                    continue
-                message = obj.get("message")
-                usage = message.get("usage") if isinstance(message, dict) else None
-                if not isinstance(usage, dict):
-                    usage = obj.get("usage") if isinstance(obj.get("usage"), dict) else None
-                if not isinstance(usage, dict):
-                    continue
-                total = 0
-                found = False
-                for key in ("input_tokens", "cache_read_input_tokens", "cache_creation_input_tokens"):
-                    value = usage.get(key)
-                    if isinstance(value, bool) or not isinstance(value, int):
-                        continue
-                    total += value
-                    found = True
-                if found:
-                    last = total
+                total += value
+                found = True
+            if found and total > 0:
+                return total
     except OSError:
         return None
-    return last if last and last > 0 else None
+    return None
 
 
 def measure_tokens(path: Path) -> tuple[Optional[int], bool]:
