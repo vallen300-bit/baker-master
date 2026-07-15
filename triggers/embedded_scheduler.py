@@ -410,6 +410,28 @@ def _register_jobs(scheduler: BackgroundScheduler):
             "airport_checkin_tick disabled via AIRPORT_CHECKIN_SWEEP_ENABLED - skipping registration"
         )
 
+    # ARRIVALS_BOARD_CLICKUP_MILESTONE_SYNC_1: auto-derive the arrivals board's
+    # arrives_on/arrives_label from each flight's ClickUp timetable (next incomplete
+    # task with a due date). Registered unconditionally — it is self-gating on
+    # project_registry.clickup_list_id (only flights carrying a list id are touched;
+    # BB-AUK-001 is the pilot), so no enable flag is needed. Reads ClickUp only;
+    # a desk's manual edit wins for 24h (anti-flap). Fault-tolerant: per-flight and
+    # top-level try/except inside run_clickup_milestone_sync.
+    from orchestrator.arrivals_board import run_clickup_milestone_sync
+
+    _arrivals_sync_interval = 900
+    scheduler.add_job(
+        run_clickup_milestone_sync,
+        IntervalTrigger(seconds=_arrivals_sync_interval),
+        id="arrivals_clickup_sync",
+        name="Arrivals board <- ClickUp milestone sync",
+        coalesce=True,
+        max_instances=1,
+        replace_existing=True,
+    )
+    register_expected_job("arrivals_clickup_sync", _arrivals_sync_interval)
+    logger.info(f"Registered: arrivals_clickup_sync (every {_arrivals_sync_interval}s)")
+
     # STATE_FILE_REFRESH_1: nightly drift audit at 03:00 UTC (3h before vault_scanner
     # at 06:00 UTC to spread filesystem load + ClickUp writes across the night).
     # Singleton via scheduler_lease. Job is fault-tolerant — any exception
