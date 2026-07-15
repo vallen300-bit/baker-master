@@ -275,3 +275,269 @@ def test_arrivals_json_uses_effective_status(monkeypatch):
     cookie_resp = fresh_client.get("/api/arrivals.json")
     assert cookie_resp.status_code == 200
     assert cookie_resp.json()["rows"][0]["effective_status"] == "DELAYED"
+
+
+# =====================================================================
+# ARRIVALS_BOARD_CLICKUP_MILESTONE_SYNC_1 — deriver + anti-flap + sync
+# =====================================================================
+# TDD seams (brief): (1) pure derive_next_milestone(tasks, today),
+# (2) pure sync_should_write(row, now), (3) run_clickup_milestone_sync
+# orchestration with the DB + ClickUp seams monkeypatched (no live PG needed).
+
+_UTC = timezone.utc
+
+
+def _task(name, due_ms, closed=False):
+    return {
+        "name": name,
+        "due_date": due_ms,
+        "status": {"status": "complete" if closed else "in progress",
+                   "type": "closed" if closed else "open"},
+    }
+
+
+def _ms(y, m, d, hh=12, mm=0):
+    return int(datetime(y, m, d, hh, mm, tzinfo=_UTC).timestamp() * 1000)
+
+
+# --- AC1: derive_next_milestone --------------------------------------
+def test_derive_earliest_incomplete_with_due_wins():
+    tasks = [
+        _task("Later milestone", _ms(2026, 8, 1)),
+        _task("Next milestone", _ms(2026, 7, 20)),
+        _task("Latest", _ms(2026, 9, 1)),
+    ]
+    got = ab.derive_next_milestone(tasks, date(2026, 7, 15))
+    assert got == {"arrives_on": date(2026, 7, 20), "arrives_label": "Next milestone"}
+
+
+def test_derive_ignores_closed_and_no_due():
+    tasks = [
+        _task("Closed earlier", _ms(2026, 7, 10), closed=True),
+        _task("No due date", None),
+        _task("Real next", _ms(2026, 7, 25)),
+    ]
+    got = ab.derive_next_milestone(tasks, date(2026, 7, 15))
+    assert got == {"arrives_on": date(2026, 7, 25), "arrives_label": "Real next"}
+
+
+def test_derive_empty_and_all_closed_return_none():
+    assert ab.derive_next_milestone([], date(2026, 7, 15)) is None
+    assert ab.derive_next_milestone(
+        [_task("done", _ms(2026, 7, 20), closed=True), _task("nodue", None)],
+        date(2026, 7, 15),
+    ) is None
+
+
+def test_derive_label_truncated_to_128():
+    long_name = "X" * 400
+    got = ab.derive_next_milestone([_task(long_name, _ms(2026, 7, 20))], date(2026, 7, 15))
+    assert len(got["arrives_label"]) == 128
+
+
+# --- AC10 (R2): ms-epoch is UTC-pinned, no host-local day shift -------
+def test_derive_due_date_utc_pinned_no_day_shift():
+    # 2026-07-20 23:00 UTC. A host in a negative-offset zone using bare
+    # date.fromtimestamp would render 2026-07-20 too, but a positive-offset
+    # host (e.g. CET, +2) would shift to 07-21. UTC pinning must yield 07-20
+    # regardless of host TZ.
+    due_ms = int(datetime(2026, 7, 20, 23, 0, tzinfo=_UTC).timestamp() * 1000)
+    got = ab.derive_next_milestone([_task("Late-day milestone", due_ms)], date(2026, 7, 1))
+    assert got["arrives_on"] == date(2026, 7, 20)
+
+
+# --- AC5: sync_should_write anti-flap --------------------------------
+def test_sync_should_write_no_row_or_missing_ts():
+    now = datetime(2026, 7, 15, 12, 0, tzinfo=_UTC)
+    assert ab.sync_should_write(None, now) is True
+    assert ab.sync_should_write({"updated_by": "desk"}, now) is True  # no updated_at
+
+
+def test_sync_should_write_machine_last_writer_always_ok():
+    now = datetime(2026, 7, 15, 12, 0, tzinfo=_UTC)
+    row = {"updated_by": ab._SYNC_UPDATED_BY, "updated_at": now - timedelta(minutes=1)}
+    assert ab.sync_should_write(row, now) is True
+
+
+def test_sync_should_write_manual_edit_wins_for_24h():
+    now = datetime(2026, 7, 15, 12, 0, tzinfo=_UTC)
+    fresh_manual = {"updated_by": "hag-desk", "updated_at": now - timedelta(hours=1)}
+    assert ab.sync_should_write(fresh_manual, now) is False
+    stale_manual = {"updated_by": "hag-desk", "updated_at": now - timedelta(hours=25)}
+    assert ab.sync_should_write(stale_manual, now) is True
+
+
+# --- orchestration (DB + ClickUp seams monkeypatched) ----------------
+class _FakeClient:
+    def __init__(self, tasks_by_list):
+        self._t = tasks_by_list
+
+    def get_tasks(self, list_id, date_updated_gt=None):
+        val = self._t.get(list_id)
+        if isinstance(val, Exception):
+            raise val
+        return val or []
+
+
+def _install_sync_seams(monkeypatch, rows, tasks_by_list, captured):
+    monkeypatch.setattr(ab, "_sync_candidate_rows", lambda: rows)
+    monkeypatch.setattr(
+        ab, "_audit_sync_summary",
+        lambda s: captured.setdefault("summaries", []).append(dict(s)),
+    )
+
+    def fake_upsert(code, fields, updated_by):
+        captured.setdefault("writes", []).append((code, dict(fields), updated_by))
+        return {"project_code": code, **fields, "updated_by": updated_by}
+
+    monkeypatch.setattr(ab, "upsert_board_state", fake_upsert)
+    import clickup_client
+    monkeypatch.setattr(
+        clickup_client.ClickUpClient, "_get_global_instance",
+        classmethod(lambda cls: _FakeClient(tasks_by_list)),
+    )
+
+
+def test_run_sync_writes_derived_and_threads_status(monkeypatch):
+    # AC9 (R1): status threaded through unchanged; updated_by = sync tag.
+    now = datetime(2026, 7, 15, 12, 0, tzinfo=_UTC)
+    rows = [{
+        "project_code": "BB-AUK-001", "clickup_list_id": "901524194809",
+        "status": "ON TIME", "arrives_on": date(2026, 6, 1),
+        "arrives_label": "Old", "updated_by": ab._SYNC_UPDATED_BY,
+        "updated_at": now - timedelta(days=2),
+    }]
+    tasks = {"901524194809": [_task("Financing close", _ms(2026, 7, 30))]}
+    captured = {}
+    _install_sync_seams(monkeypatch, rows, tasks, captured)
+
+    summary = ab.run_clickup_milestone_sync(now=now)
+    assert summary["written"] == 1 and summary["checked"] == 1
+    (code, fields, by) = captured["writes"][0]
+    assert code == "BB-AUK-001"
+    assert fields["arrives_on"] == date(2026, 7, 30)
+    assert fields["arrives_label"] == "Financing close"
+    assert fields["status"] == "ON TIME"     # R1: status preserved verbatim
+    assert by == ab._SYNC_UPDATED_BY
+    assert captured["summaries"][-1]["written"] == 1
+
+
+def test_run_sync_default_status_when_no_board_row(monkeypatch):
+    # AC9: no existing status -> default CHECK-IN (sync never invents a status).
+    now = datetime(2026, 7, 15, 12, 0, tzinfo=_UTC)
+    rows = [{
+        "project_code": "BB-AUK-001", "clickup_list_id": "901524194809",
+        "status": None, "arrives_on": None, "arrives_label": None,
+        "updated_by": None, "updated_at": None,
+    }]
+    tasks = {"901524194809": [_task("Kickoff", _ms(2026, 7, 30))]}
+    captured = {}
+    _install_sync_seams(monkeypatch, rows, tasks, captured)
+    ab.run_clickup_milestone_sync(now=now)
+    assert captured["writes"][0][1]["status"] == "CHECK-IN"
+
+
+def test_run_sync_noop_suppressed(monkeypatch):
+    # AC6: derived == current -> no upsert, no per-flight write.
+    now = datetime(2026, 7, 15, 12, 0, tzinfo=_UTC)
+    rows = [{
+        "project_code": "BB-AUK-001", "clickup_list_id": "901524194809",
+        "status": "ON TIME", "arrives_on": date(2026, 7, 30),
+        "arrives_label": "Financing close", "updated_by": ab._SYNC_UPDATED_BY,
+        "updated_at": now - timedelta(days=2),
+    }]
+    tasks = {"901524194809": [_task("Financing close", _ms(2026, 7, 30))]}
+    captured = {}
+    _install_sync_seams(monkeypatch, rows, tasks, captured)
+    summary = ab.run_clickup_milestone_sync(now=now)
+    assert summary["written"] == 0 and summary["skipped_noop"] == 1
+    assert "writes" not in captured
+
+
+def test_run_sync_manual_hold_blocks_write(monkeypatch):
+    # AC5: a desk manual edit < 24h old is never overwritten.
+    now = datetime(2026, 7, 15, 12, 0, tzinfo=_UTC)
+    rows = [{
+        "project_code": "BB-AUK-001", "clickup_list_id": "901524194809",
+        "status": "HOLDING", "arrives_on": date(2026, 7, 5),
+        "arrives_label": "Desk value", "updated_by": "hag-desk",
+        "updated_at": now - timedelta(hours=3),
+    }]
+    tasks = {"901524194809": [_task("Machine milestone", _ms(2026, 7, 30))]}
+    captured = {}
+    _install_sync_seams(monkeypatch, rows, tasks, captured)
+    summary = ab.run_clickup_milestone_sync(now=now)
+    assert summary["skipped_manual"] == 1 and summary["written"] == 0
+    assert "writes" not in captured
+
+
+def test_run_sync_no_milestone_leaves_value_untouched(monkeypatch):
+    # AC2 fallback: no upcoming milestone -> skip, no write.
+    now = datetime(2026, 7, 15, 12, 0, tzinfo=_UTC)
+    rows = [{
+        "project_code": "BB-AUK-001", "clickup_list_id": "901524194809",
+        "status": "ON TIME", "arrives_on": date(2026, 7, 5),
+        "arrives_label": "Manual", "updated_by": "hag-desk",
+        "updated_at": now - timedelta(days=10),
+    }]
+    tasks = {"901524194809": []}   # all-empty -> derive returns None
+    captured = {}
+    _install_sync_seams(monkeypatch, rows, tasks, captured)
+    summary = ab.run_clickup_milestone_sync(now=now)
+    assert summary["skipped_no_milestone"] == 1 and summary["written"] == 0
+    assert "writes" not in captured
+
+
+def test_run_sync_independent_per_flight_on_error(monkeypatch):
+    # AC7: one flight's ClickUp error must not abort the tick for the others.
+    now = datetime(2026, 7, 15, 12, 0, tzinfo=_UTC)
+    rows = [
+        {"project_code": "BB-AUK-001", "clickup_list_id": "list-bad",
+         "status": "ON TIME", "arrives_on": None, "arrives_label": None,
+         "updated_by": ab._SYNC_UPDATED_BY, "updated_at": now - timedelta(days=2)},
+        {"project_code": "MO-VIE-001", "clickup_list_id": "list-good",
+         "status": "ON TIME", "arrives_on": None, "arrives_label": None,
+         "updated_by": ab._SYNC_UPDATED_BY, "updated_at": now - timedelta(days=2)},
+    ]
+    tasks = {
+        "list-bad": RuntimeError("clickup 500"),
+        "list-good": [_task("Good milestone", _ms(2026, 7, 30))],
+    }
+    captured = {}
+    _install_sync_seams(monkeypatch, rows, tasks, captured)
+    summary = ab.run_clickup_milestone_sync(now=now)
+    assert summary["errors"] == 1
+    assert summary["written"] == 1
+    assert captured["writes"][0][0] == "MO-VIE-001"   # the healthy flight still wrote
+
+
+# --- codex #4 (P2): same-day milestones break ties by TIME, not response order
+def test_derive_same_day_breaks_tie_by_time():
+    early = int(datetime(2026, 7, 20, 8, 0, tzinfo=_UTC).timestamp() * 1000)
+    late = int(datetime(2026, 7, 20, 18, 0, tzinfo=_UTC).timestamp() * 1000)
+    # feed the LATER task first so a day-granularity/response-order sort would
+    # wrongly pick it; the full-timestamp sort must still pick the earlier one.
+    tasks = [_task("Late same-day", late), _task("Early same-day", early)]
+    got = ab.derive_next_milestone(tasks, date(2026, 7, 1))
+    assert got["arrives_label"] == "Early same-day"
+    assert got["arrives_on"] == date(2026, 7, 20)
+
+
+# --- codex #1 (P1): a LANDED/DIVERTED flight is never re-derived ------
+def test_run_sync_skips_terminal_landed_flight(monkeypatch):
+    # Re-upserting a landed flight would refresh updated_at and defeat the
+    # >7-day old-landed hide on the Director-facing board.
+    now = datetime(2026, 7, 15, 12, 0, tzinfo=_UTC)
+    rows = [{
+        "project_code": "BB-AUK-001", "clickup_list_id": "901524194809",
+        "status": "LANDED", "arrives_on": date(2026, 7, 1),
+        "arrives_label": "Arrived", "updated_by": ab._SYNC_UPDATED_BY,
+        "updated_at": now - timedelta(days=8),
+    }]
+    tasks = {"901524194809": [_task("Some future task", _ms(2026, 8, 1))]}
+    captured = {}
+    _install_sync_seams(monkeypatch, rows, tasks, captured)
+    summary = ab.run_clickup_milestone_sync(now=now)
+    assert summary["skipped_terminal"] == 1
+    assert summary["checked"] == 0 and summary["written"] == 0
+    assert "writes" not in captured

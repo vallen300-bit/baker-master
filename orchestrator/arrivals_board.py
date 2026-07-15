@@ -36,6 +36,13 @@ STATUSES = [
 # arrives date has passed. A pilot can never hide a slip.
 _OVERLAY_EXEMPT = {"LANDED", "DIVERTED", "DELAYED"}
 _TRIGGER_SOURCE = "arrivals_board"
+
+# ClickUp milestone sync (ARRIVALS_BOARD_CLICKUP_MILESTONE_SYNC_1). The scheduler
+# tick auto-derives arrives_on/arrives_label from each flight's ClickUp timetable.
+# _SYNC_UPDATED_BY tags rows the sync wrote (also the anti-flap key: when the last
+# writer was us, refreshing is safe; a desk's manual edit wins for _MANUAL_HOLD_S).
+_SYNC_UPDATED_BY = "arrivals_clickup_sync"
+_MANUAL_HOLD_S = 24 * 3600
 _TEMPLATE_PATH = (
     Path(__file__).resolve().parents[1]
     / "outputs"
@@ -234,6 +241,215 @@ def effective_status(row: dict[str, Any], today: Optional[date] = None) -> str:
     if arrives and status not in _OVERLAY_EXEMPT and arrives < today:
         return "DELAYED"
     return status
+
+
+# --- ClickUp milestone sync (ARRIVALS_BOARD_CLICKUP_MILESTONE_SYNC_1) --------
+# Auto-derive arrives_on / arrives_label from each flight's ClickUp timetable so
+# the board never rots when a desk forgets to update it. Desks keep control: a
+# manual edit wins for 24h (anti-flap). Reads ClickUp only; never writes it.
+
+
+def derive_next_milestone(
+    tasks: list[dict[str, Any]], today: Optional[date] = None
+) -> Optional[dict[str, Any]]:
+    """Earliest incomplete ClickUp task with a due date = the next milestone.
+
+    Pure + testable. `tasks` = raw dicts from clickup_client.get_tasks(list_id).
+    Closed tasks and no-due-date tasks are ignored. Returns
+    {arrives_on: date, arrives_label: str} or None (no upcoming milestone ->
+    leave the existing board value untouched). `today` is accepted for a stable
+    signature but selection is date-independent: a past-due earliest milestone
+    is still returned, and the read-time effective_status() overlay renders it
+    DELAYED — the machine slip overlay is preserved, never written.
+    """
+    cand: list[tuple[int, date, str]] = []
+    for t in tasks:
+        st = t.get("status") or {}
+        if isinstance(st, dict) and str(st.get("type") or "").lower() == "closed":
+            continue
+        due_ms = t.get("due_date")
+        if not due_ms:
+            continue
+        try:
+            ms = int(due_ms)
+            # R2 (lead #11692): TZ-pin the ms-epoch so a midnight-CET due date
+            # does not day-shift on a UTC host. Use fromtimestamp(..., tz=utc),
+            # NOT bare date.fromtimestamp (host-local).
+            due = datetime.fromtimestamp(ms / 1000, tz=timezone.utc).date()
+        except (ValueError, TypeError, OverflowError, OSError):
+            continue
+        # sort key is the FULL ms timestamp (codex P2/#4): two tasks due the same
+        # DAY must break ties by actual time, not ClickUp response order.
+        cand.append((ms, due, str(t.get("name") or "")))
+    if not cand:
+        return None
+    cand.sort(key=lambda x: x[0])
+    _, due, name = cand[0]
+    return {"arrives_on": due, "arrives_label": name[:128]}
+
+
+def sync_should_write(row: Optional[dict[str, Any]], now: datetime) -> bool:
+    """Anti-flap: a desk's manual edit wins for _MANUAL_HOLD_S (24h).
+
+    Pure + testable. Write when: no row yet, the last writer was the sync itself,
+    or the last (manual) write is older than the hold window.
+    """
+    if not row:
+        return True
+    if row.get("updated_by") == _SYNC_UPDATED_BY:
+        return True
+    updated_at = _parse_datetime_value(row.get("updated_at"))
+    if updated_at is None:
+        return True
+    return (now - updated_at).total_seconds() >= _MANUAL_HOLD_S
+
+
+def _sync_candidate_rows() -> list[dict[str, Any]]:
+    """Active flights with a ClickUp list, LEFT JOINed to their board row.
+
+    Read-only, bounded. NULL clickup_list_id flights are excluded here (AC2 skip)
+    so the sync is self-gating to flights that carry a list id (BB-AUK-001 pilot).
+    """
+    try:
+        with get_conn() as conn:
+            try:
+                with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
+                    cur.execute(
+                        """
+                        SELECT r.project_number AS project_code, r.clickup_list_id,
+                               s.status, s.arrives_on, s.arrives_label,
+                               s.updated_by, s.updated_at
+                          FROM project_registry r
+                          LEFT JOIN flight_board_state s
+                                 ON s.project_code = r.project_number
+                         WHERE r.status = 'active'
+                           AND r.clickup_list_id IS NOT NULL
+                           AND r.clickup_list_id <> ''
+                           -- a landed/diverted flight has arrived; never re-derive
+                           -- its arrival (that would refresh updated_at and defeat
+                           -- the old-landed hide) — codex P1.
+                           AND (s.status IS NULL OR s.status NOT IN ('LANDED', 'DIVERTED'))
+                         ORDER BY r.project_number
+                         LIMIT 200
+                        """
+                    )
+                    return [dict(x) for x in cur.fetchall()]
+            except Exception:
+                conn.rollback()
+                raise
+    except Exception:
+        logger.warning("sync_candidate_rows query failed", exc_info=True)
+        return []
+
+
+def _audit_sync_summary(summary: dict[str, Any]) -> None:
+    """One per-tick baker_actions heartbeat row (separate from per-flight upserts)."""
+    try:
+        with get_conn() as conn:
+            try:
+                with conn.cursor() as cur:
+                    cur.execute(
+                        """
+                        INSERT INTO baker_actions
+                            (action_type, payload, trigger_source, success)
+                        VALUES (%s, %s, %s, TRUE)
+                        """,
+                        (
+                            "flight_board.clickup_sync",
+                            _json_param(summary),
+                            _SYNC_UPDATED_BY,
+                        ),
+                    )
+                conn.commit()
+            except Exception:
+                conn.rollback()
+                raise
+    except Exception:
+        logger.warning("clickup_sync summary audit failed", exc_info=True)
+
+
+def run_clickup_milestone_sync(now: Optional[datetime] = None) -> dict[str, Any]:
+    """Scheduler tick: refresh arrives_on/arrives_label from ClickUp timetables.
+
+    Independent per flight — one flight's ClickUp/DB error never aborts the tick
+    for the others. Writes only via upsert_board_state (audited); no ClickUp
+    writes, no overlay writes, no-op writes suppressed.
+    """
+    now = now or datetime.now(timezone.utc)
+    today = now.date()
+    summary = {
+        "checked": 0,
+        "written": 0,
+        "skipped_manual": 0,
+        "skipped_no_milestone": 0,
+        "skipped_noop": 0,
+        "skipped_terminal": 0,
+        "errors": 0,
+    }
+    _TERMINAL = {"LANDED", "DIVERTED"}
+    rows = _sync_candidate_rows()
+    if not rows:
+        _audit_sync_summary(summary)
+        return summary
+
+    try:
+        from clickup_client import ClickUpClient
+
+        client = ClickUpClient._get_global_instance()
+    except Exception:
+        logger.warning("clickup client unavailable; milestone sync skipped", exc_info=True)
+        summary["errors"] = len(rows)
+        _audit_sync_summary(summary)
+        return summary
+
+    for r in rows:
+        code = r.get("project_code")
+        list_id = r.get("clickup_list_id")
+        if not list_id:
+            continue
+        # A landed/diverted flight has arrived — never re-derive its arrival
+        # (defense-in-depth; _sync_candidate_rows also filters these in SQL).
+        # Re-upserting would refresh updated_at and defeat the old-landed hide.
+        if str(r.get("status") or "").strip().upper() in _TERMINAL:
+            summary["skipped_terminal"] += 1
+            continue
+        summary["checked"] += 1
+        try:
+            tasks = client.get_tasks(list_id)
+            derived = derive_next_milestone(tasks, today)
+            if derived is None:
+                summary["skipped_no_milestone"] += 1
+                continue
+            if not sync_should_write(r, now):
+                summary["skipped_manual"] += 1
+                continue
+            # no-op suppression: derived == current => no upsert, no audit row.
+            if (
+                _parse_date_value(r.get("arrives_on")) == derived["arrives_on"]
+                and (r.get("arrives_label") or "") == derived["arrives_label"]
+            ):
+                summary["skipped_noop"] += 1
+                continue
+            # R1 (lead #11692, BUILD-BLOCKER): upsert_board_state -> _normalize_status
+            # RAISES when status is absent, so a {arrives_*}-only payload throws on
+            # every machine write. Thread the current status through unchanged
+            # (default CHECK-IN only when no board row exists yet). The sync never
+            # changes status.
+            fields = {
+                "arrives_on": derived["arrives_on"],
+                "arrives_label": derived["arrives_label"],
+                "status": (r.get("status") or "CHECK-IN"),
+            }
+            upsert_board_state(code, fields, updated_by=_SYNC_UPDATED_BY)
+            summary["written"] += 1
+        except Exception:
+            summary["errors"] += 1
+            logger.warning("clickup milestone sync failed for %s", code, exc_info=True)
+            continue
+
+    _audit_sync_summary(summary)
+    logger.info("clickup milestone sync: %s", summary)
+    return summary
 
 
 def _has_state(row: dict[str, Any]) -> bool:
