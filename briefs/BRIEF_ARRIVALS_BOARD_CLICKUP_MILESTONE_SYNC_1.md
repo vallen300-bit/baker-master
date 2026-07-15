@@ -82,7 +82,10 @@ keeps them current from the flight's real schedule, so they go stale silently.
            due_ms = t.get("due_date")
            if not due_ms:
                continue
-           due = date.fromtimestamp(int(due_ms) / 1000)  # ClickUp due_date is ms epoch
+           # R2 (lead #11692): TZ-pin the ms-epoch so a midnight-CET due date does not
+           # day-shift on a UTC host. datetime.fromtimestamp(..., tz=utc).date(), NOT bare
+           # date.fromtimestamp (host-local). Test with a 23:00Z-equivalent epoch.
+           due = datetime.fromtimestamp(int(due_ms) / 1000, tz=timezone.utc).date()
            cand.append((due, t.get("name") or ""))
        if not cand:
            return None  # no upcoming milestone -> leave existing value untouched
@@ -109,8 +112,15 @@ keeps them current from the flight's real schedule, so they go stale silently.
    - For each active project with `clickup_list_id` NOT NULL (join registry→board): fetch
      `get_tasks(list_id)`, `derive_next_milestone(...)`. If None → skip (fallback: manual value
      stands). Read current board row; if `sync_should_write(row, now)` is False → skip (manual hold).
-     Else `upsert_board_state(project_code, {arrives_on, arrives_label}, updated_by=_SYNC_UPDATED_BY)`
-     ONLY when the derived value differs from current (no-op writes suppressed to avoid audit spam).
+     Else write ONLY when the derived value differs from current (no-op writes suppressed).
+     **R1 (lead #11692, BUILD-BLOCKER):** `upsert_board_state` calls `_normalize_status(fields.get('status'))`
+     (`arrivals_board.py:126-130`/`:133`) which **raises `ValueError` when status is absent** — a
+     `{arrives_on, arrives_label}`-only payload throws on EVERY machine write. The worker MUST thread
+     the current status through unchanged:
+     `fields = {"arrives_on": ..., "arrives_label": ..., "status": (row["status"] if row else "CHECK-IN")}`,
+     then `upsert_board_state(project_code, fields, updated_by=_SYNC_UPDATED_BY)`. The sync never
+     changes status — it preserves the existing one verbatim (default `CHECK-IN` only when no board
+     row exists yet).
    - Fallback when `clickup_list_id` unset: skip the flight entirely (manual value untouched).
    - Every write is audited by the existing `upsert_board_state` baker_actions path; ALSO log one
      summary `baker_actions(action_type='flight_board.clickup_sync', trigger_source=_SYNC_UPDATED_BY,
@@ -161,6 +171,8 @@ keeps them current from the flight's real schedule, so they go stale silently.
 - **AC6** No-op suppression — derived == current ⇒ no upsert, no audit row.
 - **AC7** Independence + fault-tolerance — one flight's failure doesn't abort the tick; all DB/API calls try/except + rollback.
 - **AC8** Tick registered on the embedded scheduler with liveness (`register_expected_job`).
+- **AC9** (R1) Machine write threads the row's current `status` verbatim (default `CHECK-IN` when no row exists); a status-bearing row's status is unchanged after sync. Test asserts no `ValueError` and status preserved.
+- **AC10** (R2) `due_date` ms-epoch → DATE is UTC-pinned (`datetime.fromtimestamp(ms/1000, tz=timezone.utc).date()`); test with a 23:00Z-equivalent epoch proves no day-shift.
 
 ## Rollout (per-flight activation; lead rider #11689)
 Registry audit 2026-07-15: only **BB-AUK-001** carries `clickup_list_id` (`901524194809`); the other
