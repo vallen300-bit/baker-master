@@ -42,6 +42,16 @@
     <string>__ALARM_LOG__</string>
     <key>ARM_ALARM_EMAIL_TO</key>
     <string>__EMAIL_TO__</string>
+    <!-- Per-kind recipient routing (ARM_ALARM_RECIPIENT_SPLIT_1, lead #11699):
+         route routine semantic-delivery red to lead instead of the Director ops
+         address. launchd EnvironmentVariables are inherited by arm_alarm_check.sh
+         and its python3 delivery child, so ARM_ALARM_EMAIL_TO_SEMANTIC is picked
+         up by resolve_recipient("semantic"). Baked into the template (not a
+         placeholder) so it survives every fleet reinstall: the installer
+         regenerates this plist on each install run, which would otherwise drop a
+         hand-added env. report/canary stay on ARM_ALARM_EMAIL_TO (Director). -->
+    <key>ARM_ALARM_EMAIL_TO_SEMANTIC</key>
+    <string>dvallen+brisen-lead-alarm@brisengroup.com</string>
   </dict>
 </dict>
 </plist>
