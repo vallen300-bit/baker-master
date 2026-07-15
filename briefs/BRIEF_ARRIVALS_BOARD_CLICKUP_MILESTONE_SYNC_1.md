@@ -162,6 +162,15 @@ keeps them current from the flight's real schedule, so they go stale silently.
 - **AC7** Independence + fault-tolerance — one flight's failure doesn't abort the tick; all DB/API calls try/except + rollback.
 - **AC8** Tick registered on the embedded scheduler with liveness (`register_expected_job`).
 
+## Rollout (per-flight activation; lead rider #11689)
+Registry audit 2026-07-15: only **BB-AUK-001** carries `clickup_list_id` (`901524194809`); the other
+7 flights (AI-HTL / AO-OSK / BRI-GRP / FA-ACA / HAG-RG7 / MO-VIE / MO-WAR) are NULL. The sync is
+therefore **self-gating and incremental** — it acts only on flights whose `clickup_list_id` is set,
+so it is safe to ship before the backfill. **BB-AUK-001 is the pilot row** (validate the live tick
+there first). Each remaining flight activates automatically the moment its `clickup_list_id` lands
+via the backfill (deputy-codex, lead-ordered, after the discipline SOP merges). No code change per
+activation — data-driven. NULL-list flights are skipped (AC2), never errored.
+
 ## Done rubric / done-state (Harness V2)
 DONE = AC1-AC8 green **and** codex verify PASS on the diff **and** deputy cross-lane review PASS
 **and** lead merge **and** post-deploy live check (a real BB-AUK-001 sync tick updates the board
