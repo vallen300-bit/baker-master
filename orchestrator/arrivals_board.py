@@ -262,7 +262,7 @@ def derive_next_milestone(
     is still returned, and the read-time effective_status() overlay renders it
     DELAYED — the machine slip overlay is preserved, never written.
     """
-    cand: list[tuple[date, str]] = []
+    cand: list[tuple[int, date, str]] = []
     for t in tasks:
         st = t.get("status") or {}
         if isinstance(st, dict) and str(st.get("type") or "").lower() == "closed":
@@ -271,17 +271,20 @@ def derive_next_milestone(
         if not due_ms:
             continue
         try:
+            ms = int(due_ms)
             # R2 (lead #11692): TZ-pin the ms-epoch so a midnight-CET due date
             # does not day-shift on a UTC host. Use fromtimestamp(..., tz=utc),
             # NOT bare date.fromtimestamp (host-local).
-            due = datetime.fromtimestamp(int(due_ms) / 1000, tz=timezone.utc).date()
+            due = datetime.fromtimestamp(ms / 1000, tz=timezone.utc).date()
         except (ValueError, TypeError, OverflowError, OSError):
             continue
-        cand.append((due, str(t.get("name") or "")))
+        # sort key is the FULL ms timestamp (codex P2/#4): two tasks due the same
+        # DAY must break ties by actual time, not ClickUp response order.
+        cand.append((ms, due, str(t.get("name") or "")))
     if not cand:
         return None
     cand.sort(key=lambda x: x[0])
-    due, name = cand[0]
+    _, due, name = cand[0]
     return {"arrives_on": due, "arrives_label": name[:128]}
 
 
@@ -322,6 +325,10 @@ def _sync_candidate_rows() -> list[dict[str, Any]]:
                          WHERE r.status = 'active'
                            AND r.clickup_list_id IS NOT NULL
                            AND r.clickup_list_id <> ''
+                           -- a landed/diverted flight has arrived; never re-derive
+                           -- its arrival (that would refresh updated_at and defeat
+                           -- the old-landed hide) — codex P1.
+                           AND (s.status IS NULL OR s.status NOT IN ('LANDED', 'DIVERTED'))
                          ORDER BY r.project_number
                          LIMIT 200
                         """
@@ -376,8 +383,10 @@ def run_clickup_milestone_sync(now: Optional[datetime] = None) -> dict[str, Any]
         "skipped_manual": 0,
         "skipped_no_milestone": 0,
         "skipped_noop": 0,
+        "skipped_terminal": 0,
         "errors": 0,
     }
+    _TERMINAL = {"LANDED", "DIVERTED"}
     rows = _sync_candidate_rows()
     if not rows:
         _audit_sync_summary(summary)
@@ -397,6 +406,12 @@ def run_clickup_milestone_sync(now: Optional[datetime] = None) -> dict[str, Any]
         code = r.get("project_code")
         list_id = r.get("clickup_list_id")
         if not list_id:
+            continue
+        # A landed/diverted flight has arrived — never re-derive its arrival
+        # (defense-in-depth; _sync_candidate_rows also filters these in SQL).
+        # Re-upserting would refresh updated_at and defeat the old-landed hide.
+        if str(r.get("status") or "").strip().upper() in _TERMINAL:
+            summary["skipped_terminal"] += 1
             continue
         summary["checked"] += 1
         try:

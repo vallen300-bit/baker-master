@@ -509,3 +509,35 @@ def test_run_sync_independent_per_flight_on_error(monkeypatch):
     assert summary["errors"] == 1
     assert summary["written"] == 1
     assert captured["writes"][0][0] == "MO-VIE-001"   # the healthy flight still wrote
+
+
+# --- codex #4 (P2): same-day milestones break ties by TIME, not response order
+def test_derive_same_day_breaks_tie_by_time():
+    early = int(datetime(2026, 7, 20, 8, 0, tzinfo=_UTC).timestamp() * 1000)
+    late = int(datetime(2026, 7, 20, 18, 0, tzinfo=_UTC).timestamp() * 1000)
+    # feed the LATER task first so a day-granularity/response-order sort would
+    # wrongly pick it; the full-timestamp sort must still pick the earlier one.
+    tasks = [_task("Late same-day", late), _task("Early same-day", early)]
+    got = ab.derive_next_milestone(tasks, date(2026, 7, 1))
+    assert got["arrives_label"] == "Early same-day"
+    assert got["arrives_on"] == date(2026, 7, 20)
+
+
+# --- codex #1 (P1): a LANDED/DIVERTED flight is never re-derived ------
+def test_run_sync_skips_terminal_landed_flight(monkeypatch):
+    # Re-upserting a landed flight would refresh updated_at and defeat the
+    # >7-day old-landed hide on the Director-facing board.
+    now = datetime(2026, 7, 15, 12, 0, tzinfo=_UTC)
+    rows = [{
+        "project_code": "BB-AUK-001", "clickup_list_id": "901524194809",
+        "status": "LANDED", "arrives_on": date(2026, 7, 1),
+        "arrives_label": "Arrived", "updated_by": ab._SYNC_UPDATED_BY,
+        "updated_at": now - timedelta(days=8),
+    }]
+    tasks = {"901524194809": [_task("Some future task", _ms(2026, 8, 1))]}
+    captured = {}
+    _install_sync_seams(monkeypatch, rows, tasks, captured)
+    summary = ab.run_clickup_milestone_sync(now=now)
+    assert summary["skipped_terminal"] == 1
+    assert summary["checked"] == 0 and summary["written"] == 0
+    assert "writes" not in captured
