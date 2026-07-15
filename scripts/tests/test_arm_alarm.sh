@@ -354,5 +354,23 @@ reset_recorders
 run_worker "$D" ARM_ALARM_EMAIL_TO="$DIRECTOR" ARM_ALARM_EMAIL_TO_SEMANTIC="$LEAD"
 [ "$(last_to)" = "$DIRECTOR" ] && ok || bad "no-leak: report resolved to '$(last_to)' (semantic env leaked)"
 
+# --- 31. recipient PINNED across lifecycle even if the env changes mid-incident
+# The recipient is resolved once at FIRE and pinned to the incident record, so a
+# fleet reinstall / manual env edit while a semantic incident is OPEN cannot
+# misroute its RECOVERY to the Director (codex P2 hardening; rider #11679).
+D="$TMP/split_pin"; write_report "$D" 60; write_canary "$D" 60 true; write_semantic "$D" 60 false
+reset_recorders
+run_worker "$D" ARM_ALARM_SEMANTIC_ENFORCE=1 ARM_ALARM_EMAIL_TO="$DIRECTOR" ARM_ALARM_EMAIL_TO_SEMANTIC="$LEAD"
+[ "$(last_to)" = "$LEAD" ] && ok || bad "pin FIRE: semantic did not route to lead ($(last_to))"
+[ "$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["incidents"]["semantic:failed"].get("recipient",""))' "$D/state.json")" = "$LEAD" ] \
+  && ok || bad "pin FIRE: resolved recipient not persisted on incident record"
+# recover with the semantic per-kind env now GONE (simulates reinstall mid-incident)
+write_semantic "$D" 60 true
+reset_recorders
+run_worker "$D" ARM_ALARM_SEMANTIC_ENFORCE=1 ARM_ALARM_EMAIL_TO="$DIRECTOR"   # no ARM_ALARM_EMAIL_TO_SEMANTIC
+[ "$(emails)" -eq 1 ] && ok || bad "pin RECOVERY: no recovery notice ($(emails))"
+[ "$(last_to)" = "$LEAD" ] && ok || bad "pin RECOVERY: recovery misrouted to '$(last_to)' after env change (P2 regression)"
+grep -qx "$DIRECTOR" "$TO_LOG" && bad "pin RECOVERY: semantic recovery reached Director after env change" || ok
+
 echo "arm_alarm tests: $PASS passed, $FAIL failed"
 [ "$FAIL" -eq 0 ]

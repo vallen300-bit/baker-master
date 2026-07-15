@@ -416,10 +416,19 @@ for key, (itype, detail) in verdicts.items():
         continue
     if reason == "still-failing":
         subject = "[ARM OUT-OF-BAND ALARM STILL-FAILING] %s on %s" % (red_summary, host)
-    # Route by incident source (semantic->lead, report/canary->EMAIL_TO). FIRE and
-    # STILL-FAILING share this path, so both resolve to the same recipient.
+    # Route by incident source (semantic->lead, report/canary->EMAIL_TO). Resolve
+    # ONCE at first fire and PIN the recipient on the incident record, so FIRE +
+    # STILL-FAILING + RECOVERY all reach the same address even if the per-kind env
+    # is changed mid-incident (e.g. a fleet reinstall while an incident is open).
+    # Re-resolving live each poll would let such a change misroute a later
+    # STILL-FAILING/RECOVERY to the Director (the rider #11679 misfire).
     source = ik.split(":", 1)[0]
-    to = resolve_log(ik, source)
+    to = rec.get("recipient")
+    if to:
+        logs.append("resolved %s -> %s (pinned for lifecycle)" % (ik, to))
+    else:
+        to = resolve_log(ik, source)
+    rec["recipient"] = to
     e_ok, n_ok = deliver(subject, body, to)
     if e_ok or n_ok:
         # DELIVERED — now (and only now) mark it alarmed + advance cooldown.
@@ -447,23 +456,31 @@ for ik, rec in list(inc.items()):
         continue
     if rec.get("active"):
         # a DELIVERED alarm recovered -> send a recovery notice (best-effort).
-        # Same source-based routing as the FIRE that raised it, so a semantic
-        # recovery lands on lead, never the Director (rider #11679).
+        # Reuse the recipient PINNED at fire, so a semantic recovery lands on lead
+        # even if the per-kind env changed since (rider #11679). Fall back to a
+        # fresh resolve only for a pre-pin incident (older state file).
         source = ik.split(":", 1)[0]
-        to = resolve_log(ik, source)
+        to = rec.get("recipient")
+        if to:
+            logs.append("resolved %s -> %s (pinned for lifecycle)" % (ik, to))
+        else:
+            to = resolve_log(ik, source)
         subject = "[ARM OUT-OF-BAND RECOVERY] %s on %s" % (ik, host)
         body = ("ARM out-of-band watchdog: incident %s has RECOVERED (marker fresh again). "
                 "The key is re-armed.\n" % ik)
         e_ok, n_ok = deliver(subject, body, to)
         logs.append("RECOVER %s delivered email=%s notify=%s" % (ik, e_ok, n_ok))
+        # clear the pin on recovery so a future re-fire resolves fresh (env may
+        # have legitimately changed by then).
         rec.update({"active": False, "delivery_pending": False, "recovered_at": now,
-                    "send_fail_count": 0}); rec.pop("next_retry_at", None)
+                    "send_fail_count": 0})
+        rec.pop("next_retry_at", None); rec.pop("recipient", None)
         inc[ik] = rec
     elif rec.get("delivery_pending"):
         # an alarm that was NEVER delivered recovered -> clear silently (a recovery
         # for an alarm the human never saw would only confuse).
         rec.update({"delivery_pending": False, "recovered_at": now, "send_fail_count": 0})
-        rec.pop("next_retry_at", None); inc[ik] = rec
+        rec.pop("next_retry_at", None); rec.pop("recipient", None); inc[ik] = rec
         logs.append("CLEAR-UNDELIVERED %s (alarm never delivered; cleared on recovery)" % ik)
 
 try:
