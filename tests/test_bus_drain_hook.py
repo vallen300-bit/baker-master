@@ -168,7 +168,7 @@ def test_daemon_unreachable_emits_status(stubs_dir, base_env, tmp_path):
     payload = json.loads(result.stdout)
     ctx = payload["hookSpecificOutput"]["additionalContext"]
     assert "daemon unreachable" in ctx
-    assert "timeout 4s" in ctx
+    assert "timeout 10s" in ctx
     assert "slug=b2" in ctx
 
 

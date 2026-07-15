@@ -224,12 +224,12 @@ fi
 # permanent false-pending floor in every agent's drain (b2 saw 25, BB-desk 20->42).
 # Directed dispatches are unaffected — they are named recipients and still render.
 
-RESP="$(curl -sS --max-time 4 -G -H "X-Terminal-Key: ${KEY}" \
+RESP="$(curl -sS --max-time 10 -G -H "X-Terminal-Key: ${KEY}" \
         --data-urlencode "since=${SINCE}" \
         --data-urlencode "limit=50" \
         --data-urlencode "unread=true" \
         "${DAEMON_URL}/msg/${SLUG}" 2>/dev/null)" || {
-    printf '[bus-drain] daemon unreachable (timeout 4s) for slug=%s — skipping.\n' "$SLUG" | _emit
+    printf '[bus-drain] daemon unreachable (timeout 10s) for slug=%s — skipping.\n' "$SLUG" | _emit
     exit 0
 }
 
