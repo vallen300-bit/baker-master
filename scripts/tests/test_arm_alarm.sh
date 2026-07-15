@@ -19,9 +19,11 @@ TMP="$(mktemp -d -t arm_alarm_test.XXXXXX)"
 trap 'rm -rf "$TMP"' EXIT
 
 # Recorders: append one line per email / notification so we can count sends.
-EMAIL_LOG="$TMP/emails.log"; NOTIFY_LOG="$TMP/notify.log"
-: > "$EMAIL_LOG"; : > "$NOTIFY_LOG"
-SEND_CMD='printf "%s\n" "$ARM_ALARM_SUBJECT" >> '"$EMAIL_LOG"
+# TO_LOG records the resolved recipient the email channel would use (ARM_ALARM_TO)
+# so the per-kind recipient-split tests can assert routing without a real send.
+EMAIL_LOG="$TMP/emails.log"; NOTIFY_LOG="$TMP/notify.log"; TO_LOG="$TMP/to.log"
+: > "$EMAIL_LOG"; : > "$NOTIFY_LOG"; : > "$TO_LOG"
+SEND_CMD='printf "%s\n" "$ARM_ALARM_SUBJECT" >> '"$EMAIL_LOG"'; printf "%s\n" "$ARM_ALARM_TO" >> '"$TO_LOG"
 NOTIFY_CMD='printf "%s\n" "$ARM_ALARM_TITLE" >> '"$NOTIFY_LOG"
 
 now="$(date +%s)"
@@ -50,7 +52,9 @@ run_worker() {
     "$@" bash "$WORKER"
 }
 emails() { wc -l < "$EMAIL_LOG" | tr -d ' '; }
-reset_recorders() { : > "$EMAIL_LOG"; : > "$NOTIFY_LOG"; }
+last_to() { tail -n 1 "$TO_LOG" 2>/dev/null; }
+tos() { sort -u "$TO_LOG" 2>/dev/null | grep -c .; }   # count of DISTINCT recipients recorded
+reset_recorders() { : > "$EMAIL_LOG"; : > "$NOTIFY_LOG"; : > "$TO_LOG"; }
 
 # --- 0. syntax probes (lost-exec/truncation guard) --------------------------
 for s in "$WORKER" "$INSTALLER" "$DRIFT"; do
@@ -291,6 +295,82 @@ grep -qi 'AMBER' "$D/alarm.log" && ok || bad "enforce=1 absent semantic not logg
 reset_recorders; run_worker "$D" ARM_ALARM_SEMANTIC_ENFORCE=1 ARM_ALARM_MISSING_IS_RED=1
 [ "$(emails)" -ge 1 ] && ok || bad "enforce=1 + MISSING_IS_RED=1 did not alarm on absent semantic ($(emails))"
 grep -q 'semantic' "$EMAIL_LOG" && ok || bad "enforced absent-semantic alarm did not name semantic source"
+
+# === PER-KIND RECIPIENT SPLIT tests (ARM_ALARM_RECIPIENT_SPLIT_1) ===========
+# The alarm routes email by incident source: ARM_ALARM_EMAIL_TO_<KIND> when set,
+# else fallback EMAIL_TO. Routine semantic red -> lead; report/canary -> Director.
+DIRECTOR="director@test.invalid"; LEAD="lead@test.invalid"
+
+# --- 27. AC3 backward-compat: no per-kind env => every kind resolves to EMAIL_TO
+# report red, no ARM_ALARM_EMAIL_TO_* set => recipient is exactly EMAIL_TO.
+D="$TMP/split_compat"; write_report "$D" 7200; write_canary "$D" 60 true
+reset_recorders; run_worker "$D" ARM_ALARM_EMAIL_TO="$DIRECTOR"
+[ "$(emails)" -eq 1 ] && ok || bad "AC3 compat: report red did not fire once ($(emails))"
+[ "$(last_to)" = "$DIRECTOR" ] && ok || bad "AC3 compat: report resolved to '$(last_to)' not EMAIL_TO ($DIRECTOR)"
+grep -q 'resolved report:stale -> EMAIL_TO (no ARM_ALARM_EMAIL_TO_REPORT)' "$D/alarm.log" && ok \
+  || bad "AC3/AC5 compat: fallback resolve log line missing"
+
+# --- 28. AC2 semantic red => lead (per-kind env), report red => Director (fallback)
+# Both a semantic incident and a report incident fire in ONE run; assert each
+# lands on its own recipient (semantic->lead via per-kind, report->EMAIL_TO).
+D="$TMP/split_route"; write_report "$D" 7200; write_canary "$D" 60 true; write_semantic "$D" 60 false
+reset_recorders
+run_worker "$D" ARM_ALARM_SEMANTIC_ENFORCE=1 ARM_ALARM_EMAIL_TO="$DIRECTOR" ARM_ALARM_EMAIL_TO_SEMANTIC="$LEAD"
+[ "$(emails)" -eq 2 ] && ok || bad "AC2 route: expected 2 alarms (semantic+report), got $(emails)"
+grep -qx "$LEAD" "$TO_LOG" && ok || bad "AC2 route: semantic red did not resolve to lead ($LEAD)"
+grep -qx "$DIRECTOR" "$TO_LOG" && ok || bad "AC2 route: report red did not resolve to Director/EMAIL_TO ($DIRECTOR)"
+grep -q 'resolved semantic:failed -> ARM_ALARM_EMAIL_TO_SEMANTIC' "$D/alarm.log" && ok \
+  || bad "AC2/AC5: per-kind resolve log line missing"
+grep -q 'resolved report:stale -> EMAIL_TO (no ARM_ALARM_EMAIL_TO_REPORT)' "$D/alarm.log" && ok \
+  || bad "AC2/AC5: report fallback resolve log line missing"
+
+# --- 29. AC2 lifecycle consistency (rider #11679): FIRE + STILL-FAILING + RECOVERY
+# of the SAME semantic incident all resolve to lead, never Director.
+D="$TMP/split_lifecycle"; write_report "$D" 60; write_canary "$D" 60 true; write_semantic "$D" 60 false
+# FIRE
+reset_recorders
+run_worker "$D" ARM_ALARM_SEMANTIC_ENFORCE=1 ARM_ALARM_EMAIL_TO="$DIRECTOR" ARM_ALARM_EMAIL_TO_SEMANTIC="$LEAD"
+[ "$(last_to)" = "$LEAD" ] && ok || bad "lifecycle FIRE: semantic did not resolve to lead ($(last_to))"
+grep -q 'FIRE semantic:failed' "$D/alarm.log" && ok || bad "lifecycle FIRE: no FIRE log for semantic"
+# STILL-FAILING (cooldown=0 forces a re-alarm on the still-red incident)
+reset_recorders
+run_worker "$D" ARM_ALARM_SEMANTIC_ENFORCE=1 ARM_ALARM_COOLDOWN_S=0 ARM_ALARM_EMAIL_TO="$DIRECTOR" ARM_ALARM_EMAIL_TO_SEMANTIC="$LEAD"
+[ "$(emails)" -eq 1 ] && ok || bad "lifecycle STILL-FAILING: did not re-alarm ($(emails))"
+grep -q 'STILL-FAILING' "$EMAIL_LOG" && ok || bad "lifecycle STILL-FAILING: subject not marked"
+[ "$(last_to)" = "$LEAD" ] && ok || bad "lifecycle STILL-FAILING: resolved to '$(last_to)' not lead"
+# RECOVERY (semantic marker healthy again => recovery notice, still to lead)
+write_semantic "$D" 60 true
+reset_recorders
+run_worker "$D" ARM_ALARM_SEMANTIC_ENFORCE=1 ARM_ALARM_EMAIL_TO="$DIRECTOR" ARM_ALARM_EMAIL_TO_SEMANTIC="$LEAD"
+[ "$(emails)" -eq 1 ] && ok || bad "lifecycle RECOVERY: did not send exactly one notice ($(emails))"
+grep -q 'RECOVERY' "$EMAIL_LOG" && ok || bad "lifecycle RECOVERY: notice not marked RECOVERY"
+[ "$(last_to)" = "$LEAD" ] && ok || bad "lifecycle RECOVERY: semantic recovery went to '$(last_to)' not lead (Director-misfire regression)"
+grep -qx "$DIRECTOR" "$TO_LOG" && bad "lifecycle RECOVERY: a semantic-lifecycle notice reached Director" || ok
+
+# --- 30. per-kind env for one kind does NOT leak to another kind --------------
+# Set ONLY ARM_ALARM_EMAIL_TO_SEMANTIC; a report red must still fall back to EMAIL_TO.
+D="$TMP/split_noleak"; write_report "$D" 7200; write_canary "$D" 60 true
+reset_recorders
+run_worker "$D" ARM_ALARM_EMAIL_TO="$DIRECTOR" ARM_ALARM_EMAIL_TO_SEMANTIC="$LEAD"
+[ "$(last_to)" = "$DIRECTOR" ] && ok || bad "no-leak: report resolved to '$(last_to)' (semantic env leaked)"
+
+# --- 31. recipient PINNED across lifecycle even if the env changes mid-incident
+# The recipient is resolved once at FIRE and pinned to the incident record, so a
+# fleet reinstall / manual env edit while a semantic incident is OPEN cannot
+# misroute its RECOVERY to the Director (codex P2 hardening; rider #11679).
+D="$TMP/split_pin"; write_report "$D" 60; write_canary "$D" 60 true; write_semantic "$D" 60 false
+reset_recorders
+run_worker "$D" ARM_ALARM_SEMANTIC_ENFORCE=1 ARM_ALARM_EMAIL_TO="$DIRECTOR" ARM_ALARM_EMAIL_TO_SEMANTIC="$LEAD"
+[ "$(last_to)" = "$LEAD" ] && ok || bad "pin FIRE: semantic did not route to lead ($(last_to))"
+[ "$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["incidents"]["semantic:failed"].get("recipient",""))' "$D/state.json")" = "$LEAD" ] \
+  && ok || bad "pin FIRE: resolved recipient not persisted on incident record"
+# recover with the semantic per-kind env now GONE (simulates reinstall mid-incident)
+write_semantic "$D" 60 true
+reset_recorders
+run_worker "$D" ARM_ALARM_SEMANTIC_ENFORCE=1 ARM_ALARM_EMAIL_TO="$DIRECTOR"   # no ARM_ALARM_EMAIL_TO_SEMANTIC
+[ "$(emails)" -eq 1 ] && ok || bad "pin RECOVERY: no recovery notice ($(emails))"
+[ "$(last_to)" = "$LEAD" ] && ok || bad "pin RECOVERY: recovery misrouted to '$(last_to)' after env change (P2 regression)"
+grep -qx "$DIRECTOR" "$TO_LOG" && bad "pin RECOVERY: semantic recovery reached Director after env change" || ok
 
 echo "arm_alarm tests: $PASS passed, $FAIL failed"
 [ "$FAIL" -eq 0 ]
