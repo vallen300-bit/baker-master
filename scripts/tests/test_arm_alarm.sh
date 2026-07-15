@@ -73,6 +73,10 @@ grep -q '__KEY__' "$PLIST" && bad "plist embeds a secret token (Outlook M365 aut
 grep -Eq 'X-Terminal-Key|LAB_URL|curl[^|]*(/msg/|bus_health|brisen-lab\.onrender)' "$WORKER" && bad "worker makes a bus call (must be non-bus)" || ok
 grep -Eq 'exit 0[[:space:]]*$|exit 0 ' "$WORKER" && ok || bad "worker missing tolerant exit 0"
 grep -q 'gt 300' "$INSTALLER" && ok || bad "installer does not clamp interval to <=300s (SLO)"
+# semantic recipient routing baked into the plist template so semantic->lead
+# survives fleet reinstalls (ARM_ALARM_RECIPIENT_SPLIT_1 follow-up, lead #11699).
+grep -q 'ARM_ALARM_EMAIL_TO_SEMANTIC' "$PLIST" && ok || bad "plist missing ARM_ALARM_EMAIL_TO_SEMANTIC (semantic->lead route not wired for reinstall)"
+grep -q 'dvallen+brisen-lead-alarm@brisengroup.com' "$PLIST" && ok || bad "plist ARM_ALARM_EMAIL_TO_SEMANTIC is not the lead alarm address"
 
 # --- 2. all-fresh markers => NO alarm ---------------------------------------
 D="$TMP/fresh"; write_report "$D" 60; write_canary "$D" 60 true
