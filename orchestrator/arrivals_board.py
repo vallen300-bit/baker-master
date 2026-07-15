@@ -265,7 +265,11 @@ def derive_next_milestone(
     cand: list[tuple[int, date, str]] = []
     for t in tasks:
         st = t.get("status") or {}
-        if isinstance(st, dict) and str(st.get("type") or "").lower() == "closed":
+        # ClickUp marks a finished task with status.type "closed" OR "done" — the
+        # BB-AUK-001 connector list uses "done" ("complete" status), so excluding
+        # only "closed" left completed tasks deriving as the next milestone and the
+        # board stuck DELAYED on a past date (lead #11775, desk evidence #11774).
+        if isinstance(st, dict) and str(st.get("type") or "").lower() in ("closed", "done"):
             continue
         due_ms = t.get("due_date")
         if not due_ms:

@@ -244,7 +244,16 @@ class ClickUpClient:
                 raise ClickUpUnavailable(
                     f"get_tasks({list_id}) page {page}: ClickUp request failed"
                 )
-            page_tasks = data.get("tasks") or []
+            # A malformed-but-truthy 200 body ({}, {"tasks": null}, a missing tasks
+            # key, or a non-dict) is NOT an empty list — coercing it to [] would
+            # reopen the outage-looks-empty gap F1 closes. Require a dict with a
+            # list-valued "tasks"; otherwise fail loud (codex #572).
+            if not isinstance(data, dict) or not isinstance(data.get("tasks"), list):
+                raise ClickUpUnavailable(
+                    f"get_tasks({list_id}) page {page}: malformed response "
+                    "(no list-valued 'tasks' field)"
+                )
+            page_tasks = data["tasks"]
             tasks.extend(page_tasks)
             # Terminate on ClickUp's last_page flag, or defensively on a short/empty
             # page (a full page without last_page falls through to the next request).

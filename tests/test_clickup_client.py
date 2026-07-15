@@ -203,6 +203,16 @@ class TestGetTasksRobustness(unittest.TestCase):
         with self.assertRaises(ClickUpUnavailable):
             client.get_tasks("list-1")
 
+    def test_ac1b_malformed_200_body_raises_not_empty(self):
+        """A truthy-but-malformed 200 body ({}, tasks:null, missing key, non-dict)
+        must fail loud — NOT coerce to [] (would reopen the F1 gap; codex #572)."""
+        from clickup_client import ClickUpUnavailable
+        for bad in ({}, {"tasks": None}, {"last_page": True}, [{"id": "x"}], "garbage"):
+            client = self._make_client()
+            client._request = MagicMock(return_value=bad)
+            with self.assertRaises(ClickUpUnavailable):
+                client.get_tasks("list-1")
+
     def test_ac2_genuine_empty_returns_empty_no_raise(self):
         """HTTP 200 with tasks:[] is a real empty list => [] (distinct from outage)."""
         client = self._make_client()

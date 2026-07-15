@@ -563,3 +563,20 @@ def test_run_sync_clickup_outage_skipped_knowingly(monkeypatch):
     assert summary["skipped_outage"] == 1
     assert summary["written"] == 0 and summary["errors"] == 0
     assert "writes" not in captured
+
+
+# --- lead #11775: 'done'-type completions are terminal, not just 'closed' ------
+def test_derive_ignores_done_type_not_just_closed():
+    # BB-AUK-001 connector list marks completions status.type "done" ("complete"),
+    # not "closed" — excluding only "closed" left them deriving as next milestone.
+    done_task = {"name": "Completed B18", "due_date": _ms(2026, 7, 10),
+                 "status": {"status": "complete", "type": "done"}}
+    tasks = [done_task, _task("Real next", _ms(2026, 7, 25))]
+    got = ab.derive_next_milestone(tasks, date(2026, 7, 15))
+    assert got == {"arrives_on": date(2026, 7, 25), "arrives_label": "Real next"}
+    # a list of ONLY done/closed tasks -> None (board leaves existing value untouched)
+    only_finished = [
+        done_task,
+        {"name": "c", "due_date": _ms(2026, 7, 5), "status": {"type": "closed"}},
+    ]
+    assert ab.derive_next_milestone(only_finished, date(2026, 7, 15)) is None
