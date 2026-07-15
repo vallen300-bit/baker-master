@@ -210,6 +210,7 @@ if meter is None:
     raise SystemExit(0)
 tokens_est = meter["tokens"]
 percent = meter["context_percent"]
+measurement_note = "" if meter["measured"] else " (bytes-estimate, unreliable)"
 
 # Emit the machine band for the heartbeat to carry — for EVERY band, before the
 # soft-gate early-exit, so a healthy ok seat still reports (retires E16).
@@ -233,7 +234,7 @@ if percent >= hard:
             "spawned by orchestrator-wake so a clean exit loses nothing. If you have "
             "NOT yet written briefs/_checkpoints/<BRIEF_ID>.checkpoint.md + committed "
             "+ pushed + posted the respawn request, do it first, then exit.".format(
-                percent, tokens_est, window_tokens, hard
+                percent, "{}{}".format(tokens_est, measurement_note), window_tokens, hard
             ),
             block=False,
         )
@@ -250,7 +251,7 @@ if percent >= hard:
             "HARD: write or refresh briefs/_checkpoints/<BRIEF_ID>.checkpoint.md now, "
             "commit + push it, post respawn request, then exit cleanly. "
             "Claim in the successor is the attempt-bump commit, not bus ack.".format(
-                percent, tokens_est, window_tokens, hard
+                percent, "{}{}".format(tokens_est, measurement_note), window_tokens, hard
             ),
             block=blocked,
         )
@@ -258,7 +259,7 @@ else:
     _emit(
         "[rollover] context ~{}% ({} est tokens / {} window, soft {}% / hard {}%). "
         "Refresh the checkpoint before the next phase boundary; at {}% checkpoint and respawn.".format(
-            percent, tokens_est, window_tokens, soft, hard, hard
+            percent, "{}{}".format(tokens_est, measurement_note), window_tokens, soft, hard, hard
         ),
         block=False,
     )
