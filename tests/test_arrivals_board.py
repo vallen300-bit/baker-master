@@ -541,3 +541,25 @@ def test_run_sync_skips_terminal_landed_flight(monkeypatch):
     assert summary["skipped_terminal"] == 1
     assert summary["checked"] == 0 and summary["written"] == 0
     assert "writes" not in captured
+
+
+# --- CLICKUP_GET_TASKS_ROBUSTNESS_1 (caller side): outage skipped knowingly ---
+def test_run_sync_clickup_outage_skipped_knowingly(monkeypatch):
+    # F1: get_tasks now RAISES ClickUpUnavailable on a ClickUp outage (vs the old
+    # []). The sync must count it as skipped_outage (fail-loud) and NEVER overwrite
+    # the board with an outage-derived empty — distinct from a generic error.
+    from clickup_client import ClickUpUnavailable
+    now = datetime(2026, 7, 15, 12, 0, tzinfo=_UTC)
+    rows = [{
+        "project_code": "BB-AUK-001", "clickup_list_id": "901524194809",
+        "status": "ON TIME", "arrives_on": date(2026, 7, 20),
+        "arrives_label": "Existing", "updated_by": ab._SYNC_UPDATED_BY,
+        "updated_at": now - timedelta(days=2),
+    }]
+    tasks = {"901524194809": ClickUpUnavailable("clickup down")}
+    captured = {}
+    _install_sync_seams(monkeypatch, rows, tasks, captured)
+    summary = ab.run_clickup_milestone_sync(now=now)
+    assert summary["skipped_outage"] == 1
+    assert summary["written"] == 0 and summary["errors"] == 0
+    assert "writes" not in captured

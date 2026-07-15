@@ -21,6 +21,20 @@ _RATE_LIMIT_MAX = 100
 _RATE_LIMIT_WARN = 90  # sleep when approaching limit
 _MAX_WRITES_PER_CYCLE = 10
 
+# get_tasks pagination safety cap. ClickUp returns ~100 tasks/page; a real Baker
+# list never approaches 50 pages (~5000 tasks). If last_page never trips, fail
+# loud rather than loop forever on a malformed response (CLICKUP_GET_TASKS_ROBUSTNESS_1).
+_TASKS_PAGE_CAP = 50
+
+
+class ClickUpUnavailable(Exception):
+    """A ClickUp READ could not be completed (network/HTTP failure, retries
+    exhausted, or a malformed paginated response) — distinct from a genuinely
+    empty result. `_request` returns None on any such failure; get_tasks raises
+    this instead of returning [] so callers can tell 'ClickUp is down' from 'the
+    list is empty' and skip knowingly rather than overwriting state with an
+    outage-derived empty (CLICKUP_GET_TASKS_ROBUSTNESS_1)."""
+
 
 class ClickUpClient:
     """ClickUp API wrapper with read-all / write-all (Director authorized 2026-03-25)."""
@@ -196,17 +210,48 @@ class ClickUpClient:
 
     def get_tasks(self, list_id: str, date_updated_gt: int = None) -> list:
         """
-        GET /list/{list_id}/task — returns tasks with optional watermark filter.
+        GET /list/{list_id}/task — ALL pages of tasks (optional watermark filter).
         date_updated_gt: Unix timestamp in milliseconds.
-        """
-        params = {"include_closed": "true"}
-        if date_updated_gt is not None:
-            params["date_updated_gt"] = str(date_updated_gt)
 
-        data = self._request("GET", f"/list/{list_id}/task", params=params)
-        if data and "tasks" in data:
-            return data["tasks"]
-        return []
+        Pagination (F2): ClickUp caps ~100 tasks/page and marks the final page with
+        ``last_page: true``. This loops until last_page (or a short/empty page),
+        preserving include_closed + date_updated_gt on every page, so a >100-task
+        list is fully returned instead of silently truncated to page 0.
+
+        Outage vs empty (F1): ``_request`` returns None on any request failure
+        (4xx/5xx/timeout/retries-exhausted). That is NOT an empty list — this
+        RAISES ClickUpUnavailable so a caller can skip knowingly rather than treat
+        an outage as "no tasks". A genuinely empty list (HTTP 200, ``tasks: []``)
+        still returns []. See CLICKUP_GET_TASKS_ROBUSTNESS_1.
+        """
+        base_params = {"include_closed": "true"}
+        if date_updated_gt is not None:
+            base_params["date_updated_gt"] = str(date_updated_gt)
+
+        tasks: list = []
+        page = 0
+        while True:
+            if page >= _TASKS_PAGE_CAP:
+                raise ClickUpUnavailable(
+                    f"get_tasks({list_id}) exceeded page cap {_TASKS_PAGE_CAP} "
+                    "(last_page never set — malformed response); failing loud "
+                    "rather than looping"
+                )
+            params = dict(base_params, page=str(page))
+            data = self._request("GET", f"/list/{list_id}/task", params=params)
+            if data is None:
+                # request failed (outage / retries exhausted) — distinct from empty.
+                raise ClickUpUnavailable(
+                    f"get_tasks({list_id}) page {page}: ClickUp request failed"
+                )
+            page_tasks = data.get("tasks") or []
+            tasks.extend(page_tasks)
+            # Terminate on ClickUp's last_page flag, or defensively on a short/empty
+            # page (a full page without last_page falls through to the next request).
+            if data.get("last_page") is True or not page_tasks:
+                break
+            page += 1
+        return tasks
 
     def get_task_comments(self, task_id: str) -> list:
         """GET /task/{task_id}/comment — returns list of comments."""

@@ -384,6 +384,7 @@ def run_clickup_milestone_sync(now: Optional[datetime] = None) -> dict[str, Any]
         "skipped_no_milestone": 0,
         "skipped_noop": 0,
         "skipped_terminal": 0,
+        "skipped_outage": 0,
         "errors": 0,
     }
     _TERMINAL = {"LANDED", "DIVERTED"}
@@ -393,7 +394,7 @@ def run_clickup_milestone_sync(now: Optional[datetime] = None) -> dict[str, Any]
         return summary
 
     try:
-        from clickup_client import ClickUpClient
+        from clickup_client import ClickUpClient, ClickUpUnavailable
 
         client = ClickUpClient._get_global_instance()
     except Exception:
@@ -442,6 +443,15 @@ def run_clickup_milestone_sync(now: Optional[datetime] = None) -> dict[str, Any]
             }
             upsert_board_state(code, fields, updated_by=_SYNC_UPDATED_BY)
             summary["written"] += 1
+        except ClickUpUnavailable:
+            # F1: ClickUp is down for this list — NOT an empty timetable. Skip the
+            # write knowingly so the board keeps its last value (never overwrite an
+            # arrival with an outage-derived empty); fail loud in the log + summary.
+            summary["skipped_outage"] += 1
+            logger.warning(
+                "clickup unavailable for %s; keeping last board value (no overwrite)", code
+            )
+            continue
         except Exception:
             summary["errors"] += 1
             logger.warning("clickup milestone sync failed for %s", code, exc_info=True)
