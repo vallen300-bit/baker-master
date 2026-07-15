@@ -11,7 +11,10 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
 
 class TestWriteSafety(unittest.TestCase):
-    """Write methods must raise ValueError when space_id != 901510186446."""
+    """Write methods honor the kill switch and cycle cap; all spaces are writable.
+
+    Director authorization on 2026-03-25 removed the old BAKER-space-only guard.
+    """
 
     def _make_client(self):
         """Create a ClickUpClient with mocked HTTP."""
@@ -27,51 +30,65 @@ class TestWriteSafety(unittest.TestCase):
             client._cycle_write_count = 0
         return client
 
-    def test_create_task_wrong_space_raises(self):
-        """create_task must raise ValueError for non-BAKER space."""
+    def test_create_task_allows_non_baker_space(self):
+        """Director-authorized all-space writes include create_task."""
         client = self._make_client()
-        # Mock _resolve_space_id_for_list to return a wrong space
         client._resolve_space_id_for_list = MagicMock(return_value="999999999")
+        client._request = MagicMock(return_value={"id": "created_task"})
+        client._log_action = MagicMock()
 
-        with self.assertRaises(ValueError) as ctx:
-            client.create_task(list_id="fake_list", name="Test task")
-        self.assertIn("Write attempted outside BAKER space", str(ctx.exception))
+        result = client.create_task(list_id="fake_list", name="Test task")
 
-    def test_update_task_wrong_space_raises(self):
-        """update_task must raise ValueError for non-BAKER space."""
+        self.assertEqual(result, {"id": "created_task"})
+        self.assertEqual(client._cycle_write_count, 1)
+
+    def test_update_task_allows_non_baker_space(self):
+        """Director-authorized all-space writes include update_task."""
         client = self._make_client()
         client._resolve_space_id_for_task = MagicMock(return_value="888888888")
+        client._request = MagicMock(return_value={"id": "updated_task"})
+        client._log_action = MagicMock()
 
-        with self.assertRaises(ValueError) as ctx:
-            client.update_task(task_id="fake_task", name="Updated")
-        self.assertIn("Write attempted outside BAKER space", str(ctx.exception))
+        result = client.update_task(task_id="fake_task", name="Updated")
 
-    def test_post_comment_wrong_space_raises(self):
-        """post_comment must raise ValueError for non-BAKER space."""
+        self.assertEqual(result, {"id": "updated_task"})
+        self.assertEqual(client._cycle_write_count, 1)
+
+    def test_post_comment_allows_non_baker_space(self):
+        """Director-authorized all-space writes include post_comment."""
         client = self._make_client()
         client._resolve_space_id_for_task = MagicMock(return_value="777777777")
+        client._request = MagicMock(return_value={"id": "comment"})
+        client._log_action = MagicMock()
 
-        with self.assertRaises(ValueError) as ctx:
-            client.post_comment(task_id="fake_task", comment_text="Hello")
-        self.assertIn("Write attempted outside BAKER space", str(ctx.exception))
+        result = client.post_comment(task_id="fake_task", comment_text="Hello")
 
-    def test_add_tag_wrong_space_raises(self):
-        """add_tag must raise ValueError for non-BAKER space."""
+        self.assertEqual(result, {"id": "comment"})
+        self.assertEqual(client._cycle_write_count, 1)
+
+    def test_add_tag_allows_non_baker_space(self):
+        """Director-authorized all-space writes include add_tag."""
         client = self._make_client()
         client._resolve_space_id_for_task = MagicMock(return_value="666666666")
+        client._request = MagicMock(return_value={"id": "tag_added"})
+        client._log_action = MagicMock()
 
-        with self.assertRaises(ValueError) as ctx:
-            client.add_tag(task_id="fake_task", tag_name="urgent")
-        self.assertIn("Write attempted outside BAKER space", str(ctx.exception))
+        result = client.add_tag(task_id="fake_task", tag_name="urgent")
 
-    def test_remove_tag_wrong_space_raises(self):
-        """remove_tag must raise ValueError for non-BAKER space."""
+        self.assertEqual(result, {"id": "tag_added"})
+        self.assertEqual(client._cycle_write_count, 1)
+
+    def test_remove_tag_allows_non_baker_space(self):
+        """Director-authorized all-space writes include remove_tag."""
         client = self._make_client()
         client._resolve_space_id_for_task = MagicMock(return_value="555555555")
+        client._request = MagicMock(return_value={"id": "tag_removed"})
+        client._log_action = MagicMock()
 
-        with self.assertRaises(ValueError) as ctx:
-            client.remove_tag(task_id="fake_task", tag_name="urgent")
-        self.assertIn("Write attempted outside BAKER space", str(ctx.exception))
+        result = client.remove_tag(task_id="fake_task", tag_name="urgent")
+
+        self.assertEqual(result, {"id": "tag_removed"})
+        self.assertEqual(client._cycle_write_count, 1)
 
     def test_write_allowed_for_baker_space(self):
         """_check_write_allowed must NOT raise for BAKER space."""
