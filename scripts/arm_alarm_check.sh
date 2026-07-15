@@ -80,6 +80,28 @@ LOG="${ARM_ALARM_LOG:-$HOME/.brisen-lab/arm-alarm.log}"
 # the Director's ops address, overridable per host.
 EMAIL_TO="${ARM_ALARM_EMAIL_TO:-dvallen@brisengroup.com}"
 
+# PER-KIND RECIPIENT ROUTING (ARM_ALARM_RECIPIENT_SPLIT_1). Each alarm is routed
+# by incident source: the delivery path reads ARM_ALARM_EMAIL_TO_<SOURCE> (upper-
+# cased source, e.g. ARM_ALARM_EMAIL_TO_SEMANTIC) and, when set + non-blank, sends
+# to that address; otherwise it falls back to EMAIL_TO. This lets routine enforced
+# semantic red retarget to lead while report/canary emergencies stay on the
+# Director ops address — the prerequisite for arming ARM_ALARM_SEMANTIC_ENFORCE=1
+# without paging the Director on routine semantic delivery (lead ruling #11674/#11679).
+# The routing map is NOT hardcoded here; it is applied as envs at install.
+#
+# PRODUCTION ROUTING (deploy note, AC7):
+#   source    class      env set at install               -> recipient
+#   semantic  routine    ARM_ALARM_EMAIL_TO_SEMANTIC=<lead addr>  -> lead
+#   report    emergency  (unset -> fallback)              -> EMAIL_TO (Director)
+#   canary    emergency  (unset -> fallback)              -> EMAIL_TO (Director)
+#   cadence / future     (unset -> fallback)              -> EMAIL_TO (Director)
+# DEPLOY: the launchd plist EnvironmentVariables dict must carry
+# ARM_ALARM_EMAIL_TO_SEMANTIC=<lead address> (launchd env is inherited by this
+# script and its python3 delivery child). The installer regenerates the plist
+# from scripts/launchd/com.baker.arm-alarm.plist on every reinstall, so to survive
+# a fleet reinstall the semantic env belongs in that template's EnvironmentVariables
+# (installer-owned change, tracked separately — see build-complete report to deputy).
+
 # never-seen marker => RED? default 0 (AMBER) so install day does not false-page.
 MISSING_IS_RED="${ARM_ALARM_MISSING_IS_RED:-0}"
 # re-alarm backstop for a still-active incident.
@@ -262,6 +284,30 @@ email_to = os.environ.get("EMAIL_TO", "")
 bk_base = int(os.environ.get("ARM_ALARM_BACKOFF_BASE_S", "60"))
 bk_cap  = int(os.environ.get("ARM_ALARM_BACKOFF_CAP_S", "1800"))
 
+# --- per-kind recipient resolution (ARM_ALARM_RECIPIENT_SPLIT_1) -------------
+# Route the alarm by incident source. source = the part of the incident key
+# before ":" (e.g. "semantic", "report", "canary"). ARM_ALARM_EMAIL_TO_<SOURCE>
+# when set (and non-blank) wins; otherwise fall back to EMAIL_TO. Routine
+# semantic red retargets to lead; report/canary stay on the Director ops address
+# (routing map applied via envs in the launchd plist at install, NOT hardcoded).
+# Resolution is deterministic on source, so FIRE / STILL-FAILING / RECOVERY for
+# the same incident always land on the SAME recipient (lifecycle consistency).
+def resolve_recipient(source):
+    env_key = "ARM_ALARM_EMAIL_TO_" + source.upper()
+    to = os.environ.get(env_key, "").strip()
+    if to:
+        return to, env_key
+    return email_to, "EMAIL_TO"
+
+def resolve_log(ik, source):
+    # Fail-loud: every resolution emits one log line; never a silent no-send.
+    to, rkey = resolve_recipient(source)
+    if rkey == "EMAIL_TO":
+        logs.append("resolved %s -> EMAIL_TO (no ARM_ALARM_EMAIL_TO_%s)" % (ik, source.upper()))
+    else:
+        logs.append("resolved %s -> %s" % (ik, rkey))
+    return to
+
 # --- transport adapter: each channel returns True ONLY on a real success ------
 def _run(cmd, extra):
     env = dict(os.environ); env.update(extra)
@@ -272,11 +318,11 @@ def _run(cmd, extra):
     except Exception:
         return False
 
-def send_email(subject, body):
+def send_email(subject, body, to):
     cmd = os.environ.get("ARM_ALARM_SEND_CMD")
     if cmd:
         return _run(cmd, {"ARM_ALARM_SUBJECT": subject, "ARM_ALARM_BODY": body,
-                          "ARM_ALARM_TO": email_to})
+                          "ARM_ALARM_TO": to})
     # Real path: Outlook.app autonomous send (Pattern A). returncode is the truth
     # signal — a non-zero osascript exit (Outlook down / auth broken / send error)
     # means the channel FAILED (the check=False bug codex flagged is fixed here).
@@ -286,7 +332,7 @@ def send_email(subject, body):
         '\tset m to make new outgoing message with properties {subject:"%s", content:"%s"}\n'
         '\tmake new recipient at m with properties {email address:{address:"%s"}}\n'
         '\tsend m\n'
-        'end tell\n' % (esc(subject), esc(body), esc(email_to)))
+        'end tell\n' % (esc(subject), esc(body), esc(to)))
     try:
         r = subprocess.run(["osascript", "-e", scpt],
                            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
@@ -307,9 +353,9 @@ def send_notify(title, message):
     except Exception:
         return False
 
-def deliver(subject, body):
+def deliver(subject, body, to):
     # Try BOTH channels; success = at least one delivered. Returns (email, notify).
-    e = send_email(subject, body)
+    e = send_email(subject, body, to)
     n = send_notify("ARM alarm", subject)
     return e, n
 
@@ -370,7 +416,11 @@ for key, (itype, detail) in verdicts.items():
         continue
     if reason == "still-failing":
         subject = "[ARM OUT-OF-BAND ALARM STILL-FAILING] %s on %s" % (red_summary, host)
-    e_ok, n_ok = deliver(subject, body)
+    # Route by incident source (semantic->lead, report/canary->EMAIL_TO). FIRE and
+    # STILL-FAILING share this path, so both resolve to the same recipient.
+    source = ik.split(":", 1)[0]
+    to = resolve_log(ik, source)
+    e_ok, n_ok = deliver(subject, body, to)
     if e_ok or n_ok:
         # DELIVERED — now (and only now) mark it alarmed + advance cooldown.
         rec.update({"active": True, "delivery_pending": False,
@@ -397,10 +447,14 @@ for ik, rec in list(inc.items()):
         continue
     if rec.get("active"):
         # a DELIVERED alarm recovered -> send a recovery notice (best-effort).
+        # Same source-based routing as the FIRE that raised it, so a semantic
+        # recovery lands on lead, never the Director (rider #11679).
+        source = ik.split(":", 1)[0]
+        to = resolve_log(ik, source)
         subject = "[ARM OUT-OF-BAND RECOVERY] %s on %s" % (ik, host)
         body = ("ARM out-of-band watchdog: incident %s has RECOVERED (marker fresh again). "
                 "The key is re-armed.\n" % ik)
-        e_ok, n_ok = deliver(subject, body)
+        e_ok, n_ok = deliver(subject, body, to)
         logs.append("RECOVER %s delivered email=%s notify=%s" % (ik, e_ok, n_ok))
         rec.update({"active": False, "delivery_pending": False, "recovered_at": now,
                     "send_fail_count": 0}); rec.pop("next_retry_at", None)
