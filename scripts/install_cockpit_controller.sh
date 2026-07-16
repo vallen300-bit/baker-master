@@ -26,9 +26,32 @@ for required in "$CONTROLLER_SRC" "$LAUNCHER_SRC" "$TEMPLATE"; do
     exit 2
   }
 done
+mkdir -p "$DEPLOY_DIR" "$LAUNCHD_DIR" "$STATIC_DIR" "$LOG_DIR"
+mkdir -p "$(dirname "$CREDENTIAL_PATH")"
+if [[ -L "$CREDENTIAL_PATH" ]]; then
+  echo "FATAL: credential path must not be a symlink: $CREDENTIAL_PATH" >&2
+  exit 2
+fi
+if [[ ! -e "$CREDENTIAL_PATH" ]]; then
+  command -v openssl >/dev/null 2>&1 || {
+    echo "FATAL: openssl is required to generate the cockpit credential." >&2
+    exit 2
+  }
+  CREDENTIAL_USER="${COCKPIT_CREDENTIAL_USER:-director}"
+  [[ "$CREDENTIAL_USER" != *:* ]] || {
+    echo "FATAL: COCKPIT_CREDENTIAL_USER must not contain ':'." >&2
+    exit 2
+  }
+  (
+    umask 077
+    printf '%s:%s\n' "$CREDENTIAL_USER" "$(openssl rand -hex 24)" \
+      > "$CREDENTIAL_PATH"
+  )
+  chmod 600 "$CREDENTIAL_PATH"
+  echo "Generated cockpit credential: $CREDENTIAL_PATH (mode 0600)"
+fi
 [[ -f "$CREDENTIAL_PATH" ]] || {
-  echo "FATAL: credential file missing: $CREDENTIAL_PATH" >&2
-  echo "Create username:password with mode 0600 before installing." >&2
+  echo "FATAL: credential path is not a regular file: $CREDENTIAL_PATH" >&2
   exit 2
 }
 [[ "$(stat -f '%Lp' "$CREDENTIAL_PATH")" == "600" ]] || {
@@ -43,8 +66,6 @@ done
   echo "FATAL: launch manifest missing: $MANIFEST_PATH" >&2
   exit 2
 }
-
-mkdir -p "$DEPLOY_DIR" "$LAUNCHD_DIR" "$STATIC_DIR" "$LOG_DIR"
 cp "$CONTROLLER_SRC" "$CONTROLLER_DEPLOY"
 cp "$LAUNCHER_SRC" "$LAUNCHER_DEPLOY"
 chmod 700 "$CONTROLLER_DEPLOY" "$LAUNCHER_DEPLOY"
