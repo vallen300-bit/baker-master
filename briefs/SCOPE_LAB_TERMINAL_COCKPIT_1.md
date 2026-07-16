@@ -262,9 +262,9 @@ AC (all must pass, live, not compile-clean — Lesson #8):
 6. Rollback script restores today's direct-launch Terminal profiles.
 
 **P2 — candidates (separate ratification):** live last-lines preview on card
-face (`tmux capture-pane`), Lab-telemetry status badges, embed inside the
-Render Lab (solve mixed-content/Private-Network-Access), Tailscale remote,
-Cowork-App deep-link cards.
+face (`tmux capture-pane`), Lab-telemetry status badges, Tailscale remote,
+Cowork-App deep-link cards. (Render-Lab embed REMOVED — §11.5 locks the local
+page as permanent; PNA embed must not be revived — codex-arch #12047 N4.)
 
 ## 9. Risks + mitigations
 
@@ -294,7 +294,7 @@ Cowork-App deep-link cards.
 
 ## 10. Effort + cost
 
-- 2 briefs, est. 2–3 elapsed days incl. pilot + fleet migration + runbook.
+- 3 briefs (A, B-1, B-2 — codex-arch #12047 N4), est. 2–3 elapsed days incl. pilot + fleet migration + runbook.
 - Software cost: 0 (tmux, ttyd MIT/BSD). No new services, no Render change.
 - Runtime overhead: negligible (tmux + N idle ttyd processes).
 
