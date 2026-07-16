@@ -69,7 +69,7 @@ if [[ -r "$KEY_FILE" ]]; then
   #
   # BUS_POST_ENVELOPE_ID_MINT_1: mint a per-post envelope id (idempotency_key).
   # Once BRISEN_LAB_REQUIRE_ENVELOPE_ID flips on the daemon, a body-POST with no id
-  # hard-400s "missing_envelope_id" — and this curl swallows failures (|| true +
+  # hard-400s "missing_idempotency_key" — and this curl swallows failures (|| true +
   # >/dev/null), so the drift alert would silently vanish exactly like the bad_kind
   # trap above. A fresh uuid4 per invocation is unique, so distinct drift posts NEVER
   # false-dedup (mirrors bus_post.sh's mint). Sibling scripts audited for the flag

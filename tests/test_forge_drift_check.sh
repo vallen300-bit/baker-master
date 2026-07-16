@@ -97,7 +97,7 @@ oks.append(("topic-form", str(d.get("topic","")).startswith("drift/forge-agent-"
 oks.append(("tier-valid", d.get("tier_required") in {"A","B","director_only"}))
 oks.append(("endpoint-msg-lead", "/msg/lead" in cap))
 # BUS_POST_ENVELOPE_ID_MINT_1: a minted envelope id must be present + non-blank so the
-# drift post survives BRISEN_LAB_REQUIRE_ENVELOPE_ID (else a silent missing_envelope_id 400).
+# drift post survives BRISEN_LAB_REQUIRE_ENVELOPE_ID (else a silent missing_idempotency_key 400).
 ik=d.get("idempotency_key")
 oks.append(("envelope-id-minted", isinstance(ik,str) and bool(ik.strip())))
 print(" ".join(("OK:" if v else "FAIL:")+k for k,v in oks))
