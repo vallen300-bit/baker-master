@@ -1,10 +1,11 @@
 # SCOPE_LAB_TERMINAL_COCKPIT_1 — In-Lab Live-Terminal Cockpit
 
-- **Status:** DRAFT v1.1 — recut after codex-arch G0 FAIL (#12017); awaiting re-G0, then Director build ratification
-- **Author:** cowork-ah1 · 2026-07-16 · v1.1 recut by lead (cowork-ah1 seat overloaded, Director handoff 2026-07-16 evening)
+- **Status:** DRAFT v1.2 — Director RATIFIED build + card contract (mock confirmed 2026-07-16 evening); codex-arch re-G0 in flight reviews THIS version
+- **Author:** cowork-ah1 · 2026-07-16 · v1.1 recut + v1.2 Director corrections by lead
 - **Reviewer:** codex-arch (cross-vendor design pass)
-- **Type:** Scope / design document. NOT a build brief. Build briefs are cut from this after G0 PASS.
+- **Type:** Scope / design document. NOT a build brief. Build briefs are cut from this.
 - **v1.1 delta:** three dispatch-blocker contracts added (§6a Migration, §6b Launch manifest, §6c Controller + auth) per codex-arch #12017; §11 open questions resolved with codex-arch picks; R3 auth claim corrected.
+- **v1.2 delta (Director rulings, chat 2026-07-16 evening):** §5 rewritten — production Lab glance colors reused (blue-flash NEW / amber WORKING / dim IDLE), plate grouping (Control Tower / Verification / Builders / Specialists / Matter Desks / Ground System), GO-click affordance (`/go` route sends Enter), unacked-copy control (separate Lab brief). Director also confirmed the B3 mock interaction verbatim.
 
 ---
 
@@ -54,17 +55,41 @@ Room (glance), screen 2 = Cockpit (interact).
    the local Mac. A cloud page cannot reach local processes without the
    cross-origin work deferred to P2 (§9 R1).
 
-## 5. Target UX
+## 5. Target UX (v1.2 — Director corrections 2026-07-16 evening folded)
 
-1. Grid of cards grouped exactly like the Lab fleet page (Orchestrators /
-   Builders / Desks / Specialists), order fixed by registry sequence — B1–B4
-   always adjacent, always same slots.
-2. Card face: agent_id, display_name, slug, live/idle dot, "session up/down".
+1. **Plate grouping (Director-corrected):** cards grouped on visually
+   distinct "plates" — each group a bordered container with a slightly
+   different background tint. Groups: **Control Tower** (lead, deputies,
+   cowork-ah1, dispatcher), **Verification** (codex seats, reviewer lanes),
+   **Builders** (B1–B4 always adjacent, same slots), **Specialists**
+   (researcher, librarian, clerk, publisher, designer, arm…), **Matter
+   Desks**, **Ground System**. Group membership generated from the registry
+   (class/role fields), mirroring the Lab Control Room grouping — verify
+   against the live Control Room at build; no hardcoded slug lists.
+2. Card face: agent_id, display_name, slug, session up/down, PLUS the
+   **live Lab glance state with today's production semantics** (Director
+   ruling): flashing blue frame = new unacked bus not yet reacted to; amber
+   frame = working; extinguished/dim = idle. Reuse `resolveGlanceState`
+   semantics (brisen-lab `static/glance_state.js` — WORKING > NEW > UNKNOWN >
+   DONE/IDLE) and the same bus-badge data (`unacked_count`,
+   `oldest_unacked_age_sec`, topics; age colors amber >10 min, red >30 min).
+   Data path: cockpit controller proxies the Lab state endpoints (localhost
+   page cannot rely on cross-origin fetch to Render — build resolves).
 3. Click card → terminal panel opens in-page (modal or right split), full
    xterm rendering, keyboard focus, scrollback. Esc/✕ → back to grid.
-4. The native Terminal.app window for the same agent keeps working — both
+4. **GO affordance (Director-added):** when the open terminal is waiting for
+   a confirmation, one click answers it. A prominent **GO** button on the
+   open panel (and on the card face) sends Enter to that tmux session via
+   the controller (`send-keys Enter` — new allowlisted route, §6c). No text
+   injection beyond Enter in v1.
+5. **Unacked copy (Director-added):** the Lab's white-circle unread badge
+   popup (unacked count + topic list) gains a one-click **copy** control so
+   the Director can paste the unacked summary into a misbehaving idle
+   terminal. Lives in the Lab UI (separate small brief, brisen-lab repo);
+   cockpit cards mirror it in P2.
+6. The native Terminal.app window for the same agent keeps working — both
    views attach to one shared session (tmux), nothing is lost either way.
-5. Dark register, Lab visual tokens (card bevel, AG-badge, section headers).
+7. Dark register, Lab visual tokens (card bevel, AG-badge, plate headers).
 
 ## 6. Architecture
 
@@ -138,10 +163,15 @@ A static HTML page cannot supply live session state or a Start action. v1
 ships a **tiny Python controller** (codex-arch pick; not bare `http.server`,
 not Caddy) bound to 127.0.0.1 under launchd:
 
-- `GET /api/agents` — card list + live session state (manifest + `tmux ls`).
+- `GET /api/agents` — card list + live session state (manifest + `tmux ls`)
+  + proxied Lab glance/bus-badge state (§5.2).
 - `POST /api/sessions/{slug}/start` — allowlisted to manifest slugs only;
-  starts the tmux session via the launch manifest. No other verbs in v1
-  (no stop/kill from the page in v1 — native window or CLI remains the path).
+  starts the tmux session via the launch manifest.
+- `POST /api/sessions/{slug}/go` — sends exactly `Enter` to the seat's tmux
+  session (`tmux send-keys -t <slug> Enter`); allowlisted slugs only; no
+  arbitrary key/text injection (v1.2, Director GO-click ruling). No other
+  verbs in v1 (no stop/kill from the page — native window or CLI remains
+  the path).
 - Controller also serves the static cockpit page (one process, one port).
 - **Auth decision:** ttyd `-c` is HTTP **Basic auth**, not token auth (R3
   corrected). v1: all listeners 127.0.0.1-only (threat = local user = Director,
