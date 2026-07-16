@@ -1,0 +1,43 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN"
+  "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>com.baker.cockpit-controller</string>
+  <key>ProgramArguments</key>
+  <array>
+    <string>/bin/bash</string>
+    <string>__LAUNCHER_PATH__</string>
+  </array>
+  <key>WorkingDirectory</key>
+  <string>__DEPLOY_DIR__</string>
+  <key>RunAtLoad</key>
+  <true/>
+  <key>KeepAlive</key>
+  <true/>
+  <key>StandardOutPath</key>
+  <string>__LOG_PATH__</string>
+  <key>StandardErrorPath</key>
+  <string>__ERROR_LOG_PATH__</string>
+  <key>EnvironmentVariables</key>
+  <dict>
+    <key>PATH</key>
+    <string>/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin</string>
+    <key>COCKPIT_CONTROLLER_SCRIPT</key>
+    <string>__CONTROLLER_PATH__</string>
+    <key>COCKPIT_FLEET_SCRIPT</key>
+    <string>__FLEET_SCRIPT__</string>
+    <key>COCKPIT_MANIFEST_FILE</key>
+    <string>__MANIFEST_PATH__</string>
+    <key>COCKPIT_CREDENTIAL_FILE</key>
+    <string>__CREDENTIAL_PATH__</string>
+    <key>COCKPIT_STATIC_DIR</key>
+    <string>__STATIC_DIR__</string>
+    <key>COCKPIT_HOST</key>
+    <string>127.0.0.1</string>
+    <key>COCKPIT_PORT</key>
+    <string>__PORT__</string>
+  </dict>
+</dict>
+</plist>
