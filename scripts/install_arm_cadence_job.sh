@@ -6,11 +6,15 @@
 # plist, reloads. SINGLE job per host (the ARM custodian is one seat, unlike the
 # per-seat lease emitter) — one Label, no seat fan-out.
 #
-# Mirrors install_lease_heartbeat_emitter.sh (TCC-safe deploy dir + Python
-# str.replace substitution + crash-only KeepAlive) with two deltas:
-#   - NO embedded secret: the machine surface GET /api/bus_health is public
-#     (verified 2026-07-13 http=200 unauth), so the plist carries no key and is
-#     not chmod-600-for-secrecy (0644 is fine).
+# Mirrors install_lease_heartbeat_emitter.sh / install_arm_semantic_job.sh
+# (TCC-safe deploy dir + Python str.replace substitution + crash-only KeepAlive)
+# with two deltas:
+#   - EMBEDDED secret: GET /api/bus_health went authed (bare=401, X-Terminal-Key=200
+#     — BUS_HEALTH_401_POLLER_KEY_1, supersedes the 2026-07-13 http=200-unauth note).
+#     The terminal key is resolved at install time (env → cache → 1Password, via
+#     brisen_lab_terminal_key.sh) and EMBEDDED in the plist, so it is chmod 600
+#     (was 0644). The key helper is deployed alongside the worker so the deployed
+#     poller can fall back to the cache if the plist env is ever cleared.
 #   - A `--check` subcommand (forge_drift_check.sh contract) so the drift
 #     sentinel can assert convergence without re-running the install.
 #
@@ -23,7 +27,9 @@
 #   ARM_CADENCE_INTERVAL_S   optional. StartInterval seconds. Default 1800 (30 min).
 #   ARM_CADENCE_DEPLOY_DIR   optional (tests). Worker deploy dir override.
 #   ARM_CADENCE_SNAPSHOT_DIR optional. Snapshot dir (also injected into plist env).
-#   ARM_CADENCE_DRYRUN       optional (tests). Deploy files only; skip launchctl.
+#   ARM_CADENCE_SEAT         optional. Seat slug whose key authenticates. Default 'arm'.
+#   ARM_CADENCE_KEY / BRISEN_LAB_TERMINAL_KEY  optional. Key override (else cache/1P).
+#   ARM_CADENCE_DRYRUN       optional (tests). Deploy files only; skip launchctl + key.
 
 set -euo pipefail
 
@@ -33,10 +39,13 @@ SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 
 LABEL="com.baker.arm-cadence"
 WORKER_SRC="${SCRIPT_DIR}/arm_cadence_poll.sh"
+KEYHELPER_SRC="${SCRIPT_DIR}/brisen_lab_terminal_key.sh"
 TEMPLATE="${SCRIPT_DIR}/launchd/com.baker.arm-cadence.plist"
 
 DEPLOY_DIR="${ARM_CADENCE_DEPLOY_DIR:-$HOME/Library/Application Support/baker}"
 WORKER_DEPLOY="${DEPLOY_DIR}/arm_cadence_poll.sh"
+KEYHELPER_DEPLOY="${DEPLOY_DIR}/brisen_lab_terminal_key.sh"
+SEAT="${ARM_CADENCE_SEAT:-arm}"
 INSTALLED_PLIST="$HOME/Library/LaunchAgents/${LABEL}.plist"
 LOG="$HOME/Library/Logs/arm-cadence.log"
 ERRLOG="$HOME/Library/Logs/arm-cadence.err.log"
@@ -104,6 +113,19 @@ except Exception: print('')
     if [[ "$plist_worker" != "$WORKER_DEPLOY" ]]; then
       emit "[FAIL] installed plist worker path differs (installed ${plist_worker:-<missing>} != expected $WORKER_DEPLOY)"; rc=1
     fi
+    # BUS_HEALTH_401_POLLER_KEY_1: the plist MUST carry a non-empty terminal key
+    # (embedded env), else every poll 401s and the snapshot is silently degraded.
+    # Print only present/empty — never the key itself.
+    key_present="$(python3 -c "
+import plistlib,sys
+try:
+    d=plistlib.load(open(sys.argv[1],'rb')); k=d.get('EnvironmentVariables',{}).get('ARM_CADENCE_KEY','')
+    print('yes' if (k and k != '__KEY__') else 'no')
+except Exception: print('no')
+" "$INSTALLED_PLIST" 2>/dev/null || echo 'no')"
+    if [[ "$key_present" != "yes" ]]; then
+      emit "[FAIL] installed plist has no embedded ARM_CADENCE_KEY (bus_health polls will 401 — re-run install)"; rc=1
+    fi
   fi
   # Snapshot freshness: latest.json should be younger than 3x the cadence. A
   # stale snapshot means the poller silently stopped producing (the exact
@@ -126,13 +148,15 @@ fi
 # install / reinstall
 # --------------------------------------------------------------------------
 [[ -f "$WORKER_SRC" ]] || { echo "FATAL: worker missing at $WORKER_SRC" >&2; exit 2; }
+[[ -f "$KEYHELPER_SRC" ]] || { echo "FATAL: key helper missing at $KEYHELPER_SRC" >&2; exit 2; }
 [[ -f "$TEMPLATE"   ]] || { echo "FATAL: plist template missing at $TEMPLATE" >&2; exit 2; }
 
-# 1. Deploy worker to the TCC-safe dir; ensure snapshot dir exists.
+# 1. Deploy worker + key helper to the TCC-safe dir; ensure snapshot dir exists.
 mkdir -p "$DEPLOY_DIR" "$SNAP_DIR"
 cp "$WORKER_SRC" "$WORKER_DEPLOY"; chmod +x "$WORKER_DEPLOY"
+cp "$KEYHELPER_SRC" "$KEYHELPER_DEPLOY"; chmod +x "$KEYHELPER_DEPLOY"
 
-# Dry-run (tests): deploy files only; never touch launchd or the live agent.
+# Dry-run (tests): deploy files only; never touch launchd, never resolve the key.
 if [[ -n "${ARM_CADENCE_DRYRUN:-}" ]]; then
   echo "Dry-run: deployed ARM cadence poller (interval=${CADENCE}s) to ${DEPLOY_DIR}"
   echo "  Worker:   $WORKER_DEPLOY"
@@ -141,31 +165,42 @@ if [[ -n "${ARM_CADENCE_DRYRUN:-}" ]]; then
   exit 0
 fi
 
-# 2. Unload existing job if present.
+# 2. Resolve the terminal key (env → cache → 1Password). Fail loud if unresolved —
+#    an authed poller with no key would only ever record 401/degraded snapshots.
+# shellcheck source=scripts/brisen_lab_terminal_key.sh
+. "$KEYHELPER_SRC"
+KEY="$(brisen_lab_read_terminal_key "$SEAT" "${ARM_CADENCE_KEY:-${BRISEN_LAB_TERMINAL_KEY:-}}" 2>/dev/null || true)"
+if [[ -z "$KEY" ]]; then
+  echo "FATAL: could not resolve terminal key for seat '$SEAT' (env → cache → 1Password all empty)" >&2
+  exit 3
+fi
+
+# 3. Unload existing job if present.
 launchctl unload "$INSTALLED_PLIST" 2>/dev/null || true
 
-# 3. Generate the plist via Python str.replace (safe regardless of path content).
-# No secret token here (public endpoint) — all tokens are non-secret paths.
-python3 -c "
-import sys
-tpl, worker, label, cadence, log, errlog, snap_dir, cadence_log = sys.argv[1:9]
+# 4. Generate the plist. The key goes via env (ARM_CADENCE_KEY), NOT argv, so it
+#    never appears in the process list. All other tokens are argv (non-secret paths).
+ARM_CADENCE_KEY="$KEY" python3 -c "
+import os, sys
+tpl, worker, label, cadence, log, errlog, snap_dir, cadence_log, seat = sys.argv[1:10]
 body = open(tpl).read()
 for a, b in (('__WORKER_PATH__', worker), ('__LABEL__', label),
              ('__CADENCE__', cadence), ('__LOG__', log), ('__ERRLOG__', errlog),
-             ('__SNAP_DIR__', snap_dir), ('__CADENCE_LOG__', cadence_log)):
+             ('__SNAP_DIR__', snap_dir), ('__CADENCE_LOG__', cadence_log),
+             ('__SEAT__', seat), ('__KEY__', os.environ['ARM_CADENCE_KEY'])):
     body = body.replace(a, b)
 sys.stdout.write(body)
-" "$TEMPLATE" "$WORKER_DEPLOY" "$LABEL" "$CADENCE" "$LOG" "$ERRLOG" "$SNAP_DIR" "$CADENCE_LOG" \
+" "$TEMPLATE" "$WORKER_DEPLOY" "$LABEL" "$CADENCE" "$LOG" "$ERRLOG" "$SNAP_DIR" "$CADENCE_LOG" "$SEAT" \
   > "$INSTALLED_PLIST"
-chmod 644 "$INSTALLED_PLIST"
+chmod 600 "$INSTALLED_PLIST"   # protect the embedded terminal key
 
-# 4. Load the job.
+# 5. Load the job.
 launchctl load -w "$INSTALLED_PLIST"
 
 echo "Installed ARM cadence watchdog:"
-echo "  Interval: ${CADENCE}s"
+echo "  Interval: ${CADENCE}s   Seat: ${SEAT}"
 echo "  Worker:   $WORKER_DEPLOY"
-echo "  Plist:    $INSTALLED_PLIST"
+echo "  Plist:    $INSTALLED_PLIST  (chmod 600 — embeds terminal key)"
 echo "  Snapshot: ${SNAP_DIR}/latest.json  (ARM report synthesis reads this)"
 echo "Verify:   launchctl list | grep $LABEL"
 echo "Kill:     launchctl unload $INSTALLED_PLIST   # reverts ARM to v1 scope (charter §7)"

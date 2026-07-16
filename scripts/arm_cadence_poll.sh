@@ -29,9 +29,17 @@
 # TOLERANCE: any transient failure logs + exits 0 so launchd does NOT back off
 # (non-zero exit → KeepAlive relaunch storm, collapsing the 30-min cadence into a
 # hot-loop). Snapshot FRESHNESS is the health signal (checked by
-# arm_cadence_drift_check.sh), never this script's exit code. There is no config
-# fault path that exits non-zero: the poller has no required secret (the machine
-# surface is public, verified 2026-07-13 http=200 unauth).
+# arm_cadence_drift_check.sh), never this script's exit code. No config fault path
+# exits non-zero: a missing key logs + still writes a (degraded) snapshot so the
+# freshness sentinel keeps its signal — the auth failure surfaces as http=401 in
+# the snapshot, not as a poller crash.
+#
+# AUTH: /api/bus_health went authed (bare=401; X-Terminal-Key=200) — the machine
+# surface is NO LONGER public (BUS_HEALTH_401_POLLER_KEY_1, lead-verified live
+# 2026-07-16 14:43Z; supersedes the 2026-07-13 http=200-unauth note). The poller
+# now carries its own terminal key (default seat 'arm', the ARM custodian's own
+# identity — same seat as arm_semantic_poll.sh, lead #10948) resolved via the
+# standard env → key-cache → 1Password chain (brisen_lab_terminal_key.sh).
 
 set -u
 set -o pipefail
@@ -46,6 +54,27 @@ TS="$(date -u +%FT%TZ)"
 TS_FILE="$(date -u +%Y%m%dT%H%M%SZ)"
 HOST="$(hostname 2>/dev/null || echo unknown)"
 
+# --- terminal key (authed machine surface) ----------------------------------
+# /api/bus_health requires X-Terminal-Key (BUS_HEALTH_401_POLLER_KEY_1). Resolve
+# the key: env (ARM_CADENCE_KEY, injected by the plist) → key cache → 1Password,
+# via the standard helper. SEAT defaults to 'arm' (ARM custodian identity, mirrors
+# arm_semantic_poll.sh). A missing key is NOT fatal: the fetch still runs and the
+# 401 is recorded in the snapshot (freshness stays the health signal).
+SEAT="${ARM_CADENCE_SEAT:-arm}"
+SCRIPT_DIR="$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)"
+# shellcheck source=scripts/brisen_lab_terminal_key.sh
+[ -f "$SCRIPT_DIR/brisen_lab_terminal_key.sh" ] && . "$SCRIPT_DIR/brisen_lab_terminal_key.sh"
+KEY="${ARM_CADENCE_KEY:-}"
+if [ -z "$KEY" ] && command -v brisen_lab_read_terminal_key >/dev/null 2>&1; then
+  KEY="$(brisen_lab_read_terminal_key "$SEAT" "" 2>/dev/null || true)"
+fi
+# Build the auth header as an array so the "Header: value" pair is passed as ONE
+# curl arg (an inline ${KEY:+...} would word-split the space and corrupt the
+# header). Empty when no key — guarded with the bash-3.2 empty-array idiom below
+# because macOS /bin/bash + `set -u` errors on a bare "${arr[@]}" when unset.
+AUTH_HEADER=()
+[ -n "$KEY" ] && AUTH_HEADER=(-H "X-Terminal-Key: ${KEY}")
+
 # SOURCES: machine telemetry endpoints captured each poll. Extension point for
 # the arm_sql lease/wake/envelope surfaces as P1–P4 land — add "<key> <path>"
 # rows; the loop below captures each into the snapshot under its key. Each MUST
@@ -58,6 +87,10 @@ mkdir -p "$SNAP_DIR" 2>/dev/null || true
 mkdir -p "$(dirname "$LOG")" 2>/dev/null || true
 
 log_line() { printf '%s arm-cadence %s %s\n' "$TS" "$HOST" "$*" >> "$LOG" 2>/dev/null || true; }
+
+# Loud (but non-fatal) note if the key never resolved: every snapshot will be a
+# 401/degraded until a key is present. Freshness stays intact; auth is the gap.
+[ -z "$KEY" ] && log_line "WARN no terminal key for seat=${SEAT} (bus_health fetch will 401; snapshot degraded)"
 
 # --- single-instance guard (mkdir-mutex, POSIX-atomic; stale-lock reclaim) ---
 # A slow poll must not stack on a still-running one (a 30-min cadence with a
@@ -91,6 +124,7 @@ for entry in "${SOURCES[@]}"; do
   key="${entry%% *}"; path="${entry#* }"
   : > "$TMP_BODY"
   http="$(curl -sS --connect-timeout 5 --max-time 25 \
+      ${AUTH_HEADER[@]+"${AUTH_HEADER[@]}"} \
       -o "$TMP_BODY" -w '%{http_code}' \
       "${LAB_URL}${path}" 2>/dev/null)" || http="000"
   bf="$(mktemp -t arm_cadence_frag.XXXXXX)"
