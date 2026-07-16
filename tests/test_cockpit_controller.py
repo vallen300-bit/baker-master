@@ -236,7 +236,13 @@ def test_http_proxy_rewrites_host_and_origin(tmp_path, monkeypatch):
     class FakeResponse:
         status_code = 200
         content = b"ttyd"
-        headers = httpx.Headers({"content-type": "text/plain"})
+        headers = httpx.Headers(
+            {
+                "content-type": "text/plain",
+                "content-length": "999",
+                "content-encoding": "gzip",
+            }
+        )
 
     class FakeClient:
         async def __aenter__(self):
@@ -263,6 +269,8 @@ def test_http_proxy_rewrites_host_and_origin(tmp_path, monkeypatch):
     assert captured["url"] == "http://127.0.0.1:17603/term/b3/"
     assert captured["headers"]["Host"] == "127.0.0.1:17603"
     assert captured["headers"]["Origin"] == "http://127.0.0.1:17603"
+    assert response.headers["content-length"] == "4"
+    assert "content-encoding" not in response.headers
 
 
 def test_static_root_is_inside_the_single_basic_auth_origin(tmp_path):
