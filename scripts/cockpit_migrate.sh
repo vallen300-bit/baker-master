@@ -46,21 +46,30 @@ sandbox() {
   echo "[4/5] dual-viewer smoke (native + web)"
   session_up "$slug" || die "native: tmux session '$slug' did not come up"
   echo "   native: tmux session '$slug' present + attachable"
-  # web viewer: install ttyd for this seat + probe 127.0.0.1:<port> with creds
+  # web viewer: install ttyd for this seat + probe it under its base path.
+  # ttyd runs with -b /term/<slug>/ (controller reverse-proxy contract), so the
+  # servable URL is /term/<slug>/, NOT / — probing / returns 404 by design and
+  # must NOT be "fixed" back (regression #12139 / deputy-codex #12138).
   "$TTYD_INSTALL" "$slug"
   [ -f "$CREDENTIAL_PATH" ] || die "web: credential $CREDENTIAL_PATH absent (controller-owned #12074)"
   local cred; cred="$(head -n1 "$CREDENTIAL_PATH")"
+  local base="http://127.0.0.1:$port/term/$slug/"
   local code=""
   for _ in $(seq 1 20); do
-    code="$(curl -s -o /dev/null -w '%{http_code}' -u "$cred" "http://127.0.0.1:$port/" || true)"
+    code="$(curl -s -o /dev/null -w '%{http_code}' -u "$cred" "$base" || true)"
     [ "$code" = "200" ] && break
     sleep 0.5
   done
-  [ "$code" = "200" ] || die "web: ttyd at 127.0.0.1:$port did not serve 200 (got '$code')"
+  [ "$code" = "200" ] || die "web: ttyd base path $base did not serve 200 (got '$code')"
+  # negative expectation: bare / MUST be 404 — that is correct base-path behavior,
+  # the proof the -b guard is in force (not a bug to repair).
+  local root_code
+  root_code="$(curl -s -o /dev/null -w '%{http_code}' -u "$cred" "http://127.0.0.1:$port/" || true)"
+  [ "$root_code" = "404" ] || die "web: expected 404 at bare / (base-path guard), got '$root_code'"
   # AC-M3: confirm 127.0.0.1-only bind
   lsof -nP -iTCP:"$port" -sTCP:LISTEN | grep -q "127.0.0.1:$port" \
     || die "web: ttyd not bound 127.0.0.1:$port (AC-M3)"
-  echo "   web: ttyd 127.0.0.1:$port -> 200 (auth ok, loopback-only)"
+  echo "   web: ttyd $base -> 200, bare / -> 404 (base-path guard), loopback-only"
 
   echo "[5/5] mark migrated in ledger"
   ledger_set "$slug" migrated
