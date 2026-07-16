@@ -56,3 +56,45 @@ def test_nonstrict_lists_unresolved_without_crash(tmp_path):
     r = _run(reg, plist)  # default mode: emit + report, exit 0
     assert r.returncode == 0, r.stderr
     assert "Traceback" not in r.stderr, r.stderr
+
+
+def test_strict_write_leaves_no_partial_artifacts(tmp_path):
+    """codex #12130 P1-B: --write --strict on an unresolved seat must NOT write
+    (or overwrite) the manifest/reconciliation — validate strict before writing."""
+    reg, plist = _fixtures(tmp_path)
+    man = tmp_path / "out_manifest.json"
+    recon = tmp_path / "out_recon.md"
+    env = dict(os.environ,
+               BAKER_AGENT_REGISTRY=str(reg),
+               COCKPIT_TERMINAL_PLIST=str(plist),
+               COCKPIT_MANIFEST_OUT=str(man),
+               COCKPIT_RECON_OUT=str(recon))
+    r = subprocess.run([sys.executable, str(SCRIPT), "--write", "--strict"],
+                       capture_output=True, text=True, env=env)
+    assert r.returncode == 1, r.stderr
+    assert not man.exists(), "manifest was written despite --strict failure"
+    assert not recon.exists(), "reconciliation was written despite --strict failure"
+
+
+def test_strict_write_atomic_on_success(tmp_path):
+    """A clean --write --strict (all seats resolve) writes both artifacts, exit 0.
+    Hermetic: the alias function is defined in a temp ZDOTDIR/.zshrc so the test
+    does not depend on the dev machine's live zsh aliases (CI-safe)."""
+    reg = tmp_path / "registry.yml"
+    reg.write_text(
+        "agents:\n  - agent_id: AG-999\n    slug: seatx\n    display_name: SeatX\n"
+        "    status: active\n    runtime: terminal-claude\n"
+    )
+    plist = tmp_path / "Terminal.plist"
+    plistlib.dump({"Window Settings": {"SeatX": {"CommandString": "seatx"}}}, plist.open("wb"))
+    zdot = tmp_path / "zdot"; zdot.mkdir()
+    # define the alias as a real zsh function carrying the identity marker
+    (zdot / ".zshrc").write_text("seatx () { BAKER_ROLE=seatx claude \"$@\" }\n")
+    man = tmp_path / "m.json"; recon = tmp_path / "r.md"
+    env = dict(os.environ, BAKER_AGENT_REGISTRY=str(reg),
+               COCKPIT_TERMINAL_PLIST=str(plist), ZDOTDIR=str(zdot),
+               COCKPIT_MANIFEST_OUT=str(man), COCKPIT_RECON_OUT=str(recon))
+    r = subprocess.run([sys.executable, str(SCRIPT), "--write", "--strict"],
+                       capture_output=True, text=True, env=env)
+    assert r.returncode == 0, r.stderr
+    assert man.exists() and recon.exists()

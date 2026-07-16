@@ -45,9 +45,16 @@ TERMINAL_PLIST = Path(os.environ.get(
     os.path.expanduser("~/Library/Preferences/com.apple.Terminal.plist"),
 ))
 SCRIPT_DIR = Path(__file__).resolve().parent
-MANIFEST_OUT = SCRIPT_DIR / "cockpit_launch_manifest.json"
-RECON_OUT = SCRIPT_DIR / "cockpit_manifest_reconciliation.md"
+MANIFEST_OUT = Path(os.environ.get("COCKPIT_MANIFEST_OUT", SCRIPT_DIR / "cockpit_launch_manifest.json"))
+RECON_OUT = Path(os.environ.get("COCKPIT_RECON_OUT", SCRIPT_DIR / "cockpit_manifest_reconciliation.md"))
 PORT_BASE = 7600
+
+
+def _atomic_write(path: Path, text: str) -> None:
+    """Write via temp + os.replace so a run never leaves a half-written file."""
+    tmp = path.with_name(path.name + ".tmp")
+    tmp.write_text(text)
+    os.replace(tmp, path)
 
 
 def _load_registry():
@@ -285,24 +292,28 @@ def main():
     manifest = render_manifest(result)
     recon = render_reconciliation(result)
 
-    if args.write:
-        MANIFEST_OUT.write_text(manifest)
-        RECON_OUT.write_text(recon)
-        print(f"wrote {MANIFEST_OUT}")
-        print(f"wrote {RECON_OUT}")
-    else:
-        print(manifest)
-
     print(
         f"resolved {result['resolved_count']}/{result['eligible_count']} eligible seats"
         f" ({len(result['unresolved_seats'])} unresolved)",
         file=sys.stderr,
     )
+
+    # P1-B (codex #12130): validate strict BEFORE writing anything — never leave
+    # partial artifacts or overwrite the source manifest on a failed strict run
+    # (no-partial-manifest contract, scope §6b). Fail loud first, write after.
     if args.strict and result["unresolved_seats"]:
         # unresolved_seats rows are 4-tuples (slug, display, runtime, why)
         names = ", ".join(row[0] for row in result["unresolved_seats"])
         print(f"FATAL (--strict): unresolved eligible seats: {names}", file=sys.stderr)
         sys.exit(1)
+
+    if args.write:
+        _atomic_write(MANIFEST_OUT, manifest)
+        _atomic_write(RECON_OUT, recon)
+        print(f"wrote {MANIFEST_OUT}")
+        print(f"wrote {RECON_OUT}")
+    else:
+        print(manifest)
 
 
 if __name__ == "__main__":
