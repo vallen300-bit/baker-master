@@ -42,6 +42,13 @@
     <string>__SNAP_DIR__</string>
     <key>ARM_CADENCE_LOG</key>
     <string>__CADENCE_LOG__</string>
+    <key>ARM_CADENCE_SEAT</key>
+    <string>__SEAT__</string>
+    <!-- /api/bus_health is authed (BUS_HEALTH_401_POLLER_KEY_1). The terminal key
+         is resolved at install time and embedded here (env, never argv) — hence
+         the installer chmod 600's this plist. -->
+    <key>ARM_CADENCE_KEY</key>
+    <string>__KEY__</string>
   </dict>
 </dict>
 </plist>
