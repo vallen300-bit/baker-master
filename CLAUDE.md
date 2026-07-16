@@ -47,50 +47,34 @@ Source: `https://x.com/Mnilax/status/2053116311132155938` (May 2026, 30-codebase
 
 # Baker / Sentinel — Repo CLAUDE.md
 
-> **B-code (b1–b4) + AH2 (deputy) picker orientation moved to per-picker `.claude/role-context/<role>.md`**
-> (SESSION_SLIM_IMPL_1 L2, 2026-06-17) — injected at SessionStart by `.claude/hooks/session-start-role.sh`, so each
-> role loads only its own block instead of all three. AH1 orientation remains inline below because the AH1/lead
-> role-context is the symlinked shared laconic register (moving it there would corrupt the register).
-
-> **AI Head A1 (AH1) opening this dir via picker symlink** (`~/Vallen Dropbox/Dimitry vallen/bm-aihead1/` → `~/bm-aihead1/`, ratified 2026-05-08 to mirror AH2 pattern + drop session start cost from ~12% to ~6% by retiring the heavy `~/Desktop/baker-code` auto-memory slug; further trimmed 2026-05-23 PM2 — canonical MEMORY.md matter index demoted to Tier 1, lead stays slim at session start per Director directive "we need him as an engineer, an architect, etc. ... we need him slim. Especially at the start of the session") — MANDATORY before any reply (Tier 0/1/2/3 access model, ratified 2026-05-09 — `_ops/processes/cross-agent-knowledge-dispatch.md`):
+> **AI Head A (AH1) picker orientation — slim session-start contract.**
+> The detailed role rules live in `~/baker-vault/_ops/agents/aihead1/orientation.md`;
+> this block keeps only the read order and routing pointers. B-code and deputy
+> orientation is injected from `.claude/role-context/<role>.md`.
 >
-> **Tier 0 — always (slim, engineer/architect-focused; Director-ratified 2026-05-23 PM2 — matter knowledge demoted to Tier 1):**
-> 1. *Global rules + Tier 0 portfolio context (`/Users/dimitry/.claude/CLAUDE.md` + imported `dropbox-tier0.md`) are harness-auto-loaded — do NOT Read again. Sanity check: confirm Rule 1 ("Director is non-technical") is visible in context; if missing, fall back to Read on `/Users/dimitry/.claude/CLAUDE.md`.*
-> 2. Invoke the Read tool on `~/baker-vault/_ops/agents/aihead1/orientation.md` (full AH1 orientation).
-> 3. Invoke the Read tool on `~/baker-vault/_ops/skills/ai-head/SKILL.md` (canonical AI Head operating rules).
-> 4. *Laconic V2 register is hook-injected at SessionStart (`.claude/role-context/lead.md`) and is DEFAULT for Director-facing replies — do NOT wait for `/laconic`. Do NOT Read `~/.claude/skills/laconic/SKILL.md` again (saves ~5k tokens; dropped 2026-06-10 per Director context-bloat directive). Read it only if the hook injection is missing from context.*
+> **Tier 0 — always:**
+> 1. Global rules and `dropbox-tier0.md` are harness-loaded; confirm Director Rule 1.
+> 2. Read `~/baker-vault/_ops/agents/aihead1/orientation.md`.
+> 3. Read `~/baker-vault/_ops/skills/ai-head/SKILL.md`.
+> 4. Read `~/baker-vault/_ops/agents/aihead1/PINNED.md` frontmatter + `§A` at session start when present.
+> 5. Laconic V2 is hook-injected by `.claude/role-context/lead.md`; do not reread
+>    `~/.claude/skills/laconic/SKILL.md` unless the hook is missing.
 >
-> **Tier 1 — keyword-routed (load on match in user's first substantive message):**
+> **Tier 1 — keyword-routed:**
+> - Build / Harness V2: `~/baker-vault/_ops/build/INDEX.md`
+> - Autonomy / Tier B-C: `~/baker-vault/_ops/processes/ai-head-autonomy-charter.md`
+> - Dispatch / B-code / brief: `_ops/processes/b-code-dispatch-coordination.md`
+> - Lessons: `tasks/lessons.md`
+> - Matter or project context: the named desk or curated memory index
 >
-> | Keywords in user message | Also Read |
-> |---|---|
-> | Cortex, RA-23, Phase 1-6, signal queue, capability set / framework, cortex-config | `~/baker-vault/_ops/processes/cortex-stage2-v1-tracker.md` + `~/baker-vault/_ops/processes/cortex3t-roadmap.md` |
-> | charter, autonomy, Tier B prerogative, Cortex Design boundary | `~/baker-vault/_ops/processes/ai-head-autonomy-charter.md` |
-> | B-code, dispatch, mailbox, b1/b2/b3/b4, brief format, write-brief | `~/baker-vault/_ops/processes/b-code-dispatch-coordination.md` + `~/baker-vault/_ops/processes/INDEX.md` |
-> | lessons, scar tissue, prior incident | `tasks/lessons.md` |
-> | PINNED, handover-archive, prior session resume | `~/baker-vault/_ops/agents/aihead1/PINNED.md` (if present) |
-> | matter context, desk shadow-org, AO/MOVIE/Hagenauer/Eastdil/Heidenauer disambig, Cortex history, Todoist API, BB-Desk, active roadmap pointers, strategic principles | `~/.claude/projects/-Users-dimitry-Vallen-Dropbox-Dimitry-vallen-Baker-Project/memory/MEMORY.md` (curated index — engineer/architect roles lazy-load this; Director-ratified 2026-05-23 PM2 to keep AH slim at session start) |
+> **Tier 2-3:** read the named brief, architecture note, or owner library only
+> when the request requires it; dispatch IT, finance, and matter-domain questions
+> to AID-T, BEN, or the named desk rather than loading another library directly.
 >
-> **Tier 2 — topic-depth (read only when question genuinely needs deep domain reasoning):**
+> **First-message confirmation:** `"AH1 oriented (Tier 0). Read: aihead1/orientation.md, ai-head/SKILL.md. Laconic via hook. Tier 1+ on demand."`
 >
-> | Question depth | Also Read |
-> |---|---|
-> | Cortex architecture deep dive | `~/baker-vault/_ops/ideas/2026-04-27-cortex-architecture-final-locked.md` |
-> | Specific brief by name | `briefs/_tasks/<name>.md` or `~/baker-vault/_ops/briefs/<name>.md` |
->
-> **Tier 3 — cross-agent dispatch (DO NOT read another agent's library directly):**
->
-> | Domain | Owner — dispatch a question; do not read directly |
-> |---|---|
-> | IT / SRE / NIST / agent-architecture / security-engineering / prompt-engineering | AID-T (`wiki/_ai-it/aid-t/library/`) |
-> | Finance / commercial reasoning / Baden-Baden vehicles | BEN (`wiki/_finance/baden-baden/`) |
-> | Specific matter context (Hagenauer, Cupial, MOVIE, AO, Annaberg, Balgerstrasse) | matter desk for that slug (`wiki/<matter-slug>/`) |
->
-> **First-message confirmation phrase (evidence-bound, exact):** `"AH1 oriented (Tier 0). Read: aihead1/orientation.md, ai-head/SKILL.md. Laconic via hook. Tier 1+ on demand."`
->
-> AH1 picker has NO auto-memory directory (Director-ratified 2026-05-08 PM, mirror AH2 — drops start cost to ~6%). All historical session handovers + feedback + project memories live in baker-vault `_ops/agents/aihead1/handover-archive/YYYY-MM/` + `_ops/agents/aihead1/auto-memory-archive-20260508/`. Read on demand. Latest in-flight state lives in `_ops/agents/aihead1/operating.md` + `ARCHIVE.md` (canonical, no MEMORY.md). SessionEnd hook at `.claude/hooks/aihead1-session-end.sh` warns on uncommitted/unpushed `_ops/agents/aihead1/` state.
->
-> Block applies when cwd path is `/Users/dimitry/bm-aihead1` OR a Cowork-spawned worktree under it (`bm-aihead1/.claude/worktrees/<name>`). Pre-2026-05-10 the check was strict basename only, which broke when Cowork forced worktree-mode on the standalone clone and spawned sessions under `.claude/worktrees/`. Pre-2026-05-08 AH1 sessions opened directly at `~/Desktop/baker-code` and used the heavier auto-memory slug there — that fallback path remains operational but new sessions should use the picker.
+> Historical handovers and typed memory remain on demand. The block applies to
+> `/Users/dimitry/bm-aihead1` and its `.claude/worktrees/*` sessions.
 
 @.claude/how-to/INDEX.md
 
