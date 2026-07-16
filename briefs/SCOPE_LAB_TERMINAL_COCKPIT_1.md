@@ -1,6 +1,7 @@
 # SCOPE_LAB_TERMINAL_COCKPIT_1 — In-Lab Live-Terminal Cockpit
 
-- **Status:** DRAFT v1.2 — Director RATIFIED build + card contract (mock confirmed 2026-07-16 evening); codex-arch re-G0 in flight reviews THIS version
+- **Status:** DRAFT v1.3 — third G0 round requested; Director-ratified build + card contract stand (mock confirmed 2026-07-16 evening)
+- **v1.3 delta (per codex-arch re-G0 FAIL #12028):** §6b executable interface = validated alias → `/bin/zsh -lic '<alias>'`, no cwd field, generation-time `type` validation all seats; §6a rewritten = Phase-1 sandbox pilots + ONE coordinated global Terminal cutover (Lesson 76 — Cmd+Q is app-wide), named reboot owner (controller plist RunAtLoad → fleet up → ttyd KeepAlive); §6c same-origin HTTP+WS proxy `/term/<slug>/` = one credential prompt, ttyd `--check-origin`; stale branches removed (§6.3 plist ruling, R2 window-size, R4 order, §4 eligibility shorthand); P1 split backend-before-UI (B-1 controller, B-2 page).
 - **Author:** cowork-ah1 · 2026-07-16 · v1.1 recut + v1.2 Director corrections by lead
 - **Reviewer:** codex-arch (cross-vendor design pass)
 - **Type:** Scope / design document. NOT a build brief. Build briefs are cut from this.
@@ -96,51 +97,64 @@ Room (glance), screen 2 = Cockpit (interact).
 **Stack: tmux (session host) + ttyd (web terminal, xterm.js) + static local
 cockpit page + launchd (persistence). All OSS, zero licence cost.**
 
-1. **tmux layer** — every terminal-claude agent launches inside
-   `tmux new-session -A -s <slug> '<existing launch cmd>'`. Terminal profiles
-   change their command to exactly that (one-time migration, scripted).
-   `-A` = attach-if-exists, so double-launch is safe.
+1. **tmux layer** — every eligible agent (§6b prefix rule) launches inside
+   `tmux new-session -A -s <slug> "/bin/zsh -lic '<alias>'"` where `<alias>`
+   is the seat's validated Terminal-profile alias (§6b). `-A` =
+   attach-if-exists, so double-launch is safe.
 2. **fleet launcher** — `scripts/fleet_terminals.sh up|open <slug>|status`:
-   reads the registry, creates missing tmux sessions in registry order,
+   reads the manifest, creates missing tmux sessions in registry order,
    `open <slug>` opens a Terminal window attached to that session.
-3. **ttyd layer** — one ttyd per agent: `ttyd -W -p <port> -i 127.0.0.1
-   [-c auth] tmux attach -t <slug>`. Port = 7600 + registry index (map
-   generated from registry — no hand-kept list; HAGENAUER_DESK_ON_BUS_1
-   hardcoded-list trap is the anti-pattern). Managed by one launchd agent
-   (`com.baker.cockpit-ttyd`) supervising all instances, or one plist per
-   agent — build decides; installer mirrors `install_forge_push.sh`.
-4. **Cockpit page** — static HTML/JS served by a tiny local server (or the
-   ttyd `--base-path` trick / one extra ttyd serving static). Renders cards
-   from a registry-generated JSON (build step, same generator family as
-   `agent_identity_generated.sh`). Card click → iframe to
-   `http://127.0.0.1:<port>` for that agent.
+3. **ttyd layer** — one ttyd per agent, **one launchd plist per agent**
+   (resolved; generated from the manifest): `ttyd -W -p <port> -i 127.0.0.1
+   -c <cred> --check-origin ...` attaching `tmux attach -t <slug>`. Port =
+   7600 + registry index; no hand-kept lists (HAGENAUER trap). Browser never
+   talks to ttyd directly — see §6c proxy. Installer mirrors
+   `install_forge_push.sh`.
+4. **Cockpit page** — static HTML/JS served by the controller (§6c, one
+   origin). Renders cards from manifest-generated JSON (same generator
+   family as `agent_identity_generated.sh`). Card click → iframe to
+   `/term/<slug>/` on the controller origin (proxied to that seat's ttyd).
 5. **Design source** — reuse the Lab's locked card design language; extract
    CSS tokens from the live Lab page / canonical mockup at build time. The
    Cockpit must be visually indistinguishable from a Lab page.
 
-## 6a. Migration contract (G0 blocker 1 — codex-arch #12017)
+## 6a. Migration contract (v1.3 — rewritten per codex-arch #12028 blocker 2)
 
-Running agents CANNOT be adopted by tmux; a naive `fleet up` while old
-windows live would create duplicate seats. Migration is therefore a per-seat
-five-step state machine, never a fleet-wide switch:
+Two facts drive the design: running agents CANNOT be adopted by tmux, and
+Terminal profile changes only take effect app-wide (Cmd+Q quits EVERY
+window — Lesson 76). Per-seat profile cutover is therefore impossible; the
+hybrid in v1.1 is withdrawn. v1.3 mechanism:
 
-1. **Checkpoint** — seat writes/refreshes its checkpoint per the existing
-   context-band rollover discipline (`briefs/_checkpoints/` for workers, PINNED
-   for binding seats); for idle seats a lightweight "migration pin" suffices.
-2. **Stop old seat** — clean exit of the existing session (same path as the
-   daemon refresh cadence / Terminal Cmd+Q refresh); never kill mid-write.
-3. **Create tmux seat** — relaunch via the launch manifest (§6b) inside
-   `tmux new-session -A -s <slug>`.
-4. **Smoke both viewers** — native Terminal attach AND ttyd web attach must
-   both render + accept keystrokes before the seat counts as migrated.
-5. **Mark migrated** — recorded in a generated migration ledger
-   (`fleet_terminals.sh status` shows migrated/pending per seat); `up` only
-   creates sessions for seats marked migrated, so unmigrated seats are never
-   double-launched.
+**Phase 1 — sandbox validation (NO Terminal profile edits, NO seat stops):**
+pilot seats (B3, then Brisen Desk) get tmux sessions created directly by
+`fleet_terminals.sh` alongside their (stopped-by-their-own-cadence or idle)
+Terminal seats — validation happens on a seat that is cleanly down via the
+existing daemon refresh cadence, never by killing a live one. Smoke: native
+`open <slug>` attach AND web attach both render + accept keystrokes.
 
-Order: pilot B3 → Brisen Desk (sequential, per codex-arch pick) → rest of
-fleet in registry order. Rollback per seat = §12 script restores the
-direct-launch profile for that seat only.
+**Phase 2 — ONE coordinated global cutover (after both pilots green +
+explicit lead GO):**
+1. All active seats checkpoint (existing context-band rollover discipline;
+   idle seats: lightweight migration pin).
+2. Migration script rewrites ALL eligible Terminal-profile CommandStrings to
+   the tmux wrapper in one pass.
+3. Single Terminal.app quit (the ONLY Cmd+Q in the process, scheduled in a
+   quiet window with the daemon's refresh cadence paused).
+4. Relaunch: `fleet_terminals.sh up` creates all sessions; Terminal windows
+   reopen attached via the new profile commands.
+5. Per-seat smoke recorded in the generated migration ledger
+   (`fleet_terminals.sh status`); any seat failing smoke gets its profile
+   rolled back individually (§12) while the rest stay migrated.
+
+`up` creates sessions only for manifest-eligible seats and is idempotent;
+before Phase 2 it creates only the pilot sandbox sessions, so unmigrated
+seats are never double-launched.
+
+**Reboot owner + order (codex-arch blocker 4):** the controller's launchd
+plist (`RunAtLoad`) is the named owner: at load it runs
+`fleet_terminals.sh up`, THEN the per-agent ttyd plists (KeepAlive) find
+their sessions; ttyd started before its session simply retries attach.
+Documented in the runbook.
 
 ## 6b. Launch manifest contract (G0 blocker 2 — codex-arch #12017)
 
@@ -149,10 +163,20 @@ call materially different zsh functions — so the tmux wrapper cannot be
 derived from the registry alone. Build adds a **generated launch manifest**
 (same generator family as `agent_identity_generated.sh`):
 
-- Per seat: `slug`, `cwd`, `launch_cmd` (the exact command the current
-  profile runs), `port` (7600 + registry index), `eligible` flag.
+- **Executable interface (v1.3, per codex-arch #12028 blocker 1):** profile
+  CommandStrings are zsh alias/functions (`b3`, `brisendesk`, …) defined only
+  in interactive login shells — `/bin/zsh -c` cannot see them. The manifest
+  therefore stores the **validated alias**, and the ONE launch form
+  everywhere is `/bin/zsh -lic '<alias>'`. No `cwd` field: the alias itself
+  establishes cwd (function internals are never parsed or duplicated).
+- Per seat: `slug`, `alias` (from the Terminal-profile CommandString),
+  `port` (7600 + registry index), `eligible` flag.
 - **Eligibility rule:** `status: active` AND `runtime` starts with
-  `terminal-` (prefix match, NOT exact `terminal-claude` — per codex-arch).
+  `terminal-` (prefix match; supersedes §4's shorthand "26 terminal-claude"
+  — the prefix rule is canonical).
+- **Generation-time validation (all eligible seats):** generator probes
+  `/bin/zsh -lic 'type <alias>'` per seat; any alias that does not resolve
+  fails the generation LOUD (no partial manifests).
 - Manifest is regenerated from registry + profile sources at install time;
   hand-editing it is forbidden (HAGENAUER hardcoded-list trap).
 - `fleet_terminals.sh` and the ttyd installer consume ONLY the manifest.
@@ -173,14 +197,23 @@ not Caddy) bound to 127.0.0.1 under launchd:
   verbs in v1 (no stop/kill from the page — native window or CLI remains
   the path).
 - Controller also serves the static cockpit page (one process, one port).
-- **Auth decision:** ttyd `-c` is HTTP **Basic auth**, not token auth (R3
-  corrected). v1: all listeners 127.0.0.1-only (threat = local user = Director,
-  same machine/user as the `--dangerously-skip-permissions`-class sessions —
-  no widening), plus one shared Basic-auth credential on ttyd + controller
-  stored 0600 in `~/Library/Application Support/baker/cockpit/`; browser
-  caches it per-origin so the Director types it once per session. Origin
-  enforcement: controller rejects requests whose `Origin`/`Host` is not
-  `127.0.0.1:<cockpit-port>`.
+- **Same-origin proxy (v1.3, per codex-arch #12028 blocker 3):** each ttyd
+  port is a distinct browser origin, so per-port Basic auth would prompt per
+  agent. The controller therefore reverse-proxies HTTP + WebSocket at
+  `/term/<slug>/` to the seat's ttyd — the browser sees ONE origin
+  (`127.0.0.1:<cockpit-port>`), ONE Basic-auth prompt per browser session.
+- **Auth layout:** ttyd `-c` is HTTP **Basic auth** (not token — R3
+  corrected). Credential (0600,
+  `~/Library/Application Support/baker/cockpit/`) is required by the
+  controller at its single origin AND passed by the controller (not the
+  browser) to each ttyd; every ttyd runs `--check-origin` restricted to the
+  controller origin and binds 127.0.0.1. Controller rejects requests whose
+  `Origin`/`Host` is not `127.0.0.1:<cockpit-port>`. Threat model unchanged:
+  local user = Director; no widening of who can reach the
+  `--dangerously-skip-permissions`-class sessions.
+- **AC addition:** exact browser smoke — full flow (grid → open B3 →
+  keystroke → GO) completes with at most ONE credential prompt, verified in
+  a fresh browser profile.
 
 ## 7. Surface contract
 
@@ -198,13 +231,20 @@ not Caddy) bound to 127.0.0.1 under launchd:
 
 ## 8. Phases + acceptance criteria
 
-**P1 — MVP (2 build briefs):**
+**P1 — MVP (3 build briefs, backend before UI — codex-arch #12028
+blocker 4 / ui-surface-prebrief):**
 - BRIEF A `FLEET_TMUX_LAUNCH_1`: brew install tmux+ttyd; launch-manifest
-  generator (§6b); fleet_terminals.sh + migration ledger; per-seat migration
-  state machine + rollback (§6a); per-agent ttyd plist generator + installer.
-- BRIEF B `LAB_COCKPIT_PAGE_1`: Python controller + API (§6c); cockpit page
-  (manifest-driven grid, Lab CSS, on-demand iframe panel); Basic-auth +
-  origin enforcement; runbook + how-to entry.
+  generator + alias validation (§6b); fleet_terminals.sh + migration ledger;
+  Phase-1 sandbox pilot machinery + Phase-2 cutover + rollback scripts (§6a);
+  per-agent ttyd plist generator + installer.
+- BRIEF B-1 `LAB_COCKPIT_CONTROLLER_1` (backend, gated first): Python
+  controller — /api/agents, /api/sessions/{slug}/start, /go, /term/<slug>/
+  HTTP+WS proxy, Basic-auth + origin enforcement, launchd plist (RunAtLoad
+  reboot owner). Reviewer instruction: exact URLs + expected non-error
+  responses, no UI.
+- BRIEF B-2 `LAB_COCKPIT_PAGE_1` (UI, after B-1 merged): cockpit page —
+  plate grid (§5.1), glance colors (§5.2), on-demand iframe panel via
+  /term/<slug>/, GO button, Lab CSS; runbook + how-to entry.
 
 AC (all must pass, live, not compile-clean — Lesson #8):
 1. `fleet_terminals.sh up` creates sessions ONLY for seats marked migrated
@@ -231,16 +271,19 @@ Cowork-App deep-link cards.
 - **R1 Cross-origin embed (why v1 is local):** HTTPS Render page → 
   `http://127.0.0.1` iframes trips mixed-content/PNA rules in Chrome.
   Deferred to P2 investigation; v1 sidesteps entirely with a local page.
-- **R2 tmux two-viewer sizing:** smallest client wins by default →
-  `set -g window-size latest`; documented quirk.
+- **R2 tmux two-viewer sizing:** current tmux default already sizes to the
+  latest client — NO fleet-wide override shipped (resolved §11.4; stale
+  `window-size latest` instruction withdrawn v1.3); documented quirk only.
 - **R3 Writable terminal on localhost:** 127.0.0.1 bind + ttyd Basic auth
   (`-c` — NOT token auth; corrected v1.1, see §6c);
   never tunneled/port-forwarded; threat = local user only (= Director).
   These sessions run `--dangerously-skip-permissions`-class agents — the
   cockpit must not widen who can reach them (it doesn't: same machine, same
   user).
-- **R4 Launch migration breaks a seat:** migration is per-profile + scripted
-  + reversible (AC 6); pilot on B3 first, then fleet.
+- **R4 Launch migration breaks a seat:** Phase-1 sandbox pilots (B3 → Brisen
+  Desk, §6a) before the single coordinated cutover; per-seat rollback (AC 6)
+  after it; canonical order is §6a's (stale "per-profile, B3 then fleet"
+  branch withdrawn v1.3).
 - **R5 TUI-in-tmux quirks (mouse, scrollback, resize):** tmux mouse on;
   known-good pattern for Claude Code CLI; pilot seat validates before fleet.
 - **R6 TCC/launchd path blocks:** solved pattern — deploy workers to
