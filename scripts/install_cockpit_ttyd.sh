@@ -38,6 +38,18 @@ die() { echo "FATAL: $*" >&2; exit 2; }
 command -v jq >/dev/null 2>&1 || die "jq required but not found"
 TTYD_BIN="$(command -v ttyd || true)"; [ -n "$TTYD_BIN" ] || die "ttyd not found (brew install ttyd)"
 TMUX_BIN="$(command -v tmux || true)"; [ -n "$TMUX_BIN" ] || die "tmux not found (brew install tmux)"
+# P1-4 (codex #12118): never install a stale/blind committed manifest. Regenerate
+# from live sources + --strict FIRST, so the substrate reflects the real registry +
+# Terminal profiles at install time and fails loud on any unresolved/conflicting
+# seat. Skipped only when the caller pins an explicit manifest (COCKPIT_MANIFEST_SRC,
+# e.g. tests) — then it is used verbatim.
+if [ -z "${COCKPIT_MANIFEST_SRC:-}" ]; then
+  GENERATOR="$SCRIPT_DIR/generate_cockpit_manifest.py"
+  [ -f "$GENERATOR" ] || die "manifest generator missing at $GENERATOR"
+  echo "regenerating manifest from live sources (--strict)..."
+  python3 "$GENERATOR" --write --strict >/dev/null \
+    || die "manifest --strict failed — resolve unresolved/conflicting seats at source (fix the zsh function markers, not a table) before install"
+fi
 [ -f "$MANIFEST_SRC" ] || die "manifest missing at $MANIFEST_SRC — run generate_cockpit_manifest.py --write"
 [ -f "$FLEET_SRC" ]    || die "fleet_terminals.sh missing at $FLEET_SRC"
 [ -f "$TEMPLATE" ]     || die "ttyd plist template missing at $TEMPLATE"
@@ -60,7 +72,11 @@ CREDENTIAL="$(head -n1 "$CREDENTIAL_PATH")"
 if [ "$#" -gt 0 ]; then
   SEATS=("$@")
 else
-  mapfile -t SEATS < <(jq -r '.entries[].slug' "$MANIFEST_SRC")
+  # stock macOS ships bash 3.2 (no mapfile) — while-read is 3.2-compatible (codex P1-2)
+  SEATS=()
+  while IFS= read -r _slug; do
+    [ -n "$_slug" ] && SEATS+=("$_slug")
+  done < <(jq -r '.entries[].slug' "$MANIFEST_SRC")
 fi
 
 installed=0

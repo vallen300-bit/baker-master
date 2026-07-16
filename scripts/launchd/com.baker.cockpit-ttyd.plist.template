@@ -12,6 +12,12 @@
   <array>
     <string>__TTYD_BIN__</string>
     <string>-W</string>
+    <!-- -O/--check-origin: refuse websocket connections whose Origin != Host
+         (codex N2 P1-1). The controller rewrites BOTH Origin and Host to the
+         upstream authority (cockpit_controller.py _upstream_headers), so the
+         same-origin proxy keeps working; a direct browser hit carrying the
+         controller's Origin against ttyd's Host is refused. -->
+    <string>-O</string>
     <string>-i</string>
     <string>127.0.0.1</string>
     <string>-p</string>

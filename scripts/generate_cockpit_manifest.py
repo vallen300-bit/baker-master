@@ -299,7 +299,8 @@ def main():
         file=sys.stderr,
     )
     if args.strict and result["unresolved_seats"]:
-        names = ", ".join(s for s, _, _ in result["unresolved_seats"])
+        # unresolved_seats rows are 4-tuples (slug, display, runtime, why)
+        names = ", ".join(row[0] for row in result["unresolved_seats"])
         print(f"FATAL (--strict): unresolved eligible seats: {names}", file=sys.stderr)
         sys.exit(1)
 
