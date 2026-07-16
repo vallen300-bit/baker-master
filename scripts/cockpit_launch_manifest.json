@@ -1,0 +1,225 @@
+{
+  "meta": {
+    "_generated": "DO NOT EDIT BY HAND \u2014 regenerate with scripts/generate_cockpit_manifest.py --write",
+    "_sources": {
+      "registry": "/Users/dimitry/baker-vault/_ops/registries/agent_registry.yml",
+      "registry_sha256": "e42a405975dc4691a48ad63080825a2fe4280fc864dc651846dabe7c27b53495",
+      "terminal_plist": "/Users/dimitry/Library/Preferences/com.apple.Terminal.plist"
+    },
+    "_join": "D (alias-function role-marker derivation, lead ruling #12080)",
+    "_launch_form": "/bin/zsh -lic '<alias>'",
+    "port_base": 7600,
+    "eligible_count": 26,
+    "resolved_count": 26
+  },
+  "entries": [
+    {
+      "slug": "lead",
+      "alias": "aihead1",
+      "launch": "/bin/zsh -lic 'aihead1'",
+      "port": 7600,
+      "eligible": true,
+      "profile": "AI 1 LEAD"
+    },
+    {
+      "slug": "deputy",
+      "alias": "aihead2claude",
+      "launch": "/bin/zsh -lic 'aihead2claude'",
+      "port": 7602,
+      "eligible": true,
+      "profile": "AI Head B (Claude)"
+    },
+    {
+      "slug": "deputy-codex",
+      "alias": "aihead2",
+      "launch": "/bin/zsh -lic 'aihead2'",
+      "port": 7603,
+      "eligible": true,
+      "profile": "DEPUTY CODEX"
+    },
+    {
+      "slug": "aid",
+      "alias": "aidennist",
+      "launch": "/bin/zsh -lic 'aidennist'",
+      "port": 7605,
+      "eligible": true,
+      "profile": "AID"
+    },
+    {
+      "slug": "b1",
+      "alias": "b1",
+      "launch": "/bin/zsh -lic 'b1'",
+      "port": 7606,
+      "eligible": true,
+      "profile": "B1"
+    },
+    {
+      "slug": "b2",
+      "alias": "b2",
+      "launch": "/bin/zsh -lic 'b2'",
+      "port": 7607,
+      "eligible": true,
+      "profile": "B2"
+    },
+    {
+      "slug": "b3",
+      "alias": "b3",
+      "launch": "/bin/zsh -lic 'b3'",
+      "port": 7608,
+      "eligible": true,
+      "profile": "B3"
+    },
+    {
+      "slug": "b4",
+      "alias": "b4",
+      "launch": "/bin/zsh -lic 'b4'",
+      "port": 7609,
+      "eligible": true,
+      "profile": "B4"
+    },
+    {
+      "slug": "researcher",
+      "alias": "researcher",
+      "launch": "/bin/zsh -lic 'researcher'",
+      "port": 7611,
+      "eligible": true,
+      "profile": "Researcher"
+    },
+    {
+      "slug": "codex",
+      "alias": "cvi",
+      "launch": "/bin/zsh -lic 'cvi'",
+      "port": 7612,
+      "eligible": true,
+      "profile": "Codex 5.5"
+    },
+    {
+      "slug": "russo-ai",
+      "alias": "russoai",
+      "launch": "/bin/zsh -lic 'russoai'",
+      "port": 7616,
+      "eligible": true,
+      "profile": "Russo AI"
+    },
+    {
+      "slug": "librarian",
+      "alias": "librarian",
+      "launch": "/bin/zsh -lic 'librarian'",
+      "port": 7619,
+      "eligible": true,
+      "profile": "LIBRARIAN"
+    },
+    {
+      "slug": "arm",
+      "alias": "arm",
+      "launch": "/bin/zsh -lic 'arm'",
+      "port": 7620,
+      "eligible": true,
+      "profile": "ARM"
+    },
+    {
+      "slug": "publisher",
+      "alias": "publisher",
+      "launch": "/bin/zsh -lic 'publisher'",
+      "port": 7621,
+      "eligible": true,
+      "profile": "Publisher"
+    },
+    {
+      "slug": "designer",
+      "alias": "designer",
+      "launch": "/bin/zsh -lic 'designer'",
+      "port": 7622,
+      "eligible": true,
+      "profile": "UI Designer"
+    },
+    {
+      "slug": "hag-desk",
+      "alias": "hagenauerdesk",
+      "launch": "/bin/zsh -lic 'hagenauerdesk'",
+      "port": 7623,
+      "eligible": true,
+      "profile": "Hag Desk"
+    },
+    {
+      "slug": "origination-desk",
+      "alias": "originationdesk",
+      "launch": "/bin/zsh -lic 'originationdesk'",
+      "port": 7624,
+      "eligible": true,
+      "profile": "Origination Desk"
+    },
+    {
+      "slug": "ao-desk",
+      "alias": "aodesk",
+      "launch": "/bin/zsh -lic 'aodesk'",
+      "port": 7625,
+      "eligible": true,
+      "profile": "AO Desk"
+    },
+    {
+      "slug": "movie-desk",
+      "alias": "moviedesk",
+      "launch": "/bin/zsh -lic 'moviedesk'",
+      "port": 7626,
+      "eligible": true,
+      "profile": "MOVIE Desk"
+    },
+    {
+      "slug": "baden-baden-desk",
+      "alias": "badenbadendesk",
+      "launch": "/bin/zsh -lic 'badenbadendesk'",
+      "port": 7627,
+      "eligible": true,
+      "profile": "Baden-Baden Desk"
+    },
+    {
+      "slug": "brisen-desk",
+      "alias": "brisendesk",
+      "launch": "/bin/zsh -lic 'brisendesk'",
+      "port": 7628,
+      "eligible": true,
+      "profile": "Brisen Desk"
+    },
+    {
+      "slug": "CM-1",
+      "alias": "cm1",
+      "launch": "/bin/zsh -lic 'cm1'",
+      "port": 7640,
+      "eligible": true,
+      "profile": "CM-1"
+    },
+    {
+      "slug": "CM-2",
+      "alias": "cm2",
+      "launch": "/bin/zsh -lic 'cm2'",
+      "port": 7641,
+      "eligible": true,
+      "profile": "CM-2"
+    },
+    {
+      "slug": "CM-3",
+      "alias": "cm3",
+      "launch": "/bin/zsh -lic 'cm3'",
+      "port": 7642,
+      "eligible": true,
+      "profile": "CM-3"
+    },
+    {
+      "slug": "CM-4",
+      "alias": "cm4",
+      "launch": "/bin/zsh -lic 'cm4'",
+      "port": 7643,
+      "eligible": true,
+      "profile": "CM-4"
+    },
+    {
+      "slug": "hag-filer",
+      "alias": "hagfiler",
+      "launch": "/bin/zsh -lic 'hagfiler'",
+      "port": 7644,
+      "eligible": true,
+      "profile": "Hag Filer"
+    }
+  ]
+}

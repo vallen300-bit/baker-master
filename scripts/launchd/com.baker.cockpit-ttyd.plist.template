@@ -1,0 +1,55 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>__LABEL__</string>
+  <!-- One ttyd per agent (codex-arch pick #12047 q1): per-seat KeepAlive +
+       restart isolation. 127.0.0.1-only, Basic-auth via -c (scope §6c). ttyd
+       serves the seat's tmux session; if the session is not up yet it simply
+       fails the per-connection attach and retries on reconnect (scope §6a). -->
+  <key>ProgramArguments</key>
+  <array>
+    <string>__TTYD_BIN__</string>
+    <string>-W</string>
+    <!-- -O is the check-origin flag: refuse websocket connections whose Origin
+         differs from Host (codex N2 P1-1). The controller rewrites BOTH Origin
+         and Host to the upstream authority (cockpit_controller.py
+         _upstream_headers), so the same-origin proxy keeps working; a direct
+         browser hit carrying the controller Origin against ttyd Host is refused.
+         (No double hyphen in this comment; XML comments forbid it.) -->
+    <string>-O</string>
+    <string>-i</string>
+    <string>127.0.0.1</string>
+    <string>-p</string>
+    <string>__PORT__</string>
+    <string>-c</string>
+    <string>__CREDENTIAL__</string>
+    <!-- base path: the controller reverse-proxies this ttyd under /term/<slug>/
+         and forwards the path unstripped (cockpit_controller.py _target_path),
+         so ttyd must expect that base or every asset/WS 404s (deputy-codex N2/C3). -->
+    <string>-b</string>
+    <string>__BASE_PATH__</string>
+    <string>__TMUX_BIN__</string>
+    <string>attach</string>
+    <string>-t</string>
+    <string>__SLUG__</string>
+  </array>
+  <key>RunAtLoad</key>
+  <true/>
+  <!-- KeepAlive=true: ttyd is a long-lived listener; if it ever exits, bring it
+       back. Per-seat plist = per-seat restart isolation (one seat's ttyd crash
+       never touches another's). -->
+  <key>KeepAlive</key>
+  <true/>
+  <key>StandardOutPath</key>
+  <string>__LOG_PATH__</string>
+  <key>StandardErrorPath</key>
+  <string>__ERROR_LOG_PATH__</string>
+  <key>EnvironmentVariables</key>
+  <dict>
+    <key>PATH</key>
+    <string>/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin</string>
+  </dict>
+</dict>
+</plist>
