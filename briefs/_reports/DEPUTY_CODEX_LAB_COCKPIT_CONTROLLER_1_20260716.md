@@ -67,6 +67,11 @@ Installer dry-run generated and linted the plist. The launch wrapper executes:
 1. `fleet_terminals.sh up`
 2. controller Python process
 
+Install note: `scripts/install_cockpit_controller.sh` creates the shared
+`director:<openssl-rand>` credential at mode `0600` only when absent; it never
+overwrites an existing credential. B1's ttyd plist generator reads this same
+file.
+
 ## Exact URL list for B-2 reviewer
 
 Default controller port: `7800`.
