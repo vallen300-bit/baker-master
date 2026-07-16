@@ -1,0 +1,43 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>__LABEL__</string>
+  <!-- One ttyd per agent (codex-arch pick #12047 q1): per-seat KeepAlive +
+       restart isolation. 127.0.0.1-only, Basic-auth via -c (scope §6c). ttyd
+       serves the seat's tmux session; if the session is not up yet it simply
+       fails the per-connection attach and retries on reconnect (scope §6a). -->
+  <key>ProgramArguments</key>
+  <array>
+    <string>__TTYD_BIN__</string>
+    <string>-W</string>
+    <string>-i</string>
+    <string>127.0.0.1</string>
+    <string>-p</string>
+    <string>__PORT__</string>
+    <string>-c</string>
+    <string>__CREDENTIAL__</string>
+    <string>__TMUX_BIN__</string>
+    <string>attach</string>
+    <string>-t</string>
+    <string>__SLUG__</string>
+  </array>
+  <key>RunAtLoad</key>
+  <true/>
+  <!-- KeepAlive=true: ttyd is a long-lived listener; if it ever exits, bring it
+       back. Per-seat plist = per-seat restart isolation (one seat's ttyd crash
+       never touches another's). -->
+  <key>KeepAlive</key>
+  <true/>
+  <key>StandardOutPath</key>
+  <string>__LOG_PATH__</string>
+  <key>StandardErrorPath</key>
+  <string>__ERROR_LOG_PATH__</string>
+  <key>EnvironmentVariables</key>
+  <dict>
+    <key>PATH</key>
+    <string>/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin</string>
+  </dict>
+</dict>
+</plist>

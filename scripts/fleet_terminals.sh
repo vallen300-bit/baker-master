@@ -18,7 +18,17 @@
 set -euo pipefail
 
 SCRIPT_DIR="$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)"
-MANIFEST="${COCKPIT_MANIFEST:-$SCRIPT_DIR/cockpit_launch_manifest.json}"
+# Manifest resolution: explicit override wins, else the deployed name
+# (launch_manifest.json, what the controller expects in DEPLOY_DIR), else the
+# in-repo generated name (cockpit_launch_manifest.json). Lets the SAME script
+# work in scripts/ and when deployed alongside launch_manifest.json.
+if [ -n "${COCKPIT_MANIFEST:-}" ]; then
+  MANIFEST="$COCKPIT_MANIFEST"
+elif [ -f "$SCRIPT_DIR/launch_manifest.json" ]; then
+  MANIFEST="$SCRIPT_DIR/launch_manifest.json"
+else
+  MANIFEST="$SCRIPT_DIR/cockpit_launch_manifest.json"
+fi
 LEDGER_DIR="${COCKPIT_STATE_DIR:-$HOME/Library/Application Support/baker/cockpit}"
 LEDGER="$LEDGER_DIR/migration_ledger.json"
 
