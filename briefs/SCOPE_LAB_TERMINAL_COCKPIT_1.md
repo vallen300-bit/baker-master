@@ -180,6 +180,23 @@ derived from the registry alone. Build adds a **generated launch manifest**
 - Manifest is regenerated from registry + profile sources at install time;
   hand-editing it is forbidden (HAGENAUER hardcoded-list trap).
 - `fleet_terminals.sh` and the ttyd installer consume ONLY the manifest.
+- **Slug↔profile join — narrow identity-marker exception (v1.3.2, lead
+  ruling #12080 as revised by codex-arch objection #12092):** to join a
+  profile alias to its registry slug, the generator may read ONLY literal
+  identity markers from the alias's zsh function — `BAKER_ROLE=` /
+  `FORGE_TERMINAL=` assignments — following at most ONE single-function
+  wrapper hop. Function-body analysis is candidate discovery, never
+  canonical identity: every identity signal present must reconcile to
+  EXACTLY ONE registry slug/alias; conflicting, multiple, or zero matches =
+  unresolved (fail loud). Parsing `cwd`/`cd` targets, system prompts, or
+  any other command internals stays FORBIDDEN (the no-cwd invariant above
+  is unchanged). The generated reconciliation artifact carries per-row
+  provenance: profile name, CommandString alias, wrapper hop, identity
+  markers found, matched slug, verdict. Phase-2 cutover gate = 26/26
+  resolved, zero conflicts, reviewer line-read of the artifact. Unresolved
+  seats are fixed at source (correct that seat's zsh function markers) —
+  never via override table, hand-kept list, or resolver alias-table
+  extension.
 
 ## 6c. Controller + auth contract (G0 blocker 3 — codex-arch #12017)
 
