@@ -16,6 +16,7 @@ ROOT = Path(__file__).resolve().parents[1]
 VAULT = Path("/Users/dimitry/baker-vault")
 SKILLS_INDEX = VAULT / "_ops" / "skills" / "SKILLS_INDEX.md"
 POINTER_SKILL = VAULT / "_ops" / "skills" / "skill-index" / "SKILL.md"
+RULING_EXPECTED_SEATS = 38
 
 sys.path.insert(0, str(ROOT))
 from scripts.measure_session_start_load import (  # noqa: E402
@@ -132,6 +133,9 @@ MATTER_COMMON = COMMON | _set(
     "nvidia-style-html",
     "outbound-status-claim-gate",
     "pichler-report",
+    "airport-process-orchestration",
+    "flight-dashboard-build",
+    "flight-discipline",
     "project-room-build",
     "transcripts-by-matter",
     "ui-surface-prebrief",
@@ -400,7 +404,9 @@ def table_zero(rows: list[dict]) -> list[str]:
     lines = [
         "## Table 0 - Seat manifest",
         "",
-        f"Identity generator entries observed: **{len(rows)}** (brief/ruling expected 38; drift: {len(rows) - 38:+d}).",
+        f"Identity generator entries observed: **{len(rows)}** "
+        f"(brief/ruling expected {RULING_EXPECTED_SEATS}; "
+        f"drift: {len(rows) - RULING_EXPECTED_SEATS:+d}).",
         "Every generated row is assigned exactly once below. Claude skill decisions",
         "apply only to MEASURE rows; Codex and no-session rows are N/A.",
         "",
@@ -520,7 +526,8 @@ def render(output: Path) -> str:
         "",
         "## Review notes",
         "",
-        "- The current generated snapshot contains 42 seats, not the ruling's expected 38.",
+        f"- The current generated snapshot contains {len(rows)} seats, not the "
+        f"ruling's expected {RULING_EXPECTED_SEATS}.",
         "  The four-row drift is preserved and named; no generated row was silently dropped.",
         "- `N/A-codex` rows use a different loader and are footnotes, not Claude skill denominators.",
         "- `N/A-no-session` rows have no local picker and do not receive a Claude manifest.",
