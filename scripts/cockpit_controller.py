@@ -398,6 +398,7 @@ def _copy_response_headers(headers: httpx.Headers) -> dict[str, str]:
         key: value
         for key, value in headers.items()
         if key.lower() not in HOP_BY_HOP_HEADERS
+        and key.lower() not in {"content-length", "content-encoding"}
     }
 
 
