@@ -32,7 +32,9 @@ Cockpit arc, Director-ratified 2026-07-16 (card contract confirmed via mock; "st
 3. **`scripts/fleet_terminals.sh`** — `up | open <slug> | status`: `up` creates tmux sessions ONLY for ledger-migrated seats, registry order, idempotent; `open` attaches a native Terminal window; `status` prints per-seat migrated/pending + session up/down.
 4. **Migration state machine** (scope §6a): per-seat checkpoint → stop old seat → tmux relaunch → dual-viewer smoke (native + web) → ledger mark. Scripted, per-profile, reversible.
 5. **Per-agent ttyd plist generator + installer** (codex-arch pick): one launchd plist per agent from the manifest; `ttyd -W -i 127.0.0.1 -p <port> -c <cred>`; installer mirrors `install_forge_push.sh` TCC-safe pattern (`~/Library/Application Support/baker/`).
-6. **Rollback script** (scope §12): per-seat and full restore of direct-launch profiles.
+6. **Rollback script** (scope §12 + codex-arch N4 nit N3, #12047): honors Lesson 76 — restoring a profile on disk does NOT refresh Terminal.app's cache. Failed-seat recovery = immediate direct-alias relaunch (`/bin/zsh -lic '<alias>'` in a plain new window, no profile dependency) NOW, profile-cache restore lands at the next coordinated app restart. NO promise of instant per-seat profile-cache rollback anywhere in code, docs, or ship report.
+
+**Scope alignment (v1.3 @2b7f18e4 — supersedes the v1.2 text this brief was cut from):** §6a is now Phase-1 sandbox pilots (B3, Brisen Desk; no profile edits, no live-seat kills) + ONE coordinated global cutover on my GO; §6b manifest = validated `alias` (no cwd), launch form `/bin/zsh -lic '<alias>'`, generation-time `type` probe fails loud; reboot owner = controller plist RunAtLoad → `fleet_terminals.sh up` → ttyd KeepAlive retry-attach. Build Phase-1 machinery + cutover scripts; do NOT execute Phase 2.
 
 ## Verification
 
