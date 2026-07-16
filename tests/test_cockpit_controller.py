@@ -114,6 +114,29 @@ def test_api_agents_requires_auth_and_maps_only_pinned_glance_fields(
     }
 
 
+def test_manifest_consumes_b1_entries_envelope(tmp_path):
+    manifest = tmp_path / "launch_manifest.json"
+    manifest.write_text(
+        json.dumps(
+            {
+                "meta": {"eligible_count": 1},
+                "entries": [
+                    {
+                        "slug": "b3",
+                        "alias": "b3",
+                        "port": 7608,
+                        "eligible": True,
+                    }
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+    assert controller.load_manifest(manifest) == (
+        controller.ManifestEntry(slug="b3", alias="b3", port=7608),
+    )
+
+
 def test_lab_failure_is_fail_soft_and_origin_is_strict(tmp_path, monkeypatch):
     settings = _settings(tmp_path)
 

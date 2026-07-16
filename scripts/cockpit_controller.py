@@ -166,7 +166,10 @@ def load_manifest(path: Path) -> tuple[ManifestEntry, ...]:
     with path.open(encoding="utf-8") as handle:
         raw = json.load(handle)
     if isinstance(raw, dict):
-        rows = raw.get("seats", raw.get("agents", []))
+        rows = raw.get(
+            "entries",
+            raw.get("seats", raw.get("agents", [])),
+        )
     else:
         rows = raw
     if not isinstance(rows, list):
