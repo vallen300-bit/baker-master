@@ -71,16 +71,18 @@ for slug in "${SEATS[@]}"; do
   label="com.baker.cockpit-ttyd-$slug"
   installed_plist="$LAUNCHD_DIR/$label.plist"
 
+  # base path the controller proxies this seat under (unstripped): /term/<slug>/
+  base_path="/term/$slug/"
   TTYD_BIN="$TTYD_BIN" TMUX_BIN="$TMUX_BIN" python3 - \
     "$TEMPLATE" "$installed_plist" "$label" "$port" "$CREDENTIAL" "$slug" \
-    "$LOG_DIR/ttyd-$slug.log" "$LOG_DIR/ttyd-$slug.error.log" <<'PY'
+    "$LOG_DIR/ttyd-$slug.log" "$LOG_DIR/ttyd-$slug.error.log" "$base_path" <<'PY'
 import os, sys, pathlib
-tmpl, out, label, port, cred, slug, logp, errp = sys.argv[1:]
+tmpl, out, label, port, cred, slug, logp, errp, base = sys.argv[1:]
 body = pathlib.Path(tmpl).read_text()
 for k, v in {
     "__LABEL__": label, "__TTYD_BIN__": os.environ["TTYD_BIN"],
     "__TMUX_BIN__": os.environ["TMUX_BIN"], "__PORT__": port,
-    "__CREDENTIAL__": cred, "__SLUG__": slug,
+    "__CREDENTIAL__": cred, "__SLUG__": slug, "__BASE_PATH__": base,
     "__LOG_PATH__": logp, "__ERROR_LOG_PATH__": errp,
 }.items():
     body = body.replace(k, v)

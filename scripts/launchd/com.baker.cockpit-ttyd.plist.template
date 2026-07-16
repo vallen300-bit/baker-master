@@ -18,6 +18,11 @@
     <string>__PORT__</string>
     <string>-c</string>
     <string>__CREDENTIAL__</string>
+    <!-- base path: the controller reverse-proxies this ttyd under /term/<slug>/
+         and forwards the path unstripped (cockpit_controller.py _target_path),
+         so ttyd must expect that base or every asset/WS 404s (deputy-codex N2/C3). -->
+    <string>-b</string>
+    <string>__BASE_PATH__</string>
     <string>__TMUX_BIN__</string>
     <string>attach</string>
     <string>-t</string>
