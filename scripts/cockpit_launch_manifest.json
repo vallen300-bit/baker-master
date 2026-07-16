@@ -10,7 +10,7 @@
     "_launch_form": "/bin/zsh -lic '<alias>'",
     "port_base": 7600,
     "eligible_count": 26,
-    "resolved_count": 25
+    "resolved_count": 26
   },
   "entries": [
     {
@@ -36,6 +36,14 @@
       "port": 7603,
       "eligible": true,
       "profile": "DEPUTY CODEX"
+    },
+    {
+      "slug": "aid",
+      "alias": "aidennist",
+      "launch": "/bin/zsh -lic 'aidennist'",
+      "port": 7605,
+      "eligible": true,
+      "profile": "AID"
     },
     {
       "slug": "b1",

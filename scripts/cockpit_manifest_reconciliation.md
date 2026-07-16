@@ -4,8 +4,8 @@
 > correcting that seat's zsh function (real source), never a table here.
 
 - Eligible seats (active + runtime terminal-*): **26**
-- Resolved into manifest: **25**
-- Unresolved eligible seats: **1**
+- Resolved into manifest: **26**
+- Unresolved eligible seats: **0**
 
 ## Resolved
 
@@ -14,6 +14,7 @@
 | 7600 | lead | `aihead1` | AI 1 LEAD |
 | 7602 | deputy | `aihead2claude` | AI Head B (Claude) |
 | 7603 | deputy-codex | `aihead2` | DEPUTY CODEX |
+| 7605 | aid | `aidennist` | AID |
 | 7606 | b1 | `b1` | B1 |
 | 7607 | b2 | `b2` | B2 |
 | 7608 | b3 | `b3` | B3 |
@@ -39,13 +40,10 @@
 
 ## Unresolved eligible seats (fix the zsh function)
 
-| slug | display | runtime | why |
-|---|---|---|---|
-| aid | AID T | terminal-claude | no Terminal profile function body resolved to this slug |
+_none — all eligible seats resolved._
 
 ## Unresolved Terminal profiles (informational)
 
 | profile | alias | reason |
 |---|---|---|
-| AID | `aidennist` | marker 'AI_DENNIS' does not map to any registry slug |
 | Deep55 | `deep55picker` | function body carries no BAKER_ROLE/FORGE_TERMINAL/picker-dir marker |
