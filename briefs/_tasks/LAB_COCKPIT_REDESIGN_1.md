@@ -22,7 +22,7 @@ Cockpit page ships with Control-Room-mirror grouping and v1 card visuals. Direct
 
 ## Deliverables
 
-**D1 — Layout rebind.** Generator reads `director_layout_contract.json` for plate labels, order, card membership + in-plate order (sort: row-band y±40 then x — same rule as the mock export). Registry/manifest still supply display_name/runtime/driveable/ports. `--strict`: every active seat must appear exactly once; fail loud on drift between contract and registry (new seat activated later → trailing "Unassigned" plate + stderr report, never silent).
+**D1 — Layout rebind.** Generator reads `director_layout_contract.json` for plate labels, order, card membership + in-plate order (sort: row-band y±40 then x — same rule as the mock export). Contract supplies display_name (codex-arch ruling #12246 — Director's shortened labels are binding); registry/manifest supply runtime/driveable/ports. `--strict`: every active seat must appear exactly once; fail loud on drift between contract and registry (new seat activated later → trailing "Unassigned" plate + stderr report, never silent).
 
 **D2 — Card visuals (REVISED per Director correction 2026-07-17 ~13:45Z).** Drop the AG pill entirely. Card geometry: LANDSCAPE — WIDER than today AND lower height (Director final wording: "they should be longer, but not so high"); vertical screen economy is the goal. Lab-style drop shadow so cards lift. Text MUCH brighter — card names + all cockpit lettering step up toward white (still AA on the dark fills). Names one line. Cowork/APP cards: SAME dimensions as terminal cards, recessed/inner-shadow kept, APP marker kept.
 
