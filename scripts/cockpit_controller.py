@@ -138,12 +138,13 @@ def read_mute(path: Path) -> bool:
 
 
 def write_mute(path: Path, muted: bool) -> None:
-    """Persist the mute flag so page-closed firing honours the last toggle."""
-    try:
-        path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_text(json.dumps({"muted": bool(muted)}), "utf-8")
-    except OSError as exc:
-        LOG.warning("notify mute write failed: %s", exc)
+    """Persist the mute flag so page-closed firing honours the last toggle.
+
+    Raises OSError on a persistence failure — the caller MUST surface it rather
+    than report a false success (the UI would show "muted" while banners keep
+    firing, codex #12354). ``read_mute`` still fails safe (toward alerting)."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps({"muted": bool(muted)}), "utf-8")
 
 
 def notify_macos(settings: "Settings", slug: str, count: int) -> None:
@@ -829,7 +830,14 @@ def create_app(
         except (ValueError, TypeError):
             payload = {}
         muted = bool(payload.get("muted")) if isinstance(payload, dict) else False
-        write_mute(config.notify_mute_path, muted)
+        # A persistence failure must surface, not read back as success — otherwise
+        # the UI shows "muted" while the controller keeps banner-ing (codex #12354).
+        try:
+            write_mute(config.notify_mute_path, muted)
+        except OSError as exc:
+            raise HTTPException(
+                status_code=500, detail=f"mute persistence failed: {exc}"
+            ) from exc
         return {"ok": True, "muted": muted}
 
     async def _notify_tick() -> None:
@@ -850,6 +858,11 @@ def create_app(
             return
         for slug, count in to_fire:
             notify_macos(config, slug, count)
+
+    # Expose one tick for deterministic tests (codex #12354) — the committed test
+    # awaits this directly to prove a 0→N transition banners once through the real
+    # read→compute→fire path, without depending on background-task timing.
+    app.state.notify_tick = _notify_tick
 
     async def _notify_loop() -> None:
         while True:

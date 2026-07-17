@@ -363,6 +363,7 @@
   }
 
   async function toggleNotify() {
+    const prev = notifyMuted;
     const next = !notifyMuted;
     notifyMuted = next;                       // optimistic UI
     try { localStorage.setItem(NOTIFY_MUTE_KEY, next ? "1" : "0"); } catch (_e) {}
@@ -376,6 +377,10 @@
       if (!r.ok) throw new Error("HTTP " + r.status);
       toast(next ? "Bus alerts muted" : "Bus alerts on", "ok");
     } catch (e) {
+      // Persist failed — revert so the toggle never lies about the real state.
+      notifyMuted = prev;
+      try { localStorage.setItem(NOTIFY_MUTE_KEY, prev ? "1" : "0"); } catch (_e2) {}
+      applyNotifyUI();
       toast("Notify toggle failed — " + e.message, "err");
     }
   }

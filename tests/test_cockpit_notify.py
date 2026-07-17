@@ -6,8 +6,11 @@ All network-free: the pure functions are exercised directly and the endpoint
 tests use TestClient WITHOUT a lifespan context, so the background poll task
 never starts (it is registered on the startup event only).
 """
+import asyncio
 import base64
+import dataclasses
 import json
+import time
 from pathlib import Path
 
 from fastapi.testclient import TestClient
@@ -173,6 +176,114 @@ def test_mute_corrupt_file_reads_unmuted(tmp_path):
     p = tmp_path / "m.json"
     p.write_text("garbage", encoding="utf-8")
     assert controller.read_mute(p) is False           # corrupt never silences
+
+
+def test_write_mute_propagates_failure(tmp_path, monkeypatch):
+    # codex #12354 — write_mute must NOT swallow: a persistence failure has to be
+    # surfaceable so the endpoint never reports a false success.
+    p = tmp_path / "m.json"
+    def boom(*_a, **_k):
+        raise OSError("disk full")
+    monkeypatch.setattr(controller.Path, "write_text", boom)
+    try:
+        controller.write_mute(p, True)
+        raised = False
+    except OSError:
+        raised = True
+    assert raised is True
+
+
+# ---- loop path (codex #12354, finding 1) -----------------------------------
+
+class _Flip:
+    """Lab stub: first read reports 0 (seeds baseline), later reads report N."""
+    def __init__(self, slug, count):
+        self.slug, self.count, self.n, self.last_ok = slug, count, 0, True
+
+    async def read(self):
+        self.n += 1
+        return {self.slug: {"unacked_count": 0 if self.n < 2 else self.count}}
+
+
+def _seed_layout(settings, slug):
+    (settings.static_dir / "cockpit_layout.json").write_text(
+        json.dumps(_layout_with([{"slug": slug, "notify_eligible": True}])),
+        encoding="utf-8",
+    )
+
+
+def test_notify_tick_fires_once_through_loop(tmp_path, monkeypatch):
+    """A 0→N transition must banner exactly once through the real
+    read→compute→fire tick path (not just the pure detector)."""
+    settings = _settings(tmp_path)
+    _seed_layout(settings, "codex-arch")
+    app = controller.create_app(settings, lab_glance=_Flip("codex-arch", 4))
+    fired = []
+    monkeypatch.setattr(
+        controller, "notify_macos",
+        lambda _cfg, slug, count: fired.append((slug, count)),
+    )
+    tick = app.state.notify_tick
+
+    async def drive():
+        await tick()   # n=1 → count 0 → seed only
+        await tick()   # n=2 → count 4 → 0→N fire
+        await tick()   # n=3 → still 4 → N→N, no re-fire
+    asyncio.run(drive())
+    assert fired == [("codex-arch", 4)]
+
+
+def test_notify_tick_muted_does_not_fire_but_advances_baseline(tmp_path, monkeypatch):
+    settings = _settings(tmp_path)
+    _seed_layout(settings, "codex-arch")
+    controller.write_mute(settings.notify_mute_path, True)   # muted
+    app = controller.create_app(settings, lab_glance=_Flip("codex-arch", 2))
+    fired = []
+    monkeypatch.setattr(
+        controller, "notify_macos",
+        lambda _cfg, slug, count: fired.append((slug, count)),
+    )
+    tick = app.state.notify_tick
+
+    async def drive():
+        await tick(); await tick()
+    asyncio.run(drive())
+    assert fired == []                                        # muted → silent
+    assert app.state.notify_prev.get("codex-arch") == 2      # baseline still advanced
+
+
+def test_lifespan_background_task_fires_on_transition(tmp_path, monkeypatch):
+    """The lifespan actually starts the poll loop and it banners a 0→N seat."""
+    settings = dataclasses.replace(
+        _settings(tmp_path), notify_enabled=True, notify_poll_seconds=0.01
+    )
+    _seed_layout(settings, "codex-arch")
+    fired = []
+    monkeypatch.setattr(
+        controller, "notify_macos",
+        lambda _cfg, slug, count: fired.append((slug, count)),
+    )
+    app = controller.create_app(settings, lab_glance=_Flip("codex-arch", 5))
+    with TestClient(app):                 # __enter__ fires lifespan → starts loop
+        deadline = time.time() + 3.0
+        while not fired and time.time() < deadline:
+            time.sleep(0.02)
+    assert ("codex-arch", 5) in fired     # background loop delivered the banner
+
+
+# ---- mute endpoint write-failure (codex #12354, finding 2) -----------------
+
+def test_mute_endpoint_surfaces_write_failure(tmp_path, monkeypatch):
+    settings = _settings(tmp_path)
+    (settings.static_dir / "cockpit_layout.json").write_text(
+        json.dumps(_layout_with([])), encoding="utf-8")
+    app = controller.create_app(settings, lab_glance=controller.LabGlance(settings))
+    def boom(*_a, **_k):
+        raise OSError("disk full")
+    monkeypatch.setattr(controller, "write_mute", boom)
+    client = TestClient(app)
+    r = client.post("/api/notify/mute", json={"muted": True}, headers=_auth())
+    assert r.status_code == 500          # false success is a bug; must surface
 
 
 # ---- banner command shape ---------------------------------------------------
