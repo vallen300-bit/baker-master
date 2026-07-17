@@ -14,6 +14,7 @@
 - [Bluewin private email read](.claude/how-to/bluewin-read-via-mail-app.md) — dvallen@bluewin.ch in Baker cloud pipeline (baker_email_search source="bluewin", live since 2026-06-09); Mail.app AppleScript for pre-06-09 history
 - [Forge snapshot pusher install](.claude/how-to/forge-snapshot-push-install.md) — `FORGE_KEY=… bash scripts/install_forge_push.sh` from a **Terminal** (not Cowork — ~15s ~/Library wipe); KeepAlive-hardened, self-resumes on reboot/crash. Feeds Brisen Lab card telemetry
 - [Baker Cockpit (fleet page)](.claude/how-to/lab-cockpit.md) — local Director page at http://127.0.0.1:7800/; Lab-style card grid, click a seat → its real terminal in-page, GO/Start buttons. Deploy/refresh, regenerate plate layout, add a pilot, failure modes
+- [Cockpit Phase-2 cutover](.claude/how-to/cockpit-phase2-cutover.md) — lead-run quiet-window runbook for the ONE coordinated Terminal→tmux+ttyd fleet cutover (FLEET_TMUX_LAUNCH_1 §6a); GO-gated, single Cmd+Q, `cutover --dry-run` first, per-seat rollback
 
 ## Adding a new how-to
 

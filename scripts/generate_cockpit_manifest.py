@@ -71,15 +71,28 @@ def _norm(s: str) -> str:
     return re.sub(r"[^a-z0-9]", "", (s or "").lower())
 
 
+# A profile CommandString is normally the bare launch alias, but after the
+# Phase-2 cutover it is the tmux wrapper `tmux new-session -A -s <slug>
+# "/bin/zsh -lic '<alias>'"`. Unwrap it back to the alias so the generator
+# resolves IDENTICALLY pre- and post-cutover (codex 019f714a finding 7 — otherwise
+# a post-cutover regeneration resolves 0/N and --strict fails the whole fleet).
+_WRAPPER_RE = re.compile(r"""^tmux\s+new-session\s+-A\s+-s\s+\S+\s+"/bin/zsh\s+-lic\s+'([^']+)'"\s*$""")
+
+
+def _unwrap_commandstring(cmd: str) -> str:
+    m = _WRAPPER_RE.match(cmd)
+    return m.group(1) if m else cmd
+
+
 def _load_profiles():
-    """profile display-name -> launch alias (CommandString)."""
+    """profile display-name -> launch alias (CommandString, unwrapped if post-cutover)."""
     import plistlib
     d = plistlib.loads(TERMINAL_PLIST.read_bytes())
     out = {}
     for name, cfg in (d.get("Window Settings") or {}).items():
         cmd = cfg.get("CommandString")
         if cmd:
-            out[name] = cmd.strip()
+            out[name] = _unwrap_commandstring(cmd.strip())
     return out
 
 

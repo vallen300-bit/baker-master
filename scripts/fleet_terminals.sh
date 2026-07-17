@@ -62,6 +62,7 @@ ledger_set() {
 manifest_slugs()  { jq -r '.entries[].slug' "$MANIFEST"; }
 manifest_alias()  { jq -r --arg s "$1" '.entries[] | select(.slug==$s) | .alias'  "$MANIFEST"; }
 manifest_launch() { jq -r --arg s "$1" '.entries[] | select(.slug==$s) | .launch' "$MANIFEST"; }
+manifest_profile(){ jq -r --arg s "$1" '.entries[] | select(.slug==$s) | .profile' "$MANIFEST"; }
 manifest_has()    { jq -e --arg s "$1" '.entries[] | select(.slug==$s)' "$MANIFEST" >/dev/null 2>&1; }
 
 session_up() { tmux has-session -t "=$1" 2>/dev/null; }
