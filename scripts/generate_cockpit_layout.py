@@ -16,15 +16,17 @@ hand-kept slug list:
      supplies the plate labels, plate order, and per-plate slug order (which
      keeps B1–B4 adjacent, §5.1). It is a frozen JSON-compatible literal.
   2. Agent registry (``agent_registry.yml``) — display_name, agent_id (AG-###),
-     runtime. ``runtime == app-claude`` marks a status-only card (no ttyd, no
-     iframe). The registry has NO class/group field, which is exactly why the
-     grouping is sourced from the Control Room, not the registry (§5.1 wording
-     is aspirational; flagged to lead 2026-07-17 #12159).
+     runtime. Any ``runtime`` beginning ``app-`` (``app-claude``, ``app-codex``,
+     …) marks a status-only *app seat* card (no ttyd, no iframe) — the seat runs
+     in a desktop app, not a tmux terminal. The registry has NO class/group
+     field, which is exactly why the grouping is sourced from the Control Room,
+     not the registry (§5.1 wording is aspirational; flagged to lead
+     2026-07-17 #12159).
   3. The cockpit launch manifest (``cockpit_launch_manifest.json``) — the set of
      tmux-driveable seats and their ports. A card is *driveable* iff it is in
-     the manifest; otherwise (app-claude) it is status-only.
+     the manifest; otherwise (an app-* seat) it is status-only.
 
-Card set = union(manifest driveable seats, registry app-claude seats). Every
+Card set = union(manifest driveable seats, registry app-* seats). Every
 card is placed in its Control Room plate; a card whose slug is not directly in
 CONTROL_GROUPS is placed by its base slug (``cowork-researcher`` -> the plate of
 ``researcher``); anything still unplaced lands in a trailing "Other" plate and
@@ -113,9 +115,13 @@ def build() -> dict:
     control = _parse_control_groups()
 
     driveable = set(ports)                       # in the tmux launch manifest
-    app_claude = {s for s, a in registry.items()
-                  if str(a.get("runtime")) == "app-claude"}
-    card_slugs = driveable | app_claude
+    # Any app-* runtime (app-claude, app-codex, …) is a status-only app seat:
+    # it runs in a desktop app, not a tmux terminal. Matching only "app-claude"
+    # here silently dropped app-codex seats (e.g. codex-arch) — the seat was
+    # active + bus-enabled + Control-Room-listed yet got no card (lead #12205).
+    app_seats = {s for s, a in registry.items()
+                 if str(a.get("runtime", "")).startswith("app-")}
+    card_slugs = driveable | app_seats
 
     # slug -> plate label, from the Control Room curation (mirror target).
     plate_of: dict[str, str] = {}
@@ -143,7 +149,7 @@ def build() -> dict:
             "agent_id": a.get("agent_id", ""),
             "display_name": a.get("display_name", slug),
             "driveable": slug in driveable,
-            "app_claude": slug in app_claude,
+            "app_seat": slug in app_seats,
             "port": ports.get(slug),
         }
 
@@ -178,7 +184,7 @@ def build() -> dict:
         "counts": {
             "cards": len(card_slugs),
             "driveable": len(driveable & card_slugs),
-            "app_claude": len(app_claude & card_slugs),
+            "app_seat": len(app_seats & card_slugs),
             "unplaced": len(unplaced),
         },
         "unplaced": unplaced,
@@ -216,8 +222,8 @@ def main() -> None:
     result = build()
     layout = render(result)
     c = result["counts"]
-    print(f"cards {c['cards']} (driveable {c['driveable']}, app-claude "
-          f"{c['app_claude']}, unplaced {c['unplaced']})", file=sys.stderr)
+    print(f"cards {c['cards']} (driveable {c['driveable']}, app-seat "
+          f"{c['app_seat']}, unplaced {c['unplaced']})", file=sys.stderr)
 
     if args.strict and result["unplaced"]:
         print(f"FATAL (--strict): unplaced cards: {', '.join(result['unplaced'])}",
