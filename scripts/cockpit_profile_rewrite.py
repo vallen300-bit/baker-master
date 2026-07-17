@@ -165,6 +165,14 @@ def cmd_rewrite(args) -> None:
             snapshot = {}
     for profile, slug, alias, current, new in planned:
         snapshot.setdefault(profile, current)   # current == bare alias here
+    # Never write a degenerate/empty rollback source (codex 019f713a finding 4):
+    # if there is nothing to preserve AND no prior backup, a later failed seat
+    # would have no original to restore. Refuse loudly instead of writing "{}".
+    if not snapshot:
+        _die(4, "refusing to write an empty backup: every eligible profile is "
+                "already at the wrapper and no prior backup exists, so no original "
+                "CommandString can be recovered. If this is a re-run, restore from "
+                f"{backup}.plist.bak or regenerate originals before proceeding.")
     _atomic_write_text(backup, json.dumps(snapshot, indent=2, sort_keys=True) + "\n")
 
     # Apply the rewrite.
@@ -210,13 +218,22 @@ def cmd_restore(args) -> None:
     if not backup.is_file():
         _die(3, f"backup not found: {backup}")
     backup_map = json.loads(backup.read_text())
+    # A restore that CANNOT happen is a loud failure, not a silent RC=0 no-op
+    # (codex 019f713a finding 3a): a failed seat with no original to restore must
+    # surface so the caller can flag it, never report a phantom success.
+    if args.profile not in backup_map:
+        _die(4, f"no backup entry for profile '{args.profile}' in {backup} — cannot "
+                "restore its original CommandString (the seat has no recoverable "
+                "original). Surfacing loudly rather than reporting a phantom restore.")
     root = _load_plist(plist)
     win = root.get("Window Settings") or {}
     changed = _restore_one(win, backup_map, args.profile)
-    if changed:
-        root["Window Settings"] = win
-        _atomic_write_bytes(plist, plistlib.dumps(root, fmt=plistlib.FMT_BINARY))
-    print(json.dumps({"restored": [args.profile] if changed else []}))
+    if not changed:
+        _die(4, f"profile '{args.profile}' present in backup but not writable into "
+                f"{plist} (absent from Window Settings) — restore did not apply.")
+    root["Window Settings"] = win
+    _atomic_write_bytes(plist, plistlib.dumps(root, fmt=plistlib.FMT_BINARY))
+    print(json.dumps({"restored": [args.profile]}))
 
 
 def cmd_restore_all(args) -> None:

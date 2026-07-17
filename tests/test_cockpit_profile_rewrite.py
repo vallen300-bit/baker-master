@@ -144,6 +144,35 @@ def test_drift_fails_loud_and_writes_nothing(env, tmp_path):
     assert not backup.exists()
 
 
+def test_restore_missing_profile_fails_loud(env):
+    """restore of a profile with no backup entry must exit non-zero, never a
+    phantom RC=0 no-op (codex 019f713a finding 3a)."""
+    plist, manifest, backup = env
+    _run("rewrite", "--manifest", str(manifest), "--plist", str(plist),
+         "--backup", str(backup), "--allow-running")
+    r = _run("restore", "--plist", str(plist), "--backup", str(backup),
+             "--profile", "No Such Profile", "--allow-running")
+    assert r.returncode == 4, (r.returncode, r.stdout, r.stderr)
+
+
+def test_rewrite_refuses_empty_backup(tmp_path):
+    """All profiles already wrapped + no prior backup => no original recoverable;
+    rewrite must refuse rather than write an empty backup (codex 019f713a
+    finding 4)."""
+    plist = tmp_path / "com.apple.Terminal.plist"
+    manifest = tmp_path / "manifest.json"
+    backup = tmp_path / "profile_backup.json"
+    # plist where every eligible profile is ALREADY at the wrapper
+    win = {name: {"CommandString": _wrapper(slug, alias)}
+           for name, (slug, alias) in SEATS.items()}
+    (plist).write_bytes(plistlib.dumps({"Window Settings": win}, fmt=plistlib.FMT_BINARY))
+    _write_manifest(manifest)
+    r = _run("rewrite", "--manifest", str(manifest), "--plist", str(plist),
+             "--backup", str(backup), "--allow-running")
+    assert r.returncode == 4, (r.returncode, r.stderr)
+    assert not backup.exists()
+
+
 def test_rerun_after_partial_rollback_merge_preserves(env):
     """A pre-existing backup must NOT block a rerun (codex finding 7): rewrite
     merge-preserves the original snapshot and never recaptures a wrapped value."""
