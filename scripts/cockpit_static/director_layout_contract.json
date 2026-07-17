@@ -1,0 +1,337 @@
+{
+  "exported_at": "2026-07-17T13:26:27.606Z",
+  "by": "Director mock v3 FINAL",
+  "plates": [
+    {
+      "label": "Control Tower & VERIFICATION",
+      "cards": [
+        {
+          "slug": "deputy-codex",
+          "display_name": "Codex Deputy",
+          "app": false,
+          "x": 11,
+          "y": 2
+        },
+        {
+          "slug": "lead",
+          "display_name": "Lead",
+          "app": false,
+          "x": 137,
+          "y": 0
+        },
+        {
+          "slug": "deputy",
+          "display_name": "Deputy",
+          "app": false,
+          "x": 260,
+          "y": 0
+        },
+        {
+          "slug": "codex",
+          "display_name": "Codex Rev",
+          "app": false,
+          "x": 387,
+          "y": 0
+        },
+        {
+          "slug": "cowork-ah1",
+          "display_name": "Cowork AH1",
+          "app": true,
+          "x": 138,
+          "y": 76
+        },
+        {
+          "slug": "codex-arch",
+          "display_name": "Codex Arch",
+          "app": true,
+          "x": 268,
+          "y": 77
+        }
+      ]
+    },
+    {
+      "label": "ENGINEERING , TECHNICAL & STAFF MANAGEMENT",
+      "cards": [
+        {
+          "slug": "b1",
+          "display_name": "B1",
+          "app": false,
+          "x": 5,
+          "y": 8
+        },
+        {
+          "slug": "b2",
+          "display_name": "B2",
+          "app": false,
+          "x": 135,
+          "y": 9
+        },
+        {
+          "slug": "b3",
+          "display_name": "B3",
+          "app": false,
+          "x": 262,
+          "y": 6
+        },
+        {
+          "slug": "b4",
+          "display_name": "B4",
+          "app": false,
+          "x": 389,
+          "y": 6
+        },
+        {
+          "slug": "arm",
+          "display_name": "ARM",
+          "app": false,
+          "x": 518,
+          "y": 7
+        },
+        {
+          "slug": "aid",
+          "display_name": "AID T",
+          "app": false,
+          "x": 646,
+          "y": 8
+        },
+        {
+          "slug": "cortex",
+          "display_name": "Cortex",
+          "app": false,
+          "x": 5,
+          "y": 85
+        },
+        {
+          "slug": "cowork-arm",
+          "display_name": "Cowork ARM",
+          "app": true,
+          "x": 526,
+          "y": 81
+        },
+        {
+          "slug": "cowork-aid",
+          "display_name": "Cowork AID",
+          "app": true,
+          "x": 655,
+          "y": 83
+        }
+      ]
+    },
+    {
+      "label": "PILOTS & PILOT TEAMS",
+      "cards": [
+        {
+          "slug": "ao-desk",
+          "display_name": "AO Desk",
+          "app": false,
+          "x": 5,
+          "y": 6
+        },
+        {
+          "slug": "movie-desk",
+          "display_name": "MOVIE Desk",
+          "app": false,
+          "x": 130,
+          "y": 5
+        },
+        {
+          "slug": "baden-baden-desk",
+          "display_name": "Baden-Baden Desk",
+          "app": false,
+          "x": 258,
+          "y": 5
+        },
+        {
+          "slug": "origination-desk",
+          "display_name": "Origination Desk",
+          "app": false,
+          "x": 389,
+          "y": 5
+        },
+        {
+          "slug": "brisen-desk",
+          "display_name": "Brisen Desk",
+          "app": false,
+          "x": 520,
+          "y": 5
+        },
+        {
+          "slug": "hag-desk",
+          "display_name": "Hag Desk",
+          "app": false,
+          "x": 647,
+          "y": 6
+        },
+        {
+          "slug": "cowork-ao-desk",
+          "display_name": "Cowork AO",
+          "app": true,
+          "x": 6,
+          "y": 81
+        },
+        {
+          "slug": "cowork-movie-desk",
+          "display_name": "Cowork MOVIE",
+          "app": true,
+          "x": 133,
+          "y": 79
+        },
+        {
+          "slug": "cowork-bb-desk",
+          "display_name": "Cowork BB",
+          "app": true,
+          "x": 258,
+          "y": 79
+        },
+        {
+          "slug": "cowork-origination-desk",
+          "display_name": "Cowork Origination",
+          "app": true,
+          "x": 391,
+          "y": 79
+        },
+        {
+          "slug": "cowork-hag-desk",
+          "display_name": "Cowork Hag",
+          "app": true,
+          "x": 655,
+          "y": 81
+        }
+      ]
+    },
+    {
+      "label": "FLIGHTS SUPPORT & DOMAIN SPECIFIC",
+      "cards": [
+        {
+          "slug": "researcher",
+          "display_name": "Researcher",
+          "app": false,
+          "x": 5,
+          "y": 4
+        },
+        {
+          "slug": "librarian",
+          "display_name": "Librarian",
+          "app": false,
+          "x": 132,
+          "y": 6
+        },
+        {
+          "slug": "CM-1",
+          "display_name": "CM-1",
+          "app": false,
+          "x": 260,
+          "y": 6
+        },
+        {
+          "slug": "CM-2",
+          "display_name": "CM-2",
+          "app": false,
+          "x": 385,
+          "y": 6
+        },
+        {
+          "slug": "CM-3",
+          "display_name": "CM-3",
+          "app": false,
+          "x": 513,
+          "y": 6
+        },
+        {
+          "slug": "CM-4",
+          "display_name": "CM-4",
+          "app": false,
+          "x": 641,
+          "y": 5
+        },
+        {
+          "slug": "cowork-researcher",
+          "display_name": "Cowork Researcher",
+          "app": true,
+          "x": 5,
+          "y": 79
+        },
+        {
+          "slug": "cowork-librarian",
+          "display_name": "Cowork Librarian",
+          "app": true,
+          "x": 133,
+          "y": 80
+        },
+        {
+          "slug": "hag-filer",
+          "display_name": "Hag Filer",
+          "app": false,
+          "x": 638,
+          "y": 85
+        }
+      ]
+    },
+    {
+      "label": "LEGAL ,FINANCIAL , PR, MARKETING & COMMUNICATIONS",
+      "cards": [
+        {
+          "slug": "russo-ai",
+          "display_name": "Russo AI",
+          "app": false,
+          "x": 6,
+          "y": 1
+        },
+        {
+          "slug": "ben",
+          "display_name": "BEN",
+          "app": false,
+          "x": 132,
+          "y": 1
+        },
+        {
+          "slug": "publisher",
+          "display_name": "Publisher",
+          "app": false,
+          "x": 524,
+          "y": 5
+        },
+        {
+          "slug": "designer",
+          "display_name": "UI Designer",
+          "app": false,
+          "x": 648,
+          "y": 3
+        },
+        {
+          "slug": "cowork-russo-ai",
+          "display_name": "Cowork Russo AI",
+          "app": true,
+          "x": 0,
+          "y": 78
+        }
+      ]
+    },
+    {
+      "label": "INTERNS",
+      "cards": [
+        {
+          "slug": "deep55",
+          "display_name": "Deep55",
+          "app": false,
+          "x": 5,
+          "y": 6
+        },
+        {
+          "slug": "clerk",
+          "display_name": "Clerk Qwen",
+          "app": false,
+          "x": 131,
+          "y": 6
+        },
+        {
+          "slug": "clerk-haiku",
+          "display_name": "Clerk Haiku",
+          "app": false,
+          "x": 260,
+          "y": 7
+        }
+      ]
+    }
+  ]
+}
