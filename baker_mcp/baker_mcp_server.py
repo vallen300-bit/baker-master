@@ -1004,6 +1004,45 @@ TOOLS = [
             },
         },
     ),
+    Tool(
+        name="baker_dropbox_search",
+        description=(
+            "Live search across the ENTIRE Vallen Dropbox (all areas: BRISEN GROUP "
+            "GENEVA, Dimitry vallen, Swiss Projects, Vienna projects) via Dropbox's "
+            "own search API. Covers files NOT ingested into Baker. Matches filenames "
+            "always; file content where plan supports it. Read-only; returns paths + "
+            "metadata, not file bodies. Use baker_search for semantic search over "
+            "the ingested corpus."
+        ),
+        inputSchema={
+            "type": "object",
+            "properties": {
+                "query": {
+                    "type": "string",
+                    "description": "Search terms (filename or content keywords).",
+                    "minLength": 1,
+                    "maxLength": 1000,
+                },
+                "path": {
+                    "type": "string",
+                    "description": "Optional folder scope, e.g. '/Swiss Projects'. Empty = whole Dropbox.",
+                    "default": "",
+                },
+                "filename_only": {
+                    "type": "boolean",
+                    "description": "Restrict matching to filenames (faster).",
+                    "default": False,
+                },
+                "limit": {
+                    "type": "integer",
+                    "description": "Max results (default 15, max 25).",
+                    "default": 15,
+                    "maximum": 25,
+                },
+            },
+            "required": ["query"],
+        },
+    ),
 ]
 
 # ClaimsMax v1 REST surface — imported separately to keep the existing 24-tool
@@ -2274,6 +2313,35 @@ def _dispatch(name: str, args: dict) -> str:
 
     elif name == "baker_inbox_ack":
         return _brisen_lab_ack_via_http(args)
+
+    elif name == "baker_dropbox_search":
+        from triggers.dropbox_client import DropboxClient
+        query = args.get("query", "").strip()
+        if not query:
+            return "Error: query is required."
+        try:
+            client = DropboxClient._get_global_instance()
+            hits = client.search(
+                query=query,
+                path=args.get("path", ""),
+                max_results=args.get("limit", 15),
+                filename_only=args.get("filename_only", False),
+            )
+        except Exception as e:
+            # Lesson #97: surface the Dropbox error_summary, never an opaque wrapper
+            detail = ""
+            resp = getattr(e, "response", None)
+            if resp is not None:
+                detail = f" status={resp.status_code} body={resp.text[:300]}"
+            return f"Error: dropbox search failed: {e}{detail}"
+        if not hits:
+            return f"No Dropbox matches for '{query}'."
+        lines = [f"Dropbox Search — {len(hits)} match(es) for '{query}':", ""]
+        for h in hits:
+            lines.append(
+                f"- {h['path']} ({h['match_type']}, modified {h['modified']}, {h['size_bytes']} bytes)"
+            )
+        return "\n".join(lines)
 
     elif name in CLAIMSMAX_TOOL_NAMES:
         return dispatch_claimsmax(name, args)

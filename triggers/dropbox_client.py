@@ -25,6 +25,16 @@ _RATE_LIMIT_WARN = 800
 _RATE_LIMIT_PAUSE = 950
 
 
+class DropboxPathRootError(Exception):
+    """Raised when team-root path-root resolution fails.
+
+    Fail-closed guard (codex G0 #12338/#12343): a silent home-namespace fallback
+    would return plausible single-area results, violating the cross-area scope
+    that is the acceptance criterion for full-Dropbox search. Refuse rather than
+    degrade — never let a search proceed pinned to the member home namespace.
+    """
+
+
 class DropboxClient:
     """Dropbox API v2 wrapper — read-only polling client with OAuth2 token refresh."""
 
@@ -123,20 +133,29 @@ class DropboxClient:
     # API Methods (Dropbox API v2 — raw HTTP)
     # -------------------------------------------------------
 
-    def _api_post(self, url: str, json_body: dict) -> dict:
-        """POST to Dropbox API with auth, rate limiting, and auto-retry on 401."""
-        self._check_rate_limit()
-        headers = {**self._auth_headers(), "Content-Type": "application/json"}
+    def _api_post(self, url: str, json_body: Optional[dict], extra_headers: Optional[dict] = None) -> dict:
+        """POST to Dropbox API with auth, rate limiting, and auto-retry on 401.
 
-        resp = self._client.post(url, headers=headers, json=json_body)
+        json_body=None sends the literal JSON ``null`` body: Dropbox no-argument RPC
+        endpoints (users/get_current_account) 500 on an empty body with a JSON
+        Content-Type, but accept ``null`` (verified live 2026-07-17 — the brief's
+        "empty body" assumption was wrong). extra_headers merges caller headers
+        (e.g. Dropbox-API-Path-Root) after auth.
+        """
+        self._check_rate_limit()
+        # literal `null` for no-arg endpoints; `json=` for real payloads
+        post_kwargs = {"content": b"null"} if json_body is None else {"json": json_body}
+        headers = {**self._auth_headers(), "Content-Type": "application/json", **(extra_headers or {})}
+
+        resp = self._client.post(url, headers=headers, **post_kwargs)
 
         # Auto-refresh on 401 and retry once
         if resp.status_code == 401:
             logger.info("Dropbox 401 — refreshing token and retrying")
             self._refresh_access_token()
-            headers = {**self._auth_headers(), "Content-Type": "application/json"}
+            headers = {**self._auth_headers(), "Content-Type": "application/json", **(extra_headers or {})}
             self._check_rate_limit()
-            resp = self._client.post(url, headers=headers, json=json_body)
+            resp = self._client.post(url, headers=headers, **post_kwargs)
 
         # Handle 429 rate limit
         if resp.status_code == 429:
@@ -144,10 +163,78 @@ class DropboxClient:
             logger.warning(f"Dropbox 429 — sleeping {retry_after}s")
             time.sleep(retry_after)
             self._check_rate_limit()
-            resp = self._client.post(url, headers=headers, json=json_body)
+            headers = {**self._auth_headers(), "Content-Type": "application/json", **(extra_headers or {})}
+            resp = self._client.post(url, headers=headers, **post_kwargs)
 
         resp.raise_for_status()
         return resp.json()
+
+    def _resolve_path_root_header(self) -> dict:
+        """Return Dropbox-API-Path-Root header pinning calls to the TEAM root.
+
+        Team-space accounts (Vallen Dropbox): member home is a sub-namespace;
+        top-level team folders (BRISEN GROUP GENEVA, Swiss Projects, ...) are
+        only reachable when path root = root namespace. Cached after first call.
+        """
+        if getattr(self, "_path_root_header", None) is not None:
+            return self._path_root_header
+        try:
+            account = self._api_post(
+                "https://api.dropboxapi.com/2/users/get_current_account", json_body=None
+            )
+            root_info = account.get("root_info", {})
+            root_ns = root_info.get("root_namespace_id")
+            home_ns = root_info.get("home_namespace_id")
+            if root_ns and root_ns != home_ns:
+                import json as _json
+                self._path_root_header = {
+                    "Dropbox-API-Path-Root": _json.dumps({".tag": "root", "root": root_ns})
+                }
+            else:
+                self._path_root_header = {}
+        except Exception as e:
+            # FAIL CLOSED (codex G0 #12338): a silent home-namespace fallback is
+            # the brief's named worst failure mode -- plausible single-area
+            # results violating cross-area scope. Do NOT cache, do NOT degrade.
+            self._path_root_header = None  # leave unresolved for retry
+            raise DropboxPathRootError(
+                f"path-root resolution failed; refusing home-namespace fallback: {e}"
+            ) from e
+        return self._path_root_header
+
+    def search(self, query: str, path: str = "", max_results: int = 25,
+               filename_only: bool = False) -> list[dict]:
+        """Full-Dropbox search via /2/files/search_v2. Read-only.
+
+        Returns list of {path, name, modified, size_bytes, match_type}.
+        Content matching requires plan support; filename matching always works.
+        """
+        options = {
+            "max_results": max(1, min(max_results, 25)),
+            "file_status": "active",
+            "filename_only": filename_only,
+        }
+        if path:
+            options["path"] = path
+        body = {"query": query[:1000], "options": options}
+        data = self._api_post(
+            "https://api.dropboxapi.com/2/files/search_v2",
+            json_body=body,
+            extra_headers=self._resolve_path_root_header(),
+        )
+        results = []
+        for m in data.get("matches", []):
+            md = m.get("metadata", {}).get("metadata", {})
+            if md.get(".tag") != "file":
+                continue
+            results.append({
+                "path": md.get("path_display", ""),
+                "name": md.get("name", ""),
+                "modified": md.get("server_modified", ""),
+                "size_bytes": md.get("size", 0),
+                "match_type": (m.get("match_type", {}) or {}).get(".tag", "unknown"),
+            })
+        return results
 
     def list_folder(self, path: str, cursor: Optional[str] = None) -> tuple[list[dict], str]:
         """List folder contents or continue from cursor.
