@@ -24,7 +24,7 @@ Cockpit page ships with Control-Room-mirror grouping and v1 card visuals. Direct
 
 **D1 — Layout rebind.** Generator reads `director_layout_contract.json` for plate labels, order, card membership + in-plate order (sort: row-band y±40 then x — same rule as the mock export). Registry/manifest still supply display_name/runtime/driveable/ports. `--strict`: every active seat must appear exactly once; fail loud on drift between contract and registry (new seat activated later → trailing "Unassigned" plate + stderr report, never silent).
 
-**D2 — Card visuals (REVISED per Director correction 2026-07-17 ~13:45Z).** Drop the AG pill entirely. Card geometry: LANDSCAPE — REDUCED height, width may stay or grow (Director: "by narrower I meant their height to be reduced, the length could be like [today]"); vertical screen economy is the goal. Lab-style drop shadow so cards lift. Text MUCH brighter — card names + all cockpit lettering step up toward white (still AA on the dark fills). Names one line. Cowork/APP cards: SAME dimensions as terminal cards, recessed/inner-shadow kept, APP marker kept.
+**D2 — Card visuals (REVISED per Director correction 2026-07-17 ~13:45Z).** Drop the AG pill entirely. Card geometry: LANDSCAPE — WIDER than today AND lower height (Director final wording: "they should be longer, but not so high"); vertical screen economy is the goal. Lab-style drop shadow so cards lift. Text MUCH brighter — card names + all cockpit lettering step up toward white (still AA on the dark fills). Names one line. Cowork/APP cards: SAME dimensions as terminal cards, recessed/inner-shadow kept, APP marker kept.
 
 **D3 — Plate shading.** Each of the 6 plates gets a slightly different grade of near-black background (subtle stepped ladder, same hue family) so sections read apart at a glance. Keep text contrast AA.
 
@@ -51,8 +51,8 @@ Literal, not compile-clean (Lesson #8): pytest cockpit suite green; `node --chec
 ## Quality Checkpoints / Acceptance criteria
 
 - AC-1: live :7800 renders exactly the contract layout (6 plates, 43 cards, order).
-- AC-2: no AG pills; Lab-proportion cards w/ shadow; cowork = same size, recessed; plates visibly graded.
-- AC-3: context line fills per `context_pct`; hidden when null; never blocks render.
+- AC-2: no AG pills; landscape cards (wider, lower) w/ shadow; MUCH brighter lettering; cowork = same size, recessed; plates visibly graded.
+- AC-3: NO context bar on card face; `ctx NN%` appears in open-panel title when known, absent when null; never blocks render.
 - AC-4: unacked seat shows amber + count; panel lists message ids/topics; matches Lab numbers for the same seat at the same moment (spot-check 3 seats).
 - AC-5: wake-on-open fires exactly once per guard window, correct text, audited; does NOT fire on WORKING or needs_go seats.
 - AC-6: all #585-#587 invariants hold (GO gating via goAffordanceVisible untouched, ttyd error card, telemetry banner, no innerHTML, --strict passes).
