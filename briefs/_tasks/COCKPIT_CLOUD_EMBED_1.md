@@ -1,6 +1,6 @@
 # BRIEF: COCKPIT_CLOUD_EMBED_1 — Reach the fleet cockpit from Brisen Lab (off-laptop)
 
-**STATUS: DRAFT — awaiting Director ratification. Do NOT dispatch.**
+**STATUS: SUPERSEDED 2026-07-17 by `COCKPIT_IN_LAB_BRIDGE_1.md`** — Director ruled build-overnight (#12558/#12562) and no Brisen domain is on Cloudflare (dig NS: Infomaniak/Namecheap), so the tunnel prerequisite fails; lead re-architected to a native Lab reverse bridge under charter §3. Kept for the option analysis + security framing. Do NOT dispatch.
 Origin: Director question via cowork-ah1 bus #12556 (2026-07-17); lead answer #12557 (brief promised, no overnight build). Authored overnight by lead per #12554 handoff.
 
 ## Decision for Director (plain English)
