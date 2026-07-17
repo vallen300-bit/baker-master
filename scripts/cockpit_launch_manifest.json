@@ -3,14 +3,14 @@
     "_generated": "DO NOT EDIT BY HAND \u2014 regenerate with scripts/generate_cockpit_manifest.py --write",
     "_sources": {
       "registry": "/Users/dimitry/baker-vault/_ops/registries/agent_registry.yml",
-      "registry_sha256": "e42a405975dc4691a48ad63080825a2fe4280fc864dc651846dabe7c27b53495",
+      "registry_sha256": "a66ee7ca7fa4f14f78b19875eb31b8bfd44bdb55ac1a5a44ceecc2f9a16fa584",
       "terminal_plist": "/Users/dimitry/Library/Preferences/com.apple.Terminal.plist"
     },
     "_join": "D (alias-function role-marker derivation, lead ruling #12080)",
     "_launch_form": "/bin/zsh -lic '<alias>'",
     "port_base": 7600,
-    "eligible_count": 26,
-    "resolved_count": 26
+    "eligible_count": 29,
+    "resolved_count": 29
   },
   "entries": [
     {
@@ -94,12 +94,36 @@
       "profile": "Codex 5.5"
     },
     {
+      "slug": "clerk",
+      "alias": "clerkqwenterm",
+      "launch": "/bin/zsh -lic 'clerkqwenterm'",
+      "port": 7614,
+      "eligible": true,
+      "profile": "Clerk Qwen3"
+    },
+    {
+      "slug": "clerk-haiku",
+      "alias": "clerkhaiku",
+      "launch": "/bin/zsh -lic 'clerkhaiku'",
+      "port": 7615,
+      "eligible": true,
+      "profile": "Clerk Chat"
+    },
+    {
       "slug": "russo-ai",
       "alias": "russoai",
       "launch": "/bin/zsh -lic 'russoai'",
       "port": 7616,
       "eligible": true,
       "profile": "Russo AI"
+    },
+    {
+      "slug": "deep55",
+      "alias": "deep55picker",
+      "launch": "/bin/zsh -lic 'deep55picker'",
+      "port": 7617,
+      "eligible": true,
+      "profile": "Deep55"
     },
     {
       "slug": "librarian",

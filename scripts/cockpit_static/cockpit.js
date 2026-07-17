@@ -4,7 +4,7 @@
  * metadata, mirrors the live Control Room) merged by slug with the controller's
  * live GET /api/agents (session + glance state). Driveable seats open an
  * on-demand iframe to /term/<slug>/ (same origin — one Basic-auth prompt per
- * browser session). App seats (any app-* runtime) are status-only (no terminal). GO sends
+ * browser session). Non-driveable active seats (app-*, service, headless) are status-only (no terminal). GO sends
  * Enter to the seat's tmux session; Start (re)creates a downed seat's session.
  *
  * Interaction contract: COCKPIT_CARD_BEHAVIOR_MOCK.html. Glance frames: §5.2 +
@@ -182,10 +182,13 @@
     const cls = ["card"];
     let stateText, actions = null, statusOnly = null, unread = null;
 
-    if (meta.app_seat) {
+    if (meta.status_only) {
+      // Any non-driveable active seat: app (app-*), service, headless. Reuse
+      // the .app status-only styling; the kind pill + badge carry the family.
       cls.push("app");
-      stateText = "app seat";
-      statusOnly = el("div", { class: "statusonly", text: "status only — app seat, no terminal" });
+      const label = meta.app_seat ? "app seat" : (meta.badge || "status only");
+      stateText = label;
+      statusOnly = el("div", { class: "statusonly", text: "status only — " + label + ", no terminal" });
     } else if (up && row && row.ttyd_up === false) {
       // tmux session is alive but its ttyd terminal server is unreachable:
       // opening would 502. Show an explicit error state (§7) — no GO, no open.
@@ -221,7 +224,7 @@
       actions = el("div", { class: "actions" }, [startBtn]);
     }
 
-    const kind = meta.app_seat ? "APP" : "TERMINAL";
+    const kind = meta.kind || (meta.status_only ? "APP" : "TERMINAL");
     const top = el("div", { class: "top" }, [
       el("span", { class: "agpill", text: meta.agent_id || "AG-?" }),
       el("span", { class: "kind", text: kind }),
@@ -240,7 +243,7 @@
     if (actions) children.push(actions);
 
     const c = el("div", { class: cls.join(" "), "data-slug": meta.slug }, children);
-    if (!meta.app_seat) {
+    if (!meta.status_only) {
       c.addEventListener("click", () => {
         const r = stateBySlug.get(meta.slug) || {};
         if (!r.session_up) { toast(meta.display_name + " is down — press Start first"); return; }

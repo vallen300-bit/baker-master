@@ -5,8 +5,8 @@
 > NO cwd parsing) map to exactly one registry slug. Zero/conflict/multiple =
 > unresolved -> fix that seat's zsh function markers at source, never a table.
 
-- Eligible seats (active + runtime terminal-*): **26**
-- Resolved into manifest: **26**
+- Eligible seats (active + runtime terminal-*): **29**
+- Resolved into manifest: **29**
 - Unresolved eligible seats: **0**
 
 ## Resolved seats
@@ -23,7 +23,10 @@
 | 7609 | b4 | `b4` | B4 |
 | 7611 | researcher | `researcher` | Researcher |
 | 7612 | codex | `cvi` | Codex 5.5 |
+| 7614 | clerk | `clerkqwenterm` | Clerk Qwen3 |
+| 7615 | clerk-haiku | `clerkhaiku` | Clerk Chat |
 | 7616 | russo-ai | `russoai` | Russo AI |
+| 7617 | deep55 | `deep55picker` | Deep55 |
 | 7619 | librarian | `librarian` | LIBRARIAN |
 | 7620 | arm | `arm` | ARM |
 | 7621 | publisher | `publisher` | Publisher |
@@ -65,11 +68,12 @@ _none — all eligible seats resolved deterministically._
 | CM-2 | `cm2` | — | BAKER_ROLE=CM-2, FORGE_TERMINAL=CM-2 | CM-2 | resolved |
 | CM-3 | `cm3` | — | BAKER_ROLE=CM-3, FORGE_TERMINAL=CM-3 | CM-3 | resolved |
 | CM-4 | `cm4` | — | BAKER_ROLE=CM-4, FORGE_TERMINAL=CM-4 | CM-4 | resolved |
-| Clerk | `clerk` | — | BAKER_ROLE=clerk, FORGE_TERMINAL=clerk | clerk | resolved |
-| Clerk Qwen3 | `clerkqwenterm` | — | — | — | unresolved: zero identity markers (BAKER_ROLE/FORGE_TERMINAL) |
+| Clerk | `clerk` | — | — | — | unresolved: zero identity markers (BAKER_ROLE/FORGE_TERMINAL) |
+| Clerk Chat | `clerkhaiku` | — | BAKER_ROLE=clerk-haiku, FORGE_TERMINAL=clerk-haiku | clerk-haiku | resolved |
+| Clerk Qwen3 | `clerkqwenterm` | — | BAKER_ROLE=clerk, FORGE_TERMINAL=clerk | clerk | resolved |
 | Codex 5.5 | `cvi` | — | FORGE_TERMINAL=codex | codex | resolved |
 | DEPUTY CODEX | `aihead2` | aihead2codex | BAKER_ROLE=deputy-codex, FORGE_TERMINAL=deputy-codex | deputy-codex | resolved |
-| Deep55 | `deep55picker` | — | — | — | unresolved: zero identity markers (BAKER_ROLE/FORGE_TERMINAL) |
+| Deep55 | `deep55picker` | — | BAKER_ROLE=deep55, FORGE_TERMINAL=deep55 | deep55 | resolved |
 | Hag Desk | `hagenauerdesk` | — | BAKER_ROLE=hag-desk, FORGE_TERMINAL=hag-desk | hag-desk | resolved |
 | Hag Filer | `hagfiler` | — | BAKER_ROLE=hag-filer, FORGE_TERMINAL=hag-filer | hag-filer | resolved |
 | LIBRARIAN | `librarian` | — | BAKER_ROLE=librarian, FORGE_TERMINAL=librarian | librarian | resolved |

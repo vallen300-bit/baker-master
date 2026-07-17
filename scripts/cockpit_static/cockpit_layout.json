@@ -3,15 +3,16 @@
     "_generated": "DO NOT EDIT BY HAND \u2014 regenerate with scripts/generate_cockpit_layout.py --write",
     "_sources": {
       "registry": "/Users/dimitry/baker-vault/_ops/registries/agent_registry.yml",
-      "registry_sha256": "e42a405975dc4691a48ad63080825a2fe4280fc864dc651846dabe7c27b53495",
+      "registry_sha256": "a66ee7ca7fa4f14f78b19875eb31b8bfd44bdb55ac1a5a44ceecc2f9a16fa584",
       "control_groups_source": "/Users/dimitry/bm-b1/brisen-lab/static/app.js",
       "control_groups_sha256": "aec8798d782a524a8cb11acf58d8e3b5da7e1984fcf8d27b914b32c9230f208d",
       "manifest": "/Users/dimitry/bm-b1/scripts/cockpit_launch_manifest.json"
     },
     "_mirror": "plates + order mirror live Lab CONTROL_GROUPS (scope \u00a75.1); membership reconciled with registry runtime + launch manifest",
     "counts": {
-      "cards": 39,
-      "driveable": 26,
+      "cards": 43,
+      "driveable": 29,
+      "status_only": 14,
       "app_seat": 13,
       "unplaced": 0
     }
@@ -27,6 +28,9 @@
           "display_name": "Lead",
           "driveable": true,
           "app_seat": false,
+          "status_only": false,
+          "kind": "TERMINAL",
+          "badge": null,
           "port": 7600
         },
         {
@@ -36,6 +40,9 @@
           "display_name": "Codex Deputy",
           "driveable": true,
           "app_seat": false,
+          "status_only": false,
+          "kind": "TERMINAL",
+          "badge": null,
           "port": 7603
         },
         {
@@ -45,6 +52,9 @@
           "display_name": "Cowork AH1",
           "driveable": false,
           "app_seat": true,
+          "status_only": true,
+          "kind": "APP",
+          "badge": null,
           "port": null
         }
       ]
@@ -59,6 +69,9 @@
           "display_name": "Codex Rev",
           "driveable": true,
           "app_seat": false,
+          "status_only": false,
+          "kind": "TERMINAL",
+          "badge": null,
           "port": 7612
         },
         {
@@ -68,6 +81,9 @@
           "display_name": "Codex Arch",
           "driveable": false,
           "app_seat": true,
+          "status_only": true,
+          "kind": "APP",
+          "badge": null,
           "port": null
         }
       ]
@@ -82,6 +98,9 @@
           "display_name": "Researcher",
           "driveable": true,
           "app_seat": false,
+          "status_only": false,
+          "kind": "TERMINAL",
+          "badge": null,
           "port": 7611
         },
         {
@@ -91,6 +110,9 @@
           "display_name": "Librarian",
           "driveable": true,
           "app_seat": false,
+          "status_only": false,
+          "kind": "TERMINAL",
+          "badge": null,
           "port": 7619
         },
         {
@@ -100,6 +122,9 @@
           "display_name": "AID T",
           "driveable": true,
           "app_seat": false,
+          "status_only": false,
+          "kind": "TERMINAL",
+          "badge": null,
           "port": 7605
         },
         {
@@ -109,6 +134,9 @@
           "display_name": "ARM",
           "driveable": true,
           "app_seat": false,
+          "status_only": false,
+          "kind": "TERMINAL",
+          "badge": null,
           "port": 7620
         },
         {
@@ -118,7 +146,34 @@
           "display_name": "BEN",
           "driveable": false,
           "app_seat": true,
+          "status_only": true,
+          "kind": "APP",
+          "badge": null,
           "port": null
+        },
+        {
+          "slug": "clerk",
+          "alias": "clerk",
+          "agent_id": "AG-204",
+          "display_name": "Clerk QWEN",
+          "driveable": true,
+          "app_seat": false,
+          "status_only": false,
+          "kind": "TERMINAL",
+          "badge": null,
+          "port": 7614
+        },
+        {
+          "slug": "clerk-haiku",
+          "alias": "clerk-haiku",
+          "agent_id": "AG-205",
+          "display_name": "Clerk Haiku",
+          "driveable": true,
+          "app_seat": false,
+          "status_only": false,
+          "kind": "TERMINAL",
+          "badge": null,
+          "port": 7615
         },
         {
           "slug": "russo-ai",
@@ -127,7 +182,22 @@
           "display_name": "Russo AI",
           "driveable": true,
           "app_seat": false,
+          "status_only": false,
+          "kind": "TERMINAL",
+          "badge": null,
           "port": 7616
+        },
+        {
+          "slug": "deep55",
+          "alias": "deep-55",
+          "agent_id": "AG-207",
+          "display_name": "Deep55",
+          "driveable": true,
+          "app_seat": false,
+          "status_only": false,
+          "kind": "TERMINAL",
+          "badge": null,
+          "port": 7617
         },
         {
           "slug": "cowork-aid",
@@ -136,6 +206,9 @@
           "display_name": "Cowork AID",
           "driveable": false,
           "app_seat": true,
+          "status_only": true,
+          "kind": "APP",
+          "badge": null,
           "port": null
         },
         {
@@ -145,6 +218,9 @@
           "display_name": "Cowork ARM",
           "driveable": false,
           "app_seat": true,
+          "status_only": true,
+          "kind": "APP",
+          "badge": null,
           "port": null
         },
         {
@@ -154,6 +230,9 @@
           "display_name": "Cowork Librarian",
           "driveable": false,
           "app_seat": true,
+          "status_only": true,
+          "kind": "APP",
+          "badge": null,
           "port": null
         },
         {
@@ -163,6 +242,9 @@
           "display_name": "Cowork Researcher",
           "driveable": false,
           "app_seat": true,
+          "status_only": true,
+          "kind": "APP",
+          "badge": null,
           "port": null
         },
         {
@@ -172,6 +254,9 @@
           "display_name": "Cowork Russo AI",
           "driveable": false,
           "app_seat": true,
+          "status_only": true,
+          "kind": "APP",
+          "badge": null,
           "port": null
         }
       ]
@@ -186,6 +271,9 @@
           "display_name": "Deputy",
           "driveable": true,
           "app_seat": false,
+          "status_only": false,
+          "kind": "TERMINAL",
+          "badge": null,
           "port": 7602
         },
         {
@@ -195,6 +283,9 @@
           "display_name": "B1",
           "driveable": true,
           "app_seat": false,
+          "status_only": false,
+          "kind": "TERMINAL",
+          "badge": null,
           "port": 7606
         },
         {
@@ -204,6 +295,9 @@
           "display_name": "B2",
           "driveable": true,
           "app_seat": false,
+          "status_only": false,
+          "kind": "TERMINAL",
+          "badge": null,
           "port": 7607
         },
         {
@@ -213,6 +307,9 @@
           "display_name": "B3",
           "driveable": true,
           "app_seat": false,
+          "status_only": false,
+          "kind": "TERMINAL",
+          "badge": null,
           "port": 7608
         },
         {
@@ -222,6 +319,9 @@
           "display_name": "B4",
           "driveable": true,
           "app_seat": false,
+          "status_only": false,
+          "kind": "TERMINAL",
+          "badge": null,
           "port": 7609
         },
         {
@@ -231,6 +331,9 @@
           "display_name": "Publisher",
           "driveable": true,
           "app_seat": false,
+          "status_only": false,
+          "kind": "TERMINAL",
+          "badge": null,
           "port": 7621
         },
         {
@@ -240,6 +343,9 @@
           "display_name": "UI Designer",
           "driveable": true,
           "app_seat": false,
+          "status_only": false,
+          "kind": "TERMINAL",
+          "badge": null,
           "port": 7622
         }
       ]
@@ -254,6 +360,9 @@
           "display_name": "Hag Desk",
           "driveable": true,
           "app_seat": false,
+          "status_only": false,
+          "kind": "TERMINAL",
+          "badge": null,
           "port": 7623
         },
         {
@@ -263,6 +372,9 @@
           "display_name": "Hag Filer",
           "driveable": true,
           "app_seat": false,
+          "status_only": false,
+          "kind": "TERMINAL",
+          "badge": null,
           "port": 7644
         },
         {
@@ -272,6 +384,9 @@
           "display_name": "Origination Desk",
           "driveable": true,
           "app_seat": false,
+          "status_only": false,
+          "kind": "TERMINAL",
+          "badge": null,
           "port": 7624
         },
         {
@@ -281,6 +396,9 @@
           "display_name": "AO Desk",
           "driveable": true,
           "app_seat": false,
+          "status_only": false,
+          "kind": "TERMINAL",
+          "badge": null,
           "port": 7625
         },
         {
@@ -290,6 +408,9 @@
           "display_name": "MOVIE Desk",
           "driveable": true,
           "app_seat": false,
+          "status_only": false,
+          "kind": "TERMINAL",
+          "badge": null,
           "port": 7626
         },
         {
@@ -299,6 +420,9 @@
           "display_name": "Baden-Baden Desk",
           "driveable": true,
           "app_seat": false,
+          "status_only": false,
+          "kind": "TERMINAL",
+          "badge": null,
           "port": 7627
         },
         {
@@ -308,6 +432,9 @@
           "display_name": "Brisen Desk",
           "driveable": true,
           "app_seat": false,
+          "status_only": false,
+          "kind": "TERMINAL",
+          "badge": null,
           "port": 7628
         },
         {
@@ -317,6 +444,9 @@
           "display_name": "Cowork BB Desk",
           "driveable": false,
           "app_seat": true,
+          "status_only": true,
+          "kind": "APP",
+          "badge": null,
           "port": null
         },
         {
@@ -326,6 +456,9 @@
           "display_name": "Cowork AO Desk",
           "driveable": false,
           "app_seat": true,
+          "status_only": true,
+          "kind": "APP",
+          "badge": null,
           "port": null
         },
         {
@@ -335,6 +468,9 @@
           "display_name": "Cowork MOVIE Desk",
           "driveable": false,
           "app_seat": true,
+          "status_only": true,
+          "kind": "APP",
+          "badge": null,
           "port": null
         },
         {
@@ -344,6 +480,9 @@
           "display_name": "Cowork Hag Desk",
           "driveable": false,
           "app_seat": true,
+          "status_only": true,
+          "kind": "APP",
+          "badge": null,
           "port": null
         },
         {
@@ -353,6 +492,9 @@
           "display_name": "Cowork Origination Desk",
           "driveable": false,
           "app_seat": true,
+          "status_only": true,
+          "kind": "APP",
+          "badge": null,
           "port": null
         }
       ]
@@ -361,12 +503,27 @@
       "label": "Ground systems",
       "cards": [
         {
+          "slug": "cortex",
+          "alias": "cortex",
+          "agent_id": "AG-005",
+          "display_name": "Cortex",
+          "driveable": false,
+          "app_seat": false,
+          "status_only": true,
+          "kind": "SERVICE",
+          "badge": "service",
+          "port": null
+        },
+        {
           "slug": "CM-1",
           "alias": "cm-1",
           "agent_id": "AG-401",
           "display_name": "CM-1",
           "driveable": true,
           "app_seat": false,
+          "status_only": false,
+          "kind": "TERMINAL",
+          "badge": null,
           "port": 7640
         },
         {
@@ -376,6 +533,9 @@
           "display_name": "CM-2",
           "driveable": true,
           "app_seat": false,
+          "status_only": false,
+          "kind": "TERMINAL",
+          "badge": null,
           "port": 7641
         },
         {
@@ -385,6 +545,9 @@
           "display_name": "CM-3",
           "driveable": true,
           "app_seat": false,
+          "status_only": false,
+          "kind": "TERMINAL",
+          "badge": null,
           "port": 7642
         },
         {
@@ -394,6 +557,9 @@
           "display_name": "CM-4",
           "driveable": true,
           "app_seat": false,
+          "status_only": false,
+          "kind": "TERMINAL",
+          "badge": null,
           "port": 7643
         }
       ]

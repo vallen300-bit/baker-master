@@ -158,7 +158,7 @@ main.wrap { padding: 22px 24px 60px; }
   0% { background: rgba(43,217,100,.5); } 100% { background: transparent; }
 }
 
-/* app-claude status-only card — visibly marked, not clickable to a terminal. */
+/* app / service / headless status-only card — visibly marked, not clickable to a terminal. */
 .card.app { cursor: default; }
 .card.app:hover { transform: none; border-color: #36414f; }
 .card.app .agpill { color: var(--muted); background: rgba(139,148,158,.10); border-color: rgba(139,148,158,.4); }

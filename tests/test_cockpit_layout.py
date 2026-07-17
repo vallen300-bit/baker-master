@@ -36,9 +36,12 @@ def test_layout_present_and_shaped(layout):
             assert c["display_name"], f"card {c['slug']} missing display_name"
             assert re.match(r"AG-\d+", c["agent_id"]), f"{c['slug']} bad agent_id"
             assert isinstance(c["driveable"], bool)
-            assert isinstance(c["app_seat"], bool)
-            # a card is exactly one of driveable / app-seat (status-only)
-            assert c["driveable"] != c["app_seat"], f"{c['slug']} ambiguous kind"
+            assert isinstance(c["status_only"], bool)
+            # a card is exactly one of driveable / status-only
+            assert c["driveable"] != c["status_only"], f"{c['slug']} ambiguous kind"
+            # app_seat implies status-only (an app card is never driveable)
+            if c.get("app_seat"):
+                assert c["status_only"], f"{c['slug']} app_seat but driveable"
 
 
 def test_plate_order_mirrors_control_room(layout):
@@ -62,11 +65,11 @@ def test_counts_consistent(layout):
     slugs = [c["slug"] for c in cards]
     assert len(slugs) == len(set(slugs)), "duplicate card across plates"
     drive = sum(c["driveable"] for c in cards)
-    app = sum(c["app_seat"] for c in cards)
+    status = sum(c["status_only"] for c in cards)
     meta = layout.get("meta", {}).get("counts", {})
     if meta:
         assert meta["driveable"] == drive
-        assert meta["app_seat"] == app
+        assert meta["status_only"] == status
         assert meta.get("unplaced", 0) == 0
 
 
@@ -93,6 +96,47 @@ def test_no_app_runtime_seat_silently_dropped(layout):
     # codex-arch is the representative app-codex seat; assert it is carded and
     # marked app_seat (broader registry-vs-layout reconciliation is a live check).
     assert "codex-arch" in carded
+
+
+def _find(layout, slug):
+    for p in layout["plates"]:
+        for c in p["cards"]:
+            if c["slug"] == slug:
+                return p["label"], c
+    return None, None
+
+
+def test_scopeadd_driveable_seats_carded(layout):
+    """lead #12212/#12222: clerk, clerk-haiku, deep55 are real Terminal seats —
+    each must be a DRIVEABLE card in the Specialists plate."""
+    for slug in ("clerk", "clerk-haiku", "deep55"):
+        plate, c = _find(layout, slug)
+        assert c, f"{slug} missing from layout"
+        assert c["driveable"] is True and c["status_only"] is False, \
+            f"{slug} must be driveable"
+        assert plate == "Specialists", f"{slug} in {plate}, expected Specialists"
+
+
+def test_cortex_status_only_service_card(layout):
+    """lead #12208/#12214: cortex (runtime service) is active + bus-enabled and
+    must render as a status-only card badged 'service' — the membership
+    generalization beyond app-* seats."""
+    plate, c = _find(layout, "cortex")
+    assert c, "cortex missing from layout"
+    assert c["status_only"] is True and c["driveable"] is False
+    assert c["app_seat"] is False and c["badge"] == "service"
+    assert c["kind"] == "SERVICE"
+
+
+def test_every_card_has_kind_and_shape(layout):
+    """Every card carries the fields the page renders: kind + status_only + badge key."""
+    for p in layout["plates"]:
+        for c in p["cards"]:
+            assert c["kind"], f"{c['slug']} missing kind"
+            assert "badge" in c, f"{c['slug']} missing badge key"
+            # driveable cards never carry a badge; status-only non-app may.
+            if c["driveable"]:
+                assert c["badge"] is None, f"{c['slug']} driveable but badged"
 
 
 def test_generator_parses_control_groups_literal():
