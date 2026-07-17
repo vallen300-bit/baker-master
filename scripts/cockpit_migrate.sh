@@ -320,11 +320,25 @@ EOF
   # while Terminal is down or Terminal clobbers it on its next quit).
   if [ "$do_quit" = "1" ]; then
     echo "[3/7] quitting Terminal.app (single coordinated Cmd+Q)"
+    # 2026-07-17 abort root cause: AppleScript `quit` triggers the "running
+    # processes" confirmation dialog when live seats have active shells, so
+    # Terminal never exits and the 20s wait dies. Escalation ladder: polite
+    # AppleScript quit (10s) -> SIGTERM killall (10s) -> SIGKILL (5s) -> die.
+    # SIGTERM/SIGKILL skip the dialog AND skip Terminal's plist write on exit —
+    # which is what we want here (Lesson 76: our rewrite must be authoritative).
     osascript -e 'tell application "Terminal" to quit' >/dev/null 2>&1 || true
     local waited=0
     while pgrep -x Terminal >/dev/null 2>&1; do
       sleep 0.5; waited=$((waited+1))
-      [ "$waited" -ge 40 ] && die "Terminal.app did not quit within 20s — aborting BEFORE any plist edit (plist untouched; backup at $PROFILE_BACKUP.plist.bak)."
+      if [ "$waited" -eq 20 ]; then
+        echo "   AppleScript quit blocked after 10s (confirm dialog) — escalating to SIGTERM"
+        killall Terminal 2>/dev/null || true
+      elif [ "$waited" -eq 40 ]; then
+        echo "   SIGTERM ignored after 10s — escalating to SIGKILL"
+        killall -9 Terminal 2>/dev/null || true
+      elif [ "$waited" -ge 50 ]; then
+        die "Terminal.app survived quit + SIGTERM + SIGKILL (25s) — aborting BEFORE any plist edit (plist untouched; backup at $PROFILE_BACKUP.plist.bak)."
+      fi
     done
     killall cfprefsd 2>/dev/null || true
     echo "   Terminal down; cfprefsd cache dropped."

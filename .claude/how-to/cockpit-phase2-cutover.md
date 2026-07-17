@@ -68,6 +68,13 @@ seats rolled back durably here) → ONE Terminal relaunch at the end. If the run
 aborts anywhere in the danger window, a trap restores every profile from the
 backup and relaunches Terminal automatically.
 
+**Quit-dialog hardening (2026-07-18, after the 07-17 abort):** AppleScript
+`quit` pops Terminal's "running processes" confirmation dialog when live seats
+have active shells, so the polite quit can hang forever. The script now
+escalates: AppleScript quit (10s) → `killall Terminal` SIGTERM (10s) →
+SIGKILL (5s) → abort. The kill path also skips Terminal's own plist write on
+exit, which is exactly what Lesson 76 wants — our rewrite stays authoritative.
+
 ## Verify list (per seat, done by the smoke phase + your eyeball on :7800)
 
 - `fleet_terminals.sh status` — every eligible seat `migrated` + session `up`.
