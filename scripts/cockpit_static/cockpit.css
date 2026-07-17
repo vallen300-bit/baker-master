@@ -104,9 +104,10 @@ main.wrap { padding: 22px 24px 60px; }
   /* FIXED height (not min-height) so terminal / app / service cards are the
      EXACT same dimensions at every wrap breakpoint — min-height alone let
      content-heavy terminal cards outgrow status-only cards (codex-arch #12246
-     blocker 2). Sized to the TALLEST state = the crowded driveable card
-     (kind + name + slug + state + unread + GO = 6 rows, #12262 blocker). */
-  height: 140px;
+     blocker 2). Sized to the tallest state = the crowded driveable card, which
+     Director #12264 compacts to 5 rows (unread + action share the footer row):
+     kind + name + slug + state + footer. */
+  height: 122px;
   overflow: hidden;
   box-shadow: 0 3px 8px rgba(0,0,0,.5), 0 1px 2px rgba(0,0,0,.35);
   transition: border-color 120ms, box-shadow 140ms, transform 140ms;
@@ -158,6 +159,14 @@ main.wrap { padding: 22px 24px 60px; }
 
 /* card-face action row */
 .card .actions { display: flex; gap: 8px; margin-top: 1px; }
+/* Footer row (Director #12264): unread badge (left) + action button (right) on
+   ONE row, anchored to the card bottom so the name/slug keep their space. */
+.card .footer {
+  display: flex; align-items: center; justify-content: space-between;
+  gap: 8px; margin-top: auto;
+}
+.card .footer .actions { margin-top: 0; }
+.card .footer .state { min-width: 0; }
 .btn {
   font: 600 11px/1 -apple-system, sans-serif;
   border-radius: 6px; padding: 4px 11px; cursor: pointer;

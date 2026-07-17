@@ -239,9 +239,13 @@
     ]);
 
     const children = [top, nameEl, slugEl, stateEl];
-    if (unread) children.push(unread);
     if (statusOnly) children.push(statusOnly);
-    if (actions) children.push(actions);
+    // Compaction (Director #12264): the unread badge and the action button share
+    // ONE footer row so the crowded state stays 5 rows — the name is never
+    // squeezed and the uniform card height stays low.
+    if (unread || actions) {
+      children.push(el("div", { class: "footer" }, [unread, actions].filter(Boolean)));
+    }
 
     const c = el("div", { class: cls.join(" "), "data-slug": meta.slug }, children);
     if (!meta.status_only) {

@@ -9,11 +9,16 @@ tests JS via `node` for pure logic only, and node has no layout engine):
   + slug + state + unread + GO = 6 rows) flex-shrank .name to 0px. Fix = every
   card child `flex-shrink:0` + the fixed height sized to the crowded state.
 
+  #12264 (Director) — the name is the untouchable row; compact INSIDE the height
+  before growing it. The unread badge + action button now share ONE footer row,
+  so the crowded state is 5 rows and the uniform height stays low (122px, not 140).
+
 The faithful rendered check ("name/slug/unread/GO keep non-zero bounds in the
-crowded fixture") was verified in-browser on the scratch port: natural crowded
-height 134px, name 19px, slug 11px, unread 14px, GO 21px, 0 clipped. This test
-is the CI-enforceable proxy: it parses cockpit.css and asserts the invariants
-that make that render impossible to regress.
+crowded fixture") was verified in-browser on the scratch port after compaction:
+natural crowded height 115px, name 19px, slug 11px, unread 14px, GO 21px, unread
+and GO on ONE row, 0 clipped, all 43 cards uniform at 122px. This test is the
+CI-enforceable proxy: it parses cockpit.css/js and asserts the invariants that
+make that render impossible to regress.
 """
 import re
 from pathlib import Path
@@ -25,10 +30,13 @@ _RAW = (Path(__file__).resolve().parent.parent
 # Strip /* comments */ so prose mentioning a property never trips a substring check.
 CSS = re.sub(r"/\*.*?\*/", "", _RAW, flags=re.S)
 
-# Measured natural height of the 6-row crowded driveable card (2026-07-17,
-# scratch-port render). The fixed card height must be >= this so overflow:hidden
-# never clips and no row is forced to shrink.
-CROWDED_NATURAL_PX = 134
+JS = (Path(__file__).resolve().parent.parent
+      / "scripts" / "cockpit_static" / "cockpit.js").read_text()
+
+# Measured natural height of the COMPACTED crowded card (2026-07-17 scratch-port
+# render): unread + action share the footer row → 5 rows → 115px. The fixed card
+# height must be >= this so overflow:hidden never clips and no row is shrunk.
+CROWDED_NATURAL_PX = 115
 
 
 def _card_block():
@@ -63,3 +71,16 @@ def test_card_children_do_not_flex_shrink():
 def test_card_clips_overflow_for_uniformity():
     """overflow:hidden + a height that fits the crowded state = uniform, no clip."""
     assert "overflow: hidden" in _card_block(), "overflow guard missing on .card"
+
+
+def test_unread_and_action_share_the_footer_row():
+    """Director #12264 compaction: unread badge + action button on ONE row.
+    Locks both the JS (footer holds unread + actions) and the CSS (single flex
+    row) so the crowded state can't regress to a 6th row that grows the card."""
+    assert re.search(r'class:\s*"footer"[^)]*\[\s*unread\s*,\s*actions\s*\]', JS), \
+        "card() no longer merges unread + actions into one footer row"
+    m = re.search(r"\.card\s+\.footer\s*\{([^}]*)\}", CSS)
+    assert m, ".card .footer CSS rule missing"
+    body = m.group(1)
+    assert "display: flex" in body and "space-between" in body, \
+        ".card .footer must be a single space-between flex row"
