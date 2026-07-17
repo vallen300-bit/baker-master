@@ -106,8 +106,9 @@ main.wrap { padding: 22px 24px 60px; }
      content-heavy terminal cards outgrow status-only cards (codex-arch #12246
      blocker 2). Sized to the tallest state = the crowded driveable card, which
      Director #12264 compacts to 5 rows (unread + action share the footer row):
-     kind + name + slug + state + footer. */
-  height: 122px;
+     kind + name + slug + state + footer. Compacted crowded natural = 115px, so
+     120px is the lowest uniform height that fits (#12266 target ~120). */
+  height: 120px;
   overflow: hidden;
   box-shadow: 0 3px 8px rgba(0,0,0,.5), 0 1px 2px rgba(0,0,0,.35);
   transition: border-color 120ms, box-shadow 140ms, transform 140ms;
