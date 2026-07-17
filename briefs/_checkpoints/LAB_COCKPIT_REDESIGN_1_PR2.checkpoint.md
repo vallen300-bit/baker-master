@@ -25,6 +25,7 @@ Contract/layout/manifest already on main (43/43). New branch off main @4fdf3058.
 ## Progress
 - [x] E1-E5 (page-side) — commit on branch, verified scratch 114px uniform
 - [x] D4 context band UI (null-safe) — 3px bar, cardbottom, verified
+- [x] E6 remove state text row — uniform height re-minimized 120->102px (adf91184)
 - [ ] D5 amber predicate (glance_state.js) + amber class (cockpit.js)
 - [ ] D5 controller unacked-list endpoint + panel render
 - [ ] D6 controller wake verb + audit + openTerm call
