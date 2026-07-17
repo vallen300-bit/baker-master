@@ -43,11 +43,17 @@ restore_profile_cmd() {
   [ -f "$PROFILE_REWRITE" ] || { echo "  (profile-rewrite helper missing — skipping profile restore)"; return 0; }
   profile="$(manifest_profile "$slug" 2>/dev/null || true)"
   [ -n "$profile" ] && [ "$profile" != "null" ] || { echo "  (no profile for '$slug' in manifest — skipping profile restore)"; return 0; }
-  if python3 "$PROFILE_REWRITE" restore --plist "$TERMINAL_PLIST" --backup "$PROFILE_BACKUP" \
-       --profile "$profile" --allow-running >/dev/null 2>&1; then
-    echo "  restored profile CommandString for '$profile' (durable at next Terminal restart — Lesson 76)"
+  # NO --allow-running: the helper refuses (Lesson 76) if Terminal.app is live, so a
+  # restore is never silently clobbered on Terminal's next quit (codex 267d4477
+  # finding 3). For a durable profile restore, Terminal must be down — run this
+  # rollback inside the coordinated cutover window, or quit Terminal first.
+  local err
+  if err="$(python3 "$PROFILE_REWRITE" restore --plist "$TERMINAL_PLIST" --backup "$PROFILE_BACKUP" \
+       --profile "$profile" 2>&1 >/dev/null)"; then
+    echo "  restored profile CommandString for '$profile' (Terminal down -> durable)"
   else
-    echo "  profile restore for '$profile' failed (non-fatal) — check $PROFILE_BACKUP"
+    echo "  profile restore for '$profile' NOT written: ${err#FATAL: }"
+    echo "  -> the seat works now via --relaunch direct alias; restore the profile in a Terminal-down window."
   fi
 }
 

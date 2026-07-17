@@ -144,9 +144,23 @@ def test_drift_fails_loud_and_writes_nothing(env, tmp_path):
     assert not backup.exists()
 
 
-def test_backup_exists_guard(env):
+def test_rerun_after_partial_rollback_merge_preserves(env):
+    """A pre-existing backup must NOT block a rerun (codex finding 7): rewrite
+    merge-preserves the original snapshot and never recaptures a wrapped value."""
     plist, manifest, backup = env
-    backup.write_text("{}")                       # pre-existing backup
+    # first cutover
+    _run("rewrite", "--manifest", str(manifest), "--plist", str(plist),
+         "--backup", str(backup), "--allow-running")
+    # simulate a partial rollback: one seat reverted to its alias, backup left in place
+    root = plistlib.loads(plist.read_bytes())
+    root["Window Settings"]["AO Desk"]["CommandString"] = "aodesk"
+    plist.write_bytes(plistlib.dumps(root, fmt=plistlib.FMT_BINARY))
+    # rerun must succeed (no exit 3) and re-wrap the reverted seat
     r = _run("rewrite", "--manifest", str(manifest), "--plist", str(plist),
              "--backup", str(backup), "--allow-running")
-    assert r.returncode == 3, r.stderr            # refuses without --force
+    assert r.returncode == 0, r.stderr
+    win = _load_win(plist)
+    assert win["AO Desk"]["CommandString"] == _wrapper("ao-desk", "aodesk")
+    # the backup still holds the TRUE original alias, not a wrapped value
+    snap = json.loads(backup.read_text())
+    assert snap["AO Desk"] == "aodesk"

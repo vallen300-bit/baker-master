@@ -104,10 +104,15 @@ def cmd_rewrite(args) -> None:
             _die(3, "Terminal.app is running — refusing to rewrite (Lesson 76: the "
                     "edit would be clobbered on Terminal's next quit). Quit Terminal "
                     "first, or pass --allow-running for tests/dry-run.")
-        if backup.exists() and not args.force:
-            _die(3, f"backup already exists at {backup} — a prior rewrite has not been "
-                    "rolled back. Refusing to overwrite the original snapshot. Use "
-                    "restore-all first, or --force to override.")
+        # A pre-existing backup is NOT fatal: rewrite merge-preserves it (setdefault
+        # below), and the drift guard guarantees a wrapped value is never captured as
+        # an "original". This keeps the cutover rerunnable after a partial rollback
+        # left the backup in place (codex 267d4477 finding 7). --force is accepted
+        # for back-compat but no longer required.
+        if backup.exists():
+            print(f"note: backup exists at {backup} — merge-preserving originals "
+                  "(a rewritten value is never recaptured; drift guard enforces this).",
+                  file=sys.stderr)
 
     entries = _manifest_entries(manifest)
     root = _load_plist(plist)

@@ -51,15 +51,22 @@ expected pre-cutover state). Confirm the plan and pilot states before the window
 # 1. regenerate + strict-validate the manifest (fail loud if any seat unresolved):
 python3 ~/bm-b2/scripts/generate_cockpit_manifest.py --write --strict
 
-# 2. run the cutover DETACHED with the GO token (single Cmd+Q happens inside):
+# 2. run the cutover DETACHED with the GO token (single Cmd+Q happens inside).
+#    `env -u TERM_SESSION_ID` is REQUIRED: nohup inherits the caller's
+#    TERM_SESSION_ID and the self-seat guard would otherwise reject its own
+#    sanctioned command.
 cd ~/bm-b2/scripts
-COCKPIT_PHASE2_GO=LEAD-RATIFIED nohup ./cockpit_migrate.sh cutover --wave-size 5 \
+COCKPIT_PHASE2_GO=LEAD-RATIFIED env -u TERM_SESSION_ID nohup ./cockpit_migrate.sh cutover --wave-size 5 \
     > ~/Library/Application\ Support/baker/cockpit/cutover_run.log 2>&1 &
 ```
 
-Launch order inside the script (do not reorder): backup plist → quit Terminal →
-drop cfprefsd cache → rewrite ALL profiles → mark ledger → `fleet_terminals.sh up`
-→ reopen Terminal → per-seat smoke in waves of 5.
+Launch order inside the script (do not reorder — every profile write happens
+while Terminal is DOWN so it is durable, Lesson 76): backup plist → single
+Terminal quit → drop cfprefsd cache → rewrite ALL profiles → mark ledger →
+`fleet_terminals.sh up` → per-seat smoke in waves (Terminal still down; failed
+seats rolled back durably here) → ONE Terminal relaunch at the end. If the run
+aborts anywhere in the danger window, a trap restores every profile from the
+backup and relaunches Terminal automatically.
 
 ## Verify list (per seat, done by the smoke phase + your eyeball on :7800)
 
