@@ -10,6 +10,8 @@ set -euo pipefail
 SCRIPT_DIR="$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)"
 # shellcheck source=scripts/brisen_lab_terminal_key.sh
 . "$SCRIPT_DIR/brisen_lab_terminal_key.sh"
+# shellcheck source=scripts/brisen_lab_ack.sh
+. "$SCRIPT_DIR/brisen_lab_ack.sh"
 
 if [[ $# -lt 1 ]]; then
   echo "Usage: $0 <message-id>" >&2
@@ -31,13 +33,9 @@ if [[ -z "$KEY" ]]; then
   exit 2
 fi
 
-HTTP_CODE="$(curl -sS -o /dev/null -w '%{http_code}' \
-  -X POST -H "X-Terminal-Key: $KEY" \
-  "https://brisen-lab.onrender.com/msg/${MSG_ID}/ack")"
-
-if [[ "$HTTP_CODE" == "200" ]]; then
-  echo "ack #${MSG_ID} → 200"
+if HTTP_CODE="$(brisen_lab_ack_post "$KEY" "$MSG_ID")"; then
+  echo "ack #${MSG_ID} → ${HTTP_CODE}"
 else
-  echo "ack #${MSG_ID} FAILED → HTTP $HTTP_CODE" >&2
+  echo "ack #${MSG_ID} FAILED → HTTP $HTTP_CODE (after retries)" >&2
   exit 3
 fi

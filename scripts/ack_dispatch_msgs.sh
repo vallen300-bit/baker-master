@@ -36,6 +36,8 @@ BRIEF_SLUG=""
 SCRIPT_DIR="$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)"
 # shellcheck source=scripts/brisen_lab_terminal_key.sh
 . "$SCRIPT_DIR/brisen_lab_terminal_key.sh"
+# shellcheck source=scripts/brisen_lab_ack.sh
+. "$SCRIPT_DIR/brisen_lab_ack.sh"
 
 while [[ $# -gt 0 ]]; do
     case "$1" in
@@ -165,14 +167,11 @@ read -ra ACK_IDS <<< "$MATCHING_IDS"
 ACKED=0
 TOTAL=${#ACK_IDS[@]}
 for id in "${ACK_IDS[@]}"; do
-    # No -f here: -f turns 4xx into exit 22 + suppresses the body, which
-    # would mask the real HTTP code via the `|| HTTP="000"` fallback. We want
-    # to log the actual HTTP code for diagnosis on 4xx.
-    HTTP="$(curl -sS --connect-timeout 5 --max-time 15 \
-        -o /dev/null -w '%{http_code}' -X POST \
-        -H "X-Terminal-Key: ${KEY}" \
-        "${DAEMON_URL}/msg/${id}/ack" 2>/dev/null)" || HTTP="000"
-    if [[ "$HTTP" == "200" ]]; then
+    # brisen_lab_ack_post retries transient/infra codes (503 flap etc.) with
+    # exponential backoff and echoes the final HTTP code. It never retries a
+    # permanent 4xx, so a real fault still surfaces immediately. Non-fatal
+    # contract preserved: a failed ack logs + continues, never aborts a ship.
+    if HTTP="$(brisen_lab_ack_post "${KEY}" "${id}")"; then
         ACKED=$((ACKED + 1))
         echo "[ack] ${SENDER}/${id}: OK"
     else
