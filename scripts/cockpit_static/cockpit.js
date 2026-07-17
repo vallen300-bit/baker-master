@@ -180,26 +180,23 @@
     const row = meta.driveable ? stateBySlug.get(meta.slug) : null;
     const up = row ? row.session_up === true : false;
     const cls = ["card"];
-    let stateText = "", actions = null, unread = null;
+    let actions = null, unread = null;
 
+    // E6 (Director, binding): NO state text row. State is color + affordance
+    // only — dimmed+Start = down, bright = running, amber = unread, green tint +
+    // GO = needs GO, red = offline. The only card words are name / slug / unread
+    // badge+age / buttons.
     if (meta.status_only) {
       // Status-only (app / service / headless). E1: the recessed background IS
-      // the app/terminal distinction; E3: no "APP" text marker, no state row.
+      // the app/terminal distinction; E3: no "APP" marker.
       cls.push("app");
     } else if (up && row && row.ttyd_up === false) {
-      // tmux alive but ttyd unreachable — opening would 502. Keep this affordance.
-      cls.push("up", "error");
-      stateText = "terminal offline";
+      cls.push("up", "error");                    // red = offline (no words)
     } else if (up) {
-      cls.push("up");
+      cls.push("up");                             // bright = running
       const gc = glanceClass(row);
-      if (gc) cls.push(gc);
+      if (gc) cls.push(gc);                        // amber/green/cyan glance frame
       if (row && row.is_working) cls.push("working");
-      // E4: no "up" word. A live idle seat shows only its dot; working / unknown
-      // keep a word, needs-go/new carry their glance frame + unread badge.
-      if (gc === "glance-unknown") stateText = "no telemetry";
-      else if (row && row.is_working) stateText = "working";
-      else stateText = "";
       // GO on the card face (§5.4) — ONLY when the seat is awaiting a GO.
       if (window.goAffordanceVisible(row)) {
         const goBtn = el("button", { class: "btn go", type: "button", text: "GO ⏎",
@@ -214,8 +211,7 @@
         ]);
       }
     } else {
-      cls.push("down");
-      stateText = "session down";                // down affordance kept (E4)
+      cls.push("down");                           // dimmed + Start = down
       const startBtn = el("button", { class: "btn start", type: "button", text: "▶ Start",
         onclick: (ev) => { ev.stopPropagation(); doStart(meta.slug, ev.currentTarget); } });
       actions = el("div", { class: "actions" }, [startBtn]);
@@ -229,12 +225,6 @@
     }
     children.push(el("div", { class: "name", text: meta.display_name || meta.slug }));
     children.push(el("div", { class: "slug", text: meta.slug }));
-    // State row only for driveable seats and only when there's a word/dot worth
-    // showing (E4 dropped the idle "up" text — an idle seat is just its dot).
-    if (!meta.status_only) {
-      children.push(el("div", { class: "state" },
-        [el("span", { class: "dot" }), stateText ? el("span", { text: stateText }) : null]));
-    }
     // Bottom-pinned group (margin-top:auto): the footer row + the context band.
     const bottom = [];
     // Compaction (Director #12264): unread badge + action button share ONE footer row.

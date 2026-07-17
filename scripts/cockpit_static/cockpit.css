@@ -106,10 +106,10 @@ main.wrap { padding: 22px 24px 60px; }
      content-heavy terminal cards outgrow status-only cards (codex-arch #12246
      blocker 2). Sized to the tallest state = the crowded driveable card, which
      Director #12264 compacts the footer (unread + action one row); E3 removed
-     the kind row and D4 added the 3px context band. Recomputed tallest state
-     (name + slug + state + footer + ctx) = 110px natural, so 114px is the lowest
-     uniform height that fits (E5 re-minimize). */
-  height: 114px;
+     the kind row, E6 removed the state text row, D4 added the 3px context band.
+     Recomputed tallest state (name + slug + footer + ctx) = 98px natural, so
+     102px is the lowest uniform height that fits (E5 re-minimize). */
+  height: 102px;
   overflow: hidden;
   /* E2 — stronger Lab-style drop shadow so cards visibly lift off the plate
      (Director eyeball: the deployed shadow read flat). */
