@@ -221,6 +221,41 @@ async def test_handle_ws_acks_and_pipes(monkeypatch, tmp_path):
 
 
 @pytest.mark.asyncio
+async def test_oversize_request_body_resets_stream(monkeypatch):
+    agent = agent_mod.BridgeAgent(lab_ws="wss://x", upstream="http://127.0.0.1:7800", cred_path="/none")
+    monkeypatch.setattr(agent_mod, "_MAX_STREAM_BODY", 8)
+    ws = FakeWS()
+    sid = 3
+    head = json.dumps({"method": "POST", "path": "/x", "query": "", "headers": {}}).encode()
+    await agent._on_frame(ws, mux.Frame(sid, mux.OPEN, head))
+    await agent._on_frame(ws, mux.Frame(sid, mux.DATA, b"0123456789"))  # 10 > 8
+    await asyncio.sleep(0.02)  # let the RESET task run
+    assert sid not in agent._streams
+    frames, _ = mux.iter_frames(b"".join(ws.sent))
+    assert any(f.type == mux.RESET for f in frames)
+
+
+def test_reset_connection_state_cancels_ws_tasks_and_clears():
+    agent = agent_mod.BridgeAgent(lab_ws="wss://x", upstream="http://127.0.0.1:7800", cred_path="/none")
+
+    async def _drive():
+        async def _sleeper():
+            await asyncio.sleep(100)
+        t = asyncio.ensure_future(_sleeper())
+        agent._ws_tasks[1] = t
+        agent._ws_streams[1] = asyncio.Queue()
+        agent._streams[2] = {"head": {}, "body": bytearray()}
+        agent._reset_connection_state()
+        await asyncio.sleep(0)  # let the cancel propagate
+        assert agent._ws_tasks == {}
+        assert agent._ws_streams == {}
+        assert agent._streams == {}
+        assert t.cancelled()
+
+    asyncio.get_event_loop().run_until_complete(_drive())
+
+
+@pytest.mark.asyncio
 async def test_ws_frames_route_to_stream_queue():
     agent = agent_mod.BridgeAgent(lab_ws="wss://x", upstream="http://127.0.0.1:7800", cred_path="/none")
     ws = FakeWS()

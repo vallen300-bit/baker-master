@@ -37,8 +37,10 @@ import httpx
 
 try:  # websockets >=13 asyncio client
     from websockets.asyncio.client import connect as ws_connect
-except ImportError:  # pragma: no cover - older websockets
+    _WS_HEADERS_KW = "additional_headers"
+except ImportError:  # pragma: no cover - older websockets (<=12) use the legacy kw
     from websockets import connect as ws_connect  # type: ignore
+    _WS_HEADERS_KW = "extra_headers"
 from websockets.exceptions import ConnectionClosed
 
 # Import the shared codec by path so this script runs standalone.
@@ -63,6 +65,9 @@ BRIDGE_SLUG = "cockpit-bridge"
 _REQUEST_TIMEOUT_S = 30.0
 _BACKOFF_START_S = 1.0
 _BACKOFF_MAX_S = 60.0
+# Aggregate per-request body cap (codex #5). Cockpit is a control surface — its
+# requests are tiny; this only backstops a pathological/hostile stream.
+_MAX_STREAM_BODY = 32 * 1024 * 1024  # 32 MiB
 
 # Deterministic jitter without Math.random-style nondeterminism concerns: a
 # monotonic-seeded small perturbation is enough to de-sync reconnect storms.
@@ -100,10 +105,12 @@ def resolve_bridge_key() -> Optional[str]:
                 return txt
     except OSError:
         pass
-    # 1Password fallback — item ref is conventional; absence is non-fatal.
+    # 1Password fallback (codex #4): match the canonical resolver's item scheme
+    # (brisen_lab_terminal_key.sh -> op://Baker API Keys/BRISEN_LAB_TERMINAL_KEY_<slug>)
+    # so a machine provisioned the standard way resolves the bridge key.
     op_ref = os.environ.get(
         "BRISEN_LAB_COCKPIT_BRIDGE_OP_REF",
-        "op://Brisen Lab/cockpit-bridge/credential",
+        f"op://Baker API Keys/BRISEN_LAB_TERMINAL_KEY_{BRIDGE_SLUG}/credential",
     )
     try:
         out = subprocess.run(
@@ -146,15 +153,32 @@ class BridgeAgent:
         self._streams: dict[int, dict] = {}
         self._ws_streams: dict[int, "asyncio.Queue"] = {}
         self._send_lock = asyncio.Lock()
+        self._ws_tasks: dict[int, "asyncio.Task"] = {}
         self._client: Optional[httpx.AsyncClient] = None
         # ws:// base for dialing the controller's ttyd proxy (http->ws, https->wss).
         self._ws_upstream = ("wss://" if self.upstream.startswith("https://") else "ws://") + self._authority
+
+    def _reset_connection_state(self) -> None:
+        """Drop all per-connection stream state on (re)connect. Codex #6: a bare
+        _streams.clear() stranded Phase-2 ttyd pump tasks + _ws_streams across a
+        Lab reconnect, and reused stream ids let stale cleanup clobber new
+        streams. Cancel outstanding ws handlers and clear both maps."""
+        self._streams.clear()
+        self._ws_streams.clear()
+        for task in self._ws_tasks.values():
+            task.cancel()
+        self._ws_tasks.clear()
 
     # -- one connection ------------------------------------------------------
 
     async def run_forever(self) -> None:
         backoff = _BACKOFF_START_S
-        async with httpx.AsyncClient(timeout=_REQUEST_TIMEOUT_S) as client:
+        # trust_env=False (codex #1): the loopback request carries the injected
+        # controller Basic-auth; if HTTP(S)_PROXY/ALL_PROXY is set without
+        # 127.0.0.1 in NO_PROXY, trust_env=True would route that credential
+        # through an external proxy, breaking "the credential never leaves the
+        # laptop". The upstream is always loopback, so a proxy is never wanted.
+        async with httpx.AsyncClient(timeout=_REQUEST_TIMEOUT_S, trust_env=False) as client:
             self._client = client
             while True:
                 key = resolve_bridge_key()
@@ -176,10 +200,15 @@ class BridgeAgent:
 
     async def _serve_once(self, key: str) -> None:
         # Key travels only in the connection header — never argv, never logged.
-        async with ws_connect(self.lab_ws, additional_headers={"X-Terminal-Key": key},
-                              max_size=mux.MAX_FRAME_PAYLOAD + mux.HEADER_LEN + 64) as ws:
+        # _WS_HEADERS_KW picks additional_headers (websockets>=13) vs extra_headers
+        # (legacy<=12) so a permitted old pin does not brick every connection.
+        connect_kwargs = {
+            _WS_HEADERS_KW: {"X-Terminal-Key": key},
+            "max_size": mux.MAX_FRAME_PAYLOAD + mux.HEADER_LEN + 64,
+        }
+        async with ws_connect(self.lab_ws, **connect_kwargs) as ws:
             LOG.info("bridge connected to %s", self.lab_ws)
-            self._streams.clear()
+            self._reset_connection_state()
             buf = b""
             async for message in ws:
                 if isinstance(message, str):
@@ -207,6 +236,12 @@ class BridgeAgent:
         if frame.type == mux.DATA:
             if st is not None:
                 st["body"].extend(frame.payload)
+                # Codex #5: aggregate per-stream cap so a runaway request body can
+                # never buffer without bound (the 256KiB cap is per-frame only).
+                if len(st["body"]) > _MAX_STREAM_BODY:
+                    self._streams.pop(frame.stream_id, None)
+                    asyncio.create_task(self._send(ws, mux.encode_frame(
+                        frame.stream_id, mux.RESET, b'{"reason":"request_too_large"}')))
             return
         if frame.type == mux.RESET:
             self._streams.pop(frame.stream_id, None)
@@ -221,7 +256,10 @@ class BridgeAgent:
             head = json.loads(frame.payload.decode("utf-8")) if frame.payload else {}
             q: "asyncio.Queue" = asyncio.Queue()
             self._ws_streams[frame.stream_id] = q
-            asyncio.create_task(self._handle_ws(ws, frame.stream_id, head, q))
+            sid = frame.stream_id
+            task = asyncio.create_task(self._handle_ws(ws, sid, head, q))
+            self._ws_tasks[sid] = task
+            task.add_done_callback(lambda _t, s=sid: self._ws_tasks.pop(s, None))
             return
         if frame.type in (mux.WS_DATA, mux.WS_CLOSE):
             q = self._ws_streams.get(frame.stream_id)
@@ -274,7 +312,7 @@ class BridgeAgent:
         auth = load_basic_auth(self.cred_path)
         if auth:
             upstream_headers["Authorization"] = auth
-        connect_kwargs = {"additional_headers": upstream_headers}
+        connect_kwargs = {_WS_HEADERS_KW: upstream_headers}
         if subprotocols:
             connect_kwargs["subprotocols"] = subprotocols
         try:

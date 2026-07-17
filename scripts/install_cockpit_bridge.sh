@@ -48,7 +48,9 @@ done
 [[ -n "$PYTHON_BIN"   ]] || { echo "FATAL: no python3 found (set COCKPIT_BRIDGE_PYTHON)" >&2; exit 2; }
 
 # 1. Deploy worker + shared codec to the TCC-safe location.
-mkdir -p "$DEPLOY_DIR"
+# mkdir the LaunchAgents + Logs dirs too (codex #7): a fresh account may not have
+# ~/Library/LaunchAgents yet, and the plist redirect below would fail without it.
+mkdir -p "$DEPLOY_DIR" "$HOME/Library/LaunchAgents" "$HOME/Library/Logs"
 cp "$WORKER_SRC" "$WORKER_DEPLOY"; chmod +x "$WORKER_DEPLOY"
 cp "$CODEC_SRC"  "$CODEC_DEPLOY"
 
