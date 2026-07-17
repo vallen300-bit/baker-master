@@ -79,7 +79,9 @@ main.wrap { padding: 22px 24px 60px; }
   font-size: 12px; letter-spacing: .14em; text-transform: uppercase;
   color: var(--muted); margin: 2px 0 12px;
 }
-.plate > h2 .count { color: var(--down); margin-left: 8px; letter-spacing: normal; }
+/* count is secondary but must clear AA on the darkest plate grade (#0b0f16):
+   #8f9aa8 = 6.72:1 there (codex-arch #12246 blocker 1; --down #4a5561 was 2.5:1). */
+.plate > h2 .count { color: #8f9aa8; margin-left: 8px; letter-spacing: normal; }
 
 /* LANDSCAPE cards (D2 correction, Director "longer, but not so high"): wider
    than before + low height for vertical screen economy. Flexible columns fill
@@ -99,7 +101,12 @@ main.wrap { padding: 22px 24px 60px; }
   padding: 9px 12px 10px;
   cursor: pointer;
   display: flex; flex-direction: column; gap: 4px;
-  min-height: 78px;
+  /* FIXED height (not min-height) so terminal / app / service cards are the
+     EXACT same dimensions at every wrap breakpoint — min-height alone let
+     content-heavy terminal cards outgrow status-only cards (codex-arch #12246
+     blocker 2). Sized to the tallest state (down driveable, with Start). */
+  height: 112px;
+  overflow: hidden;
   box-shadow: 0 3px 8px rgba(0,0,0,.5), 0 1px 2px rgba(0,0,0,.35);
   transition: border-color 120ms, box-shadow 140ms, transform 140ms;
 }
@@ -119,12 +126,10 @@ main.wrap { padding: 22px 24px 60px; }
 .card.up.working .dot { background: var(--working); }
 .card .statusonly { font-size: 10px; color: var(--muted); font-style: italic; }
 
-/* down = dimmed content + a crisp Start affordance (mock). Dim the info rows,
-   NOT the action button — a greyed-out Start reads as disabled (nit). */
-.card.down .top,
-.card.down .name,
-.card.down .slug,
-.card.down .state { opacity: .5; }
+/* down = recessed card + grey dot, but the TEXT keeps full AA contrast: the old
+   opacity:.5 on text roles dropped them to ~3.05:1 (codex-arch #12246 blocker 1).
+   Signal "down" via the card fill + dot, not by dimming the lettering. */
+.card.down { background: #171b24; }
 .card.down .dot { background: var(--down); box-shadow: none; }
 
 /* error = tmux up but ttyd terminal server unreachable (§7). Distinct red
@@ -173,7 +178,9 @@ main.wrap { padding: 22px 24px 60px; }
   box-shadow: inset 0 2px 8px rgba(0,0,0,.55), 0 0 0 1px rgba(0,0,0,.3);
 }
 .card.app:hover { transform: none; border-color: #232a36; box-shadow: inset 0 2px 8px rgba(0,0,0,.55), 0 0 0 1px rgba(0,0,0,.3); }
-.card.app .kind { color: #5a6472; }
+/* the APP/SERVICE marker keeps --muted (#aeb8c6 = 9.02:1 on the recessed
+   #12161f fill); the old #5a6472 was 3.02:1 (codex-arch #12246 blocker 1). */
+.card.app .kind { color: var(--muted); }
 
 /* Glance frames (§5.2) — precedence NEEDS_GO > WORKING > NEW resolved in JS. */
 .card.glance-working {
