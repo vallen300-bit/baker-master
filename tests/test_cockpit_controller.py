@@ -110,6 +110,8 @@ def test_api_agents_requires_auth_and_maps_only_pinned_glance_fields(
                 "unacked_count": 2,
                 "oldest_unacked_age_sec": 700,
                 "unacked_topics": ["review/one"],
+                "context_pct": None,
+                "unacked_messages": None,
             },
             {
                 "slug": "b4",
@@ -123,6 +125,8 @@ def test_api_agents_requires_auth_and_maps_only_pinned_glance_fields(
                 "unacked_count": None,
                 "oldest_unacked_age_sec": None,
                 "unacked_topics": None,
+                "context_pct": None,
+                "unacked_messages": None,
             },
         ],
         "lab_glance_ok": True,

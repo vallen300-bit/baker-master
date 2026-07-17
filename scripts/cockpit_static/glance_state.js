@@ -21,6 +21,21 @@ function resolveGlanceState({ unacked, isWorking, hasTelemetry, isDoneGreen, nee
   return isDoneGreen ? "DONE" : "IDLE";
 }
 
+// D5 amber-state predicate: a seat shows the AMBER "unread" card state when it
+// has unacked bus messages and is NOT working (and not awaiting GO — needs_go
+// owns the green state). This is exactly resolveGlanceState === "NEW", exposed
+// as its own pure predicate so the cockpit and its tests can gate on it.
+function amberState(row) {
+  if (!row) return false;
+  return resolveGlanceState({
+    unacked: row.unacked_count || 0,
+    isWorking: row.is_working === true,
+    hasTelemetry: row.has_telemetry === true,
+    isDoneGreen: false,
+    needsGo: row.needs_go === true,
+  }) === "NEW";
+}
+
 // GO delivers a bare Enter into the seat's tmux session. That is only safe when
 // the seat is actually awaiting a GO ("GO?" confirmation) — otherwise Enter
 // lands in a normal prompt. Every GO affordance (card face AND terminal panel)
@@ -68,9 +83,10 @@ function buildUnreadCopyPayload(alias, badge, rows = []) {
 if (typeof window !== "undefined") {
   window.resolveGlanceState = resolveGlanceState;
   window.goAffordanceVisible = goAffordanceVisible;
+  window.amberState = amberState;
   window.formatUnreadAge = formatUnreadAge;
   window.buildUnreadCopyPayload = buildUnreadCopyPayload;
 }
 if (typeof module !== "undefined" && module.exports) {
-  module.exports = { resolveGlanceState, goAffordanceVisible, formatUnreadAge, buildUnreadCopyPayload };
+  module.exports = { resolveGlanceState, goAffordanceVisible, amberState, formatUnreadAge, buildUnreadCopyPayload };
 }

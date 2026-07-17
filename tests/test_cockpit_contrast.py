@@ -15,7 +15,7 @@ CSS = (Path(__file__).resolve().parent.parent
 
 # Fills a small-text role can sit on (darkest case drives the assertion).
 CARD_BG = "#1c2330"       # terminal card
-APP_BG = "#12161f"        # recessed app/service/cowork card
+APP_BG = "#0c1018"        # recessed app/service/cowork card
 DOWN_BG = "#171b24"       # down-state card fill
 PLATE_DARKEST = "#0b0f16"  # grade-0, the darkest plate ladder step
 AA = 4.5
@@ -124,8 +124,7 @@ def test_age_text_passes_aa_composited_over_every_glance_tint_and_grade():
     grades = _grade_bgs()
     overlays = {
         "needs_go": _glance_tint(".card.glance-needs-go"),
-        "NEW": _glance_tint(".card.glance-new"),
-        "working": _glance_tint(".card.glance-working"),
+        "amber": _glance_tint(".card.glance-amber"),
     }
     failures = []
     for role in ("hot", "warn", "base"):

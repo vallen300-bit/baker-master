@@ -30,6 +30,7 @@
   const termMount = document.getElementById("term-mount");
   const termTitle = document.getElementById("term-title");
   const termGo = document.getElementById("term-go");
+  const termUnacked = document.getElementById("term-unacked");
   const toastEl = document.getElementById("toast");
 
   let layout = null;             // { plates: [{label, cards:[...]}, ...] }
@@ -74,9 +75,9 @@
       isDoneGreen: false,               // no DONE signal on this surface
       needsGo: row.needs_go === true,
     });
-    if (g === "NEEDS_GO") return "glance-needs-go";
-    if (g === "WORKING") return "glance-working";
-    if (g === "NEW") return "glance-new";
+    if (g === "NEEDS_GO") return "glance-needs-go";      // green tint + GO
+    if (g === "WORKING") return "";                       // E6: running = bright, no frame
+    if (g === "NEW") return "glance-amber";               // D5/E6: amber = unread
     // UNKNOWN (glance outage or telemetry-less seat) must read distinctly from
     // IDLE — a quiet seat with telemetry vs a seat we have no signal for.
     if (g === "UNKNOWN") return "glance-unknown";
@@ -140,10 +141,45 @@
     termGo.hidden = !show;
   }
 
+  // D5 — list the seat's unacked bus messages (id · topic · age) in the panel.
+  function renderPanelUnacked(slug) {
+    termUnacked.textContent = "";
+    const row = stateBySlug.get(slug) || {};
+    const msgs = Array.isArray(row.unacked_messages) ? row.unacked_messages : [];
+    if (!msgs.length) { termUnacked.hidden = true; return; }
+    const head = el("div", { class: "u-head",
+      text: msgs.length + " unacked bus message" + (msgs.length === 1 ? "" : "s") });
+    const list = el("div", { class: "u-list" }, msgs.map((m) => {
+      const ts = m && m.created_at ? Date.parse(m.created_at) : NaN;
+      const age = Number.isFinite(ts) ? window.formatUnreadAge((Date.now() - ts) / 1000) : "";
+      return el("div", { class: "u-row" }, [
+        el("span", { class: "u-id", text: "#" + String((m && m.id) || "?") }),
+        el("span", { class: "u-topic", text: String((m && m.topic) || "(no topic)") }),
+        age ? el("span", { class: "u-age", text: age }) : null,
+      ]);
+    }));
+    termUnacked.appendChild(head);
+    termUnacked.appendChild(list);
+    termUnacked.hidden = false;
+  }
+
+  // D6 — wake-on-open. Opening a driveable seat that has unacked>0 and is not
+  // WORKING (and not needs_go — that is the GO flow) nudges its tmux once. The
+  // controller enforces the guards + a 10-min dedupe + audit; the page just asks.
+  function maybeWakeOnOpen(slug) {
+    const row = stateBySlug.get(slug);
+    if (window.amberState(row)) {
+      fetch(url("/api/sessions/" + slug + "/wake"), { ...FETCH_OPTS, method: "POST" })
+        .catch(() => { /* best-effort nudge; never blocks opening the terminal */ });
+    }
+  }
+
   function openTerm(slug, name) {
     openSlug = slug;
     termTitle.textContent = name + " — live terminal";
     syncPanelGo();
+    renderPanelUnacked(slug);
+    maybeWakeOnOpen(slug);
     termMount.textContent = "";
     const frame = el("iframe", { id: "termframe", src: url("/term/" + slug + "/"),
                                  title: name + " terminal" });
@@ -173,6 +209,7 @@
     termEl.classList.remove("open");
     veilEl.classList.remove("open");
     termMount.textContent = "";   // remove iframe -> drops the ttyd WS connection
+    termUnacked.textContent = ""; termUnacked.hidden = true;
   }
 
   // ---- rendering ----------------------------------------------------------
@@ -180,30 +217,24 @@
     const row = meta.driveable ? stateBySlug.get(meta.slug) : null;
     const up = row ? row.session_up === true : false;
     const cls = ["card"];
-    let stateText, actions = null, statusOnly = null, unread = null;
+    let actions = null, unread = null;
 
+    // E6 (Director, binding): NO state text row. State is color + affordance
+    // only — dimmed+Start = down, bright = running, amber = unread, green tint +
+    // GO = needs GO, red = offline. The only card words are name / slug / unread
+    // badge+age / buttons.
     if (meta.status_only) {
-      // Any non-driveable active seat: app (app-*), service, headless. Reuse
-      // the .app status-only styling; the kind pill + badge carry the family.
+      // Status-only (app / service / headless). E1: the recessed background IS
+      // the app/terminal distinction; E3: no "APP" marker.
       cls.push("app");
-      const label = meta.app_seat ? "app seat" : (meta.badge || "status only");
-      stateText = label;
-      statusOnly = el("div", { class: "statusonly", text: "status only — " + label + ", no terminal" });
     } else if (up && row && row.ttyd_up === false) {
-      // tmux session is alive but its ttyd terminal server is unreachable:
-      // opening would 502. Show an explicit error state (§7) — no GO, no open.
-      cls.push("up", "error");
-      stateText = "terminal offline";
+      cls.push("up", "error");                    // red = offline (no words)
     } else if (up) {
-      cls.push("up");
+      cls.push("up");                             // bright = running
       const gc = glanceClass(row);
-      if (gc) cls.push(gc);
+      if (gc) cls.push(gc);                        // amber/green/cyan glance frame
       if (row && row.is_working) cls.push("working");
-      // UNKNOWN telemetry must read differently from a live idle seat.
-      stateText = gc === "glance-unknown" ? "session up · no telemetry" : "session up";
-      // GO on the card face (§5.4) — ONLY when the seat is actually awaiting a
-      // GO. Sending Enter into a non-confirmation prompt is unsafe, so gate
-      // strictly on needs_go (shared predicate, see panel GO below).
+      // GO on the card face (§5.4) — ONLY when the seat is awaiting a GO.
       if (window.goAffordanceVisible(row)) {
         const goBtn = el("button", { class: "btn go", type: "button", text: "GO ⏎",
           onclick: (ev) => { ev.stopPropagation(); doGo(meta.slug, ev.currentTarget); } });
@@ -217,35 +248,36 @@
         ]);
       }
     } else {
-      cls.push("down");
-      stateText = "session down";
+      cls.push("down");                           // dimmed + Start = down
       const startBtn = el("button", { class: "btn start", type: "button", text: "▶ Start",
         onclick: (ev) => { ev.stopPropagation(); doStart(meta.slug, ev.currentTarget); } });
       actions = el("div", { class: "actions" }, [startBtn]);
     }
 
-    // AG pill dropped (D2). The kind pill (TERMINAL / APP / SERVICE / …) is the
-    // only top-row marker now.
-    const kind = meta.kind || (meta.status_only ? "APP" : "TERMINAL");
-    const top = el("div", { class: "top" }, [
-      el("span", { class: "kind", text: kind }),
-    ]);
-    const nameEl = el("div", { class: "name", text: meta.display_name || meta.slug });
-    // Card face must carry the slug alongside display name (scope §5.2) — the
-    // slug is the address every bus/tmux action uses, so it belongs on the face.
-    const slugEl = el("div", { class: "slug", text: meta.slug });
-    const stateEl = el("div", { class: "state" }, [
-      el("span", { class: "dot" }), el("span", { text: stateText }),
-    ]);
-
-    const children = [top, nameEl, slugEl, stateEl];
-    if (statusOnly) children.push(statusOnly);
-    // Compaction (Director #12264): the unread badge and the action button share
-    // ONE footer row so the crowded state stays 5 rows — the name is never
-    // squeezed and the uniform card height stays low.
-    if (unread || actions) {
-      children.push(el("div", { class: "footer" }, [unread, actions].filter(Boolean)));
+    // E3: no TERMINAL / APP kind word — the background carries that. Only
+    // service / headless keep a small badge pill (bg alone can't name them).
+    const children = [];
+    if (meta.badge) {
+      children.push(el("div", { class: "top" }, [el("span", { class: "kind", text: meta.kind })]));
     }
+    children.push(el("div", { class: "name", text: meta.display_name || meta.slug }));
+    children.push(el("div", { class: "slug", text: meta.slug }));
+    // Bottom-pinned group (margin-top:auto): the footer row + the context band.
+    const bottom = [];
+    // Compaction (Director #12264): unread badge + action button share ONE footer row.
+    if (unread || actions) {
+      bottom.push(el("div", { class: "footer" }, [unread, actions].filter(Boolean)));
+    }
+    // D4: context band — driveable seats with a known context_pct only; null →
+    // hidden (never blocks render). 3px green→amber→red fill by usage + tiny label.
+    if (meta.driveable && row && typeof row.context_pct === "number") {
+      const pct = Math.max(0, Math.min(100, row.context_pct));
+      bottom.push(el("div", { class: "ctx" }, [
+        el("div", { class: "ctxbar" }, [el("div", { class: "ctxfill", style: "width:" + pct + "%" })]),
+        el("div", { class: "ctxlbl", text: "ctx " + Math.round(pct) + "%" }),
+      ]));
+    }
+    if (bottom.length) children.push(el("div", { class: "cardbottom" }, bottom));
 
     const c = el("div", { class: cls.join(" "), "data-slug": meta.slug }, children);
     if (!meta.status_only) {

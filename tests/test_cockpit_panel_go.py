@@ -50,3 +50,25 @@ def test_go_affordance_gates_strictly_on_needs_go():
         check=True,
     )
     assert json.loads(out.stdout) == [True, False, True, False, False, False, False]
+
+
+@pytest.mark.skipif(shutil.which("node") is None, reason="node not available")
+def test_amber_state_is_unread_and_not_working():
+    """D5 amber = unacked>0 AND not working AND not needs_go (== NEW)."""
+    assert GLANCE_JS.exists(), GLANCE_JS
+    script = (
+        f"const g = require({json.dumps(str(GLANCE_JS))});"
+        "const a = g.amberState;"
+        "process.stdout.write(JSON.stringify(["
+        "  a({unacked_count: 3, has_telemetry: true}),"                 # unread, idle -> amber
+        "  a({unacked_count: 3, is_working: true, has_telemetry: true})," # working suppresses -> not amber
+        "  a({unacked_count: 3, needs_go: true, has_telemetry: true})," # needs_go owns it -> not amber
+        "  a({unacked_count: 0, has_telemetry: true}),"                # no unread -> not amber
+        "  a(null),"                                                    # no row -> not amber
+        "  a(undefined)"
+        "]));"
+    )
+    out = subprocess.run(
+        ["node", "-e", script], capture_output=True, text=True, timeout=20, check=True,
+    )
+    assert json.loads(out.stdout) == [True, False, False, False, False, False]

@@ -48,7 +48,16 @@ GLANCE_FIELDS = (
     "unacked_count",
     "oldest_unacked_age_sec",
     "unacked_topics",
+    # D4 — context-window usage (forge telemetry via #12055). Absent today →
+    # null flows through and the card-face context bar stays hidden (null-safe).
+    "context_pct",
+    # D5 — per-seat unacked message list (id / topic / created_at) so the
+    # terminal panel can list them and D6 can name the oldest in the wake nudge.
+    "unacked_messages",
 )
+# D6 — wake-on-open: re-nudge dedupe window (a seat is nudged at most once per
+# this many seconds, so re-opening a seat does not spam its tmux).
+WAKE_DEDUPE_SECONDS = 600.0
 HOP_BY_HOP_HEADERS = frozenset(
     {
         "connection",
@@ -85,6 +94,11 @@ class Settings:
     fleet_script: Path = Path(
         os.path.expanduser(
             "~/Library/Application Support/baker/cockpit/fleet_terminals.sh"
+        )
+    )
+    wake_audit_path: Path = Path(
+        os.path.expanduser(
+            "~/Library/Application Support/baker/cockpit/wake_audit.log"
         )
     )
     lab_url: str = "https://brisen-lab.onrender.com/api/v2/terminals"
@@ -304,6 +318,86 @@ def send_go(settings: Settings, entry: ManifestEntry) -> dict[str, Any]:
     return {"ok": True, "sent": "Enter", "slug": entry.slug}
 
 
+def _oldest_unacked(messages: Any) -> tuple[Any, str] | None:
+    """(id, topic) of the oldest unacked message by created_at, or None."""
+    rows = [
+        m for m in (messages or [])
+        if isinstance(m, dict) and m.get("id") is not None
+    ]
+    if not rows:
+        return None
+    oldest = min(rows, key=lambda m: str(m.get("created_at") or ""))
+    return oldest.get("id"), str(oldest.get("topic") or "")
+
+
+def wake_skip_reason(glance_row: dict[str, Any] | None) -> str | None:
+    """D6 guards. Returns None when a wake nudge is allowed, else the skip
+    reason. NEVER wake a WORKING seat (it is busy) or a needs_go seat (the GO
+    flow owns those); only nudge when there is a real unacked message to name."""
+    if not glance_row:
+        return "no telemetry"
+    if glance_row.get("needs_go") is True:
+        return "needs_go (GO flow owns it)"
+    if glance_row.get("is_working") is True:
+        return "working"
+    if not (glance_row.get("unacked_count") or 0) > 0:
+        return "no unacked"
+    if _oldest_unacked(glance_row.get("unacked_messages")) is None:
+        return "no unacked message id"
+    return None
+
+
+def _audit_wake(settings: Settings, slug: str, msg_id: Any, topic: str, line: str) -> None:
+    """Append a durable audit line for every wake nudge sent (D6)."""
+    entry = {
+        "ts": time.time(), "slug": slug, "msg_id": msg_id,
+        "topic": topic, "line": line,
+    }
+    try:
+        settings.wake_audit_path.parent.mkdir(parents=True, exist_ok=True)
+        with settings.wake_audit_path.open("a", encoding="utf-8") as handle:
+            handle.write(json.dumps(entry) + "\n")
+    except OSError as exc:  # audit is best-effort; never fail the send on it
+        LOG.warning("wake audit write failed for %s: %s", slug, exc)
+    LOG.info("cockpit wake %s -> %s", slug, line)
+
+
+def send_wake(
+    settings: Settings,
+    entry: ManifestEntry,
+    glance_row: dict[str, Any] | None,
+    *,
+    now: float,
+    last_wake: dict[str, float],
+    audit: bool = True,
+) -> dict[str, Any]:
+    """D6 wake-on-open: send one `check bus #<oldest-id> <topic>` + Enter into the
+    seat's tmux. Guarded (wake_skip_reason) and deduped (WAKE_DEDUPE_SECONDS per
+    seat). Returns a result dict; a guarded/deduped skip is a no-op, not an error."""
+    reason = wake_skip_reason(glance_row)
+    if reason is not None:
+        return {"ok": True, "sent": False, "skipped": reason, "slug": entry.slug}
+    prev = last_wake.get(entry.slug)
+    if prev is not None and (now - prev) < WAKE_DEDUPE_SECONDS:
+        return {"ok": True, "sent": False, "skipped": "deduped", "slug": entry.slug}
+    msg_id, topic = _oldest_unacked(glance_row.get("unacked_messages"))
+    line = f"check bus #{msg_id} {topic}".rstrip()
+    # Send the literal line, then Enter, as two sends so '#'/spaces stay literal.
+    literal = _run_tmux(settings, ["send-keys", "-t", entry.slug, "-l", line])
+    if literal.returncode != 0:
+        raise RuntimeError(literal.stderr.strip() or "tmux wake send failed")
+    enter = _run_tmux(settings, ["send-keys", "-t", entry.slug, "Enter"])
+    if enter.returncode != 0:
+        raise RuntimeError(enter.stderr.strip() or "tmux wake Enter failed")
+    last_wake[entry.slug] = now
+    if audit:
+        _audit_wake(settings, entry.slug, msg_id, topic, line)
+    return {
+        "ok": True, "sent": True, "slug": entry.slug,
+        "msg_id": msg_id, "topic": topic, "line": line,
+    }
+
+
 async def probe_ttyd(host: str, port: int, timeout: float) -> bool:
     """True if the seat's ttyd terminal server accepts a loopback TCP connect.
 
@@ -482,6 +576,8 @@ def create_app(
     app.state.settings = config
     app.state.credentials = credentials
     app.state.lab_glance = glance
+    # D6 — per-seat last-wake monotonic timestamps for the re-nudge dedupe window.
+    app.state.wake_last = {}
 
     def manifest() -> tuple[ManifestEntry, ...]:
         try:
@@ -544,6 +640,22 @@ def create_app(
         entry = _entry_for(manifest(), slug)
         try:
             return send_go(config, entry)
+        except (OSError, RuntimeError, subprocess.TimeoutExpired) as exc:
+            raise HTTPException(status_code=502, detail=str(exc)) from exc
+
+    @app.post("/api/sessions/{slug}/wake")
+    async def wake_session(slug: str, request: Request):
+        # D6 — wake-on-open. Same origin/auth guards as start/go (middleware).
+        entry = _entry_for(manifest(), slug)
+        if entry.slug not in tmux_session_names(config):
+            return {"ok": True, "sent": False, "skipped": "session down", "slug": entry.slug}
+        lab = await glance.read()
+        row = lab.get(entry.slug) or {}
+        try:
+            return send_wake(
+                config, entry, row,
+                now=time.monotonic(), last_wake=app.state.wake_last,
+            )
         except (OSError, RuntimeError, subprocess.TimeoutExpired) as exc:
             raise HTTPException(status_code=502, detail=str(exc)) from exc
 
