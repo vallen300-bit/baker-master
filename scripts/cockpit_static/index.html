@@ -32,6 +32,8 @@
     <button class="btn go" id="term-go" type="button" title="Send Enter (answer GO)" hidden>GO ⏎</button>
     <div id="x" role="button" tabindex="0" aria-label="Close">✕</div>
   </div>
+  <!-- D5 — on open, the seat's unacked bus messages (id · topic · age). Hidden when none. -->
+  <div id="term-unacked" hidden></div>
   <!-- iframe is injected on open and removed on close (no lingering connection). -->
   <div id="term-mount" style="flex:1; display:flex;"></div>
 </div>

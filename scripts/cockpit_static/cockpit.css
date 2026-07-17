@@ -207,12 +207,9 @@ main.wrap { padding: 22px 24px 60px; }
    fill); AA holds on the darker fill. */
 .card.app .kind { color: var(--muted); }
 
-/* Glance frames (§5.2) — precedence NEEDS_GO > WORKING > NEW resolved in JS. */
-.card.glance-working {
-  border-color: #d29922;
-  box-shadow: 0 0 0 1px #d29922, 0 0 16px rgba(210,153,34,.38);
-  background: rgba(210,153,34,.07);
-}
+/* Glance frames — per Director E6 the card COLOR is the state: needs_go = green
+   tint + GO, unread(NEW) = amber, working/running = bright (no frame), offline =
+   red (.error), down = dimmed. Precedence NEEDS_GO > WORKING > NEW is in JS. */
 .card.glance-needs-go {
   border-color: #2bd964;
   box-shadow: 0 0 0 2px #2bd964, 0 0 24px rgba(43,217,100,.72);
@@ -223,19 +220,20 @@ main.wrap { padding: 22px 24px 60px; }
   0%,100% { box-shadow: 0 0 0 2px #2bd964, 0 0 14px rgba(43,217,100,.42); }
   50%     { box-shadow: 0 0 0 2px #2bd964, 0 0 30px rgba(43,217,100,.82); }
 }
-.card.glance-new {
-  border-color: #00d5ff;
-  box-shadow: 0 0 0 1px #00d5ff, 0 0 18px rgba(0,213,255,.62);
-  background: rgba(0,213,255,.13);
-  animation: card-new-pulse 1.4s ease-in-out infinite;
+/* amber = unread (unacked > 0, not working) — the Lab-parity glance state (D5). */
+.card.glance-amber {
+  border-color: #d29922;
+  box-shadow: 0 0 0 1px #d29922, 0 0 16px rgba(210,153,34,.5);
+  background: rgba(210,153,34,.14);
+  animation: card-amber-pulse 1.5s ease-in-out infinite;
 }
-@keyframes card-new-pulse {
-  0%,100% { box-shadow: 0 0 0 1px #00d5ff, 0 0 11px rgba(0,213,255,.38); }
-  50%     { box-shadow: 0 0 0 1px #00d5ff, 0 0 24px rgba(0,213,255,.78); }
+@keyframes card-amber-pulse {
+  0%,100% { box-shadow: 0 0 0 1px #d29922, 0 0 10px rgba(210,153,34,.32); }
+  50%     { box-shadow: 0 0 0 1px #d29922, 0 0 22px rgba(210,153,34,.7); }
 }
 .card .unread {
   font: 700 10px/1 ui-monospace, Menlo, monospace;
-  color: #0d1117; background: #00d5ff; border-radius: 9px; padding: 2px 6px;
+  color: #0d1117; background: #f0b429; border-radius: 9px; padding: 2px 6px;
 }
 .card .age { font-size: 10px; color: var(--muted); }
 .card .age.warn { color: var(--working); }
@@ -268,6 +266,18 @@ main.wrap { padding: 22px 24px 60px; }
 #x { cursor: pointer; color: var(--muted); font-size: 18px; padding: 2px 8px; }
 #x:hover { color: #fff; }
 #termframe { flex: 1; border: 0; width: 100%; background: #000; }
+
+/* D5 — per-seat unacked bus messages listed in the terminal panel on open. */
+#term-unacked {
+  background: var(--panel); border-bottom: 1px solid var(--border);
+  padding: 8px 16px; max-height: 22vh; overflow: auto;
+}
+#term-unacked[hidden] { display: none; }
+#term-unacked .u-head { font-size: 11px; color: #d29922; letter-spacing: .04em; margin-bottom: 6px; }
+#term-unacked .u-row { display: flex; align-items: baseline; gap: 10px; font-size: 12px; padding: 2px 0; }
+#term-unacked .u-id { color: var(--muted); font-family: ui-monospace, Menlo, monospace; font-size: 11px; flex: 0 0 auto; }
+#term-unacked .u-topic { color: var(--text); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+#term-unacked .u-age { color: var(--muted); font-size: 11px; margin-left: auto; flex: 0 0 auto; }
 
 /* Toast */
 #toast {

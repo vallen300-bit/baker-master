@@ -124,8 +124,7 @@ def test_age_text_passes_aa_composited_over_every_glance_tint_and_grade():
     grades = _grade_bgs()
     overlays = {
         "needs_go": _glance_tint(".card.glance-needs-go"),
-        "NEW": _glance_tint(".card.glance-new"),
-        "working": _glance_tint(".card.glance-working"),
+        "amber": _glance_tint(".card.glance-amber"),
     }
     failures = []
     for role in ("hot", "warn", "base"):

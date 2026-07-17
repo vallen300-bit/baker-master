@@ -30,6 +30,7 @@
   const termMount = document.getElementById("term-mount");
   const termTitle = document.getElementById("term-title");
   const termGo = document.getElementById("term-go");
+  const termUnacked = document.getElementById("term-unacked");
   const toastEl = document.getElementById("toast");
 
   let layout = null;             // { plates: [{label, cards:[...]}, ...] }
@@ -74,9 +75,9 @@
       isDoneGreen: false,               // no DONE signal on this surface
       needsGo: row.needs_go === true,
     });
-    if (g === "NEEDS_GO") return "glance-needs-go";
-    if (g === "WORKING") return "glance-working";
-    if (g === "NEW") return "glance-new";
+    if (g === "NEEDS_GO") return "glance-needs-go";      // green tint + GO
+    if (g === "WORKING") return "";                       // E6: running = bright, no frame
+    if (g === "NEW") return "glance-amber";               // D5/E6: amber = unread
     // UNKNOWN (glance outage or telemetry-less seat) must read distinctly from
     // IDLE — a quiet seat with telemetry vs a seat we have no signal for.
     if (g === "UNKNOWN") return "glance-unknown";
@@ -140,10 +141,45 @@
     termGo.hidden = !show;
   }
 
+  // D5 — list the seat's unacked bus messages (id · topic · age) in the panel.
+  function renderPanelUnacked(slug) {
+    termUnacked.textContent = "";
+    const row = stateBySlug.get(slug) || {};
+    const msgs = Array.isArray(row.unacked_messages) ? row.unacked_messages : [];
+    if (!msgs.length) { termUnacked.hidden = true; return; }
+    const head = el("div", { class: "u-head",
+      text: msgs.length + " unacked bus message" + (msgs.length === 1 ? "" : "s") });
+    const list = el("div", { class: "u-list" }, msgs.map((m) => {
+      const ts = m && m.created_at ? Date.parse(m.created_at) : NaN;
+      const age = Number.isFinite(ts) ? window.formatUnreadAge((Date.now() - ts) / 1000) : "";
+      return el("div", { class: "u-row" }, [
+        el("span", { class: "u-id", text: "#" + String((m && m.id) || "?") }),
+        el("span", { class: "u-topic", text: String((m && m.topic) || "(no topic)") }),
+        age ? el("span", { class: "u-age", text: age }) : null,
+      ]);
+    }));
+    termUnacked.appendChild(head);
+    termUnacked.appendChild(list);
+    termUnacked.hidden = false;
+  }
+
+  // D6 — wake-on-open. Opening a driveable seat that has unacked>0 and is not
+  // WORKING (and not needs_go — that is the GO flow) nudges its tmux once. The
+  // controller enforces the guards + a 10-min dedupe + audit; the page just asks.
+  function maybeWakeOnOpen(slug) {
+    const row = stateBySlug.get(slug);
+    if (window.amberState(row)) {
+      fetch(url("/api/sessions/" + slug + "/wake"), { ...FETCH_OPTS, method: "POST" })
+        .catch(() => { /* best-effort nudge; never blocks opening the terminal */ });
+    }
+  }
+
   function openTerm(slug, name) {
     openSlug = slug;
     termTitle.textContent = name + " — live terminal";
     syncPanelGo();
+    renderPanelUnacked(slug);
+    maybeWakeOnOpen(slug);
     termMount.textContent = "";
     const frame = el("iframe", { id: "termframe", src: url("/term/" + slug + "/"),
                                  title: name + " terminal" });
@@ -173,6 +209,7 @@
     termEl.classList.remove("open");
     veilEl.classList.remove("open");
     termMount.textContent = "";   // remove iframe -> drops the ttyd WS connection
+    termUnacked.textContent = ""; termUnacked.hidden = true;
   }
 
   // ---- rendering ----------------------------------------------------------
