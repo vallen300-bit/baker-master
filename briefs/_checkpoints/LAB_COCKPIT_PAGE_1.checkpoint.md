@@ -1,9 +1,16 @@
 # Checkpoint — LAB_COCKPIT_PAGE_1 (Cockpit BRIEF B-2, page UI)
 
-- attempt: 1
+- attempt: 2
 - seat: B1
 - branch: b1/lab-cockpit-page (this checkpoint) — successor claims by the attempt-bump commit here
-- status: DISPATCHED, NOT STARTED — handed to a fresh seat (prior B1 seat carried the full BRIEF A arc; context-band rollover at a clean brief boundary)
+- status: IN PROGRESS (attempt 2 claimed 2026-07-17) — building the cockpit page; env grounded (controller live :7800, b3 tmux+ttyd pilot up, /api/agents shape confirmed)
+
+## Attempt-2 grounding + decisions (recorded for successor/review)
+- MOCK ABSENT: COCKPIT_CARD_BEHAVIOR_MOCK.html is not on this machine (git history, bm-b1, baker-vault, Desktop/baker-code all clean). Dispatch #12149 carries no mock correction. NOT treated as a blocker: scope §5 Target UX specifies the full interaction contract in prose, and §6.5 names the *live Lab page* as the design source (present at brisen-lab/static/). Building to scope §5 + live Lab CSS tokens + live Control Room. Flagged to lead.
+- GROUPING: registry (agent_registry.yml) has NO class/group fields (§5.1 "generated from registry class/role fields" is literally unsatisfiable). Authoritative source per §5.1 = "mirror the live Control Room, verify at build". Decision: build-time generator (scripts/generate_cockpit_layout.py) mirrors live Lab CONTROL_GROUPS (brisen-lab/static/app.js) — the 6 plates in Control Room order — reconciled against the registry (display names, runtime → driveable vs app-claude) + launch manifest (ports). Emits generated cockpit_layout.json (provenance SHAs, no hand-kept list in the page). Card set = 26 driveable (/api/agents) + 12 app-claude status-only.
+- /api/agents fields: slug, alias, port, session_up, is_working, has_telemetry, needs_go, unacked_count, oldest_unacked_age_sec, unacked_topics.
+- Static deploy target: ~/Library/Application Support/baker/cockpit/static (COCKPIT_STATIC_DIR); repo source scripts/cockpit_static/; installer wired to copy it.
+- CREDENTIAL is 9 bytes at ~/Library/Application Support/baker/cockpit/credentials — read at runtime, never hardcode.
 - dispatch: lead #12149 (acked). BRIEF A verdict #12145 accepted.
 - brief: briefs/_tasks/LAB_COCKPIT_PAGE_1.md @2b55d251
 - binding scope: SCOPE_LAB_TERMINAL_COCKPIT_1 v1.3 @2b7f18e4 §5/§7/§8 P1 B-2/§9/§11 (dispatch cited v1.3.2 @46d8134f)
