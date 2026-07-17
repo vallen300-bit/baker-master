@@ -30,7 +30,8 @@
           "status_only": false,
           "kind": "TERMINAL",
           "badge": null,
-          "port": 7603
+          "port": 7603,
+          "notify_eligible": false
         },
         {
           "slug": "lead",
@@ -41,7 +42,8 @@
           "status_only": false,
           "kind": "TERMINAL",
           "badge": null,
-          "port": 7600
+          "port": 7600,
+          "notify_eligible": false
         },
         {
           "slug": "deputy",
@@ -52,7 +54,8 @@
           "status_only": false,
           "kind": "TERMINAL",
           "badge": null,
-          "port": 7602
+          "port": 7602,
+          "notify_eligible": false
         },
         {
           "slug": "codex",
@@ -63,7 +66,8 @@
           "status_only": false,
           "kind": "TERMINAL",
           "badge": null,
-          "port": 7612
+          "port": 7612,
+          "notify_eligible": false
         },
         {
           "slug": "cowork-ah1",
@@ -74,7 +78,8 @@
           "status_only": true,
           "kind": "APP",
           "badge": null,
-          "port": null
+          "port": null,
+          "notify_eligible": false
         },
         {
           "slug": "codex-arch",
@@ -85,7 +90,8 @@
           "status_only": true,
           "kind": "APP",
           "badge": null,
-          "port": null
+          "port": null,
+          "notify_eligible": true
         }
       ]
     },
@@ -101,7 +107,8 @@
           "status_only": false,
           "kind": "TERMINAL",
           "badge": null,
-          "port": 7606
+          "port": 7606,
+          "notify_eligible": false
         },
         {
           "slug": "b2",
@@ -112,7 +119,8 @@
           "status_only": false,
           "kind": "TERMINAL",
           "badge": null,
-          "port": 7607
+          "port": 7607,
+          "notify_eligible": false
         },
         {
           "slug": "b3",
@@ -123,7 +131,8 @@
           "status_only": false,
           "kind": "TERMINAL",
           "badge": null,
-          "port": 7608
+          "port": 7608,
+          "notify_eligible": false
         },
         {
           "slug": "b4",
@@ -134,7 +143,8 @@
           "status_only": false,
           "kind": "TERMINAL",
           "badge": null,
-          "port": 7609
+          "port": 7609,
+          "notify_eligible": false
         },
         {
           "slug": "arm",
@@ -145,7 +155,8 @@
           "status_only": false,
           "kind": "TERMINAL",
           "badge": null,
-          "port": 7620
+          "port": 7620,
+          "notify_eligible": false
         },
         {
           "slug": "aid",
@@ -156,7 +167,8 @@
           "status_only": false,
           "kind": "TERMINAL",
           "badge": null,
-          "port": 7605
+          "port": 7605,
+          "notify_eligible": false
         },
         {
           "slug": "cortex",
@@ -167,7 +179,8 @@
           "status_only": true,
           "kind": "SERVICE",
           "badge": "service",
-          "port": null
+          "port": null,
+          "notify_eligible": false
         },
         {
           "slug": "cowork-arm",
@@ -178,7 +191,8 @@
           "status_only": true,
           "kind": "APP",
           "badge": null,
-          "port": null
+          "port": null,
+          "notify_eligible": true
         },
         {
           "slug": "cowork-aid",
@@ -189,7 +203,8 @@
           "status_only": true,
           "kind": "APP",
           "badge": null,
-          "port": null
+          "port": null,
+          "notify_eligible": true
         }
       ]
     },
@@ -205,7 +220,8 @@
           "status_only": false,
           "kind": "TERMINAL",
           "badge": null,
-          "port": 7625
+          "port": 7625,
+          "notify_eligible": false
         },
         {
           "slug": "movie-desk",
@@ -216,7 +232,8 @@
           "status_only": false,
           "kind": "TERMINAL",
           "badge": null,
-          "port": 7626
+          "port": 7626,
+          "notify_eligible": false
         },
         {
           "slug": "baden-baden-desk",
@@ -227,7 +244,8 @@
           "status_only": false,
           "kind": "TERMINAL",
           "badge": null,
-          "port": 7627
+          "port": 7627,
+          "notify_eligible": false
         },
         {
           "slug": "origination-desk",
@@ -238,7 +256,8 @@
           "status_only": false,
           "kind": "TERMINAL",
           "badge": null,
-          "port": 7624
+          "port": 7624,
+          "notify_eligible": false
         },
         {
           "slug": "brisen-desk",
@@ -249,7 +268,8 @@
           "status_only": false,
           "kind": "TERMINAL",
           "badge": null,
-          "port": 7628
+          "port": 7628,
+          "notify_eligible": false
         },
         {
           "slug": "hag-desk",
@@ -260,7 +280,8 @@
           "status_only": false,
           "kind": "TERMINAL",
           "badge": null,
-          "port": 7623
+          "port": 7623,
+          "notify_eligible": false
         },
         {
           "slug": "cowork-ao-desk",
@@ -271,7 +292,8 @@
           "status_only": true,
           "kind": "APP",
           "badge": null,
-          "port": null
+          "port": null,
+          "notify_eligible": true
         },
         {
           "slug": "cowork-movie-desk",
@@ -282,7 +304,8 @@
           "status_only": true,
           "kind": "APP",
           "badge": null,
-          "port": null
+          "port": null,
+          "notify_eligible": true
         },
         {
           "slug": "cowork-bb-desk",
@@ -293,7 +316,8 @@
           "status_only": true,
           "kind": "APP",
           "badge": null,
-          "port": null
+          "port": null,
+          "notify_eligible": false
         },
         {
           "slug": "cowork-origination-desk",
@@ -304,7 +328,8 @@
           "status_only": true,
           "kind": "APP",
           "badge": null,
-          "port": null
+          "port": null,
+          "notify_eligible": true
         },
         {
           "slug": "cowork-hag-desk",
@@ -315,7 +340,8 @@
           "status_only": true,
           "kind": "APP",
           "badge": null,
-          "port": null
+          "port": null,
+          "notify_eligible": true
         }
       ]
     },
@@ -331,7 +357,8 @@
           "status_only": false,
           "kind": "TERMINAL",
           "badge": null,
-          "port": 7611
+          "port": 7611,
+          "notify_eligible": false
         },
         {
           "slug": "librarian",
@@ -342,7 +369,8 @@
           "status_only": false,
           "kind": "TERMINAL",
           "badge": null,
-          "port": 7619
+          "port": 7619,
+          "notify_eligible": false
         },
         {
           "slug": "CM-1",
@@ -353,7 +381,8 @@
           "status_only": false,
           "kind": "TERMINAL",
           "badge": null,
-          "port": 7640
+          "port": 7640,
+          "notify_eligible": false
         },
         {
           "slug": "CM-2",
@@ -364,7 +393,8 @@
           "status_only": false,
           "kind": "TERMINAL",
           "badge": null,
-          "port": 7641
+          "port": 7641,
+          "notify_eligible": false
         },
         {
           "slug": "CM-3",
@@ -375,7 +405,8 @@
           "status_only": false,
           "kind": "TERMINAL",
           "badge": null,
-          "port": 7642
+          "port": 7642,
+          "notify_eligible": false
         },
         {
           "slug": "CM-4",
@@ -386,7 +417,8 @@
           "status_only": false,
           "kind": "TERMINAL",
           "badge": null,
-          "port": 7643
+          "port": 7643,
+          "notify_eligible": false
         },
         {
           "slug": "cowork-researcher",
@@ -397,7 +429,8 @@
           "status_only": true,
           "kind": "APP",
           "badge": null,
-          "port": null
+          "port": null,
+          "notify_eligible": true
         },
         {
           "slug": "cowork-librarian",
@@ -408,7 +441,8 @@
           "status_only": true,
           "kind": "APP",
           "badge": null,
-          "port": null
+          "port": null,
+          "notify_eligible": true
         },
         {
           "slug": "hag-filer",
@@ -419,7 +453,8 @@
           "status_only": false,
           "kind": "TERMINAL",
           "badge": null,
-          "port": 7644
+          "port": 7644,
+          "notify_eligible": false
         }
       ]
     },
@@ -435,7 +470,8 @@
           "status_only": false,
           "kind": "TERMINAL",
           "badge": null,
-          "port": 7616
+          "port": 7616,
+          "notify_eligible": false
         },
         {
           "slug": "ben",
@@ -446,7 +482,8 @@
           "status_only": true,
           "kind": "APP",
           "badge": null,
-          "port": null
+          "port": null,
+          "notify_eligible": false
         },
         {
           "slug": "publisher",
@@ -457,7 +494,8 @@
           "status_only": false,
           "kind": "TERMINAL",
           "badge": null,
-          "port": 7621
+          "port": 7621,
+          "notify_eligible": false
         },
         {
           "slug": "designer",
@@ -468,7 +506,8 @@
           "status_only": false,
           "kind": "TERMINAL",
           "badge": null,
-          "port": 7622
+          "port": 7622,
+          "notify_eligible": false
         },
         {
           "slug": "cowork-russo-ai",
@@ -479,7 +518,8 @@
           "status_only": true,
           "kind": "APP",
           "badge": null,
-          "port": null
+          "port": null,
+          "notify_eligible": true
         }
       ]
     },
@@ -495,7 +535,8 @@
           "status_only": false,
           "kind": "TERMINAL",
           "badge": null,
-          "port": 7617
+          "port": 7617,
+          "notify_eligible": false
         },
         {
           "slug": "clerk",
@@ -506,7 +547,8 @@
           "status_only": false,
           "kind": "TERMINAL",
           "badge": null,
-          "port": 7614
+          "port": 7614,
+          "notify_eligible": false
         },
         {
           "slug": "clerk-haiku",
@@ -517,7 +559,8 @@
           "status_only": false,
           "kind": "TERMINAL",
           "badge": null,
-          "port": 7615
+          "port": 7615,
+          "notify_eligible": false
         }
       ]
     }

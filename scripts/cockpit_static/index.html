@@ -12,6 +12,10 @@
   <div class="tab">Control Room</div>
   <div class="tab active">Cockpit</div>
   <div class="spacer"></div>
+  <!-- NOTIFY_SLICE — mute toggle for controller-side unread-bus banners. Source of
+       truth is the controller (page-closed firing); this hydrates from /api/notify/state. -->
+  <button class="tab notify-toggle" id="notify-toggle" type="button"
+          aria-pressed="false" title="Mute unread-bus notifications">🔔 Alerts</button>
   <div class="conn" id="conn">connecting…</div>
 </header>
 

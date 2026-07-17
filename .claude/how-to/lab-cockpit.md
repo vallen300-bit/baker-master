@@ -78,6 +78,33 @@ bash scripts/cockpit_migrate.sh sandbox <slug>
 To add only the web viewer for a seat whose session is already up:
 `bash scripts/install_cockpit_ttyd.sh <slug>`.
 
+## Unread-bus notifications (LAB_COCKPIT_NOTIFY_SLICE_1)
+
+The controller fires a **macOS banner + sound** when a bus dispatch lands unread
+(`unacked_count` 0→N) on a seat that nothing else alerts — an app-resident seat
+outside the Wake.app regime. This closes the gap where a dispatch to e.g.
+`codex-arch` sat unread until the Director happened to catch the card flash.
+
+- **Fires from the controller poll loop**, so it works with the page closed
+  (launchd keeps the controller alive). Cadence ~15s.
+- **Eligible seats** are derived at generate time — each card in
+  `cockpit_layout.json` carries `notify_eligible`, set by
+  `generate_cockpit_layout.py` from the registry: app-resident (`runtime app-*`)
+  AND not Wake.app-covered (Wake.app banners `app-claude` seats whose `wakeable`
+  is not the explicit `false`). Result: `codex-arch` + the `wakeable:false` cowork
+  desks fire; `cowork-ah1`/`ben`/`cowork-bb-desk` (Wake.app covers) and all
+  terminal seats (self-awake, e.g. `b1`) do not. **No hand-kept list** — regenerate
+  the layout to change coverage.
+- **One banner per 0→N rising edge**, never on N→N+1; a 5-min per-seat cooldown
+  guards against storms. A controller restart seeds the baseline silently (no
+  backlog burst).
+- **Mute toggle** (🔔/🔕 in the header) persists to the controller
+  (`notify_mute.json`) so page-closed firing honours it; it also caches to
+  `localStorage` for instant UI. Muting still advances the baseline, so un-muting
+  does not dump the accumulated backlog.
+- **Kill switch:** `COCKPIT_NOTIFY_ENABLED=0` disables the loop entirely.
+- Endpoints: `GET /api/notify/state` (mute + eligible set), `POST /api/notify/mute`.
+
 ## Failure modes
 
 - **Cockpit blank / "offline":** the controller is down. It is launchd

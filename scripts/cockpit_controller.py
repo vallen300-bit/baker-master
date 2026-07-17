@@ -12,6 +12,7 @@ import argparse
 import asyncio
 import base64
 import binascii
+import contextlib
 from dataclasses import dataclass
 import hmac
 import json
@@ -19,6 +20,7 @@ import logging
 import os
 from pathlib import Path
 import re
+import shutil
 import subprocess
 import time
 from typing import Any, Iterable
@@ -58,6 +60,118 @@ GLANCE_FIELDS = (
 # D6 — wake-on-open: re-nudge dedupe window (a seat is nudged at most once per
 # this many seconds, so re-opening a seat does not spam its tmux).
 WAKE_DEDUPE_SECONDS = 600.0
+
+# LAB_COCKPIT_NOTIFY_SLICE_1 — controller-side macOS banner+sound when a bus
+# dispatch lands (unacked_count 0→N) on a NON-self-awake seat that Wake.app does
+# not already banner. Fires from the controller poll loop so it works with the
+# page closed. The eligible-seat set is derived at generate time (registry →
+# ``notify_eligible`` per card in cockpit_layout.json); the controller only reads
+# that flag, never a hand-kept slug list (brief: "no hand-kept list").
+NOTIFY_POLL_SECONDS = 15.0
+# Per-seat re-fire cooldown: a seat that keeps receiving messages (N→N+1) never
+# re-banners; only a fresh 0→N rising edge does, and even that is suppressed
+# within this window as a storm guard.
+NOTIFY_COOLDOWN_SECONDS = 300.0
+NOTIFY_SOUND = "Ping"
+
+
+def load_notify_seats(static_dir: Path) -> set[str]:
+    """Return the slugs whose generated card carries ``notify_eligible`` true.
+
+    Source of truth is the generated ``cockpit_layout.json`` (registry-derived at
+    generate time), so the controller keeps NO hand-kept seat list. Fault-tolerant:
+    any read/parse error yields an empty set (fire nothing) rather than raising."""
+    try:
+        raw = json.loads((static_dir / "cockpit_layout.json").read_text("utf-8"))
+    except (OSError, ValueError, TypeError):
+        return set()
+    seats: set[str] = set()
+    plates = raw.get("plates") or raw.get("sections") or []
+    if not isinstance(plates, list):
+        return set()
+    for plate in plates:
+        for card in (plate or {}).get("cards", []) or []:
+            if isinstance(card, dict) and card.get("notify_eligible") and card.get("slug"):
+                seats.add(str(card["slug"]))
+    return seats
+
+
+def compute_notifications(
+    prev_counts: dict[str, int],
+    rows: dict[str, dict[str, Any]],
+    eligible: set[str],
+    last_fired: dict[str, float],
+    *,
+    now: float,
+    cooldown: float,
+) -> tuple[list[tuple[str, int]], dict[str, int], dict[str, float]]:
+    """Pure transition detector. Returns (to_fire, new_prev_counts, new_last_fired).
+
+    Fire rule for an eligible seat: a rising edge from zero — previous observed
+    count == 0 and current > 0. The FIRST observation of a seat only seeds the
+    baseline (prev is None) and never fires, so a controller restart does not
+    banner the existing backlog. N→N+1 (prev>0) never fires; N→0 resets so a later
+    0→N re-fires. A per-seat cooldown suppresses re-fires within ``cooldown`` s."""
+    to_fire: list[tuple[str, int]] = []
+    new_prev = dict(prev_counts)
+    new_last = dict(last_fired)
+    for slug in eligible:
+        row = rows.get(slug) or {}
+        cur = int(row.get("unacked_count") or 0)
+        prev = prev_counts.get(slug)
+        if prev is not None and prev == 0 and cur > 0:
+            last = last_fired.get(slug)
+            if last is None or (now - last) >= cooldown:
+                to_fire.append((slug, cur))
+                new_last[slug] = now
+        new_prev[slug] = cur
+    return to_fire, new_prev, new_last
+
+
+def read_mute(path: Path) -> bool:
+    """Read the persisted mute flag (default False = notifications on). Any
+    read/parse failure reads as un-muted so a corrupt file never silences alerts."""
+    try:
+        return bool(json.loads(path.read_text("utf-8")).get("muted", False))
+    except (OSError, ValueError, TypeError, AttributeError):
+        return False
+
+
+def write_mute(path: Path, muted: bool) -> None:
+    """Persist the mute flag so page-closed firing honours the last toggle.
+
+    Raises OSError on a persistence failure — the caller MUST surface it rather
+    than report a false success (the UI would show "muted" while banners keep
+    firing, codex #12354). ``read_mute`` still fails safe (toward alerting)."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps({"muted": bool(muted)}), "utf-8")
+
+
+def notify_macos(settings: "Settings", slug: str, count: int) -> None:
+    """Fire one macOS banner + sound naming the seat. terminal-notifier if present
+    (richer banner), else osascript. Best-effort: never raises into the poll loop."""
+    plural = "s" if count != 1 else ""
+    message = f"{slug}: {count} unread bus message{plural} — poke it"
+    tn = shutil.which("terminal-notifier")
+    try:
+        if tn:
+            cmd = [
+                tn, "-title", "Baker Cockpit", "-message", message,
+                "-sound", settings.notify_sound, "-group", f"cockpit-notify-{slug}",
+            ]
+        else:
+            safe = message.replace('"', "'")
+            script = (
+                f'display notification "{safe}" with title "Baker Cockpit" '
+                f'sound name "{settings.notify_sound}"'
+            )
+            cmd = ["osascript", "-e", script]
+        subprocess.run(
+            cmd, check=False, capture_output=True,
+            timeout=settings.command_timeout_seconds,
+        )
+    except (OSError, subprocess.SubprocessError) as exc:
+        LOG.warning("notify send failed for %s: %s", slug, exc)
 HOP_BY_HOP_HEADERS = frozenset(
     {
         "connection",
@@ -101,6 +215,17 @@ class Settings:
             "~/Library/Application Support/baker/cockpit/wake_audit.log"
         )
     )
+    # LAB_COCKPIT_NOTIFY_SLICE_1 — persisted mute flag (page-closed firing honours
+    # the last toggle); background poll cadence; per-seat re-fire cooldown; sound.
+    notify_mute_path: Path = Path(
+        os.path.expanduser(
+            "~/Library/Application Support/baker/cockpit/notify_mute.json"
+        )
+    )
+    notify_enabled: bool = True
+    notify_poll_seconds: float = NOTIFY_POLL_SECONDS
+    notify_cooldown_seconds: float = NOTIFY_COOLDOWN_SECONDS
+    notify_sound: str = NOTIFY_SOUND
     lab_url: str = "https://brisen-lab.onrender.com/api/v2/terminals"
     lab_cache_seconds: float = 30.0
     lab_timeout_seconds: float = 5.0
@@ -146,6 +271,9 @@ class Settings:
             ),
             lab_url=os.environ.get("COCKPIT_LAB_URL", defaults.lab_url),
             tmux_binary=os.environ.get("COCKPIT_TMUX_BINARY", defaults.tmux_binary),
+            notify_enabled=os.environ.get(
+                "COCKPIT_NOTIFY_ENABLED", "1" if defaults.notify_enabled else "0"
+            ).strip().lower() not in ("0", "false", "no", ""),
         )
 
     @property
@@ -570,7 +698,27 @@ def create_app(
         )
 
     prober = ttyd_prober or default_prober
-    app = FastAPI(title="Baker Cockpit Controller", docs_url=None, redoc_url=None)
+
+    @contextlib.asynccontextmanager
+    async def lifespan(_app: FastAPI):
+        # NOTIFY_SLICE — background poll loop for unread-bus banners. Runs only
+        # when enabled; cleanly cancelled on shutdown. _notify_loop is defined
+        # below in this closure and resolves at runtime (startup), not at def.
+        task = (
+            asyncio.create_task(_notify_loop()) if config.notify_enabled else None
+        )
+        try:
+            yield
+        finally:
+            if task is not None:
+                task.cancel()
+                with contextlib.suppress(asyncio.CancelledError):
+                    await task
+
+    app = FastAPI(
+        title="Baker Cockpit Controller", docs_url=None, redoc_url=None,
+        lifespan=lifespan,
+    )
     app.add_middleware(OriginGuardMiddleware, settings=config)
     app.add_middleware(BasicAuthMiddleware, credentials=credentials)
     app.state.settings = config
@@ -578,6 +726,10 @@ def create_app(
     app.state.lab_glance = glance
     # D6 — per-seat last-wake monotonic timestamps for the re-nudge dedupe window.
     app.state.wake_last = {}
+    # NOTIFY_SLICE — per-seat last-observed unacked baseline + last-fire timestamps
+    # for the 0→N transition detector (advanced by the lifespan poll loop).
+    app.state.notify_prev = {}
+    app.state.notify_last_fired = {}
 
     def manifest() -> tuple[ManifestEntry, ...]:
         try:
@@ -658,6 +810,69 @@ def create_app(
             )
         except (OSError, RuntimeError, subprocess.TimeoutExpired) as exc:
             raise HTTPException(status_code=502, detail=str(exc)) from exc
+
+    @app.get("/api/notify/state")
+    async def notify_state(request: Request):
+        # NOTIFY_SLICE — hydrate the header mute toggle. Eligible set is exposed
+        # for observability (which seats the controller will banner).
+        return {
+            "muted": read_mute(config.notify_mute_path),
+            "enabled": config.notify_enabled,
+            "eligible": sorted(load_notify_seats(config.static_dir)),
+        }
+
+    @app.post("/api/notify/mute")
+    async def notify_mute(request: Request):
+        # NOTIFY_SLICE — persist the mute flag so page-closed firing honours it.
+        # Same origin/auth guards as start/go/wake (middleware).
+        try:
+            payload = await request.json()
+        except (ValueError, TypeError):
+            payload = {}
+        muted = bool(payload.get("muted")) if isinstance(payload, dict) else False
+        # A persistence failure must surface, not read back as success — otherwise
+        # the UI shows "muted" while the controller keeps banner-ing (codex #12354).
+        try:
+            write_mute(config.notify_mute_path, muted)
+        except OSError as exc:
+            raise HTTPException(
+                status_code=500, detail=f"mute persistence failed: {exc}"
+            ) from exc
+        return {"ok": True, "muted": muted}
+
+    async def _notify_tick() -> None:
+        """One poll cycle: read glance, detect 0→N on eligible seats, banner unless
+        muted. The baseline is ALWAYS advanced (even while muted) so un-muting does
+        not dump the accumulated backlog as a burst of banners."""
+        rows = await glance.read()
+        if not getattr(glance, "last_ok", True):
+            return  # a full Lab outage collapses every seat to {}; do not fire
+        eligible = load_notify_seats(config.static_dir)
+        to_fire, app.state.notify_prev, app.state.notify_last_fired = (
+            compute_notifications(
+                app.state.notify_prev, rows, eligible, app.state.notify_last_fired,
+                now=time.monotonic(), cooldown=config.notify_cooldown_seconds,
+            )
+        )
+        if read_mute(config.notify_mute_path):
+            return
+        for slug, count in to_fire:
+            notify_macos(config, slug, count)
+
+    # Expose one tick for deterministic tests (codex #12354) — the committed test
+    # awaits this directly to prove a 0→N transition banners once through the real
+    # read→compute→fire path, without depending on background-task timing.
+    app.state.notify_tick = _notify_tick
+
+    async def _notify_loop() -> None:
+        while True:
+            try:
+                await _notify_tick()
+            except asyncio.CancelledError:
+                raise
+            except Exception as exc:  # a bad tick must never kill the loop
+                LOG.warning("notify tick failed: %s", exc)
+            await asyncio.sleep(config.notify_poll_seconds)
 
     async def proxy_http(request: Request, slug: str, tail: str = ""):
         entry = _entry_for(manifest(), slug)

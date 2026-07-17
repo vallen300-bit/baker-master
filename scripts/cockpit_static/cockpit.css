@@ -47,6 +47,15 @@ body {
   text-transform: none; letter-spacing: normal;
 }
 .cockpit-header .spacer { flex: 1; }
+/* NOTIFY_SLICE — unread-bus alerts mute toggle. */
+.cockpit-header .notify-toggle {
+  background: none; border: 1px solid var(--line, #30363d); border-radius: 6px;
+  cursor: pointer; margin-right: 10px; padding: 6px 12px; font: inherit;
+  font-size: 11px; letter-spacing: .04em; color: var(--text);
+  text-transform: none;
+}
+.cockpit-header .notify-toggle:hover { border-color: var(--accent); }
+.cockpit-header .notify-toggle.muted { color: var(--muted); opacity: .7; }
 .cockpit-header .conn {
   font-size: 11px; color: var(--muted); padding-right: 6px;
   font-variant-numeric: tabular-nums;

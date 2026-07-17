@@ -32,6 +32,7 @@
   const termGo = document.getElementById("term-go");
   const termUnacked = document.getElementById("term-unacked");
   const toastEl = document.getElementById("toast");
+  const notifyToggle = document.getElementById("notify-toggle");
 
   let layout = null;             // { plates: [{label, cards:[...]}, ...] }
   let stateBySlug = new Map();   // slug -> live /api/agents row
@@ -332,6 +333,60 @@
   });
   document.addEventListener("keydown", (e) => { if (e.key === "Escape" && openSlug) closeTerm(); });
 
+  // ---- unread-bus notifications mute toggle (NOTIFY_SLICE) ----------------
+  // The controller fires banners even with the page closed; this toggle only
+  // reflects + flips the controller's persisted mute flag. localStorage gives an
+  // instant default before the controller answers; the controller is authoritative.
+  const NOTIFY_MUTE_KEY = "cockpit.notifyMuted";
+  let notifyMuted = false;
+
+  function applyNotifyUI() {
+    if (!notifyToggle) return;
+    notifyToggle.textContent = notifyMuted ? "🔕 Muted" : "🔔 Alerts";
+    notifyToggle.setAttribute("aria-pressed", notifyMuted ? "true" : "false");
+    notifyToggle.classList.toggle("muted", notifyMuted);
+  }
+
+  async function hydrateNotify() {
+    // Default from localStorage first (instant), then reconcile with controller.
+    try { notifyMuted = localStorage.getItem(NOTIFY_MUTE_KEY) === "1"; } catch (_e) {}
+    applyNotifyUI();
+    try {
+      const r = await fetch(url("/api/notify/state"), FETCH_OPTS);
+      if (r.ok) {
+        const s = await r.json();
+        notifyMuted = !!s.muted;
+        try { localStorage.setItem(NOTIFY_MUTE_KEY, notifyMuted ? "1" : "0"); } catch (_e) {}
+        applyNotifyUI();
+      }
+    } catch (_e) { /* offline: keep localStorage default */ }
+  }
+
+  async function toggleNotify() {
+    const prev = notifyMuted;
+    const next = !notifyMuted;
+    notifyMuted = next;                       // optimistic UI
+    try { localStorage.setItem(NOTIFY_MUTE_KEY, next ? "1" : "0"); } catch (_e) {}
+    applyNotifyUI();
+    try {
+      const r = await fetch(url("/api/notify/mute"), {
+        ...FETCH_OPTS, method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ muted: next }),
+      });
+      if (!r.ok) throw new Error("HTTP " + r.status);
+      toast(next ? "Bus alerts muted" : "Bus alerts on", "ok");
+    } catch (e) {
+      // Persist failed — revert so the toggle never lies about the real state.
+      notifyMuted = prev;
+      try { localStorage.setItem(NOTIFY_MUTE_KEY, prev ? "1" : "0"); } catch (_e2) {}
+      applyNotifyUI();
+      toast("Notify toggle failed — " + e.message, "err");
+    }
+  }
+
+  if (notifyToggle) notifyToggle.addEventListener("click", toggleNotify);
+
   async function boot() {
     try {
       const r = await fetch(url("/cockpit_layout.json"), FETCH_OPTS);
@@ -343,6 +398,7 @@
       return;
     }
     render();                    // paint immediately from layout (metadata)
+    hydrateNotify();             // reflect the controller's mute state on the toggle
     await poll();                // then hydrate with live state
     pollTimer = setInterval(poll, POLL_MS);
   }
