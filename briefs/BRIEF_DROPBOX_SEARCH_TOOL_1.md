@@ -97,6 +97,9 @@ namespace and miss entire areas — worst failure mode (looks working, wrong sco
             # the brief's named worst failure mode -- plausible single-area
             # results violating cross-area scope. Do NOT cache, do NOT degrade.
             self._path_root_header = None  # leave unresolved for retry
+            # DropboxPathRootError: NEW dedicated exception, define in
+            # triggers/dropbox_client.py (class DropboxPathRootError(Exception))
+            # -- codex G0 #12343: it does not exist in the repo yet.
             raise DropboxPathRootError(
                 f"path-root resolution failed; refusing home-namespace fallback: {e}"
             ) from e
@@ -248,7 +251,7 @@ Append to `_dispatch` (elif chain, before the final unknown-tool fallthrough):
 - Content-match may be unavailable on some plans: filename matches still return; do not treat `match_type != content` as an error.
 
 ### Verification
-1. Unit tests (`tests/test_dropbox_search_tool.py`, mocked httpx): (a) `search()` parses matches + applies path-root header when `root_namespace_id != home_namespace_id`; (b) `_dispatch("baker_dropbox_search", {"query": "x"})` formats results; (c) empty query → error string; (d) HTTPStatusError surfaces status + body excerpt; (e) FAIL-CLOSED (codex G0 #12338): `get_current_account` failure → `search()` raises/returns explicit error, NEVER a normal-looking home-namespace result; header not cached, retried next call.
+1. Unit tests (`tests/test_dropbox_search_tool.py`, mocked httpx): (a) `search()` parses matches + applies path-root header when `root_namespace_id != home_namespace_id`; (b) `_dispatch("baker_dropbox_search", {"query": "x"})` formats results; (c) empty query → error string; (d) HTTPStatusError surfaces status + body excerpt; (e) FAIL-CLOSED (codex G0 #12338/#12343): `get_current_account` failure → `search()` raises `DropboxPathRootError` (assert the CONCRETE exception type + 'refusing home-namespace fallback' text), NEVER a normal-looking home-namespace result; header not cached, retried next call.
 2. `pytest tests/test_dropbox_search_tool.py -v` green; `python3 -c "import py_compile; py_compile.compile('triggers/dropbox_client.py', doraise=True)"` + same for `baker_mcp/baker_mcp_server.py`.
 3. Post-deploy live probe:
 ```bash
@@ -261,7 +264,7 @@ Expected: ≥1 match with paths from at least 2 distinct top-level areas (e.g. `
 ---
 
 ## Files Modified
-- `triggers/dropbox_client.py` — add `search()`, `_resolve_path_root_header()`, extend `_api_post` with `extra_headers`
+- `triggers/dropbox_client.py` — add `search()`, `_resolve_path_root_header()`, NEW `class DropboxPathRootError(Exception)` (fail-closed resolver error, codex G0 #12343), extend `_api_post` with `extra_headers`
 - `baker_mcp/baker_mcp_server.py` — 1 Tool entry + 1 dispatch branch
 - `tests/test_dropbox_search_tool.py` — new
 
