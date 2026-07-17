@@ -1,6 +1,6 @@
 ---
 brief_id: LAB_COCKPIT_REDESIGN_1 (PR 2)
-attempt: 1
+attempt: 2
 branch: b1/cockpit-redesign-pr2
 dispatched_by: lead (bus #12281)
 report_topic: gates/cockpit-redesign-pr2
