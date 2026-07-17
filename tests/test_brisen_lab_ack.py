@@ -72,10 +72,15 @@ def _run(tmp_path: Path, *, codes: list[str], msg_id: str = "555",
     env = os.environ.copy()
     env["PATH"] = f"{tmp_path / 'bin'}:{env.get('PATH', '')}"
     env["BRISEN_LAB_ACK_NO_SLEEP"] = "1"
+    # Key is injected via env (the resolver's literal-key precedence), NOT argv:
+    # the helper deliberately has no --key flag (codex PR #595 P2). BAKER_ROLE
+    # drives the internal slug resolution.
+    env["BAKER_ROLE"] = "deputy"
+    env["BRISEN_LAB_TERMINAL_KEY"] = "fake-key"
     if extra_env:
         env.update(extra_env)
     proc = subprocess.run(
-        ["bash", str(_SCRIPT), "--key", "fake-key", msg_id],
+        ["bash", str(_SCRIPT), msg_id],
         env=env, capture_output=True, text=True, cwd=str(_REPO),
     )
     return proc, calls_log
@@ -130,3 +135,42 @@ def test_rejects_non_numeric_msg_id(tmp_path):
     proc, _ = _run(tmp_path, codes=["200"], msg_id="not-a-number")
     assert proc.returncode == 2
     assert "must be numeric" in proc.stderr
+
+
+# --- P2 security regressions (codex PR #595) --------------------------------
+
+def test_no_key_flag_on_argv(tmp_path):
+    """`--key` must NOT be a key path — a terminal key on argv leaks via `ps`.
+
+    Passing `--key foo` should be treated as an unexpected non-numeric arg and
+    rejected (exit 2), never accepted as a credential.
+    """
+    calls_log, _ = _write_sequence_curl(tmp_path, ["200"])
+    env = os.environ.copy()
+    env["PATH"] = f"{tmp_path / 'bin'}:{env.get('PATH', '')}"
+    env["BRISEN_LAB_ACK_NO_SLEEP"] = "1"
+    env["BAKER_ROLE"] = "deputy"
+    env["BRISEN_LAB_TERMINAL_KEY"] = "fake-key"
+    proc = subprocess.run(
+        ["bash", str(_SCRIPT), "--key", "should-not-be-accepted", "555"],
+        env=env, capture_output=True, text=True, cwd=str(_REPO),
+    )
+    assert proc.returncode == 2
+    # It bailed before any network call — no ack POST leaked the "key".
+    assert not calls_log.exists() or "/ack" not in calls_log.read_text()
+
+
+def test_daemon_url_is_hard_pinned(tmp_path):
+    """BRISEN_LAB_DAEMON_URL must NOT redirect the key — the host is hard-pinned.
+
+    Even with a hostile override in the env, the ack POST must hit
+    brisen-lab.onrender.com and never the attacker host.
+    """
+    proc, log = _run(
+        tmp_path, codes=["200"],
+        extra_env={"BRISEN_LAB_DAEMON_URL": "https://evil.example.test"},
+    )
+    assert proc.returncode == 0, proc.stderr
+    logged = log.read_text()
+    assert "brisen-lab.onrender.com/msg/555/ack" in logged
+    assert "evil.example.test" not in logged

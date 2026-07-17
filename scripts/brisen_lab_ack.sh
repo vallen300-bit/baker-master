@@ -15,25 +15,28 @@
 #   . scripts/brisen_lab_ack.sh
 #   brisen_lab_ack_post "<terminal_key>" "<msg_id>"   # -> 0 on 200, 1 otherwise
 #                                                      # echoes final HTTP code
-# CLI:
-#   BAKER_ROLE=deputy scripts/brisen_lab_ack.sh <msg_id>      # resolves key
-#   scripts/brisen_lab_ack.sh --key <key> <msg_id>            # explicit key
+# CLI (key is NEVER accepted on argv — no --key flag; it is resolved internally
+# via the same precedence as the sibling ack scripts, so it is never exposed in
+# the process table / shell history):
+#   BAKER_ROLE=deputy scripts/brisen_lab_ack.sh <msg_id>
+# The key resolves from BRISEN_LAB_TERMINAL_KEY env -> ~/.brisen-lab cache -> 1P.
 #
 # Tunables (env, all optional):
 #   BRISEN_LAB_ACK_MAX_ATTEMPTS  total attempts incl. first (default 5)
 #   BRISEN_LAB_ACK_BASE_DELAY    seconds, first backoff (default 0.5)
 #   BRISEN_LAB_ACK_MAX_DELAY     seconds, backoff ceiling (default 8)
 #   BRISEN_LAB_ACK_NO_SLEEP      =1 skips the sleeps (fast tests)
-#   BRISEN_LAB_DAEMON_URL        daemon base (default the pinned prod URL)
+# The daemon URL is hard-pinned (no env override) — see below.
 #
 # Retry policy: retry on transient/infra codes (000 network/timeout, 408, 425,
 # 429, 500, 502, 503, 504). Do NOT retry a permanent client error
 # (400/401/403/404/409/410/422) — that is a real fault to surface, not flap.
 
-# HARD-PINNED daemon URL default (defense-in-depth, mirrors check_inbox.sh):
-# an attacker-controlled BRISEN_LAB_DAEMON_URL prefix must never redirect the
-# terminal key. The env override exists only for the test harness + staging.
-_BRISEN_LAB_ACK_DEFAULT_URL="https://brisen-lab.onrender.com"
+# HARD-PINNED daemon URL (defense-in-depth, mirrors check_inbox.sh line 40-44,
+# codex G3 #8628 F1): NO env override. An attacker-controlled env prefix must
+# never be able to redirect the X-Terminal-Key to an arbitrary host. Callers
+# never pass a URL; the constant below is the only endpoint this helper hits.
+_BRISEN_LAB_ACK_URL="https://brisen-lab.onrender.com"
 
 # Return 0 if the HTTP code is worth retrying, 1 if terminal (success or a
 # permanent client error).
@@ -48,7 +51,7 @@ _brisen_lab_ack_is_retryable() {
 # Echoes the final HTTP code; returns 0 iff a 200 was seen.
 brisen_lab_ack_post() {
     local key="$1" msg_id="$2"
-    local base_url="${BRISEN_LAB_DAEMON_URL:-$_BRISEN_LAB_ACK_DEFAULT_URL}"
+    local base_url="$_BRISEN_LAB_ACK_URL"
     local max_attempts="${BRISEN_LAB_ACK_MAX_ATTEMPTS:-5}"
     local base_delay="${BRISEN_LAB_ACK_BASE_DELAY:-0.5}"
     local max_delay="${BRISEN_LAB_ACK_MAX_DELAY:-8}"
@@ -95,13 +98,14 @@ if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then
     set -o pipefail
     _SCRIPT_DIR="$(CDPATH= cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 
-    _EXPLICIT_KEY=""
+    # Deliberately NO --key flag: a terminal key on argv would leak into the
+    # process table (`ps`) and shell history. The key is resolved internally
+    # only (codex PR #595 P2). Sole positional arg is the numeric message id.
     _MSG_ID=""
     while [[ $# -gt 0 ]]; do
         case "$1" in
-            --key) _EXPLICIT_KEY="${2:-}"; shift 2 ;;
             -h|--help)
-                echo "Usage: BAKER_ROLE=<role> $0 <msg_id>   |   $0 --key <key> <msg_id>"
+                echo "Usage: BAKER_ROLE=<role> $0 <msg_id>"
                 exit 0 ;;
             *)
                 if [[ -z "$_MSG_ID" ]]; then _MSG_ID="$1"; shift
@@ -114,22 +118,18 @@ if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then
         exit 2
     fi
 
-    if [[ -n "$_EXPLICIT_KEY" ]]; then
-        _KEY="$_EXPLICIT_KEY"
-    else
-        # shellcheck source=scripts/agent_identity_generated.sh
-        . "$_SCRIPT_DIR/agent_identity_generated.sh"
-        # shellcheck source=scripts/brisen_lab_terminal_key.sh
-        . "$_SCRIPT_DIR/brisen_lab_terminal_key.sh"
-        if ! _SLUG="$(agent_identity_resolve_role "${BAKER_ROLE:-}")"; then
-            echo "ERROR: BAKER_ROLE not set or unrecognized: '${BAKER_ROLE:-}'." >&2
-            exit 2
-        fi
-        _KEY="$(brisen_lab_read_terminal_key "$_SLUG" "${BRISEN_LAB_TERMINAL_KEY:-}" 2>/dev/null || true)"
-        if [[ -z "$_KEY" ]]; then
-            echo "ERROR: terminal key empty for slug=${_SLUG} (no env, no cache, no 1P)." >&2
-            exit 2
-        fi
+    # shellcheck source=scripts/agent_identity_generated.sh
+    . "$_SCRIPT_DIR/agent_identity_generated.sh"
+    # shellcheck source=scripts/brisen_lab_terminal_key.sh
+    . "$_SCRIPT_DIR/brisen_lab_terminal_key.sh"
+    if ! _SLUG="$(agent_identity_resolve_role "${BAKER_ROLE:-}")"; then
+        echo "ERROR: BAKER_ROLE not set or unrecognized: '${BAKER_ROLE:-}'." >&2
+        exit 2
+    fi
+    _KEY="$(brisen_lab_read_terminal_key "$_SLUG" "${BRISEN_LAB_TERMINAL_KEY:-}" 2>/dev/null || true)"
+    if [[ -z "$_KEY" ]]; then
+        echo "ERROR: terminal key empty for slug=${_SLUG} (no env, no cache, no 1P)." >&2
+        exit 2
     fi
 
     if _CODE="$(brisen_lab_ack_post "$_KEY" "$_MSG_ID")"; then
