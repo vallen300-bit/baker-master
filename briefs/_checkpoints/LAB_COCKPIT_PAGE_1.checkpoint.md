@@ -55,8 +55,17 @@ AC-U3 killed controller+b3 ttyd → tmux survived, launchd relaunch <1s, GET/ 20
 AC-U4 live DOM needs_go+working → glance-needs-go (working suppressed); AC-U5 N/A (badge flag off);
 §8 AC-5 loopback-only. Pilots b3+brisen-desk migrated in ledger. Screenshot: briefs/_reports/_assets/B1_cockpit_grid_20260717.png.
 
+## Fix pass 1 (2026-07-17) — codex-arch UI critique #12171 FAIL, 4 blockers cleared
+Dispatch lead #12172 (acked). Commit 3a3b84e1 on b1/lab-cockpit-page (no amend). Fix-done posted #12173 → gates/lab-cockpit-page-pr-585.
+- B1 slug on card face (cockpit.js .slug line, §5.2).
+- B2 GO gated on row.needs_go===true (was every up seat).
+- B3 ttyd-down error card — controller /api/agents adds per-seat ttyd_up (probe_ttyd async loopback TCP, concurrent, injectable ttyd_prober param); renderer red 'terminal offline', not openable.
+- B4 Lab outage visible — LabGlance.last_ok → /api/agents lab_glance_ok; renderer amber 'telemetry offline' banner + dashed 'no telemetry' UNKNOWN (glanceClass returns glance-unknown for null row / UNKNOWN).
+- Nits folded: header 'N driveable / M seats'; down-seat Start un-dimmed.
+- Tests 24 passed (test_cockpit_controller incl. new probe_ttyd + lab_glance_ok; layout/serve/manifest). Live-verified all 4 states + outage banner on a throwaway controller (alt port + fake manifest/Lab); screenshots briefs/_reports/_assets/B1_cockpit_fixpass{,_outage}_20260717.png. Live :7800 untouched.
+
 ## Next concrete step (successor)
-If resuming: the build + ACs are done. Remaining = open PR (b1/lab-cockpit-page → main), file ship report briefs/_reports/, post ship + POST_DEPLOY_AC_VERDICT to lead. If PR already open, wait on codex cross-vendor PR review + UI critique → lead merge → Director eyeball.
+Wait on codex-arch re-critique + codex delta gate on gates/lab-cockpit-page-pr-585. On PASS → lead merge → deploy (install_cockpit_controller.sh restages static + restarts :7800) → POST_DEPLOY_AC_VERDICT v1 on pilot seats (b3, brisen-desk) to lead. On re-FAIL → address on NEW commits, re-post fix-done. Do NOT redeploy :7800 pre-merge.
 
 ## BRIEF A (prior arc) — DONE, for reference
 Merged main @10dd3bec (PR #582 + regression #584). B3 sandbox live: tmux b3 UP, ttyd 127.0.0.1:7608 /term/b3/, ledger migrated. Scripts: generate_cockpit_manifest.py, fleet_terminals.sh, cockpit_migrate.sh, install_cockpit_ttyd.sh, cockpit_rollback.sh. AC verdict #12145 accepted.
