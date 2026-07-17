@@ -11,10 +11,11 @@ it is a *generated* artifact (same generator family as
 This generator derives the layout from three live sources — fail-loud, no
 hand-kept slug list:
 
-  1. Live Lab Control Room grouping — ``CONTROL_GROUPS`` in
-     ``brisen-lab/static/app.js`` — the authoritative mirror target (§5.1). It
-     supplies the plate labels, plate order, and per-plate slug order (which
-     keeps B1–B4 adjacent, §5.1). It is a frozen JSON-compatible literal.
+  1. Director layout contract — ``director_layout_contract.json`` — the
+     authoritative grouping source (LAB_COCKPIT_REDESIGN_1 D1, REPLACES the
+     Control-Room mirror). It supplies the plate labels, plate order, per-plate
+     card membership, the Director's display_name per card, and the x/y that
+     drive in-plate order (row-band y±40 then x — same rule as the mock export).
   2. Agent registry (``agent_registry.yml``) — display_name, agent_id (AG-###),
      runtime, status. EVERY ``status: active`` seat gets a card (lead #12208
      ruling). A driveable card is a tmux seat (in the manifest); every other
@@ -41,7 +42,6 @@ import argparse
 import hashlib
 import json
 import os
-import re
 import sys
 from pathlib import Path
 
@@ -50,12 +50,14 @@ REGISTRY = Path(os.environ.get(
     "BAKER_AGENT_REGISTRY",
     os.path.expanduser("~/baker-vault/_ops/registries/agent_registry.yml"),
 ))
-CONTROL_SRC = Path(os.environ.get(
-    "COCKPIT_CONTROL_GROUPS_SRC",
-    os.path.expanduser("~/bm-b1/brisen-lab/static/app.js"),
-))
+CONTRACT_IN = Path(os.environ.get(
+    "COCKPIT_LAYOUT_CONTRACT",
+    SCRIPT_DIR / "cockpit_static" / "director_layout_contract.json"))
 MANIFEST_IN = Path(os.environ.get(
     "COCKPIT_MANIFEST_IN", SCRIPT_DIR / "cockpit_launch_manifest.json"))
+# In-plate order: cards on the same visual row (y within this band) read
+# left-to-right by x; rows stack top-to-bottom. Mirrors the mock-v3 export sort.
+ROW_BAND_PX = 40
 LAYOUT_OUT = Path(os.environ.get(
     "COCKPIT_LAYOUT_OUT", SCRIPT_DIR / "cockpit_static" / "cockpit_layout.json"))
 
@@ -88,61 +90,62 @@ def _load_manifest_ports() -> dict:
     return {e["slug"]: e["port"] for e in data.get("entries", [])}
 
 
-def _parse_control_groups() -> list:
-    """Extract CONTROL_GROUPS from the live Lab app.js.
+def _load_contract() -> list:
+    """Load the Director layout contract: [(label, [card, ...]), ...].
 
-    The literal is ``Object.freeze([ ["Label", ["slug", ...]], ... ])`` — pure
-    double-quoted JSON once the freeze wrapper and any trailing commas are
-    stripped. Fail loud if it can't be found or parsed (the whole point is
-    build-time verification against the live Control Room)."""
-    text = CONTROL_SRC.read_text()
-    m = re.search(r"CONTROL_GROUPS\s*=\s*Object\.freeze\(\s*(\[[\s\S]*?\])\s*\)\s*;",
-                  text)
-    if not m:
-        raise SystemExit(
-            f"FATAL: CONTROL_GROUPS not found in {CONTROL_SRC} — cannot mirror "
-            "the live Control Room (scope §5.1).")
-    body = re.sub(r",(\s*[\]}])", r"\1", m.group(1))  # strip trailing commas
+    Each card is the raw contract dict (slug, display_name, app, x, y). This is
+    the Director's FINAL grouping + in-plate positions (mock-v3 export) and
+    REPLACES the Control-Room mirror as the grouping source (LAB_COCKPIT_REDESIGN_1
+    D1). Fail loud if the file is missing or malformed."""
     try:
-        arr = json.loads(body)
-    except json.JSONDecodeError as exc:
-        raise SystemExit(f"FATAL: CONTROL_GROUPS not JSON-parseable: {exc}")
-    return [(label, list(slugs)) for label, slugs in arr]
+        data = json.loads(CONTRACT_IN.read_text())
+    except (OSError, json.JSONDecodeError) as exc:
+        raise SystemExit(f"FATAL: cannot read layout contract {CONTRACT_IN}: {exc}")
+    plates = data.get("plates")
+    if not isinstance(plates, list) or not plates:
+        raise SystemExit(f"FATAL: layout contract has no plates: {CONTRACT_IN}")
+    out = []
+    for p in plates:
+        label = p.get("label")
+        cards = p.get("cards") or []
+        if not label:
+            raise SystemExit(f"FATAL: contract plate missing label: {p}")
+        out.append((label, list(cards)))
+    return out
+
+
+def _order_in_plate(cards: list) -> list:
+    """Row-band sort (mock export rule): group cards whose y is within
+    ROW_BAND_PX of a row's anchor, order rows top→bottom, within a row left→right
+    by x. Keeps B1–B4 (one row) left-to-right and cowork rows below terminals."""
+    bands: list[dict] = []
+    for c in sorted(cards, key=lambda c: (c.get("y", 0), c.get("x", 0))):
+        y = c.get("y", 0)
+        band = next((b for b in bands if abs(y - b["y0"]) <= ROW_BAND_PX), None)
+        if band is None:
+            bands.append({"y0": y, "items": [c]})
+        else:
+            band["items"].append(c)
+    ordered = []
+    for b in sorted(bands, key=lambda b: b["y0"]):
+        ordered.extend(sorted(b["items"], key=lambda c: c.get("x", 0)))
+    return ordered
 
 
 def build() -> dict:
     registry = _load_registry()
     ports = _load_manifest_ports()
-    control = _parse_control_groups()
+    contract = _load_contract()
 
     driveable = set(ports)                       # in the tmux launch manifest
     # Every active seat gets a card (lead #12208). A driveable card is a tmux
-    # seat; every other active seat is status-only. Matching only "app-claude"
-    # once silently dropped app-codex (codex-arch, #12205) and non-app actives
-    # like cortex (service); membership is now the whole active set.
+    # seat; every other active seat is status-only. Membership + grouping now
+    # come from the Director contract; the registry still gates which slugs are
+    # live (active) and supplies runtime/driveable/ports.
     active = {s for s, a in registry.items()
               if str(a.get("status")) == "active"}
     app_seats = {s for s, a in registry.items()
                  if str(a.get("runtime", "")).startswith("app-")}
-    card_slugs = active | driveable              # driveable ⊆ active in practice
-
-    # slug -> plate label, from the Control Room curation (mirror target).
-    plate_of: dict[str, str] = {}
-    plate_order: list[str] = []
-    for label, slugs in control:
-        if label not in plate_order:
-            plate_order.append(label)
-        for s in slugs:
-            plate_of.setdefault(s, label)
-
-    def resolve_plate(slug: str) -> str | None:
-        if slug in plate_of:
-            return plate_of[slug]
-        if slug.startswith("cowork-"):            # app sibling -> base plate
-            base = slug[len("cowork-"):]
-            if base in plate_of:
-                return plate_of[base]
-        return None
 
     def _kind_and_badge(slug: str, runtime: str):
         """Pill label + status-only badge for a card.
@@ -161,15 +164,17 @@ def build() -> dict:
         cat = (runtime.split("-")[0] or "seat")
         return cat.upper(), cat
 
-    def card_for(slug: str) -> dict:
+    def card_for(slug: str, contract_name: str | None = None) -> dict:
         a = registry.get(slug, {})
         runtime = str(a.get("runtime", ""))
         kind, badge = _kind_and_badge(slug, runtime)
+        # Director contract naming (de-Desked, mock-approved) wins where present;
+        # registry display_name is the fallback (D1/D2 reconciliation).
+        display = contract_name or a.get("display_name", slug)
         return {
             "slug": slug,
             "alias": (a.get("aliases") or [slug])[0] if isinstance(a.get("aliases"), list) else slug,
-            "agent_id": a.get("agent_id", ""),
-            "display_name": a.get("display_name", slug),
+            "display_name": display,
             "driveable": slug in driveable,
             "app_seat": slug in app_seats,
             "status_only": slug not in driveable,
@@ -178,42 +183,48 @@ def build() -> dict:
             "port": ports.get(slug),
         }
 
-    # Build plates in Control Room order; within a plate keep Control Room slug
-    # order (B1–B4 adjacency preserved), appending any base-slug-resolved extras.
+    # Build plates in contract order; in-plate order = row-band(y±40) then x.
+    # Fail loud on drift: a contract card whose slug is not an active registry
+    # seat, or a duplicate slug, is reported; an active seat the contract omits
+    # lands in a trailing "Unassigned" plate — never silently dropped (D1).
     plates: list[dict] = []
     placed: set[str] = set()
-    for label, slugs in control:
-        cards = []
-        for s in slugs:
-            if s in card_slugs and s not in placed:
-                cards.append(card_for(s)); placed.add(s)
-        # app-claude siblings resolved to this plate but not listed here
-        for s in sorted(card_slugs - placed):
-            if resolve_plate(s) == label:
-                cards.append(card_for(s)); placed.add(s)
-        if cards:
-            # de-dup label (Control Room lists each once, but be defensive)
-            existing = next((p for p in plates if p["label"] == label), None)
-            if existing:
-                existing["cards"].extend(cards)
-            else:
-                plates.append({"label": label, "cards": cards})
+    unknown: list[tuple] = []      # (slug, plate) — contract refs a non-active seat
+    duplicates: list[str] = []     # slug listed in >1 contract card
+    for label, cards in contract:
+        built = []
+        for c in _order_in_plate(cards):
+            slug = c.get("slug")
+            if not slug:
+                continue
+            if slug in placed:
+                duplicates.append(slug); continue
+            if slug not in active:
+                unknown.append((slug, label)); continue
+            built.append(card_for(slug, c.get("display_name")))
+            placed.add(slug)
+        if built:
+            plates.append({"label": label, "cards": built})
 
-    unplaced = sorted(card_slugs - placed)
-    if unplaced:
-        plates.append({"label": "Other",
-                       "cards": [card_for(s) for s in unplaced]})
+    unassigned = sorted(active - placed)
+    if unassigned:
+        plates.append({"label": "Unassigned",
+                       "cards": [card_for(s) for s in unassigned]})
 
+    drift = bool(unassigned or unknown or duplicates)
     return {
         "plates": plates,
         "counts": {
-            "cards": len(card_slugs),
-            "driveable": len(driveable & card_slugs),
-            "status_only": len(card_slugs - driveable),
-            "app_seat": len(app_seats & card_slugs),
-            "unplaced": len(unplaced),
+            "cards": len(placed) + len(unassigned),
+            "driveable": len(driveable & placed),
+            "status_only": len(placed - driveable) + len(unassigned),
+            "app_seat": len(app_seats & placed),
+            "unassigned": len(unassigned),
         },
-        "unplaced": unplaced,
+        "unassigned": unassigned,
+        "unknown": unknown,
+        "duplicates": duplicates,
+        "drift": drift,
     }
 
 
@@ -224,12 +235,13 @@ def render(result: dict) -> str:
         "_sources": {
             "registry": str(REGISTRY),
             "registry_sha256": _sha256(REGISTRY),
-            "control_groups_source": str(CONTROL_SRC),
-            "control_groups_sha256": _sha256(CONTROL_SRC),
+            "layout_contract": str(CONTRACT_IN),
+            "layout_contract_sha256": _sha256(CONTRACT_IN),
             "manifest": str(MANIFEST_IN),
         },
-        "_mirror": "plates + order mirror live Lab CONTROL_GROUPS (scope §5.1); "
-                   "membership reconciled with registry runtime + launch manifest",
+        "_grouping": "plates + order + in-plate position from the Director layout "
+                     "contract (LAB_COCKPIT_REDESIGN_1 D1); membership gated by "
+                     "registry active status + manifest driveable/ports",
         "counts": result["counts"],
     }
     return json.dumps(
@@ -249,10 +261,21 @@ def main() -> None:
     layout = render(result)
     c = result["counts"]
     print(f"cards {c['cards']} (driveable {c['driveable']}, status-only "
-          f"{c['status_only']}, unplaced {c['unplaced']})", file=sys.stderr)
+          f"{c['status_only']}, unassigned {c['unassigned']})", file=sys.stderr)
 
-    if args.strict and result["unplaced"]:
-        print(f"FATAL (--strict): unplaced cards: {', '.join(result['unplaced'])}",
+    # Fail loud on any contract/registry drift (D1): active seat the contract
+    # omits, contract card referencing a non-active seat, or a duplicate slug.
+    if result["unassigned"]:
+        print(f"DRIFT: active seats not in contract (Unassigned plate): "
+              f"{', '.join(result['unassigned'])}", file=sys.stderr)
+    if result["unknown"]:
+        print(f"DRIFT: contract cards not active in registry: "
+              f"{', '.join(f'{s} @{p}' for s, p in result['unknown'])}", file=sys.stderr)
+    if result["duplicates"]:
+        print(f"DRIFT: duplicate slugs in contract: "
+              f"{', '.join(result['duplicates'])}", file=sys.stderr)
+    if args.strict and result["drift"]:
+        print("FATAL (--strict): contract/registry drift — see DRIFT lines above.",
               file=sys.stderr)
         sys.exit(1)
 

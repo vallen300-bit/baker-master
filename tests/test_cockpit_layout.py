@@ -1,12 +1,11 @@
-"""LAB_COCKPIT_PAGE_1 — invariants of the generated cockpit page layout.
+"""LAB_COCKPIT_REDESIGN_1 — invariants of the generated cockpit page layout.
 
 These assert the committed artifact the cockpit page actually consumes
 (scripts/cockpit_static/cockpit_layout.json), plus the generator's pure
-CONTROL_GROUPS parser. No live registry / Control Room / manifest needed, so the
-test is deterministic and CI-safe.
+row-band order helper. No live registry / contract / manifest needed for the
+artifact assertions, so the test is deterministic and CI-safe.
 """
 import json
-import re
 from pathlib import Path
 
 import pytest
@@ -14,16 +13,28 @@ import pytest
 REPO = Path(__file__).resolve().parent.parent
 LAYOUT = REPO / "scripts" / "cockpit_static" / "cockpit_layout.json"
 
-# Plate labels + order mirror the live Lab Control Room (scope §5.1).
+# Plate labels + order come from the Director layout contract (D1).
 EXPECTED_PLATE_ORDER = [
-    "Control Tower", "Verification", "Specialists",
-    "Builders", "Matter desks", "Ground systems",
+    "Control Tower & VERIFICATION",
+    "ENGINEERING , TECHNICAL & STAFF MANAGEMENT",
+    "PILOTS & PILOT TEAMS",
+    "FLIGHTS SUPPORT & DOMAIN SPECIFIC",
+    "LEGAL ,FINANCIAL , PR, MARKETING & COMMUNICATIONS",
+    "INTERNS",
 ]
 
 
 @pytest.fixture(scope="module")
 def layout():
     return json.loads(LAYOUT.read_text())
+
+
+def _find(layout, slug):
+    for p in layout["plates"]:
+        for c in p["cards"]:
+            if c["slug"] == slug:
+                return p["label"], c
+    return None, None
 
 
 def test_layout_present_and_shaped(layout):
@@ -34,7 +45,8 @@ def test_layout_present_and_shaped(layout):
         for c in plate["cards"]:
             assert c["slug"], "card missing slug"
             assert c["display_name"], f"card {c['slug']} missing display_name"
-            assert re.match(r"AG-\d+", c["agent_id"]), f"{c['slug']} bad agent_id"
+            # AG pill dropped (D2) — no agent_id field is emitted.
+            assert "agent_id" not in c, f"{c['slug']} still carries agent_id"
             assert isinstance(c["driveable"], bool)
             assert isinstance(c["status_only"], bool)
             # a card is exactly one of driveable / status-only
@@ -44,17 +56,17 @@ def test_layout_present_and_shaped(layout):
                 assert c["status_only"], f"{c['slug']} app_seat but driveable"
 
 
-def test_plate_order_mirrors_control_room(layout):
+def test_plate_order_matches_contract(layout):
     labels = [p["label"] for p in layout["plates"]]
-    # every rendered plate is a known Control Room plate, in Control Room order
-    assert labels == [l for l in EXPECTED_PLATE_ORDER if l in labels], labels
-    assert "Other" not in labels, "unplaced cards leaked into an Other plate"
+    assert labels == EXPECTED_PLATE_ORDER, labels
+    assert "Unassigned" not in labels, "active seats missing from the contract"
 
 
 def test_builders_b1_to_b4_adjacent_in_order(layout):
-    builders = next((p for p in layout["plates"] if p["label"] == "Builders"), None)
-    assert builders, "no Builders plate"
-    slugs = [c["slug"] for c in builders["cards"]]
+    plate, _ = _find(layout, "b1")
+    eng = next((p for p in layout["plates"] if p["label"] == plate), None)
+    assert eng, "no plate containing b1"
+    slugs = [c["slug"] for c in eng["cards"]]
     idx = [slugs.index(b) for b in ("b1", "b2", "b3", "b4")]
     assert idx == sorted(idx), f"B1–B4 not in order: {slugs}"
     assert idx[-1] - idx[0] == 3, f"B1–B4 not adjacent: {slugs}"
@@ -70,91 +82,74 @@ def test_counts_consistent(layout):
     if meta:
         assert meta["driveable"] == drive
         assert meta["status_only"] == status
-        assert meta.get("unplaced", 0) == 0
+        assert meta.get("unassigned", 0) == 0
+    assert len(cards) == 43, f"expected 43 cards, got {len(cards)}"
 
 
-def test_codex_arch_carded_as_app_seat_in_verification(layout):
-    """Regression (lead #12205): codex-arch (runtime app-codex) is active +
-    bus-enabled and Control-Room-listed, so it must render as a status-only app
-    card in the Verification plate next to codex — not be silently dropped by an
-    app-claude-only membership filter."""
-    verification = next(
-        (p for p in layout["plates"] if p["label"] == "Verification"), None)
-    assert verification, "no Verification plate"
-    by_slug = {c["slug"]: c for c in verification["cards"]}
-    assert "codex-arch" in by_slug, \
-        f"codex-arch missing from Verification: {list(by_slug)}"
-    card = by_slug["codex-arch"]
-    assert card["app_seat"] is True and card["driveable"] is False, \
-        "codex-arch must be a status-only app seat (app-codex, no tmux terminal)"
+def test_contract_display_names_applied(layout):
+    """Director contract names (de-Desked, mock-approved) win over registry."""
+    for slug, name in (("lead", "Lead"), ("aid", "AID T"),
+                       ("clerk", "Clerk Qwen"), ("cowork-ao-desk", "Cowork AO")):
+        _, c = _find(layout, slug)
+        assert c and c["display_name"] == name, \
+            f"{slug} name {c and c['display_name']!r} != {name!r}"
 
 
-def test_no_app_runtime_seat_silently_dropped(layout):
-    """Any registry seat with an app-* runtime that the Control Room places must
-    surface as an app_seat card — generalizes the codex-arch fix beyond app-claude."""
-    carded = {c["slug"] for p in layout["plates"] for c in p["cards"]}
-    # codex-arch is the representative app-codex seat; assert it is carded and
-    # marked app_seat (broader registry-vs-layout reconciliation is a live check).
-    assert "codex-arch" in carded
+def test_codex_arch_app_seat_in_control_tower(layout):
+    """Regression (lead #12205): codex-arch (app-codex) is a status-only app card;
+    the contract places it in the Control Tower & VERIFICATION plate."""
+    plate, c = _find(layout, "codex-arch")
+    assert c, "codex-arch missing"
+    assert c["app_seat"] is True and c["driveable"] is False
+    assert plate == "Control Tower & VERIFICATION", plate
 
 
-def _find(layout, slug):
-    for p in layout["plates"]:
-        for c in p["cards"]:
-            if c["slug"] == slug:
-                return p["label"], c
-    return None, None
-
-
-def test_scopeadd_driveable_seats_carded(layout):
-    """lead #12212/#12222: clerk, clerk-haiku, deep55 are real Terminal seats —
-    each must be a DRIVEABLE card in the Specialists plate."""
+def test_scopeadd_driveable_seats_in_interns(layout):
+    """lead #12212/#12222 + contract: clerk, clerk-haiku, deep55 are driveable
+    Terminal seats grouped in the INTERNS plate."""
     for slug in ("clerk", "clerk-haiku", "deep55"):
         plate, c = _find(layout, slug)
-        assert c, f"{slug} missing from layout"
-        assert c["driveable"] is True and c["status_only"] is False, \
-            f"{slug} must be driveable"
-        assert plate == "Specialists", f"{slug} in {plate}, expected Specialists"
+        assert c, f"{slug} missing"
+        assert c["driveable"] is True and c["status_only"] is False, f"{slug} not driveable"
+        assert plate == "INTERNS", f"{slug} in {plate}, expected INTERNS"
 
 
 def test_cortex_status_only_service_card(layout):
-    """lead #12208/#12214: cortex (runtime service) is active + bus-enabled and
-    must render as a status-only card badged 'service' — the membership
-    generalization beyond app-* seats."""
-    plate, c = _find(layout, "cortex")
-    assert c, "cortex missing from layout"
+    """cortex (runtime service) → status-only card badged 'service'."""
+    _, c = _find(layout, "cortex")
+    assert c, "cortex missing"
     assert c["status_only"] is True and c["driveable"] is False
-    assert c["app_seat"] is False and c["badge"] == "service"
-    assert c["kind"] == "SERVICE"
+    assert c["app_seat"] is False and c["badge"] == "service" and c["kind"] == "SERVICE"
 
 
 def test_every_card_has_kind_and_shape(layout):
-    """Every card carries the fields the page renders: kind + status_only + badge key."""
     for p in layout["plates"]:
         for c in p["cards"]:
             assert c["kind"], f"{c['slug']} missing kind"
             assert "badge" in c, f"{c['slug']} missing badge key"
-            # driveable cards never carry a badge; status-only non-app may.
             if c["driveable"]:
                 assert c["badge"] is None, f"{c['slug']} driveable but badged"
 
 
-def test_generator_parses_control_groups_literal():
-    """The generator must extract CONTROL_GROUPS as JSON (mirror-at-build)."""
+def _load_generator():
     import importlib.util
     spec = importlib.util.spec_from_file_location(
         "gcl", REPO / "scripts" / "generate_cockpit_layout.py")
     gcl = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(gcl)
-    sample = (
-        'const CONTROL_GROUPS = Object.freeze([\n'
-        '  ["Control Tower", ["lead", "deputy-codex"]],\n'
-        '  ["Builders", ["b1", "b2", "b3", "b4"]],\n'
-        ']);\n'
-    )
-    body = re.search(
-        r"CONTROL_GROUPS\s*=\s*Object\.freeze\(\s*(\[[\s\S]*?\])\s*\)\s*;", sample
-    ).group(1)
-    arr = json.loads(re.sub(r",(\s*[\]}])", r"\1", body))
-    assert arr[0][0] == "Control Tower"
-    assert arr[1][1] == ["b1", "b2", "b3", "b4"]
+    return gcl
+
+
+def test_generator_orders_by_row_band():
+    """_order_in_plate groups a visual row (y within ROW_BAND_PX) left→right by x,
+    stacks rows top→bottom — the mock-v3 export rule."""
+    gcl = _load_generator()
+    cards = [
+        {"slug": "d", "x": 260, "y": 77},   # second row (cowork)
+        {"slug": "a", "x": 11, "y": 2},     # first row
+        {"slug": "c", "x": 387, "y": 0},    # first row
+        {"slug": "b", "x": 137, "y": 0},    # first row
+        {"slug": "e", "x": 138, "y": 76},   # second row
+    ]
+    ordered = [c["slug"] for c in gcl._order_in_plate(cards)]
+    assert ordered == ["a", "b", "c", "e", "d"], ordered
