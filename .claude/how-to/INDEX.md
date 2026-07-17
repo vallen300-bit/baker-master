@@ -13,6 +13,7 @@
 - [Cheap OCR for desks](~/baker-vault/_ops/how-to/cheap-ocr-desk.md) — `desk-ocr <image>` = free on-device Apple Vision OCR for number-in-image docs. Never feed flat PNGs/charts to Opus vision just to read digits.
 - [Bluewin private email read](.claude/how-to/bluewin-read-via-mail-app.md) — dvallen@bluewin.ch in Baker cloud pipeline (baker_email_search source="bluewin", live since 2026-06-09); Mail.app AppleScript for pre-06-09 history
 - [Forge snapshot pusher install](.claude/how-to/forge-snapshot-push-install.md) — `FORGE_KEY=… bash scripts/install_forge_push.sh` from a **Terminal** (not Cowork — ~15s ~/Library wipe); KeepAlive-hardened, self-resumes on reboot/crash. Feeds Brisen Lab card telemetry
+- [Baker Cockpit (fleet page)](.claude/how-to/lab-cockpit.md) — local Director page at http://127.0.0.1:7800/; Lab-style card grid, click a seat → its real terminal in-page, GO/Start buttons. Deploy/refresh, regenerate plate layout, add a pilot, failure modes
 
 ## Adding a new how-to
 
