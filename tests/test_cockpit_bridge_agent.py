@@ -152,6 +152,87 @@ async def test_ping_replies_pong():
     assert [f.type for f in frames] == [mux.PONG]
 
 
+class FakeUpstreamWS:
+    """Agent-side upstream (ttyd) double: async-iterates canned messages."""
+
+    def __init__(self, messages, subprotocol="tty"):
+        self._messages = list(messages)
+        self.subprotocol = subprotocol
+        self.sent = []
+        self.closed = False
+
+    async def __aenter__(self):
+        return self
+
+    async def __aexit__(self, *exc):
+        self.closed = True
+        return False
+
+    def __aiter__(self):
+        return self._gen()
+
+    async def _gen(self):
+        for m in self._messages:
+            yield m
+
+    async def send(self, data):
+        self.sent.append(data)
+
+    async def close(self):
+        self.closed = True
+
+
+@pytest.mark.asyncio
+async def test_handle_ws_acks_and_pipes(monkeypatch, tmp_path):
+    cred = tmp_path / "credentials"
+    cred.write_text("u:p")
+    agent = agent_mod.BridgeAgent(lab_ws="wss://x", upstream="http://127.0.0.1:7800", cred_path=str(cred))
+
+    captured = {}
+
+    def fake_connect(target, **kwargs):
+        captured["target"] = target
+        captured["headers"] = kwargs.get("additional_headers")
+        captured["subprotocols"] = kwargs.get("subprotocols")
+        return FakeUpstreamWS(messages=["term-output"], subprotocol="tty")
+
+    monkeypatch.setattr(agent_mod, "ws_connect", fake_connect)
+
+    lab_ws = FakeWS()
+    inbound = asyncio.Queue()
+    head = {"path": "/term/b1/ws", "query": "", "headers": {}, "subprotocols": ["tty"]}
+    await agent._handle_ws(lab_ws, 3, head, inbound)
+
+    # Upstream dialed at the ws:// authority with the ttyd path; NO manual Host.
+    assert captured["target"] == "ws://127.0.0.1:7800/term/b1/ws"
+    assert "Host" not in captured["headers"]
+    assert captured["headers"]["Origin"] == "http://127.0.0.1:7800"
+    assert captured["headers"]["Authorization"].startswith("Basic ")
+
+    frames, _ = mux.iter_frames(b"".join(lab_ws.sent))
+    types = [f.type for f in frames]
+    # WS_OPEN ack (with subprotocol), WS_DATA(term-output), then WS_CLOSE.
+    assert types[0] == mux.WS_OPEN
+    assert json.loads(frames[0].payload.decode())["subprotocol"] == "tty"
+    assert mux.WS_DATA in types
+    data_frame = next(f for f in frames if f.type == mux.WS_DATA)
+    assert data_frame.payload == bytes([mux.WS_KIND_TEXT]) + b"term-output"
+    assert types[-1] == mux.WS_CLOSE
+
+
+@pytest.mark.asyncio
+async def test_ws_frames_route_to_stream_queue():
+    agent = agent_mod.BridgeAgent(lab_ws="wss://x", upstream="http://127.0.0.1:7800", cred_path="/none")
+    ws = FakeWS()
+    q = asyncio.Queue()
+    agent._ws_streams[4] = q
+    await agent._on_frame(ws, mux.Frame(4, mux.WS_DATA, bytes([mux.WS_KIND_TEXT]) + b"x"))
+    await agent._on_frame(ws, mux.Frame(4, mux.WS_CLOSE, b""))
+    assert q.qsize() == 2
+    assert q.get_nowait().type == mux.WS_DATA
+    assert q.get_nowait().type == mux.WS_CLOSE
+
+
 @pytest.mark.asyncio
 async def test_upstream_error_sends_502(tmp_path):
     import httpx

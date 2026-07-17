@@ -99,6 +99,27 @@ def build_fake_controller() -> FastAPI:
         body = await req.body()
         return JSONResponse({"ok": True, "path": path, "echo": body.decode() or None})
 
+    @app.websocket("/term/{slug}/{tail:path}")
+    async def fake_ttyd(ws: WebSocket, slug: str, tail: str = ""):
+        # Prove the agent injected Basic-auth on the upstream WS connect.
+        want = "Basic " + base64.b64encode(CRED.encode()).decode()
+        if ws.headers.get("authorization") != want:
+            await ws.close(code=1008)
+            return
+        offered = [p.strip() for p in ws.headers.get("sec-websocket-protocol", "").split(",") if p.strip()]
+        await ws.accept(subprotocol="tty" if "tty" in offered else None)
+        try:
+            while True:
+                msg = await ws.receive()
+                if msg.get("type") == "websocket.disconnect":
+                    return
+                if msg.get("text") is not None:
+                    await ws.send_text("echo:" + msg["text"])
+                elif msg.get("bytes") is not None:
+                    await ws.send_bytes(b"echo:" + msg["bytes"])
+        except WebSocketDisconnect:
+            return
+
     return app
 
 
@@ -152,6 +173,21 @@ def build_lab_app() -> FastAPI:
     @app.post("/cockpit/{path:path}")
     async def cockpit_post(req: Request, path: str):
         return await _proxy(req, path)
+
+    @app.websocket("/cockpit/term/{slug}/{tail:path}")
+    async def cockpit_term_ws(ws: WebSocket, slug: str, tail: str = ""):
+        if not cb.cockpit_embed_enabled():
+            await ws.close(code=1008, reason="disabled")
+            return
+        origin = ws.headers.get("origin", "")
+        expected = cb._expected_origin()
+        if origin and origin != expected:
+            await ws.close(code=1008, reason="bad origin")
+            return
+        path = f"/term/{slug}/{tail}" if tail else f"/term/{slug}"
+        headers = cb.sanitize_request_headers(ws.headers)
+        subprotocols = [p.strip() for p in ws.headers.get("sec-websocket-protocol", "").split(",") if p.strip()]
+        await cb.get_bridge().proxy_ws(ws, path, ws.url.query, headers, subprotocols)
 
     return app
 
@@ -237,6 +273,34 @@ async def run_probe():
             r2 = await client.get(base + "/cockpit/api/agents", headers=origin)
             check("flag OFF -> 404 on /cockpit paths", r1.status_code == 404 and r2.status_code == 404,
                   f"page={r1.status_code} api={r2.status_code}")
+            os.environ["COCKPIT_EMBED_ENABLED"] = "1"
+
+            # 6b. Phase 2 — ttyd WS live terminal round-trip through the bridge.
+            try:
+                from websockets.asyncio.client import connect as _wsc
+            except ImportError:
+                from websockets import connect as _wsc  # type: ignore
+            ws_url = f"ws://127.0.0.1:{lab_port}/cockpit/term/b1/ws"
+            try:
+                async with _wsc(ws_url, additional_headers={"Origin": base},
+                                subprotocols=["tty"]) as term:
+                    await term.send("hello-term")
+                    reply = await asyncio.wait_for(term.recv(), timeout=5)
+                    sub = getattr(term, "subprotocol", None)
+                    check("Phase2 ttyd WS round-trip (echo + subprotocol)",
+                          reply == "echo:hello-term" and sub == "tty", f"reply={reply!r} sub={sub!r}")
+            except Exception as exc:  # noqa: BLE001
+                check("Phase2 ttyd WS round-trip (echo + subprotocol)", False, f"exc={exc}")
+
+            # 6c. Phase 2 — flag OFF closes the terminal WS (never opens).
+            os.environ["COCKPIT_EMBED_ENABLED"] = "0"
+            ws_closed = False
+            try:
+                async with _wsc(ws_url, additional_headers={"Origin": base}, subprotocols=["tty"]) as term:
+                    await asyncio.wait_for(term.recv(), timeout=2)
+            except Exception:
+                ws_closed = True
+            check("Phase2 flag OFF -> terminal WS refused", ws_closed)
             os.environ["COCKPIT_EMBED_ENABLED"] = "1"
 
             # 7. agent absent -> 503

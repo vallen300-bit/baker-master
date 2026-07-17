@@ -144,8 +144,11 @@ class BridgeAgent:
         # host:port authority the controller's OriginGuard expects.
         self._authority = self.upstream.split("://", 1)[-1]
         self._streams: dict[int, dict] = {}
+        self._ws_streams: dict[int, "asyncio.Queue"] = {}
         self._send_lock = asyncio.Lock()
         self._client: Optional[httpx.AsyncClient] = None
+        # ws:// base for dialing the controller's ttyd proxy (http->ws, https->wss).
+        self._ws_upstream = ("wss://" if self.upstream.startswith("https://") else "ws://") + self._authority
 
     # -- one connection ------------------------------------------------------
 
@@ -213,7 +216,18 @@ class BridgeAgent:
                 self._streams.pop(frame.stream_id, None)
                 asyncio.create_task(self._handle_request(ws, frame.stream_id, st))
             return
-        # WS_* frames (Phase 2) handled elsewhere; ignore here.
+        # --- Phase 2: proxied ttyd websocket ---
+        if frame.type == mux.WS_OPEN:
+            head = json.loads(frame.payload.decode("utf-8")) if frame.payload else {}
+            q: "asyncio.Queue" = asyncio.Queue()
+            self._ws_streams[frame.stream_id] = q
+            asyncio.create_task(self._handle_ws(ws, frame.stream_id, head, q))
+            return
+        if frame.type in (mux.WS_DATA, mux.WS_CLOSE):
+            q = self._ws_streams.get(frame.stream_id)
+            if q is not None:
+                q.put_nowait(frame)
+            return
 
     async def _handle_request(self, ws, stream_id: int, st: dict) -> None:
         head = st["head"]
@@ -244,6 +258,77 @@ class BridgeAgent:
                 await self._send(ws, chunk)
         except Exception:
             pass
+
+    # -- Phase 2: proxied ttyd websocket -------------------------------------
+
+    async def _handle_ws(self, lab_ws, sid: int, head: dict, inbound: "asyncio.Queue") -> None:
+        """Dial the laptop controller's ttyd WS and pipe it to the Lab over mux."""
+        path = head.get("path", "/")
+        query = head.get("query", "")
+        target = self._ws_upstream + path + (("?" + query) if query else "")
+        subprotocols = head.get("subprotocols") or []
+        # NB: do NOT set Host manually — the websockets client derives it from the
+        # target URI (== the controller authority the OriginGuard expects); a manual
+        # duplicate corrupts the handshake (400). Origin is what OriginGuard checks.
+        upstream_headers = {"Origin": self.upstream}
+        auth = load_basic_auth(self.cred_path)
+        if auth:
+            upstream_headers["Authorization"] = auth
+        connect_kwargs = {"additional_headers": upstream_headers}
+        if subprotocols:
+            connect_kwargs["subprotocols"] = subprotocols
+        try:
+            async with ws_connect(target, **connect_kwargs) as upstream:
+                chosen = getattr(upstream, "subprotocol", None)
+                ack = json.dumps({"subprotocol": chosen}, separators=(",", ":")).encode("utf-8")
+                await self._send(lab_ws, mux.encode_frame(sid, mux.WS_OPEN, ack))
+                pump_up = asyncio.create_task(self._ws_upstream_to_lab(lab_ws, sid, upstream))
+                pump_down = asyncio.create_task(self._ws_lab_to_upstream(inbound, upstream))
+                done, pending = await asyncio.wait(
+                    {pump_up, pump_down}, return_when=asyncio.FIRST_COMPLETED)
+                for t in pending:
+                    t.cancel()
+                for t in pending:
+                    try:
+                        await t
+                    except (asyncio.CancelledError, Exception):
+                        pass
+        except Exception as exc:  # noqa: BLE001 — surface as a clean close, never crash
+            LOG.info("ttyd ws dial failed stream=%s: %s", sid, exc)
+            await self._send(lab_ws, mux.encode_frame(sid, mux.WS_CLOSE, b""))
+        finally:
+            self._ws_streams.pop(sid, None)
+            await self._send(lab_ws, mux.encode_frame(sid, mux.WS_CLOSE, b""))
+
+    async def _ws_upstream_to_lab(self, lab_ws, sid: int, upstream) -> None:
+        try:
+            async for message in upstream:
+                if isinstance(message, str):
+                    payload = bytes([mux.WS_KIND_TEXT]) + message.encode("utf-8")
+                else:
+                    payload = bytes([mux.WS_KIND_BINARY]) + message
+                if len(payload) > mux.MAX_FRAME_PAYLOAD:
+                    continue
+                await self._send(lab_ws, mux.encode_frame(sid, mux.WS_DATA, payload))
+        except ConnectionClosed:
+            return
+
+    async def _ws_lab_to_upstream(self, inbound: "asyncio.Queue", upstream) -> None:
+        try:
+            while True:
+                frame = await inbound.get()
+                if frame.type == mux.WS_CLOSE:
+                    await upstream.close()
+                    return
+                if frame.type != mux.WS_DATA or not frame.payload:
+                    continue
+                kind, data = frame.payload[0], frame.payload[1:]
+                if kind == mux.WS_KIND_TEXT:
+                    await upstream.send(data.decode("utf-8", "replace"))
+                else:
+                    await upstream.send(data)
+        except ConnectionClosed:
+            return
 
     async def _proxy_to_controller(self, head: dict, body: bytes) -> httpx.Response:
         assert self._client is not None
