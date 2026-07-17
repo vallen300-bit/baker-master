@@ -9,8 +9,10 @@
   --bg: #0d1117;
   --panel: #161b22;
   --border: #30363d;
-  --text: #e6edf3;
-  --muted: #8b949e;
+  /* D2 correction (Director "much brighter"): lettering stepped toward white;
+     both stay clear AA on the near-black plate/card fills. */
+  --text: #f4f8fe;
+  --muted: #aeb8c6;
   --accent: #388bfd;
   --working: #d29922;
   --needs-go: #2bd964;
@@ -79,25 +81,25 @@ main.wrap { padding: 22px 24px 60px; }
 }
 .plate > h2 .count { color: var(--down); margin-left: 8px; letter-spacing: normal; }
 
-/* Narrower + taller cards (D2) — Lab proportions, more columns per row so the
-   fleet reads down the vertical screen length. Fixed 148px columns keep every
-   card the same width; cowork/app cards match exactly (D2). */
+/* LANDSCAPE cards (D2 correction, Director "longer, but not so high"): wider
+   than before + low height for vertical screen economy. Flexible columns fill
+   the row so every card is wide; cowork/app cards match exactly (D2). */
 .grid {
   display: grid;
-  grid-template-columns: repeat(auto-fill, 148px);
-  gap: 11px;
+  grid-template-columns: repeat(auto-fill, minmax(196px, 1fr));
+  gap: 10px;
 }
 
 /* Card — Lab register: flat fill + drop shadow so the card lifts off the
-   graded plate (D2). Portrait-leaning via min-height. */
+   graded plate (D2). Landscape: wide + low, content laid out compactly. */
 .card {
   background: #1c2330;
   border: 1px solid var(--border);
   border-radius: 9px;
-  padding: 10px 11px 11px;
+  padding: 9px 12px 10px;
   cursor: pointer;
-  display: flex; flex-direction: column; gap: 6px;
-  min-height: 122px;
+  display: flex; flex-direction: column; gap: 4px;
+  min-height: 78px;
   box-shadow: 0 3px 8px rgba(0,0,0,.5), 0 1px 2px rgba(0,0,0,.35);
   transition: border-color 120ms, box-shadow 140ms, transform 140ms;
 }
