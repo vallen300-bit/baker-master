@@ -116,7 +116,15 @@ emergency_recover() {
     cp -p "$PROFILE_BACKUP.plist.bak" "$TERMINAL_PLIST" 2>/dev/null || true
   fi
   killall cfprefsd 2>/dev/null || true
-  # 2. tear down ALL cockpit substrate (tmux + ttyd) so nothing is left half-up.
+  # 2. clear the ledger (all-pending) BEFORE teardown, atomically. Order matters:
+  #    if a later teardown step fails, the ledger already says pending, so the worst
+  #    residue is a harmless orphan tmux session — never a "migrated but no session"
+  #    seat (codex 019f715a finding 1). Atomic temp+mv so a failed write can't leave
+  #    a half-written ledger either.
+  if printf '{}' > "$LEDGER.tmp" 2>/dev/null && mv -f "$LEDGER.tmp" "$LEDGER" 2>/dev/null; then :; else
+    rm -f "$LEDGER" 2>/dev/null || true   # last resort: absent ledger reads as all-pending
+  fi
+  # 3. tear down ALL cockpit substrate (tmux + ttyd) so nothing is left half-up.
   local s tp
   while IFS= read -r s; do
     [ -n "$s" ] || continue
@@ -124,8 +132,6 @@ emergency_recover() {
     if [ -f "$tp" ]; then launchctl unload "$tp" 2>/dev/null || true; rm -f "$tp" 2>/dev/null || true; fi
     if session_up "$s"; then tmux kill-session -t "=$s" 2>/dev/null || true; fi
   done < <(manifest_slugs 2>/dev/null || true)
-  # 3. clear the ledger (all-pending) — the consistent partner of all-baseline.
-  echo '{}' > "$LEDGER" 2>/dev/null || true
   # 4. bring Terminal back so agents relaunch via the restored direct-alias profiles.
   osascript -e 'tell application "Terminal" to activate' >/dev/null 2>&1 || true
   echo "!! recovery done: BASELINE forced (all direct-alias, substrate down, ledger cleared)." >&2
@@ -356,11 +362,19 @@ EOF
   CUTOVER_DONE=1
   trap - EXIT INT TERM
 
-  echo "CUTOVER COMPLETE: $pass passed, $fail failed.${failed_seats:+ Rolled back:$failed_seats}"
+  if [ "$rberr" -gt 0 ]; then
+    echo "CUTOVER FINISHED WITH ROLLBACK ERRORS: $pass passed, $fail failed, $rberr rollback(s) INCOMPLETE.${failed_seats:+ Seats:$failed_seats}"
+  else
+    echo "CUTOVER COMPLETE: $pass passed, $fail failed.${failed_seats:+ Rolled back:$failed_seats}"
+  fi
   [ "$tup" = "1" ] && echo "Terminal.app relaunched (native windows reopen per Terminal's own restore; the cockpit surface is the :7800 web page + tmux, which do not depend on native windows)." \
                    || echo "WARNING: Terminal.app did NOT come back up within 10s — relaunch it manually; the tmux+ttyd substrate is unaffected."
-  [ "$fail" -eq 0 ] || echo "NOTE: failed seats' profiles restored to direct alias (durable — written while Terminal was down)."
-  [ "$rberr" -eq 0 ] || { echo "ERROR: $rberr seat rollback(s) INCOMPLETE — see $WAVE_LOG; do not consider the cutover clean."; }
+  # Only claim "restored to direct alias" when EVERY rollback actually succeeded
+  # (codex 019f715a finding 2 — never print success text over an errored rollback).
+  if [ "$fail" -gt 0 ] && [ "$rberr" -eq 0 ]; then
+    echo "NOTE: the $fail failed seat(s) were rolled back — profiles restored to direct alias (durable, written while Terminal was down)."
+  fi
+  [ "$rberr" -eq 0 ] || echo "ERROR: $rberr seat rollback(s) INCOMPLETE — profile restore/teardown errored; see $WAVE_LOG. Do NOT consider the cutover clean; inspect those seats by hand."
   echo "Wave report: $WAVE_LOG"
   [ "$rberr" -eq 0 ] || return 1
 }

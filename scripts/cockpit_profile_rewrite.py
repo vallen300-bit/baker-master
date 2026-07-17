@@ -127,6 +127,16 @@ def cmd_rewrite(args) -> None:
         profile, slug, alias = e.get("profile"), e.get("slug"), e.get("alias")
         if not (profile and slug and alias):
             _die(4, f"manifest entry missing profile/slug/alias: {e}")
+        # Quoting guard (codex 019f715a finding 5): the wrapper single-quotes the
+        # alias and space-delimits the slug — an alias with a quote or a slug with
+        # whitespace/quote would build a broken CommandString. Fail loud rather than
+        # emit an unparseable wrapper. (No current seat trips this.)
+        if "'" in alias or '"' in alias:
+            _die(4, f"alias '{alias}' (seat {slug}) contains a quote — unsupported "
+                    "(the tmux wrapper single-quotes the alias).")
+        if '"' in slug or "'" in slug or any(c.isspace() for c in slug):
+            _die(4, f"slug '{slug}' contains whitespace or a quote — unsupported "
+                    "(the tmux wrapper space-delimits the session name).")
         if profile not in win:
             _die(4, f"profile '{profile}' (seat {slug}) not present in {plist} "
                     "Window Settings — cannot rewrite a profile that isn't there.")
@@ -140,6 +150,25 @@ def cmd_rewrite(args) -> None:
                     f"'{current}', expected the bare alias '{alias}' or the wrapper. "
                     "Refusing to rewrite an unexpected value — fix the seat first.")
         planned.append((profile, slug, alias, current, new))
+
+    # Load any existing backup up front — the recoverability check below applies to
+    # BOTH plan-only and the real run (codex 019f715a finding 4: a green dry-run must
+    # not hide a rewrite that would _die).
+    existing: dict[str, str] = {}
+    if backup.exists():
+        try:
+            existing = json.loads(backup.read_text())
+        except Exception:  # noqa: BLE001
+            existing = {}
+    # Every ALREADY-wrapped profile must have a recoverable original in the backup,
+    # else it can never be rolled back (mixed wrapped/bare + no backup). Fail loud —
+    # in plan-only too — before anything is written.
+    missing = [p for p in already if p not in existing]
+    if missing:
+        _die(4, f"profiles already at the wrapper with NO backup entry: {missing}. "
+                "Their original CommandString is unrecoverable — refusing rather than "
+                f"proceeding with an incomplete rollback source. Restore from "
+                f"{backup}.plist.bak or repair the backup first.")
 
     if args.plan_only:
         summary = {
@@ -155,34 +184,18 @@ def cmd_rewrite(args) -> None:
         print(json.dumps(summary, indent=2))
         return
 
-    # Snapshot originals for exactly the profiles we will change (merge-preserve if
-    # --force re-runs over an existing backup: never lose a true original).
-    snapshot: dict[str, str] = {}
-    if backup.exists():
-        try:
-            snapshot = json.loads(backup.read_text())
-        except Exception:  # noqa: BLE001
-            snapshot = {}
+    # Snapshot originals = existing backup + the bare-alias originals of what we will
+    # change (merge-preserve: never lose a true original across reruns).
+    snapshot = dict(existing)
     for profile, slug, alias, current, new in planned:
         snapshot.setdefault(profile, current)   # current == bare alias here
-    # Never write a degenerate/empty rollback source (codex 019f713a finding 4):
-    # if there is nothing to preserve AND no prior backup, a later failed seat
-    # would have no original to restore. Refuse loudly instead of writing "{}".
+    # Never write a degenerate/empty rollback source: nothing to preserve AND no
+    # prior backup means a later failed seat would have no original to restore.
     if not snapshot:
         _die(4, "refusing to write an empty backup: every eligible profile is "
                 "already at the wrapper and no prior backup exists, so no original "
                 "CommandString can be recovered. If this is a re-run, restore from "
                 f"{backup}.plist.bak or regenerate originals before proceeding.")
-    # Every ALREADY-wrapped profile must have a recoverable original in the backup,
-    # else it can never be rolled back (codex 019f714a finding 4: a mixed
-    # wrapped/bare plist with no backup would otherwise pass the empty guard and
-    # leave the wrapped seat unrecoverable). Fail loud on any such gap.
-    missing = [p for p in already if p not in snapshot]
-    if missing:
-        _die(4, f"profiles already at the wrapper with NO backup entry: {missing}. "
-                "Their original CommandString is unrecoverable — refusing rather than "
-                f"proceeding with an incomplete rollback source. Restore from "
-                f"{backup}.plist.bak or repair the backup first.")
     _atomic_write_text(backup, json.dumps(snapshot, indent=2, sort_keys=True) + "\n")
 
     # Apply the rewrite.

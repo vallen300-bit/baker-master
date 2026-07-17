@@ -206,6 +206,11 @@ def test_mixed_wrapper_no_backup_fails_loud(tmp_path):
              "--backup", str(backup), "--allow-running")
     assert r.returncode == 4, (r.returncode, r.stderr)
     assert not backup.exists()
+    # dry-run (--plan-only) must ALSO surface the unrecoverable state, not print a
+    # clean plan that the real run would _die on (codex 019f715a finding 4).
+    r2 = _run("rewrite", "--manifest", str(manifest), "--plist", str(plist),
+              "--backup", str(backup), "--plan-only")
+    assert r2.returncode == 4, (r2.returncode, r2.stderr)
 
 
 def test_generator_unwraps_cutover_commandstring():

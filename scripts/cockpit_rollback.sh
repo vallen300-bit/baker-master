@@ -123,26 +123,36 @@ case "${1:-}" in
     ;;
   full)
     [ "${2:-}" = "--relaunch" ] && RELAUNCH=1
-    # Only a POST-cutover full rollback (a profile backup exists) needs the
-    # coordinated Terminal quit for a durable profile restore. A Phase-1 cleanup
-    # (no backup, substrate teardown only) must NOT quit the whole fleet (codex
-    # 019f714a finding 3).
     if [ -f "$PROFILE_BACKUP" ]; then
+      # POST-cutover abort: quit Terminal once (durable profile restore), roll back
+      # every seat with NO per-seat relaunch (would restart Terminal mid-loop), then
+      # a SINGLE relaunch at the end. Seats reopen via the restored direct-alias
+      # profiles / Terminal's own window restore.
       quit_terminal_if_up
-    fi
-    while IFS= read -r slug; do
-      [ -n "$slug" ] && rollback_one "$slug" 0
-    done < <(manifest_slugs)
-    if [ "$RELAUNCH" = "1" ] || [ "$QUIT_DONE" = "1" ]; then
-      osascript -e 'tell application "Terminal" to activate' >/dev/null 2>&1 || true
-      echo "  Terminal relaunched; seats reopen via the restored direct-alias profiles."
-    fi
-    if [ ! -f "$PROFILE_BACKUP" ]; then
-      echo "full rollback complete (Phase-1: substrate teardown only; no profiles to restore)."
-    elif [ "$QUIT_DONE" = "1" ]; then
-      echo "full rollback complete (profiles restored while Terminal was down -> durable)."
+      while IFS= read -r slug; do
+        [ -n "$slug" ] && rollback_one "$slug" 0
+      done < <(manifest_slugs)
+      if [ "$RELAUNCH" = "1" ] || [ "$QUIT_DONE" = "1" ]; then
+        osascript -e 'tell application "Terminal" to activate' >/dev/null 2>&1 || true
+        echo "  Terminal relaunched."
+      fi
+      if [ "$QUIT_DONE" = "1" ]; then
+        echo "full rollback complete (profiles restored while Terminal was down -> durable)."
+      else
+        echo "WARNING: full rollback restored profiles ON DISK but Terminal did not quit -> NOT durable until a manual Terminal restart."
+      fi
     else
-      echo "WARNING: full rollback restored profiles ON DISK but Terminal did not quit -> NOT durable until a manual Terminal restart."
+      # Phase-1 cleanup (no profiles were ever rewritten): substrate teardown only,
+      # do NOT quit the fleet. Honor --relaunch as a PER-SEAT direct-alias re-seat
+      # (codex 019f715a finding 3 — round-3 wrongly passed 0 and only activated).
+      while IFS= read -r slug; do
+        [ -n "$slug" ] && rollback_one "$slug" "$RELAUNCH"
+      done < <(manifest_slugs)
+      if [ "$RELAUNCH" = "1" ]; then
+        echo "full rollback complete (Phase-1: substrate torn down; each seat re-seated via its direct alias)."
+      else
+        echo "full rollback complete (Phase-1: substrate teardown only; no profiles to restore)."
+      fi
     fi
     ;;
   *)
