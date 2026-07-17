@@ -173,6 +173,54 @@ def test_rewrite_refuses_empty_backup(tmp_path):
     assert not backup.exists()
 
 
+def test_restore_all_fails_loud_on_unappliable_entry(env):
+    """restore-all persists what it can but exits non-zero if a backed-up profile
+    can't be applied (renamed/removed), so emergency_recover falls back (finding 5)."""
+    plist, manifest, backup = env
+    _run("rewrite", "--manifest", str(manifest), "--plist", str(plist),
+         "--backup", str(backup), "--allow-running")
+    root = plistlib.loads(plist.read_bytes())
+    del root["Window Settings"]["AO Desk"]           # backed-up but now absent
+    plist.write_bytes(plistlib.dumps(root, fmt=plistlib.FMT_BINARY))
+    r = _run("restore-all", "--plist", str(plist), "--backup", str(backup), "--allow-running")
+    assert r.returncode == 4, (r.returncode, r.stderr)
+    out = json.loads(r.stdout)
+    assert "AO Desk" in out["skipped"]
+    win = _load_win(plist)
+    assert win["B3"]["CommandString"] == "b3"        # the appliable ones still restored
+
+
+def test_mixed_wrapper_no_backup_fails_loud(tmp_path):
+    """One already-wrapped profile + bare others + no backup: the wrapped seat has
+    no recoverable original, so rewrite must refuse (finding 4 hole)."""
+    plist = tmp_path / "com.apple.Terminal.plist"
+    manifest = tmp_path / "manifest.json"
+    backup = tmp_path / "profile_backup.json"
+    win = {}
+    for name, (slug, alias) in SEATS.items():
+        cs = _wrapper(slug, alias) if name == "B3" else alias
+        win[name] = {"CommandString": cs}
+    plist.write_bytes(plistlib.dumps({"Window Settings": win}, fmt=plistlib.FMT_BINARY))
+    _write_manifest(manifest)
+    r = _run("rewrite", "--manifest", str(manifest), "--plist", str(plist),
+             "--backup", str(backup), "--allow-running")
+    assert r.returncode == 4, (r.returncode, r.stderr)
+    assert not backup.exists()
+
+
+def test_generator_unwraps_cutover_commandstring():
+    """The manifest generator resolves a post-cutover wrapped CommandString back to
+    its alias, so regeneration is identical pre/post cutover (finding 7)."""
+    import importlib.util
+    gpath = Path(__file__).resolve().parents[1] / "scripts" / "generate_cockpit_manifest.py"
+    spec = importlib.util.spec_from_file_location("gcm_under_test", gpath)
+    m = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(m)
+    assert m._unwrap_commandstring(_wrapper("b3", "b3")) == "b3"
+    assert m._unwrap_commandstring(_wrapper("ao-desk", "aodesk")) == "aodesk"
+    assert m._unwrap_commandstring("aodesk") == "aodesk"   # bare alias untouched
+
+
 def test_rerun_after_partial_rollback_merge_preserves(env):
     """A pre-existing backup must NOT block a rerun (codex finding 7): rewrite
     merge-preserves the original snapshot and never recaptures a wrapped value."""

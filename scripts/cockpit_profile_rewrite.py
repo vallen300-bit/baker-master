@@ -173,6 +173,16 @@ def cmd_rewrite(args) -> None:
                 "already at the wrapper and no prior backup exists, so no original "
                 "CommandString can be recovered. If this is a re-run, restore from "
                 f"{backup}.plist.bak or regenerate originals before proceeding.")
+    # Every ALREADY-wrapped profile must have a recoverable original in the backup,
+    # else it can never be rolled back (codex 019f714a finding 4: a mixed
+    # wrapped/bare plist with no backup would otherwise pass the empty guard and
+    # leave the wrapped seat unrecoverable). Fail loud on any such gap.
+    missing = [p for p in already if p not in snapshot]
+    if missing:
+        _die(4, f"profiles already at the wrapper with NO backup entry: {missing}. "
+                "Their original CommandString is unrecoverable — refusing rather than "
+                f"proceeding with an incomplete rollback source. Restore from "
+                f"{backup}.plist.bak or repair the backup first.")
     _atomic_write_text(backup, json.dumps(snapshot, indent=2, sort_keys=True) + "\n")
 
     # Apply the rewrite.
@@ -248,11 +258,20 @@ def cmd_restore_all(args) -> None:
     backup_map = json.loads(backup.read_text())
     root = _load_plist(plist)
     win = root.get("Window Settings") or {}
-    restored = [p for p in backup_map if _restore_one(win, backup_map, p)]
+    restored, skipped = [], []
+    for p in backup_map:
+        (restored if _restore_one(win, backup_map, p) else skipped).append(p)
     root["Window Settings"] = win
     _atomic_write_bytes(plist, plistlib.dumps(root, fmt=plistlib.FMT_BINARY))
-    print(f"restored {len(restored)} profile(s) from {backup}", file=sys.stderr)
-    print(json.dumps({"restored": restored}))
+    print(f"restored {len(restored)} profile(s) from {backup}"
+          f"{f'; {len(skipped)} not applied' if skipped else ''}", file=sys.stderr)
+    print(json.dumps({"restored": restored, "skipped": skipped}))
+    # A backed-up profile that could not be applied (renamed/removed from the plist)
+    # is a LOUD failure so callers (emergency_recover) trigger the whole-plist
+    # fallback instead of reporting a phantom-complete recovery (codex 019f714a
+    # finding 5).
+    if skipped:
+        sys.exit(4)
 
 
 def main() -> None:

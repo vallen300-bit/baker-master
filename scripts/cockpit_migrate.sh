@@ -97,28 +97,18 @@ CUTOVER_DANGER=0   # 1 once Terminal is down + profiles are being rewritten
 CUTOVER_DONE=0     # 1 once we have relaunched Terminal + reached steady state
 
 # emergency_recover: fired by the EXIT/INT/TERM trap if the cutover aborts inside
-# the danger window (Terminal down, profiles wrapped). Returns the WHOLE fleet to
-# the pre-cutover direct-alias baseline — consistently, not half-migrated (codex
-# 019f713a findings 1+2): tear down ALL cockpit substrate this run created, restore
-# the ledger to its pre-cutover snapshot, restore every Terminal profile from the
-# backup, then relaunch Terminal. Ends with `exit` so a SIGINT/SIGTERM aborts
-# rather than resuming the cutover (finding 1). Re-entrancy-guarded.
+# the danger window. Forces the WHOLE fleet to ONE consistent BASELINE — all
+# profiles = direct alias, NO cockpit substrate, ledger cleared — rather than
+# reasoning about partial state (codex 019f714a: partial ledger/substrate restores
+# were the recurring false-green/half-migrated bug). Ends with `exit` so a
+# SIGINT/SIGTERM aborts rather than resuming the cutover. Re-entrancy-guarded.
 emergency_recover() {
   [ "$CUTOVER_DANGER" = "1" ] && [ "$CUTOVER_DONE" = "0" ] || return 0
   CUTOVER_DONE=1   # guard: never recover twice (EXIT after INT/TERM)
-  echo "!! CUTOVER ABORTED mid-flight — emergency recovery to direct-alias baseline" >&2
-  # 1. tear down ALL cockpit substrate this cutover may have created (tmux + ttyd).
-  local s tp
-  while IFS= read -r s; do
-    [ -n "$s" ] || continue
-    tp="$LAUNCHD_DIR/com.baker.cockpit-ttyd-$s.plist"
-    if [ -f "$tp" ]; then launchctl unload "$tp" 2>/dev/null || true; rm -f "$tp" 2>/dev/null || true; fi
-    if session_up "$s"; then tmux kill-session -t "=$s" 2>/dev/null || true; fi
-  done < <(manifest_slugs 2>/dev/null || true)
-  # 2. restore the ledger to its pre-cutover snapshot (baseline).
-  [ -f "$PROFILE_BACKUP.ledger.bak" ] && { cp -p "$PROFILE_BACKUP.ledger.bak" "$LEDGER" 2>/dev/null || true; }
-  # 3. restore every Terminal profile from the backup (Terminal is DOWN in the
-  #    danger window -> durable; fall back to the whole-plist belt copy).
+  echo "!! CUTOVER ABORTED mid-flight — forcing whole-fleet BASELINE (direct-alias, no substrate)" >&2
+  # 1. restore ALL profiles to the bare alias (Terminal is DOWN in the danger
+  #    window -> durable). restore-all exits non-zero if any backed-up profile
+  #    could not be applied, so we fall back to the whole-plist belt copy.
   if [ -f "$PROFILE_BACKUP" ]; then
     python3 "$PROFILE_REWRITE" restore-all --plist "$TERMINAL_PLIST" --backup "$PROFILE_BACKUP" >/dev/null 2>&1 \
       || cp -p "$PROFILE_BACKUP.plist.bak" "$TERMINAL_PLIST" 2>/dev/null || true
@@ -126,10 +116,20 @@ emergency_recover() {
     cp -p "$PROFILE_BACKUP.plist.bak" "$TERMINAL_PLIST" 2>/dev/null || true
   fi
   killall cfprefsd 2>/dev/null || true
+  # 2. tear down ALL cockpit substrate (tmux + ttyd) so nothing is left half-up.
+  local s tp
+  while IFS= read -r s; do
+    [ -n "$s" ] || continue
+    tp="$LAUNCHD_DIR/com.baker.cockpit-ttyd-$s.plist"
+    if [ -f "$tp" ]; then launchctl unload "$tp" 2>/dev/null || true; rm -f "$tp" 2>/dev/null || true; fi
+    if session_up "$s"; then tmux kill-session -t "=$s" 2>/dev/null || true; fi
+  done < <(manifest_slugs 2>/dev/null || true)
+  # 3. clear the ledger (all-pending) — the consistent partner of all-baseline.
+  echo '{}' > "$LEDGER" 2>/dev/null || true
   # 4. bring Terminal back so agents relaunch via the restored direct-alias profiles.
   osascript -e 'tell application "Terminal" to activate' >/dev/null 2>&1 || true
-  echo "!! recovery done: substrate torn down, ledger + profiles restored to baseline, Terminal relaunched." >&2
-  echo "!! If any seat still shows a tmux wrapper, quit+reopen Terminal once. Inspect: $LEDGER , $WAVE_LOG" >&2
+  echo "!! recovery done: BASELINE forced (all direct-alias, substrate down, ledger cleared)." >&2
+  echo "!! If a seat still shows a tmux wrapper, quit+reopen Terminal once. Inspect: $LEDGER , $WAVE_LOG" >&2
   exit 1
 }
 
@@ -268,12 +268,18 @@ EOF
   # runbook step 1). The GO token asserts the runbook preconditions are met.
   echo "[1/7] PRECONDITION (runbook, not script-enforced): all active seats checkpointed + daemon refresh cadence paused."
 
-  # [2] belt backup of the whole plist AND the ledger before any edit (the ledger
-  # snapshot lets emergency_recover restore the exact pre-cutover baseline).
+  # [2] belt backup of the whole plist before any edit (whole-plist fallback for
+  # recovery). No ledger snapshot: on abort we force an all-pending baseline, not a
+  # partial restore (codex 019f714a finding 1).
   ledger_init
   cp -p "$TERMINAL_PLIST" "$PROFILE_BACKUP.plist.bak"
-  cp -p "$LEDGER" "$PROFILE_BACKUP.ledger.bak" 2>/dev/null || true
-  echo "[2/7] plist + ledger backed up -> $PROFILE_BACKUP.plist.bak / .ledger.bak"
+  echo "[2/7] plist backed up -> $PROFILE_BACKUP.plist.bak"
+
+  # Arm the recovery trap NOW — BEFORE the quit — so a SIGINT/SIGTERM during the
+  # quit itself is covered (codex 019f714a finding 6). The plist belt copy already
+  # exists, so emergency_recover can restore even if we abort before the rewrite.
+  CUTOVER_DANGER=1
+  trap 'emergency_recover' EXIT INT TERM
 
   # [3] single Terminal.app quit (the ONLY Cmd+Q; §6a step 3), then drop the prefs
   # cache so the file rewrite is authoritative (Lesson 76: the write MUST happen
@@ -292,12 +298,6 @@ EOF
     echo "[3/7] --no-quit: caller asserts Terminal.app already down."
     pgrep -x Terminal >/dev/null 2>&1 && die "--no-quit given but Terminal.app is still running — refusing to rewrite (Lesson 76)."
   fi
-
-  # DANGER WINDOW OPEN: Terminal is down + about to be rewritten. From here any
-  # abort must restore profiles + relaunch Terminal, so arm the recovery trap
-  # (finding 2). It self-clears once CUTOVER_DONE=1.
-  CUTOVER_DANGER=1
-  trap 'emergency_recover' EXIT INT TERM
 
   # [4] rewrite ALL eligible profiles in one pass (durable — Terminal down), then
   # mark them migrated.

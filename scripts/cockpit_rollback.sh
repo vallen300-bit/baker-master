@@ -96,7 +96,8 @@ rollback_one() {
 
 # Quit Terminal.app if it is up, so `full`'s profile restores are DURABLE
 # (Lesson 76 — a restore written while Terminal is live is clobbered on its next
-# quit; codex 019f713a finding 5). Sets QUIT_DONE=1 if it quit.
+# quit). Sets QUIT_DONE=1 ONLY if Terminal is actually down afterward (codex
+# 019f714a finding 2: a 20s-timeout must not claim a durable quit).
 QUIT_DONE=0
 quit_terminal_if_up() {
   pgrep -x Terminal >/dev/null 2>&1 || return 0
@@ -104,8 +105,13 @@ quit_terminal_if_up() {
   osascript -e 'tell application "Terminal" to quit' >/dev/null 2>&1 || true
   local w=0
   while pgrep -x Terminal >/dev/null 2>&1; do sleep 0.5; w=$((w+1)); [ "$w" -ge 40 ] && break; done
-  killall cfprefsd 2>/dev/null || true
-  QUIT_DONE=1
+  if pgrep -x Terminal >/dev/null 2>&1; then
+    echo "  WARNING: Terminal did not quit within 20s — profile restores will NOT be durable until a manual restart."
+    QUIT_DONE=0
+  else
+    killall cfprefsd 2>/dev/null || true
+    QUIT_DONE=1
+  fi
 }
 
 RELAUNCH=0
@@ -117,9 +123,13 @@ case "${1:-}" in
     ;;
   full)
     [ "${2:-}" = "--relaunch" ] && RELAUNCH=1
-    # Coordinated abort: restore every profile DURABLY, so quit Terminal first,
-    # restore all seats (no per-seat relaunch mid-loop), then one relaunch at end.
-    quit_terminal_if_up
+    # Only a POST-cutover full rollback (a profile backup exists) needs the
+    # coordinated Terminal quit for a durable profile restore. A Phase-1 cleanup
+    # (no backup, substrate teardown only) must NOT quit the whole fleet (codex
+    # 019f714a finding 3).
+    if [ -f "$PROFILE_BACKUP" ]; then
+      quit_terminal_if_up
+    fi
     while IFS= read -r slug; do
       [ -n "$slug" ] && rollback_one "$slug" 0
     done < <(manifest_slugs)
@@ -127,10 +137,12 @@ case "${1:-}" in
       osascript -e 'tell application "Terminal" to activate' >/dev/null 2>&1 || true
       echo "  Terminal relaunched; seats reopen via the restored direct-alias profiles."
     fi
-    if [ "$QUIT_DONE" = "1" ]; then
+    if [ ! -f "$PROFILE_BACKUP" ]; then
+      echo "full rollback complete (Phase-1: substrate teardown only; no profiles to restore)."
+    elif [ "$QUIT_DONE" = "1" ]; then
       echo "full rollback complete (profiles restored while Terminal was down -> durable)."
     else
-      echo "full rollback complete (Terminal was not running; profiles restored on disk, effective at next launch)."
+      echo "WARNING: full rollback restored profiles ON DISK but Terminal did not quit -> NOT durable until a manual Terminal restart."
     fi
     ;;
   *)
