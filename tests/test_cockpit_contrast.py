@@ -15,7 +15,7 @@ CSS = (Path(__file__).resolve().parent.parent
 
 # Fills a small-text role can sit on (darkest case drives the assertion).
 CARD_BG = "#1c2330"       # terminal card
-APP_BG = "#12161f"        # recessed app/service/cowork card
+APP_BG = "#0c1018"        # recessed app/service/cowork card
 DOWN_BG = "#171b24"       # down-state card fill
 PLATE_DARKEST = "#0b0f16"  # grade-0, the darkest plate ladder step
 AA = 4.5

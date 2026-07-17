@@ -11,12 +11,12 @@ tests JS via `node` for pure logic only, and node has no layout engine):
 
   #12264 (Director) — the name is the untouchable row; compact INSIDE the height
   before growing it. The unread badge + action button now share ONE footer row,
-  so the crowded state is 5 rows and the uniform height stays low (120px, not 140).
+  so the crowded state is 5 rows and the uniform height stays low (114px).
 
 The faithful rendered check ("name/slug/unread/GO keep non-zero bounds in the
 crowded fixture") was verified in-browser on the scratch port after compaction:
-natural crowded height 115px, name 19px, slug 11px, unread 14px, GO 21px, unread
-and GO on ONE row, 0 clipped, all 43 cards uniform at 120px. This test is the
+natural crowded height 110px, name 19px, slug 11px, unread 14px, GO 21px, unread
+and GO on ONE row, 0 clipped, all 43 cards uniform at 114px. This test is the
 CI-enforceable proxy: it parses cockpit.css/js and asserts the invariants that
 make that render impossible to regress.
 """
@@ -36,7 +36,7 @@ JS = (Path(__file__).resolve().parent.parent
 # Measured natural height of the COMPACTED crowded card (2026-07-17 scratch-port
 # render): unread + action share the footer row → 5 rows → 115px. The fixed card
 # height must be >= this so overflow:hidden never clips and no row is shrunk.
-CROWDED_NATURAL_PX = 115
+CROWDED_NATURAL_PX = 110
 
 
 def _card_block():

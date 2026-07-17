@@ -180,18 +180,14 @@
     const row = meta.driveable ? stateBySlug.get(meta.slug) : null;
     const up = row ? row.session_up === true : false;
     const cls = ["card"];
-    let stateText, actions = null, statusOnly = null, unread = null;
+    let stateText = "", actions = null, unread = null;
 
     if (meta.status_only) {
-      // Any non-driveable active seat: app (app-*), service, headless. Reuse
-      // the .app status-only styling; the kind pill + badge carry the family.
+      // Status-only (app / service / headless). E1: the recessed background IS
+      // the app/terminal distinction; E3: no "APP" text marker, no state row.
       cls.push("app");
-      const label = meta.app_seat ? "app seat" : (meta.badge || "status only");
-      stateText = label;
-      statusOnly = el("div", { class: "statusonly", text: "status only — " + label + ", no terminal" });
     } else if (up && row && row.ttyd_up === false) {
-      // tmux session is alive but its ttyd terminal server is unreachable:
-      // opening would 502. Show an explicit error state (§7) — no GO, no open.
+      // tmux alive but ttyd unreachable — opening would 502. Keep this affordance.
       cls.push("up", "error");
       stateText = "terminal offline";
     } else if (up) {
@@ -199,11 +195,12 @@
       const gc = glanceClass(row);
       if (gc) cls.push(gc);
       if (row && row.is_working) cls.push("working");
-      // UNKNOWN telemetry must read differently from a live idle seat.
-      stateText = gc === "glance-unknown" ? "session up · no telemetry" : "session up";
-      // GO on the card face (§5.4) — ONLY when the seat is actually awaiting a
-      // GO. Sending Enter into a non-confirmation prompt is unsafe, so gate
-      // strictly on needs_go (shared predicate, see panel GO below).
+      // E4: no "up" word. A live idle seat shows only its dot; working / unknown
+      // keep a word, needs-go/new carry their glance frame + unread badge.
+      if (gc === "glance-unknown") stateText = "no telemetry";
+      else if (row && row.is_working) stateText = "working";
+      else stateText = "";
+      // GO on the card face (§5.4) — ONLY when the seat is awaiting a GO.
       if (window.goAffordanceVisible(row)) {
         const goBtn = el("button", { class: "btn go", type: "button", text: "GO ⏎",
           onclick: (ev) => { ev.stopPropagation(); doGo(meta.slug, ev.currentTarget); } });
@@ -218,34 +215,42 @@
       }
     } else {
       cls.push("down");
-      stateText = "session down";
+      stateText = "session down";                // down affordance kept (E4)
       const startBtn = el("button", { class: "btn start", type: "button", text: "▶ Start",
         onclick: (ev) => { ev.stopPropagation(); doStart(meta.slug, ev.currentTarget); } });
       actions = el("div", { class: "actions" }, [startBtn]);
     }
 
-    // AG pill dropped (D2). The kind pill (TERMINAL / APP / SERVICE / …) is the
-    // only top-row marker now.
-    const kind = meta.kind || (meta.status_only ? "APP" : "TERMINAL");
-    const top = el("div", { class: "top" }, [
-      el("span", { class: "kind", text: kind }),
-    ]);
-    const nameEl = el("div", { class: "name", text: meta.display_name || meta.slug });
-    // Card face must carry the slug alongside display name (scope §5.2) — the
-    // slug is the address every bus/tmux action uses, so it belongs on the face.
-    const slugEl = el("div", { class: "slug", text: meta.slug });
-    const stateEl = el("div", { class: "state" }, [
-      el("span", { class: "dot" }), el("span", { text: stateText }),
-    ]);
-
-    const children = [top, nameEl, slugEl, stateEl];
-    if (statusOnly) children.push(statusOnly);
-    // Compaction (Director #12264): the unread badge and the action button share
-    // ONE footer row so the crowded state stays 5 rows — the name is never
-    // squeezed and the uniform card height stays low.
-    if (unread || actions) {
-      children.push(el("div", { class: "footer" }, [unread, actions].filter(Boolean)));
+    // E3: no TERMINAL / APP kind word — the background carries that. Only
+    // service / headless keep a small badge pill (bg alone can't name them).
+    const children = [];
+    if (meta.badge) {
+      children.push(el("div", { class: "top" }, [el("span", { class: "kind", text: meta.kind })]));
     }
+    children.push(el("div", { class: "name", text: meta.display_name || meta.slug }));
+    children.push(el("div", { class: "slug", text: meta.slug }));
+    // State row only for driveable seats and only when there's a word/dot worth
+    // showing (E4 dropped the idle "up" text — an idle seat is just its dot).
+    if (!meta.status_only) {
+      children.push(el("div", { class: "state" },
+        [el("span", { class: "dot" }), stateText ? el("span", { text: stateText }) : null]));
+    }
+    // Bottom-pinned group (margin-top:auto): the footer row + the context band.
+    const bottom = [];
+    // Compaction (Director #12264): unread badge + action button share ONE footer row.
+    if (unread || actions) {
+      bottom.push(el("div", { class: "footer" }, [unread, actions].filter(Boolean)));
+    }
+    // D4: context band — driveable seats with a known context_pct only; null →
+    // hidden (never blocks render). 3px green→amber→red fill by usage + tiny label.
+    if (meta.driveable && row && typeof row.context_pct === "number") {
+      const pct = Math.max(0, Math.min(100, row.context_pct));
+      bottom.push(el("div", { class: "ctx" }, [
+        el("div", { class: "ctxbar" }, [el("div", { class: "ctxfill", style: "width:" + pct + "%" })]),
+        el("div", { class: "ctxlbl", text: "ctx " + Math.round(pct) + "%" }),
+      ]));
+    }
+    if (bottom.length) children.push(el("div", { class: "cardbottom" }, bottom));
 
     const c = el("div", { class: cls.join(" "), "data-slug": meta.slug }, children);
     if (!meta.status_only) {

@@ -105,19 +105,22 @@ main.wrap { padding: 22px 24px 60px; }
      EXACT same dimensions at every wrap breakpoint — min-height alone let
      content-heavy terminal cards outgrow status-only cards (codex-arch #12246
      blocker 2). Sized to the tallest state = the crowded driveable card, which
-     Director #12264 compacts to 5 rows (unread + action share the footer row):
-     kind + name + slug + state + footer. Compacted crowded natural = 115px, so
-     120px is the lowest uniform height that fits (#12266 target ~120). */
-  height: 120px;
+     Director #12264 compacts the footer (unread + action one row); E3 removed
+     the kind row and D4 added the 3px context band. Recomputed tallest state
+     (name + slug + state + footer + ctx) = 110px natural, so 114px is the lowest
+     uniform height that fits (E5 re-minimize). */
+  height: 114px;
   overflow: hidden;
-  box-shadow: 0 3px 8px rgba(0,0,0,.5), 0 1px 2px rgba(0,0,0,.35);
+  /* E2 — stronger Lab-style drop shadow so cards visibly lift off the plate
+     (Director eyeball: the deployed shadow read flat). */
+  box-shadow: 0 6px 16px rgba(0,0,0,.62), 0 2px 5px rgba(0,0,0,.5);
   transition: border-color 120ms, box-shadow 140ms, transform 140ms;
 }
 /* No card row may flex-shrink: a fixed-height flex column otherwise collapses
    .name to 0px in the crowded state (codex-arch #12262). Every direct child
    keeps its natural height; the fixed height above is sized so nothing clips. */
 .card > * { flex-shrink: 0; }
-.card:hover { border-color: #4a5766; transform: translateY(-2px); box-shadow: 0 7px 18px rgba(0,0,0,.6); }
+.card:hover { border-color: #4a5766; transform: translateY(-2px); box-shadow: 0 11px 26px rgba(0,0,0,.7), 0 3px 7px rgba(0,0,0,.55); }
 .card:active { transform: translateY(0); }
 
 .card .top { display: flex; align-items: center; gap: 7px; }
@@ -131,7 +134,6 @@ main.wrap { padding: 22px 24px 60px; }
 .card .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--down); flex: 0 0 auto; }
 .card.up   .dot { background: var(--working); box-shadow: 0 0 6px rgba(210,153,34,.7); }
 .card.up.working .dot { background: var(--working); }
-.card .statusonly { font-size: 10px; color: var(--muted); font-style: italic; }
 
 /* down = recessed card + grey dot, but the TEXT keeps full AA contrast: the old
    opacity:.5 on text roles dropped them to ~3.05:1 (codex-arch #12246 blocker 1).
@@ -160,14 +162,21 @@ main.wrap { padding: 22px 24px 60px; }
 
 /* card-face action row */
 .card .actions { display: flex; gap: 8px; margin-top: 1px; }
-/* Footer row (Director #12264): unread badge (left) + action button (right) on
-   ONE row, anchored to the card bottom so the name/slug keep their space. */
+/* Bottom group — footer row + context band, pinned to the card bottom so the
+   name/slug keep the top of the card (D4 ctx rides at the very bottom). */
+.card .cardbottom { margin-top: auto; display: flex; flex-direction: column; gap: 5px; }
+/* Footer row (Director #12264): unread badge (left) + action button (right) on ONE row. */
 .card .footer {
-  display: flex; align-items: center; justify-content: space-between;
-  gap: 8px; margin-top: auto;
+  display: flex; align-items: center; justify-content: space-between; gap: 8px;
 }
 .card .footer .actions { margin-top: 0; }
 .card .footer .state { min-width: 0; }
+/* D4 — context band (mock v3): 3px green→amber→red fill by usage + tiny label.
+   pointer-events:none so it never intercepts the card click. */
+.card .ctx { pointer-events: none; }
+.card .ctxbar { height: 3px; border-radius: 2px; background: #242b38; overflow: hidden; }
+.card .ctxfill { height: 100%; background: linear-gradient(90deg, #3fb950, #d29922 70%, #f85149 92%); }
+.card .ctxlbl { font-size: 8.5px; color: var(--muted); margin-top: 2px; letter-spacing: .02em; }
 .btn {
   font: 600 11px/1 -apple-system, sans-serif;
   border-radius: 6px; padding: 4px 11px; cursor: pointer;
@@ -183,18 +192,19 @@ main.wrap { padding: 22px 24px 60px; }
   0% { background: rgba(43,217,100,.5); } 100% { background: transparent; }
 }
 
-/* app / service / headless status-only card — same size as a terminal card
-   (D2) but recessed (inner shadow) so it reads as "not a driveable terminal",
-   not clickable. */
+/* app / service / headless status-only card. E1 (Director eyeball): the
+   BACKGROUND is the app/terminal distinction — a distinctly darker, sunken fill
+   with an inner shadow and NO drop shadow, so it reads clearly apart from the
+   lifted, lighter terminal cards at arm's length. Same size (D2), not clickable. */
 .card.app {
   cursor: default;
-  background: #12161f;
-  border-color: #232a36;
-  box-shadow: inset 0 2px 8px rgba(0,0,0,.55), 0 0 0 1px rgba(0,0,0,.3);
+  background: #0c1018;
+  border-color: #202634;
+  box-shadow: inset 0 2px 10px rgba(0,0,0,.7), inset 0 0 0 1px rgba(0,0,0,.4);
 }
-.card.app:hover { transform: none; border-color: #232a36; box-shadow: inset 0 2px 8px rgba(0,0,0,.55), 0 0 0 1px rgba(0,0,0,.3); }
-/* the APP/SERVICE marker keeps --muted (#aeb8c6 = 9.02:1 on the recessed
-   #12161f fill); the old #5a6472 was 3.02:1 (codex-arch #12246 blocker 1). */
+.card.app:hover { transform: none; border-color: #202634; box-shadow: inset 0 2px 10px rgba(0,0,0,.7), inset 0 0 0 1px rgba(0,0,0,.4); }
+/* the SERVICE/HEADLESS badge keeps --muted (#aeb8c6 = 9.6:1 on the #0c1018
+   fill); AA holds on the darker fill. */
 .card.app .kind { color: var(--muted); }
 
 /* Glance frames (§5.2) — precedence NEEDS_GO > WORKING > NEW resolved in JS. */
