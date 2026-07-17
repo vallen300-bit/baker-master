@@ -64,8 +64,15 @@ Dispatch lead #12172 (acked). Commit 3a3b84e1 on b1/lab-cockpit-page (no amend).
 - Nits folded: header 'N driveable / M seats'; down-seat Start un-dimmed.
 - Tests 24 passed (test_cockpit_controller incl. new probe_ttyd + lab_glance_ok; layout/serve/manifest). Live-verified all 4 states + outage banner on a throwaway controller (alt port + fake manifest/Lab); screenshots briefs/_reports/_assets/B1_cockpit_fixpass{,_outage}_20260717.png. Live :7800 untouched.
 
+## Fix pass 2 (2026-07-17) — codex delta gate #12176 BLOCK, panel GO gating
+Dispatch lead #12177 (acked). Commit 6e1de0c8 (no amend). Fix-done posted #12178 → gates/lab-cockpit-page-pr-585.
+- Finding: card-face GO gated but terminal-panel GO (#term-go) was unconditional → open any up seat + click = bare Enter into tmux.
+- Fix: single pure predicate goAffordanceVisible(row)=!!(row&&row.needs_go===true) in glance_state.js (dual-exported), used by BOTH card face and panel. index.html #term-go defaults hidden. cockpit.js syncPanelGo() sets visibility on open/close + every poll (reactive). Click handler re-checks predicate.
+- Regression: tests/test_cockpit_panel_go.py (node, skips if node absent).
+- Live-verified: needs_go=false seat → panel GO hidden; needs_go seat → visible (script term-go.hidden + screenshot B1_cockpit_panelgo_20260717.png). Tests green. Live :7800 untouched.
+
 ## Next concrete step (successor)
-Wait on codex-arch re-critique + codex delta gate on gates/lab-cockpit-page-pr-585. On PASS → lead merge → deploy (install_cockpit_controller.sh restages static + restarts :7800) → POST_DEPLOY_AC_VERDICT v1 on pilot seats (b3, brisen-desk) to lead. On re-FAIL → address on NEW commits, re-post fix-done. Do NOT redeploy :7800 pre-merge.
+Wait on codex delta re-gate + codex-arch re-critique (#12174 re-pointed at head 6e1de0c8) on gates/lab-cockpit-page-pr-585. On PASS → lead merge → deploy (install_cockpit_controller.sh restages static + restarts :7800) → POST_DEPLOY_AC_VERDICT v1 on pilot seats (b3, brisen-desk) to lead. On re-FAIL → address on NEW commits, re-post fix-done. Do NOT redeploy :7800 pre-merge.
 
 ## BRIEF A (prior arc) — DONE, for reference
 Merged main @10dd3bec (PR #582 + regression #584). B3 sandbox live: tmux b3 UP, ttyd 127.0.0.1:7608 /term/b3/, ledger migrated. Scripts: generate_cockpit_manifest.py, fleet_terminals.sh, cockpit_migrate.sh, install_cockpit_ttyd.sh, cockpit_rollback.sh. AC verdict #12145 accepted.
