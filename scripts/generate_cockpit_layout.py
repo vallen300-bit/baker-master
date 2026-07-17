@@ -164,6 +164,25 @@ def build() -> dict:
         cat = (runtime.split("-")[0] or "seat")
         return cat.upper(), cat
 
+    def _notify_eligible(slug: str) -> bool:
+        """LAB_COCKPIT_NOTIFY_SLICE_1 — should the cockpit controller fire a macOS
+        banner when a bus dispatch lands unread on this seat?
+
+        True iff the seat is app-resident (runtime ``app-*``) AND Wake.app does not
+        already banner it. Wake.app (BUS_AUTOWAKE_APP_RESIDENT_NOTIFY_1) banners
+        wake-registered app-claude seats — i.e. app-claude whose ``wakeable`` is not
+        the explicit ``false`` override. So the residue the controller must cover is
+        app-codex seats (codex-arch) + app-claude seats with ``wakeable: false``
+        (the cowork desks). Terminal-* seats are self-awake / driven and are never
+        notified (matches the AC: b1 → no banner). Classifier lead-approved
+        2026-07-17 (bus #12332)."""
+        a = registry.get(slug, {})
+        runtime = str(a.get("runtime", ""))
+        if not runtime.startswith("app-"):
+            return False
+        wake_registered = runtime == "app-claude" and a.get("wakeable") is not False
+        return not wake_registered
+
     def card_for(slug: str, contract_name: str | None = None) -> dict:
         a = registry.get(slug, {})
         runtime = str(a.get("runtime", ""))
@@ -181,6 +200,7 @@ def build() -> dict:
             "kind": kind,
             "badge": badge,
             "port": ports.get(slug),
+            "notify_eligible": _notify_eligible(slug),
         }
 
     # Build plates in contract order; in-plate order = row-band(y±40) then x.
