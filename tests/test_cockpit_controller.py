@@ -165,6 +165,14 @@ def test_derive_context_pct_rejects_bool_and_nonnumeric():
     assert controller.derive_context_pct({"context_used_percent": "80"}) is None
 
 
+def test_derive_context_pct_rejects_non_finite():
+    # NaN/±inf would clamp to a confident ctx 100% (a false full band); non-finite
+    # telemetry must hide the band instead (codex #12055 verify — no invention).
+    assert controller.derive_context_pct({"context_used_percent": float("nan")}) is None
+    assert controller.derive_context_pct({"context_used_percent": float("inf")}) is None
+    assert controller.derive_context_pct({"context_used_percent": float("-inf")}) is None
+
+
 def test_derive_context_pct_never_reads_session_age():
     # HARD RULE (#12055 codex-arch OBJECT): session age is NOT a proxy for
     # context/token consumption and must never populate the context band.

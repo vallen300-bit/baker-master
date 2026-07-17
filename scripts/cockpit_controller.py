@@ -17,6 +17,7 @@ from dataclasses import dataclass
 import hmac
 import json
 import logging
+import math
 import os
 from pathlib import Path
 import re
@@ -87,6 +88,10 @@ def derive_context_pct(row: dict[str, Any]) -> float | None:
         if isinstance(val, bool):
             continue
         if isinstance(val, (int, float)):
+            # NaN/±inf would clamp to a confident 100% (a false full band) —
+            # treat non-finite telemetry as unknown so the band hides instead.
+            if not math.isfinite(val):
+                continue
             return max(0.0, min(100.0, float(val)))
     return None
 
