@@ -47,51 +47,65 @@ restore_profile_cmd() {
   # restore is never silently clobbered on Terminal's next quit (codex 267d4477
   # finding 3). For a durable profile restore, Terminal must be down — run this
   # rollback inside the coordinated cutover window, or quit Terminal first.
+  # Returns non-zero on a genuine restore FAILURE so the caller can propagate it
+  # (codex 019f7168 finding 4). The "no backup / no helper / no profile" cases are
+  # legitimate no-ops (Phase-1) and return 0.
   local err
   if err="$(python3 "$PROFILE_REWRITE" restore --plist "$TERMINAL_PLIST" --backup "$PROFILE_BACKUP" \
        --profile "$profile" 2>&1 >/dev/null)"; then
     echo "  restored profile CommandString for '$profile' (Terminal down -> durable)"
-  else
-    echo "  profile restore for '$profile' NOT written: ${err#FATAL: }"
-    echo "  -> the seat works now via --relaunch direct alias; restore the profile in a Terminal-down window."
+    return 0
   fi
+  echo "  profile restore for '$profile' NOT written: ${err#FATAL: }"
+  echo "  -> the seat works now via --relaunch direct alias; restore the profile in a Terminal-down window."
+  return 1
 }
 
+# Rolls one seat back. Every step propagates failure into rc; the final line is
+# "rolled back" ONLY when rc==0 (codex 019f7168 findings 2/4). Returns rc.
 rollback_one() {
-  local slug="$1" relaunch="$2"
+  local slug="$1" relaunch="$2" rc=0
   manifest_has "$slug" || die "seat '$slug' not in manifest"
   local alias; alias="$(manifest_alias "$slug")"
 
   # 0. restore the seat's original Terminal-profile command (§12; no-op in Phase-1)
-  restore_profile_cmd "$slug"
+  restore_profile_cmd "$slug" || rc=1
 
   # 1. unload + remove the ttyd plist (per-seat isolation)
   local plist="$LAUNCHD_DIR/com.baker.cockpit-ttyd-$slug.plist"
   if [ -f "$plist" ]; then
-    launchctl unload "$plist" 2>/dev/null || true
-    rm -f "$plist"
+    launchctl unload "$plist" 2>/dev/null || true   # unload-of-unloaded is fine
+    rm -f "$plist" || rc=1
     echo "  removed ttyd plist: $plist"
   fi
 
   # 2. kill the tmux session
   if session_up "$slug"; then
-    tmux kill-session -t "=$slug"
+    tmux kill-session -t "=$slug" 2>/dev/null || rc=1
     echo "  killed tmux session: $slug"
   fi
 
   # 3. ledger -> pending (so fleet up will not recreate it)
-  ledger_set "$slug" pending
+  ledger_set "$slug" pending || rc=1
   echo "  ledger: $slug -> pending"
 
   # 4. optional direct-alias re-seat (Lesson 76 recovery — NOT a profile restore)
   if [ "$relaunch" = "1" ]; then
-    osascript -e "tell application \"Terminal\" to do script \"/bin/zsh -lic '$alias'\"" \
-              -e "tell application \"Terminal\" to activate" >/dev/null
-    echo "  re-seated '$slug' via direct alias '$alias' in a new Terminal window"
-    echo "  NOTE (Lesson 76): Terminal-profile CommandString cache restore happens at the"
-    echo "        next coordinated Terminal.app restart — NOT instantly, by design."
+    if osascript -e "tell application \"Terminal\" to do script \"/bin/zsh -lic '$alias'\"" \
+                 -e "tell application \"Terminal\" to activate" >/dev/null 2>&1; then
+      echo "  re-seated '$slug' via direct alias '$alias' in a new Terminal window"
+    else
+      rc=1
+      echo "  WARNING: direct-alias re-seat of '$slug' failed — re-seat it by hand."
+    fi
   fi
-  echo "rolled back: $slug"
+
+  if [ "$rc" = "0" ]; then
+    echo "rolled back: $slug"
+  else
+    echo "ROLLBACK INCOMPLETE for '$slug' — one or more steps failed; inspect by hand." >&2
+  fi
+  return "$rc"
 }
 
 # Quit Terminal.app if it is up, so `full`'s profile restores are DURABLE
@@ -115,44 +129,50 @@ quit_terminal_if_up() {
 }
 
 RELAUNCH=0
+FULL_RC=0
 case "${1:-}" in
   seat)
     slug="${2:-}"; [ -n "$slug" ] || die "usage: cockpit_rollback.sh seat <slug> [--relaunch]"
     [ "${3:-}" = "--relaunch" ] && RELAUNCH=1
-    rollback_one "$slug" "$RELAUNCH"
+    rollback_one "$slug" "$RELAUNCH" || exit 1     # surface a failed rollback loudly
     ;;
   full)
     [ "${2:-}" = "--relaunch" ] && RELAUNCH=1
     if [ -f "$PROFILE_BACKUP" ]; then
-      # POST-cutover abort: quit Terminal once (durable profile restore), roll back
-      # every seat with NO per-seat relaunch (would restart Terminal mid-loop), then
-      # a SINGLE relaunch at the end. Seats reopen via the restored direct-alias
-      # profiles / Terminal's own window restore.
+      # POST-cutover abort: profile restores are durable only with Terminal DOWN.
       quit_terminal_if_up
+      # Durability = Terminal is actually down NOW (we quit it, OR it was already
+      # down — codex 019f7168 finding 5). Drop the prefs cache in the already-down
+      # case too, so the on-disk restore is authoritative.
+      DURABLE=0
+      if pgrep -x Terminal >/dev/null 2>&1; then DURABLE=0; else DURABLE=1; killall cfprefsd 2>/dev/null || true; fi
       while IFS= read -r slug; do
-        [ -n "$slug" ] && rollback_one "$slug" 0
+        if [ -n "$slug" ]; then rollback_one "$slug" 0 || FULL_RC=1; fi
       done < <(manifest_slugs)
       if [ "$RELAUNCH" = "1" ] || [ "$QUIT_DONE" = "1" ]; then
         osascript -e 'tell application "Terminal" to activate' >/dev/null 2>&1 || true
         echo "  Terminal relaunched."
       fi
-      if [ "$QUIT_DONE" = "1" ]; then
-        echo "full rollback complete (profiles restored while Terminal was down -> durable)."
+      if [ "$DURABLE" = "1" ]; then
+        echo "full rollback finished (profiles restored while Terminal was down -> durable)."
       else
-        echo "WARNING: full rollback restored profiles ON DISK but Terminal did not quit -> NOT durable until a manual Terminal restart."
+        echo "WARNING: full rollback restored profiles ON DISK but Terminal is still up -> NOT durable until a manual Terminal restart."
       fi
     else
       # Phase-1 cleanup (no profiles were ever rewritten): substrate teardown only,
-      # do NOT quit the fleet. Honor --relaunch as a PER-SEAT direct-alias re-seat
-      # (codex 019f715a finding 3 — round-3 wrongly passed 0 and only activated).
+      # do NOT quit the fleet. Honor --relaunch as a PER-SEAT direct-alias re-seat.
       while IFS= read -r slug; do
-        [ -n "$slug" ] && rollback_one "$slug" "$RELAUNCH"
+        if [ -n "$slug" ]; then rollback_one "$slug" "$RELAUNCH" || FULL_RC=1; fi
       done < <(manifest_slugs)
       if [ "$RELAUNCH" = "1" ]; then
-        echo "full rollback complete (Phase-1: substrate torn down; each seat re-seated via its direct alias)."
+        echo "full rollback finished (Phase-1: substrate torn down; each seat re-seated via its direct alias)."
       else
-        echo "full rollback complete (Phase-1: substrate teardown only; no profiles to restore)."
+        echo "full rollback finished (Phase-1: substrate teardown only; no profiles to restore)."
       fi
+    fi
+    if [ "$FULL_RC" != "0" ]; then
+      echo "WARNING: one or more seats did NOT roll back cleanly — see the ROLLBACK INCOMPLETE lines above; inspect by hand." >&2
+      exit 1
     fi
     ;;
   *)

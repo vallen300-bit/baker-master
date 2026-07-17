@@ -106,36 +106,50 @@ emergency_recover() {
   [ "$CUTOVER_DANGER" = "1" ] && [ "$CUTOVER_DONE" = "0" ] || return 0
   CUTOVER_DONE=1   # guard: never recover twice (EXIT after INT/TERM)
   echo "!! CUTOVER ABORTED mid-flight — forcing whole-fleet BASELINE (direct-alias, no substrate)" >&2
+  local prof_ok=0 ledger_ok=0 s tp
   # 1. restore ALL profiles to the bare alias (Terminal is DOWN in the danger
   #    window -> durable). restore-all exits non-zero if any backed-up profile
-  #    could not be applied, so we fall back to the whole-plist belt copy.
+  #    could not be applied, so we fall back to the whole-plist belt copy. Track
+  #    whether EITHER actually succeeded (codex 019f7168 finding 3 — never claim
+  #    baseline over a failed restore).
   if [ -f "$PROFILE_BACKUP" ]; then
-    python3 "$PROFILE_REWRITE" restore-all --plist "$TERMINAL_PLIST" --backup "$PROFILE_BACKUP" >/dev/null 2>&1 \
-      || cp -p "$PROFILE_BACKUP.plist.bak" "$TERMINAL_PLIST" 2>/dev/null || true
+    if python3 "$PROFILE_REWRITE" restore-all --plist "$TERMINAL_PLIST" --backup "$PROFILE_BACKUP" >/dev/null 2>&1; then
+      prof_ok=1
+    elif cp -p "$PROFILE_BACKUP.plist.bak" "$TERMINAL_PLIST" 2>/dev/null; then
+      prof_ok=1
+    fi
   elif [ -f "$PROFILE_BACKUP.plist.bak" ]; then
-    cp -p "$PROFILE_BACKUP.plist.bak" "$TERMINAL_PLIST" 2>/dev/null || true
+    cp -p "$PROFILE_BACKUP.plist.bak" "$TERMINAL_PLIST" 2>/dev/null && prof_ok=1
   fi
   killall cfprefsd 2>/dev/null || true
-  # 2. clear the ledger (all-pending) BEFORE teardown, atomically. Order matters:
-  #    if a later teardown step fails, the ledger already says pending, so the worst
-  #    residue is a harmless orphan tmux session — never a "migrated but no session"
-  #    seat (codex 019f715a finding 1). Atomic temp+mv so a failed write can't leave
-  #    a half-written ledger either.
-  if printf '{}' > "$LEDGER.tmp" 2>/dev/null && mv -f "$LEDGER.tmp" "$LEDGER" 2>/dev/null; then :; else
-    rm -f "$LEDGER" 2>/dev/null || true   # last resort: absent ledger reads as all-pending
+  # 2. clear the ledger (all-pending), atomically. Track success.
+  if printf '{}' > "$LEDGER.tmp" 2>/dev/null && mv -f "$LEDGER.tmp" "$LEDGER" 2>/dev/null; then
+    ledger_ok=1
+  elif rm -f "$LEDGER" 2>/dev/null; then
+    ledger_ok=1                     # absent ledger reads as all-pending
   fi
-  # 3. tear down ALL cockpit substrate (tmux + ttyd) so nothing is left half-up.
-  local s tp
-  while IFS= read -r s; do
-    [ -n "$s" ] || continue
-    tp="$LAUNCHD_DIR/com.baker.cockpit-ttyd-$s.plist"
-    if [ -f "$tp" ]; then launchctl unload "$tp" 2>/dev/null || true; rm -f "$tp" 2>/dev/null || true; fi
-    if session_up "$s"; then tmux kill-session -t "=$s" 2>/dev/null || true; fi
-  done < <(manifest_slugs 2>/dev/null || true)
+  # 3. tear down substrate ONLY if the ledger is now consistent (cleared). If we
+  #    could NOT clear it, killing sessions would recreate the exact "migrated but
+  #    no session" state — so we SKIP teardown and flag loudly (codex 019f7168
+  #    finding 1) rather than manufacture the inconsistency.
+  if [ "$ledger_ok" = "1" ]; then
+    while IFS= read -r s; do
+      [ -n "$s" ] || continue
+      tp="$LAUNCHD_DIR/com.baker.cockpit-ttyd-$s.plist"
+      if [ -f "$tp" ]; then launchctl unload "$tp" 2>/dev/null || true; rm -f "$tp" 2>/dev/null || true; fi
+      if session_up "$s"; then tmux kill-session -t "=$s" 2>/dev/null || true; fi
+    done < <(manifest_slugs 2>/dev/null || true)
+  fi
   # 4. bring Terminal back so agents relaunch via the restored direct-alias profiles.
   osascript -e 'tell application "Terminal" to activate' >/dev/null 2>&1 || true
-  echo "!! recovery done: BASELINE forced (all direct-alias, substrate down, ledger cleared)." >&2
-  echo "!! If a seat still shows a tmux wrapper, quit+reopen Terminal once. Inspect: $LEDGER , $WAVE_LOG" >&2
+  # 5. report HONESTLY: only claim baseline when profiles restored AND ledger cleared.
+  if [ "$prof_ok" = "1" ] && [ "$ledger_ok" = "1" ]; then
+    echo "!! recovery done: BASELINE forced (all direct-alias, substrate down, ledger cleared)." >&2
+    echo "!! If a seat still shows a tmux wrapper, quit+reopen Terminal once. Inspect: $LEDGER , $WAVE_LOG" >&2
+  else
+    echo "!! CRITICAL: recovery INCOMPLETE (profiles_restored=$prof_ok ledger_cleared=$ledger_ok) — MANUAL intervention required." >&2
+    echo "!! Restore Terminal profiles from $PROFILE_BACKUP.plist.bak and clear/inspect the ledger $LEDGER by hand." >&2
+  fi
   exit 1
 }
 
@@ -188,9 +202,12 @@ cutover_fail_seat() {
       --profile "$profile" >/dev/null 2>&1 || rc=1
   fi
   tp="$LAUNCHD_DIR/com.baker.cockpit-ttyd-$slug.plist"
-  if [ -f "$tp" ]; then launchctl unload "$tp" 2>/dev/null || true; rm -f "$tp"; fi
+  if [ -f "$tp" ]; then
+    launchctl unload "$tp" 2>/dev/null || true   # unload-of-unloaded is not a failure
+    rm -f "$tp" || rc=1                           # but a failed remove IS (codex 019f7168 finding 2)
+  fi
   if session_up "$slug"; then tmux kill-session -t "=$slug" 2>/dev/null || rc=1; fi
-  ledger_set "$slug" pending
+  ledger_set "$slug" pending || rc=1              # a failed ledger write IS a rollback failure
   return "$rc"
 }
 
@@ -311,7 +328,7 @@ EOF
   python3 "$PROFILE_REWRITE" rewrite --manifest "$MANIFEST" --plist "$TERMINAL_PLIST" --backup "$PROFILE_BACKUP" \
     || die "profile rewrite failed — see error above. Trap will restore from backup."
   while IFS= read -r slug; do
-    [ -n "$slug" ] && ledger_set "$slug" migrated
+    if [ -n "$slug" ]; then ledger_set "$slug" migrated || die "ledger write failed for '$slug' — trap will restore baseline."; fi
   done <<< "$seats"
   echo "   all eligible seats marked migrated in ledger."
 
