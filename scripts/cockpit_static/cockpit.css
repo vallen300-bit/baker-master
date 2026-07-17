@@ -229,7 +229,10 @@ main.wrap { padding: 22px 24px 60px; }
 }
 .card .age { font-size: 10px; color: var(--muted); }
 .card .age.warn { color: var(--working); }
-.card .age.hot  { color: #f85149; }
+/* hot age (>30min unacked) — lighter red so it stays >=4.5:1 composited on the
+   needs_go/NEW glance tints across all six plate grades; #f85149 was 3.65:1
+   (codex-arch #12272). Still clearly the red/urgent family. */
+.card .age.hot  { color: #ff8f87; }
 
 /* Terminal overlay (mock #term/#veil). */
 #veil {

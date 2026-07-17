@@ -75,6 +75,73 @@ def test_app_kind_marker_passes_aa_on_recessed_fill():
     assert contrast(kind, APP_BG) >= AA, (kind, APP_BG)
 
 
+# ---- composited semantic-overlay sweep (codex-arch #12272) -------------------
+# The age text sits on a glance-tinted card (needs_go/NEW/working set a
+# semi-transparent background that composites over the plate grade behind the
+# card). The flat-fill checks above miss that; this sweeps age-role x overlay x
+# every plate grade on the real composited background.
+
+def _rgb(hexs):
+    h = hexs.lstrip("#")
+    return tuple(int(h[i:i + 2], 16) for i in (0, 2, 4))
+
+
+def _hex(rgb):
+    return "#%02x%02x%02x" % tuple(round(c) for c in rgb)
+
+
+def _composite(base_hex, r, g, b, a):
+    base = _rgb(base_hex)
+    ov = (r, g, b)
+    return _hex(tuple(base[i] * (1 - a) + ov[i] * a for i in range(3)))
+
+
+def _grade_bgs():
+    out = []
+    for n in range(6):
+        m = re.search(rf"\.plate\.grade-{n}\s*\{{[^}}]*background:\s*(#[0-9a-fA-F]{{6}})", CSS)
+        assert m, f"grade-{n} background not found"
+        out.append(m.group(1))
+    return out
+
+
+def _glance_tint(selector):
+    m = re.search(re.escape(selector) + r"\s*\{[^}]*background:\s*rgba\(([^)]+)\)", CSS)
+    assert m, f"no rgba background for {selector}"
+    parts = [p.strip() for p in m.group(1).split(",")]
+    r, g, b = (int(parts[0]), int(parts[1]), int(parts[2]))
+    return (r, g, b, float(parts[3]))
+
+
+def _age_color(cls):
+    # .card .age.hot / .age.warn / .card .age  (resolve var())
+    sel = ".card .age.hot" if cls == "hot" else \
+          ".card .age.warn" if cls == "warn" else ".card .age"
+    return _rule_color(sel)
+
+
+def test_age_text_passes_aa_composited_over_every_glance_tint_and_grade():
+    grades = _grade_bgs()
+    overlays = {
+        "needs_go": _glance_tint(".card.glance-needs-go"),
+        "NEW": _glance_tint(".card.glance-new"),
+        "working": _glance_tint(".card.glance-working"),
+    }
+    failures = []
+    for role in ("hot", "warn", "base"):
+        fg = _age_color(role)
+        # no-overlay case: age on the plain card fill
+        if contrast(fg, CARD_BG) < AA:
+            failures.append((role, "none", CARD_BG, round(contrast(fg, CARD_BG), 3)))
+        for oname, (r, g, b, a) in overlays.items():
+            for grade in grades:
+                bg = _composite(grade, r, g, b, a)
+                c = contrast(fg, bg)
+                if c < AA:
+                    failures.append((role, oname, grade, round(c, 3)))
+    assert not failures, f"age text below {AA}:1 composited: {failures}"
+
+
 def test_down_state_does_not_dim_text_below_aa():
     """Down cards must signal via chrome, not by dropping text opacity (which
     halved contrast to ~3.05:1). No text role may be opacity-dimmed."""
