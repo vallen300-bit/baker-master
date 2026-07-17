@@ -39,10 +39,14 @@ die() { echo "FATAL: $*" >&2; exit 1; }
 # No-op (not an error) when there is no backup (Phase-1 sandbox never edits profiles).
 restore_profile_cmd() {
   local slug="$1" profile
+  # No backup at all = Phase-1 (profiles were never rewritten): a genuine no-op.
   [ -f "$PROFILE_BACKUP" ] || { echo "  (no profile backup — Phase-1 sandbox path, nothing to restore)"; return 0; }
-  [ -f "$PROFILE_REWRITE" ] || { echo "  (profile-rewrite helper missing — skipping profile restore)"; return 0; }
+  # Backup EXISTS (post-cutover): a missing helper or an unresolved profile means we
+  # CANNOT restore a seat whose profile was wrapped — that is a real failure, not a
+  # skip (codex 019f7173 finding 3).
+  [ -f "$PROFILE_REWRITE" ] || { echo "  ERROR: profile-rewrite helper missing but a backup exists — cannot restore '$slug'"; return 1; }
   profile="$(manifest_profile "$slug" 2>/dev/null || true)"
-  [ -n "$profile" ] && [ "$profile" != "null" ] || { echo "  (no profile for '$slug' in manifest — skipping profile restore)"; return 0; }
+  [ -n "$profile" ] && [ "$profile" != "null" ] || { echo "  ERROR: no profile for '$slug' in manifest but a backup exists — cannot restore its wrapped profile"; return 1; }
   # NO --allow-running: the helper refuses (Lesson 76) if Terminal.app is live, so a
   # restore is never silently clobbered on Terminal's next quit (codex 267d4477
   # finding 3). For a durable profile restore, Terminal must be down — run this
@@ -138,6 +142,9 @@ case "${1:-}" in
     ;;
   full)
     [ "${2:-}" = "--relaunch" ] && RELAUNCH=1
+    # Never run the rollback loop over an empty set (codex 019f7173 finding 2).
+    ALL_SLUGS="$(manifest_slugs)"
+    [ -n "$ALL_SLUGS" ] || die "manifest yielded no seats — nothing to roll back (refusing to report a clean rollback over zero seats)."
     if [ -f "$PROFILE_BACKUP" ]; then
       # POST-cutover abort: profile restores are durable only with Terminal DOWN.
       quit_terminal_if_up
@@ -148,7 +155,7 @@ case "${1:-}" in
       if pgrep -x Terminal >/dev/null 2>&1; then DURABLE=0; else DURABLE=1; killall cfprefsd 2>/dev/null || true; fi
       while IFS= read -r slug; do
         if [ -n "$slug" ]; then rollback_one "$slug" 0 || FULL_RC=1; fi
-      done < <(manifest_slugs)
+      done <<< "$ALL_SLUGS"
       if [ "$RELAUNCH" = "1" ] || [ "$QUIT_DONE" = "1" ]; then
         osascript -e 'tell application "Terminal" to activate' >/dev/null 2>&1 || true
         echo "  Terminal relaunched."
@@ -163,7 +170,7 @@ case "${1:-}" in
       # do NOT quit the fleet. Honor --relaunch as a PER-SEAT direct-alias re-seat.
       while IFS= read -r slug; do
         if [ -n "$slug" ]; then rollback_one "$slug" "$RELAUNCH" || FULL_RC=1; fi
-      done < <(manifest_slugs)
+      done <<< "$ALL_SLUGS"
       if [ "$RELAUNCH" = "1" ]; then
         echo "full rollback finished (Phase-1: substrate torn down; each seat re-seated via its direct alias)."
       else

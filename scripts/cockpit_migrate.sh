@@ -106,7 +106,7 @@ emergency_recover() {
   [ "$CUTOVER_DANGER" = "1" ] && [ "$CUTOVER_DONE" = "0" ] || return 0
   CUTOVER_DONE=1   # guard: never recover twice (EXIT after INT/TERM)
   echo "!! CUTOVER ABORTED mid-flight — forcing whole-fleet BASELINE (direct-alias, no substrate)" >&2
-  local prof_ok=0 ledger_ok=0 s tp
+  local prof_ok=0 ledger_ok=0 teardown_ok=1 s tp slugs
   # 1. restore ALL profiles to the bare alias (Terminal is DOWN in the danger
   #    window -> durable). restore-all exits non-zero if any backed-up profile
   #    could not be applied, so we fall back to the whole-plist belt copy. Track
@@ -130,25 +130,35 @@ emergency_recover() {
   fi
   # 3. tear down substrate ONLY if the ledger is now consistent (cleared). If we
   #    could NOT clear it, killing sessions would recreate the exact "migrated but
-  #    no session" state — so we SKIP teardown and flag loudly (codex 019f7168
-  #    finding 1) rather than manufacture the inconsistency.
+  #    no session" state — so we SKIP teardown and flag loudly rather than
+  #    manufacture the inconsistency. Track teardown_ok honestly: an empty seat set
+  #    (manifest_slugs failed) or any failed remove/kill flips it (codex 019f7173
+  #    findings 1+2 — never claim baseline over a failed/empty teardown).
   if [ "$ledger_ok" = "1" ]; then
-    while IFS= read -r s; do
-      [ -n "$s" ] || continue
-      tp="$LAUNCHD_DIR/com.baker.cockpit-ttyd-$s.plist"
-      if [ -f "$tp" ]; then launchctl unload "$tp" 2>/dev/null || true; rm -f "$tp" 2>/dev/null || true; fi
-      if session_up "$s"; then tmux kill-session -t "=$s" 2>/dev/null || true; fi
-    done < <(manifest_slugs 2>/dev/null || true)
+    slugs="$(manifest_slugs 2>/dev/null || true)"
+    if [ -z "$slugs" ]; then
+      teardown_ok=0
+    else
+      while IFS= read -r s; do
+        [ -n "$s" ] || continue
+        tp="$LAUNCHD_DIR/com.baker.cockpit-ttyd-$s.plist"
+        if [ -f "$tp" ]; then launchctl unload "$tp" 2>/dev/null || true; rm -f "$tp" 2>/dev/null || teardown_ok=0; fi
+        if session_up "$s"; then tmux kill-session -t "=$s" 2>/dev/null || teardown_ok=0; fi
+      done <<< "$slugs"
+    fi
+  else
+    teardown_ok=0   # teardown deliberately skipped (ledger not clean)
   fi
   # 4. bring Terminal back so agents relaunch via the restored direct-alias profiles.
   osascript -e 'tell application "Terminal" to activate' >/dev/null 2>&1 || true
-  # 5. report HONESTLY: only claim baseline when profiles restored AND ledger cleared.
-  if [ "$prof_ok" = "1" ] && [ "$ledger_ok" = "1" ]; then
+  # 5. report HONESTLY: claim baseline only when profiles restored AND ledger cleared
+  #    AND substrate fully torn down.
+  if [ "$prof_ok" = "1" ] && [ "$ledger_ok" = "1" ] && [ "$teardown_ok" = "1" ]; then
     echo "!! recovery done: BASELINE forced (all direct-alias, substrate down, ledger cleared)." >&2
     echo "!! If a seat still shows a tmux wrapper, quit+reopen Terminal once. Inspect: $LEDGER , $WAVE_LOG" >&2
   else
-    echo "!! CRITICAL: recovery INCOMPLETE (profiles_restored=$prof_ok ledger_cleared=$ledger_ok) — MANUAL intervention required." >&2
-    echo "!! Restore Terminal profiles from $PROFILE_BACKUP.plist.bak and clear/inspect the ledger $LEDGER by hand." >&2
+    echo "!! CRITICAL: recovery INCOMPLETE (profiles_restored=$prof_ok ledger_cleared=$ledger_ok substrate_torn_down=$teardown_ok) — MANUAL intervention required." >&2
+    echo "!! Restore Terminal profiles from $PROFILE_BACKUP.plist.bak, clear the ledger $LEDGER, and tear down any leftover tmux/ttyd by hand." >&2
   fi
   exit 1
 }
@@ -285,6 +295,7 @@ EOF
   fi
 
   local seats; seats="$(manifest_slugs)"
+  [ -n "$seats" ] || die "manifest yielded no seats — aborting before any change (codex 019f7173 finding 2: never run the loops over an empty set)."
   echo "== Phase-2 coordinated global cutover (§6a) — wave-size $wave_size, quit=$do_quit =="
 
   # [1] checkpoint — NOT script-enforceable (each agent pins its own context;
