@@ -10,9 +10,9 @@
     },
     "_mirror": "plates + order mirror live Lab CONTROL_GROUPS (scope \u00a75.1); membership reconciled with registry runtime + launch manifest",
     "counts": {
-      "cards": 38,
+      "cards": 39,
       "driveable": 26,
-      "app_claude": 12,
+      "app_seat": 13,
       "unplaced": 0
     }
   },
@@ -26,7 +26,7 @@
           "agent_id": "AG-001",
           "display_name": "Lead",
           "driveable": true,
-          "app_claude": false,
+          "app_seat": false,
           "port": 7600
         },
         {
@@ -35,7 +35,7 @@
           "agent_id": "AG-004",
           "display_name": "Codex Deputy",
           "driveable": true,
-          "app_claude": false,
+          "app_seat": false,
           "port": 7603
         },
         {
@@ -44,7 +44,7 @@
           "agent_id": "AG-002",
           "display_name": "Cowork AH1",
           "driveable": false,
-          "app_claude": true,
+          "app_seat": true,
           "port": null
         }
       ]
@@ -58,8 +58,17 @@
           "agent_id": "AG-202",
           "display_name": "Codex Rev",
           "driveable": true,
-          "app_claude": false,
+          "app_seat": false,
           "port": 7612
+        },
+        {
+          "slug": "codex-arch",
+          "alias": "codex-arch",
+          "agent_id": "AG-203",
+          "display_name": "Codex Arch",
+          "driveable": false,
+          "app_seat": true,
+          "port": null
         }
       ]
     },
@@ -72,7 +81,7 @@
           "agent_id": "AG-201",
           "display_name": "Researcher",
           "driveable": true,
-          "app_claude": false,
+          "app_seat": false,
           "port": 7611
         },
         {
@@ -81,7 +90,7 @@
           "agent_id": "AG-209",
           "display_name": "Librarian",
           "driveable": true,
-          "app_claude": false,
+          "app_seat": false,
           "port": 7619
         },
         {
@@ -90,7 +99,7 @@
           "agent_id": "AG-006",
           "display_name": "AID T",
           "driveable": true,
-          "app_claude": false,
+          "app_seat": false,
           "port": 7605
         },
         {
@@ -99,7 +108,7 @@
           "agent_id": "AG-210",
           "display_name": "ARM",
           "driveable": true,
-          "app_claude": false,
+          "app_seat": false,
           "port": 7620
         },
         {
@@ -108,7 +117,7 @@
           "agent_id": "AG-208",
           "display_name": "BEN",
           "driveable": false,
-          "app_claude": true,
+          "app_seat": true,
           "port": null
         },
         {
@@ -117,7 +126,7 @@
           "agent_id": "AG-206",
           "display_name": "Russo AI",
           "driveable": true,
-          "app_claude": false,
+          "app_seat": false,
           "port": 7616
         },
         {
@@ -126,7 +135,7 @@
           "agent_id": "AG-317",
           "display_name": "Cowork AID",
           "driveable": false,
-          "app_claude": true,
+          "app_seat": true,
           "port": null
         },
         {
@@ -135,7 +144,7 @@
           "agent_id": "AG-314",
           "display_name": "Cowork ARM",
           "driveable": false,
-          "app_claude": true,
+          "app_seat": true,
           "port": null
         },
         {
@@ -144,7 +153,7 @@
           "agent_id": "AG-316",
           "display_name": "Cowork Librarian",
           "driveable": false,
-          "app_claude": true,
+          "app_seat": true,
           "port": null
         },
         {
@@ -153,7 +162,7 @@
           "agent_id": "AG-313",
           "display_name": "Cowork Researcher",
           "driveable": false,
-          "app_claude": true,
+          "app_seat": true,
           "port": null
         },
         {
@@ -162,7 +171,7 @@
           "agent_id": "AG-315",
           "display_name": "Cowork Russo AI",
           "driveable": false,
-          "app_claude": true,
+          "app_seat": true,
           "port": null
         }
       ]
@@ -176,7 +185,7 @@
           "agent_id": "AG-003",
           "display_name": "Deputy",
           "driveable": true,
-          "app_claude": false,
+          "app_seat": false,
           "port": 7602
         },
         {
@@ -185,7 +194,7 @@
           "agent_id": "AG-101",
           "display_name": "B1",
           "driveable": true,
-          "app_claude": false,
+          "app_seat": false,
           "port": 7606
         },
         {
@@ -194,7 +203,7 @@
           "agent_id": "AG-102",
           "display_name": "B2",
           "driveable": true,
-          "app_claude": false,
+          "app_seat": false,
           "port": 7607
         },
         {
@@ -203,7 +212,7 @@
           "agent_id": "AG-103",
           "display_name": "B3",
           "driveable": true,
-          "app_claude": false,
+          "app_seat": false,
           "port": 7608
         },
         {
@@ -212,7 +221,7 @@
           "agent_id": "AG-104",
           "display_name": "B4",
           "driveable": true,
-          "app_claude": false,
+          "app_seat": false,
           "port": 7609
         },
         {
@@ -221,7 +230,7 @@
           "agent_id": "AG-211",
           "display_name": "Publisher",
           "driveable": true,
-          "app_claude": false,
+          "app_seat": false,
           "port": 7621
         },
         {
@@ -230,7 +239,7 @@
           "agent_id": "AG-212",
           "display_name": "UI Designer",
           "driveable": true,
-          "app_claude": false,
+          "app_seat": false,
           "port": 7622
         }
       ]
@@ -244,7 +253,7 @@
           "agent_id": "AG-301",
           "display_name": "Hag Desk",
           "driveable": true,
-          "app_claude": false,
+          "app_seat": false,
           "port": 7623
         },
         {
@@ -253,7 +262,7 @@
           "agent_id": "AG-405",
           "display_name": "Hag Filer",
           "driveable": true,
-          "app_claude": false,
+          "app_seat": false,
           "port": 7644
         },
         {
@@ -262,7 +271,7 @@
           "agent_id": "AG-302",
           "display_name": "Origination Desk",
           "driveable": true,
-          "app_claude": false,
+          "app_seat": false,
           "port": 7624
         },
         {
@@ -271,7 +280,7 @@
           "agent_id": "AG-303",
           "display_name": "AO Desk",
           "driveable": true,
-          "app_claude": false,
+          "app_seat": false,
           "port": 7625
         },
         {
@@ -280,7 +289,7 @@
           "agent_id": "AG-304",
           "display_name": "MOVIE Desk",
           "driveable": true,
-          "app_claude": false,
+          "app_seat": false,
           "port": 7626
         },
         {
@@ -289,7 +298,7 @@
           "agent_id": "AG-305",
           "display_name": "Baden-Baden Desk",
           "driveable": true,
-          "app_claude": false,
+          "app_seat": false,
           "port": 7627
         },
         {
@@ -298,7 +307,7 @@
           "agent_id": "AG-306",
           "display_name": "Brisen Desk",
           "driveable": true,
-          "app_claude": false,
+          "app_seat": false,
           "port": 7628
         },
         {
@@ -307,7 +316,7 @@
           "agent_id": "AG-308",
           "display_name": "Cowork BB Desk",
           "driveable": false,
-          "app_claude": true,
+          "app_seat": true,
           "port": null
         },
         {
@@ -316,7 +325,7 @@
           "agent_id": "AG-309",
           "display_name": "Cowork AO Desk",
           "driveable": false,
-          "app_claude": true,
+          "app_seat": true,
           "port": null
         },
         {
@@ -325,7 +334,7 @@
           "agent_id": "AG-310",
           "display_name": "Cowork MOVIE Desk",
           "driveable": false,
-          "app_claude": true,
+          "app_seat": true,
           "port": null
         },
         {
@@ -334,7 +343,7 @@
           "agent_id": "AG-311",
           "display_name": "Cowork Hag Desk",
           "driveable": false,
-          "app_claude": true,
+          "app_seat": true,
           "port": null
         },
         {
@@ -343,7 +352,7 @@
           "agent_id": "AG-312",
           "display_name": "Cowork Origination Desk",
           "driveable": false,
-          "app_claude": true,
+          "app_seat": true,
           "port": null
         }
       ]
@@ -357,7 +366,7 @@
           "agent_id": "AG-401",
           "display_name": "CM-1",
           "driveable": true,
-          "app_claude": false,
+          "app_seat": false,
           "port": 7640
         },
         {
@@ -366,7 +375,7 @@
           "agent_id": "AG-402",
           "display_name": "CM-2",
           "driveable": true,
-          "app_claude": false,
+          "app_seat": false,
           "port": 7641
         },
         {
@@ -375,7 +384,7 @@
           "agent_id": "AG-403",
           "display_name": "CM-3",
           "driveable": true,
-          "app_claude": false,
+          "app_seat": false,
           "port": 7642
         },
         {
@@ -384,7 +393,7 @@
           "agent_id": "AG-404",
           "display_name": "CM-4",
           "driveable": true,
-          "app_claude": false,
+          "app_seat": false,
           "port": 7643
         }
       ]

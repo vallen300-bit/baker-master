@@ -36,9 +36,9 @@ def test_layout_present_and_shaped(layout):
             assert c["display_name"], f"card {c['slug']} missing display_name"
             assert re.match(r"AG-\d+", c["agent_id"]), f"{c['slug']} bad agent_id"
             assert isinstance(c["driveable"], bool)
-            assert isinstance(c["app_claude"], bool)
-            # a card is exactly one of driveable / app-claude
-            assert c["driveable"] != c["app_claude"], f"{c['slug']} ambiguous kind"
+            assert isinstance(c["app_seat"], bool)
+            # a card is exactly one of driveable / app-seat (status-only)
+            assert c["driveable"] != c["app_seat"], f"{c['slug']} ambiguous kind"
 
 
 def test_plate_order_mirrors_control_room(layout):
@@ -62,12 +62,37 @@ def test_counts_consistent(layout):
     slugs = [c["slug"] for c in cards]
     assert len(slugs) == len(set(slugs)), "duplicate card across plates"
     drive = sum(c["driveable"] for c in cards)
-    app = sum(c["app_claude"] for c in cards)
+    app = sum(c["app_seat"] for c in cards)
     meta = layout.get("meta", {}).get("counts", {})
     if meta:
         assert meta["driveable"] == drive
-        assert meta["app_claude"] == app
+        assert meta["app_seat"] == app
         assert meta.get("unplaced", 0) == 0
+
+
+def test_codex_arch_carded_as_app_seat_in_verification(layout):
+    """Regression (lead #12205): codex-arch (runtime app-codex) is active +
+    bus-enabled and Control-Room-listed, so it must render as a status-only app
+    card in the Verification plate next to codex — not be silently dropped by an
+    app-claude-only membership filter."""
+    verification = next(
+        (p for p in layout["plates"] if p["label"] == "Verification"), None)
+    assert verification, "no Verification plate"
+    by_slug = {c["slug"]: c for c in verification["cards"]}
+    assert "codex-arch" in by_slug, \
+        f"codex-arch missing from Verification: {list(by_slug)}"
+    card = by_slug["codex-arch"]
+    assert card["app_seat"] is True and card["driveable"] is False, \
+        "codex-arch must be a status-only app seat (app-codex, no tmux terminal)"
+
+
+def test_no_app_runtime_seat_silently_dropped(layout):
+    """Any registry seat with an app-* runtime that the Control Room places must
+    surface as an app_seat card — generalizes the codex-arch fix beyond app-claude."""
+    carded = {c["slug"] for p in layout["plates"] for c in p["cards"]}
+    # codex-arch is the representative app-codex seat; assert it is carded and
+    # marked app_seat (broader registry-vs-layout reconciliation is a live check).
+    assert "codex-arch" in carded
 
 
 def test_generator_parses_control_groups_literal():

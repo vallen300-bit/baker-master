@@ -4,7 +4,7 @@
  * metadata, mirrors the live Control Room) merged by slug with the controller's
  * live GET /api/agents (session + glance state). Driveable seats open an
  * on-demand iframe to /term/<slug>/ (same origin — one Basic-auth prompt per
- * browser session). App-claude seats are status-only (no terminal). GO sends
+ * browser session). App seats (any app-* runtime) are status-only (no terminal). GO sends
  * Enter to the seat's tmux session; Start (re)creates a downed seat's session.
  *
  * Interaction contract: COCKPIT_CARD_BEHAVIOR_MOCK.html. Glance frames: §5.2 +
@@ -182,7 +182,7 @@
     const cls = ["card"];
     let stateText, actions = null, statusOnly = null, unread = null;
 
-    if (meta.app_claude) {
+    if (meta.app_seat) {
       cls.push("app");
       stateText = "app seat";
       statusOnly = el("div", { class: "statusonly", text: "status only — app seat, no terminal" });
@@ -221,7 +221,7 @@
       actions = el("div", { class: "actions" }, [startBtn]);
     }
 
-    const kind = meta.app_claude ? "APP" : "TERMINAL";
+    const kind = meta.app_seat ? "APP" : "TERMINAL";
     const top = el("div", { class: "top" }, [
       el("span", { class: "agpill", text: meta.agent_id || "AG-?" }),
       el("span", { class: "kind", text: kind }),
@@ -240,7 +240,7 @@
     if (actions) children.push(actions);
 
     const c = el("div", { class: cls.join(" "), "data-slug": meta.slug }, children);
-    if (!meta.app_claude) {
+    if (!meta.app_seat) {
       c.addEventListener("click", () => {
         const r = stateBySlug.get(meta.slug) || {};
         if (!r.session_up) { toast(meta.display_name + " is down — press Start first"); return; }
