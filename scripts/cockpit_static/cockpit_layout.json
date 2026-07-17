@@ -1,0 +1,393 @@
+{
+  "meta": {
+    "_generated": "DO NOT EDIT BY HAND \u2014 regenerate with scripts/generate_cockpit_layout.py --write",
+    "_sources": {
+      "registry": "/Users/dimitry/baker-vault/_ops/registries/agent_registry.yml",
+      "registry_sha256": "e42a405975dc4691a48ad63080825a2fe4280fc864dc651846dabe7c27b53495",
+      "control_groups_source": "/Users/dimitry/bm-b1/brisen-lab/static/app.js",
+      "control_groups_sha256": "aec8798d782a524a8cb11acf58d8e3b5da7e1984fcf8d27b914b32c9230f208d",
+      "manifest": "/Users/dimitry/bm-b1/scripts/cockpit_launch_manifest.json"
+    },
+    "_mirror": "plates + order mirror live Lab CONTROL_GROUPS (scope \u00a75.1); membership reconciled with registry runtime + launch manifest",
+    "counts": {
+      "cards": 38,
+      "driveable": 26,
+      "app_claude": 12,
+      "unplaced": 0
+    }
+  },
+  "plates": [
+    {
+      "label": "Control Tower",
+      "cards": [
+        {
+          "slug": "lead",
+          "alias": "AH1",
+          "agent_id": "AG-001",
+          "display_name": "Lead",
+          "driveable": true,
+          "app_claude": false,
+          "port": 7600
+        },
+        {
+          "slug": "deputy-codex",
+          "alias": "deputy_codex",
+          "agent_id": "AG-004",
+          "display_name": "Codex Deputy",
+          "driveable": true,
+          "app_claude": false,
+          "port": 7603
+        },
+        {
+          "slug": "cowork-ah1",
+          "alias": "AH1-APP",
+          "agent_id": "AG-002",
+          "display_name": "Cowork AH1",
+          "driveable": false,
+          "app_claude": true,
+          "port": null
+        }
+      ]
+    },
+    {
+      "label": "Verification",
+      "cards": [
+        {
+          "slug": "codex",
+          "alias": "codex",
+          "agent_id": "AG-202",
+          "display_name": "Codex Rev",
+          "driveable": true,
+          "app_claude": false,
+          "port": 7612
+        }
+      ]
+    },
+    {
+      "label": "Specialists",
+      "cards": [
+        {
+          "slug": "researcher",
+          "alias": "research-agent",
+          "agent_id": "AG-201",
+          "display_name": "Researcher",
+          "driveable": true,
+          "app_claude": false,
+          "port": 7611
+        },
+        {
+          "slug": "librarian",
+          "alias": "librarian",
+          "agent_id": "AG-209",
+          "display_name": "Librarian",
+          "driveable": true,
+          "app_claude": false,
+          "port": 7619
+        },
+        {
+          "slug": "aid",
+          "alias": "ai-dennis",
+          "agent_id": "AG-006",
+          "display_name": "AID T",
+          "driveable": true,
+          "app_claude": false,
+          "port": 7605
+        },
+        {
+          "slug": "arm",
+          "alias": "arm",
+          "agent_id": "AG-210",
+          "display_name": "ARM",
+          "driveable": true,
+          "app_claude": false,
+          "port": 7620
+        },
+        {
+          "slug": "ben",
+          "alias": "ben",
+          "agent_id": "AG-208",
+          "display_name": "BEN",
+          "driveable": false,
+          "app_claude": true,
+          "port": null
+        },
+        {
+          "slug": "russo-ai",
+          "alias": "russo_ai",
+          "agent_id": "AG-206",
+          "display_name": "Russo AI",
+          "driveable": true,
+          "app_claude": false,
+          "port": 7616
+        },
+        {
+          "slug": "cowork-aid",
+          "alias": "AID-APP",
+          "agent_id": "AG-317",
+          "display_name": "Cowork AID",
+          "driveable": false,
+          "app_claude": true,
+          "port": null
+        },
+        {
+          "slug": "cowork-arm",
+          "alias": "ARM-APP",
+          "agent_id": "AG-314",
+          "display_name": "Cowork ARM",
+          "driveable": false,
+          "app_claude": true,
+          "port": null
+        },
+        {
+          "slug": "cowork-librarian",
+          "alias": "LIBRARIAN-APP",
+          "agent_id": "AG-316",
+          "display_name": "Cowork Librarian",
+          "driveable": false,
+          "app_claude": true,
+          "port": null
+        },
+        {
+          "slug": "cowork-researcher",
+          "alias": "RESEARCHER-APP",
+          "agent_id": "AG-313",
+          "display_name": "Cowork Researcher",
+          "driveable": false,
+          "app_claude": true,
+          "port": null
+        },
+        {
+          "slug": "cowork-russo-ai",
+          "alias": "RUSSO-APP",
+          "agent_id": "AG-315",
+          "display_name": "Cowork Russo AI",
+          "driveable": false,
+          "app_claude": true,
+          "port": null
+        }
+      ]
+    },
+    {
+      "label": "Builders",
+      "cards": [
+        {
+          "slug": "deputy",
+          "alias": "AH2",
+          "agent_id": "AG-003",
+          "display_name": "Deputy",
+          "driveable": true,
+          "app_claude": false,
+          "port": 7602
+        },
+        {
+          "slug": "b1",
+          "alias": "b1",
+          "agent_id": "AG-101",
+          "display_name": "B1",
+          "driveable": true,
+          "app_claude": false,
+          "port": 7606
+        },
+        {
+          "slug": "b2",
+          "alias": "b2",
+          "agent_id": "AG-102",
+          "display_name": "B2",
+          "driveable": true,
+          "app_claude": false,
+          "port": 7607
+        },
+        {
+          "slug": "b3",
+          "alias": "b3",
+          "agent_id": "AG-103",
+          "display_name": "B3",
+          "driveable": true,
+          "app_claude": false,
+          "port": 7608
+        },
+        {
+          "slug": "b4",
+          "alias": "b4",
+          "agent_id": "AG-104",
+          "display_name": "B4",
+          "driveable": true,
+          "app_claude": false,
+          "port": 7609
+        },
+        {
+          "slug": "publisher",
+          "alias": "publisher",
+          "agent_id": "AG-211",
+          "display_name": "Publisher",
+          "driveable": true,
+          "app_claude": false,
+          "port": 7621
+        },
+        {
+          "slug": "designer",
+          "alias": "ui-designer",
+          "agent_id": "AG-212",
+          "display_name": "UI Designer",
+          "driveable": true,
+          "app_claude": false,
+          "port": 7622
+        }
+      ]
+    },
+    {
+      "label": "Matter desks",
+      "cards": [
+        {
+          "slug": "hag-desk",
+          "alias": "hagenauer-desk",
+          "agent_id": "AG-301",
+          "display_name": "Hag Desk",
+          "driveable": true,
+          "app_claude": false,
+          "port": 7623
+        },
+        {
+          "slug": "hag-filer",
+          "alias": "hag_filer",
+          "agent_id": "AG-405",
+          "display_name": "Hag Filer",
+          "driveable": true,
+          "app_claude": false,
+          "port": 7644
+        },
+        {
+          "slug": "origination-desk",
+          "alias": "origination",
+          "agent_id": "AG-302",
+          "display_name": "Origination Desk",
+          "driveable": true,
+          "app_claude": false,
+          "port": 7624
+        },
+        {
+          "slug": "ao-desk",
+          "alias": "ao_desk",
+          "agent_id": "AG-303",
+          "display_name": "AO Desk",
+          "driveable": true,
+          "app_claude": false,
+          "port": 7625
+        },
+        {
+          "slug": "movie-desk",
+          "alias": "MOVIE_DESK",
+          "agent_id": "AG-304",
+          "display_name": "MOVIE Desk",
+          "driveable": true,
+          "app_claude": false,
+          "port": 7626
+        },
+        {
+          "slug": "baden-baden-desk",
+          "alias": "bb",
+          "agent_id": "AG-305",
+          "display_name": "Baden-Baden Desk",
+          "driveable": true,
+          "app_claude": false,
+          "port": 7627
+        },
+        {
+          "slug": "brisen-desk",
+          "alias": "brisen-desk",
+          "agent_id": "AG-306",
+          "display_name": "Brisen Desk",
+          "driveable": true,
+          "app_claude": false,
+          "port": 7628
+        },
+        {
+          "slug": "cowork-bb-desk",
+          "alias": "BB-APP",
+          "agent_id": "AG-308",
+          "display_name": "Cowork BB Desk",
+          "driveable": false,
+          "app_claude": true,
+          "port": null
+        },
+        {
+          "slug": "cowork-ao-desk",
+          "alias": "AO-APP",
+          "agent_id": "AG-309",
+          "display_name": "Cowork AO Desk",
+          "driveable": false,
+          "app_claude": true,
+          "port": null
+        },
+        {
+          "slug": "cowork-movie-desk",
+          "alias": "MOVIE-APP",
+          "agent_id": "AG-310",
+          "display_name": "Cowork MOVIE Desk",
+          "driveable": false,
+          "app_claude": true,
+          "port": null
+        },
+        {
+          "slug": "cowork-hag-desk",
+          "alias": "HAG-APP",
+          "agent_id": "AG-311",
+          "display_name": "Cowork Hag Desk",
+          "driveable": false,
+          "app_claude": true,
+          "port": null
+        },
+        {
+          "slug": "cowork-origination-desk",
+          "alias": "ORIG-APP",
+          "agent_id": "AG-312",
+          "display_name": "Cowork Origination Desk",
+          "driveable": false,
+          "app_claude": true,
+          "port": null
+        }
+      ]
+    },
+    {
+      "label": "Ground systems",
+      "cards": [
+        {
+          "slug": "CM-1",
+          "alias": "cm-1",
+          "agent_id": "AG-401",
+          "display_name": "CM-1",
+          "driveable": true,
+          "app_claude": false,
+          "port": 7640
+        },
+        {
+          "slug": "CM-2",
+          "alias": "cm-2",
+          "agent_id": "AG-402",
+          "display_name": "CM-2",
+          "driveable": true,
+          "app_claude": false,
+          "port": 7641
+        },
+        {
+          "slug": "CM-3",
+          "alias": "cm-3",
+          "agent_id": "AG-403",
+          "display_name": "CM-3",
+          "driveable": true,
+          "app_claude": false,
+          "port": 7642
+        },
+        {
+          "slug": "CM-4",
+          "alias": "cm-4",
+          "agent_id": "AG-404",
+          "display_name": "CM-4",
+          "driveable": true,
+          "app_claude": false,
+          "port": 7643
+        }
+      ]
+    }
+  ]
+}

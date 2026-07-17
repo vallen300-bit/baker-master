@@ -14,6 +14,7 @@ PORT="${COCKPIT_PORT:-7800}"
 
 CONTROLLER_SRC="$SCRIPT_DIR/cockpit_controller.py"
 LAUNCHER_SRC="$SCRIPT_DIR/cockpit_controller_launch.sh"
+STATIC_SRC="$SCRIPT_DIR/cockpit_static"
 TEMPLATE="$SCRIPT_DIR/launchd/$LABEL.plist"
 CONTROLLER_DEPLOY="$DEPLOY_DIR/cockpit_controller.py"
 LAUNCHER_DEPLOY="$DEPLOY_DIR/cockpit_controller_launch.sh"
@@ -69,6 +70,24 @@ fi
 cp "$CONTROLLER_SRC" "$CONTROLLER_DEPLOY"
 cp "$LAUNCHER_SRC" "$LAUNCHER_DEPLOY"
 chmod 700 "$CONTROLLER_DEPLOY" "$LAUNCHER_DEPLOY"
+
+# Stage the cockpit static page (LAB_COCKPIT_PAGE_1). The controller mounts
+# STATIC_DIR at "/". cockpit_layout.json is a GENERATED artifact (regenerate with
+# scripts/generate_cockpit_layout.py --write before installing when the registry
+# or Control Room grouping changes). Mirror the source dir exactly so a removed
+# asset does not linger in the deploy dir.
+if [[ -d "$STATIC_SRC" ]]; then
+  if command -v rsync >/dev/null 2>&1; then
+    rsync -a --delete "$STATIC_SRC/" "$STATIC_DIR/"
+  else
+    rm -rf "${STATIC_DIR:?}/"* 2>/dev/null || true
+    cp -R "$STATIC_SRC/." "$STATIC_DIR/"
+  fi
+  chmod -R go-w "$STATIC_DIR" 2>/dev/null || true
+  echo "Staged cockpit static page: $STATIC_DIR"
+else
+  echo "WARN: cockpit static source missing ($STATIC_SRC) — page not staged." >&2
+fi
 
 python3 - "$TEMPLATE" "$INSTALLED_PLIST" \
   "$LAUNCHER_DEPLOY" "$DEPLOY_DIR" "$CONTROLLER_DEPLOY" "$FLEET_SCRIPT" \

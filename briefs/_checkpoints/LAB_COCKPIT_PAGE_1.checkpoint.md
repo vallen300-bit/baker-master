@@ -43,8 +43,20 @@ Controller/backend changes (B-1), Render-Lab embed (permanently out §11.5), Tai
 ## Gates
 codex cross-vendor PR review + cross-vendor UI critique -> lead line-read + merge -> Director eyeball on pilot cards.
 
+## Progress (attempt 2 — build COMPLETE, live ACs GREEN)
+Built: scripts/cockpit_static/{index.html,cockpit.css,cockpit.js,glance_state.js,cockpit_layout.json}
++ scripts/generate_cockpit_layout.py (layout generator, mirrors live CONTROL_GROUPS)
++ install_cockpit_controller.sh static-staging + .claude/how-to/lab-cockpit.md (runbook) + INDEX line
++ tests/test_cockpit_layout.py (5 passed; existing cockpit suite 18 passed, no regression).
+Mock pulled from main @b44a7132 (merged) — behavior aligned to it. Live smoke on Chrome:
+AC-2/AC-U1 open B3 → real terminal in-page + keystroke reached brisen-desk tmux (probe verified+cleared)
++ GO → POST /go 200; AC-U2 brisen-desk Start button flipped card down→up live no reload;
+AC-U3 killed controller+b3 ttyd → tmux survived, launchd relaunch <1s, GET/ 200;
+AC-U4 live DOM needs_go+working → glance-needs-go (working suppressed); AC-U5 N/A (badge flag off);
+§8 AC-5 loopback-only. Pilots b3+brisen-desk migrated in ledger. Screenshot: briefs/_reports/_assets/B1_cockpit_grid_20260717.png.
+
 ## Next concrete step (successor)
-Read the Context-Contract files (mock + glance_state.js + app.js + controller routes), confirm /api/agents shape live (curl with cred from file), then scaffold the static page into the controller's static dir. Pilot cards to drive: B3 (up) + Brisen Desk. Start behavior-mock-faithful; do not invent interactions.
+If resuming: the build + ACs are done. Remaining = open PR (b1/lab-cockpit-page → main), file ship report briefs/_reports/, post ship + POST_DEPLOY_AC_VERDICT to lead. If PR already open, wait on codex cross-vendor PR review + UI critique → lead merge → Director eyeball.
 
 ## BRIEF A (prior arc) — DONE, for reference
 Merged main @10dd3bec (PR #582 + regression #584). B3 sandbox live: tmux b3 UP, ttyd 127.0.0.1:7608 /term/b3/, ledger migrated. Scripts: generate_cockpit_manifest.py, fleet_terminals.sh, cockpit_migrate.sh, install_cockpit_ttyd.sh, cockpit_rollback.sh. AC verdict #12145 accepted.

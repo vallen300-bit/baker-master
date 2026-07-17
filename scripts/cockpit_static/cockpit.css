@@ -1,0 +1,205 @@
+/* Baker Cockpit — LAB_COCKPIT_PAGE_1 (scope §5/§7, mock interaction contract).
+ *
+ * Visual tokens are the LIVE Lab tokens (brisen-lab/static/styles.css :root) so
+ * the Cockpit is visually indistinguishable from a Lab page (§6.5). Card + panel
+ * INTERACTION follows COCKPIT_CARD_BEHAVIOR_MOCK.html; glance frames (§5.2) and
+ * the GO affordance (§5.4) are scope additions the mock does not cover.
+ */
+:root {
+  --bg: #0d1117;
+  --panel: #161b22;
+  --border: #30363d;
+  --text: #e6edf3;
+  --muted: #8b949e;
+  --accent: #388bfd;
+  --working: #d29922;
+  --needs-go: #2bd964;
+  --new: #00d5ff;
+  --down: #4a5561;
+  --plate: #10151c;
+}
+
+* { box-sizing: border-box; }
+html, body { margin: 0; }
+body {
+  background: var(--bg);
+  color: var(--text);
+  font: 14px/1.45 -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, sans-serif;
+}
+
+/* Top bar — mirrors the Lab tab strip; "Cockpit" is the active tab. */
+.cockpit-header {
+  display: flex; align-items: center; gap: 2px;
+  background: #080b0f;
+  border-bottom: 1px solid var(--border);
+  padding: 0 20px;
+  position: sticky; top: 0; z-index: 5;
+}
+.cockpit-header .tab {
+  padding: 13px 18px; font-size: 12px; letter-spacing: .1em;
+  color: var(--muted); text-transform: uppercase;
+}
+.cockpit-header .tab.brand { font-weight: 700; }
+.cockpit-header .tab.active {
+  color: var(--text); border-bottom: 2px solid var(--accent);
+  text-transform: none; letter-spacing: normal;
+}
+.cockpit-header .spacer { flex: 1; }
+.cockpit-header .conn {
+  font-size: 11px; color: var(--muted); padding-right: 6px;
+  font-variant-numeric: tabular-nums;
+}
+.cockpit-header .conn.ok::before    { content: "● "; color: var(--working); }
+.cockpit-header .conn.err::before   { content: "● "; color: #f85149; }
+
+main.wrap { padding: 22px 24px 60px; }
+
+/* Plates — bordered, tinted container per group (§5.1). */
+.plate {
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: var(--plate);
+  padding: 14px 16px 18px;
+  margin-bottom: 20px;
+}
+.plate > h2 {
+  font-size: 12px; letter-spacing: .14em; text-transform: uppercase;
+  color: var(--muted); margin: 2px 0 12px;
+}
+.plate > h2 .count { color: var(--down); margin-left: 8px; letter-spacing: normal; }
+
+.grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(210px, 1fr));
+  gap: 12px;
+}
+
+/* Card — Lab bevel + mock face layout. */
+.card {
+  background: linear-gradient(180deg, #28323f, #141922);
+  border: 1px solid #36414f;
+  border-radius: 10px;
+  padding: 12px 13px;
+  cursor: pointer;
+  display: flex; flex-direction: column; gap: 7px;
+  min-height: 74px;
+  box-shadow:
+    inset 0 1.5px 0 rgba(255,255,255,.14),
+    inset 0 -2px 3px rgba(0,0,0,.48),
+    0 4px 9px rgba(0,0,0,.52);
+  transition: border-color 120ms, box-shadow 140ms, transform 140ms, background 120ms;
+}
+.card:hover { border-color: #4a5766; transform: translateY(-1px); }
+.card:active { transform: translateY(1px); }
+
+.card .top { display: flex; align-items: center; gap: 7px; }
+.agpill {
+  font: 700 11px/1 ui-monospace, SFMono-Regular, Menlo, monospace;
+  color: var(--accent);
+  background: rgba(56,139,253,.12);
+  border: 1px solid rgba(56,139,253,.45);
+  border-radius: 5px; padding: 3px 6px; letter-spacing: .02em; flex: 0 0 auto;
+}
+.card .kind { font-size: 10px; letter-spacing: .09em; color: var(--muted); text-transform: uppercase; }
+.card .name { font-weight: 600; font-size: 13.5px; }
+.card .state { font-size: 11px; color: var(--muted); display: flex; align-items: center; gap: 6px; }
+.card .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--down); flex: 0 0 auto; }
+.card.up   .dot { background: var(--working); box-shadow: 0 0 6px rgba(210,153,34,.7); }
+.card.up.working .dot { background: var(--working); }
+.card .statusonly { font-size: 10px; color: var(--muted); font-style: italic; }
+
+/* down = dimmed + Start affordance (mock). */
+.card.down { opacity: .5; }
+.card.down .dot { background: var(--down); box-shadow: none; }
+
+/* card-face action row */
+.card .actions { display: flex; gap: 8px; margin-top: 1px; }
+.btn {
+  font: 600 11px/1 -apple-system, sans-serif;
+  border-radius: 6px; padding: 4px 11px; cursor: pointer;
+  background: transparent; color: var(--accent); border: 1px solid var(--accent);
+}
+.btn:hover { background: rgba(56,139,253,.14); }
+.btn.go { color: var(--needs-go); border-color: var(--needs-go); }
+.btn.go:hover { background: rgba(43,217,100,.16); }
+.btn.start { color: var(--accent); border-color: var(--accent); }
+.btn:disabled { opacity: .5; cursor: default; }
+.btn.flash-ok { animation: flash-ok .9s ease-out; }
+@keyframes flash-ok {
+  0% { background: rgba(43,217,100,.5); } 100% { background: transparent; }
+}
+
+/* app-claude status-only card — visibly marked, not clickable to a terminal. */
+.card.app { cursor: default; }
+.card.app:hover { transform: none; border-color: #36414f; }
+.card.app .agpill { color: var(--muted); background: rgba(139,148,158,.10); border-color: rgba(139,148,158,.4); }
+
+/* Glance frames (§5.2) — precedence NEEDS_GO > WORKING > NEW resolved in JS. */
+.card.glance-working {
+  border-color: #d29922;
+  box-shadow: 0 0 0 1px #d29922, 0 0 16px rgba(210,153,34,.38);
+  background: rgba(210,153,34,.07);
+}
+.card.glance-needs-go {
+  border-color: #2bd964;
+  box-shadow: 0 0 0 2px #2bd964, 0 0 24px rgba(43,217,100,.72);
+  background: rgba(43,217,100,.16);
+  animation: card-go-pulse 1.05s ease-in-out infinite;
+}
+@keyframes card-go-pulse {
+  0%,100% { box-shadow: 0 0 0 2px #2bd964, 0 0 14px rgba(43,217,100,.42); }
+  50%     { box-shadow: 0 0 0 2px #2bd964, 0 0 30px rgba(43,217,100,.82); }
+}
+.card.glance-new {
+  border-color: #00d5ff;
+  box-shadow: 0 0 0 1px #00d5ff, 0 0 18px rgba(0,213,255,.62);
+  background: rgba(0,213,255,.13);
+  animation: card-new-pulse 1.4s ease-in-out infinite;
+}
+@keyframes card-new-pulse {
+  0%,100% { box-shadow: 0 0 0 1px #00d5ff, 0 0 11px rgba(0,213,255,.38); }
+  50%     { box-shadow: 0 0 0 1px #00d5ff, 0 0 24px rgba(0,213,255,.78); }
+}
+.card .unread {
+  font: 700 10px/1 ui-monospace, Menlo, monospace;
+  color: #0d1117; background: #00d5ff; border-radius: 9px; padding: 2px 6px;
+}
+.card .age { font-size: 10px; color: var(--muted); }
+.card .age.warn { color: var(--working); }
+.card .age.hot  { color: #f85149; }
+
+/* Terminal overlay (mock #term/#veil). */
+#veil {
+  display: none; position: fixed; inset: 0; background: rgba(0,0,0,.55); z-index: 8;
+}
+#veil.open { display: block; }
+#term {
+  display: none; position: fixed; inset: 6% 8%; z-index: 9;
+  background: #000; border: 1px solid var(--accent); border-radius: 12px;
+  flex-direction: column; overflow: hidden;
+  box-shadow: 0 20px 80px rgba(0,0,0,.7);
+}
+#term.open { display: flex; }
+#termbar {
+  display: flex; align-items: center; gap: 12px;
+  padding: 10px 16px; background: var(--panel);
+  border-bottom: 1px solid var(--border); border-radius: 12px 12px 0 0;
+}
+#termbar b { font-size: 13px; }
+#termbar .sub { color: var(--muted); font-size: 11px; }
+#termbar .spacer { flex: 1; }
+#term .btn.go { font-size: 12px; padding: 6px 16px; }
+#x { cursor: pointer; color: var(--muted); font-size: 18px; padding: 2px 8px; }
+#x:hover { color: #fff; }
+#termframe { flex: 1; border: 0; width: 100%; background: #000; }
+
+/* Toast */
+#toast {
+  position: fixed; bottom: 22px; left: 50%; transform: translateX(-50%);
+  background: var(--panel); border: 1px solid var(--border); border-radius: 8px;
+  padding: 9px 16px; font-size: 12.5px; z-index: 11;
+  box-shadow: 0 8px 24px rgba(0,0,0,.5); opacity: 0; transition: opacity .2s;
+}
+#toast.show { opacity: 1; }
+#toast.err { border-color: #f85149; color: #ffb4ad; }
+#toast.ok  { border-color: var(--needs-go); }
