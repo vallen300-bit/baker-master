@@ -91,6 +91,9 @@ class Settings:
     lab_cache_seconds: float = 30.0
     lab_timeout_seconds: float = 5.0
     command_timeout_seconds: float = 10.0
+    # Per-seat ttyd reachability probe budget — a local loopback TCP connect,
+    # kept short so a hung seat never stalls the whole /api/agents response.
+    ttyd_probe_timeout_seconds: float = 0.5
     tmux_binary: str = "tmux"
 
     @classmethod
@@ -301,11 +304,36 @@ def send_go(settings: Settings, entry: ManifestEntry) -> dict[str, Any]:
     return {"ok": True, "sent": "Enter", "slug": entry.slug}
 
 
+async def probe_ttyd(host: str, port: int, timeout: float) -> bool:
+    """True if the seat's ttyd terminal server accepts a loopback TCP connect.
+
+    tmux (session_up) and ttyd (the browser-facing terminal server) fail
+    independently: a seat can be session_up yet have a dead ttyd, in which case
+    the /term proxy 502s. The cockpit renders that as an explicit error card, so
+    it needs a per-seat ttyd signal distinct from session_up.
+    """
+    try:
+        reader_writer = asyncio.open_connection(host, port)
+        _reader, writer = await asyncio.wait_for(reader_writer, timeout=timeout)
+    except (OSError, asyncio.TimeoutError):
+        return False
+    writer.close()
+    try:
+        await writer.wait_closed()
+    except (OSError, asyncio.TimeoutError):
+        pass
+    return True
+
+
 class LabGlance:
     def __init__(self, settings: Settings):
         self.settings = settings
         self._expires_at = 0.0
         self._value: dict[str, dict[str, Any]] = {}
+        # Whether the last actual (non-cached) Lab read succeeded. A full outage
+        # collapses every seat's glance to {} — the page must show that
+        # explicitly rather than letting all seats read as idle.
+        self.last_ok = True
 
     async def read(self) -> dict[str, dict[str, Any]]:
         now = time.monotonic()
@@ -320,6 +348,7 @@ class LabGlance:
                 payload = response.json()
         except (httpx.HTTPError, ValueError, TypeError) as exc:
             LOG.warning("Lab glance unavailable: %s", exc)
+            self.last_ok = False
             self._value = {}
             self._expires_at = now + min(self.settings.lab_cache_seconds, 5.0)
             return {}
@@ -333,6 +362,7 @@ class LabGlance:
                 result[str(row["slug"])] = {
                     field: row.get(field) for field in GLANCE_FIELDS
                 }
+        self.last_ok = True
         self._value = result
         self._expires_at = now + self.settings.lab_cache_seconds
         return result
@@ -434,10 +464,18 @@ def create_app(
     settings: Settings | None = None,
     *,
     lab_glance: LabGlance | None = None,
+    ttyd_prober: Any | None = None,
 ) -> FastAPI:
     config = settings or Settings.from_env()
     credentials = CredentialStore(config.credential_path)
     glance = lab_glance or LabGlance(config)
+
+    async def default_prober(entry: ManifestEntry) -> bool:
+        return await probe_ttyd(
+            config.bind_host, entry.port, config.ttyd_probe_timeout_seconds
+        )
+
+    prober = ttyd_prober or default_prober
     app = FastAPI(title="Baker Cockpit Controller", docs_url=None, redoc_url=None)
     app.add_middleware(OriginGuardMiddleware, settings=config)
     app.add_middleware(BasicAuthMiddleware, credentials=credentials)
@@ -474,8 +512,12 @@ def create_app(
         entries = manifest()
         sessions = tmux_session_names(config)
         lab = await glance.read()
+        lab_ok = getattr(glance, "last_ok", True)
+        ttyd_states = await asyncio.gather(
+            *(prober(entry) for entry in entries)
+        )
         agents = []
-        for entry in entries:
+        for entry, ttyd_up in zip(entries, ttyd_states):
             values = lab.get(entry.slug, {})
             agents.append(
                 {
@@ -483,10 +525,11 @@ def create_app(
                     "alias": entry.alias,
                     "port": entry.port,
                     "session_up": entry.slug in sessions,
+                    "ttyd_up": bool(ttyd_up),
                     **{field: values.get(field) for field in GLANCE_FIELDS},
                 }
             )
-        return {"agents": agents}
+        return {"agents": agents, "lab_glance_ok": bool(lab_ok)}
 
     @app.post("/api/sessions/{slug}/start")
     async def start_session(slug: str, request: Request):

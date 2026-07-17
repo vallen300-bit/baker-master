@@ -44,11 +44,22 @@ def _auth():
 
 
 class FakeLab:
-    def __init__(self, rows):
+    def __init__(self, rows, *, last_ok=True):
         self.rows = rows
+        self.last_ok = last_ok
 
     async def read(self):
         return self.rows
+
+
+def _prober(up_slugs):
+    """Fake ttyd prober: reports the given slugs as reachable, all others down."""
+    up = set(up_slugs)
+
+    async def prober(entry):
+        return entry.slug in up
+
+    return prober
 
 
 def test_api_agents_requires_auth_and_maps_only_pinned_glance_fields(
@@ -70,6 +81,7 @@ def test_api_agents_requires_auth_and_maps_only_pinned_glance_fields(
                 }
             }
         ),
+        ttyd_prober=_prober({"b3"}),
     )
     monkeypatch.setattr(
         controller,
@@ -91,6 +103,7 @@ def test_api_agents_requires_auth_and_maps_only_pinned_glance_fields(
                 "alias": "b3",
                 "port": 17603,
                 "session_up": True,
+                "ttyd_up": True,
                 "is_working": True,
                 "has_telemetry": True,
                 "needs_go": False,
@@ -103,6 +116,7 @@ def test_api_agents_requires_auth_and_maps_only_pinned_glance_fields(
                 "alias": "b4",
                 "port": 17604,
                 "session_up": False,
+                "ttyd_up": False,
                 "is_working": None,
                 "has_telemetry": None,
                 "needs_go": None,
@@ -110,8 +124,32 @@ def test_api_agents_requires_auth_and_maps_only_pinned_glance_fields(
                 "oldest_unacked_age_sec": None,
                 "unacked_topics": None,
             },
-        ]
+        ],
+        "lab_glance_ok": True,
     }
+
+
+def test_probe_ttyd_true_for_listening_false_for_closed():
+    import asyncio
+
+    async def scenario():
+        async def handle(reader, writer):
+            writer.close()
+
+        server = await asyncio.start_server(handle, "127.0.0.1", 0)
+        port = server.sockets[0].getsockname()[1]
+        try:
+            live = await controller.probe_ttyd("127.0.0.1", port, 0.5)
+        finally:
+            server.close()
+            await server.wait_closed()
+        # Port is now closed (server torn down).
+        dead = await controller.probe_ttyd("127.0.0.1", port, 0.5)
+        return live, dead
+
+    live, dead = asyncio.run(scenario())
+    assert live is True
+    assert dead is False
 
 
 def test_manifest_consumes_b1_entries_envelope(tmp_path):
@@ -141,10 +179,14 @@ def test_lab_failure_is_fail_soft_and_origin_is_strict(tmp_path, monkeypatch):
     settings = _settings(tmp_path)
 
     class UnavailableLab:
+        last_ok = False
+
         async def read(self):
             return {}
 
-    app = controller.create_app(settings, lab_glance=UnavailableLab())
+    app = controller.create_app(
+        settings, lab_glance=UnavailableLab(), ttyd_prober=_prober(set())
+    )
     monkeypatch.setattr(controller, "tmux_session_names", lambda _settings: set())
     client = TestClient(app)
     forged = client.get(
@@ -162,9 +204,12 @@ def test_lab_failure_is_fail_soft_and_origin_is_strict(tmp_path, monkeypatch):
         headers={"Host": "127.0.0.1:7800", **_auth()},
     )
     assert response.status_code == 200
+    body = response.json()
+    # A full Lab outage must surface explicitly, not collapse to silent idle.
+    assert body["lab_glance_ok"] is False
     assert all(
         all(agent[field] is None for field in controller.GLANCE_FIELDS)
-        for agent in response.json()["agents"]
+        for agent in body["agents"]
     )
 
 

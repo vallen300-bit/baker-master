@@ -65,7 +65,8 @@
   }
 
   function glanceClass(row) {
-    if (!row) return "";
+    // No live row at all = telemetry never seen for this seat -> UNKNOWN, NOT idle.
+    if (!row) return "glance-unknown";
     const g = window.resolveGlanceState({
       unacked: row.unacked_count || 0,
       isWorking: row.is_working === true,
@@ -76,13 +77,21 @@
     if (g === "NEEDS_GO") return "glance-needs-go";
     if (g === "WORKING") return "glance-working";
     if (g === "NEW") return "glance-new";
-    return "";
+    // UNKNOWN (glance outage or telemetry-less seat) must read distinctly from
+    // IDLE — a quiet seat with telemetry vs a seat we have no signal for.
+    if (g === "UNKNOWN") return "glance-unknown";
+    return "";                          // IDLE
   }
 
   function ageClass(sec) {
     if (sec >= 1800) return "age hot";     // >30 min
     if (sec >= 600) return "age warn";     // >10 min
     return "age";
+  }
+
+  function totalCardCount() {
+    if (!layout) return 0;
+    return layout.plates.reduce((n, p) => n + p.cards.length, 0);
   }
 
   // ---- network ------------------------------------------------------------
@@ -106,8 +115,13 @@
       const m = new Map();
       for (const a of (data.agents || [])) m.set(a.slug, a);
       stateBySlug = m;
-      connEl.textContent = "live · " + m.size + " seats";
-      connEl.className = "conn ok";
+      // lab_glance_ok=false ⇒ the Lab telemetry source is down; every seat's
+      // glance collapses to UNKNOWN. Surface it explicitly, don't read as idle.
+      const labOk = data.lab_glance_ok !== false;
+      const total = totalCardCount();
+      connEl.textContent = "live · " + m.size + " driveable / " + total + " seats" +
+        (labOk ? "" : " · ⚠ telemetry offline");
+      connEl.className = labOk ? "conn ok" : "conn warn";
       render();
     } catch (e) {
       connEl.textContent = "offline — " + e.message;
@@ -160,16 +174,26 @@
       cls.push("app");
       stateText = "app seat";
       statusOnly = el("div", { class: "statusonly", text: "status only — app seat, no terminal" });
+    } else if (up && row && row.ttyd_up === false) {
+      // tmux session is alive but its ttyd terminal server is unreachable:
+      // opening would 502. Show an explicit error state (§7) — no GO, no open.
+      cls.push("up", "error");
+      stateText = "terminal offline";
     } else if (up) {
       cls.push("up");
       const gc = glanceClass(row);
       if (gc) cls.push(gc);
       if (row && row.is_working) cls.push("working");
-      stateText = "session up";
-      // GO on the card face (§5.4)
-      const goBtn = el("button", { class: "btn go", type: "button", text: "GO ⏎",
-        onclick: (ev) => { ev.stopPropagation(); doGo(meta.slug, ev.currentTarget); } });
-      actions = el("div", { class: "actions" }, [goBtn]);
+      // UNKNOWN telemetry must read differently from a live idle seat.
+      stateText = gc === "glance-unknown" ? "session up · no telemetry" : "session up";
+      // GO on the card face (§5.4) — ONLY when the seat is actually awaiting a
+      // GO. Sending Enter into a non-confirmation prompt is unsafe, so gate
+      // strictly on needs_go rather than rendering GO on every up seat.
+      if (row && row.needs_go === true) {
+        const goBtn = el("button", { class: "btn go", type: "button", text: "GO ⏎",
+          onclick: (ev) => { ev.stopPropagation(); doGo(meta.slug, ev.currentTarget); } });
+        actions = el("div", { class: "actions" }, [goBtn]);
+      }
       if (row && row.unacked_count > 0) {
         unread = el("div", { class: "state" }, [
           el("span", { class: "unread", text: String(row.unacked_count) }),
@@ -191,11 +215,14 @@
       el("span", { class: "kind", text: kind }),
     ]);
     const nameEl = el("div", { class: "name", text: meta.display_name || meta.slug });
+    // Card face must carry the slug alongside display name (scope §5.2) — the
+    // slug is the address every bus/tmux action uses, so it belongs on the face.
+    const slugEl = el("div", { class: "slug", text: meta.slug });
     const stateEl = el("div", { class: "state" }, [
       el("span", { class: "dot" }), el("span", { text: stateText }),
     ]);
 
-    const children = [top, nameEl, stateEl];
+    const children = [top, nameEl, slugEl, stateEl];
     if (unread) children.push(unread);
     if (statusOnly) children.push(statusOnly);
     if (actions) children.push(actions);
@@ -203,8 +230,11 @@
     const c = el("div", { class: cls.join(" "), "data-slug": meta.slug }, children);
     if (!meta.app_claude) {
       c.addEventListener("click", () => {
-        if ((stateBySlug.get(meta.slug) || {}).session_up) openTerm(meta.slug, meta.display_name || meta.slug);
-        else toast(meta.display_name + " is down — press Start first");
+        const r = stateBySlug.get(meta.slug) || {};
+        if (!r.session_up) { toast(meta.display_name + " is down — press Start first"); return; }
+        // ttyd down ⇒ the proxy would 502; don't open a dead terminal frame.
+        if (r.ttyd_up === false) { toast(meta.display_name + " — terminal server offline"); return; }
+        openTerm(meta.slug, meta.display_name || meta.slug);
       });
     }
     return c;

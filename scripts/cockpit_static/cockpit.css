@@ -51,6 +51,8 @@ body {
 }
 .cockpit-header .conn.ok::before    { content: "● "; color: var(--working); }
 .cockpit-header .conn.err::before   { content: "● "; color: #f85149; }
+.cockpit-header .conn.warn          { color: #f0b429; }
+.cockpit-header .conn.warn::before  { content: "● "; color: #f0b429; }
 
 main.wrap { padding: 22px 24px 60px; }
 
@@ -102,15 +104,42 @@ main.wrap { padding: 22px 24px 60px; }
 }
 .card .kind { font-size: 10px; letter-spacing: .09em; color: var(--muted); text-transform: uppercase; }
 .card .name { font-weight: 600; font-size: 13.5px; }
+.card .slug {
+  font: 500 10.5px/1 ui-monospace, SFMono-Regular, Menlo, monospace;
+  color: var(--muted); letter-spacing: .01em; margin-top: -3px;
+}
 .card .state { font-size: 11px; color: var(--muted); display: flex; align-items: center; gap: 6px; }
 .card .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--down); flex: 0 0 auto; }
 .card.up   .dot { background: var(--working); box-shadow: 0 0 6px rgba(210,153,34,.7); }
 .card.up.working .dot { background: var(--working); }
 .card .statusonly { font-size: 10px; color: var(--muted); font-style: italic; }
 
-/* down = dimmed + Start affordance (mock). */
-.card.down { opacity: .5; }
+/* down = dimmed content + a crisp Start affordance (mock). Dim the info rows,
+   NOT the action button — a greyed-out Start reads as disabled (nit). */
+.card.down .top,
+.card.down .name,
+.card.down .slug,
+.card.down .state { opacity: .5; }
 .card.down .dot { background: var(--down); box-shadow: none; }
+
+/* error = tmux up but ttyd terminal server unreachable (§7). Distinct red
+   frame; the card is not openable while in this state. */
+.card.error {
+  border-color: #f85149;
+  box-shadow: 0 0 0 1px #f85149, 0 0 14px rgba(248,81,73,.35);
+  background: rgba(248,81,73,.06);
+}
+.card.error .dot { background: #f85149; box-shadow: 0 0 6px rgba(248,81,73,.7); }
+.card.error .state { color: #ffb4ad; }
+
+/* UNKNOWN telemetry — no signal for this seat (Lab outage or telemetry-less
+   seat). Must NOT read as a live idle seat: dashed frame + grey dot. */
+.card.glance-unknown {
+  border-style: dashed;
+  border-color: #55606d;
+}
+.card.glance-unknown .dot { background: var(--muted); box-shadow: none; }
+.card.glance-unknown .state { color: var(--muted); font-style: italic; }
 
 /* card-face action row */
 .card .actions { display: flex; gap: 8px; margin-top: 1px; }
