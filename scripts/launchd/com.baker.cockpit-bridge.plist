@@ -1,0 +1,35 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>com.baker.cockpit-bridge</string>
+  <key>ProgramArguments</key>
+  <array>
+    <string>__PYTHON__</string>
+    <string>__WORKER_PATH__</string>
+  </array>
+  <!-- COCKPIT_IN_LAB_BRIDGE_1: a LONG-RUNNING daemon (one persistent outbound
+       websocket), not a periodic script. KeepAlive=true keeps exactly one live;
+       RunAtLoad starts it on login; the agent's own reconnect backoff handles
+       Lab outages, so launchd only re-spawns on a hard process death. NO secret
+       is embedded here: the bridge key is resolved at runtime from
+       ~/.brisen-lab/keys/cockpit-bridge (env/cache/1P), so LaunchAgents never
+       stores it in plaintext. -->
+  <key>RunAtLoad</key>
+  <true/>
+  <key>KeepAlive</key>
+  <true/>
+  <key>ThrottleInterval</key>
+  <integer>10</integer>
+  <key>StandardOutPath</key>
+  <string>/Users/dimitry/Library/Logs/cockpit-bridge-agent.log</string>
+  <key>StandardErrorPath</key>
+  <string>/Users/dimitry/Library/Logs/cockpit-bridge-agent.err.log</string>
+  <key>EnvironmentVariables</key>
+  <dict>
+    <key>PATH</key>
+    <string>/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin</string>
+  </dict>
+</dict>
+</plist>
