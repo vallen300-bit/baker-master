@@ -45,3 +45,23 @@ Enumerated all active + bus_enabled registry seats vs the card set. Beyond codex
 | clerk | headless-qwen3-worker | not terminal-*, not app-* |
 
 These are **not** app seats (no interactive app/terminal surface), so out of this fix's scope. Flagged on the bus thread for a ratified decision on whether non-interactive bus-enabled seats should get status-only cards. This fix does not add them.
+
+## SCOPE ADD sweep (lead #12208 / #12212 / #12214)
+
+Lead extended scope: cockpit should card every `status:active` registry seat (terminal→driveable, app/service/headless→status-only + 'headless' badge), and upgrade clerk/deep55/clerk-haiku to driveable where a real Terminal profile exists. Reported to lead on the thread (bus #12217). Read-only investigation — did NOT edit `agent_registry.yml` or any zsh function.
+
+| seat | registry | Terminal profile | §6b markers | driveable-card blocker |
+|---|---|---|---|---|
+| clerk / AG-204 | active, runtime headless-qwen3-worker, "Clerk QWEN" | "Clerk" → `clerk` (resolves) | BAKER_ROLE=clerk / FORGE_TERMINAL=clerk ✓ | runtime not terminal-* → excluded from manifest; lead flips runtime to terminal-* for driveable, else status-only |
+| deep55 / AG-207 | planned, runtime terminal-openai-raw | "Deep55" → `deep55picker` (exists) | none → unresolved | (a) lead flips status→active; (b) Director adds BAKER_ROLE/FORGE_TERMINAL to `deep55picker` fn |
+| clerk-haiku / AG-205 | planned, runtime terminal-claude-haiku | none on this Mac (33 profiles, no Haiku) | n/a | no Terminal profile exists — must be created with markers; status flip alone won't surface it |
+| cortex / AG-005 | active, runtime service | n/a (service) | n/a | status-only card via membership generalization (no wiring) |
+
+Extra notes:
+- "Clerk Qwen3" → `clerkqwenterm` is a **marker-less duplicate** launcher; the working driveable launcher for Clerk QWEN is profile "Clerk".
+- Unrelated pre-existing §6b defect (flag only): profile "BEN" → `ben` has CONFLICT markers (BAKER_ROLE=BB_FINANCE + FORGE_TERMINAL=ben → bb-finance vs ben).
+
+**Blocked** pending lead registry flips + Director shell-picker fixes; the status-only membership generalization (cards cortex + clerk now) is buildable independently on lead's signal. Follow-up lands as a separate commit/PR on the same thread (per #12214 pt3); PR #586 stays as-is.
+
+## Process correction (lead #12214 pt2, fail-loud)
+I refreshed live :7800 from an **unmerged** branch — correct order is gate → lead merge → deploy. Owned; will not redeploy pre-merge again. Codex gate is running on PR #586. Current :7800 left as-deployed (not rolled back) absent a lead instruction otherwise.
