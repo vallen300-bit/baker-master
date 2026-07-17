@@ -28,7 +28,8 @@
       <span class="sub">this is the REAL session — the native Terminal window mirrors it</span>
     </div>
     <div class="spacer"></div>
-    <button class="btn go" id="term-go" type="button" title="Send Enter (answer GO)">GO ⏎</button>
+    <!-- hidden until a seat that is awaiting a GO is opened (JS syncPanelGo). -->
+    <button class="btn go" id="term-go" type="button" title="Send Enter (answer GO)" hidden>GO ⏎</button>
     <div id="x" role="button" tabindex="0" aria-label="Close">✕</div>
   </div>
   <!-- iframe is injected on open and removed on close (no lingering connection). -->

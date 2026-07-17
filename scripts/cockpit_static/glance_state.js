@@ -21,6 +21,14 @@ function resolveGlanceState({ unacked, isWorking, hasTelemetry, isDoneGreen, nee
   return isDoneGreen ? "DONE" : "IDLE";
 }
 
+// GO delivers a bare Enter into the seat's tmux session. That is only safe when
+// the seat is actually awaiting a GO ("GO?" confirmation) — otherwise Enter
+// lands in a normal prompt. Every GO affordance (card face AND terminal panel)
+// gates on this one predicate so the two can never drift apart again.
+function goAffordanceVisible(row) {
+  return !!(row && row.needs_go === true);
+}
+
 function formatUnreadAge(ageSeconds) {
   const seconds = Number(ageSeconds);
   if (!Number.isFinite(seconds) || seconds < 0) return "unknown";
@@ -59,9 +67,10 @@ function buildUnreadCopyPayload(alias, badge, rows = []) {
 
 if (typeof window !== "undefined") {
   window.resolveGlanceState = resolveGlanceState;
+  window.goAffordanceVisible = goAffordanceVisible;
   window.formatUnreadAge = formatUnreadAge;
   window.buildUnreadCopyPayload = buildUnreadCopyPayload;
 }
 if (typeof module !== "undefined" && module.exports) {
-  module.exports = { resolveGlanceState, formatUnreadAge, buildUnreadCopyPayload };
+  module.exports = { resolveGlanceState, goAffordanceVisible, formatUnreadAge, buildUnreadCopyPayload };
 }

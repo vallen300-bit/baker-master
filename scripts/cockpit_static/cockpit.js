@@ -123,6 +123,7 @@
         (labOk ? "" : " · ⚠ telemetry offline");
       connEl.className = labOk ? "conn ok" : "conn warn";
       render();
+      syncPanelGo();             // reflect needs_go changes while the panel is open
     } catch (e) {
       connEl.textContent = "offline — " + e.message;
       connEl.className = "conn err";
@@ -130,9 +131,19 @@
   }
 
   // ---- terminal overlay ---------------------------------------------------
+  // The panel GO is the same unsafe Enter as the card-face GO, so it gates on
+  // the SAME predicate — and stays reactive: if the open seat gains/loses
+  // needs_go while the panel is up, the button appears/disappears on next poll.
+  function syncPanelGo() {
+    const show = openSlug !== null &&
+      window.goAffordanceVisible(stateBySlug.get(openSlug));
+    termGo.hidden = !show;
+  }
+
   function openTerm(slug, name) {
     openSlug = slug;
     termTitle.textContent = name + " — live terminal";
+    syncPanelGo();
     termMount.textContent = "";
     const frame = el("iframe", { id: "termframe", src: url("/term/" + slug + "/"),
                                  title: name + " terminal" });
@@ -158,6 +169,7 @@
 
   function closeTerm() {
     openSlug = null;
+    syncPanelGo();                // openSlug null -> panel GO hidden
     termEl.classList.remove("open");
     veilEl.classList.remove("open");
     termMount.textContent = "";   // remove iframe -> drops the ttyd WS connection
@@ -188,8 +200,8 @@
       stateText = gc === "glance-unknown" ? "session up · no telemetry" : "session up";
       // GO on the card face (§5.4) — ONLY when the seat is actually awaiting a
       // GO. Sending Enter into a non-confirmation prompt is unsafe, so gate
-      // strictly on needs_go rather than rendering GO on every up seat.
-      if (row && row.needs_go === true) {
+      // strictly on needs_go (shared predicate, see panel GO below).
+      if (window.goAffordanceVisible(row)) {
         const goBtn = el("button", { class: "btn go", type: "button", text: "GO ⏎",
           onclick: (ev) => { ev.stopPropagation(); doGo(meta.slug, ev.currentTarget); } });
         actions = el("div", { class: "actions" }, [goBtn]);
@@ -272,7 +284,11 @@
   document.getElementById("x").addEventListener("click", closeTerm);
   document.getElementById("x").addEventListener("keydown", (e) => { if (e.key === "Enter" || e.key === " ") closeTerm(); });
   veilEl.addEventListener("click", closeTerm);
-  termGo.addEventListener("click", () => { if (openSlug) doGo(openSlug, termGo); });
+  // Defense in depth: the button is hidden when GO isn't allowed, but re-check
+  // the predicate on click so a stale/racy click can never send a bare Enter.
+  termGo.addEventListener("click", () => {
+    if (openSlug && window.goAffordanceVisible(stateBySlug.get(openSlug))) doGo(openSlug, termGo);
+  });
   document.addEventListener("keydown", (e) => { if (e.key === "Escape" && openSlug) closeTerm(); });
 
   async function boot() {
