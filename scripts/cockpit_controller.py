@@ -17,6 +17,7 @@ from dataclasses import dataclass
 import hmac
 import json
 import logging
+import math
 import os
 from pathlib import Path
 import re
@@ -50,8 +51,10 @@ GLANCE_FIELDS = (
     "unacked_count",
     "oldest_unacked_age_sec",
     "unacked_topics",
-    # D4 — context-window usage (forge telemetry via #12055). Absent today →
-    # null flows through and the card-face context bar stays hidden (null-safe).
+    # D4 — context-window usage. Populated by ``derive_context_pct`` from the
+    # Lab context-band slice (LAB_CONTEXT_BAND_EXPOSURE_1 / #12055); until that
+    # slice is live the source field is absent and null flows through, so the
+    # card-face context bar stays hidden (null-safe).
     "context_pct",
     # D5 — per-seat unacked message list (id / topic / created_at) so the
     # terminal panel can list them and D6 can name the oldest in the wake nudge.
@@ -60,6 +63,48 @@ GLANCE_FIELDS = (
 # D6 — wake-on-open: re-nudge dedupe window (a seat is nudged at most once per
 # this many seconds, so re-opening a seat does not spam its tmux).
 WAKE_DEDUPE_SECONDS = 600.0
+
+# LAB_CONTEXT_BAND_EXPOSURE_1 (#12055) exposes per-seat context-window usage as
+# ``context_used_percent`` on the public /api/v2/terminals payload. The cockpit
+# D4 band renders ``context_pct`` (0-100, filled green→amber→red by USAGE), so
+# the consumer maps used-% → context_pct. The Lab side already nulls its context
+# fields on a stale (>900s) or absent heartbeat, so a missing used-% flows
+# straight through to a hidden band. Session age NEVER feeds this field
+# (codex-arch OBJECT, #12055) — the mapping only ever reads the usage percent.
+CONTEXT_USED_FIELD = "context_used_percent"
+
+
+def derive_context_pct(row: dict[str, Any]) -> float | None:
+    """Return the D4 context-usage percent (0-100) for a Lab row, or None.
+
+    Honors an explicit ``context_pct`` if the Lab payload ever carries one;
+    otherwise falls back to the pinned-contract ``context_used_percent``. Any
+    absent / non-numeric / boolean value yields None so the band hides rather
+    than rendering a wrong bar (fault-tolerant). Numeric values are clamped to
+    [0, 100]."""
+    for key in ("context_pct", CONTEXT_USED_FIELD):
+        val = row.get(key)
+        # bool is an int subclass — reject it so True/False never render as 1/0.
+        if isinstance(val, bool):
+            continue
+        if isinstance(val, (int, float)):
+            # NaN/±inf would clamp to a confident 100% (a false full band) —
+            # treat non-finite telemetry as unknown so the band hides instead.
+            if not math.isfinite(val):
+                continue
+            return max(0.0, min(100.0, float(val)))
+    return None
+
+
+def glance_row_from_lab(row: dict[str, Any]) -> dict[str, Any]:
+    """Project one Lab /api/v2/terminals row down to the pinned glance fields.
+
+    Copies ONLY ``GLANCE_FIELDS`` (so no body/transcript/session detail leaks to
+    the local page) and derives the D4 ``context_pct`` from the Lab context-band
+    usage field."""
+    glance = {field: row.get(field) for field in GLANCE_FIELDS}
+    glance["context_pct"] = derive_context_pct(row)
+    return glance
 
 # LAB_COCKPIT_NOTIFY_SLICE_1 — controller-side macOS banner+sound when a bus
 # dispatch lands (unacked_count 0→N) on a NON-self-awake seat that Wake.app does
@@ -581,9 +626,7 @@ class LabGlance:
             for row in rows:
                 if not isinstance(row, dict) or not row.get("slug"):
                     continue
-                result[str(row["slug"])] = {
-                    field: row.get(field) for field in GLANCE_FIELDS
-                }
+                result[str(row["slug"])] = glance_row_from_lab(row)
         self.last_ok = True
         self._value = result
         self._expires_at = now + self.settings.lab_cache_seconds

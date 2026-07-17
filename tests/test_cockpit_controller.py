@@ -133,6 +133,78 @@ def test_api_agents_requires_auth_and_maps_only_pinned_glance_fields(
     }
 
 
+def test_derive_context_pct_maps_lab_used_percent():
+    # LAB_CONTEXT_BAND_EXPOSURE_1 (#12055): the Lab payload carries usage as
+    # ``context_used_percent``; the D4 band renders it as ``context_pct``.
+    assert controller.derive_context_pct({"context_used_percent": 73.4}) == 73.4
+    # Integer usage flows through as a float.
+    assert controller.derive_context_pct({"context_used_percent": 12}) == 12.0
+
+
+def test_derive_context_pct_null_when_absent_or_stale():
+    # No context field at all (seat never heartbeated) → hidden band.
+    assert controller.derive_context_pct({"slug": "b3"}) is None
+    # Lab nulls its own context fields on a stale/absent row (>900s); that null
+    # flows straight through — the consumer invents nothing.
+    assert controller.derive_context_pct({"context_used_percent": None}) is None
+
+
+def test_derive_context_pct_honors_explicit_and_clamps():
+    # An explicit ``context_pct`` (should the Lab ever emit one) wins.
+    assert controller.derive_context_pct(
+        {"context_pct": 40, "context_used_percent": 90}
+    ) == 40.0
+    # Out-of-range values are clamped to [0, 100] rather than overflowing the bar.
+    assert controller.derive_context_pct({"context_used_percent": 140}) == 100.0
+    assert controller.derive_context_pct({"context_used_percent": -5}) == 0.0
+
+
+def test_derive_context_pct_rejects_bool_and_nonnumeric():
+    # bool is an int subclass — True must not render as ctx 1%.
+    assert controller.derive_context_pct({"context_used_percent": True}) is None
+    assert controller.derive_context_pct({"context_used_percent": "80"}) is None
+
+
+def test_derive_context_pct_rejects_non_finite():
+    # NaN/±inf would clamp to a confident ctx 100% (a false full band); non-finite
+    # telemetry must hide the band instead (codex #12055 verify — no invention).
+    assert controller.derive_context_pct({"context_used_percent": float("nan")}) is None
+    assert controller.derive_context_pct({"context_used_percent": float("inf")}) is None
+    assert controller.derive_context_pct({"context_used_percent": float("-inf")}) is None
+
+
+def test_derive_context_pct_never_reads_session_age():
+    # HARD RULE (#12055 codex-arch OBJECT): session age is NOT a proxy for
+    # context/token consumption and must never populate the context band.
+    row = {"session_age_seconds": 9000, "telemetry_age_seconds": 30}
+    assert controller.derive_context_pct(row) is None
+
+
+def test_glance_row_from_lab_projects_pinned_fields_and_context():
+    # Full Lab-shaped row: only GLANCE_FIELDS survive (no body leak) and
+    # context_pct is derived from context_used_percent.
+    lab_row = {
+        "slug": "b3",
+        "is_working": True,
+        "has_telemetry": True,
+        "needs_go": False,
+        "unacked_count": 1,
+        "oldest_unacked_age_sec": 40,
+        "unacked_topics": ["ops/x"],
+        "unacked_messages": [{"id": 1, "topic": "ops/x", "created_at": "t"}],
+        "context_used_percent": 55.0,
+        "context_band": "soft",
+        "body": "must not leak",
+        "session_age_seconds": 9000,
+    }
+    glance = controller.glance_row_from_lab(lab_row)
+    assert set(glance) == set(controller.GLANCE_FIELDS)
+    assert "body" not in glance
+    assert "context_band" not in glance
+    assert glance["context_pct"] == 55.0
+    assert glance["unacked_count"] == 1
+
+
 def test_probe_ttyd_true_for_listening_false_for_closed():
     import asyncio
 
