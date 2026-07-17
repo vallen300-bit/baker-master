@@ -224,9 +224,10 @@
       actions = el("div", { class: "actions" }, [startBtn]);
     }
 
+    // AG pill dropped (D2). The kind pill (TERMINAL / APP / SERVICE / …) is the
+    // only top-row marker now.
     const kind = meta.kind || (meta.status_only ? "APP" : "TERMINAL");
     const top = el("div", { class: "top" }, [
-      el("span", { class: "agpill", text: meta.agent_id || "AG-?" }),
       el("span", { class: "kind", text: kind }),
     ]);
     const nameEl = el("div", { class: "name", text: meta.display_name || meta.slug });
@@ -258,14 +259,15 @@
   function render() {
     if (!layout) return;
     const frag = document.createDocumentFragment();
-    for (const plate of layout.plates) {
+    // grade-{i} drives the D3 stepped near-black plate ladder (6 grades).
+    layout.plates.forEach((plate, i) => {
       const grid = el("div", { class: "grid" }, plate.cards.map(card));
-      frag.appendChild(el("div", { class: "plate" }, [
+      frag.appendChild(el("div", { class: "plate grade-" + i }, [
         el("h2", {}, [document.createTextNode(plate.label),
           el("span", { class: "count", text: plate.cards.length + " seats" })]),
         grid,
       ]));
-    }
+    });
     gridEl.textContent = "";
     gridEl.appendChild(frag);
   }

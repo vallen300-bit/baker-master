@@ -64,46 +64,49 @@ main.wrap { padding: 22px 24px 60px; }
   padding: 14px 16px 18px;
   margin-bottom: 20px;
 }
+/* D3 — stepped near-black ladder (same blue-black hue), one grade per section
+   so the six plates read apart at a glance. All grades sit darker than the
+   card fill (#1c2330) so cards lift. Labels stay --muted on near-black (AA). */
+.plate.grade-0 { background: #0b0f16; }
+.plate.grade-1 { background: #0d121b; }
+.plate.grade-2 { background: #0f141f; }
+.plate.grade-3 { background: #111723; }
+.plate.grade-4 { background: #131a27; }
+.plate.grade-5 { background: #151d2b; }
 .plate > h2 {
   font-size: 12px; letter-spacing: .14em; text-transform: uppercase;
   color: var(--muted); margin: 2px 0 12px;
 }
 .plate > h2 .count { color: var(--down); margin-left: 8px; letter-spacing: normal; }
 
+/* Narrower + taller cards (D2) — Lab proportions, more columns per row so the
+   fleet reads down the vertical screen length. Fixed 148px columns keep every
+   card the same width; cowork/app cards match exactly (D2). */
 .grid {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(210px, 1fr));
-  gap: 12px;
+  grid-template-columns: repeat(auto-fill, 148px);
+  gap: 11px;
 }
 
-/* Card — Lab bevel + mock face layout. */
+/* Card — Lab register: flat fill + drop shadow so the card lifts off the
+   graded plate (D2). Portrait-leaning via min-height. */
 .card {
-  background: linear-gradient(180deg, #28323f, #141922);
-  border: 1px solid #36414f;
-  border-radius: 10px;
-  padding: 12px 13px;
+  background: #1c2330;
+  border: 1px solid var(--border);
+  border-radius: 9px;
+  padding: 10px 11px 11px;
   cursor: pointer;
-  display: flex; flex-direction: column; gap: 7px;
-  min-height: 74px;
-  box-shadow:
-    inset 0 1.5px 0 rgba(255,255,255,.14),
-    inset 0 -2px 3px rgba(0,0,0,.48),
-    0 4px 9px rgba(0,0,0,.52);
-  transition: border-color 120ms, box-shadow 140ms, transform 140ms, background 120ms;
+  display: flex; flex-direction: column; gap: 6px;
+  min-height: 122px;
+  box-shadow: 0 3px 8px rgba(0,0,0,.5), 0 1px 2px rgba(0,0,0,.35);
+  transition: border-color 120ms, box-shadow 140ms, transform 140ms;
 }
-.card:hover { border-color: #4a5766; transform: translateY(-1px); }
-.card:active { transform: translateY(1px); }
+.card:hover { border-color: #4a5766; transform: translateY(-2px); box-shadow: 0 7px 18px rgba(0,0,0,.6); }
+.card:active { transform: translateY(0); }
 
 .card .top { display: flex; align-items: center; gap: 7px; }
-.agpill {
-  font: 700 11px/1 ui-monospace, SFMono-Regular, Menlo, monospace;
-  color: var(--accent);
-  background: rgba(56,139,253,.12);
-  border: 1px solid rgba(56,139,253,.45);
-  border-radius: 5px; padding: 3px 6px; letter-spacing: .02em; flex: 0 0 auto;
-}
 .card .kind { font-size: 10px; letter-spacing: .09em; color: var(--muted); text-transform: uppercase; }
-.card .name { font-weight: 600; font-size: 13.5px; }
+.card .name { font-weight: 600; font-size: 13px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .card .slug {
   font: 500 10.5px/1 ui-monospace, SFMono-Regular, Menlo, monospace;
   color: var(--muted); letter-spacing: .01em; margin-top: -3px;
@@ -158,10 +161,17 @@ main.wrap { padding: 22px 24px 60px; }
   0% { background: rgba(43,217,100,.5); } 100% { background: transparent; }
 }
 
-/* app / service / headless status-only card — visibly marked, not clickable to a terminal. */
-.card.app { cursor: default; }
-.card.app:hover { transform: none; border-color: #36414f; }
-.card.app .agpill { color: var(--muted); background: rgba(139,148,158,.10); border-color: rgba(139,148,158,.4); }
+/* app / service / headless status-only card — same size as a terminal card
+   (D2) but recessed (inner shadow) so it reads as "not a driveable terminal",
+   not clickable. */
+.card.app {
+  cursor: default;
+  background: #12161f;
+  border-color: #232a36;
+  box-shadow: inset 0 2px 8px rgba(0,0,0,.55), 0 0 0 1px rgba(0,0,0,.3);
+}
+.card.app:hover { transform: none; border-color: #232a36; box-shadow: inset 0 2px 8px rgba(0,0,0,.55), 0 0 0 1px rgba(0,0,0,.3); }
+.card.app .kind { color: #5a6472; }
 
 /* Glance frames (§5.2) — precedence NEEDS_GO > WORKING > NEW resolved in JS. */
 .card.glance-working {
