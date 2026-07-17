@@ -3,7 +3,7 @@
 - attempt: 2
 - seat: B1
 - branch: b1/lab-cockpit-page (this checkpoint) — successor claims by the attempt-bump commit here
-- status: IN PROGRESS (attempt 2 claimed 2026-07-17) — building the cockpit page; env grounded (controller live :7800, b3 tmux+ttyd pilot up, /api/agents shape confirmed)
+- status: DONE from worker side (2026-07-17) — PR #585 merged @1388c22c; post-merge deploy DONE + POST_DEPLOY_AC_VERDICT v1 PASS posted (#12187 lead / #12188 deputy cc). Awaiting lead-owned Director eyeball on pilot cards. Do NOT re-deploy :7800 on respawn.
 
 ## Attempt-2 grounding + decisions (recorded for successor/review)
 - MOCK ABSENT: COCKPIT_CARD_BEHAVIOR_MOCK.html is not on this machine (git history, bm-b1, baker-vault, Desktop/baker-code all clean). Dispatch #12149 carries no mock correction. NOT treated as a blocker: scope §5 Target UX specifies the full interaction contract in prose, and §6.5 names the *live Lab page* as the design source (present at brisen-lab/static/). Building to scope §5 + live Lab CSS tokens + live Control Room. Flagged to lead.
@@ -71,8 +71,15 @@ Dispatch lead #12177 (acked). Commit 6e1de0c8 (no amend). Fix-done posted #12178
 - Regression: tests/test_cockpit_panel_go.py (node, skips if node absent).
 - Live-verified: needs_go=false seat → panel GO hidden; needs_go seat → visible (script term-go.hidden + screenshot B1_cockpit_panelgo_20260717.png). Tests green. Live :7800 untouched.
 
+## Post-merge deploy + AC (2026-07-17) — DONE
+Dispatch lead #12186 (acked). PR #585 MERGED to main @1388c22c (codex PASS #12181, codex-arch re-critique PASS #12183, lead line-read PASS).
+- Deploy: checked out merged main, ran install_cockpit_controller.sh — rsynced scripts/cockpit_static → deploy static dir (--delete), reloaded launchd com.baker.cockpit-controller (:7800).
+- Byte-match: all 5 static assets diff-clean vs merged main; no stray files; controller back up (401 authed → 200).
+- Live post-deploy ACs (real page http://127.0.0.1:7800/, authed) via DOM assertion: grid 38 cards (26 driveable + 12 app-claude) across 6 Control-Room-order plates; b1 slug on face; GO hidden all non-needs_go seats; open b3 → same-origin iframe /term/b3/ + panel #term-go HIDDEN + Esc closes; telemetry banner HIDDEN (lab_glance_ok=true). Caveats (non-blocking): ttyd-down card + GO-shown + banner-shown positive paths not live-reproducible this pass (env has no needs_go/ttyd-down seat, lab_glance_ok true) — each verified in prior fix passes (#12173/#12178). Screenshot skipped: CDP captureScreenshot times out on the never-idle poll loop (page fully interactive).
+- POST_DEPLOY_AC_VERDICT v1 PASS / done_state DONE posted #12187 (lead) + #12188 (deputy cc) → post-deploy-ac/lab-cockpit-page-1.
+
 ## Next concrete step (successor)
-Wait on codex delta re-gate + codex-arch re-critique (#12174 re-pointed at head 6e1de0c8) on gates/lab-cockpit-page-pr-585. On PASS → lead merge → deploy (install_cockpit_controller.sh restages static + restarts :7800) → POST_DEPLOY_AC_VERDICT v1 on pilot seats (b3, brisen-desk) to lead. On re-FAIL → address on NEW commits, re-post fix-done. Do NOT redeploy :7800 pre-merge.
+NONE — worker arc complete. Director eyeball on pilot cards is lead-owned (dispatch #12186). Do NOT re-deploy :7800. codex-arch non-blocking polish (Control Room label inert; card-open not keyboard-focusable) is a P2 follow-up, not this arc.
 
 ## BRIEF A (prior arc) — DONE, for reference
 Merged main @10dd3bec (PR #582 + regression #584). B3 sandbox live: tmux b3 UP, ttyd 127.0.0.1:7608 /term/b3/, ledger migrated. Scripts: generate_cockpit_manifest.py, fleet_terminals.sh, cockpit_migrate.sh, install_cockpit_ttyd.sh, cockpit_rollback.sh. AC verdict #12145 accepted.
