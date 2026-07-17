@@ -105,9 +105,10 @@ def test_total_tool_count_matches_baseline_plus_brisen_lab():
     50 (CLERK_FULL_CAPABILITY_POLICY_1 PR 2d-2 adds baker_perplexity_ask) →
     52 (M365_MAIL_BLINDSPOT_DIAGNOSE_FIX_1 adds baker_email_search + baker_email_read) →
     53 (BAKER_M365_ATTACHMENT_READ_SURFACE_1 adds baker_email_attachment_read) →
-    54 (ATTACHMENT_READ_SERVICE_1 adds baker_attachment_read).
+    54 (ATTACHMENT_READ_SERVICE_1 adds baker_attachment_read) →
+    55 (DROPBOX_SEARCH_TOOL_1 adds baker_dropbox_search).
     """
-    assert len(srv.TOOLS) == 54
+    assert len(srv.TOOLS) == 55
 
 
 def test_email_tools_registered():
