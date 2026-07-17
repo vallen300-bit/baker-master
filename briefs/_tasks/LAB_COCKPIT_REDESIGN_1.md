@@ -28,7 +28,7 @@ Cockpit page ships with Control-Room-mirror grouping and v1 card visuals. Direct
 
 **D3 — Plate shading.** Each of the 6 plates gets a slightly different grade of near-black background (subtle stepped ladder, same hue family) so sections read apart at a glance. Keep text contrast AA.
 
-**D4 — Context readout (REVISED per Director correction 2026-07-17 ~13:45Z: NO context line on the card face).** Card face carries NO context bar (it cost card height). Instead: `context_pct` (forge telemetry via controller, null-safe, coordinate with #12055) surfaces ONLY in the open terminal-panel title as a small `ctx NN%` suffix. If Director later wants it gone entirely, it is one line to remove.
+**D4 — Context band on card face (RE-CONFIRMED by Director 2026-07-17 ~13:50Z — mock-v3 rendition ratified as "perfect").** Thin fill-line at card bottom exactly as in COCKPIT_REDESIGN_MOCK_V3.html: 3px bar, green→amber→red gradient by fill, tiny label. Data: `context_pct` via controller (forge telemetry, null-safe → bar hidden; coordinate with #12055, do not block on it). Approximate acceptable. The bar must NOT materially raise card height (it fits the landscape geometry).
 
 **D5 — Lab-parity bus glance.** Card face: unacked count + oldest-age (exists) + AMBER card state when unacked>0 and seat not WORKING (match Lab semantics Director uses today). Terminal panel: on open, list that seat's unacked bus messages — id + topic + age (controller proxies the Lab per-seat unacked query; read-only). Goal: Director can retire Production/Lab view for daily driving.
 
@@ -52,7 +52,7 @@ Literal, not compile-clean (Lesson #8): pytest cockpit suite green; `node --chec
 
 - AC-1: live :7800 renders exactly the contract layout (6 plates, 43 cards, order).
 - AC-2: no AG pills; landscape cards (wider, lower) w/ shadow; MUCH brighter lettering; cowork = same size, recessed; plates visibly graded.
-- AC-3: NO context bar on card face; `ctx NN%` appears in open-panel title when known, absent when null; never blocks render.
+- AC-3: context bar on card face per mock v3 (3px fill line); hidden when `context_pct` null; never blocks render; no material height cost.
 - AC-4: unacked seat shows amber + count; panel lists message ids/topics; matches Lab numbers for the same seat at the same moment (spot-check 3 seats).
 - AC-5: wake-on-open fires exactly once per guard window, correct text, audited; does NOT fire on WORKING or needs_go seats.
 - AC-6: all #585-#587 invariants hold (GO gating via goAffordanceVisible untouched, ttyd error card, telemetry banner, no innerHTML, --strict passes).
