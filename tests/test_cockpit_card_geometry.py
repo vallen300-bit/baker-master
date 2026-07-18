@@ -1,29 +1,16 @@
-"""LAB_COCKPIT_REDESIGN_1 — card-geometry guard (codex-arch #12246/#12262).
+"""COCKPIT_UI_POLISH_1 — thin-row geometry guard (Director #12800).
 
-Two rendered regressions this locks, without a browser (CI has none — the repo
-tests JS via `node` for pure logic only, and node has no layout engine):
+Supersedes the fixed-height CARD contract (LAB_COCKPIT_REDESIGN_1 #12246/#12262/
+#12264): the Director replaced the landscape cards with thin Lab-list rows so the
+whole fleet fits one screen. This locks the row invariants that make D1/D2/D3
+impossible to regress, parsed from cockpit.css/js (CI has no browser).
 
-  #12246 blocker 2 — cards must be a UNIFORM fixed height (min-height let
-  content-heavy terminal cards outgrow status-only cards).
-  #12262 — a fixed height too short for the crowded driveable state (kind + name
-  + slug + state + unread + GO = 6 rows) flex-shrank .name to 0px. Fix = every
-  card child `flex-shrink:0` + the fixed height sized to the crowded state.
-
-  #12264 (Director) — the name is the untouchable row; compact INSIDE the height
-  before growing it. The unread badge + action button now share ONE footer row,
-  so the crowded state is 5 rows and the uniform height stays low (102px).
-
-The faithful rendered check ("name/slug/unread/GO keep non-zero bounds in the
-crowded fixture") was verified in-browser on the scratch port after compaction:
-natural crowded height 98px, name 19px, slug 11px, unread 14px, GO 21px, unread
-and GO on ONE row, 0 clipped, all 43 cards uniform at 102px. This test is the
-CI-enforceable proxy: it parses cockpit.css/js and asserts the invariants that
-make that render impossible to regress.
+  D1 — one thin row per seat, a fixed 5-column grid so columns align table-style.
+  D2 — the context meter renders on EVERY row (em-dash placeholder when null).
+  D3 — the state control renders on EVERY row (Start / GO / status chip).
 """
 import re
 from pathlib import Path
-
-import pytest
 
 _RAW = (Path(__file__).resolve().parent.parent
         / "scripts" / "cockpit_static" / "cockpit.css").read_text()
@@ -33,54 +20,59 @@ CSS = re.sub(r"/\*.*?\*/", "", _RAW, flags=re.S)
 JS = (Path(__file__).resolve().parent.parent
       / "scripts" / "cockpit_static" / "cockpit.js").read_text()
 
-# Measured natural height of the COMPACTED crowded card (2026-07-17 scratch-port
-# render): unread + action share the footer row → 5 rows → 115px. The fixed card
-# height must be >= this so overflow:hidden never clips and no row is shrunk.
-CROWDED_NATURAL_PX = 98
 
-
-def _card_block():
-    m = re.search(r"\.card\s*\{([^}]*)\}", CSS)
-    assert m, ".card rule not found"
+def _row_block():
+    m = re.search(r"\.row\s*\{([^}]*)\}", CSS)
+    assert m, ".row rule not found"
     return m.group(1)
 
 
-def test_card_uses_fixed_height_not_min_height():
-    """Uniformity (#12246 b2): a single fixed height, no min-height floor."""
-    block = _card_block()
-    assert re.search(r"(?<!min-)height:\s*\d+px", block), "no fixed height on .card"
-    assert "min-height" not in block, "min-height re-introduced — breaks uniformity"
+def test_row_is_a_fixed_column_grid():
+    """D1: rows use a CSS grid with a fixed column template so every row's
+    columns align across all plates (uniform Lab-list density)."""
+    block = _row_block()
+    assert "display: grid" in block, ".row must be a CSS grid"
+    m = re.search(r"grid-template-columns:\s*([^;]+);", block)
+    assert m, ".row has no fixed grid-template-columns"
+    # 5 columns: dot · identity · unread · ctx · control.
+    cols = m.group(1).split()
+    assert len(cols) >= 5, f".row grid needs >=5 columns, got {m.group(1)!r}"
 
 
-def test_fixed_height_covers_the_crowded_state():
-    """#12262: the fixed height must fit the 6-row GO+unread state (>=134px)."""
-    block = _card_block()
-    m = re.search(r"(?<!min-)height:\s*(\d+)px", block)
-    assert m, "no fixed height on .card"
-    h = int(m.group(1))
-    assert h >= CROWDED_NATURAL_PX, (
-        f".card height {h}px < crowded-state {CROWDED_NATURAL_PX}px — .name will clip/collapse")
+def test_rows_are_thin_not_fixed_card_height():
+    """The old uniform 102px card height is gone; desktop rows are compact so the
+    whole fleet fits one 1440x900 screen."""
+    block = _row_block()
+    m = re.search(r"min-height:\s*(\d+)px", block)
+    assert m, ".row needs a compact min-height"
+    assert int(m.group(1)) <= 30, "row min-height too tall for a one-screen fleet"
+    assert "height: 102px" not in CSS, "old fixed card height still present"
 
 
-def test_card_children_do_not_flex_shrink():
-    """#12262 mechanism: a fixed-height flex column must not shrink any row to 0."""
-    assert re.search(r"\.card\s*>\s*\*\s*\{[^}]*flex-shrink:\s*0", CSS), \
-        "missing `.card > * { flex-shrink: 0 }` — crowded .name can collapse to 0px"
+def test_ctx_meter_rendered_on_every_row():
+    """D2: card() appends ctxCell unconditionally, and ctxCell returns a node in
+    BOTH branches — a bar when numeric, an em-dash placeholder when null."""
+    assert "ctxCell(meta, row)" in JS, "card() no longer appends ctxCell for every row"
+    assert "function ctxCell" in JS, "ctxCell helper missing"
+    # Null branch renders the em-dash placeholder; never null, never hidden.
+    assert 'class: "r-ctx r-ctx-null"' in JS, "ctxCell null branch must render an em-dash placeholder"
+    assert ".r-ctx-null" in CSS, ".r-ctx-null placeholder style missing"
 
 
-def test_card_clips_overflow_for_uniformity():
-    """overflow:hidden + a height that fits the crowded state = uniform, no clip."""
-    assert "overflow: hidden" in _card_block(), "overflow guard missing on .card"
+def test_state_control_rendered_on_every_row():
+    """D3: card() appends stateControl unconditionally, which falls through to a
+    status chip so the control column is never absent (Start / GO / chip)."""
+    assert "stateControl(meta, row, up)" in JS, "card() no longer appends stateControl for every row"
+    assert "function stateControl" in JS, "stateControl helper missing"
+    # The final, unconditional return is a status chip (never null).
+    assert 'class: "chip"' in JS, "stateControl must always fall through to a status chip"
+    assert ".rbtn" in CSS and ".chip" in CSS, "row control styles (.rbtn/.chip) missing"
 
 
-def test_unread_and_action_share_the_footer_row():
-    """Director #12264 compaction: unread badge + action button on ONE row.
-    Locks both the JS (footer holds unread + actions) and the CSS (single flex
-    row) so the crowded state can't regress to a 6th row that grows the card."""
-    assert re.search(r'class:\s*"footer"[^)]*\[\s*unread\s*,\s*actions\s*\]', JS), \
-        "card() no longer merges unread + actions into one footer row"
-    m = re.search(r"\.card\s+\.footer\s*\{([^}]*)\}", CSS)
-    assert m, ".card .footer CSS rule missing"
-    body = m.group(1)
-    assert "display: flex" in body and "space-between" in body, \
-        ".card .footer must be a single space-between flex row"
+def test_phone_rows_stay_tappable():
+    """Phone (Director uses iPhone Safari): rows stay >=44px tappable via a media
+    query, even though desktop rows are compact."""
+    m = re.search(r"@media \(max-width:\s*640px\)\s*\{(.*?)\n\}", CSS, re.S)
+    assert m, "no phone media query"
+    assert re.search(r"\.row\s*\{[^}]*min-height:\s*44px", m.group(1)), \
+        "phone rows must be >=44px tappable"

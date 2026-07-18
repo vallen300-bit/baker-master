@@ -219,80 +219,128 @@
   }
 
   // ---- rendering ----------------------------------------------------------
+  // COCKPIT_UI_POLISH_1 (Director #12800): thin Lab-list rows — the whole fleet
+  // on one screen. Each row is a fixed 5-column CSS grid (dot · identity · unread
+  // · ctx · control) so every row's columns align table-style across all plates.
+  //   D2: the ctx cell renders on EVERY row (em-dash placeholder when null).
+  //   D3: the control cell renders on EVERY row (Start / GO / status chip) —
+  //       never conditionally absent.
+  // All content is built via textContent / DOM nodes (no innerHTML), so
+  // agent-supplied strings can never inject markup.
+
+  // D2 — context meter on every row. Driveable seat with a numeric context_pct
+  // → mini bar + label; anything else (status-only, down, telemetry-less) → an
+  // em-dash placeholder. Never blank, never hidden.
+  function ctxCell(meta, row) {
+    const pct = (meta.driveable && row && typeof row.context_pct === "number")
+      ? Math.max(0, Math.min(100, row.context_pct)) : null;
+    if (pct === null) {
+      return el("span", { class: "r-ctx r-ctx-null", text: "—",
+                          title: "no context telemetry" });
+    }
+    return el("span", { class: "r-ctx", title: "context window " + Math.round(pct) + "% used" }, [
+      el("span", { class: "ctxbar" }, [el("span", { class: "ctxfill", style: "width:" + pct + "%" })]),
+      el("span", { class: "ctxlbl", text: Math.round(pct) + "%" }),
+    ]);
+  }
+
+  // D3 — state control on every row. Driveable + down → Start; driveable + up +
+  // needs_go → GO; otherwise a live status chip (running / unread / idle /
+  // offline / no-signal for driveable seats, or the kind for status-only). The
+  // chip is never omitted, so the control column is uniform.
+  function statusChipText(meta, row, up) {
+    if (meta.status_only) return meta.kind || "app";
+    if (!up) return "down";
+    if (row && row.ttyd_up === false) return "offline";
+    const g = window.resolveGlanceState ? window.resolveGlanceState({
+      unacked: (row && row.unacked_count) || 0,
+      isWorking: !!(row && row.is_working),
+      hasTelemetry: !!(row && row.has_telemetry),
+      isDoneGreen: false,
+      needsGo: !!(row && row.needs_go),
+    }) : "";
+    if (g === "WORKING") return "running";
+    if (g === "NEW") return "unread";
+    if (g === "UNKNOWN") return "no signal";
+    return "idle";
+  }
+
+  function stateControl(meta, row, up) {
+    if (!meta.status_only) {
+      if (!up) {
+        return el("button", { class: "rbtn start", type: "button", text: "▶ Start",
+          title: "Start " + (meta.display_name || meta.slug),
+          onclick: (ev) => { ev.stopPropagation(); doStart(meta.slug, ev.currentTarget); } });
+      }
+      if (row && window.goAffordanceVisible(row)) {
+        return el("button", { class: "rbtn go", type: "button", text: "GO ⏎",
+          title: "Answer GO for " + (meta.display_name || meta.slug),
+          onclick: (ev) => { ev.stopPropagation(); doGo(meta.slug, ev.currentTarget); } });
+      }
+    }
+    return el("span", { class: "chip", text: statusChipText(meta, row, up) });
+  }
+
   function card(meta) {
     const row = meta.driveable ? stateBySlug.get(meta.slug) : null;
     const up = row ? row.session_up === true : false;
-    const cls = ["card"];
-    let actions = null, unread = null;
+    const cls = ["row"];
 
-    // E6 (Director, binding): NO state text row. State is color + affordance
-    // only — dimmed+Start = down, bright = running, amber = unread, green tint +
-    // GO = needs GO, red = offline. The only card words are name / slug / unread
-    // badge+age / buttons.
+    // State classes (color language preserved from the card design): app =
+    // status-only, error = ttyd down, up/working, glance frame, or down.
     if (meta.status_only) {
-      // Status-only (app / service / headless). E1: the recessed background IS
-      // the app/terminal distinction; E3: no "APP" marker.
       cls.push("app");
     } else if (up && row && row.ttyd_up === false) {
-      cls.push("up", "error");                    // red = offline (no words)
+      cls.push("up", "error");
     } else if (up) {
-      cls.push("up");                             // bright = running
+      cls.push("up");
       const gc = glanceClass(row);
-      if (gc) cls.push(gc);                        // amber/green/cyan glance frame
+      if (gc) cls.push(gc);
       if (row && row.is_working) cls.push("working");
-      // GO on the card face (§5.4) — ONLY when the seat is awaiting a GO.
-      if (window.goAffordanceVisible(row)) {
-        const goBtn = el("button", { class: "btn go", type: "button", text: "GO ⏎",
-          onclick: (ev) => { ev.stopPropagation(); doGo(meta.slug, ev.currentTarget); } });
-        actions = el("div", { class: "actions" }, [goBtn]);
-      }
-      if (row && row.unacked_count > 0) {
-        unread = el("div", { class: "state" }, [
-          el("span", { class: "unread", text: String(row.unacked_count) }),
-          el("span", { class: ageClass(row.oldest_unacked_age_sec || 0),
-                       text: window.formatUnreadAge(row.oldest_unacked_age_sec || 0) + " oldest" }),
-        ]);
-      }
     } else {
-      cls.push("down");                           // dimmed + Start = down
-      const startBtn = el("button", { class: "btn start", type: "button", text: "▶ Start",
-        onclick: (ev) => { ev.stopPropagation(); doStart(meta.slug, ev.currentTarget); } });
-      actions = el("div", { class: "actions" }, [startBtn]);
+      cls.push("down");
     }
 
-    // E3: no TERMINAL / APP kind word — the background carries that. Only
-    // service / headless keep a small badge pill (bg alone can't name them).
-    const children = [];
-    if (meta.badge) {
-      children.push(el("div", { class: "top" }, [el("span", { class: "kind", text: meta.kind })]));
-    }
-    children.push(el("div", { class: "name", text: meta.display_name || meta.slug }));
-    children.push(el("div", { class: "slug", text: meta.slug }));
-    // Bottom-pinned group (margin-top:auto): the footer row + the context band.
-    const bottom = [];
-    // Compaction (Director #12264): unread badge + action button share ONE footer row.
-    if (unread || actions) {
-      bottom.push(el("div", { class: "footer" }, [unread, actions].filter(Boolean)));
-    }
-    // D4: context band — driveable seats with a known context_pct only; null →
-    // hidden (never blocks render). 3px green→amber→red fill by usage + tiny label.
-    if (meta.driveable && row && typeof row.context_pct === "number") {
-      const pct = Math.max(0, Math.min(100, row.context_pct));
-      bottom.push(el("div", { class: "ctx" }, [
-        el("div", { class: "ctxbar" }, [el("div", { class: "ctxfill", style: "width:" + pct + "%" })]),
-        el("div", { class: "ctxlbl", text: "ctx " + Math.round(pct) + "%" }),
-      ]));
-    }
-    if (bottom.length) children.push(el("div", { class: "cardbottom" }, bottom));
+    // Col 2 — identity (name + slug, + kind badge for service/headless).
+    const idKids = [
+      el("span", { class: "r-name", text: meta.display_name || meta.slug }),
+      el("span", { class: "r-slug", text: meta.slug }),
+    ];
+    if (meta.badge) idKids.push(el("span", { class: "r-kind", text: meta.kind }));
 
-    const c = el("div", { class: cls.join(" "), "data-slug": meta.slug }, children);
+    // Col 3 — unread badge + oldest age (empty spacer keeps the column aligned).
+    let unread;
+    if (up && row && row.unacked_count > 0) {
+      unread = el("span", { class: "r-unread" }, [
+        el("span", { class: "unread", text: String(row.unacked_count) }),
+        el("span", { class: ageClass(row.oldest_unacked_age_sec || 0),
+                     text: window.formatUnreadAge(row.oldest_unacked_age_sec || 0) }),
+      ]);
+    } else {
+      unread = el("span", { class: "r-unread r-unread-empty" });
+    }
+
+    const c = el("div", { class: cls.join(" "), "data-slug": meta.slug }, [
+      el("span", { class: "r-dot" }),
+      el("span", { class: "r-id" }, idKids),
+      unread,
+      ctxCell(meta, row),          // D2 — every row
+      stateControl(meta, row, up), // D3 — every row
+    ]);
+
     if (!meta.status_only) {
-      c.addEventListener("click", () => {
+      c.setAttribute("role", "button");
+      c.setAttribute("tabindex", "0");
+      const open = () => {
         const r = stateBySlug.get(meta.slug) || {};
-        if (!r.session_up) { toast(meta.display_name + " is down — press Start first"); return; }
+        if (!r.session_up) { toast((meta.display_name || meta.slug) + " is down — press Start first"); return; }
         // ttyd down ⇒ the proxy would 502; don't open a dead terminal frame.
-        if (r.ttyd_up === false) { toast(meta.display_name + " — terminal server offline"); return; }
+        if (r.ttyd_up === false) { toast((meta.display_name || meta.slug) + " — terminal server offline"); return; }
         openTerm(meta.slug, meta.display_name || meta.slug);
+      };
+      c.addEventListener("click", open);
+      c.addEventListener("keydown", (e) => {
+        if (e.key === "Enter" || e.key === " ") { e.preventDefault(); open(); }
       });
     }
     return c;
@@ -301,13 +349,13 @@
   function render() {
     if (!layout) return;
     const frag = document.createDocumentFragment();
-    // grade-{i} drives the D3 stepped near-black plate ladder (6 grades).
-    layout.plates.forEach((plate, i) => {
-      const grid = el("div", { class: "grid" }, plate.cards.map(card));
-      frag.appendChild(el("div", { class: "plate grade-" + i }, [
+    // Plate groupings survive as slim section headers (D1); rows list under each.
+    layout.plates.forEach((plate) => {
+      const list = el("div", { class: "rows" }, plate.cards.map(card));
+      frag.appendChild(el("div", { class: "plate" }, [
         el("h2", {}, [document.createTextNode(plate.label),
-          el("span", { class: "count", text: plate.cards.length + " seats" })]),
-        grid,
+          el("span", { class: "count", text: plate.cards.length })]),
+        list,
       ]));
     });
     gridEl.textContent = "";
