@@ -2,8 +2,10 @@
 
 **Brief:** `briefs/_tasks/COCKPIT_IN_LAB_BRIDGE_1.md` @c1828591 (lead dispatch #12566).
 **Date:** 2026-07-18. **Reply-to:** lead, topic `gates/cockpit-in-lab-bridge-1`.
-**Branches (pushed):** baker-master `b1/cockpit-in-lab-bridge-1` @c08ac3db · brisen-lab `b1/cockpit-in-lab-bridge-1` @ac2ffd1.
-**Status: NOT merge-ready — one design blocker (#2) awaits lead ruling.** Transport (Phase 1 + Phase 2) built + green; all gates run; all codex findings fixed except #2 (escalated, crosses a Do-Not-Touch boundary).
+**FINAL tips (pushed):** baker-master `b1/cockpit-in-lab-bridge-1` @5939527f · brisen-lab @4538ca5.
+**Status (updated 2026-07-18 ~02:12Z): READY FOR LEAD LINE-READ + MERGE.** #2 resolved via lead-ruled Option A (#12577); codex re-verified **PASS on both final tips**, no new findings. All three lead conditions met (see FINAL UPDATE at end). Flag stays OFF until Director GO.
+
+> Historical note: the body below was written at the first ship (tips c08ac3db/ac2ffd1) when #2 was still open. See **FINAL UPDATE** at the end for the resolved state.
 
 ## Done rubric (done-state class: staged-verified)
 
@@ -56,3 +58,21 @@ The brief's premise "cockpit page is a pure client, HTTP proxying is sufficient,
 ## Next (owner)
 
 Lead: rule on #2 (A vs B) + the token-mandatory policy; line-read + merge; then the morning flip checklist in `cockpit-cloud-access.md` (Director GO) — flag stays OFF until then.
+
+---
+
+## FINAL UPDATE (2026-07-18 ~02:12Z) — #2 resolved, codex PASS both tips
+
+Lead ruled **Option A, GO** (#12577) with 3 conditions + ratified COCKPIT_ACCESS_TOKEN mandatory. Final tips: **baker-master 5939527f, brisen-lab 4538ca5**.
+
+**Option A implemented:** `cockpit.js:23` → `const BASE = window.__COCKPIT_BASE__ || location.origin` (one backward-compatible line); the Lab injects `<base href="/cockpit/">` + `window.__COCKPIT_BASE__` into the SHELL page only (`inject_base` gated to path `""`/`index.html`, never `/term/*`).
+
+**Condition 1 — local page unaffected:** full cockpit suite **91 pass**; deployed new cockpit.js to live static + reloaded the real `127.0.0.1:7800` page → grid **45 cards**, `conn "live · 28 driveable"`, `__COCKPIT_BASE__` unset locally (BASE falls back), `/term/b3/` terminal works; then **restored** live static to pre-change (live == main until merge + morning deploy).
+
+**Condition 2 — URL sweep:** every cockpit.js network call routes through `url()`→`BASE` (line 23 the sole source); `glance_state.js` has zero URL construction.
+
+**Condition 3 — codex both tips:** the re-verify caught real NEW bugs in the fix code — inject firing on the ttyd page (would break terminals), `hb_task` CancelledError skipping `bridge.detach` (socket leak), token via `X-Cockpit-Token`/`Referer`, and a Phase-2 pump-task leak on reconnect. **All fixed.** Final codex confirmation: **PASS** baker 5939527f + **PASS** lab 4538ca5, no new findings (codex ran the repo tests too, 26 pass).
+
+**Final tests:** lab **76**, baker **27**, codec sha256-identical, loopback probe **12/12** (now incl. ttyd-not-injected + shell-injected). `COCKPIT_ACCESS_TOKEN` now MANDATORY-before-flip in the runbook. WS 403-not-404 flag-off accepted (protocol-inherent).
+
+**Next (owner):** lead line-read + merge both tips; then the morning flip checklist in `cockpit-cloud-access.md` (Director GO — token set BEFORE flag-on). Flag OFF until then.

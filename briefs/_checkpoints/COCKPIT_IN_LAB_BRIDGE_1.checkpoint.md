@@ -4,7 +4,8 @@ attempt: 1
 branch: b1/cockpit-in-lab-bridge-1 (both repos: baker-master + brisen-lab)
 dispatched_by: lead (bus #12566)
 report_topic: gates/cockpit-in-lab-bridge-1
-gate: /security-review clean; codex FAIL both tips -> all findings fixed except #2 (escalated #12574); lead line-read + merge + morning flip pending
+status: READY FOR MERGE — Option A done (#12577), codex PASS both final tips (baker 5939527f, lab 4538ca5). Awaiting lead line-read + merge, then Director-GO morning flip. Flag OFF.
+gate: /security-review clean; codex re-verified PASS both tips; all findings fixed; #2 resolved via Option A
 ---
 
 # COCKPIT_IN_LAB_BRIDGE_1 — checkpoint
