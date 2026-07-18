@@ -6,7 +6,7 @@ report_topic: gates/cockpit-bridge-hardening-2
 repos:
   - brisen-lab b1/cockpit-bridge-hardening-2 @3a19f20d (D1 + D3)
   - baker-master b1/cockpit-bridge-hardening-2 @651b320d (D2 + D4 + runbook; codex #12968 fix)
-status: codex BOUNCE #12974 (P2 #12968) RESOLVED — D4 rotation made atomic+non-destructive. New baker-master tip @651b320d pushed. Awaiting lead re-dispatch of codex on exact head -> merge both -> Render deploy -> live AC1-AC5 verdict (post-deploy, lead flips flag).
+status: CLOSED 2026-07-18 — codex PASS #12992; MERGED both repos (baker PR #605 + lab PR #158, receipt #12994). Lab auto-deploys revoke watcher server-side; staged laptop bridge agent refreshed from merged main, still DARK (correct pre-flip). Runbook STATUS = DARK/re-flip-pending. Live AC1-AC5 flag-flip drill is lead's to run at flip time. B1 released to STANDBY.
 gate: codex bus-seat gate both tips + /security-review (done, clean) + codex-arch P2 re-verify -> lead merge
 ---
 
