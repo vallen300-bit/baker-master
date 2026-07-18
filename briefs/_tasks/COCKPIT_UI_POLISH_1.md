@@ -77,6 +77,16 @@ in-page (iframe embed of `/cockpit/` is acceptable v1), no new tab, no separate
 Lab → click sidebar Cockpit → grid opens there. One Lab, one page. AC7: literal
 click-through screenshot.
 
+**D8 (Director defect 2026-07-18 ~15:05Z):** working-state (amber) is FALSE for
+seats that are visibly working — live probe showed `is_working:false` on every
+seat incl. lead mid-task; `has_telemetry:false` on most. The Lab-glance
+telemetry feed cannot be the sole source. Fix: controller derives a LOCAL
+working signal — sample each seat's tmux pane (`capture-pane` hash delta over a
+short window, force-redraw caveat from COMPOSER_RESIDUAL_DIAG report: stale
+renders) and OR it with Lab telemetry. Card shows amber when either says
+working. AC8: with a seat mid-build, its row is amber within ≤30s, and goes
+quiet ≤60s after output stops.
+
 **D6:** post-merge deploy note: sync `scripts/cockpit_static/` into
 `~/Library/Application Support/baker/cockpit/static/` (installed copy the live
 controller serves — see 2026-07-18 stale-copy incident) and verify via the Lab.
