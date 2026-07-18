@@ -20,6 +20,33 @@
 </header>
 
 <main class="wrap" id="wrap">
+  <section class="cockpit-summary" aria-labelledby="cockpit-title">
+    <div class="summary-copy">
+      <div class="eyebrow">LIVE OPERATIONS <span>·</span> BRISEN LAB</div>
+      <div class="summary-title-row">
+        <h1 id="cockpit-title">Fleet cockpit</h1>
+        <span class="summary-status" id="sync-note">Waiting for telemetry</span>
+      </div>
+      <p>Every terminal, app seat, desk, and service in one scan surface.</p>
+    </div>
+    <dl class="summary-stats" aria-label="Fleet summary">
+      <div><dt>Seats</dt><dd id="stat-total">—</dd></div>
+      <div><dt>Attention</dt><dd id="stat-attention">—</dd></div>
+      <div><dt>Terminals</dt><dd id="stat-terminals">—</dd></div>
+    </dl>
+  </section>
+  <div class="fleet-toolbar">
+    <div class="roster-title">Fleet roster <span id="roster-note">43 seats · grouped by operating role</span></div>
+    <div class="state-legend" aria-label="State legend">
+      <span><i class="legend-dot legend-working"></i>Working</span>
+      <span><i class="legend-dot legend-go"></i>Needs GO</span>
+      <span><i class="legend-dot legend-idle"></i>Idle</span>
+      <span><i class="legend-dot legend-down"></i>No signal</span>
+    </div>
+  </div>
+  <div class="fleet-columns" aria-hidden="true">
+    <span></span><span>Agent / identity</span><span>Inbox</span><span>Context window</span><span>Session</span>
+  </div>
   <div id="grid"></div>
 </main>
 

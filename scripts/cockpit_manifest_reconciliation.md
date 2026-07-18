@@ -5,8 +5,8 @@
 > NO cwd parsing) map to exactly one registry slug. Zero/conflict/multiple =
 > unresolved -> fix that seat's zsh function markers at source, never a table.
 
-- Eligible seats (active + runtime terminal-*): **29**
-- Resolved into manifest: **29**
+- Eligible seats (active + runtime terminal-*): **28**
+- Resolved into manifest: **28**
 - Unresolved eligible seats: **0**
 
 ## Resolved seats
@@ -27,7 +27,6 @@
 | 7615 | clerk-haiku | `clerkhaiku` | Clerk Chat |
 | 7616 | russo-ai | `russoai` | Russo AI |
 | 7617 | deep55 | `deep55picker` | Deep55 |
-| 7619 | librarian | `librarian` | LIBRARIAN |
 | 7620 | arm | `arm` | ARM |
 | 7621 | publisher | `publisher` | Publisher |
 | 7622 | designer | `designer` | UI Designer |
