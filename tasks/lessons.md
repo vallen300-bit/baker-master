@@ -1235,3 +1235,17 @@ Bootout is reserved for deliberate uninstall flows with a paired bootstrap.
 Hardening: com.baker.wake-listener-watchdog (brisen-lab PR #154) re-bootstraps
 within 300s and posts a bus flag — but the rule stands; the watchdog is the net,
 not the license. Root cause: briefs/_reports/WAKE_LISTENER_UNLOAD_ROOT_CAUSE_20260718.md.
+
+## Lesson #122 — A fail-closed 404 hides the flag: never infer kill-switch state from an unauthenticated probe (2026-07-18)
+
+Lead read tokenless `GET /cockpit/` 404 as "flag off / surface dark" and booted
+out the live bridge agent — a ~70-minute self-inflicted outage of a
+Director-GO'd LIVE surface (restored by cowork-ah1, #13013). The 404 was the
+fail-closed token gate's obscurity response (lab #155): identical for flag-off
+AND token-denied. Two agents (lead + b1) independently made the same wrong read.
+Rule: before acting on any kill-switch/flag state, verify with an AUTHENTICATED
+probe or read the env/config directly; a deny-all response is designed to look
+like absence. Corollary: a Director-GO'd LIVE surface stays authorized-LIVE
+until the Director (or a ratified incident) takes it down — an ambiguous probe
+is not a ratified incident. Trap documented in
+`.claude/how-to/cockpit-cloud-access.md` STATUS block.
