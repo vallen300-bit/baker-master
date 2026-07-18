@@ -26,18 +26,24 @@ Director browser ──(Lab auth+flag)── brisen-lab /cockpit/* ──(mux ov
 
 ## KILL SWITCHES (do these FIRST if anything is wrong)
 
-> **BOTH STEPS ARE MANDATORY for a full emergency stop** (codex audit #12861):
-> the server flag is checked only at admission — an ALREADY-OPEN bridge/terminal
-> websocket keeps flowing until the laptop agent dies. Do the flag first (blocks
-> new entries), then the laptop bootout (severs live streams). A code fix
-> (flag-watcher closes live sockets) is dispatched; until it ships, never treat
-> step 1 alone as authoritative.
+> **The server flag alone is now a full emergency stop** (COCKPIT_BRIDGE_HARDENING_2
+> D1, closing codex audit #12861). A revoke watcher sweeps every ~3s: when
+> `COCKPIT_EMBED_ENABLED` goes falsy it SEVERS the live agent bridge socket, every
+> open terminal WS, and every in-flight proxy stream — not just new admissions. So
+> step 1 severs live streams within ~5s. Step 2 (laptop bootout) remains as an
+> independent second net and for a hard local stop, but is no longer required for
+> the flag to be authoritative. (Flag back ON → the agent auto-reconnects; no
+> restart.)
 
-1. **Server (instant, authoritative):** unset `COCKPIT_EMBED_ENABLED` on the Lab
-   Render service (or set it to anything falsy). Every `/cockpit` path — HTTP and
-   the terminal WS — returns `404` immediately, and the Cockpit nav button
-   disappears. Re-read per request, so no redeploy needed.
+1. **Server (instant, authoritative — severs LIVE sockets ≤5s):** unset
+   `COCKPIT_EMBED_ENABLED` on the Lab Render service (or set it to anything falsy).
+   Every `/cockpit` path — HTTP and the terminal WS — returns `404` immediately for
+   new requests, AND the revoke watcher drops all already-open bridge/terminal
+   sockets within ~5s. The Cockpit nav button disappears. Re-read per request, so
+   no redeploy needed.
    - Use the Render env guard, never a raw array PUT (`.claude/rules/python-backend.md`).
+   - Rotating `BRISEN_LAB_COCKPIT_BRIDGE_KEY` (D3) also drops the live bridge within
+     ~5s — a key-compromise kill that doesn't dark the whole surface.
 
 2. **Laptop (stops the transport):**
    ```
