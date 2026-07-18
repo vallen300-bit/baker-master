@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Regression test for fleet_terminals.sh — identity-env scrub at seat-create
-# (leaked-key arc, lead #12597 re-scope / #12697).
+# (leaked-key arc, lead #12597 re-scope / #12697; follow-up #12784).
 #
 # Guards: when `fleet_terminals.sh up` creates a tmux seat, the launcher's
 # identity env-vars (BAKER_ROLE, BRISEN_LAB_TERMINAL_KEY, GIT_AUTHOR_EMAIL,
@@ -9,10 +9,16 @@
 #
 # Method: stub `tmux` on PATH so it (a) captures its full argv per subcommand,
 # and (b) at `new-session` records the identity env-vars it actually SEES — that
-# is what a freshly-started server would inherit. Assert the seen values are
-# empty (process-level scrub worked) AND that `set-environment -u` was issued
-# for each var at both global (-g) and per-session (-t) scope. jq is real; only
-# tmux is stubbed. Never touches tmux/network.
+# is what a freshly-started server would inherit. jq is real; only tmux is
+# stubbed. Never touches tmux/network.
+#
+# Two cases exercise BOTH server states (codex PASS-WITH-NOTE #12758 follow-up):
+#   A. server-present (`tmux info` succeeds) → the global `-g -u` scrub fires.
+#   B. no-server     (`tmux info` fails)     → the first new-session STARTS the
+#      server from our process env; the `-g -u` branch is skipped, so the
+#      process-level unset is the ONLY thing standing between the launcher's
+#      identity and the seat. Asserting the empty inherited env here proves the
+#      fresh-server path directly.
 
 set -euo pipefail
 
@@ -24,14 +30,16 @@ command -v jq >/dev/null 2>&1 || { echo "jq required for this test" >&2; exit 1;
 TMP="$(mktemp -d)"
 trap 'rm -rf "$TMP"' EXIT
 
-# --- tmux stub: log argv; on new-session dump the identity env it inherited ---
+# --- tmux stub: log argv; on new-session dump the identity env it inherited.
+#     `info` exit code is controlled by STUB_INFO_EXIT so a single stub covers
+#     both the server-present and no-server cases. ---
 mkdir -p "$TMP/bin"
 cat > "$TMP/bin/tmux" <<'STUB'
 #!/usr/bin/env bash
 printf '%s\n' "$*" >> "${TMUX_ARGV_FILE:?}"
 case "${1:-}" in
   has-session) exit 1 ;;                         # seat is down → will be created
-  info)        exit 0 ;;                         # pretend a server already runs → -g branch fires
+  info)        exit "${STUB_INFO_EXIT:-0}" ;;    # 0 = server present, 1 = no server
   new-session)
     {
       printf 'BAKER_ROLE=[%s]\n'              "${BAKER_ROLE-}"
@@ -56,46 +64,63 @@ STATE_DIR="$TMP/state"
 mkdir -p "$STATE_DIR"
 printf '%s' '{"lead":{"state":"migrated"}}' > "$STATE_DIR/migration_ledger.json"
 
-export TMUX_ARGV_FILE="$TMP/tmux-argv.txt"
-export NEWSESSION_ENV_FILE="$TMP/newsession-env.txt"
-: > "$TMUX_ARGV_FILE"; : > "$NEWSESSION_ENV_FILE"
-
 fail() { echo "FAIL: $1" >&2; exit 1; }
 
-# Run `up` with a DIRTY launcher environment (simulates a leaked identity).
-PATH="$TMP/bin:$PATH" \
-COCKPIT_MANIFEST="$MANIFEST" \
-COCKPIT_STATE_DIR="$STATE_DIR" \
-BAKER_ROLE="lead" \
-BRISEN_LAB_TERMINAL_KEY="LEAKED-SECRET-KEY" \
-GIT_AUTHOR_EMAIL="launcher@leak.example" \
-GIT_COMMITTER_EMAIL="launcher@leak.example" \
-bash "$SCRIPT" up >/dev/null 2>&1 || fail "fleet_terminals.sh up exited non-zero"
+VARS=(BAKER_ROLE BRISEN_LAB_TERMINAL_KEY GIT_AUTHOR_EMAIL GIT_COMMITTER_EMAIL)
 
-ARGV="$(cat "$TMUX_ARGV_FILE")"
-ENVSEEN="$(cat "$NEWSESSION_ENV_FILE")"
+# run_case <label> <info_exit> <expect_global_scrub:yes|no>
+run_case() {
+  local label="$1" info_exit="$2" expect_global="$3"
+  export TMUX_ARGV_FILE="$TMP/argv-$label.txt"
+  export NEWSESSION_ENV_FILE="$TMP/newsession-$label.txt"
+  : > "$TMUX_ARGV_FILE"; : > "$NEWSESSION_ENV_FILE"
 
-# 1. new-session must have actually fired (sanity).
-grep -q 'new-session' <<<"$ARGV" || fail "new-session never invoked. argv: $ARGV"
+  # `up` under a DIRTY launcher environment (simulates a leaked identity).
+  PATH="$TMP/bin:$PATH" \
+  STUB_INFO_EXIT="$info_exit" \
+  COCKPIT_MANIFEST="$MANIFEST" \
+  COCKPIT_STATE_DIR="$STATE_DIR" \
+  BAKER_ROLE="lead" \
+  BRISEN_LAB_TERMINAL_KEY="LEAKED-SECRET-KEY" \
+  GIT_AUTHOR_EMAIL="launcher@leak.example" \
+  GIT_COMMITTER_EMAIL="launcher@leak.example" \
+  bash "$SCRIPT" up >/dev/null 2>&1 || fail "[$label] fleet_terminals.sh up exited non-zero"
 
-# 2. THE leak test: the env new-session inherited must be scrubbed empty.
-for pair in 'BAKER_ROLE' 'BRISEN_LAB_TERMINAL_KEY' 'GIT_AUTHOR_EMAIL' 'GIT_COMMITTER_EMAIL'; do
-  grep -q "^${pair}=\[\]$" <<<"$ENVSEEN" \
-    || fail "new-session inherited a non-empty $pair — leak not scrubbed. Saw: $(grep "^${pair}=" <<<"$ENVSEEN")"
-done
-# Belt: the literal leaked secret must never appear anywhere new-session saw.
-grep -q 'LEAKED-SECRET-KEY' <<<"$ENVSEEN" && fail "leaked key reached new-session env"
+  local ARGV ENVSEEN; ARGV="$(cat "$TMUX_ARGV_FILE")"; ENVSEEN="$(cat "$NEWSESSION_ENV_FILE")"
 
-# 3. global scrub (-g -u) issued for each var (already-running-server path).
-for v in BAKER_ROLE BRISEN_LAB_TERMINAL_KEY GIT_AUTHOR_EMAIL GIT_COMMITTER_EMAIL; do
-  grep -qE "set-environment -g -u $v" <<<"$ARGV" \
-    || fail "missing global scrub 'set-environment -g -u $v'. argv: $ARGV"
-done
+  # 1. new-session must have actually fired (sanity).
+  grep -q 'new-session' <<<"$ARGV" || fail "[$label] new-session never invoked. argv: $ARGV"
 
-# 4. per-session scrub (-t <slug> -u) issued for each var.
-for v in BAKER_ROLE BRISEN_LAB_TERMINAL_KEY GIT_AUTHOR_EMAIL GIT_COMMITTER_EMAIL; do
-  grep -qE "set-environment -t lead -u $v" <<<"$ARGV" \
-    || fail "missing per-session scrub 'set-environment -t lead -u $v'. argv: $ARGV"
-done
+  # 2. THE leak test: the env new-session inherited must be scrubbed empty
+  #    (holds in BOTH cases — process-level unset always runs).
+  local v
+  for v in "${VARS[@]}"; do
+    grep -q "^${v}=\[\]$" <<<"$ENVSEEN" \
+      || fail "[$label] new-session inherited a non-empty $v — leak not scrubbed. Saw: $(grep "^${v}=" <<<"$ENVSEEN")"
+  done
+  grep -q 'LEAKED-SECRET-KEY' <<<"$ENVSEEN" && fail "[$label] leaked key reached new-session env"
 
-echo "PASS: fleet_terminals.sh scrubs identity env at seat-create (process + global + per-session)"
+  # 3. global scrub (-g -u): present only when a server already exists.
+  for v in "${VARS[@]}"; do
+    if [ "$expect_global" = yes ]; then
+      grep -qE "set-environment -g -u $v" <<<"$ARGV" \
+        || fail "[$label] missing global scrub 'set-environment -g -u $v'. argv: $ARGV"
+    else
+      grep -qE "set-environment -g -u $v" <<<"$ARGV" \
+        && fail "[$label] unexpected global scrub for $v with no running server. argv: $ARGV"
+    fi
+  done
+
+  # 4. per-session scrub (-t <slug> -u): present in BOTH cases.
+  for v in "${VARS[@]}"; do
+    grep -qE "set-environment -t lead -u $v" <<<"$ARGV" \
+      || fail "[$label] missing per-session scrub 'set-environment -t lead -u $v'. argv: $ARGV"
+  done
+
+  echo "  ok [$label]: env scrubbed empty; global=${expect_global}; per-session present"
+}
+
+run_case server-present 0 yes
+run_case no-server       1 no
+
+echo "PASS: fleet_terminals.sh scrubs identity env at seat-create (fresh-server + already-running paths)"
