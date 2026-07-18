@@ -87,6 +87,14 @@ renders) and OR it with Lab telemetry. Card shows amber when either says
 working. AC8: with a seat mid-build, its row is amber within ≤30s, and goes
 quiet ≤60s after output stops.
 
+**D9 (Director defect, #12858):** App-resident seats (cowork-*, codex-arch —
+no tmux session) currently give a silent dead click. Fix: distinct card
+treatment + label "App agent — runs in Cowork App"; click opens a small note
+(not nothing). Data source must explicitly distinguish tmux-backed vs
+App-resident seats so status/ctx render sensibly for both. Requirement: no
+silent dead click anywhere. AC9: clicking every App-agent card yields visible
+feedback.
+
 **D6:** post-merge deploy note: sync `scripts/cockpit_static/` into
 `~/Library/Application Support/baker/cockpit/static/` (installed copy the live
 controller serves — see 2026-07-18 stale-copy incident) and verify via the Lab.

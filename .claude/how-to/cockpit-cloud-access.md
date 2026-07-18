@@ -26,7 +26,12 @@ Director browser ──(Lab auth+flag)── brisen-lab /cockpit/* ──(mux ov
 
 ## KILL SWITCHES (do these FIRST if anything is wrong)
 
-Either one takes the surface down; do both to fully stop it.
+> **BOTH STEPS ARE MANDATORY for a full emergency stop** (codex audit #12861):
+> the server flag is checked only at admission — an ALREADY-OPEN bridge/terminal
+> websocket keeps flowing until the laptop agent dies. Do the flag first (blocks
+> new entries), then the laptop bootout (severs live streams). A code fix
+> (flag-watcher closes live sockets) is dispatched; until it ships, never treat
+> step 1 alone as authoritative.
 
 1. **Server (instant, authoritative):** unset `COCKPIT_EMBED_ENABLED` on the Lab
    Render service (or set it to anything falsy). Every `/cockpit` path — HTTP and
