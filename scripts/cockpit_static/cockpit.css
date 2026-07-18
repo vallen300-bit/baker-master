@@ -112,9 +112,13 @@ main.wrap { padding: 8px 14px 40px; }
   border: 1px solid var(--border); border-radius: 4px; padding: 1px 5px; flex: 0 0 auto;
 }
 
-/* State color language (dot + subtle row tint) preserved from the card design. */
-.row.up .r-dot   { background: var(--working); box-shadow: 0 0 5px rgba(210,153,34,.6); }
-.row.down .r-dot { background: var(--down); }
+/* State color language (dot + subtle row tint). D8: a seat that is WORKING reads
+   amber (dot + faint wash) so an actively-working seat is unmistakable; a live-
+   but-idle seat gets a calm blue dot (distinct from amber), and down is grey. */
+.row.up .r-dot      { background: #5b91c9; box-shadow: none; }   /* live, idle */
+.row.working        { background: rgba(210,153,34,.06); }        /* amber wash = working */
+.row.working .r-dot { background: var(--working); box-shadow: 0 0 6px rgba(210,153,34,.75); }
+.row.down .r-dot    { background: var(--down); }
 .row.error       { background: rgba(248,81,73,.06); }
 .row.error .r-dot { background: #f85149; box-shadow: 0 0 6px rgba(248,81,73,.7); }
 .row.glance-unknown .r-dot  { background: var(--muted); box-shadow: none; }

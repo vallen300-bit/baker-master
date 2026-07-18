@@ -451,6 +451,51 @@ def tmux_session_names(settings: Settings) -> set[str]:
     return {line.strip() for line in result.stdout.splitlines() if line.strip()}
 
 
+# COCKPIT_UI_POLISH_1 D8 — local working signal. The Lab glance feed reports
+# is_working:false for seats that are visibly working (Director 2026-07-18 defect),
+# so the controller derives a LOCAL signal from tmux's own per-window output clock
+# (#{window_activity}, the epoch of the last pane output) and ORs it with Lab
+# telemetry in /api/agents. window_activity is the tmux server's output-activity
+# timestamp — NOT a rendered-grid capture — so it needs no force-redraw and is
+# immune to the stale-render effect (COMPOSER_RESIDUAL_DIAG). Read-only, no
+# keystrokes into any seat. AC8: a seat with output within this window reads amber
+# within one poll (<=30s), and goes quiet <=60s after output stops.
+LOCAL_WORKING_WINDOW_S = 45.0
+
+
+def tmux_window_activity(settings: Settings) -> dict[str, int]:
+    """slug -> last output-activity epoch, from ONE `tmux list-windows -a` call.
+    Empty on any tmux error (fault-tolerant — the Lab signal still stands)."""
+    try:
+        result = subprocess.run(
+            [settings.tmux_binary, "list-windows", "-a", "-F",
+             "#{session_name}:#{window_activity}"],
+            capture_output=True,
+            text=True,
+            timeout=settings.command_timeout_seconds,
+            check=False,
+        )
+    except (OSError, subprocess.TimeoutExpired):
+        return {}
+    if result.returncode not in (0, 1):
+        LOG.warning("tmux list-windows failed: %s", result.stderr.strip())
+        return {}
+    out: dict[str, int] = {}
+    for line in result.stdout.splitlines():
+        line = line.strip()
+        if not line or ":" not in line:
+            continue
+        name, _, ts = line.rpartition(":")
+        try:
+            epoch = int(ts)
+        except ValueError:
+            continue
+        # A session can hold multiple windows; keep its most-recent activity.
+        if name and (name not in out or epoch > out[name]):
+            out[name] = epoch
+    return out
+
+
 def _run_tmux(settings: Settings, args: Iterable[str]) -> subprocess.CompletedProcess[str]:
     return subprocess.run(
         [settings.tmux_binary, *args],
@@ -822,6 +867,8 @@ def create_app(
     async def get_agents(request: Request):
         entries = manifest()
         sessions = tmux_session_names(config)
+        activity = tmux_window_activity(config)   # D8 — local output-activity clock
+        now_epoch = time.time()
         lab = await glance.read()
         lab_ok = getattr(glance, "last_ok", True)
         ttyd_states = await asyncio.gather(
@@ -830,14 +877,27 @@ def create_app(
         agents = []
         for entry, ttyd_up in zip(entries, ttyd_states):
             values = lab.get(entry.slug, {})
+            glance_fields = {field: values.get(field) for field in GLANCE_FIELDS}
+            session_up = entry.slug in sessions
+            # D8 — OR a local tmux output-activity signal into is_working so a seat
+            # the Lab feed under-reports still reads as working while it produces
+            # output. Live tmux seats only; fault-tolerant when activity is absent.
+            last_act = activity.get(entry.slug)
+            local_working = bool(
+                session_up and last_act is not None
+                and (now_epoch - last_act) <= LOCAL_WORKING_WINDOW_S
+            )
+            if local_working:
+                glance_fields["is_working"] = True
             agents.append(
                 {
                     "slug": entry.slug,
                     "alias": entry.alias,
                     "port": entry.port,
-                    "session_up": entry.slug in sessions,
+                    "session_up": session_up,
                     "ttyd_up": bool(ttyd_up),
-                    **{field: values.get(field) for field in GLANCE_FIELDS},
+                    **glance_fields,
+                    "local_working": local_working,   # D8 — surfaced for tests/transparency
                 }
             )
         return {"agents": agents, "lab_glance_ok": bool(lab_ok)}
