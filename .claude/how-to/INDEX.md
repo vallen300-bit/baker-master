@@ -15,6 +15,7 @@
 - [Forge snapshot pusher install](.claude/how-to/forge-snapshot-push-install.md) — `FORGE_KEY=… bash scripts/install_forge_push.sh` from a **Terminal** (not Cowork — ~15s ~/Library wipe); KeepAlive-hardened, self-resumes on reboot/crash. Feeds Brisen Lab card telemetry
 - [Baker Cockpit (fleet page)](.claude/how-to/lab-cockpit.md) — local Director page at http://127.0.0.1:7800/; Lab-style card grid, click a seat → its real terminal in-page, GO/Start buttons. Deploy/refresh, regenerate plate layout, add a pilot, failure modes
 - [Cockpit Phase-2 cutover](.claude/how-to/cockpit-phase2-cutover.md) — lead-run quiet-window runbook for the ONE coordinated Terminal→tmux+ttyd fleet cutover (FLEET_TMUX_LAUNCH_1 §6a); GO-gated, single Cmd+Q, `cutover --dry-run` first, per-seat rollback
+- [Cockpit cloud access (in-Lab bridge)](.claude/how-to/cockpit-cloud-access.md) — reach Cockpit inside Brisen Lab via the outbound reverse bridge; kill switches FIRST (`COCKPIT_EMBED_ENABLED` unset + `launchctl bootout com.baker.cockpit-bridge`), then Director-GO morning flip checklist
 
 ## Adding a new how-to
 

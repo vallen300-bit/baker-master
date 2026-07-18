@@ -1,0 +1,49 @@
+{
+  "_comment": "COCKPIT_IN_LAB_BRIDGE_1 shared mux test vectors. BYTE-FOR-BYTE identical copy lives in baker-master/scripts/cockpit_mux_vectors.json. Each side's test suite encodes these and asserts encoded_hex exactly, so a one-sided codec change fails that side's tests. Regenerate ONLY via the documented codec; never hand-edit hex.",
+  "header_len": 9,
+  "max_frame_payload": 262144,
+  "vectors": [
+    {
+      "name": "open_req_head",
+      "stream_id": 1,
+      "type": 1,
+      "payload_hex": "7b226d6574686f64223a22474554222c2270617468223a222f6170692f6167656e7473227d",
+      "encoded_hex": "0000000101000000257b226d6574686f64223a22474554222c2270617468223a222f6170692f6167656e7473227d"
+    },
+    {
+      "name": "end_empty",
+      "stream_id": 1,
+      "type": 3,
+      "payload_hex": "",
+      "encoded_hex": "000000010300000000"
+    },
+    {
+      "name": "data_hello",
+      "stream_id": 2,
+      "type": 2,
+      "payload_hex": "68656c6c6f",
+      "encoded_hex": "00000002020000000568656c6c6f"
+    },
+    {
+      "name": "ping",
+      "stream_id": 0,
+      "type": 8,
+      "payload_hex": "",
+      "encoded_hex": "000000000800000000"
+    },
+    {
+      "name": "ws_data_bin",
+      "stream_id": 7,
+      "type": 6,
+      "payload_hex": "01010203",
+      "encoded_hex": "00000007060000000401010203"
+    },
+    {
+      "name": "reset_reason",
+      "stream_id": 4294967295,
+      "type": 4,
+      "payload_hex": "7b22726561736f6e223a2274696d656f7574227d",
+      "encoded_hex": "ffffffff04000000147b22726561736f6e223a2274696d656f7574227d"
+    }
+  ]
+}
