@@ -38,10 +38,19 @@
   const termUnacked = document.getElementById("term-unacked");
   const toastEl = document.getElementById("toast");
   const notifyToggle = document.getElementById("notify-toggle");
+  // D9 — App-resident card bus-message panel.
+  const msgVeil = document.getElementById("msgveil");
+  const msgPanel = document.getElementById("msgpanel");
+  const msgBody = document.getElementById("msg-body");
+  const msgTitle = document.getElementById("msg-title");
+  const msgCopy = document.getElementById("msg-copy");
 
   let layout = null;             // { plates: [{label, cards:[...]}, ...] }
   let stateBySlug = new Map();   // slug -> live /api/agents row
   let openSlug = null;           // currently open terminal, or null
+  let openMsgSlug = null;        // currently open bus-message panel, or null (D9)
+  let prevUnacked = new Map();   // slug -> last-seen unacked_count (D9 flash-on-new)
+  let flashSlugs = new Set();    // slugs whose unacked count rose this poll (D9)
   let pollTimer = null;
 
   // ---- helpers ------------------------------------------------------------
@@ -121,6 +130,7 @@
       const data = await r.json();
       const m = new Map();
       for (const a of (data.agents || [])) m.set(a.slug, a);
+      computeFlash(m);              // D9 — flag cards whose unacked count rose
       stateBySlug = m;
       // lab_glance_ok=false ⇒ the Lab telemetry source is down; every seat's
       // glance collapses to UNKNOWN. Surface it explicitly, don't read as idle.
@@ -131,6 +141,7 @@
       connEl.className = labOk ? "conn ok" : "conn warn";
       render();
       syncPanelGo();             // reflect needs_go changes while the panel is open
+      if (openMsgSlug) renderMsgSummary(openMsgSlug);   // D9 — live-refresh open panel
     } catch (e) {
       connEl.textContent = "offline — " + e.message;
       connEl.className = "conn err";
@@ -218,96 +229,256 @@
     termUnacked.textContent = ""; termUnacked.hidden = true;
   }
 
-  // ---- rendering ----------------------------------------------------------
-  function card(meta) {
-    const row = meta.driveable ? stateBySlug.get(meta.slug) : null;
-    const up = row ? row.session_up === true : false;
-    const cls = ["card"];
-    let actions = null, unread = null;
+  // ---- D9 bus-message panel (App-resident cards) --------------------------
+  // Binds the Lab "Production & Lab" component: header + Unacknowledged(n) /
+  // Last message / Acknowledged(count) sections, from the same per-agent bus
+  // fields (unacked_messages / last_message / acked_count). DOM-node built —
+  // no innerHTML, so agent-supplied strings can never inject markup.
+  function msgEnvelope(m, extraCls) {
+    const created = m && m.created_at ? Date.parse(m.created_at) : NaN;
+    const age = Number.isFinite(created)
+      ? window.formatUnreadAge((Date.now() - created) / 1000) : "";
+    return el("div", { class: "hrow " + (extraCls || "") }, [
+      el("span", { class: "hfrom", text: "from " + String((m && m.from_terminal) || "?") }),
+      el("span", { class: "htopic", text: String((m && m.topic) || "(no topic)") }),
+      el("span", { class: "hid", text: "#" + String((m && m.id) || "?") }),
+      age ? el("span", { class: "hage", text: age }) : null,
+    ]);
+  }
 
-    // E6 (Director, binding): NO state text row. State is color + affordance
-    // only — dimmed+Start = down, bright = running, amber = unread, green tint +
-    // GO = needs GO, red = offline. The only card words are name / slug / unread
-    // badge+age / buttons.
+  function renderMsgSummary(slug) {
+    const row = stateBySlug.get(slug) || {};
+    const unacked = Array.isArray(row.unacked_messages) ? row.unacked_messages : [];
+    const last = row.last_message || null;
+    const ackedCount = Number(row.acked_count) || 0;
+    msgBody.textContent = "";
+
+    const s1 = el("section", { class: "hsec" },
+      [el("h3", { class: "hsec-t", text: "Unacknowledged (" + unacked.length + ")" })]);
+    if (!unacked.length) s1.appendChild(el("div", { class: "hempty", text: "(none)" }));
+    else unacked.forEach((m) => s1.appendChild(msgEnvelope(m, "hrow-unacked")));
+    msgBody.appendChild(s1);
+
+    msgBody.appendChild(el("section", { class: "hsec" }, [
+      el("h3", { class: "hsec-t", text: "Last message" }),
+      last ? msgEnvelope(last, last.acked ? "hrow-acked" : "hrow-unacked")
+           : el("div", { class: "hempty", text: "(no messages)" }),
+    ]));
+
+    msgBody.appendChild(el("section", { class: "hsec hsec-compact" }, [
+      el("h3", { class: "hsec-t", text: "Acknowledged" }),
+      el("div", { class: "hcount", text: ackedCount + " acknowledged message(s)" }),
+    ]));
+  }
+
+  function openMsgPanel(slug, name) {
+    openMsgSlug = slug;
+    msgTitle.textContent = name + " [" + slug + "] messages";
+    renderMsgSummary(slug);
+    msgVeil.classList.add("open");
+    msgPanel.classList.add("open");
+  }
+
+  function closeMsgPanel() {
+    openMsgSlug = null;
+    msgPanel.classList.remove("open");
+    msgVeil.classList.remove("open");
+    msgBody.textContent = "";
+  }
+
+  async function copyToClipboard(text) {
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      try { await navigator.clipboard.writeText(text); return true; } catch (_) { /* fall through */ }
+    }
+    const ta = el("textarea"); ta.value = text; ta.setAttribute("readonly", "");
+    ta.style.position = "fixed"; ta.style.opacity = "0";
+    document.body.appendChild(ta); ta.select();
+    let ok = false;
+    try { ok = document.execCommand && document.execCommand("copy"); } catch (_) { ok = false; }
+    ta.remove();
+    return ok;
+  }
+
+  async function doMsgCopy() {
+    if (!openMsgSlug) return;
+    const row = stateBySlug.get(openMsgSlug) || {};
+    const unacked = Array.isArray(row.unacked_messages) ? row.unacked_messages : [];
+    const lines = unacked.map((m) =>
+      "#" + String((m && m.id) || "?") + "  " + String((m && m.topic) || "(no topic)") +
+      "  from " + String((m && m.from_terminal) || "?"));
+    const payload = (msgTitle.textContent || openMsgSlug) + "\n" +
+      (lines.length ? lines.join("\n") : "(no unacknowledged messages)");
+    msgCopy.disabled = true;
+    const ok = await copyToClipboard(payload);
+    msgCopy.disabled = false;
+    msgCopy.textContent = ok ? "copied ✓" : "copy failed";
+    clearTimeout(msgCopy._t);
+    msgCopy._t = setTimeout(() => { msgCopy.textContent = "Copy"; }, 1800);
+  }
+
+  // D9 flash-on-new-message: mark slugs whose unacked count rose since the last
+  // poll so render() can flash their cards, then advance the baseline.
+  function computeFlash(newMap) {
+    flashSlugs = new Set();
+    for (const [slug, a] of newMap) {
+      const now = (a && a.unacked_count) || 0;
+      const before = prevUnacked.has(slug) ? prevUnacked.get(slug) : now;
+      if (now > before) flashSlugs.add(slug);
+    }
+    prevUnacked = new Map();
+    for (const [slug, a] of newMap) prevUnacked.set(slug, (a && a.unacked_count) || 0);
+  }
+
+  // ---- rendering ----------------------------------------------------------
+  // COCKPIT_UI_POLISH_1 (Director #12800): thin Lab-list rows — the whole fleet
+  // on one screen. Each row is a fixed 5-column CSS grid (dot · identity · unread
+  // · ctx · control) so every row's columns align table-style across all plates.
+  //   D2: the ctx cell renders on EVERY row (em-dash placeholder when null).
+  //   D3: the control cell renders on EVERY row (Start / GO / status chip) —
+  //       never conditionally absent.
+  // All content is built via textContent / DOM nodes (no innerHTML), so
+  // agent-supplied strings can never inject markup.
+
+  // D2 — context meter on every row. Driveable seat with a numeric context_pct
+  // → mini bar + label; anything else (status-only, down, telemetry-less) → an
+  // em-dash placeholder. Never blank, never hidden.
+  function ctxCell(meta, row) {
+    const pct = (meta.driveable && row && typeof row.context_pct === "number")
+      ? Math.max(0, Math.min(100, row.context_pct)) : null;
+    if (pct === null) {
+      return el("span", { class: "r-ctx r-ctx-null", text: "—",
+                          title: "no context telemetry" });
+    }
+    return el("span", { class: "r-ctx", title: "context window " + Math.round(pct) + "% used" }, [
+      el("span", { class: "ctxbar" }, [el("span", { class: "ctxfill", style: "width:" + pct + "%" })]),
+      el("span", { class: "ctxlbl", text: Math.round(pct) + "%" }),
+    ]);
+  }
+
+  // D3 — state control on every row. Driveable + down → Start; driveable + up +
+  // needs_go → GO; otherwise a live status chip (running / unread / idle /
+  // offline / no-signal for driveable seats, or the kind for status-only). The
+  // chip is never omitted, so the control column is uniform.
+  function statusChipText(meta, row, up) {
+    if (meta.status_only) return meta.kind || "app";
+    if (!up) return "down";
+    if (row && row.ttyd_up === false) return "offline";
+    const g = window.resolveGlanceState ? window.resolveGlanceState({
+      unacked: (row && row.unacked_count) || 0,
+      isWorking: !!(row && row.is_working),
+      hasTelemetry: !!(row && row.has_telemetry),
+      isDoneGreen: false,
+      needsGo: !!(row && row.needs_go),
+    }) : "";
+    if (g === "WORKING") return "running";
+    if (g === "NEW") return "unread";
+    if (g === "UNKNOWN") return "no signal";
+    return "idle";
+  }
+
+  function stateControl(meta, row, up) {
+    if (!meta.status_only) {
+      if (!up) {
+        return el("button", { class: "rbtn start", type: "button", text: "▶ Start",
+          title: "Start " + (meta.display_name || meta.slug),
+          onclick: (ev) => { ev.stopPropagation(); doStart(meta.slug, ev.currentTarget); } });
+      }
+      if (row && window.goAffordanceVisible(row)) {
+        return el("button", { class: "rbtn go", type: "button", text: "GO ⏎",
+          title: "Answer GO for " + (meta.display_name || meta.slug),
+          onclick: (ev) => { ev.stopPropagation(); doGo(meta.slug, ev.currentTarget); } });
+      }
+    }
+    return el("span", { class: "chip", text: statusChipText(meta, row, up) });
+  }
+
+  function card(meta) {
+    // D9: fetch live state for EVERY card (not just driveable) so App-resident
+    // agents surface their unacked badge + feed the bus-message panel.
+    const row = stateBySlug.get(meta.slug) || null;
+    const up = row ? row.session_up === true : false;
+    const cls = ["row"];
+    if (flashSlugs.has(meta.slug)) cls.push("flash");   // D9 flash-on-new-message
+
+    // State classes (color language preserved from the card design): app =
+    // status-only, error = ttyd down, up/working, glance frame, or down.
     if (meta.status_only) {
-      // Status-only (app / service / headless). E1: the recessed background IS
-      // the app/terminal distinction; E3: no "APP" marker.
       cls.push("app");
     } else if (up && row && row.ttyd_up === false) {
-      cls.push("up", "error");                    // red = offline (no words)
+      cls.push("up", "error");
     } else if (up) {
-      cls.push("up");                             // bright = running
+      cls.push("up");
       const gc = glanceClass(row);
-      if (gc) cls.push(gc);                        // amber/green/cyan glance frame
+      if (gc) cls.push(gc);
       if (row && row.is_working) cls.push("working");
-      // GO on the card face (§5.4) — ONLY when the seat is awaiting a GO.
-      if (window.goAffordanceVisible(row)) {
-        const goBtn = el("button", { class: "btn go", type: "button", text: "GO ⏎",
-          onclick: (ev) => { ev.stopPropagation(); doGo(meta.slug, ev.currentTarget); } });
-        actions = el("div", { class: "actions" }, [goBtn]);
-      }
-      if (row && row.unacked_count > 0) {
-        unread = el("div", { class: "state" }, [
-          el("span", { class: "unread", text: String(row.unacked_count) }),
-          el("span", { class: ageClass(row.oldest_unacked_age_sec || 0),
-                       text: window.formatUnreadAge(row.oldest_unacked_age_sec || 0) + " oldest" }),
-        ]);
-      }
     } else {
-      cls.push("down");                           // dimmed + Start = down
-      const startBtn = el("button", { class: "btn start", type: "button", text: "▶ Start",
-        onclick: (ev) => { ev.stopPropagation(); doStart(meta.slug, ev.currentTarget); } });
-      actions = el("div", { class: "actions" }, [startBtn]);
+      cls.push("down");
     }
 
-    // E3: no TERMINAL / APP kind word — the background carries that. Only
-    // service / headless keep a small badge pill (bg alone can't name them).
-    const children = [];
-    if (meta.badge) {
-      children.push(el("div", { class: "top" }, [el("span", { class: "kind", text: meta.kind })]));
-    }
-    children.push(el("div", { class: "name", text: meta.display_name || meta.slug }));
-    children.push(el("div", { class: "slug", text: meta.slug }));
-    // Bottom-pinned group (margin-top:auto): the footer row + the context band.
-    const bottom = [];
-    // Compaction (Director #12264): unread badge + action button share ONE footer row.
-    if (unread || actions) {
-      bottom.push(el("div", { class: "footer" }, [unread, actions].filter(Boolean)));
-    }
-    // D4: context band — driveable seats with a known context_pct only; null →
-    // hidden (never blocks render). 3px green→amber→red fill by usage + tiny label.
-    if (meta.driveable && row && typeof row.context_pct === "number") {
-      const pct = Math.max(0, Math.min(100, row.context_pct));
-      bottom.push(el("div", { class: "ctx" }, [
-        el("div", { class: "ctxbar" }, [el("div", { class: "ctxfill", style: "width:" + pct + "%" })]),
-        el("div", { class: "ctxlbl", text: "ctx " + Math.round(pct) + "%" }),
-      ]));
-    }
-    if (bottom.length) children.push(el("div", { class: "cardbottom" }, bottom));
+    // Col 2 — identity (name + slug, + kind badge for service/headless).
+    const idKids = [
+      el("span", { class: "r-name", text: meta.display_name || meta.slug }),
+      el("span", { class: "r-slug", text: meta.slug }),
+    ];
+    if (meta.badge) idKids.push(el("span", { class: "r-kind", text: meta.kind }));
 
-    const c = el("div", { class: cls.join(" "), "data-slug": meta.slug }, children);
+    // Col 3 — unread badge + oldest age (empty spacer keeps the column aligned).
+    // D9: shown whenever the seat has unacked messages, including App cards
+    // (which are not session_up but do carry a bus identity).
+    let unread;
+    if (row && row.unacked_count > 0) {
+      unread = el("span", { class: "r-unread" }, [
+        el("span", { class: "unread", text: String(row.unacked_count) }),
+        el("span", { class: ageClass(row.oldest_unacked_age_sec || 0),
+                     text: window.formatUnreadAge(row.oldest_unacked_age_sec || 0) }),
+      ]);
+    } else {
+      unread = el("span", { class: "r-unread r-unread-empty" });
+    }
+
+    const c = el("div", { class: cls.join(" "), "data-slug": meta.slug }, [
+      el("span", { class: "r-dot" }),
+      el("span", { class: "r-id" }, idKids),
+      unread,
+      ctxCell(meta, row),          // D2 — every row
+      stateControl(meta, row, up), // D3 — every row
+    ]);
+
+    // D9 — two card modes, ZERO dead clicks. A tmux-backed (driveable) seat
+    // opens its terminal (unchanged); an App-resident card opens the bus-message
+    // panel (same data + section shape as the Lab "Production & Lab" component).
+    const name = meta.display_name || meta.slug;
+    let open;
     if (!meta.status_only) {
-      c.addEventListener("click", () => {
+      open = () => {
         const r = stateBySlug.get(meta.slug) || {};
-        if (!r.session_up) { toast(meta.display_name + " is down — press Start first"); return; }
+        if (!r.session_up) { toast(name + " is down — press Start first"); return; }
         // ttyd down ⇒ the proxy would 502; don't open a dead terminal frame.
-        if (r.ttyd_up === false) { toast(meta.display_name + " — terminal server offline"); return; }
-        openTerm(meta.slug, meta.display_name || meta.slug);
-      });
+        if (r.ttyd_up === false) { toast(name + " — terminal server offline"); return; }
+        openTerm(meta.slug, name);
+      };
+    } else {
+      open = () => openMsgPanel(meta.slug, name);
     }
+    c.setAttribute("role", "button");
+    c.setAttribute("tabindex", "0");
+    c.addEventListener("click", open);
+    c.addEventListener("keydown", (e) => {
+      if (e.key === "Enter" || e.key === " ") { e.preventDefault(); open(); }
+    });
     return c;
   }
 
   function render() {
     if (!layout) return;
     const frag = document.createDocumentFragment();
-    // grade-{i} drives the D3 stepped near-black plate ladder (6 grades).
-    layout.plates.forEach((plate, i) => {
-      const grid = el("div", { class: "grid" }, plate.cards.map(card));
-      frag.appendChild(el("div", { class: "plate grade-" + i }, [
+    // Plate groupings survive as slim section headers (D1); rows list under each.
+    layout.plates.forEach((plate) => {
+      const list = el("div", { class: "rows" }, plate.cards.map(card));
+      frag.appendChild(el("div", { class: "plate" }, [
         el("h2", {}, [document.createTextNode(plate.label),
-          el("span", { class: "count", text: plate.cards.length + " seats" })]),
-        grid,
+          el("span", { class: "count", text: plate.cards.length })]),
+        list,
       ]));
     });
     gridEl.textContent = "";
@@ -337,6 +508,14 @@
     if (openSlug && window.goAffordanceVisible(stateBySlug.get(openSlug))) doGo(openSlug, termGo);
   });
   document.addEventListener("keydown", (e) => { if (e.key === "Escape" && openSlug) closeTerm(); });
+
+  // ---- D9 message-panel wiring --------------------------------------------
+  document.getElementById("msg-x").addEventListener("click", closeMsgPanel);
+  document.getElementById("msg-x").addEventListener("keydown",
+    (e) => { if (e.key === "Enter" || e.key === " ") closeMsgPanel(); });
+  msgVeil.addEventListener("click", closeMsgPanel);
+  msgCopy.addEventListener("click", doMsgCopy);
+  document.addEventListener("keydown", (e) => { if (e.key === "Escape" && openMsgSlug) closeMsgPanel(); });
 
   // ---- unread-bus notifications mute toggle (NOTIFY_SLICE) ----------------
   // The controller fires banners even with the page closed; this toggle only
