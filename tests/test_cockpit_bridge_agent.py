@@ -80,11 +80,54 @@ def test_resolve_key_from_cache(monkeypatch, tmp_path):
     assert agent_mod.resolve_bridge_key() == "cachekey"
 
 
+def test_resolve_key_refuses_generic_terminal_key(monkeypatch, tmp_path):
+    """COCKPIT_BRIDGE_HARDENING_2 D2 (codex-arch): the generic
+    BRISEN_LAB_TERMINAL_KEY must NOT authenticate the bridge — only the dedicated
+    BRISEN_LAB_COCKPIT_BRIDGE_KEY / cockpit-bridge cache / cockpit-bridge 1P item.
+    With only the generic key set and no dedicated source, resolution is None."""
+    monkeypatch.delenv("BRISEN_LAB_COCKPIT_BRIDGE_KEY", raising=False)
+    monkeypatch.setenv("BRISEN_LAB_TERMINAL_KEY", "generic-bus-key")
+    # point the cache at a nonexistent file + neuter the `op` fallback
+    missing = tmp_path / "cockpit-bridge"
+    monkeypatch.setattr(agent_mod, "_key_cache_file", lambda slug: missing)
+    monkeypatch.setenv("PATH", "")
+    assert agent_mod.resolve_bridge_key() is None
+    # ...and the dedicated env key still wins when present
+    monkeypatch.setenv("BRISEN_LAB_COCKPIT_BRIDGE_KEY", "dedicated")
+    assert agent_mod.resolve_bridge_key() == "dedicated"
+
+
 def test_load_basic_auth_format(tmp_path):
     cred = tmp_path / "credentials"
     cred.write_text("director:hunter2")
     header = agent_mod.load_basic_auth(str(cred))
     assert header == "Basic " + base64.b64encode(b"director:hunter2").decode()
+
+
+def test_slug_from_term_path():
+    assert agent_mod._slug_from_term_path("/term/b1/ws") == "b1"
+    assert agent_mod._slug_from_term_path("/term/hag-desk/") == "hag-desk"
+    assert agent_mod._slug_from_term_path("/term/b1") == "b1"
+    # non-term paths + traversal attempts -> None (shared cred used)
+    assert agent_mod._slug_from_term_path("/api/agents") is None
+    assert agent_mod._slug_from_term_path("/term//ws") is None
+    assert agent_mod._slug_from_term_path("/term/../etc/ws") is None
+
+
+def test_resolve_ttyd_cred_path_per_seat(tmp_path):
+    """COCKPIT_BRIDGE_HARDENING_2 D4: a seat with its own credentials.d/<slug>
+    file gets that file; a seat without one falls back to the shared credential."""
+    base = tmp_path / "credentials"
+    base.write_text("shared:pw")
+    cred_d = tmp_path / "credentials.d"
+    cred_d.mkdir()
+    (cred_d / "b1").write_text("cockpit-b1:seatpw")
+    # b1 has a per-seat cred -> resolves to it
+    assert agent_mod.resolve_ttyd_cred_path(str(base), "/term/b1/ws") == str(cred_d / "b1")
+    # b2 has none -> falls back to the shared credential
+    assert agent_mod.resolve_ttyd_cred_path(str(base), "/term/b2/ws") == str(base)
+    # a non-term path -> shared credential
+    assert agent_mod.resolve_ttyd_cred_path(str(base), "/api/agents") == str(base)
 
 
 def test_load_basic_auth_missing_returns_none(tmp_path):

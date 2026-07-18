@@ -84,19 +84,24 @@ def _key_cache_file(slug: str) -> Path:
 
 
 def resolve_bridge_key() -> Optional[str]:
-    """env -> key-cache -> 1Password, mirroring brisen_lab_read_terminal_key.
+    """Resolve the DEDICATED cockpit-bridge key only. No generic-key fallback.
 
-    Precedence:
+    Precedence (all cockpit-bridge-dedicated sources):
       1. BRISEN_LAB_COCKPIT_BRIDGE_KEY (matches the server env name).
-      2. BRISEN_LAB_TERMINAL_KEY (generic override, same as the bash helper).
-      3. ~/.brisen-lab/keys/cockpit-bridge cache file.
-      4. `op read` 1Password fallback (best-effort; seeds nothing here).
+      2. ~/.brisen-lab/keys/cockpit-bridge cache file (slug-scoped).
+      3. `op read` 1Password fallback on the cockpit-bridge item (best-effort).
     Returns the key or None. NEVER logs the value.
+
+    COCKPIT_BRIDGE_HARDENING_2 D2 (codex-arch finding): the generic
+    BRISEN_LAB_TERMINAL_KEY env fallback is REMOVED. The bridge is a separate
+    surface from the bus, so a bus/terminal key must NEVER authenticate the
+    bridge — otherwise any seat's generic key could open the Director control
+    channel. The server (app.py cockpit_bridge_ws) already checks ONLY
+    BRISEN_LAB_COCKPIT_BRIDGE_KEY; this makes the agent symmetric.
     """
-    for env_name in ("BRISEN_LAB_COCKPIT_BRIDGE_KEY", "BRISEN_LAB_TERMINAL_KEY"):
-        val = os.environ.get(env_name)
-        if val:
-            return val.strip()
+    val = os.environ.get("BRISEN_LAB_COCKPIT_BRIDGE_KEY")
+    if val and val.strip():
+        return val.strip()
     cache = _key_cache_file(BRIDGE_SLUG)
     try:
         if cache.exists():
@@ -136,6 +141,42 @@ def load_basic_auth(cred_path: str) -> Optional[str]:
         return None
     token = base64.b64encode(raw.encode("utf-8")).decode("ascii")
     return f"Basic {token}"
+
+
+def _slug_from_term_path(path: str) -> Optional[str]:
+    """Extract <slug> from a ttyd path `/term/<slug>/...`. None if it doesn't
+    match (then the shared credential is used).
+
+    Positional parse (do NOT collapse empty segments): `/term//ws` has an EMPTY
+    slug and must yield None, not silently promote `ws`. Any slug carrying a
+    path/separator/dot char (traversal) is refused."""
+    segs = (path or "").split("/")  # "/term/b1/ws" -> ["", "term", "b1", "ws"]
+    if len(segs) >= 3 and segs[1] == "term":
+        slug = segs[2]
+        if slug and all(c.isalnum() or c in "-_" for c in slug):
+            return slug
+    return None
+
+
+def resolve_ttyd_cred_path(base_cred_path: str, path: str) -> str:
+    """Per-seat ttyd credential (COCKPIT_BRIDGE_HARDENING_2 D4).
+
+    Each seat's ttyd now embeds its OWN Basic credential (install_cockpit_ttyd.sh
+    writes `<deploy>/credentials.d/<slug>`), so a leak of one seat's plist/cred no
+    longer exposes every seat. Given the ttyd path `/term/<slug>/...`, return that
+    seat's credential file if it exists, else fall back to the shared credential
+    (`base_cred_path`) so the transition is safe before every seat is provisioned.
+    The shared credential is still used for the controller's HTTP API (a single
+    surface, not per-seat)."""
+    slug = _slug_from_term_path(path)
+    if slug:
+        per_seat = Path(base_cred_path).parent / "credentials.d" / slug
+        try:
+            if per_seat.is_file():
+                return str(per_seat)
+        except OSError:
+            pass
+    return base_cred_path
 
 
 # ---------------------------------------------------------------------------
@@ -314,7 +355,9 @@ class BridgeAgent:
         # target URI (== the controller authority the OriginGuard expects); a manual
         # duplicate corrupts the handshake (400). Origin is what OriginGuard checks.
         upstream_headers = {"Origin": self.upstream}
-        auth = load_basic_auth(self.cred_path)
+        # D4: inject this SEAT's own ttyd credential (credentials.d/<slug>) when
+        # present, falling back to the shared credential during rollout.
+        auth = load_basic_auth(resolve_ttyd_cred_path(self.cred_path, path))
         if auth:
             upstream_headers["Authorization"] = auth
         connect_kwargs = {_WS_HEADERS_KW: upstream_headers}
