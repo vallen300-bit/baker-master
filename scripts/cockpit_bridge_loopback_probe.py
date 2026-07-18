@@ -101,6 +101,10 @@ def build_fake_controller() -> FastAPI:
                 '<script src="cockpit.js"></script></body></html>'
             )
             return PlainTextResponse(html, media_type="text/html")
+        if path.startswith("term/"):
+            # simulate the ttyd terminal page (its own <head>) — must NOT be base-injected
+            return PlainTextResponse("<html><head><title>ttyd</title></head><body>TTYD_PAGE</body></html>",
+                                     media_type="text/html")
         return PlainTextResponse(PAGE_MARKER + "\n<html>cockpit</html>", media_type="text/html")
 
     @app.post("/{path:path}")
@@ -171,7 +175,11 @@ def build_lab_app() -> FastAPI:
         body = await req.body()
         headers = cb.sanitize_request_headers(req.headers)
         bridge = cb.get_bridge()
-        return await bridge.proxy_http(req.method, "/" + path, req.url.query, headers, body)
+        norm = path.strip("/")
+        inject_base = (norm == "" or norm == "index.html")
+        return await bridge.proxy_http(req.method, "/" + path,
+                                       cb.strip_token_query(req.url.query), headers, body,
+                                       inject_base=inject_base)
 
     @app.get("/cockpit")
     async def cockpit_root(req: Request):
@@ -267,6 +275,13 @@ async def run_probe():
                   and PAGE_MARKER in r.text)
             check("GET /cockpit/ page carries base-inject (prefix-aware)", ok,
                   f"status={r.status_code}")
+
+            # 1c. ttyd terminal PAGE (HTTP) must NOT be base-injected (would break
+            #     the terminal's own relative asset/WS resolution).
+            r = await client.get(base + "/cockpit/term/b1/", headers=origin)
+            ok = (r.status_code == 200 and "TTYD_PAGE" in r.text
+                  and "__COCKPIT_BASE__" not in r.text and '<base href="/cockpit/">' not in r.text)
+            check("ttyd page NOT base-injected", ok, f"status={r.status_code}")
 
             # 2. /api/agents JSON
             r = await client.get(base + "/cockpit/api/agents", headers=origin)

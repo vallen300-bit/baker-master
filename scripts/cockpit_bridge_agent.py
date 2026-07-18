@@ -259,7 +259,12 @@ class BridgeAgent:
             sid = frame.stream_id
             task = asyncio.create_task(self._handle_ws(ws, sid, head, q))
             self._ws_tasks[sid] = task
-            task.add_done_callback(lambda _t, s=sid: self._ws_tasks.pop(s, None))
+            # Guard against unregistering a REPLACEMENT task if an old task for a
+            # reused sid completes late (codex re-verify race).
+            def _clear(_t, s=sid):
+                if self._ws_tasks.get(s) is _t:
+                    self._ws_tasks.pop(s, None)
+            task.add_done_callback(_clear)
             return
         if frame.type in (mux.WS_DATA, mux.WS_CLOSE):
             q = self._ws_streams.get(frame.stream_id)
@@ -322,15 +327,18 @@ class BridgeAgent:
                 await self._send(lab_ws, mux.encode_frame(sid, mux.WS_OPEN, ack))
                 pump_up = asyncio.create_task(self._ws_upstream_to_lab(lab_ws, sid, upstream))
                 pump_down = asyncio.create_task(self._ws_lab_to_upstream(inbound, upstream))
-                done, pending = await asyncio.wait(
-                    {pump_up, pump_down}, return_when=asyncio.FIRST_COMPLETED)
-                for t in pending:
-                    t.cancel()
-                for t in pending:
-                    try:
-                        await t
-                    except (asyncio.CancelledError, Exception):
-                        pass
+                # try/finally so BOTH pumps are cancelled + awaited whether the
+                # wait completes normally OR _handle_ws is externally cancelled on
+                # a Lab reconnect (codex re-verify #6: asyncio.wait does NOT cancel
+                # its pending children when the awaiter is cancelled, so without
+                # this finally the loser pump leaks per ttyd stream per reconnect).
+                try:
+                    await asyncio.wait({pump_up, pump_down}, return_when=asyncio.FIRST_COMPLETED)
+                finally:
+                    for t in (pump_up, pump_down):
+                        if not t.done():
+                            t.cancel()
+                    await asyncio.gather(pump_up, pump_down, return_exceptions=True)
         except Exception as exc:  # noqa: BLE001 — surface as a clean close, never crash
             LOG.info("ttyd ws dial failed stream=%s: %s", sid, exc)
             await self._send(lab_ws, mux.encode_frame(sid, mux.WS_CLOSE, b""))
