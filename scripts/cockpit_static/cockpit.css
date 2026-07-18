@@ -130,10 +130,16 @@ main.wrap { padding: 8px 14px 40px; }
 .row.glance-needs-go .r-dot { background: var(--needs-go); box-shadow: 0 0 7px rgba(43,217,100,.8); animation: dot-go-pulse 1.1s ease-in-out infinite; }
 @keyframes dot-go-pulse { 0%,100% { box-shadow: 0 0 4px rgba(43,217,100,.5); } 50% { box-shadow: 0 0 10px rgba(43,217,100,.95); } }
 
-/* app / service / headless — status-only, not clickable, recessed dot. */
-.row.app { cursor: default; }
+/* app / service / headless — status-only. D9: now clickable (opens the bus-
+   message panel), so it keeps the pointer + hover affordance; recessed dot. */
 .row.app .r-dot { background: #33404f; box-shadow: none; }
-.row.app:hover { background: transparent; border-color: transparent; }
+
+/* D9 — flash a card whose unacked count just rose (passive new-message cue). */
+.row.flash { animation: row-flash 1.4s ease-out; }
+@keyframes row-flash {
+  0%   { background: rgba(0,213,255,.38); }
+  100% { background: transparent; }
+}
 
 /* Col 3 — unread badge + oldest age (empty span keeps the column aligned). */
 .r-unread { display: flex; align-items: baseline; gap: 6px; justify-content: flex-end; }
@@ -228,6 +234,41 @@ main.wrap { padding: 8px 14px 40px; }
 #term-unacked .u-id { color: var(--muted); font-family: ui-monospace, Menlo, monospace; font-size: 11px; flex: 0 0 auto; }
 #term-unacked .u-topic { color: var(--text); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 #term-unacked .u-age { color: var(--muted); font-size: 11px; margin-left: auto; flex: 0 0 auto; }
+
+/* D9 — App-resident bus-message panel (mirrors the Lab "Production & Lab"
+   component: header + Unacknowledged / Last message / Acknowledged sections). */
+#msgveil { display: none; position: fixed; inset: 0; background: rgba(0,0,0,.5); z-index: 8; }
+#msgveil.open { display: block; }
+#msgpanel {
+  display: none; position: fixed; top: 10%; left: 50%; transform: translateX(-50%);
+  width: min(560px, 92vw); max-height: 78vh; z-index: 9;
+  background: var(--panel); border: 1px solid var(--border); border-radius: 12px;
+  flex-direction: column; overflow: hidden; box-shadow: 0 20px 80px rgba(0,0,0,.7);
+}
+#msgpanel.open { display: flex; }
+#msgbar {
+  display: flex; align-items: center; gap: 12px; padding: 11px 16px;
+  background: #12171f; border-bottom: 1px solid var(--border);
+}
+#msgbar b { font-size: 13px; font-family: ui-monospace, Menlo, monospace; }
+#msgbar .spacer { flex: 1; }
+#msg-copy { font-size: 11px; padding: 4px 12px; }
+#msg-copy.flash-ok, .history-copy-success { color: var(--needs-go); border-color: var(--needs-go); }
+#msg-x { cursor: pointer; color: var(--muted); font-size: 18px; padding: 2px 8px; }
+#msg-x:hover { color: #fff; }
+#msg-body { padding: 8px 16px 16px; overflow: auto; }
+.hsec { margin-top: 14px; }
+.hsec-t { font-size: 10.5px; letter-spacing: .12em; text-transform: uppercase; color: #d29922; margin: 0 0 6px; }
+.hsec-compact .hsec-t { color: var(--muted); }
+.hempty, .hcount { font-size: 12px; color: var(--muted); padding: 2px 0; }
+.hrow { display: grid; grid-template-columns: minmax(80px,auto) 1fr auto auto; gap: 10px;
+  align-items: baseline; padding: 4px 0; border-top: 1px solid rgba(255,255,255,.04); font-size: 12px; }
+.hrow:first-of-type { border-top: none; }
+.hfrom { color: var(--muted); white-space: nowrap; }
+.htopic { color: var(--text); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.hid { color: var(--muted); font-family: ui-monospace, Menlo, monospace; font-size: 11px; }
+.hage { color: var(--muted); font-size: 11px; white-space: nowrap; }
+.hrow-unacked .htopic { color: #f0d68a; }
 
 /* Toast */
 #toast {

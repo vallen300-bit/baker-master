@@ -44,6 +44,19 @@
 
 <div id="toast" hidden></div>
 
+<!-- D9 — App-resident card bus-message panel (binds the Lab "Production & Lab"
+     component's data + section shape: Unacknowledged / Last message / Acknowledged). -->
+<div id="msgveil"></div>
+<div id="msgpanel" role="dialog" aria-modal="true" aria-label="Bus messages">
+  <div id="msgbar">
+    <b id="msg-title">messages</b>
+    <div class="spacer"></div>
+    <button class="btn" id="msg-copy" type="button" title="Copy unacknowledged summary">Copy</button>
+    <div id="msg-x" role="button" tabindex="0" aria-label="Close">✕</div>
+  </div>
+  <div id="msg-body"></div>
+</div>
+
 <script src="glance_state.js"></script>
 <script src="cockpit.js"></script>
 </body>

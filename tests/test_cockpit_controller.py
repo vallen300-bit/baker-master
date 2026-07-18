@@ -114,6 +114,8 @@ def test_api_agents_requires_auth_and_maps_only_pinned_glance_fields(
                 "unacked_topics": ["review/one"],
                 "context_pct": None,
                 "unacked_messages": None,
+                "last_message": None,
+                "acked_count": None,
                 "local_working": False,
             },
             {
@@ -130,6 +132,8 @@ def test_api_agents_requires_auth_and_maps_only_pinned_glance_fields(
                 "unacked_topics": None,
                 "context_pct": None,
                 "unacked_messages": None,
+                "last_message": None,
+                "acked_count": None,
                 "local_working": False,
             },
         ],

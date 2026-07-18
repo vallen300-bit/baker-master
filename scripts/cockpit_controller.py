@@ -59,6 +59,12 @@ GLANCE_FIELDS = (
     # D5 — per-seat unacked message list (id / topic / created_at) so the
     # terminal panel can list them and D6 can name the oldest in the wake nudge.
     "unacked_messages",
+    # COCKPIT_UI_POLISH_1 D9 — the App-resident card's bus-message panel binds the
+    # same Lab feed the "Production & Lab" component uses: the most recent message
+    # (even if acked) + the acknowledged count. Same bus-metadata class already
+    # exposed by unacked_messages — no new leak surface (no body/transcript).
+    "last_message",
+    "acked_count",
 )
 # D6 — wake-on-open: re-nudge dedupe window (a seat is nudged at most once per
 # this many seconds, so re-opening a seat does not spam its tmux).

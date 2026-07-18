@@ -38,10 +38,19 @@
   const termUnacked = document.getElementById("term-unacked");
   const toastEl = document.getElementById("toast");
   const notifyToggle = document.getElementById("notify-toggle");
+  // D9 — App-resident card bus-message panel.
+  const msgVeil = document.getElementById("msgveil");
+  const msgPanel = document.getElementById("msgpanel");
+  const msgBody = document.getElementById("msg-body");
+  const msgTitle = document.getElementById("msg-title");
+  const msgCopy = document.getElementById("msg-copy");
 
   let layout = null;             // { plates: [{label, cards:[...]}, ...] }
   let stateBySlug = new Map();   // slug -> live /api/agents row
   let openSlug = null;           // currently open terminal, or null
+  let openMsgSlug = null;        // currently open bus-message panel, or null (D9)
+  let prevUnacked = new Map();   // slug -> last-seen unacked_count (D9 flash-on-new)
+  let flashSlugs = new Set();    // slugs whose unacked count rose this poll (D9)
   let pollTimer = null;
 
   // ---- helpers ------------------------------------------------------------
@@ -121,6 +130,7 @@
       const data = await r.json();
       const m = new Map();
       for (const a of (data.agents || [])) m.set(a.slug, a);
+      computeFlash(m);              // D9 — flag cards whose unacked count rose
       stateBySlug = m;
       // lab_glance_ok=false ⇒ the Lab telemetry source is down; every seat's
       // glance collapses to UNKNOWN. Surface it explicitly, don't read as idle.
@@ -131,6 +141,7 @@
       connEl.className = labOk ? "conn ok" : "conn warn";
       render();
       syncPanelGo();             // reflect needs_go changes while the panel is open
+      if (openMsgSlug) renderMsgSummary(openMsgSlug);   // D9 — live-refresh open panel
     } catch (e) {
       connEl.textContent = "offline — " + e.message;
       connEl.className = "conn err";
@@ -218,6 +229,106 @@
     termUnacked.textContent = ""; termUnacked.hidden = true;
   }
 
+  // ---- D9 bus-message panel (App-resident cards) --------------------------
+  // Binds the Lab "Production & Lab" component: header + Unacknowledged(n) /
+  // Last message / Acknowledged(count) sections, from the same per-agent bus
+  // fields (unacked_messages / last_message / acked_count). DOM-node built —
+  // no innerHTML, so agent-supplied strings can never inject markup.
+  function msgEnvelope(m, extraCls) {
+    const created = m && m.created_at ? Date.parse(m.created_at) : NaN;
+    const age = Number.isFinite(created)
+      ? window.formatUnreadAge((Date.now() - created) / 1000) : "";
+    return el("div", { class: "hrow " + (extraCls || "") }, [
+      el("span", { class: "hfrom", text: "from " + String((m && m.from_terminal) || "?") }),
+      el("span", { class: "htopic", text: String((m && m.topic) || "(no topic)") }),
+      el("span", { class: "hid", text: "#" + String((m && m.id) || "?") }),
+      age ? el("span", { class: "hage", text: age }) : null,
+    ]);
+  }
+
+  function renderMsgSummary(slug) {
+    const row = stateBySlug.get(slug) || {};
+    const unacked = Array.isArray(row.unacked_messages) ? row.unacked_messages : [];
+    const last = row.last_message || null;
+    const ackedCount = Number(row.acked_count) || 0;
+    msgBody.textContent = "";
+
+    const s1 = el("section", { class: "hsec" },
+      [el("h3", { class: "hsec-t", text: "Unacknowledged (" + unacked.length + ")" })]);
+    if (!unacked.length) s1.appendChild(el("div", { class: "hempty", text: "(none)" }));
+    else unacked.forEach((m) => s1.appendChild(msgEnvelope(m, "hrow-unacked")));
+    msgBody.appendChild(s1);
+
+    msgBody.appendChild(el("section", { class: "hsec" }, [
+      el("h3", { class: "hsec-t", text: "Last message" }),
+      last ? msgEnvelope(last, last.acked ? "hrow-acked" : "hrow-unacked")
+           : el("div", { class: "hempty", text: "(no messages)" }),
+    ]));
+
+    msgBody.appendChild(el("section", { class: "hsec hsec-compact" }, [
+      el("h3", { class: "hsec-t", text: "Acknowledged" }),
+      el("div", { class: "hcount", text: ackedCount + " acknowledged message(s)" }),
+    ]));
+  }
+
+  function openMsgPanel(slug, name) {
+    openMsgSlug = slug;
+    msgTitle.textContent = name + " [" + slug + "] messages";
+    renderMsgSummary(slug);
+    msgVeil.classList.add("open");
+    msgPanel.classList.add("open");
+  }
+
+  function closeMsgPanel() {
+    openMsgSlug = null;
+    msgPanel.classList.remove("open");
+    msgVeil.classList.remove("open");
+    msgBody.textContent = "";
+  }
+
+  async function copyToClipboard(text) {
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      try { await navigator.clipboard.writeText(text); return true; } catch (_) { /* fall through */ }
+    }
+    const ta = el("textarea"); ta.value = text; ta.setAttribute("readonly", "");
+    ta.style.position = "fixed"; ta.style.opacity = "0";
+    document.body.appendChild(ta); ta.select();
+    let ok = false;
+    try { ok = document.execCommand && document.execCommand("copy"); } catch (_) { ok = false; }
+    ta.remove();
+    return ok;
+  }
+
+  async function doMsgCopy() {
+    if (!openMsgSlug) return;
+    const row = stateBySlug.get(openMsgSlug) || {};
+    const unacked = Array.isArray(row.unacked_messages) ? row.unacked_messages : [];
+    const lines = unacked.map((m) =>
+      "#" + String((m && m.id) || "?") + "  " + String((m && m.topic) || "(no topic)") +
+      "  from " + String((m && m.from_terminal) || "?"));
+    const payload = (msgTitle.textContent || openMsgSlug) + "\n" +
+      (lines.length ? lines.join("\n") : "(no unacknowledged messages)");
+    msgCopy.disabled = true;
+    const ok = await copyToClipboard(payload);
+    msgCopy.disabled = false;
+    msgCopy.textContent = ok ? "copied ✓" : "copy failed";
+    clearTimeout(msgCopy._t);
+    msgCopy._t = setTimeout(() => { msgCopy.textContent = "Copy"; }, 1800);
+  }
+
+  // D9 flash-on-new-message: mark slugs whose unacked count rose since the last
+  // poll so render() can flash their cards, then advance the baseline.
+  function computeFlash(newMap) {
+    flashSlugs = new Set();
+    for (const [slug, a] of newMap) {
+      const now = (a && a.unacked_count) || 0;
+      const before = prevUnacked.has(slug) ? prevUnacked.get(slug) : now;
+      if (now > before) flashSlugs.add(slug);
+    }
+    prevUnacked = new Map();
+    for (const [slug, a] of newMap) prevUnacked.set(slug, (a && a.unacked_count) || 0);
+  }
+
   // ---- rendering ----------------------------------------------------------
   // COCKPIT_UI_POLISH_1 (Director #12800): thin Lab-list rows — the whole fleet
   // on one screen. Each row is a fixed 5-column CSS grid (dot · identity · unread
@@ -282,9 +393,12 @@
   }
 
   function card(meta) {
-    const row = meta.driveable ? stateBySlug.get(meta.slug) : null;
+    // D9: fetch live state for EVERY card (not just driveable) so App-resident
+    // agents surface their unacked badge + feed the bus-message panel.
+    const row = stateBySlug.get(meta.slug) || null;
     const up = row ? row.session_up === true : false;
     const cls = ["row"];
+    if (flashSlugs.has(meta.slug)) cls.push("flash");   // D9 flash-on-new-message
 
     // State classes (color language preserved from the card design): app =
     // status-only, error = ttyd down, up/working, glance frame, or down.
@@ -309,8 +423,10 @@
     if (meta.badge) idKids.push(el("span", { class: "r-kind", text: meta.kind }));
 
     // Col 3 — unread badge + oldest age (empty spacer keeps the column aligned).
+    // D9: shown whenever the seat has unacked messages, including App cards
+    // (which are not session_up but do carry a bus identity).
     let unread;
-    if (up && row && row.unacked_count > 0) {
+    if (row && row.unacked_count > 0) {
       unread = el("span", { class: "r-unread" }, [
         el("span", { class: "unread", text: String(row.unacked_count) }),
         el("span", { class: ageClass(row.oldest_unacked_age_sec || 0),
@@ -328,21 +444,28 @@
       stateControl(meta, row, up), // D3 — every row
     ]);
 
+    // D9 — two card modes, ZERO dead clicks. A tmux-backed (driveable) seat
+    // opens its terminal (unchanged); an App-resident card opens the bus-message
+    // panel (same data + section shape as the Lab "Production & Lab" component).
+    const name = meta.display_name || meta.slug;
+    let open;
     if (!meta.status_only) {
-      c.setAttribute("role", "button");
-      c.setAttribute("tabindex", "0");
-      const open = () => {
+      open = () => {
         const r = stateBySlug.get(meta.slug) || {};
-        if (!r.session_up) { toast((meta.display_name || meta.slug) + " is down — press Start first"); return; }
+        if (!r.session_up) { toast(name + " is down — press Start first"); return; }
         // ttyd down ⇒ the proxy would 502; don't open a dead terminal frame.
-        if (r.ttyd_up === false) { toast((meta.display_name || meta.slug) + " — terminal server offline"); return; }
-        openTerm(meta.slug, meta.display_name || meta.slug);
+        if (r.ttyd_up === false) { toast(name + " — terminal server offline"); return; }
+        openTerm(meta.slug, name);
       };
-      c.addEventListener("click", open);
-      c.addEventListener("keydown", (e) => {
-        if (e.key === "Enter" || e.key === " ") { e.preventDefault(); open(); }
-      });
+    } else {
+      open = () => openMsgPanel(meta.slug, name);
     }
+    c.setAttribute("role", "button");
+    c.setAttribute("tabindex", "0");
+    c.addEventListener("click", open);
+    c.addEventListener("keydown", (e) => {
+      if (e.key === "Enter" || e.key === " ") { e.preventDefault(); open(); }
+    });
     return c;
   }
 
@@ -385,6 +508,14 @@
     if (openSlug && window.goAffordanceVisible(stateBySlug.get(openSlug))) doGo(openSlug, termGo);
   });
   document.addEventListener("keydown", (e) => { if (e.key === "Escape" && openSlug) closeTerm(); });
+
+  // ---- D9 message-panel wiring --------------------------------------------
+  document.getElementById("msg-x").addEventListener("click", closeMsgPanel);
+  document.getElementById("msg-x").addEventListener("keydown",
+    (e) => { if (e.key === "Enter" || e.key === " ") closeMsgPanel(); });
+  msgVeil.addEventListener("click", closeMsgPanel);
+  msgCopy.addEventListener("click", doMsgCopy);
+  document.addEventListener("keydown", (e) => { if (e.key === "Escape" && openMsgSlug) closeMsgPanel(); });
 
   // ---- unread-bus notifications mute toggle (NOTIFY_SLICE) ----------------
   // The controller fires banners even with the page closed; this toggle only
