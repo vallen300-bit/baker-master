@@ -67,8 +67,42 @@ manifest_has()    { jq -e --arg s "$1" '.entries[] | select(.slug==$s)' "$MANIFE
 
 session_up() { tmux has-session -t "=$1" 2>/dev/null; }
 
+# Identity env-vars that MUST NOT leak from the launcher into a seat's tmux
+# environment (leaked-key arc, lead #12597/#12697). A tmux session inherits the
+# server's global environment; if the server was started from a shell carrying
+# the LAUNCHER's identity, every seat would silently inherit the launcher's bus
+# key (post-as-wrong-identity / key exposure) and git author/committer identity
+# (mis-attributed commits). Each seat re-derives its OWN identity from its
+# profile + ~/.brisen-lab/keys/<slug>, so scrubbing the inherited values is safe.
+IDENTITY_ENV_SCRUB=(BAKER_ROLE BRISEN_LAB_TERMINAL_KEY GIT_AUTHOR_EMAIL GIT_COMMITTER_EMAIL)
+
+# scrub_identity_env — close the leak before any seat is created:
+#  1. unset from THIS process so a tmux server we start inherits a clean env;
+#  2. strip the GLOBAL env of an already-running server so pre-existing/new
+#     sessions never propagate a stale value.
+# The per-session `-u` (defense-in-depth) is applied after each new-session.
+scrub_identity_env() {
+  local v
+  for v in "${IDENTITY_ENV_SCRUB[@]}"; do
+    unset "$v" 2>/dev/null || true
+  done
+  if tmux info >/dev/null 2>&1; then           # a server already exists → clean its global env too
+    for v in "${IDENTITY_ENV_SCRUB[@]}"; do
+      tmux set-environment -g -u "$v" 2>/dev/null || true
+    done
+  fi
+}
+
+scrub_session_identity_env() {                 # per-session belt-and-suspenders
+  local slug="$1" v
+  for v in "${IDENTITY_ENV_SCRUB[@]}"; do
+    tmux set-environment -t "$slug" -u "$v" 2>/dev/null || true
+  done
+}
+
 cmd_up() {
   ledger_init
+  scrub_identity_env                            # MUST run before the first new-session
   local created=0 skipped=0 pending=0
   while IFS= read -r slug; do
     [ -n "$slug" ] || continue
@@ -80,6 +114,7 @@ cmd_up() {
     fi
     local launch; launch="$(manifest_launch "$slug")"
     tmux new-session -d -s "$slug" "$launch"
+    scrub_session_identity_env "$slug"
     echo "up: $slug  ($launch)"
     created=$((created+1))
   done < <(manifest_slugs)
