@@ -20,7 +20,12 @@
   // location.origin has NO userinfo, so building request URLs from it avoids
   // "Request cannot be constructed from a URL that includes credentials" when
   // the page itself was opened with credentials embedded in the URL.
-  const BASE = location.origin;
+  // COCKPIT_IN_LAB_BRIDGE_1 (lead ruling #12577, Option A): when this page is
+  // proxied inside Brisen Lab under /cockpit/, the Lab injects
+  // window.__COCKPIT_BASE__ = location.origin + "/cockpit" so every url() below
+  // resolves under the prefix. Local (127.0.0.1:7800) serving leaves it unset, so
+  // BASE falls back to location.origin unchanged — the local page is unaffected.
+  const BASE = (typeof window !== "undefined" && window.__COCKPIT_BASE__) || location.origin;
   const url = (p) => BASE + (p.charAt(0) === "/" ? p : "/" + p);
 
   const gridEl = document.getElementById("grid");

@@ -90,6 +90,17 @@ def build_fake_controller() -> FastAPI:
             return JSONResponse({"detail": "auth required"}, status_code=401)
         if path.startswith("api/agents"):
             return JSONResponse({"agents": [{"slug": "b1", "state": "WORKING"}]})
+        if path == "" or path.endswith("index.html") or path == "/":
+            # realistic cockpit index.html (relative assets + a <head>) so the
+            # probe can verify the Lab's Option-A base inject end-to-end.
+            html = (
+                "<!DOCTYPE html><html><head>\n"
+                f"<!-- {PAGE_MARKER} -->\n"
+                '<link rel="stylesheet" href="cockpit.css">\n'
+                "</head><body><div id='grid'></div>"
+                '<script src="cockpit.js"></script></body></html>'
+            )
+            return PlainTextResponse(html, media_type="text/html")
         return PlainTextResponse(PAGE_MARKER + "\n<html>cockpit</html>", media_type="text/html")
 
     @app.post("/{path:path}")
@@ -247,6 +258,15 @@ async def run_probe():
             r = await client.get(base + "/cockpit/", headers=origin)
             check("GET /cockpit/ -> 200 + page marker",
                   r.status_code == 200 and PAGE_MARKER in r.text, f"status={r.status_code}")
+
+            # 1b. Option A (#12577): the served cockpit page is prefix-aware.
+            r = await client.get(base + "/cockpit/", headers=origin)
+            ok = (r.status_code == 200
+                  and '<base href="/cockpit/">' in r.text
+                  and "__COCKPIT_BASE__" in r.text
+                  and PAGE_MARKER in r.text)
+            check("GET /cockpit/ page carries base-inject (prefix-aware)", ok,
+                  f"status={r.status_code}")
 
             # 2. /api/agents JSON
             r = await client.get(base + "/cockpit/api/agents", headers=origin)

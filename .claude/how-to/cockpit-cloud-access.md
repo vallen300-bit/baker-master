@@ -39,10 +39,12 @@ Either one takes the surface down; do both to fully stop it.
   stop a human who navigates straight to the URL** — see b1 bus flag #12569.
 - Cockpit drives Start/GO + wake keystrokes into live laptop terminals, so blast
   radius is higher than the read-mostly dashboard.
-- **Second factor (recommended before any real exposure):** set
+- **Access token — MANDATORY before flip (ratified #12577):** set
   `COCKPIT_ACCESS_TOKEN` on the Lab. When set, every `/cockpit` request must carry
   it (`X-Cockpit-Token` header, `cockpit_token` cookie, or a one-time `?token=`
-  that seeds the cookie). Unset → same-origin only (brief-verbatim).
+  that seeds the cookie); a no-token caller is denied. Unset → same-origin only,
+  which is NOT sufficient for a remote-command surface — never flip the flag on
+  without the token set.
 - The agent WS authenticates with a DEDICATED key (`BRISEN_LAB_COCKPIT_BRIDGE_KEY`),
   never a bus/terminal key. The laptop Basic-auth credential never leaves the
   laptop process (injected into upstream requests only).
@@ -58,8 +60,11 @@ Owner in brackets. Do in order.
 2. **[lead] Deps on the Lab:** confirm `websockets>=13,<14` deployed (already in
    `requirements.txt`). The `<14` pin is load-bearing — uvicorn 0.32 + websockets
    ≥14 breaks the WS handshake.
-3. **[lead] Set the second factor (recommended):** `COCKPIT_ACCESS_TOKEN=<token>`
-   on the Lab. Share the `?token=` bootstrap URL with the Director only.
+3. **[lead] Set the access token — MANDATORY (ratified #12577):** `COCKPIT_ACCESS_TOKEN=<token>`
+   on the Lab, set BEFORE the flag goes on. Share the `?token=` bootstrap URL with
+   the Director only. This is REQUIRED, not optional: the origin gate alone cannot
+   guard fleet keyboards on a public Lab (`Sec-Fetch-Site` is forgeable). Without
+   the token set, do NOT flip `COCKPIT_EMBED_ENABLED` on.
 4. **[lead] Deploy the Lab** with the flag still OFF; verify `GET /cockpit/` and
    `GET /cockpit/api/agents` and the terminal WS all return `404`, nav button
    absent. (post-deploy-ac-bus-gate verdict.)
