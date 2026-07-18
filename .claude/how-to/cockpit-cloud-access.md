@@ -15,14 +15,19 @@ port, no DNS, no new vendor.
 Director browser ──(Lab auth+flag)── brisen-lab /cockpit/* ──(mux over 1 WS)── laptop agent ── 127.0.0.1:7800
 ```
 
-> **STATUS: LIVE since 2026-07-18 ~08:14 UTC** (lead-run flip, Director /goal).
-> Flag ON, `COCKPIT_ACCESS_TOKEN` set (Director ruling #12565 — access code lives
-> with the Director + 1Password, NOT in this file), bridge key provisioned both
-> ends (1P item `BRISEN_LAB_COCKPIT_BRIDGE_KEY`). Laptop agent runs from the
-> pinned venv `~/.brisen-lab/bridge-venv` (websockets 13.1 — tested config).
-> Post-deploy AC verdict: 7/7 PASS, bus #12690. Pre-flip agent log noise
+> **STATUS: DARK (rolled back) as of 2026-07-18 evening — re-flip pending
+> Director GO.** The 08:14 UTC flip (lead-run, Director /goal, 7/7 AC PASS bus
+> #12690) was rolled back after the codex kill-switch audit (#12861). Both kill
+> switches engaged and verified: Lab `/cockpit/` → 404 (flag off) + laptop agent
+> booted out (lead #12962). HARDENING_2 (revoke watcher / bridge-key-only auth /
+> per-seat ttyd creds) merged 2026-07-18 evening (baker #605 + lab #158, codex
+> PASS #12992) — re-flip is now safe. Flip config that worked at 08:14: flag ON,
+> `COCKPIT_ACCESS_TOKEN` set (Director ruling #12565 — access code lives with the
+> Director + 1Password, NOT in this file), bridge key both ends (1P
+> `BRISEN_LAB_COCKPIT_BRIDGE_KEY`), laptop agent from pinned venv
+> `~/.brisen-lab/bridge-venv` (websockets 13.1). Pre-flip agent log noise
 > `transfer codings aren't supported` = the flag-gated 404 handshake reject —
-> expected while the flag is off; it latches "bridge connected" after the flip.
+> expected while the flag is off.
 
 ## KILL SWITCHES (do these FIRST if anything is wrong)
 
