@@ -69,6 +69,14 @@ lockout counter.
 
 **D5:** cookie seeded via `?token=` also gets `max_age=30d` (today: session-only).
 
+**D7 (brisen-lab — RATIFIED GOAL, #12806):** cockpit renders INSIDE the normal
+Lab sidebar UI as a first-class view: sidebar "Cockpit" click switches the view
+in-page (iframe embed of `/cockpit/` is acceptable v1), no new tab, no separate
+"top-tab" shell. Hide the cockpit page's own top-tab header when embedded
+(`window.__COCKPIT_BASE__` set = embed signal). Director acceptance: open normal
+Lab → click sidebar Cockpit → grid opens there. One Lab, one page. AC7: literal
+click-through screenshot.
+
 **D6:** post-merge deploy note: sync `scripts/cockpit_static/` into
 `~/Library/Application Support/baker/cockpit/static/` (installed copy the live
 controller serves — see 2026-07-18 stale-copy incident) and verify via the Lab.
