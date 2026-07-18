@@ -177,9 +177,10 @@ main.wrap { max-width: 1800px; margin: 0 auto; padding: 28px 28px 48px; }
 .legend-idle { background: var(--blue); }
 .legend-down { background: var(--down); }
 
-/* Explicit column grammar keeps the useful backend parameters legible. */
-.fleet-columns,
-.row {
+/* Explicit column grammar keeps the useful backend parameters legible. The
+   header uses the --row-columns token; .row mirrors the same template literally
+   (below) so the thin-row geometry guard can read the 5-column grid directly. */
+.fleet-columns {
   display: grid;
   grid-template-columns: var(--row-columns);
   align-items: center;
@@ -221,8 +222,15 @@ main.wrap { max-width: 1800px; margin: 0 auto; padding: 28px 28px 48px; }
 }
 .rows { display: flex; flex-direction: column; }
 .row {
+  display: grid;
+  /* Mirrors :root --row-columns so the .fleet-columns header stays aligned with
+     the rows. Kept literal (not var) so the thin-row geometry guard reads the
+     5-column template; keep this in sync with --row-columns above. */
+  grid-template-columns: 10px minmax(0, 1fr) minmax(72px, auto) 128px 116px;
+  align-items: center;
+  column-gap: 12px;
   position: relative;
-  min-height: 35px;
+  min-height: 26px;
   padding: 4px 12px;
   color: var(--text);
   border: 1px solid transparent;
@@ -269,6 +277,11 @@ main.wrap { max-width: 1800px; margin: 0 auto; padding: 28px 28px 48px; }
 .row.glance-needs-go { background: rgba(43,217,100,.11); border-color: rgba(43,217,100,.42); }
 .row.glance-needs-go .r-dot { background: var(--needs-go); box-shadow: 0 0 8px rgba(43,217,100,.85); animation: dot-go-pulse 1.1s ease-in-out infinite; }
 @keyframes dot-go-pulse { 0%,100% { box-shadow: 0 0 4px rgba(43,217,100,.45); } 50% { box-shadow: 0 0 11px rgba(43,217,100,.95); } }
+/* App/Cowork seats sit recessed with an inner shadow (mock v3: ".card.app"
+   inset-shadow treatment) so status-only seats read as pressed-in vs the
+   driveable terminal rows. Darker fill keeps light row text well above AA. */
+.row.app { background: rgba(0,0,0,.22); box-shadow: inset 0 2px 8px rgba(0,0,0,.5); }
+.row.app:hover { background: rgba(0,0,0,.12); }
 .row.app .r-dot { background: #364454; }
 .row.flash { animation: row-flash 1.2s ease-out; }
 @keyframes row-flash { 0% { background: rgba(0,213,255,.28); } 100% { background: transparent; } }
@@ -286,7 +299,10 @@ main.wrap { max-width: 1800px; margin: 0 auto; padding: 28px 28px 48px; }
 .age.hot { color: #ff8f87; }
 .r-ctx { display: flex; align-items: center; justify-content: flex-end; gap: 8px; min-width: 0; pointer-events: none; }
 .r-ctx .ctxbar { flex: 1; height: 5px; max-width: 82px; overflow: hidden; background: #27303d; border-radius: 3px; }
-.r-ctx .ctxfill { display: block; height: 100%; background: var(--blue); border-radius: inherit; }
+/* Context fill grows green -> amber -> red as the window fills (mock v3 legend:
+   "context line ... fills as context grows"). Gradient rides the fill element so
+   a short fill reads green and a near-full fill reaches red. */
+.r-ctx .ctxfill { display: block; height: 100%; background: linear-gradient(90deg, #3fb950, #d29922 70%, #f85149 92%); border-radius: inherit; }
 .r-ctx .ctxlbl { min-width: 31px; color: var(--muted-strong); font-size: 10px; font-variant-numeric: tabular-nums; text-align: right; }
 .r-ctx-null { color: var(--muted); font-size: 13px; }
 .rbtn, .btn {
