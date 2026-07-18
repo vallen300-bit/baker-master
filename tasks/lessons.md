@@ -1223,3 +1223,15 @@ Merged vault PR #164 (arm_check_inbox.sh) then symlinked ~/bm-arm/scripts -> ~/b
 ## Lesson #121 (2026-07-16, b1) — Uncommitted scratch dies with the seat: commit-or-stash-to-branch BEFORE respawn, or the work goes missing
 A prior b1 seat did the `missing_envelope_id` → `missing_idempotency_key` bus-error rename (bus.py hunk + coupled test assertion), acked the dispatch (lead #11814b), then rolled over — but never committed. The edits sat as uncommitted working-tree changes in the shared brisen-lab checkout. `gh` showed no PR, so lead's queue read it as owed-but-missing and had to re-nudge a day later (#11867). The successor seat found the change only by `git diff` on the dirty checkout; had another arc run `git checkout`/`git stash` in that shared checkout first, it would have evaporated (Lesson #115 class — hash-less "done" is not-yet-existing).
 **Rule:** checkpoint discipline is commit-or-stash-to-branch of ALL in-progress edits BEFORE respawn — never leave functional work as bare working-tree scratch, especially in a shared multi-seat checkout (brisen-lab, ~/baker-vault). A respawn request is not complete until the arc's edits are on a pushed branch (or explicitly stashed with the ref recorded in the checkpoint). If you inherit a seat, `git diff`/`git status` the working tree of every repo the brief touches before assuming "no PR = not started." Extends #115: uncommitted = does-not-exist, and the shared checkout makes it actively fragile.
+
+## Lesson #118 — Never bare-bootout a shared fleet agent (2026-07-18)
+Two silent wake-listener deaths (00:29, 09:21) were agents running a bare
+`launchctl bootout gui/501/com.baker.wake-listener` — bootout REMOVES the job
+from the launchd domain, so KeepAlive cannot revive it; the fleet's wake path
+stayed dead until manual restore. Rule: agents must never `launchctl bootout` a
+shared fleet service (wake-listener, watchdogs, bridge agents). To restart one:
+`launchctl kickstart -k gui/$(id -u)/<label>` (in-place restart, domain intact).
+Bootout is reserved for deliberate uninstall flows with a paired bootstrap.
+Hardening: com.baker.wake-listener-watchdog (brisen-lab PR #154) re-bootstraps
+within 300s and posts a bus flag — but the rule stands; the watchdog is the net,
+not the license. Root cause: briefs/_reports/WAKE_LISTENER_UNLOAD_ROOT_CAUSE_20260718.md.
