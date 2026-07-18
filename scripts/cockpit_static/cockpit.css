@@ -300,9 +300,13 @@ main.wrap { max-width: 1800px; margin: 0 auto; padding: 28px 28px 48px; }
 .r-ctx { display: flex; align-items: center; justify-content: flex-end; gap: 8px; min-width: 0; pointer-events: none; }
 .r-ctx .ctxbar { flex: 1; height: 5px; max-width: 82px; overflow: hidden; background: #27303d; border-radius: 3px; }
 /* Context fill grows green -> amber -> red as the window fills (mock v3 legend:
-   "context line ... fills as context grows"). Gradient rides the fill element so
-   a short fill reads green and a near-full fill reaches red. */
-.r-ctx .ctxfill { display: block; height: 100%; background: linear-gradient(90deg, #3fb950, #d29922 70%, #f85149 92%); border-radius: inherit; }
+   "context line ... fills as context grows"). SEVERITY-BY-VALUE (lead ruling
+   #12977): the gradient is anchored to the FULL track, not stretched across the
+   fill's own width, so the colour reads the true context_pct — a low-context row
+   is green (no misleading red tip), a near-full row's edge reaches red. cockpit.js
+   sets --ctx-track-scale = (10000/pct)% so the gradient box always spans one full
+   track regardless of fill width (background-size % is relative to the fill box). */
+.r-ctx .ctxfill { display: block; height: 100%; background-image: linear-gradient(90deg, #3fb950, #d29922 70%, #f85149 92%); background-repeat: no-repeat; background-position: left center; background-size: var(--ctx-track-scale, 100%) 100%; border-radius: inherit; }
 .r-ctx .ctxlbl { min-width: 31px; color: var(--muted-strong); font-size: 10px; font-variant-numeric: tabular-nums; text-align: right; }
 .r-ctx-null { color: var(--muted); font-size: 13px; }
 .rbtn, .btn {
