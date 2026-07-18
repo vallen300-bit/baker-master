@@ -4,7 +4,7 @@ attempt: 1
 repo: brisen-lab (code) — branch b1/wake-listener-hardening @63bd8248
 dispatched_by: lead (bus #12695, P1)
 report_topic: gates/wake-listener-hardening-1
-status: BUILD COMPLETE + deployed to host + AC1/AC2 live PASS. Pushed brisen-lab @63bd8248. Codex-gate report posted to lead (#12798). Awaiting lead codex gate + merge. AC4 24h soak posts post-merge.
+status: MERGED — brisen-lab PR #154 @42fde1b5 (codex PASS-WITH-NOTE #12805, Director GO, lead #12833). Host deployed + AC1/AC2 live PASS. B1 lane closed EXCEPT: AC4 24h soak verdict OWED tomorrow (2026-07-19) → post to gates/wake-listener-hardening-1. Then stand down to composer/origin-tag arc coordination with b2 (lead #12833).
 gate: codex gate on exact tips (topic gates/wake-listener-hardening-1) before lead merge
 ---
 
@@ -28,11 +28,17 @@ REMOVES the job → KeepAlive can't revive → stayed dead. NOT the wake path.
 - Live AC1 (bootout→restore+flag HTTP200, manual + launchd kickstart) + AC2 (kill -TERM→
   attributable line + KeepAlive restart) PASS. Report: `briefs/_reports/WAKE_LISTENER_UNLOAD_ROOT_CAUSE_20260718.md`.
 
-## Next concrete step (owner = lead, not B1)
-Lead runs codex gate on @63bd8248 (topic gates/wake-listener-hardening-1) → merge. Then AC4
-24h soak verdict (zero unexplained gaps in wake-listener.stdout.log) posts post-merge per
-post-deploy-ac-bus-gate. Follow-ups flagged not done: dedicated `wake-watchdog` bus sender slug;
-fleet lesson "agents must not bare-bootout shared fleet agents".
+## Next concrete step (B1, tomorrow 2026-07-19)
+Post AC4 24h soak verdict to gates/wake-listener-hardening-1: grep `~/.brisen-lab/wake-listener.stdout.log`
+for unexplained gaps since merge (~2026-07-18 14:3x). Any gap must correlate to a logged
+`received SIGTERM` line (forensic handler) or a watchdog RESTORE in `wake-listener-watchdog.log`.
+Zero unexplained gaps = PASS. Then stand down to composer/origin-tag arc coordination with b2.
+
+## Queued follow-ups (lead #12833, none blocking)
+1. Codex note: persistent restore-failure re-flags every 300s — no cross-run dedupe/backoff
+   in `wake_listener_watchdog.sh bus_flag`. Add a cooldown/state file if lead dispatches it.
+2. Dedicated `wake-watchdog` bus sender slug (currently posts as daemon/unattributed).
+3. Fleet lesson "agents must not bare-bootout shared fleet agents" — LEAD writes this one.
 
 ## Host state left healthy
 listener running (new code, SIGTERM handler); watchdog loaded, StartInterval 300s intact.
