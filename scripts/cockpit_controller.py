@@ -818,6 +818,10 @@ def send_wake(
             or (now - timestamp_value) >= WAKE_DEDUPE_SECONDS
         ):
             message_last.pop(key, None)
+            # The suppression counter belongs to the same message window.
+            # Drop it with the timestamp so historical coalesced messages do
+            # not accumulate one stale counter per message.
+            suppressed_last.pop(key, None)
     message_key = str(msg_id)
     previous_message = message_last.get(message_key)
     previous_message_at = (

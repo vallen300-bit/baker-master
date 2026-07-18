@@ -395,6 +395,41 @@ def test_send_wake_audits_suppressed_count_for_coalesced_repeat(tmp_path, fake_t
     assert audit[-1]["suppressed_count"] == 1
 
 
+def test_send_wake_prunes_expired_suppression_count_with_message_window(
+    tmp_path, fake_tmux
+):
+    """A coalesced message's suppression counter expires with its dedupe entry."""
+    settings = _settings(tmp_path)
+    last = {}
+
+    first = controller.send_wake(
+        settings, ENTRY, UNACKED_ROW, now=0.0, last_wake=last, verify=False,
+    )
+    suppressed = controller.send_wake(
+        settings, ENTRY, UNACKED_ROW, now=61.0, last_wake=last, verify=False,
+    )
+    newer = {
+        **UNACKED_ROW,
+        "unacked_messages": [
+            {
+                "id": 12099,
+                "topic": "later-topic",
+                "created_at": "2026-07-17T09:00:00Z",
+            },
+        ],
+    }
+    next_message = controller.send_wake(
+        settings, ENTRY, newer, now=601.0, last_wake=last, verify=False,
+    )
+
+    assert first["sent"] is True
+    assert suppressed["sent"] is False and suppressed["skipped"] == "deduped"
+    assert next_message["sent"] is True
+    assert last["b3"]["suppressed_count"] == {}
+    assert "12063" not in last["b3"]["message_last"]
+    assert "12099" in last["b3"]["message_last"]
+
+
 def test_send_wake_force_bypasses_dedupe_but_still_submits(tmp_path, fake_tmux):
     settings = _settings(tmp_path)
     last = {"b3": {"last_injection": 1000.0, "message_last": {"12063": 1000.0}}}
