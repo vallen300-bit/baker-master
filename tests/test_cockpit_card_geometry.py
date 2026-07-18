@@ -92,6 +92,27 @@ def test_context_fill_is_severity_gradient():
         "context gradient must run from green (#3fb950) to red (#f85149)"
 
 
+def test_context_gradient_is_anchored_to_value_not_width():
+    """SEVERITY-BY-VALUE (lead ruling #12977): the gradient must be anchored to the
+    full track so its colour reads the true context_pct, NOT stretched across the
+    fill's own width (which paints a red tip on a low-context row — misleading
+    telemetry). The fill scales the gradient box to one full track via
+    --ctx-track-scale and paints it once from the left."""
+    m = re.search(r"\.r-ctx\s+\.ctxfill\s*\{([^}]*)\}", CSS)
+    assert m, ".r-ctx .ctxfill rule not found"
+    body = m.group(1)
+    # Gradient box scaled to a full track (not the default 100% = fill's own width).
+    assert "--ctx-track-scale" in body and "background-size" in body, \
+        "ctxfill must scale the gradient to the full track via --ctx-track-scale"
+    # Painted once, from the left, so the reveal window == 0..pct of the true ramp.
+    assert "no-repeat" in body, "ctxfill gradient must not tile (background-repeat: no-repeat)"
+    assert re.search(r"background-position:\s*left", body), \
+        "ctxfill gradient must anchor at the track's left edge"
+    # JS must supply the per-row scale = (10000/pct)% so colour == severity(pct).
+    assert "--ctx-track-scale" in JS and "10000" in JS, \
+        "cockpit.js must set --ctx-track-scale = (10000/pct)% on each ctxfill"
+
+
 def test_app_rows_are_recessed():
     """Mock v3: App/Cowork (status-only) seats sit recessed with an inner shadow
     (".card.app" inset treatment) so they read distinct from driveable rows."""

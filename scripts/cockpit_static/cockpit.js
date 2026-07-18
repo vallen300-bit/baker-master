@@ -377,8 +377,15 @@
       return el("span", { class: "r-ctx r-ctx-null", text: "—",
                           title: "no context telemetry" });
     }
+    // SEVERITY-BY-VALUE (lead ruling #12977): the fill width still tracks pct, but
+    // the gradient is scaled to span one FULL track so its colour reads the true
+    // value (not the fill's own width). background-size % is relative to the fill
+    // box, and the fill is pct% of the track, so a scale of (10000/pct)% makes the
+    // gradient box exactly one track wide → colour at the fill edge == severity(pct).
+    const scale = pct > 0 ? (10000 / pct) : 100;
     return el("span", { class: "r-ctx", title: "context window " + Math.round(pct) + "% used" }, [
-      el("span", { class: "ctxbar" }, [el("span", { class: "ctxfill", style: "width:" + pct + "%" })]),
+      el("span", { class: "ctxbar" }, [el("span", { class: "ctxfill",
+        style: "width:" + pct + "%;--ctx-track-scale:" + scale + "%" })]),
       el("span", { class: "ctxlbl", text: Math.round(pct) + "%" }),
     ]);
   }
