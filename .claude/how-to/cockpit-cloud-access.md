@@ -15,6 +15,15 @@ port, no DNS, no new vendor.
 Director browser ──(Lab auth+flag)── brisen-lab /cockpit/* ──(mux over 1 WS)── laptop agent ── 127.0.0.1:7800
 ```
 
+> **STATUS: LIVE since 2026-07-18 ~08:14 UTC** (lead-run flip, Director /goal).
+> Flag ON, `COCKPIT_ACCESS_TOKEN` set (Director ruling #12565 — access code lives
+> with the Director + 1Password, NOT in this file), bridge key provisioned both
+> ends (1P item `BRISEN_LAB_COCKPIT_BRIDGE_KEY`). Laptop agent runs from the
+> pinned venv `~/.brisen-lab/bridge-venv` (websockets 13.1 — tested config).
+> Post-deploy AC verdict: 7/7 PASS, bus #12690. Pre-flip agent log noise
+> `transfer codings aren't supported` = the flag-gated 404 handshake reject —
+> expected while the flag is off; it latches "bridge connected" after the flip.
+
 ## KILL SWITCHES (do these FIRST if anything is wrong)
 
 Either one takes the surface down; do both to fully stop it.
