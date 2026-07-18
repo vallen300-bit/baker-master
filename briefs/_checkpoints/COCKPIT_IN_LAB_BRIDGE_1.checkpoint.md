@@ -4,8 +4,8 @@ attempt: 1
 branch: b1/cockpit-in-lab-bridge-1 (both repos: baker-master + brisen-lab)
 dispatched_by: lead (bus #12566)
 report_topic: gates/cockpit-in-lab-bridge-1
-status: READY FOR MERGE — Option A done (#12577), codex PASS both final tips (baker 5939527f, lab 4538ca5). Awaiting lead line-read + merge, then Director-GO morning flip. Flag OFF.
-gate: /security-review clean; codex re-verified PASS both tips; all findings fixed; #2 resolved via Option A
+status: READY FOR MERGE — Option A done (#12577), codex PASS-WITH-NOTE both tips. Post-tip close-race fix pushed baker @08a7c077 (lab unchanged @4538ca5) per lead #12588. Awaiting lead codex scope-confirm of 2-commit delta (16a9821e report + 08a7c077 fix) then merge, then Director-GO morning flip. Flag OFF.
+gate: /security-review clean; codex PASS-WITH-NOTE both tips; ConnectionClosedOK close-race fixed + test (baker 28); #2 resolved via Option A; report internally consistent (row 19 fixed)
 ---
 
 # COCKPIT_IN_LAB_BRIDGE_1 — checkpoint
