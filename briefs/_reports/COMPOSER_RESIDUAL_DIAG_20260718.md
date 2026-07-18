@@ -202,14 +202,13 @@ attribution + observability, not auto-submit.
 
 ## Not tested / honest gaps (fail-loud)
 
-- **Path 3 end-to-end through Render** (real browser paste via
-  `wss://brisen-lab.onrender.com/cockpit/term/b3/ws`) was **NOT run live.** It
-  needs the `COCKPIT_ACCESS_TOKEN` (asked lead) + would inject into a live seat
-  from a public surface. It is reproduced faithfully at the PTY layer instead,
-  and the intermediate hops are proven byte-transparent in code (loopback probe
-  10/10, `cockpit_bridge_loopback_probe.py`). If lead wants the literal
-  end-to-end cell, provide the token and I will drive a headless `tty`-subprotocol
-  WS client against b3's `/cockpit/term/b3/ws`.
+- **Path 3 end-to-end through Render** — **reproduced at the PTY layer; live cell
+  WAIVED by lead (#12795).** The literal browser-paste-through-Render test was
+  declined: PTY-layer reproduction (case A2) + code-proven hop transparency
+  (loopback probe 10/10, `cockpit_bridge_loopback_probe.py`) is sufficient
+  evidence, and lead will not circulate the Director access code or inject a live
+  seat from the public surface for a diag cell. The residual mechanism is
+  considered established without it.
 - **Path 2 live** not re-run (Terminal tabs mostly gone post-cutover); verdict
   from source + its own regression notes.
 
