@@ -63,6 +63,11 @@ GLANCE_FIELDS = (
 # D6 — wake-on-open: re-nudge dedupe window (a seat is nudged at most once per
 # this many seconds, so re-opening a seat does not spam its tmux).
 WAKE_DEDUPE_SECONDS = 600.0
+# WAKE_COMPOSER_SUBMIT_FIX_1: settle gap between text→Enter and Enter→submit-Return.
+# 0.3s mirrors the ratified `delay 0.3` in the wake handler app's submit-Return
+# (BUS_AUTOWAKE_SUBMIT_GENERALIZE_1) — long enough for the composer to absorb the
+# burst, short enough to keep the wake snappy.
+WAKE_SUBMIT_SETTLE_S = 0.3
 
 # LAB_CONTEXT_BAND_EXPOSURE_1 (#12055) exposes per-seat context-window usage as
 # ``context_used_percent`` on the public /api/v2/terminals payload. The cockpit
@@ -559,9 +564,24 @@ def send_wake(
     literal = _run_tmux(settings, ["send-keys", "-t", entry.slug, "-l", line])
     if literal.returncode != 0:
         raise RuntimeError(literal.stderr.strip() or "tmux wake send failed")
+    # WAKE_COMPOSER_SUBMIT_FIX_1 (gap 5, bus #12631): a burst-injected Enter can be
+    # swallowed by the composer (banner shown / text not yet absorbed) — the line
+    # parks in the input box unsubmitted and the wake silently dies. Same failure
+    # family as the Terminal-era bug fixed by BUS_AUTOWAKE_SUBMIT_GENERALIZE_1 in
+    # the wake handler app; this ports that ratified pattern to the tmux path:
+    # settle before Enter, then ONE best-effort bare submit-Return after another
+    # settle. A bare Return at an empty/generating composer is a no-op, and it is
+    # NEVER retried beyond this (lead ruling #5897 — re-injection on a busy-but-
+    # live seat could double parked text; log-only on failure).
+    time.sleep(WAKE_SUBMIT_SETTLE_S)
     enter = _run_tmux(settings, ["send-keys", "-t", entry.slug, "Enter"])
     if enter.returncode != 0:
         raise RuntimeError(enter.stderr.strip() or "tmux wake Enter failed")
+    time.sleep(WAKE_SUBMIT_SETTLE_S)
+    resubmit = _run_tmux(settings, ["send-keys", "-t", entry.slug, "Enter"])
+    if resubmit.returncode != 0:
+        LOG.warning("wake submit-Return failed for %s (wake already sent): %s",
+                    entry.slug, resubmit.stderr.strip())
     last_wake[entry.slug] = now
     if audit:
         _audit_wake(settings, entry.slug, msg_id, topic, line)

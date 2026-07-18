@@ -76,13 +76,49 @@ def test_send_wake_happy_path_sends_line_and_audits(tmp_path, fake_tmux):
     res = controller.send_wake(settings, ENTRY, UNACKED_ROW, now=1000.0, last_wake=last)
     assert res["sent"] is True
     assert res["line"] == "check bus #12063 ao-room-architecture"
-    # literal line then Enter
+    # WAKE_COMPOSER_SUBMIT_FIX_1: literal line, settle, Enter, settle, submit-Return
     assert fake_tmux[0] == ["send-keys", "-t", "b3", "-l", "check bus #12063 ao-room-architecture"]
     assert fake_tmux[1] == ["send-keys", "-t", "b3", "Enter"]
+    assert fake_tmux[2] == ["send-keys", "-t", "b3", "Enter"]
+    assert len(fake_tmux) == 3  # exactly one submit-Return, never retried (ruling #5897)
     assert last["b3"] == 1000.0
     # audit line written
     audited = [json.loads(l) for l in settings.wake_audit_path.read_text().splitlines()]
     assert audited[-1]["slug"] == "b3" and audited[-1]["msg_id"] == 12063
+
+
+def test_send_wake_settles_between_text_and_enters(tmp_path, monkeypatch):
+    """WAKE_COMPOSER_SUBMIT_FIX_1: the composer needs time to absorb the pasted
+    text before Enter, and the submit-Return needs a settle gap too — otherwise
+    a banner/busy composer parks the line unsubmitted (gap 5, bus #12631)."""
+    sleeps = []
+    calls = []
+
+    def _fake(settings, args):
+        calls.append(list(args))
+        return subprocess.CompletedProcess(args=list(args), returncode=0, stdout="", stderr="")
+
+    monkeypatch.setattr(controller, "_run_tmux", _fake)
+    monkeypatch.setattr(controller.time, "sleep", lambda s: sleeps.append(s))
+    res = controller.send_wake(_settings(tmp_path), ENTRY, UNACKED_ROW, now=1000.0, last_wake={})
+    assert res["sent"] is True
+    assert sleeps == [controller.WAKE_SUBMIT_SETTLE_S, controller.WAKE_SUBMIT_SETTLE_S]
+
+
+def test_send_wake_submit_return_failure_is_logged_not_raised(tmp_path, monkeypatch):
+    """The trailing submit-Return is best-effort: a bare Return is a no-op when
+    the first Enter already submitted, so its failure must never fail the wake."""
+    calls = []
+
+    def _fake(settings, args):
+        calls.append(list(args))
+        rc = 1 if len(calls) == 3 else 0  # only the submit-Return fails
+        return subprocess.CompletedProcess(args=list(args), returncode=rc, stdout="", stderr="boom")
+
+    monkeypatch.setattr(controller, "_run_tmux", _fake)
+    res = controller.send_wake(_settings(tmp_path), ENTRY, UNACKED_ROW, now=1000.0, last_wake={})
+    assert res["sent"] is True  # wake still reports sent
+    assert len(calls) == 3
 
 
 def test_send_wake_dedupes_within_window(tmp_path, fake_tmux):
