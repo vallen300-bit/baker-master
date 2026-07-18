@@ -66,9 +66,12 @@ GLANCE_FIELDS = (
     "last_message",
     "acked_count",
 )
-# D6 — wake-on-open: re-nudge dedupe window (a seat is nudged at most once per
-# this many seconds, so re-opening a seat does not spam its tmux).
+# D6 — wake-on-open: same-message re-nudge dedupe window. Newer messages for the
+# same seat must be allowed through promptly; a separate seat floor below keeps
+# bursty arrivals from producing a wake storm.
 WAKE_DEDUPE_SECONDS = 600.0
+# Minimum spacing between any two injections into one seat, regardless of message.
+WAKE_SEAT_FLOOR_SECONDS = 60.0
 # WAKE_COMPOSER_SUBMIT_FIX_1: settle gap between text→Enter and Enter→submit-Return.
 # 0.3s mirrors the ratified `delay 0.3` in the wake handler app's submit-Return
 # (BUS_AUTOWAKE_SUBMIT_GENERALIZE_1) — long enough for the composer to absorb the
@@ -734,20 +737,50 @@ def send_wake(
     glance_row: dict[str, Any] | None,
     *,
     now: float,
-    last_wake: dict[str, float],
+    last_wake: dict[str, dict[str, Any]],
     audit: bool = True,
     verify: bool = True,
 ) -> dict[str, Any]:
     """D6 wake-on-open: send one `check bus #<oldest-id> <topic>` + Enter into the
-    seat's tmux. Guarded (wake_skip_reason) and deduped (WAKE_DEDUPE_SECONDS per
-    seat). Returns a result dict; a guarded/deduped skip is a no-op, not an error."""
+    seat's tmux. Guarded (wake_skip_reason), deduped for the same message, and
+    rate-limited per seat. Returns a result dict; a guarded/deduped skip is a
+    no-op, not an error."""
     reason = wake_skip_reason(glance_row)
     if reason is not None:
         return {"ok": True, "sent": False, "skipped": reason, "slug": entry.slug}
-    prev = last_wake.get(entry.slug)
-    if prev is not None and (now - prev) < WAKE_DEDUPE_SECONDS:
+    oldest = _oldest_unacked(glance_row.get("unacked_messages"))
+    if oldest is None:  # defensive: wake_skip_reason already checks this condition
+        return {"ok": True, "sent": False, "skipped": "no unacked message id", "slug": entry.slug}
+    msg_id, topic = oldest
+
+    state = last_wake.get(entry.slug)
+    if not isinstance(state, dict):
+        state = {
+            "last_injection": state if isinstance(state, (int, float)) else None,
+            "message_last": {},
+        }
+        last_wake[entry.slug] = state
+    # Keep only the active same-message window so a long-lived controller does
+    # not accumulate one timestamp per historical bus message.
+    message_last = state.get("message_last")
+    if not isinstance(message_last, dict):
+        message_last = {}
+        state["message_last"] = message_last
+    for key, timestamp in list(message_last.items()):
+        if not isinstance(timestamp, (int, float)) or (now - timestamp) >= WAKE_DEDUPE_SECONDS:
+            message_last.pop(key, None)
+    message_key = str(msg_id)
+    previous_message = message_last.get(message_key)
+    if previous_message is not None and (now - previous_message) < WAKE_DEDUPE_SECONDS:
         return {"ok": True, "sent": False, "skipped": "deduped", "slug": entry.slug}
-    msg_id, topic = _oldest_unacked(glance_row.get("unacked_messages"))
+
+    previous_injection = state.get("last_injection")
+    if (
+        previous_injection is not None
+        and (now - previous_injection) < WAKE_SEAT_FLOOR_SECONDS
+    ):
+        return {"ok": True, "sent": False, "skipped": "seat_floor", "slug": entry.slug}
+
     # D3 — visible [wake] origin tag so freeform seat input is attributable at a
     # glance (WAKE_INJECT_SUBMIT_FIX_2). The nudge stays `check bus #<id> <topic>`.
     line = f"{WAKE_ORIGIN_TAG} check bus #{msg_id} {topic}".rstrip()
@@ -777,7 +810,8 @@ def send_wake(
     if resubmit.returncode != 0:
         LOG.warning("wake submit-Return failed for %s (wake already sent): %s",
                     entry.slug, resubmit.stderr.strip())
-    last_wake[entry.slug] = now
+    state["last_injection"] = now
+    message_last[message_key] = now
     if audit:
         _audit_wake(settings, entry.slug, msg_id, topic, line)
     result = {
@@ -986,7 +1020,8 @@ def create_app(
     app.state.settings = config
     app.state.credentials = credentials
     app.state.lab_glance = glance
-    # D6 — per-seat last-wake monotonic timestamps for the re-nudge dedupe window.
+    # D6/P2 — per-seat wake dedupe state: same-message timestamps plus a
+    # cross-message injection floor.
     app.state.wake_last = {}
     # NOTIFY_SLICE — per-seat last-observed unacked baseline + last-fire timestamps
     # for the 0→N transition detector (advanced by the lifespan poll loop).
