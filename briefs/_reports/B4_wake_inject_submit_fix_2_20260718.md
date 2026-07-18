@@ -95,3 +95,40 @@ Codex bus-seat gate on both PRs → lead merges → live AC on this host (fire a
 wake at idle b3, observe submit + `[wake]` prefix in scrollback; then busy-seat
 non-interleave) → 24h park-free observation → POST_DEPLOY_AC_VERDICT on
 `gates/wake-inject-submit-fix-2`. b2 (diag author) FYI on the topic.
+
+---
+
+## POST-DEPLOY LIVE AC (2026-07-18, after codex PASS #12921 + merge of #600/#156)
+
+Deployed controller confirmed synced (key funcs byte-identical to merged main;
+`_composer_holds` / `_verify_wake_submit` / `_tmux_write_args` / `wake_inject_writes`
+all IDENTICAL md5). Live probe run on seat b3 (lead-designated probe seat).
+
+- **AC1 — idle-seat submit: PASS.** b3 composer cleared → fired `send_wake` → returned
+  `sent=True, line='[wake] check bus #12653 fleet/wake-probe', verified='submitted'`.
+  Pane after: composer empty (`❯ `), b3 generating (`✳ Dilly-dallying…`). Tagged
+  nudge visible in scrollback: `❯ [wake] check bus #12653 fleet/wake-probe`.
+- **AC2 — busy-seat non-interleave: PASS.** `send_wake` on a working seat →
+  `{sent: False, skipped: 'working'}`. The wake_skip_reason guard blocks injection
+  into a generating composer, so no mid-line interleave is possible.
+- **AC3 — concurrent human text guard: PASS.** b3's live composer held an UNTAGGED
+  `check bus` line; `_composer_holds(pane, '[wake] check bus #12653 fleet/wake-probe')`
+  = **False** (no recovery would fire), while a tagged boxed control = True. An
+  untagged human draft is never auto-submitted — the codex #12917 breach is closed.
+- **AC4 — dispatch attribution log: PASS.** `~/.brisen-lab/wake-dispatch.log` carries
+  organic post-deploy entries (codex/b4/deputy/lead/codex), each with
+  `{ts, origin:wake, alias, foreground, result:ok}` — who/what/when/open-result.
+
+**Caveat (fail-loud, for the 24h watch):** the stale-render caveat is REAL and was
+reproduced live — `capture-pane -p` returned a stale composer render after edits
+even following a `C-l`, until fresh keystrokes forced a repaint. In AC1 the verify
+path (`C-l` + 1.0s settle + capture) read correctly, but if false parks / false
+recoveries appear during the watch, the `WAKE_VERIFY_SETTLE_S` margin or an extra
+repaint before capture is the first tuning knob. Also note: `send_wake`'s injection
+appends to whatever is already in the composer, so a wake fired while a human draft
+sits unsent would still concatenate+submit — out of this brief's scope (guarded by
+is_working for the generating case; the origin-tag chokepoint follow-up #12795
+addresses the broader attribution surface).
+
+**Verdict: 4/4 AC PASS.** Director manual copy-paste arc closed pending the 24h
+park-free observation.
