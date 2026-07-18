@@ -566,27 +566,53 @@ def wake_inject_writes(line: str) -> list[tuple[str, str]]:
     The separate-CR shape is load-bearing: a newline coalesced into the text or
     wrapped inside an xterm bracketed paste (``ESC[200~ … \\n … ESC[201~``) is
     inserted literally by the composer and never submits — only a CR delivered as
-    its own PTY write submits. See COMPOSER_RESIDUAL_DIAG_20260718. The PTY
-    regression test (tests/test_composer_pty_submit.py) drives THIS helper's
-    output through a real PTY to prove the pattern submits; send_wake's own unit
-    test pins its tmux calls to the same text-then-separate-Enter shape.
+    its own PTY write submits. See COMPOSER_RESIDUAL_DIAG_20260718. ``send_wake``
+    realises these writes via ``_tmux_write_args`` (so this helper is the single
+    production source, not dead code); the PTY regression test drives the same
+    writes through a real PTY to prove the pattern submits.
     """
     return [("literal", line), ("cr", "\r")]
 
 
-def _composer_holds(pane_text: str, needle: str) -> bool:
-    """True if ``needle`` still sits in the composer input BOX (parked), i.e. it
-    shares a trailing pane line with a composer marker (prompt glyph / box
-    border). A submitted user turn renders as a plain ``> `` line with no marker
-    and scrolls above the spinner, so it does not match — this is what separates a
-    genuine park from an already-sent nudge. Empty/absent pane → not parked."""
-    if not pane_text or not needle:
+def _tmux_write_args(slug: str, kind: str, data: str) -> list[str]:
+    """Realise one ``wake_inject_writes`` element as a tmux send-keys argv.
+
+    ``literal`` → ``send-keys -l <text>`` (exact bytes, '#'/spaces stay literal).
+    ``cr``      → ``send-keys Enter`` (tmux emits a bare CR as its own write —
+    the separate-CR that submits; ``data`` is the ``"\\r"`` it stands for)."""
+    if kind == "literal":
+        return ["send-keys", "-t", slug, "-l", data]
+    if kind == "cr":
+        return ["send-keys", "-t", slug, "Enter"]
+    raise ValueError(f"unknown wake write kind: {kind!r}")
+
+
+def _composer_holds(pane_text: str, injected_line: str) -> bool:
+    """True if OUR machine-injected nudge still sits in the composer input BOX
+    (parked). ``injected_line`` is the full tagged line (``[wake] check bus
+    #<id> …``).
+
+    Match requires BOTH the ``[wake]`` origin tag on a boxed tail line (a
+    composer marker — prompt glyph / box border) AND the nudge's ``#<id>`` token
+    in the tail. Requiring the tag is load-bearing for AC3: human-composed text
+    never carries the machine tag, so a human line like ``check bus #7 mine`` can
+    never match and never triggers a recovery Enter. A *submitted* nudge renders
+    as a plain ``> `` line with no box marker and scrolls above the spinner, so it
+    does not match either. Empty/absent pane or an untagged needle → not parked."""
+    if not pane_text or WAKE_ORIGIN_TAG not in (injected_line or ""):
         return False
     lines = [ln for ln in pane_text.splitlines() if ln.strip()]
-    for ln in lines[-WAKE_PARK_TAIL_LINES:]:
-        if needle in ln and any(m in ln for m in WAKE_COMPOSER_MARKERS):
-            return True
-    return False
+    tail = lines[-WAKE_PARK_TAIL_LINES:]
+    tag_boxed = any(
+        WAKE_ORIGIN_TAG in ln and any(m in ln for m in WAKE_COMPOSER_MARKERS)
+        for ln in tail
+    )
+    if not tag_boxed:
+        return False
+    id_match = re.search(r"#\d+", injected_line)
+    if id_match and not any(id_match.group(0) in ln for ln in tail):
+        return False
+    return True
 
 
 def _post_park_flag(settings: Settings, slug: str, needle: str) -> None:
@@ -613,15 +639,18 @@ def _post_park_flag(settings: Settings, slug: str, needle: str) -> None:
         LOG.warning("park-flag bus post failed for %s: %s", slug, exc)
 
 
-def _verify_wake_submit(settings: Settings, slug: str, msg_id: Any) -> dict[str, Any]:
+def _verify_wake_submit(settings: Settings, slug: str, injected_line: str) -> dict[str, Any]:
     """WAKE_INJECT_SUBMIT_FIX_2 D2 — confirm the nudge left the composer; recover
     once if it parked; fail loud if it can't be recovered.
+
+    Matches on the full tagged ``injected_line`` so only OUR machine nudge can
+    trigger a recovery Enter — never human-composed text (AC3).
 
     Returns ``{"verified": <state>}`` where state is one of ``submitted`` (cleared
     on first check), ``recovered`` (one recovery Enter cleared it), ``unknown``
     (pane unreadable — no action, never a false recovery), or ``park_unrecovered``
     (still boxed after one recovery Enter → logged + bus-flagged)."""
-    needle = f"check bus #{msg_id}"
+    needle = injected_line
 
     def _read_pane() -> str | None:
         # Force a redraw first: capture-pane serves a STALE composer render after
@@ -643,7 +672,7 @@ def _verify_wake_submit(settings: Settings, slug: str, msg_id: Any) -> dict[str,
     pane2 = _read_pane()
     if pane2 is None or not _composer_holds(pane2, needle):
         return {"verified": "recovered"}
-    LOG.error("wake nudge PARKED unrecovered for %s (msg #%s)", slug, msg_id)
+    LOG.error("wake nudge PARKED unrecovered for %s: %r", slug, needle)
     _post_park_flag(settings, slug, needle)
     return {"verified": "park_unrecovered"}
 
@@ -671,10 +700,11 @@ def send_wake(
     # D3 — visible [wake] origin tag so freeform seat input is attributable at a
     # glance (WAKE_INJECT_SUBMIT_FIX_2). The nudge stays `check bus #<id> <topic>`.
     line = f"{WAKE_ORIGIN_TAG} check bus #{msg_id} {topic}".rstrip()
-    # Send the literal line, then Enter, as two sends so '#'/spaces stay literal.
-    # This realises the text-then-separate-CR pattern stated by wake_inject_writes
-    # and proven at the PTY layer in tests/test_composer_pty_submit.py.
-    literal = _run_tmux(settings, ["send-keys", "-t", entry.slug, "-l", line])
+    # Realise the injection from wake_inject_writes so the write pattern has ONE
+    # production source (also exercised by the PTY regression test): a literal
+    # text write, then a bare CR as its own write. '#'/spaces stay literal.
+    literal_kind, literal_data = wake_inject_writes(line)[0]
+    literal = _run_tmux(settings, _tmux_write_args(entry.slug, literal_kind, literal_data))
     if literal.returncode != 0:
         raise RuntimeError(literal.stderr.strip() or "tmux wake send failed")
     # WAKE_COMPOSER_SUBMIT_FIX_1 (gap 5, bus #12631): a burst-injected Enter can be
@@ -686,12 +716,13 @@ def send_wake(
     # settle. A bare Return at an empty/generating composer is a no-op, and it is
     # NEVER retried beyond this (lead ruling #5897 — re-injection on a busy-but-
     # live seat could double parked text; log-only on failure).
+    cr_kind, cr_data = wake_inject_writes(line)[1]
     time.sleep(WAKE_SUBMIT_SETTLE_S)
-    enter = _run_tmux(settings, ["send-keys", "-t", entry.slug, "Enter"])
+    enter = _run_tmux(settings, _tmux_write_args(entry.slug, cr_kind, cr_data))
     if enter.returncode != 0:
         raise RuntimeError(enter.stderr.strip() or "tmux wake Enter failed")
     time.sleep(WAKE_SUBMIT_SETTLE_S)
-    resubmit = _run_tmux(settings, ["send-keys", "-t", entry.slug, "Enter"])
+    resubmit = _run_tmux(settings, _tmux_write_args(entry.slug, cr_kind, cr_data))
     if resubmit.returncode != 0:
         LOG.warning("wake submit-Return failed for %s (wake already sent): %s",
                     entry.slug, resubmit.stderr.strip())
@@ -704,7 +735,7 @@ def send_wake(
     }
     # D2 — verify the nudge left the composer; recover once; fail loud otherwise.
     if verify:
-        result.update(_verify_wake_submit(settings, entry.slug, msg_id))
+        result.update(_verify_wake_submit(settings, entry.slug, line))
     return result
 
 

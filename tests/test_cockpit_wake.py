@@ -113,15 +113,24 @@ def test_wake_inject_writes_is_text_then_separate_cr():
     assert "\n" not in writes[0][1] and "\x1b[200~" not in writes[0][1]
 
 
-@pytest.mark.parametrize("pane,needle,parked", [
-    ("", "check bus #7", False),
-    ("some scrollback\n> [wake] check bus #7 topic\n✻ Zesting…", "check bus #7", False),  # submitted: plain `>` line, no marker
-    ("╭────╮\n│ ❯ [wake] check bus #7 topic │\n╰────╯", "check bus #7", True),  # parked: inside the box
-    ("❯ [wake] check bus #7 topic", "check bus #7", True),  # parked: prompt-glyph line
-    ("│ ❯ [wake] check bus #99 x │", "check bus #7", False),  # different id, not our needle
+LINE7 = "[wake] check bus #7 topic"
+
+
+@pytest.mark.parametrize("pane,injected,parked", [
+    ("", LINE7, False),                                                               # empty pane
+    ("some scrollback\n> [wake] check bus #7 topic\n✻ Zesting…", LINE7, False),        # submitted: plain `>` line, no box marker
+    ("╭────╮\n│ ❯ [wake] check bus #7 topic │\n╰────╯", LINE7, True),                  # parked: tagged + boxed
+    ("❯ [wake] check bus #7 topic", LINE7, True),                                      # parked: prompt-glyph line
+    ("│ ❯ [wake] check bus #99 x │", LINE7, False),                                    # tagged+boxed but different id
+    # AC3 — a HUMAN line with no [wake] tag must NEVER read as parked, even when it
+    # contains the same `check bus #7` text and sits boxed at the prompt.
+    ("│ ❯ check bus #7 my-own-note │", LINE7, False),
+    ("╭────╮\n│ ❯ check bus #7 mine │\n╰────╯", LINE7, False),
+    # defensive: an untagged needle can never match (guards misuse).
+    ("│ ❯ [wake] check bus #7 topic │", "check bus #7", False),
 ])
-def test_composer_holds_distinguishes_parked_from_sent(pane, needle, parked):
-    assert controller._composer_holds(pane, needle) is parked
+def test_composer_holds_requires_tag_and_id(pane, injected, parked):
+    assert controller._composer_holds(pane, injected) is parked
 
 
 def _capturing_fake(monkeypatch, pane_sequence):
@@ -190,6 +199,22 @@ def test_send_wake_unreadable_pane_takes_no_action(tmp_path, monkeypatch):
     assert res["verified"] == "unknown"
     enters = [c for c in calls if c == ["send-keys", "-t", "b3", "Enter"]]
     assert len(enters) == 2  # only the FIX_1 submit-Returns, no recovery
+    assert flags == []
+
+
+def test_send_wake_never_recovers_human_composed_text(tmp_path, monkeypatch):
+    """AC3 (codex #12917) — a HUMAN line that happens to contain the same
+    `check bus #<id>` text, sitting boxed at the prompt with NO [wake] tag, must
+    NEVER trip a recovery Enter (that would auto-submit the human's text).
+    _composer_holds requires the machine tag, so this reads as submitted."""
+    human = "│ ❯ check bus #12063 my own note, still editing │"  # no [wake] tag
+    calls = _capturing_fake(monkeypatch, [human, human])
+    flags = []
+    monkeypatch.setattr(controller, "_post_park_flag", lambda *a: flags.append(a))
+    res = controller.send_wake(_settings(tmp_path), ENTRY, UNACKED_ROW, now=1.0, last_wake={})
+    assert res["verified"] == "submitted"        # our tagged nudge cleared; human text ignored
+    enters = [c for c in calls if c == ["send-keys", "-t", "b3", "Enter"]]
+    assert len(enters) == 2                       # FIX_1 Returns only — NO recovery Enter
     assert flags == []
 
 
