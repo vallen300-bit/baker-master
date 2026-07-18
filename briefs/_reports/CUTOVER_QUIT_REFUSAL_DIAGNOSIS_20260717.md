@@ -34,4 +34,7 @@ Escalation ladder at step 3: polite AppleScript quit (10s) → `killall Terminal
 2. **wake-listener pause/resume is runbook-manual** — script should own resume in both success and abort paths (or precondition 5 should move into the script). This was the second silent failure of attempt 1.
 3. **Run log overwritten per attempt** — attempt-1 forensic log was lost to attempt 2 (`cutover_run.log` truncates on start). Append or timestamp-suffix future runs.
 
-These are Phase-2-specific; the cutover is a one-time migration per machine, so fixes matter mainly for the Mac Mini / future-machine replays of this runbook.
+4. **tmux global-env identity leak (found 2026-07-18 03:0x UTC, live impact)** — the tmux server absorbed `BAKER_ROLE=lead` + the lead terminal key from the cutover-running shell into its GLOBAL environment; all 28 seats inherited both. Codex's inbox reader (env-beats-cache precedence) presented lead's key for `/msg/codex` → 403 `reader_slug_mismatch` (bus #12583). Scrubbed live (`tmux set-environment -g -u` both vars). MUST-DO: rotate the lead key (sat in every seat's env since cutover); fix `fleet_terminals.sh` to scrub identity env at session-create; restart/repair the codex seat process env.
+5. **Stuck composer on wake keystroke injection** — text lands in the seat's input box but Enter does not submit in one pass (seen on b1 by lead, on b1 again by cowork-ah1; second explicit Enter submits). Same family as the Mac submit-gap #3746 the cutover was meant to fix structurally — needs a look at send-keys pacing (text and Enter in one `send-keys` call vs split, and a settle delay).
+
+Gaps 1-3 matter mainly for Mac-Mini / future-machine replays of the runbook; gaps 4-5 are LIVE fleet issues on the morning list.
