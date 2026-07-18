@@ -76,3 +76,27 @@ def test_phone_rows_stay_tappable():
     assert m, "no phone media query"
     assert re.search(r"\.row\s*\{[^}]*min-height:\s*44px", m.group(1)), \
         "phone rows must be >=44px tappable"
+
+
+# ---- COCKPIT_LAYOUT_REARRANGE_1 mock-v3 fidelity guards ---------------------
+
+def test_context_fill_is_severity_gradient():
+    """Mock v3 legend: the context line 'fills as context grows' green->amber->red.
+    The fill must be a horizontal gradient, not a flat single-hue bar."""
+    m = re.search(r"\.r-ctx\s+\.ctxfill\s*\{([^}]*)\}", CSS)
+    assert m, ".r-ctx .ctxfill rule not found"
+    body = m.group(1)
+    assert "linear-gradient" in body, "context fill must be a green->amber->red gradient"
+    # green low, red high — the two ends of the severity ramp must be present.
+    assert "#3fb950" in body and "#f85149" in body, \
+        "context gradient must run from green (#3fb950) to red (#f85149)"
+
+
+def test_app_rows_are_recessed():
+    """Mock v3: App/Cowork (status-only) seats sit recessed with an inner shadow
+    (".card.app" inset treatment) so they read distinct from driveable rows."""
+    m = re.search(r"\.row\.app\s*\{([^}]*)\}", CSS)
+    assert m, ".row.app rule not found"
+    body = m.group(1)
+    assert re.search(r"box-shadow:\s*inset", body), \
+        ".row.app must carry an inset (recessed) box-shadow"

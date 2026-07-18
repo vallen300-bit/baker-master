@@ -38,6 +38,11 @@
   const termUnacked = document.getElementById("term-unacked");
   const toastEl = document.getElementById("toast");
   const notifyToggle = document.getElementById("notify-toggle");
+  const syncNoteEl = document.getElementById("sync-note");
+  const rosterNoteEl = document.getElementById("roster-note");
+  const statTotalEl = document.getElementById("stat-total");
+  const statAttentionEl = document.getElementById("stat-attention");
+  const statTerminalsEl = document.getElementById("stat-terminals");
   // D9 — App-resident card bus-message panel.
   const msgVeil = document.getElementById("msgveil");
   const msgPanel = document.getElementById("msgpanel");
@@ -110,6 +115,27 @@
     return layout.plates.reduce((n, p) => n + p.cards.length, 0);
   }
 
+  function renderSummary(labOk = null) {
+    if (!layout) return;
+    const cards = layout.plates.flatMap((plate) => plate.cards);
+    const attention = cards.filter((meta) => {
+      const row = stateBySlug.get(meta.slug);
+      if (!row) return false;
+      return row.needs_go === true || (row.unacked_count || 0) > 0 ||
+        row.ttyd_up === false || (!meta.status_only && row.session_up === false);
+    }).length;
+    const terminals = cards.filter((meta) => meta.driveable).length;
+    if (statTotalEl) statTotalEl.textContent = String(cards.length);
+    if (statAttentionEl) statAttentionEl.textContent = stateBySlug.size ? String(attention) : "—";
+    if (statTerminalsEl) statTerminalsEl.textContent = String(terminals);
+    if (rosterNoteEl) rosterNoteEl.textContent = cards.length + " seats · grouped by operating role";
+    if (syncNoteEl) {
+      syncNoteEl.textContent = labOk === false ? "Telemetry source offline" :
+        (stateBySlug.size ? "Live · refreshed just now" : "Waiting for telemetry");
+      syncNoteEl.className = "summary-status" + (labOk === false ? " is-warn" : "");
+    }
+  }
+
   // ---- network ------------------------------------------------------------
   async function post(path, label) {
     try {
@@ -139,12 +165,14 @@
       connEl.textContent = "live · " + m.size + " driveable / " + total + " seats" +
         (labOk ? "" : " · ⚠ telemetry offline");
       connEl.className = labOk ? "conn ok" : "conn warn";
+      renderSummary(labOk);
       render();
       syncPanelGo();             // reflect needs_go changes while the panel is open
       if (openMsgSlug) renderMsgSummary(openMsgSlug);   // D9 — live-refresh open panel
     } catch (e) {
       connEl.textContent = "offline — " + e.message;
       connEl.className = "conn err";
+      renderSummary(false);
     }
   }
 
@@ -483,6 +511,7 @@
     });
     gridEl.textContent = "";
     gridEl.appendChild(frag);
+    renderSummary();
   }
 
   async function doGo(slug, btn) {
@@ -575,13 +604,14 @@
     try {
       const r = await fetch(url("/cockpit_layout.json"), FETCH_OPTS);
       if (!r.ok) throw new Error("layout HTTP " + r.status);
-      layout = await r.json();
+    layout = await r.json();
     } catch (e) {
       connEl.textContent = "layout load failed — " + e.message;
       connEl.className = "conn err";
       return;
     }
     render();                    // paint immediately from layout (metadata)
+    renderSummary();
     hydrateNotify();             // reflect the controller's mute state on the toggle
     await poll();                // then hydrate with live state
     pollTimer = setInterval(poll, POLL_MS);

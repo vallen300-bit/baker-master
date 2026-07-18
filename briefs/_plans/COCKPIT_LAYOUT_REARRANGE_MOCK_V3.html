@@ -1,0 +1,192 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Cockpit mock v3 — Director wishlist build</title>
+<style>
+  :root { --bg:#0d1117; --plate:#161b22; --card:#1c2330; --appcard:#12161f; --edge:#30363d; --txt:#e6edf3; --dim:#8b949e; --accent:#58a6ff; --note:#d29922; --amber:#d29922; }
+  * { box-sizing:border-box; }
+  body { margin:0; background:var(--bg); color:var(--txt); font:14px/1.4 -apple-system,Helvetica,Arial,sans-serif; padding:16px; }
+  h1 { font-size:16px; margin:0 0 4px; }
+  .hint { color:var(--dim); font-size:12px; margin-bottom:8px; }
+  .legend { font-size:11.5px; color:var(--dim); background:var(--plate); border:1px solid var(--edge); border-radius:8px; padding:8px 12px; margin-bottom:12px; }
+  .legend b { color:var(--txt); }
+  #bar { position:sticky; top:0; z-index:50; background:var(--bg); padding:6px 0 10px; display:flex; gap:10px; align-items:center; }
+  #bar button { background:var(--accent); color:#08131f; border:none; border-radius:7px; padding:8px 15px; font-weight:700; font-size:13px; cursor:pointer; }
+  #bar button.ghost { background:transparent; color:var(--dim); border:1px solid var(--edge); }
+  #saved { color:var(--note); font-size:12px; }
+  .plate { background:var(--plate); border:1px solid var(--edge); border-radius:10px; margin-bottom:12px; }
+  .plate h2 { font-size:11.5px; letter-spacing:.1em; text-transform:uppercase; color:var(--dim); margin:0; padding:10px 12px 2px; }
+  .canvas { position:relative; min-height:100px; margin:6px 10px 10px; }
+  .card { position:absolute; width:120px; background:var(--card); border:1px solid var(--edge); border-radius:8px; padding:7px 9px 8px; cursor:grab; user-select:none; touch-action:none; box-shadow:0 1px 4px rgba(0,0,0,.35); }
+  .card.app { background:var(--appcard); border-color:#232a36; box-shadow:inset 0 2px 8px rgba(0,0,0,.55), 0 0 0 1px rgba(0,0,0,.3); }
+  .card.app::after { content:"APP"; position:absolute; bottom:5px; right:7px; font-size:8.5px; color:#5a6472; letter-spacing:.08em; }
+  .card.svc::after { content:"SERVICE"; position:absolute; bottom:5px; right:7px; font-size:8.5px; color:#5a6472; letter-spacing:.08em; }
+  .card.moving { cursor:grabbing; z-index:100; box-shadow:0 6px 22px rgba(0,0,0,.6); border-color:var(--accent); }
+  .card .nm { font-weight:600; font-size:12.5px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; pointer-events:none; }
+  .card .sl { font-size:10px; color:var(--dim); font-family:ui-monospace,Menlo,monospace; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; pointer-events:none; }
+  .ctx { margin-top:6px; pointer-events:none; }
+  .ctx .bar { height:3px; border-radius:2px; background:#242b38; overflow:hidden; }
+  .ctx .fill { height:100%; background:linear-gradient(90deg,#3fb950,#d29922 70%,#f85149 92%); }
+  .ctx .lbl { font-size:8.5px; color:#5a6472; margin-top:2px; }
+  .card .cm { margin-top:5px; font-size:10.5px; color:var(--note); white-space:pre-wrap; pointer-events:none; }
+  .card .cm:empty { display:none; }
+  .card button.note { position:absolute; top:4px; right:5px; background:none; border:none; color:var(--dim); cursor:pointer; font-size:11px; padding:0; }
+  .card button.note:hover { color:var(--note); }
+  .canvas.target { outline:2px dashed var(--accent); outline-offset:2px; }
+  h2[contenteditable] { outline:none; }
+  h2[contenteditable]:focus { color:var(--accent); }
+</style>
+</head>
+<body>
+<h1>Cockpit v3 — your layout + wishlist. Final check.</h1>
+<div class="hint">Same controls: drag anywhere, click section titles to rename, ✎ per-card comments, Save when done.</div>
+<div class="legend"><b>Built into the real page (shown here as preview):</b> no AG numbers · narrower cards (fit full screen) · Cowork/APP seats recessed w/ inner shadow · context line on driveable cards (fills as context grows; sample values here) · <b>Behaviors to be wired (not visual):</b> amber card on unacked bus + count with message IDs in the panel (Lab parity) · click sends "check bus #id" wake · Codex Arch added to Tower (status-only APP seat) · Interns: Deep55, Clerk Qwen, Clerk Haiku · Cortex parked in Engineering — drag it where you want it.</div>
+<div id="bar">
+  <button id="save">💾 Save final layout</button>
+  <button id="reset" class="ghost">Reset to this version</button>
+  <span id="saved"></span>
+</div>
+<div id="plates"></div>
+<script>
+const ORIGINAL = {"exported_at": "2026-07-17T13:06:16.151Z", "by": "Director free-drag mock v2", "plates": [{"label": "Control Tower & VERIFICATION", "cards": [{"slug": "deputy-codex", "display_name": "Codex Deputy", "x": 11, "y": 2, "app": false}, {"slug": "lead", "display_name": "Lead", "x": 167, "y": 3, "app": false}, {"slug": "deputy", "display_name": "Deputy", "x": 323, "y": 4, "app": false}, {"slug": "codex", "display_name": "Codex Rev", "x": 479, "y": 3, "app": false}, {"slug": "cowork-ah1", "display_name": "Cowork AH1", "x": 638, "y": 3, "app": true}, {"slug": "codex-arch", "display_name": "Codex Arch", "x": 794, "y": 3, "app": true}]}, {"label": "ENGINEERING , TECHNICAL & STAFF MANAGEMENT", "cards": [{"slug": "b1", "display_name": "B1", "x": 5, "y": 8, "app": false}, {"slug": "b2", "display_name": "B2", "x": 172, "y": 8, "app": false}, {"slug": "b3", "display_name": "B3", "x": 325, "y": 8, "app": false}, {"slug": "b4", "display_name": "B4", "x": 482, "y": 7, "app": false}, {"slug": "arm", "display_name": "ARM", "x": 646, "y": 7, "app": false}, {"slug": "aid", "display_name": "AID T", "x": 807, "y": 8, "app": false}, {"slug": "cowork-arm", "display_name": "Cowork ARM", "x": 658, "y": 85, "app": true}, {"slug": "cowork-aid", "display_name": "Cowork AID", "x": 816, "y": 84, "app": true}, {"slug": "cortex", "display_name": "Cortex", "x": 5, "y": 85, "service": true, "app": false}]}, {"label": "PILOTS & PILOT TEAMS", "cards": [{"slug": "ao-desk", "display_name": "AO Desk", "x": 5, "y": 6, "app": false}, {"slug": "movie-desk", "display_name": "MOVIE Desk", "x": 160, "y": 7, "app": false}, {"slug": "baden-baden-desk", "display_name": "Baden-Baden Desk", "x": 316, "y": 5, "app": false}, {"slug": "origination-desk", "display_name": "Origination Desk", "x": 476, "y": 5, "app": false}, {"slug": "brisen-desk", "display_name": "Brisen Desk", "x": 633, "y": 4, "app": false}, {"slug": "hag-desk", "display_name": "Hag Desk", "x": 791, "y": 5, "app": false}, {"slug": "cowork-ao-desk", "display_name": "Cowork AO", "x": 6, "y": 81, "app": true}, {"slug": "cowork-movie-desk", "display_name": "Cowork MOVIE", "x": 163, "y": 81, "app": true}, {"slug": "cowork-bb-desk", "display_name": "Cowork BB", "x": 322, "y": 82, "app": true}, {"slug": "cowork-origination-desk", "display_name": "Cowork Origination", "x": 479, "y": 73, "app": true}, {"slug": "cowork-hag-desk", "display_name": "Cowork Hag", "x": 796, "y": 84, "app": true}]}, {"label": "FLIGHTS SUPPORT & DOMAIN SPECIFIC", "cards": [{"slug": "researcher", "display_name": "Researcher", "x": 5, "y": 4, "app": false}, {"slug": "librarian", "display_name": "Librarian", "x": 160, "y": 6, "app": false}, {"slug": "CM-1", "display_name": "CM-1", "x": 317, "y": 6, "app": false}, {"slug": "CM-2", "display_name": "CM-2", "x": 474, "y": 7, "app": false}, {"slug": "CM-3", "display_name": "CM-3", "x": 629, "y": 6, "app": false}, {"slug": "CM-4", "display_name": "CM-4", "x": 784, "y": 8, "app": false}, {"slug": "cowork-researcher", "display_name": "Cowork Researcher", "x": 5, "y": 79, "app": true}, {"slug": "cowork-librarian", "display_name": "Cowork Librarian", "x": 163, "y": 80, "app": true}, {"slug": "hag-filer", "display_name": "Hag Filer", "x": 319, "y": 82, "app": false}]}, {"label": "LEGAL ,FINANCIAL , PR, MARKETING & COMMUNICATIONS", "cards": [{"slug": "russo-ai", "display_name": "Russo AI", "x": 6, "y": 1, "app": false}, {"slug": "ben", "display_name": "BEN", "x": 164, "y": 0, "app": false}, {"slug": "publisher", "display_name": "Publisher", "x": 322, "y": 2, "app": false}, {"slug": "designer", "display_name": "UI Designer", "x": 482, "y": 1, "app": false}, {"slug": "cowork-russo-ai", "display_name": "Cowork Russo AI", "x": 0, "y": 78, "app": true}]}, {"label": "INTERNS", "cards": [{"slug": "deep55", "display_name": "Deep55", "x": 5, "y": 6, "app": false}, {"slug": "clerk", "display_name": "Clerk Qwen", "x": 135, "y": 6, "app": false}, {"slug": "clerk-haiku", "display_name": "Clerk Haiku", "x": 265, "y": 6, "app": false}]}]};
+const CARD_W = 120, CARD_H = 62, GAP = 8;
+let comments = {};
+const SAMPLE_CTX = {}; // deterministic pseudo-sample per slug
+function ctxFor(slug){ if(!(slug in SAMPLE_CTX)){ let h=0; for(const ch of slug) h=(h*31+ch.charCodeAt(0))%97; SAMPLE_CTX[slug]=8+h%78; } return SAMPLE_CTX[slug]; }
+
+function build(layout) {
+  const root = document.getElementById('plates');
+  root.textContent = '';
+  for (const plate of layout.plates) {
+    const box = document.createElement('div');
+    box.className = 'plate';
+    const h = document.createElement('h2');
+    h.textContent = plate.label;
+    h.contentEditable = 'plaintext-only';
+    h.title = 'Click to rename (display-only)';
+    const canvas = document.createElement('div');
+    canvas.className = 'canvas';
+    canvas.dataset.label = plate.label;
+    h.addEventListener('input', () => { canvas.dataset.label = h.textContent.trim() || plate.label; });
+    box.append(h, canvas);
+    root.appendChild(box);
+    for (const meta of plate.cards) {
+      const el = card(meta);
+      el.style.left = (meta.x||0) + 'px';
+      el.style.top = (meta.y||0) + 'px';
+      canvas.appendChild(el);
+    }
+    sizeCanvas(canvas);
+  }
+}
+
+function sizeCanvas(canvas) {
+  let maxY = 0;
+  for (const el of canvas.querySelectorAll('.card'))
+    maxY = Math.max(maxY, el.offsetTop + el.offsetHeight);
+  canvas.style.minHeight = Math.max(100, maxY + CARD_H + GAP) + 'px';
+}
+
+function card(meta) {
+  const d = document.createElement('div');
+  d.className = 'card' + (meta.app ? ' app' : '') + (meta.service ? ' svc' : '');
+  d.dataset.slug = meta.slug;
+  d.dataset.meta = JSON.stringify(meta);
+  const nm = document.createElement('div'); nm.className='nm'; nm.textContent = meta.display_name;
+  const sl = document.createElement('div'); sl.className='sl'; sl.textContent = meta.slug;
+  d.append(nm, sl);
+  if (!meta.app && !meta.service) {
+    const ctx = document.createElement('div'); ctx.className='ctx';
+    const bar = document.createElement('div'); bar.className='bar';
+    const fill = document.createElement('div'); fill.className='fill';
+    const pct = ctxFor(meta.slug);
+    fill.style.width = pct + '%';
+    bar.appendChild(fill);
+    const lbl = document.createElement('div'); lbl.className='lbl'; lbl.textContent = 'context ' + pct + '% (sample)';
+    ctx.append(bar, lbl);
+    d.appendChild(ctx);
+  }
+  const cm = document.createElement('div'); cm.className='cm';
+  const btn = document.createElement('button'); btn.className='note'; btn.type='button'; btn.textContent='✎';
+  btn.addEventListener('pointerdown', (e) => e.stopPropagation());
+  btn.addEventListener('click', (e) => {
+    e.stopPropagation();
+    const v = prompt('Comment for ' + meta.display_name + ':', comments[meta.slug] || '');
+    if (v !== null) { comments[meta.slug] = v.trim(); cm.textContent = comments[meta.slug]; }
+  });
+  d.append(btn, cm);
+  d.addEventListener('pointerdown', (e) => startDrag(e, d));
+  return d;
+}
+
+function startDrag(e, el) {
+  e.preventDefault();
+  const origCanvas = el.parentElement;
+  const r = el.getBoundingClientRect();
+  const offX = e.clientX - r.left, offY = e.clientY - r.top;
+  el.classList.add('moving');
+  document.body.appendChild(el);
+  el.style.position = 'fixed';
+  el.style.left = r.left + 'px';
+  el.style.top = r.top + 'px';
+  function onMove(ev) {
+    el.style.left = (ev.clientX - offX) + 'px';
+    el.style.top  = (ev.clientY - offY) + 'px';
+    const c = canvasUnder(ev.clientX, ev.clientY);
+    document.querySelectorAll('.canvas').forEach(x => x.classList.toggle('target', x === c));
+  }
+  function onUp(ev) {
+    document.removeEventListener('pointermove', onMove);
+    document.removeEventListener('pointerup', onUp);
+    const c = canvasUnder(ev.clientX, ev.clientY) || origCanvas;
+    document.querySelectorAll('.canvas').forEach(x => x.classList.remove('target'));
+    const cr = c.getBoundingClientRect();
+    let x = ev.clientX - offX - cr.left, y = ev.clientY - offY - cr.top;
+    x = Math.max(0, Math.min(x, cr.width - CARD_W)); y = Math.max(0, y);
+    el.classList.remove('moving');
+    el.style.position = 'absolute';
+    el.style.left = x + 'px'; el.style.top = y + 'px';
+    c.appendChild(el);
+    sizeCanvas(c);
+  }
+  document.addEventListener('pointermove', onMove);
+  document.addEventListener('pointerup', onUp);
+}
+
+function canvasUnder(x, y) {
+  for (const c of document.querySelectorAll('.canvas')) {
+    const r = c.getBoundingClientRect();
+    if (x >= r.left && x <= r.right && y >= r.top - 30 && y <= r.bottom + 30) return c;
+  }
+  return null;
+}
+
+function snapshot() {
+  const plates = [];
+  for (const c of document.querySelectorAll('.canvas')) {
+    const cards = [...c.querySelectorAll('.card')].map(el => {
+      const meta = JSON.parse(el.dataset.meta);
+      return { slug: meta.slug, display_name: meta.display_name, app: !!meta.app,
+               x: el.offsetLeft, y: el.offsetTop,
+               director_comment: comments[meta.slug] || undefined };
+    });
+    cards.sort((a, b) => Math.abs(a.y - b.y) <= 40 ? a.x - b.x : a.y - b.y);
+    plates.push({ label: c.dataset.label, cards });
+  }
+  return { exported_at: new Date().toISOString(), by: 'Director mock v3 FINAL', plates };
+}
+
+document.getElementById('save').addEventListener('click', () => {
+  const blob = new Blob([JSON.stringify(snapshot(), null, 2)], { type: 'application/json' });
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = 'cockpit-layout-director-final.json';
+  a.click();
+  document.getElementById('saved').textContent = 'Saved — send cockpit-layout-director-final.json to AH1.';
+});
+document.getElementById('reset').addEventListener('click', () => { comments = {}; build(ORIGINAL); });
+build(ORIGINAL);
+</script>
+</body>
+</html>
