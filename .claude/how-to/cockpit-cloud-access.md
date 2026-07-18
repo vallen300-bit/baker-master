@@ -15,19 +15,24 @@ port, no DNS, no new vendor.
 Director browser ──(Lab auth+flag)── brisen-lab /cockpit/* ──(mux over 1 WS)── laptop agent ── 127.0.0.1:7800
 ```
 
-> **STATUS: DARK (rolled back) as of 2026-07-18 evening — re-flip pending
-> Director GO.** The 08:14 UTC flip (lead-run, Director /goal, 7/7 AC PASS bus
-> #12690) was rolled back after the codex kill-switch audit (#12861). Both kill
-> switches engaged and verified: Lab `/cockpit/` → 404 (flag off) + laptop agent
-> booted out (lead #12962). HARDENING_2 (revoke watcher / bridge-key-only auth /
-> per-seat ttyd creds) merged 2026-07-18 evening (baker #605 + lab #158, codex
-> PASS #12992) — re-flip is now safe. Flip config that worked at 08:14: flag ON,
-> `COCKPIT_ACCESS_TOKEN` set (Director ruling #12565 — access code lives with the
-> Director + 1Password, NOT in this file), bridge key both ends (1P
-> `BRISEN_LAB_COCKPIT_BRIDGE_KEY`), laptop agent from pinned venv
-> `~/.brisen-lab/bridge-venv` (websockets 13.1). Pre-flip agent log noise
-> `transfer codings aren't supported` = the flag-gated 404 handshake reject —
-> expected while the flag is off.
+> **STATUS: LIVE (hardened) — since the 08:14 UTC 2026-07-18 flip (lead-run,
+> Director /goal, 7/7 AC PASS bus #12690); never rolled back.** HARDENING_2
+> (revoke watcher / bridge-key-only auth / per-seat ttyd creds) merged and
+> deployed under the live surface 2026-07-18 evening (baker #605 + lab #158,
+> codex PASS #12992). Config: flag ON, `COCKPIT_ACCESS_TOKEN` set (Director
+> ruling #12565 — access code with the Director + 1Password, NOT in this file),
+> bridge key both ends (1P `BRISEN_LAB_COCKPIT_BRIDGE_KEY`), laptop agent from
+> pinned venv `~/.brisen-lab/bridge-venv` (websockets 13.1).
+>
+> **DIAGNOSIS TRAP (bit lead 2026-07-18, ~70-min self-inflicted outage):** a
+> tokenless `GET /cockpit/` returns **404 whether the flag is off OR the token
+> gate is denying** (fail-closed obscurity, lab #155) — a bare 404 does NOT mean
+> the flag is off. To read the true state: probe WITH the token, or check
+> `COCKPIT_EMBED_ENABLED` on Render directly. 503 `laptop offline` = flag ON,
+> laptop agent down → check `launchctl list | grep cockpit-bridge` and
+> re-bootstrap. cowork-ah1's scheduled check auto-restores the bridge agent —
+> do not bootout the agent unless the Director has ratified taking the surface
+> down (the morning flip GO is standing authorization for LIVE).
 
 ## KILL SWITCHES (do these FIRST if anything is wrong)
 
