@@ -68,6 +68,24 @@ WAKE_DEDUPE_SECONDS = 600.0
 # (BUS_AUTOWAKE_SUBMIT_GENERALIZE_1) — long enough for the composer to absorb the
 # burst, short enough to keep the wake snappy.
 WAKE_SUBMIT_SETTLE_S = 0.3
+# WAKE_INJECT_SUBMIT_FIX_2 (#12874): after the FIX_1 submit-Returns, verify the
+# nudge actually left the composer. A residual park survived FIX_1 on at least one
+# seat (b3, 2026-07-18). Settle before the verify capture so the redraw lands; a
+# park then gets exactly ONE recovery Enter, and an unrecoverable park fails loud.
+WAKE_VERIFY_SETTLE_S = 1.0
+# Number of trailing non-empty pane lines inspected for a parked nudge. The
+# composer input box lives at the bottom of the pane; once submitted the nudge
+# scrolls above the spinner/response, out of this tail.
+WAKE_PARK_TAIL_LINES = 6
+# A nudge line is "still in the composer box" only when it shares a line with a
+# composer marker: the input prompt glyph or the box border. A *submitted* user
+# turn renders as a plain `> ` line with neither, so this disambiguates parked
+# (boxed) from sent (plain) — see COMPOSER_RESIDUAL_DIAG_20260718 pane captures.
+WAKE_COMPOSER_MARKERS = ("❯", "│")  # ❯  │
+# WAKE_INJECT_SUBMIT_FIX_2 D3 — every machine-injected nudge carries this visible
+# origin prefix so freeform seat input is attributable at a glance. The reading
+# agent treats a leading bracket tag as provenance, not instruction.
+WAKE_ORIGIN_TAG = "[wake]"
 
 # LAB_CONTEXT_BAND_EXPOSURE_1 (#12055) exposes per-seat context-window usage as
 # ``context_used_percent`` on the public /api/v2/terminals payload. The cockpit
@@ -540,6 +558,96 @@ def _audit_wake(settings: Settings, slug: str, msg_id: Any, topic: str, line: st
     LOG.info("cockpit wake %s -> %s", slug, line)
 
 
+def wake_inject_writes(line: str) -> list[tuple[str, str]]:
+    """The ordered PTY-level writes a machine wake injection performs, as
+    ``(kind, data)`` pairs: a literal text write, then a bare carriage-return as
+    its OWN write.
+
+    The separate-CR shape is load-bearing: a newline coalesced into the text or
+    wrapped inside an xterm bracketed paste (``ESC[200~ … \\n … ESC[201~``) is
+    inserted literally by the composer and never submits — only a CR delivered as
+    its own PTY write submits. See COMPOSER_RESIDUAL_DIAG_20260718. The PTY
+    regression test (tests/test_composer_pty_submit.py) drives THIS helper's
+    output through a real PTY to prove the pattern submits; send_wake's own unit
+    test pins its tmux calls to the same text-then-separate-Enter shape.
+    """
+    return [("literal", line), ("cr", "\r")]
+
+
+def _composer_holds(pane_text: str, needle: str) -> bool:
+    """True if ``needle`` still sits in the composer input BOX (parked), i.e. it
+    shares a trailing pane line with a composer marker (prompt glyph / box
+    border). A submitted user turn renders as a plain ``> `` line with no marker
+    and scrolls above the spinner, so it does not match — this is what separates a
+    genuine park from an already-sent nudge. Empty/absent pane → not parked."""
+    if not pane_text or not needle:
+        return False
+    lines = [ln for ln in pane_text.splitlines() if ln.strip()]
+    for ln in lines[-WAKE_PARK_TAIL_LINES:]:
+        if needle in ln and any(m in ln for m in WAKE_COMPOSER_MARKERS):
+            return True
+    return False
+
+
+def _post_park_flag(settings: Settings, slug: str, needle: str) -> None:
+    """Fail-loud on an unrecoverable park: append a durable local record AND
+    best-effort post a bus flag to lead (topic ``fleet/wake-inject-park``). Both
+    are wrapped so a park never fails the wake; the local record is the guaranteed
+    fail-loud surface even when the bus post cannot authenticate."""
+    payload = {"ts": time.time(), "slug": slug, "line": needle, "event": "park_unrecovered"}
+    try:
+        settings.wake_audit_path.parent.mkdir(parents=True, exist_ok=True)
+        with settings.wake_audit_path.open("a", encoding="utf-8") as handle:
+            handle.write(json.dumps(payload) + "\n")
+    except OSError as exc:
+        LOG.warning("park-flag audit write failed for %s: %s", slug, exc)
+    body = f"wake nudge PARKED unrecovered on {slug}: {needle!r} — recovery Enter did not submit"
+    script = Path(__file__).resolve().parent / "bus_post.sh"
+    try:
+        subprocess.run(
+            ["bash", str(script), "lead", body, "fleet/wake-inject-park"],
+            capture_output=True, text=True, timeout=15, check=False,
+            env={**os.environ, "BAKER_ROLE": os.environ.get("BAKER_ROLE", "cockpit")},
+        )
+    except (OSError, subprocess.TimeoutExpired) as exc:
+        LOG.warning("park-flag bus post failed for %s: %s", slug, exc)
+
+
+def _verify_wake_submit(settings: Settings, slug: str, msg_id: Any) -> dict[str, Any]:
+    """WAKE_INJECT_SUBMIT_FIX_2 D2 — confirm the nudge left the composer; recover
+    once if it parked; fail loud if it can't be recovered.
+
+    Returns ``{"verified": <state>}`` where state is one of ``submitted`` (cleared
+    on first check), ``recovered`` (one recovery Enter cleared it), ``unknown``
+    (pane unreadable — no action, never a false recovery), or ``park_unrecovered``
+    (still boxed after one recovery Enter → logged + bus-flagged)."""
+    needle = f"check bus #{msg_id}"
+
+    def _read_pane() -> str | None:
+        # Force a redraw first: capture-pane serves a STALE composer render after
+        # edits (diag stale-render caveat), so a naive read false-positives and
+        # false-negatives. C-l repaints; a short settle lets it land.
+        _run_tmux(settings, ["send-keys", "-t", slug, "C-l"])
+        time.sleep(WAKE_VERIFY_SETTLE_S)
+        cap = _run_tmux(settings, ["capture-pane", "-t", slug, "-p"])
+        return cap.stdout if cap.returncode == 0 else None
+
+    pane = _read_pane()
+    if pane is None:
+        return {"verified": "unknown"}
+    if not _composer_holds(pane, needle):
+        return {"verified": "submitted"}
+    # Parked. Exactly ONE recovery Enter — never more (double-submit guard from
+    # FIX_1 stands; a second recovery could double parked text on a live seat).
+    _run_tmux(settings, ["send-keys", "-t", slug, "Enter"])
+    pane2 = _read_pane()
+    if pane2 is None or not _composer_holds(pane2, needle):
+        return {"verified": "recovered"}
+    LOG.error("wake nudge PARKED unrecovered for %s (msg #%s)", slug, msg_id)
+    _post_park_flag(settings, slug, needle)
+    return {"verified": "park_unrecovered"}
+
+
 def send_wake(
     settings: Settings,
     entry: ManifestEntry,
@@ -548,6 +656,7 @@ def send_wake(
     now: float,
     last_wake: dict[str, float],
     audit: bool = True,
+    verify: bool = True,
 ) -> dict[str, Any]:
     """D6 wake-on-open: send one `check bus #<oldest-id> <topic>` + Enter into the
     seat's tmux. Guarded (wake_skip_reason) and deduped (WAKE_DEDUPE_SECONDS per
@@ -559,8 +668,12 @@ def send_wake(
     if prev is not None and (now - prev) < WAKE_DEDUPE_SECONDS:
         return {"ok": True, "sent": False, "skipped": "deduped", "slug": entry.slug}
     msg_id, topic = _oldest_unacked(glance_row.get("unacked_messages"))
-    line = f"check bus #{msg_id} {topic}".rstrip()
+    # D3 — visible [wake] origin tag so freeform seat input is attributable at a
+    # glance (WAKE_INJECT_SUBMIT_FIX_2). The nudge stays `check bus #<id> <topic>`.
+    line = f"{WAKE_ORIGIN_TAG} check bus #{msg_id} {topic}".rstrip()
     # Send the literal line, then Enter, as two sends so '#'/spaces stay literal.
+    # This realises the text-then-separate-CR pattern stated by wake_inject_writes
+    # and proven at the PTY layer in tests/test_composer_pty_submit.py.
     literal = _run_tmux(settings, ["send-keys", "-t", entry.slug, "-l", line])
     if literal.returncode != 0:
         raise RuntimeError(literal.stderr.strip() or "tmux wake send failed")
@@ -585,10 +698,14 @@ def send_wake(
     last_wake[entry.slug] = now
     if audit:
         _audit_wake(settings, entry.slug, msg_id, topic, line)
-    return {
+    result = {
         "ok": True, "sent": True, "slug": entry.slug,
         "msg_id": msg_id, "topic": topic, "line": line,
     }
+    # D2 — verify the nudge left the composer; recover once; fail loud otherwise.
+    if verify:
+        result.update(_verify_wake_submit(settings, entry.slug, msg_id))
+    return result
 
 
 async def probe_ttyd(host: str, port: int, timeout: float) -> bool:
