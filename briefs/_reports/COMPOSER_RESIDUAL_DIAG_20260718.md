@@ -78,14 +78,26 @@ Interpretation:
 
 ### Live corroboration (in the wild, this session)
 
-- **b3** at 14:09Z had `❯ check bus` **parked** in its composer, unsubmitted —
-  a wake nudge that did not submit.
-- **b4** during the probe window acquired `❯ clean it up, checkout main and pull`
-  **parked** (not typed by me; baseline was empty). `Ctrl-U` did not clear it,
-  consistent with bracketed-paste-parked content. Flagged to lead (#12782); left
-  untouched because `checkout main and pull` could act if submitted.
+- **b3 — genuine specimen.** `❯ check bus #12652 fleet/wake-probe` **parked**,
+  unsubmitted, and still parked ~13 min later after a forced redraw (Ctrl-L). A
+  wake nudge that did not submit — a real live instance of the park.
+- **b4 — NOT a clean specimen (correction to #12782).** The `clean it up,
+  checkout main and pull` line was a **legit interactive reply** to b4's own a/b
+  question ("just clean up… or hold as-is?"), i.e. ordinary unsent user text, not
+  a bug park. Its apparent "reappearing / un-clearable" behaviour was a
+  **stale-render artifact** (see below), not an active writer and not a park.
 
-Both are independent live instances of the same park.
+### Stale-render caveat (important for instrumentation)
+
+`tmux capture-pane -p` can return a **stale composer render**: after `Ctrl-C` /
+edits, the composer line did not repaint in the capture until a redraw was forced
+(`Ctrl-L`). A single `Ctrl-C` most likely *did* clear the buffer; the stale
+render hid it, which is what made b4 look "stuck / un-clearable." Consequence for
+any pane-sampling "parked composer" detector: it **must force a redraw (Ctrl-L or
+equivalent) before trusting the read**, or it will both false-positive (stale
+text that is actually gone) and false-negative. This also retracts the
+"active local re-injecting writer" worry from #12782 — T0/T1 captures 4 s apart
+with no keystrokes were identical; there is no re-injection loop.
 
 ---
 
@@ -171,7 +183,13 @@ attribution + observability, not auto-submit.
    seat pane; if a non-empty composer line persists > N seconds with no run
    active, emit a bus signal `composer/parked <slug> <first-40-chars>`. Catches
    the next occurrence attributably regardless of path. Pairs with the
-   `seat-injections.log` above to attribute.
+   `seat-injections.log` above to attribute. **Must force a redraw (Ctrl-L) before
+   reading the pane** — `capture-pane` serves stale composer renders (see caveat
+   above), so a naive sampler both false-positives and false-negatives. Also must
+   distinguish a genuine park from ordinary unsent user text (e.g. a human
+   composing a reply) — a park signal on every unsent line would be noise;
+   gate on "injected (tagged) line" OR "persists across a redraw + N seconds +
+   no active run + not recently keystroked."
 2. **Origin-tag convention** (§ above) — recurrence-design deliverable from
    #12728.
 3. **Programmatic injectors:** keep the double-submit fix; route all through the
