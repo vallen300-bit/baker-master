@@ -4,7 +4,7 @@ attempt: 1
 branch: b1/cockpit-in-lab-bridge-1 (both repos: baker-master + brisen-lab)
 dispatched_by: lead (bus #12566)
 report_topic: gates/cockpit-in-lab-bridge-1
-status: READY FOR MERGE — Option A done (#12577), codex PASS-WITH-NOTE both tips. Post-tip close-race fix pushed baker @08a7c077 (lab unchanged @4538ca5) per lead #12588. Awaiting lead codex scope-confirm of 2-commit delta (16a9821e report + 08a7c077 fix) then merge, then Director-GO morning flip. Flag OFF.
+status: MERGED both repos (lead #12636, codex PASS #12633) — baker-master PR #596 @a7cf2abf, brisen-lab PR #153 @4538ca5. Lab redeploying; lead runs flag-OFF 404 probe when live. Flip stays Director-GO-gated per .claude/how-to/cockpit-cloud-access.md. Flag OFF. B1 build lane CLOSED — no further action.
 gate: /security-review clean; codex PASS-WITH-NOTE both tips; ConnectionClosedOK close-race fixed + test (baker 28); #2 resolved via Option A; report internally consistent (row 19 fixed)
 ---
 
