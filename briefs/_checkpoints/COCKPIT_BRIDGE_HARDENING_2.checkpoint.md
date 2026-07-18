@@ -5,8 +5,8 @@ dispatched_by: lead (bus #12867, P1/P2)
 report_topic: gates/cockpit-bridge-hardening-2
 repos:
   - brisen-lab b1/cockpit-bridge-hardening-2 @3a19f20d (D1 + D3)
-  - baker-master b1/cockpit-bridge-hardening-2 @3d1e8d8e (D2 + D4 + runbook)
-status: BUILD COMPLETE, /security-review CLEAN, both branches REBASED onto latest main (post UI_POLISH #157 + LAYOUT_REARRANGE) + pushed. Report posted to lead #12961. Awaiting lead codex gate both tips -> merge -> Render deploy -> live AC1-AC5 verdict (post-deploy, lead flips flag).
+  - baker-master b1/cockpit-bridge-hardening-2 @651b320d (D2 + D4 + runbook; codex #12968 fix)
+status: codex BOUNCE #12974 (P2 #12968) RESOLVED — D4 rotation made atomic+non-destructive. New baker-master tip @651b320d pushed. Awaiting lead re-dispatch of codex on exact head -> merge both -> Render deploy -> live AC1-AC5 verdict (post-deploy, lead flips flag).
 gate: codex bus-seat gate both tips + /security-review (done, clean) + codex-arch P2 re-verify -> lead merge
 ---
 
@@ -33,8 +33,17 @@ Brief: `briefs/_tasks/COCKPIT_BRIDGE_HARDENING_2.md` @a17e9288. Source: codex #1
 - baker-master: `tests/test_cockpit_bridge_agent.py` -> 16 passed (+D2/D4); `tests/test_cockpit_ttyd_per_seat_creds.sh` PASS.
 - /security-review: clean, no HIGH/MEDIUM.
 
+## codex #12968 fix (this session)
+`scripts/install_cockpit_ttyd.sh` `seat_credential()`: replaced the up-front `rm -f "$f"`
+on `COCKPIT_TTYD_ROTATE` with a `rotate=1` flag that only SKIPS the reuse branch. The old
+cred file is untouched until the single atomic `mv` overwrites it once a fully-validated
+replacement exists — any failure before the mv (openssl/mktemp/write) `die`s with the old
+cred intact. Added guard #4 to `tests/test_cockpit_ttyd_per_seat_creds.sh` (broken-openssl
+probe: old cred survives + stays 0600); verified load-bearing (fails vs old rm -f). Full
+script test PASS + `tests/test_cockpit_bridge_agent.py` 16 passed.
+
 ## Next concrete step (owner = lead, then B1 post-deploy)
-1. Lead: codex gate both tips (@3a19f20d + @3d1e8d8e) + codex-arch P2 re-verify -> merge both.
+1. Lead: re-dispatch codex on exact head (@3a19f20d + @651b320d) + codex-arch P2 re-verify -> merge both.
 2. Lead: Render deploy + flip `COCKPIT_EMBED_ENABLED` for the live AC drill.
 3. B1 post-deploy: post AC1-AC5 verdict to gates/cockpit-bridge-hardening-2 (flag-flip severs live socket ≤5s;
    key-rotate drops bridge ≤5s; two seats distinct creds; no-regression grid+terminal screenshot).
