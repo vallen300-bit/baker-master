@@ -114,6 +114,10 @@ cmd_up() {
     fi
     local launch; launch="$(manifest_launch "$slug")"
     tmux new-session -d -s "$slug" "$launch"
+    # Mouse scroll must enter tmux scrollback (view-only), NOT feed arrow-keys
+    # into Claude Code's composer (recalled-old-message resend hazard — Director
+    # report, cowork-ah1 #12801). Global; set after a server is guaranteed up.
+    tmux set-option -g mouse on 2>/dev/null || true
     scrub_session_identity_env "$slug"
     echo "up: $slug  ($launch)"
     created=$((created+1))
