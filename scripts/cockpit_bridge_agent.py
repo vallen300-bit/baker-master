@@ -341,10 +341,22 @@ class BridgeAgent:
                     await asyncio.gather(pump_up, pump_down, return_exceptions=True)
         except Exception as exc:  # noqa: BLE001 — surface as a clean close, never crash
             LOG.info("ttyd ws dial failed stream=%s: %s", sid, exc)
-            await self._send(lab_ws, mux.encode_frame(sid, mux.WS_CLOSE, b""))
+            await self._send_ws_close(lab_ws, sid)
         finally:
             self._ws_streams.pop(sid, None)
+            await self._send_ws_close(lab_ws, sid)
+
+    async def _send_ws_close(self, lab_ws, sid: int) -> None:
+        """Best-effort WS_CLOSE to the Lab. By the time a ttyd stream tears down
+        the Lab socket may already be gone (Director closed the tab, or the Lab
+        reconnected and dropped the old mux) — the close notification is then
+        moot. Suppress the ConnectionClosed(OK) race so it never escapes the
+        _handle_ws finally and crashes the connection loop (codex verify:
+        unhandled ConnectionClosedOK at the finally send)."""
+        try:
             await self._send(lab_ws, mux.encode_frame(sid, mux.WS_CLOSE, b""))
+        except ConnectionClosed:
+            pass
 
     async def _ws_upstream_to_lab(self, lab_ws, sid: int, upstream) -> None:
         try:

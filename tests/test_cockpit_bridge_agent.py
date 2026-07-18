@@ -221,6 +221,45 @@ async def test_handle_ws_acks_and_pipes(monkeypatch, tmp_path):
 
 
 @pytest.mark.asyncio
+async def test_handle_ws_suppresses_lab_close_race(monkeypatch, tmp_path):
+    """finally WS_CLOSE must not crash when the Lab socket already closed.
+
+    Models codex's ConnectionClosedOK race: the ttyd stream tears down after
+    the Director closed the tab / the Lab reconnected, so lab_ws.send raises
+    ConnectionClosed on the finally WS_CLOSE. _handle_ws must swallow it.
+    """
+    from websockets.exceptions import ConnectionClosed
+
+    class ClosingLabWS:
+        """Succeeds for the WS_OPEN ack + piped WS_DATA, then the Lab socket is
+        gone so every later send raises ConnectionClosed (incl. the finally)."""
+
+        def __init__(self, ok_sends):
+            self.sent = []
+            self._ok = ok_sends
+
+        async def send(self, data):
+            if len(self.sent) >= self._ok:
+                raise ConnectionClosed(None, None)
+            self.sent.append(data)
+
+    cred = tmp_path / "credentials"
+    cred.write_text("u:p")
+    agent = agent_mod.BridgeAgent(lab_ws="wss://x", upstream="http://127.0.0.1:7800", cred_path=str(cred))
+    monkeypatch.setattr(
+        agent_mod, "ws_connect",
+        lambda target, **kw: FakeUpstreamWS(messages=["term-output"], subprotocol="tty"),
+    )
+
+    lab_ws = ClosingLabWS(ok_sends=2)  # WS_OPEN + WS_DATA ok; WS_CLOSE raises
+    inbound = asyncio.Queue()
+    head = {"path": "/term/b1/ws", "query": "", "headers": {}, "subprotocols": ["tty"]}
+    # Must return cleanly — the finally's WS_CLOSE close-race is suppressed.
+    await agent._handle_ws(lab_ws, 3, head, inbound)
+    assert 3 not in agent._ws_streams
+
+
+@pytest.mark.asyncio
 async def test_oversize_request_body_resets_stream(monkeypatch):
     agent = agent_mod.BridgeAgent(lab_ws="wss://x", upstream="http://127.0.0.1:7800", cred_path="/none")
     monkeypatch.setattr(agent_mod, "_MAX_STREAM_BODY", 8)

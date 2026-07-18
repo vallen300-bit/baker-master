@@ -16,7 +16,7 @@
 | Flag-off → 404 on every `/cockpit` HTTP path + nav absent | ✅ verified in probe |
 | Flag-off terminal WS | ⚠️ refused/closed (probe verified) but returns **403 not 404** — protocol-inherent (a pre-accept WS cannot emit a 404 body). Kill switch works. |
 | Agent installer built NOT loaded | ✅ staged only; `launchctl list` shows nothing; stray test-plist removed |
-| Codex PASS on exact tips | ❌ codex returned **FAIL** both repos. All findings addressed with my own verdict; **#2 escalated, unresolved**. No clean re-verify yet. |
+| Codex PASS on exact tips | ✅ codex **PASS-WITH-NOTE** on the exact tips; all prior findings fixed. One post-tip note (ConnectionClosedOK close-race at `cockpit_bridge_agent.py`) fixed + test added this commit; #2 resolved via lead-ruled Option A (#12577). |
 | `/security-review` clean | ✅ 1 sub-threshold (token-in-query) found + fixed |
 | Morning flip checklist written | ✅ `.claude/how-to/cockpit-cloud-access.md` (kill switches first) |
 
@@ -75,4 +75,6 @@ Lead ruled **Option A, GO** (#12577) with 3 conditions + ratified COCKPIT_ACCESS
 
 **Final tests:** lab **76**, baker **27**, codec sha256-identical, loopback probe **12/12** (now incl. ttyd-not-injected + shell-injected). `COCKPIT_ACCESS_TOKEN` now MANDATORY-before-flip in the runbook. WS 403-not-404 flag-off accepted (protocol-inherent).
 
-**Next (owner):** lead line-read + merge both tips; then the morning flip checklist in `cockpit-cloud-access.md` (Director GO — token set BEFORE flag-on). Flag OFF until then.
+**Post-tip codex note (#12588 — PASS-WITH-NOTE):** codex scoped one required-for-clean-PASS item on the exact tips — an unhandled `ConnectionClosedOK` close-race in `cockpit_bridge_agent._handle_ws`: the `finally` sent WS_CLOSE to the Lab socket even after it had closed, so the close race escaped the loop. Fixed by routing both WS_CLOSE sends through `_send_ws_close`, which suppresses `ConnectionClosed`; added `test_handle_ws_suppresses_lab_close_race` (baker suite now **28**). Report-only note: no codex rollout session IDs exist to cite for this arc — codex verdicts arrived as lead-relayed bus verdicts (#12588), not CLI sessions.
+
+**Next (owner):** lead scope-confirms the 2-commit delta with codex, then line-read + merge both tips; then the morning flip checklist in `cockpit-cloud-access.md` (Director GO — token set BEFORE flag-on). Flag OFF until then.
