@@ -56,8 +56,8 @@ GLANCE_FIELDS = (
     # slice is live the source field is absent and null flows through, so the
     # card-face context bar stays hidden (null-safe).
     "context_pct",
-    # D5 — per-seat unacked message list (id / topic / created_at) so the
-    # terminal panel can list them and D6 can name the oldest in the wake nudge.
+    # D5 — per-seat unacked message list (id / kind / topic / created_at) so the
+    # terminal panel can list them and D6 can name/type the oldest wake nudge.
     "unacked_messages",
     # COCKPIT_UI_POLISH_1 D9 — the App-resident card's bus-message panel binds the
     # same Lab feed the "Production & Lab" component uses: the most recent message
@@ -70,6 +70,8 @@ GLANCE_FIELDS = (
 # same seat must be allowed through promptly; a separate seat floor below keeps
 # bursty arrivals from producing a wake storm.
 WAKE_DEDUPE_SECONDS = 600.0
+# Command/dispatch messages are actionable and may need a quicker repeat knock.
+WAKE_COMMAND_DEDUPE_SECONDS = 120.0
 # Minimum spacing between any two injections into one seat, regardless of message.
 WAKE_SEAT_FLOOR_SECONDS = 60.0
 # WAKE_COMPOSER_SUBMIT_FIX_1: settle gap between text→Enter and Enter→submit-Return.
@@ -568,16 +570,34 @@ def send_go(settings: Settings, entry: ManifestEntry) -> dict[str, Any]:
     return {"ok": True, "sent": "Enter", "slug": entry.slug}
 
 
-def _oldest_unacked(messages: Any) -> tuple[Any, str] | None:
-    """(id, topic) of the oldest unacked message by created_at, or None."""
+def _oldest_unacked_row(messages: Any) -> dict[str, Any] | None:
+    """The oldest unacked message row by created_at, or None."""
     rows = [
         m for m in (messages or [])
         if isinstance(m, dict) and m.get("id") is not None
     ]
     if not rows:
         return None
-    oldest = min(rows, key=lambda m: str(m.get("created_at") or ""))
+    return min(rows, key=lambda m: str(m.get("created_at") or ""))
+
+
+def _oldest_unacked(messages: Any) -> tuple[Any, str] | None:
+    """(id, topic) of the oldest unacked message by created_at, or None."""
+    oldest = _oldest_unacked_row(messages)
+    if oldest is None:
+        return None
     return oldest.get("id"), str(oldest.get("topic") or "")
+
+
+def _wake_repeat_window(message: dict[str, Any]) -> float:
+    """Return the repeat window for one message's typed intent."""
+    kinds = {
+        str(message.get("kind") or "").strip().lower(),
+        str(message.get("intent") or "").strip().lower(),
+    }
+    if kinds & {"command", "dispatch"}:
+        return WAKE_COMMAND_DEDUPE_SECONDS
+    return WAKE_DEDUPE_SECONDS
 
 
 def wake_skip_reason(glance_row: dict[str, Any] | None) -> str | None:
@@ -597,12 +617,25 @@ def wake_skip_reason(glance_row: dict[str, Any] | None) -> str | None:
     return None
 
 
-def _audit_wake(settings: Settings, slug: str, msg_id: Any, topic: str, line: str) -> None:
-    """Append a durable audit line for every wake nudge sent (D6)."""
+def _audit_wake(
+    settings: Settings,
+    slug: str,
+    msg_id: Any,
+    topic: str,
+    line: str,
+    *,
+    suppressed_count: int = 0,
+    skipped: str | None = None,
+) -> None:
+    """Append a durable audit line for sent or coalesced wake attempts."""
     entry = {
         "ts": time.time(), "slug": slug, "msg_id": msg_id,
         "topic": topic, "line": line,
     }
+    if skipped is not None:
+        entry["skipped"] = skipped
+    if suppressed_count > 0:
+        entry["suppressed_count"] = suppressed_count
     try:
         settings.wake_audit_path.parent.mkdir(parents=True, exist_ok=True)
         with settings.wake_audit_path.open("a", encoding="utf-8") as handle:
@@ -740,6 +773,7 @@ def send_wake(
     last_wake: dict[str, dict[str, Any]],
     audit: bool = True,
     verify: bool = True,
+    force: bool = False,
 ) -> dict[str, Any]:
     """D6 wake-on-open: send one `check bus #<oldest-id> <topic>` + Enter into the
     seat's tmux. Guarded (wake_skip_reason), deduped for the same message, and
@@ -748,10 +782,13 @@ def send_wake(
     reason = wake_skip_reason(glance_row)
     if reason is not None:
         return {"ok": True, "sent": False, "skipped": reason, "slug": entry.slug}
-    oldest = _oldest_unacked(glance_row.get("unacked_messages"))
+    oldest = _oldest_unacked_row(glance_row.get("unacked_messages"))
     if oldest is None:  # defensive: wake_skip_reason already checks this condition
         return {"ok": True, "sent": False, "skipped": "no unacked message id", "slug": entry.slug}
-    msg_id, topic = oldest
+    msg_id = oldest.get("id")
+    topic = str(oldest.get("topic") or "")
+    repeat_window = _wake_repeat_window(oldest)
+    line = f"{WAKE_ORIGIN_TAG} check bus #{msg_id} {topic}".rstrip()
 
     state = last_wake.get(entry.slug)
     if not isinstance(state, dict):
@@ -766,24 +803,67 @@ def send_wake(
     if not isinstance(message_last, dict):
         message_last = {}
         state["message_last"] = message_last
+    suppressed_last = state.get("suppressed_count")
+    if not isinstance(suppressed_last, dict):
+        suppressed_last = {}
+        state["suppressed_count"] = suppressed_last
     for key, timestamp in list(message_last.items()):
-        if not isinstance(timestamp, (int, float)) or (now - timestamp) >= WAKE_DEDUPE_SECONDS:
+        timestamp_value = (
+            timestamp.get("at")
+            if isinstance(timestamp, dict)
+            else timestamp
+        )
+        if (
+            not isinstance(timestamp_value, (int, float))
+            or (now - timestamp_value) >= WAKE_DEDUPE_SECONDS
+        ):
             message_last.pop(key, None)
     message_key = str(msg_id)
     previous_message = message_last.get(message_key)
-    if previous_message is not None and (now - previous_message) < WAKE_DEDUPE_SECONDS:
+    previous_message_at = (
+        previous_message.get("at")
+        if isinstance(previous_message, dict)
+        else previous_message
+    )
+    if (
+        not force
+        and previous_message_at is not None
+        and (now - previous_message_at) < repeat_window
+    ):
+        suppressed_last[message_key] = int(suppressed_last.get(message_key, 0)) + 1
+        if audit:
+            _audit_wake(
+                settings,
+                entry.slug,
+                msg_id,
+                topic,
+                line,
+                suppressed_count=suppressed_last[message_key],
+                skipped="deduped",
+            )
         return {"ok": True, "sent": False, "skipped": "deduped", "slug": entry.slug}
 
     previous_injection = state.get("last_injection")
     if (
-        previous_injection is not None
+        not force
+        and previous_injection is not None
         and (now - previous_injection) < WAKE_SEAT_FLOOR_SECONDS
     ):
+        suppressed_last[message_key] = int(suppressed_last.get(message_key, 0)) + 1
+        if audit:
+            _audit_wake(
+                settings,
+                entry.slug,
+                msg_id,
+                topic,
+                line,
+                suppressed_count=suppressed_last[message_key],
+                skipped="seat_floor",
+            )
         return {"ok": True, "sent": False, "skipped": "seat_floor", "slug": entry.slug}
 
     # D3 — visible [wake] origin tag so freeform seat input is attributable at a
     # glance (WAKE_INJECT_SUBMIT_FIX_2). The nudge stays `check bus #<id> <topic>`.
-    line = f"{WAKE_ORIGIN_TAG} check bus #{msg_id} {topic}".rstrip()
     # Realise the injection from wake_inject_writes so the write pattern has ONE
     # production source (also exercised by the PTY regression test): a literal
     # text write, then a bare CR as its own write. '#'/spaces stay literal.
@@ -811,9 +891,17 @@ def send_wake(
         LOG.warning("wake submit-Return failed for %s (wake already sent): %s",
                     entry.slug, resubmit.stderr.strip())
     state["last_injection"] = now
-    message_last[message_key] = now
+    message_last[message_key] = {"at": now, "window": repeat_window}
+    suppressed_count = int(suppressed_last.pop(message_key, 0))
     if audit:
-        _audit_wake(settings, entry.slug, msg_id, topic, line)
+        _audit_wake(
+            settings,
+            entry.slug,
+            msg_id,
+            topic,
+            line,
+            suppressed_count=suppressed_count,
+        )
     result = {
         "ok": True, "sent": True, "slug": entry.slug,
         "msg_id": msg_id, "topic": topic, "line": line,
@@ -1115,10 +1203,12 @@ def create_app(
             return {"ok": True, "sent": False, "skipped": "session down", "slug": entry.slug}
         lab = await glance.read()
         row = lab.get(entry.slug) or {}
+        force = request.query_params.get("force") == "1"
         try:
             return send_wake(
                 config, entry, row,
                 now=time.monotonic(), last_wake=app.state.wake_last,
+                force=force,
             )
         except (OSError, RuntimeError, subprocess.TimeoutExpired) as exc:
             raise HTTPException(status_code=502, detail=str(exc)) from exc

@@ -90,7 +90,9 @@ def test_send_wake_happy_path_sends_line_and_audits(tmp_path, fake_tmux):
     assert len(fake_tmux) == 5  # no recovery Enter on a clean submit
     assert res["verified"] == "submitted"
     assert last["b3"]["last_injection"] == 1000.0
-    assert last["b3"]["message_last"] == {"12063": 1000.0}
+    assert last["b3"]["message_last"] == {
+        "12063": {"at": 1000.0, "window": controller.WAKE_DEDUPE_SECONDS},
+    }
     # audit line written
     audited = [json.loads(l) for l in settings.wake_audit_path.read_text().splitlines()]
     assert audited[-1]["slug"] == "b3" and audited[-1]["msg_id"] == 12063
@@ -288,7 +290,10 @@ def test_send_wake_new_message_inside_old_window_fires_after_seat_floor(
         verify=False,
     )
     assert res["sent"] is True
-    assert last["b3"]["message_last"] == {"12063": 900.0, "12099": 961.0}
+    assert last["b3"]["message_last"]["12099"] == {
+        "at": 961.0,
+        "window": controller.WAKE_DEDUPE_SECONDS,
+    }
 
 
 def test_send_wake_new_message_respects_seat_floor(tmp_path, fake_tmux):
@@ -323,6 +328,87 @@ def test_send_wake_same_message_repeat_does_not_double_wake(tmp_path, fake_tmux)
     )
     assert res["sent"] is False and res["skipped"] == "deduped"
     assert fake_tmux == []
+
+
+def test_send_wake_command_repeat_window_is_120_seconds(tmp_path, fake_tmux):
+    settings = _settings(tmp_path)
+    command_row = {
+        **UNACKED_ROW,
+        "unacked_messages": [
+            {
+                "id": 12063,
+                "kind": "dispatch",
+                "topic": "ao-room-architecture",
+                "created_at": "2026-07-16T20:00:00Z",
+            },
+        ],
+    }
+    last = {"b3": {"last_injection": 900.0, "message_last": {"12063": 900.0}}}
+    res = controller.send_wake(
+        settings,
+        ENTRY,
+        command_row,
+        now=900.0 + 121,
+        last_wake=last,
+        verify=False,
+    )
+    assert res["sent"] is True
+    assert last["b3"]["message_last"]["12063"] == {
+        "at": 1021.0,
+        "window": controller.WAKE_COMMAND_DEDUPE_SECONDS,
+    }
+
+
+def test_send_wake_audits_suppressed_count_for_coalesced_repeat(tmp_path, fake_tmux):
+    settings = _settings(tmp_path)
+    command_row = {
+        **UNACKED_ROW,
+        "unacked_messages": [
+            {
+                "id": 12063,
+                "kind": "dispatch",
+                "topic": "ao-room-architecture",
+                "created_at": "2026-07-16T20:00:00Z",
+            },
+        ],
+    }
+    last = {}
+    first = controller.send_wake(
+        settings, ENTRY, command_row, now=1000.0, last_wake=last, verify=False,
+    )
+    suppressed = controller.send_wake(
+        settings, ENTRY, command_row, now=1061.0, last_wake=last, verify=False,
+    )
+    final = controller.send_wake(
+        settings, ENTRY, command_row, now=1121.0, last_wake=last, verify=False,
+    )
+    assert first["sent"] is True
+    assert suppressed["sent"] is False and suppressed["skipped"] == "deduped"
+    assert final["sent"] is True
+    audit = [
+        json.loads(line)
+        for line in settings.wake_audit_path.read_text().splitlines()
+    ]
+    assert "suppressed_count" not in audit[0]
+    assert audit[1]["skipped"] == "deduped"
+    assert audit[1]["suppressed_count"] == 1
+    assert audit[-1]["suppressed_count"] == 1
+
+
+def test_send_wake_force_bypasses_dedupe_but_still_submits(tmp_path, fake_tmux):
+    settings = _settings(tmp_path)
+    last = {"b3": {"last_injection": 1000.0, "message_last": {"12063": 1000.0}}}
+    res = controller.send_wake(
+        settings,
+        ENTRY,
+        UNACKED_ROW,
+        now=1001.0,
+        last_wake=last,
+        force=True,
+    )
+    assert res["sent"] is True
+    assert res["verified"] == "submitted"
+    assert len(fake_tmux) == 5
 
 
 def test_send_wake_guarded_seat_is_noop(tmp_path, fake_tmux):
