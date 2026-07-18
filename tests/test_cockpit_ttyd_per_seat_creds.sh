@@ -7,6 +7,8 @@
 #      (mode 0600), and each seat's generated plist embeds its OWN credential.
 #   2. A plain reinstall does NOT rotate an existing per-seat cred (stable).
 #   3. COCKPIT_TTYD_ROTATE=<slug> rotates ONLY that seat; the other is untouched.
+#   4. A rotation that FAILS mid-generation (broken openssl) leaves the OLD cred
+#      intact — rotation is atomic + non-destructive (codex #12968, AC4).
 #
 # Method: dry-run (COCKPIT_TTYD_DRYRUN=1, no launchctl). Stub ttyd/tmux on PATH;
 # jq + openssl are real. Manifest is pinned (COCKPIT_MANIFEST_SRC) so no live
@@ -80,6 +82,27 @@ run_install
 run_install COCKPIT_TTYD_ROTATE=b1
 [ "$(cat "$CRED_B1")" != "$B1_V1" ] || fail "COCKPIT_TTYD_ROTATE=b1 did not rotate b1"
 [ "$(cat "$CRED_B2")" = "$B2_V1" ] || fail "rotating b1 also changed b2 (AC4 isolation violation)"
+
+# --- install 3b: rotation that FAILS mid-generation must NOT destroy the old cred ---
+# (codex #12968 regression: old cred must survive any failure before the atomic mv.)
+B1_V2="$(cat "$CRED_B1")"
+BADBIN="$WORK/badbin"; mkdir -p "$BADBIN"
+printf '#!/bin/sh\nexit 1\n' > "$BADBIN/openssl"; chmod +x "$BADBIN/openssl"  # force gen failure
+if env \
+     PATH="$BADBIN:$PATH" \
+     COCKPIT_TTYD_DRYRUN=1 \
+     COCKPIT_MANIFEST_SRC="$MANIFEST" \
+     COCKPIT_DEPLOY_DIR="$DEPLOY" \
+     COCKPIT_LAUNCHD_DIR="$LAUNCHD" \
+     COCKPIT_LOG_DIR="$LOGS" \
+     COCKPIT_CREDENTIAL_FILE="$DEPLOY/credentials" \
+     COCKPIT_TTYD_ROTATE=b1 \
+     bash "$SCRIPT" >/dev/null 2>&1; then
+  fail "rotation with broken openssl should exit non-zero"
+fi
+[ -f "$CRED_B1" ] || fail "failed rotation DELETED b1 cred (codex #12968 regression)"
+[ "$(cat "$CRED_B1")" = "$B1_V2" ] || fail "failed rotation changed b1 cred (old cred must survive intact)"
+[ "$(stat -f '%Lp' "$CRED_B1")" = "600" ] || fail "b1 cred lost 0600 after failed rotation"
 
 # --- legacy opt-out: shared cred in every plist ---
 rm -rf "$DEPLOY/credentials.d" "$LAUNCHD"/*.plist

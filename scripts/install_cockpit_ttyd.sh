@@ -97,14 +97,20 @@ fi
 # for a slug, echo `user:pass`. Reused across installs so a plain reinstall does
 # NOT rotate. Random 24-byte password; username namespaced per seat.
 seat_credential() {
-  local slug="$1" f="$CREDENTIALS_D/$slug" cred pw tmp
+  local slug="$1" f="$CREDENTIALS_D/$slug" cred pw tmp rotate=0
   if [ "$PER_SEAT_CREDS" = "0" ]; then
     printf '%s' "$SHARED_CREDENTIAL"; return 0
   fi
+  # Rotation must be ATOMIC and non-destructive (codex #12968): never delete the
+  # existing cred up-front — a mid-generation failure (openssl/mktemp/write) would
+  # leave the seat with no cred while the plist still pins the OLD ttyd password,
+  # so the agent silently falls back to the shared cred (violates AC4). Instead we
+  # only SKIP the reuse branch below; the old file survives untouched until the
+  # single atomic `mv` overwrites it once a fully-validated replacement exists.
   if [ "${COCKPIT_TTYD_ROTATE:-}" = "$slug" ]; then
-    rm -f "$f"
+    rotate=1
   fi
-  if [ -f "$f" ]; then
+  if [ "$rotate" = "0" ] && [ -f "$f" ]; then
     [ "$(stat -f '%Lp' "$f")" = "600" ] || die "per-seat cred must be mode 0600: $f"
     cred="$(head -n1 "$f")"
     if [ -n "$cred" ]; then printf '%s' "$cred"; return 0; fi
