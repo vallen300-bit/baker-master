@@ -1,4 +1,6 @@
+import asyncio
 import base64
+from dataclasses import replace
 import json
 from pathlib import Path
 import subprocess
@@ -50,6 +52,23 @@ class FakeLab:
 
     async def read(self):
         return self.rows
+
+
+class RefreshingFakeLab:
+    def __init__(self, initial, refreshed):
+        self.initial = initial
+        self.refreshed = refreshed
+        self.last_ok = True
+        self.read_calls = 0
+        self.force_refresh_calls = 0
+
+    async def read(self):
+        self.read_calls += 1
+        return self.initial
+
+    async def force_refresh(self):
+        self.force_refresh_calls += 1
+        return self.refreshed
 
 
 def _prober(up_slugs):
@@ -431,6 +450,98 @@ def test_wake_endpoint_passes_force_query_flag(tmp_path, monkeypatch):
     )
     assert response.status_code == 200
     assert captured["force"] is True
+
+
+def test_wake_endpoint_rechecks_after_stale_no_unacked_glance(tmp_path, monkeypatch):
+    settings = _settings(tmp_path)
+    lab = RefreshingFakeLab(
+        {"b3": {"is_working": False, "unacked_count": 0}},
+        {
+            "b3": {
+                "is_working": False,
+                "unacked_count": 1,
+                "unacked_messages": [
+                    {
+                        "id": 13129,
+                        "kind": "dispatch",
+                        "topic": "wake-respawn-backlog-drain-1",
+                        "created_at": "2026-07-19T08:00:00Z",
+                    }
+                ],
+            }
+        },
+    )
+    app = controller.create_app(settings, lab_glance=lab)
+    monkeypatch.setattr(controller, "tmux_session_names", lambda _settings: {"b3"})
+    calls = []
+
+    def fake_send_wake(*args, **kwargs):
+        calls.append((args[2], kwargs))
+        if len(calls) == 1:
+            return {"ok": True, "sent": False, "skipped": "no unacked", "slug": "b3"}
+        return {"ok": True, "sent": True, "slug": "b3"}
+
+    monkeypatch.setattr(controller, "send_wake", fake_send_wake)
+    response = TestClient(app).post(
+        "/api/sessions/b3/wake",
+        headers={"Host": "127.0.0.1:7800", **_auth()},
+    )
+
+    assert response.status_code == 200
+    assert lab.force_refresh_calls == 1
+    assert len(calls) == 2
+    assert calls[1][0]["unacked_count"] == 1
+
+
+def test_backlog_sweep_tick_wakes_old_idle_session(tmp_path, monkeypatch):
+    settings = replace(_settings(tmp_path), backlog_sweep_seconds=600)
+    app = controller.create_app(
+        settings,
+        lab_glance=FakeLab(
+            {
+                "b3": {
+                    "is_working": False,
+                    "unacked_count": 1,
+                    "oldest_unacked_age_sec": 601,
+                    "unacked_messages": [
+                        {
+                            "id": 13129,
+                            "kind": "dispatch",
+                            "topic": "wake-respawn-backlog-drain-1",
+                            "created_at": "2026-07-19T08:00:00Z",
+                        }
+                    ],
+                }
+            }
+        ),
+    )
+    monkeypatch.setattr(controller, "tmux_session_names", lambda _settings: {"b3"})
+    calls = []
+
+    def fake_send_wake(*args, **kwargs):
+        calls.append((args[1].slug, kwargs))
+        return {"ok": True, "sent": True, "slug": args[1].slug}
+
+    monkeypatch.setattr(controller, "send_wake", fake_send_wake)
+
+    result = asyncio.run(app.state.backlog_sweep_tick())
+
+    assert result == [{"ok": True, "sent": True, "slug": "b3"}]
+    assert len(calls) == 1
+    assert calls[0][0] == "b3"
+    assert calls[0][1]["audit_source"] == "sweep"
+
+
+def test_backlog_sweep_tick_is_off_at_zero(tmp_path, monkeypatch):
+    settings = replace(_settings(tmp_path), backlog_sweep_seconds=0)
+    app = controller.create_app(settings, lab_glance=FakeLab({}))
+    monkeypatch.setattr(
+        controller,
+        "tmux_session_names",
+        lambda _settings: (_ for _ in ()).throw(AssertionError("must stay off")),
+    )
+
+    assert asyncio.run(app.state.backlog_sweep_tick()) == []
 
 
 def test_credential_file_must_be_private(tmp_path):

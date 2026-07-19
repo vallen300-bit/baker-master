@@ -98,6 +98,17 @@ def test_send_wake_happy_path_sends_line_and_audits(tmp_path, fake_tmux):
     assert audited[-1]["slug"] == "b3" and audited[-1]["msg_id"] == 12063
 
 
+def test_codex_family_verify_skips_c_l_repaint(tmp_path, fake_tmux):
+    entry = controller.ManifestEntry(slug="deputy-codex", alias="aihead2", port=17603)
+    result = controller.send_wake(
+        _settings(tmp_path), entry, UNACKED_ROW, now=1000.0, last_wake={}
+    )
+
+    assert result["verified"] == "submitted"
+    assert ["send-keys", "-t", "deputy-codex", "C-l"] not in fake_tmux
+    assert ["capture-pane", "-t", "deputy-codex", "-p"] in fake_tmux
+
+
 def test_send_wake_verify_off_skips_pane_reads(tmp_path, fake_tmux):
     """verify=False preserves the FIX_1 three-call shape (used where a pane read
     is not wanted, e.g. deterministic unit paths)."""
