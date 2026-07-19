@@ -178,29 +178,33 @@ def load_notify_seats(static_dir: Path) -> set[str]:
     return seats
 
 
-def load_cockpit_layout_slugs(static_dir: Path) -> set[str]:
-    """Return valid slugs rendered by the generated cockpit layout.
-
-    App/service cards are intentionally absent from the launch manifest, but
-    still have bus identities and need the lazy message endpoint.
-    """
+def load_cockpit_layout_cards(static_dir: Path) -> tuple[tuple[str, str], ...]:
+    """Return valid layout slugs and aliases, including status-only cards."""
     try:
         raw = json.loads((static_dir / "cockpit_layout.json").read_text("utf-8"))
     except (OSError, ValueError, TypeError):
-        return set()
-    slugs: set[str] = set()
+        return ()
+    out: list[tuple[str, str]] = []
     plates = raw.get("plates") or raw.get("sections") or []
     if not isinstance(plates, list):
-        return set()
+        return ()
     for plate in plates:
-        cards = (plate or {}).get("cards", []) if isinstance(plate, dict) else []
-        for card in cards or []:
+        plate_cards = (plate or {}).get("cards", []) if isinstance(plate, dict) else []
+        for card in plate_cards or []:
             if not isinstance(card, dict):
                 continue
             candidate = card.get("slug")
             if isinstance(candidate, str) and SLUG_RE.fullmatch(candidate):
-                slugs.add(candidate)
-    return slugs
+                alias = card.get("alias")
+                if not isinstance(alias, str) or not ALIAS_RE.fullmatch(alias):
+                    alias = candidate
+                out.append((candidate, alias))
+    return tuple(out)
+
+
+def load_cockpit_layout_slugs(static_dir: Path) -> set[str]:
+    """Return valid slugs rendered by the generated cockpit layout."""
+    return {slug for slug, _alias in load_cockpit_layout_cards(static_dir)}
 
 
 def trim_message_preview(row: dict[str, Any]) -> dict[str, Any] | None:
@@ -1306,6 +1310,26 @@ def create_app(
                     "ttyd_up": bool(ttyd_up),
                     **glance_fields,
                     "local_working": local_working,   # D8 — surfaced for tests/transparency
+                }
+            )
+        manifest_slugs = {entry.slug for entry in entries}
+        # Status-only app/service cards are intentionally absent from the launch
+        # manifest, but still need a live /api/agents row so their bus envelope
+        # and lazy authenticated preview panel can render.
+        for slug, alias in load_cockpit_layout_cards(config.static_dir):
+            if slug in manifest_slugs:
+                continue
+            values = lab.get(slug, {})
+            glance_fields = {field: values.get(field) for field in GLANCE_FIELDS}
+            agents.append(
+                {
+                    "slug": slug,
+                    "alias": alias,
+                    "port": None,
+                    "session_up": False,
+                    "ttyd_up": False,
+                    **glance_fields,
+                    "local_working": False,
                 }
             )
         return {"agents": agents, "lab_glance_ok": bool(lab_ok)}

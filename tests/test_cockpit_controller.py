@@ -199,6 +199,61 @@ def test_d8_local_activity_ors_into_is_working(tmp_path, monkeypatch):
     assert agents["b4"]["is_working"] is False     # stale activity → not working
 
 
+def test_api_agents_hydrates_status_only_layout_cards(tmp_path, monkeypatch):
+    settings = _settings(tmp_path)
+    settings.static_dir.mkdir()
+    (settings.static_dir / "cockpit_layout.json").write_text(
+        json.dumps(
+            {
+                "plates": [
+                    {
+                        "label": "Control Tower",
+                        "cards": [
+                            {
+                                "slug": "codex-arch",
+                                "alias": "codex-arch",
+                                "status_only": True,
+                            }
+                        ],
+                    }
+                ]
+            }
+        ),
+        encoding="utf-8",
+    )
+    app = controller.create_app(
+        settings,
+        lab_glance=FakeLab(
+            {
+                "codex-arch": {
+                    "is_working": True,
+                    "has_telemetry": True,
+                    "unacked_count": 1,
+                    "unacked_messages": [{"id": 901, "topic": "review/test"}],
+                    "last_message": {"id": 901, "topic": "review/test"},
+                    "acked_count": 0,
+                }
+            }
+        ),
+        ttyd_prober=_prober(set()),
+    )
+    monkeypatch.setattr(controller, "tmux_session_names", lambda _s: set())
+    monkeypatch.setattr(controller, "tmux_window_activity", lambda _s: {})
+
+    agents = {
+        row["slug"]: row
+        for row in TestClient(app).get(
+            "/api/agents",
+            headers={"Host": "127.0.0.1:7800", **_auth()},
+        ).json()["agents"]
+    }
+    assert agents["codex-arch"]["alias"] == "codex-arch"
+    assert agents["codex-arch"]["session_up"] is False
+    assert agents["codex-arch"]["ttyd_up"] is False
+    assert agents["codex-arch"]["unacked_count"] == 1
+    assert agents["codex-arch"]["last_message"]["id"] == 901
+
+
 def test_derive_context_pct_maps_lab_used_percent():
     # LAB_CONTEXT_BAND_EXPOSURE_1 (#12055): the Lab payload carries usage as
     # ``context_used_percent``; the D4 band renders it as ``context_pct``.
