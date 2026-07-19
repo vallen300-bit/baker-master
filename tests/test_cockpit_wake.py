@@ -494,6 +494,60 @@ def test_send_wake_force_bypasses_dedupe_but_still_submits(tmp_path, fake_tmux):
     assert len(fake_tmux) == 5
 
 
+def test_send_wake_click_debounce_coalesces_repeat_across_pages(tmp_path, fake_tmux):
+    """P2a (codex FAIL #13397): a click nudge (force=1) bypasses the per-message
+    dedupe + seat-floor by design, so the ONLY prior idempotence was a per-PAGE JS
+    debounce — which a reload / second tab / delayed repeat defeats. The server-side
+    per-slug click window coalesces those repeats regardless of the originating page."""
+    settings = _settings(tmp_path)
+    last = {}
+    first = controller.send_wake(
+        settings, ENTRY, UNACKED_ROW, now=1000.0, last_wake=last,
+        force=True, audit_source="cockpit_click", verify=False,
+    )
+    assert first["sent"] is True
+    assert last["b3"]["last_click_injection"] == 1000.0
+    fake_tmux.clear()
+    # A second click within the window — e.g. a reopened tab that never saw the first
+    # page's JS debounce — is coalesced server-side. Nothing is injected.
+    second = controller.send_wake(
+        settings, ENTRY, UNACKED_ROW,
+        now=1000.0 + controller.WAKE_CLICK_DEBOUNCE_SECONDS - 0.1,
+        last_wake=last, force=True, audit_source="cockpit_click", verify=False,
+    )
+    assert second["sent"] is False and second["skipped"] == "click_deduped"
+    assert fake_tmux == []
+
+
+def test_send_wake_click_debounce_releases_after_window(tmp_path, fake_tmux):
+    """A genuine later re-nudge (past the click window) still fires — the debounce
+    only coalesces rapid repeats, it does not permanently mute the seat."""
+    settings = _settings(tmp_path)
+    last = {}
+    controller.send_wake(
+        settings, ENTRY, UNACKED_ROW, now=1000.0, last_wake=last,
+        force=True, audit_source="cockpit_click", verify=False,
+    )
+    later = controller.send_wake(
+        settings, ENTRY, UNACKED_ROW,
+        now=1000.0 + controller.WAKE_CLICK_DEBOUNCE_SECONDS + 0.1,
+        last_wake=last, force=True, audit_source="cockpit_click", verify=False,
+    )
+    assert later["sent"] is True
+
+
+def test_send_wake_click_debounce_is_click_origin_only(tmp_path, fake_tmux):
+    """The click debounce is independent of the protected dedupe/typed-repeat state:
+    a non-click forced wake neither arms it nor is blocked by a recent click window."""
+    settings = _settings(tmp_path)
+    last = {"b3": {"last_click_injection": 1000.0, "message_last": {}}}
+    res = controller.send_wake(
+        settings, ENTRY, UNACKED_ROW, now=1000.5, last_wake=last,
+        force=True, verify=False,
+    )
+    assert res["sent"] is True  # not click_deduped despite a recent click window
+
+
 def test_send_wake_guarded_seat_is_noop(tmp_path, fake_tmux):
     settings = _settings(tmp_path)
     res = controller.send_wake(settings, ENTRY, {"is_working": True, "unacked_count": 5}, now=1.0, last_wake={})
