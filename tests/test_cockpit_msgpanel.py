@@ -52,3 +52,9 @@ def test_panel_lazily_merges_authenticated_body_previews():
     assert "detail.body_preview" in JS
     assert "text: detail.body_preview" in JS
     assert ".hpreview" in CSS
+
+
+def test_summary_counts_only_driveable_terminal_attention():
+    assert "(meta.driveable && row.ttyd_up === false)" in JS
+    assert "const driveable = layout" in JS
+    assert '" driveable / " + total + " seats"' in JS

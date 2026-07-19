@@ -156,7 +156,8 @@
       const row = stateBySlug.get(meta.slug);
       if (!row) return false;
       return row.needs_go === true || (row.unacked_count || 0) > 0 ||
-        row.ttyd_up === false || (!meta.status_only && row.session_up === false);
+        (meta.driveable && row.ttyd_up === false) ||
+        (!meta.status_only && row.session_up === false);
     }).length;
     const terminals = cards.filter((meta) => meta.driveable).length;
     if (statTotalEl) statTotalEl.textContent = String(cards.length);
@@ -196,7 +197,11 @@
       // glance collapses to UNKNOWN. Surface it explicitly, don't read as idle.
       const labOk = data.lab_glance_ok !== false;
       const total = totalCardCount();
-      connEl.textContent = "live · " + m.size + " driveable / " + total + " seats" +
+      const driveable = layout
+        ? layout.plates.reduce((n, plate) =>
+            n + plate.cards.filter((card) => card.driveable).length, 0)
+        : 0;
+      connEl.textContent = "live · " + driveable + " driveable / " + total + " seats" +
         (labOk ? "" : " · ⚠ telemetry offline");
       connEl.className = labOk ? "conn ok" : "conn warn";
       renderSummary(labOk);
