@@ -112,6 +112,68 @@ function buildUnreadCopyPayload(alias, badge, rows = []) {
   return lines.join("\n");
 }
 
+// COCKPIT_DRAWER_COPY_BUTTON_FIX_1 — reconcile the unacked rows the cockpit panel
+// RENDERS (and the Copy buttons COPY) from the two bus surfaces so they can never
+// diverge:
+//   • /api/agents   → row.unacked_messages (status shape; can be lean/empty even
+//                     when unacked_count > 0 — the "status-only hydration" shape).
+//   • /api/messages → per-id detail rows (authenticated; carry body_preview).
+// Rules:
+//   1. Prefer row.unacked_messages.
+//   2. If it is empty but unacked_count > 0, fall back to the already-fetched
+//      detail rows still flagged unacked (acked === false) — the messages ARE
+//      there, just not in the status payload. Callers pass the IN-MEMORY detail
+//      list, so this never refetches and still yields rows / a stable placeholder
+//      while /api/messages is unavailable (bus degraded).
+//   3. Enrich every returned row with the matching detail's body_preview, so Copy
+//      emits id + from + topic + body preview and the render + copy paths share one
+//      source. Pure: no DOM, no fetch, no globals.
+function reconcileUnacked(row, details) {
+  var r = row || {};
+  var detailList = Array.isArray(details) ? details : [];
+  var byId = {};
+  for (var i = 0; i < detailList.length; i++) {
+    var d = detailList[i];
+    if (d && d.id !== undefined && d.id !== null) byId[String(d.id)] = d;
+  }
+  var base = Array.isArray(r.unacked_messages) ? r.unacked_messages : [];
+  var count = Math.floor(Number(r.unacked_count)) || 0;
+  if (!base.length && count > 0) {
+    base = detailList.filter(function (d) { return d && d.acked === false; });
+  }
+  return base.map(function (m) {
+    var m0 = m || {};
+    var id = m0.id !== undefined && m0.id !== null ? String(m0.id) : null;
+    var detail = id && byId[id] ? byId[id] : null;
+    var preview = m0.body_preview || (detail && detail.body_preview) || "";
+    return {
+      id: m0.id !== undefined ? m0.id : (detail ? detail.id : undefined),
+      topic: m0.topic || (detail && detail.topic) || null,
+      from_terminal: m0.from_terminal || (detail && detail.from_terminal) || null,
+      created_at: m0.created_at || (detail && detail.created_at) || null,
+      body_preview: preview,
+    };
+  });
+}
+
+// Shared `#id  topic  from` + body-preview formatter — the ONE source of truth for
+// both the card message-panel Copy and the terminal-drawer Copy. Emits the full
+// rendered row (id + from + topic + body preview) as plain text, and the
+// placeholder ONLY when there are genuinely no unacked rows. Pure.
+function formatUnackedSummary(title, rows) {
+  var list = Array.isArray(rows) ? rows : [];
+  var lines = list.map(function (m) {
+    var m0 = m || {};
+    var head = "#" + String(m0.id !== undefined && m0.id !== null ? m0.id : "?") +
+      "  " + String(m0.topic || "(no topic)") +
+      "  from " + String(m0.from_terminal || "?");
+    var preview = m0.body_preview ? "\n    " + String(m0.body_preview) : "";
+    return head + preview;
+  });
+  return String(title || "") + "\n" +
+    (lines.length ? lines.join("\n") : "(no unacknowledged messages)");
+}
+
 if (typeof window !== "undefined") {
   window.resolveGlanceState = resolveGlanceState;
   window.resolveStateClass = resolveStateClass;
@@ -120,7 +182,9 @@ if (typeof window !== "undefined") {
   window.amberState = amberState;
   window.formatUnreadAge = formatUnreadAge;
   window.buildUnreadCopyPayload = buildUnreadCopyPayload;
+  window.reconcileUnacked = reconcileUnacked;
+  window.formatUnackedSummary = formatUnackedSummary;
 }
 if (typeof module !== "undefined" && module.exports) {
-  module.exports = { resolveGlanceState, resolveStateClass, UNREAD_OLD_S, goAffordanceVisible, amberState, formatUnreadAge, buildUnreadCopyPayload };
+  module.exports = { resolveGlanceState, resolveStateClass, UNREAD_OLD_S, goAffordanceVisible, amberState, formatUnreadAge, buildUnreadCopyPayload, reconcileUnacked, formatUnackedSummary };
 }
