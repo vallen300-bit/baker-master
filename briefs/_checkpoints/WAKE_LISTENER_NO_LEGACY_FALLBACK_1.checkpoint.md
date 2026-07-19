@@ -4,8 +4,8 @@ attempt: 1
 dispatched_by: lead (bus #13635, Director-ordered parallel lane)
 report_topic: wake-listener-no-legacy-fallback-1
 repos:
-  - brisen-lab b1/wake-listener-no-legacy-fallback-1 @f2801b8 (off main @505f299)
-status: BUILD COMPLETE + pushed; report + codex-gate request posted to lead #13670. Awaiting lead codex gate -> merge -> deploy. Reconcile-retry (req3) dormant until deputy-codex lands the controller echo + receipt endpoint (cross-lane contract flagged #13670).
+  - brisen-lab b1/wake-listener-no-legacy-fallback-1 @2b05636 (off main @505f299)
+status: codex FAIL #13727 (2 P1s) RESOLVED @2b05636 (was @f2801b8); re-gate requested #13734. Awaiting lead re-gate -> merge -> deploy. Reconcile-retry (req3) + sent:false disposition BOTH deferred to a deputy-codex follow-up brief (lead ruling #13730). Today's quiet-uncertain sent:false gap accepted+documented.
 gate: codex bus gate on @f2801b8 -> lead merge
 ---
 
@@ -30,8 +30,19 @@ Brief = lead dispatch bus #13635 (Brief-C, self-contained). Repo brisen-lab,
   `brisen_lab_test` (dropped after). duplicate-spawn tests need opentelemetry (local-env dep
   gap, unrelated — they don't import the listener).
 
+## codex #13727 P1 fixes (@2b05636)
+- P1a: `_LocalWakeConfigError` raised on pre-send auth/request-build failure inside
+  `_post_controller_wake`; `classify_controller_failure` maps it to 'unreachable' ->
+  legacy fallback (README 'credentials unreadable -> legacy-fallback'). Split by PHASE:
+  pre-send cred ValueError = unreachable(legacy); post-send parse ValueError = ambiguous.
+- P1b: derived timeout — `_CONTROLLER_WORST_CASE_S`14.5 (command_timeout 10 + tmux 0.5 +
+  verify 1 + recovery 3) x `_CONTROLLER_TIMEOUT_MARGIN`1.4 = 20.3s default, env-overridable.
+  Chose Option A. Ambiguous handling unchanged (reconcile-when-available else LOUD stop).
+- Tests: 16 pass py3.9 + py3.12 (+credentials-unreadable-legacy, +timeout-env-override,
+  +classifier local-error branch).
+
 ## Next concrete step (owner = lead, then deputy-codex cross-lane)
-1. Lead: codex gate @f2801b8 -> merge -> Render deploy.
+1. Lead: re-gate codex @2b05636 -> merge -> Render deploy.
 2. deputy-codex (contract flagged #13670): controller echoes X-Wake-Request-Id into
    wake_events/audit + a receipt-read endpoint {url}/{request_id}->{"landed":bool}; then set
    WAKE_RECEIPT_URL in the listener launchd env to enable reconcile-retry.
