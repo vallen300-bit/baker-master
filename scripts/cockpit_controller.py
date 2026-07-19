@@ -159,6 +159,9 @@ NOTIFY_SOUND = "Ping"
 # Zero disables the loop; positive values are seconds and can be tuned without a
 # code change. Existing per-message dedupe and seat-floor guards contain repeats.
 BACKLOG_SWEEP_SECONDS = 600.0
+MESSAGE_PREVIEW_LIMIT = 12
+MESSAGE_PREVIEW_MAX_CHARS = 400
+MESSAGE_PREVIEW_CACHE_SECONDS = 10.0
 
 
 def load_notify_seats(static_dir: Path) -> set[str]:
@@ -180,6 +183,53 @@ def load_notify_seats(static_dir: Path) -> set[str]:
             if isinstance(card, dict) and card.get("notify_eligible") and card.get("slug"):
                 seats.add(str(card["slug"]))
     return seats
+
+
+def load_cockpit_layout_cards(static_dir: Path) -> tuple[tuple[str, str], ...]:
+    """Return valid layout slugs and aliases, including status-only cards."""
+    try:
+        raw = json.loads((static_dir / "cockpit_layout.json").read_text("utf-8"))
+    except (OSError, ValueError, TypeError):
+        return ()
+    out: list[tuple[str, str]] = []
+    plates = raw.get("plates") or raw.get("sections") or []
+    if not isinstance(plates, list):
+        return ()
+    for plate in plates:
+        plate_cards = (plate or {}).get("cards", []) if isinstance(plate, dict) else []
+        for card in plate_cards or []:
+            if not isinstance(card, dict):
+                continue
+            candidate = card.get("slug")
+            if isinstance(candidate, str) and SLUG_RE.fullmatch(candidate):
+                alias = card.get("alias")
+                if not isinstance(alias, str) or not ALIAS_RE.fullmatch(alias):
+                    alias = candidate
+                out.append((candidate, alias))
+    return tuple(out)
+
+
+def load_cockpit_layout_slugs(static_dir: Path) -> set[str]:
+    """Return valid slugs rendered by the generated cockpit layout."""
+    return {slug for slug, _alias in load_cockpit_layout_cards(static_dir)}
+
+
+def trim_message_preview(row: dict[str, Any]) -> dict[str, Any] | None:
+    """Project one authenticated Lab row onto the browser-safe preview shape."""
+    if not isinstance(row, dict) or row.get("id") is None:
+        return None
+    body_preview = row.get("body_preview")
+    if not isinstance(body_preview, str):
+        body_preview = ""
+    return {
+        "id": row.get("id"),
+        "from_terminal": row.get("from_terminal"),
+        "topic": row.get("topic"),
+        "kind": row.get("kind"),
+        "created_at": row.get("created_at"),
+        "acked": row.get("acknowledged_at") is not None,
+        "body_preview": body_preview[:MESSAGE_PREVIEW_MAX_CHARS],
+    }
 
 
 def compute_notifications(
@@ -324,6 +374,8 @@ class Settings:
     notify_cooldown_seconds: float = NOTIFY_COOLDOWN_SECONDS
     notify_sound: str = NOTIFY_SOUND
     lab_url: str = "https://brisen-lab.onrender.com/api/v2/terminals"
+    lab_messages_url: str = "https://brisen-lab.onrender.com/msg"
+    lab_key_dir: Path = Path(os.path.expanduser("~/.brisen-lab/keys"))
     lab_cache_seconds: float = 30.0
     lab_timeout_seconds: float = 5.0
     backlog_sweep_seconds: float = BACKLOG_SWEEP_SECONDS
@@ -371,6 +423,14 @@ class Settings:
             backlog_sweep_seconds=_float_env(
                 "COCKPIT_BACKLOG_SWEEP_SECONDS",
                 defaults.backlog_sweep_seconds,
+            ),
+            lab_messages_url=os.environ.get(
+                "COCKPIT_LAB_MESSAGES_URL", defaults.lab_messages_url
+            ),
+            lab_key_dir=Path(
+                os.path.expanduser(
+                    os.environ.get("COCKPIT_LAB_KEY_DIR", str(defaults.lab_key_dir))
+                )
             ),
             tmux_binary=os.environ.get("COCKPIT_TMUX_BINARY", defaults.tmux_binary),
             notify_enabled=os.environ.get(
@@ -1190,6 +1250,8 @@ def create_app(
     # for the 0→N transition detector (advanced by the lifespan poll loop).
     app.state.notify_prev = {}
     app.state.notify_last_fired = {}
+    message_preview_cache: dict[str, tuple[float, dict[str, Any]]] = {}
+    message_preview_lock: asyncio.Lock | None = None
 
     def manifest() -> tuple[ManifestEntry, ...]:
         try:
@@ -1200,6 +1262,75 @@ def create_app(
                 status_code=503,
                 detail="launch manifest unavailable",
             ) from exc
+
+    def message_slugs() -> set[str]:
+        return {entry.slug for entry in manifest()} | load_cockpit_layout_slugs(
+            config.static_dir
+        )
+
+    async def load_message_previews(slug: str) -> dict[str, Any]:
+        nonlocal message_preview_lock
+        if message_preview_lock is None:
+            message_preview_lock = asyncio.Lock()
+        now = time.monotonic()
+        cached = message_preview_cache.get(slug)
+        if cached is not None and cached[0] > now:
+            return cached[1]
+
+        async with message_preview_lock:
+            now = time.monotonic()
+            cached = message_preview_cache.get(slug)
+            if cached is not None and cached[0] > now:
+                return cached[1]
+
+            key_path = config.lab_key_dir / slug
+            try:
+                terminal_key = key_path.read_text(encoding="utf-8").strip()
+            except OSError:
+                result = {"available": False, "reason": "no key"}
+                message_preview_cache[slug] = (
+                    time.monotonic() + MESSAGE_PREVIEW_CACHE_SECONDS,
+                    result,
+                )
+                return result
+            if not terminal_key:
+                result = {"available": False, "reason": "no key"}
+                message_preview_cache[slug] = (
+                    time.monotonic() + MESSAGE_PREVIEW_CACHE_SECONDS,
+                    result,
+                )
+                return result
+
+            result: dict[str, Any]
+            try:
+                async with httpx.AsyncClient(
+                    timeout=config.lab_timeout_seconds
+                ) as client:
+                    response = await client.get(
+                        f"{config.lab_messages_url.rstrip('/')}/{slug}",
+                        params={"limit": MESSAGE_PREVIEW_LIMIT},
+                        headers={"X-Terminal-Key": terminal_key},
+                    )
+                    response.raise_for_status()
+                    payload = response.json()
+                raw_rows = (
+                    payload.get("messages", [])
+                    if isinstance(payload, dict) else []
+                )
+                rows = [
+                    trimmed
+                    for row in raw_rows
+                    if (trimmed := trim_message_preview(row)) is not None
+                ] if isinstance(raw_rows, list) else []
+                result = {"available": True, "messages": rows}
+            except (OSError, httpx.HTTPError, ValueError, TypeError):
+                result = {"available": False}
+
+            message_preview_cache[slug] = (
+                time.monotonic() + MESSAGE_PREVIEW_CACHE_SECONDS,
+                result,
+            )
+            return result
 
     async def require_websocket_auth(websocket: WebSocket) -> bool:
         if not _allowed_authority(websocket.headers, config):
@@ -1252,7 +1383,33 @@ def create_app(
                     "local_working": local_working,   # D8 — surfaced for tests/transparency
                 }
             )
+        manifest_slugs = {entry.slug for entry in entries}
+        # Status-only app/service cards are intentionally absent from the launch
+        # manifest, but still need a live /api/agents row so their bus envelope
+        # and lazy authenticated preview panel can render.
+        for slug, alias in load_cockpit_layout_cards(config.static_dir):
+            if slug in manifest_slugs:
+                continue
+            values = lab.get(slug, {})
+            glance_fields = {field: values.get(field) for field in GLANCE_FIELDS}
+            agents.append(
+                {
+                    "slug": slug,
+                    "alias": alias,
+                    "port": None,
+                    "session_up": False,
+                    "ttyd_up": False,
+                    **glance_fields,
+                    "local_working": False,
+                }
+            )
         return {"agents": agents, "lab_glance_ok": bool(lab_ok)}
+
+    @app.get("/api/messages/{slug}")
+    async def get_messages(slug: str):
+        if slug not in message_slugs():
+            raise HTTPException(status_code=404, detail="unknown cockpit seat")
+        return await load_message_previews(slug)
 
     @app.post("/api/sessions/{slug}/start")
     async def start_session(slug: str, request: Request):
