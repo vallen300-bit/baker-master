@@ -4,7 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Baker Cockpit</title>
-<link rel="stylesheet" href="cockpit.css">
+<link rel="stylesheet" href="cockpit.css?v=1">
 </head>
 <body>
 <header class="cockpit-header">
@@ -12,10 +12,8 @@
   <div class="tab">Control Room</div>
   <div class="tab active">Cockpit</div>
   <div class="spacer"></div>
-  <!-- NOTIFY_SLICE — mute toggle for controller-side unread-bus banners. Source of
-       truth is the controller (page-closed firing); this hydrates from /api/notify/state. -->
-  <button class="tab notify-toggle" id="notify-toggle" type="button"
-          aria-pressed="false" title="Mute unread-bus notifications">🔔 Alerts</button>
+  <!-- COCKPIT_REVAMP_HEADER_1 (spec item 6): bell removed; freed corner reserved,
+       empty (future tenant: fleet cost). The one green health line lives here. -->
   <div class="conn" id="conn">connecting…</div>
 </header>
 
@@ -24,16 +22,13 @@
     <div class="summary-copy">
       <div class="eyebrow">LIVE OPERATIONS <span>·</span> BRISEN LAB</div>
       <div class="summary-title-row">
-        <h1 id="cockpit-title">Fleet cockpit</h1>
+        <h1 id="cockpit-title">FLEET COCKPIT</h1>
         <span class="summary-status" id="sync-note">Waiting for telemetry</span>
       </div>
       <p>Every terminal, app seat, desk, and service in one scan surface.</p>
     </div>
-    <dl class="summary-stats" aria-label="Fleet summary">
-      <div><dt>Seats</dt><dd id="stat-total">—</dd></div>
-      <div><dt>Attention</dt><dd id="stat-attention">—</dd></div>
-      <div><dt>Terminals</dt><dd id="stat-terminals">—</dd></div>
-    </dl>
+    <!-- COCKPIT_REVAMP_HEADER_1 (spec item 6): oversized digit block removed;
+         live counts live in the green header line. -->
   </section>
   <div class="fleet-toolbar">
     <div class="roster-title">Fleet roster <span id="roster-note">43 seats · grouped by operating role</span></div>
@@ -59,6 +54,10 @@
       <span class="sub">this is the REAL session — the native Terminal window mirrors it</span>
     </div>
     <div class="spacer"></div>
+    <!-- Copy the open seat's unacked bus summary (id · topic · from). Shown only
+         when the seat has unacked rows (JS renderPanelUnacked). Same helper as the
+         card message-panel Copy. -->
+    <button class="btn" id="term-copy" type="button" title="Copy unacknowledged summary" hidden>Copy</button>
     <!-- hidden until a seat that is awaiting a GO is opened (JS syncPanelGo). -->
     <button class="btn go" id="term-go" type="button" title="Send Enter (answer GO)" hidden>GO ⏎</button>
     <div id="x" role="button" tabindex="0" aria-label="Close">✕</div>
@@ -84,7 +83,7 @@
   <div id="msg-body"></div>
 </div>
 
-<script src="glance_state.js"></script>
-<script src="cockpit.js"></script>
+<script src="glance_state.js?v=1"></script>
+<script src="cockpit.js?v=1"></script>
 </body>
 </html>

@@ -21,6 +21,34 @@ function resolveGlanceState({ unacked, isWorking, hasTelemetry, isDoneGreen, nee
   return isDoneGreen ? "DONE" : "IDLE";
 }
 
+// COCKPIT_REVAMP_COLORS_1 (spec @d5e25efa item 3, Director-ratified 2026-07-19) —
+// FINAL cockpit state palette. Pure row → one-of-six st-* class resolver.
+//   st-running     bright green    is_working
+//   st-go          bright blue     needs_go             (pulsating)
+//   st-unread-old  bright red      unread > 600s
+//   st-unread      muted amber     unread 0–600s        (from second zero)
+//   st-offline     muted red       up but no signal     (pulsating)
+//   st-idle        muted grey      everything else / not-started
+// Precedence: running > GO > unread-old > unread > offline > idle — a working seat
+// with unread mail reads running green; GO outranks unread; unread outranks offline.
+// QUIET-WHEN-HEALTHY (spec item 7): a cleanly not-started seat (session down) stays
+// muted grey, NOT offline-red — its Start button is the affordance; offline-red is
+// reserved for a seat that is UP but silent (terminal down / no telemetry while
+// expected up), which is the "no-signal + offline combined" case that needs eyes.
+var UNREAD_OLD_S = 600; // >10 min unread flips muted-amber → bright red (named, not magic)
+function resolveStateClass(row, sessionUp) {
+  var r = row || {};
+  if (r.is_working === true) return "st-running";
+  if (r.needs_go === true) return "st-go";
+  var unacked = Math.floor(Number(r.unacked_count)) || 0;
+  if (unacked > 0) {
+    var age = Number(r.oldest_unacked_age_sec) || 0;
+    return age > UNREAD_OLD_S ? "st-unread-old" : "st-unread";
+  }
+  if (sessionUp === true && (r.ttyd_up === false || r.has_telemetry === false)) return "st-offline";
+  return "st-idle";
+}
+
 // D5 amber-state predicate: a seat shows the AMBER "unread" card state when it
 // has unacked bus messages and is NOT working (and not awaiting GO — needs_go
 // owns the green state). This is exactly resolveGlanceState === "NEW", exposed
@@ -82,11 +110,13 @@ function buildUnreadCopyPayload(alias, badge, rows = []) {
 
 if (typeof window !== "undefined") {
   window.resolveGlanceState = resolveGlanceState;
+  window.resolveStateClass = resolveStateClass;
+  window.UNREAD_OLD_S = UNREAD_OLD_S;
   window.goAffordanceVisible = goAffordanceVisible;
   window.amberState = amberState;
   window.formatUnreadAge = formatUnreadAge;
   window.buildUnreadCopyPayload = buildUnreadCopyPayload;
 }
 if (typeof module !== "undefined" && module.exports) {
-  module.exports = { resolveGlanceState, goAffordanceVisible, amberState, formatUnreadAge, buildUnreadCopyPayload };
+  module.exports = { resolveGlanceState, resolveStateClass, UNREAD_OLD_S, goAffordanceVisible, amberState, formatUnreadAge, buildUnreadCopyPayload };
 }
