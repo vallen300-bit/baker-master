@@ -1,6 +1,7 @@
 import asyncio
 import base64
 from dataclasses import replace
+from datetime import datetime, timezone
 import json
 from pathlib import Path
 import subprocess
@@ -401,11 +402,22 @@ def test_wake_row_selection_uses_server_truth_with_legacy_fallback():
             "wake_obligation": True,
         },
     ]
-    assert controller._oldest_wake_row(mixed)["id"] == 11
+    assert controller._oldest_wake_row(mixed, aggregate_count=1)["id"] == 11
 
     # A pre-WAKE_FORCE Lab has no per-row marker: preserve legacy selection.
     legacy = [{"id": 20, "created_at": "a"}, {"id": 21, "created_at": "b"}]
     assert controller._oldest_wake_row(legacy)["id"] == 20
+
+
+def test_aggregate_present_without_row_marker_fails_closed():
+    row = {
+        "wake_obligation_count": 1,
+        "unacked_messages": [{"id": 30, "created_at": "a"}],
+    }
+    assert controller._oldest_wake_row(
+        row["unacked_messages"], aggregate_count=row["wake_obligation_count"]
+    ) is None
+    assert controller.wake_skip_reason(row) == "no wake obligation message id"
 
 
 def test_obligation_count_without_authoritative_row_fails_closed():
@@ -423,7 +435,9 @@ def test_obligation_count_without_authoritative_row_fails_closed():
             }
         ],
     }
-    assert controller._oldest_wake_row(row["unacked_messages"]) is None
+    assert controller._oldest_wake_row(
+        row["unacked_messages"], aggregate_count=row["wake_obligation_count"]
+    ) is None
     assert controller.wake_skip_reason(row) == "no wake obligation message id"
 
 
@@ -987,6 +1001,52 @@ def test_backlog_sweep_ignores_display_only_unacked_without_wake_obligation(
         "send_wake",
         lambda *_args, **_kwargs: (_ for _ in ()).throw(
             AssertionError("display-only backlog must not wake")
+        ),
+    )
+
+    assert asyncio.run(app.state.backlog_sweep_tick()) == []
+
+
+def test_backlog_sweep_ages_only_authoritative_wake_rows(tmp_path, monkeypatch):
+    settings = replace(_settings(tmp_path), backlog_sweep_seconds=600)
+    now = datetime(2026, 7, 20, 12, 0, tzinfo=timezone.utc).timestamp()
+    app = controller.create_app(
+        settings,
+        lab_glance=FakeLab(
+            {
+                "b3": {
+                    "is_working": False,
+                    "unacked_count": 2,
+                    "wake_obligation_count": 1,
+                    # The display-only broadcast is old; the obligation is fresh.
+                    "oldest_unacked_age_sec": 3600,
+                    "unacked_messages": [
+                        {
+                            "id": 1,
+                            "kind": "broadcast",
+                            "topic": "fleet/status",
+                            "created_at": "2026-07-20T11:00:00Z",
+                            "wake_obligation": False,
+                        },
+                        {
+                            "id": 2,
+                            "kind": "dispatch",
+                            "topic": "real/work",
+                            "created_at": "2026-07-20T11:59:30Z",
+                            "wake_obligation": True,
+                        },
+                    ],
+                }
+            }
+        ),
+    )
+    monkeypatch.setattr(controller.time, "time", lambda: now)
+    monkeypatch.setattr(controller, "tmux_session_names", lambda _settings: {"b3"})
+    monkeypatch.setattr(
+        controller,
+        "send_wake",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(
+            AssertionError("fresh obligation must not trigger a sweep")
         ),
     )
 

@@ -14,6 +14,7 @@ import base64
 import binascii
 import contextlib
 from dataclasses import dataclass
+from datetime import datetime, timezone
 import hmac
 import json
 import logging
@@ -688,30 +689,88 @@ def _oldest_unacked_row(messages: Any) -> dict[str, Any] | None:
     return min(rows, key=lambda m: str(m.get("created_at") or ""))
 
 
-def _wake_message_rows(messages: Any) -> list[dict[str, Any]]:
+_WAKE_COUNT_UNSET = object()
+
+
+def _wake_message_rows(
+    messages: Any,
+    *,
+    aggregate_count: Any = _WAKE_COUNT_UNSET,
+) -> list[dict[str, Any]]:
     """Return only rows Lab classifies as actionable wake obligations.
 
     WAKE_FORCE_AUTHORITATIVE_READ_1 makes the server's stored-data predicate
-    authoritative at row selection as well as at the aggregate count. A legacy
-    Lab has no per-row marker, so preserve its all-unacked behavior until the
-    additive field is deployed. Once any row is marked, unmarked/false rows are
-    display-only and must never become a click/sweep target.
+    authoritative at row selection as well as at the aggregate count. A present
+    aggregate means the server contract is authoritative even when the capped
+    row payload carries no per-row marker; in that shape, fail closed. A legacy
+    Lab has neither aggregate nor marker, so preserve its all-unacked behavior.
     """
     rows = [
         m for m in (messages or [])
         if isinstance(m, dict) and m.get("id") is not None
     ]
+    if aggregate_count is not _WAKE_COUNT_UNSET and aggregate_count is not None:
+        return [row for row in rows if row.get("wake_obligation") is True]
     if not any("wake_obligation" in row for row in rows):
         return rows
     return [row for row in rows if row.get("wake_obligation") is True]
 
 
-def _oldest_wake_row(messages: Any) -> dict[str, Any] | None:
+def _oldest_wake_row(
+    messages: Any,
+    *,
+    aggregate_count: Any = _WAKE_COUNT_UNSET,
+) -> dict[str, Any] | None:
     """The oldest server-authorized wake row, or None."""
-    rows = _wake_message_rows(messages)
+    rows = _wake_message_rows(messages, aggregate_count=aggregate_count)
     if not rows:
         return None
     return min(rows, key=lambda m: str(m.get("created_at") or ""))
+
+
+def _created_at_epoch(value: Any) -> float | None:
+    """Parse a Lab ISO timestamp without turning malformed data into age."""
+    if not isinstance(value, str) or not value.strip():
+        return None
+    text = value.strip()
+    if text.endswith("Z"):
+        text = text[:-1] + "+00:00"
+    try:
+        parsed = datetime.fromisoformat(text)
+    except ValueError:
+        return None
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=timezone.utc)
+    return parsed.timestamp()
+
+
+def _oldest_wake_age_sec(glance_row: dict[str, Any]) -> float:
+    """Age only the rows the server says are wake obligations.
+
+    ``oldest_unacked_age_sec`` covers every display row, including broadcasts
+    and status messages. Once the aggregate is present, using it for the sweep
+    would let an old display-only row re-wake a seat with a fresh obligation.
+    Timestamp parsing fails closed for the authoritative shape; legacy rows
+    retain the pre-field aggregate age behavior.
+    """
+    aggregate_count = glance_row.get(WAKE_OBLIGATION_FIELD)
+    rows = _wake_message_rows(
+        glance_row.get("unacked_messages"), aggregate_count=aggregate_count,
+    )
+    if not rows:
+        return 0.0
+    if aggregate_count is None:
+        try:
+            return max(0.0, float(glance_row.get("oldest_unacked_age_sec") or 0))
+        except (TypeError, ValueError):
+            return 0.0
+    now_epoch = time.time()
+    ages = [
+        max(0.0, now_epoch - created_at)
+        for row in rows
+        if (created_at := _created_at_epoch(row.get("created_at"))) is not None
+    ]
+    return max(ages, default=0.0)
 
 
 def _oldest_unacked(messages: Any) -> tuple[Any, str] | None:
@@ -752,7 +811,11 @@ def compose_click_wake_line(glance_row: dict[str, Any] | None, *, limit: int = W
     The oldest #id stays FIRST so ``_composer_holds``'s ``#\\d+`` id-match (which reads
     the first id) still anchors on the dedupe key. ``from sender`` is included only
     when the message row carries ``from_terminal`` (fail-soft on the leaner glance)."""
-    rows = _wake_message_rows((glance_row or {}).get("unacked_messages"))
+    row = glance_row or {}
+    rows = _wake_message_rows(
+        row.get("unacked_messages"),
+        aggregate_count=row.get(WAKE_OBLIGATION_FIELD),
+    )
     rows.sort(key=lambda m: str(m.get("created_at") or ""))
     total = wake_obligation_count(glance_row or {})
     if not isinstance(total, int) or total < len(rows):
@@ -798,7 +861,10 @@ def wake_skip_reason(glance_row: dict[str, Any] | None) -> str | None:
         if glance_row.get(WAKE_OBLIGATION_FIELD) is not None:
             return "no wake obligation"
         return "no unacked"
-    if _oldest_wake_row(glance_row.get("unacked_messages")) is None:
+    if _oldest_wake_row(
+        glance_row.get("unacked_messages"),
+        aggregate_count=glance_row.get(WAKE_OBLIGATION_FIELD),
+    ) is None:
         if glance_row.get(WAKE_OBLIGATION_FIELD) is not None:
             return "no wake obligation message id"
         return "no unacked message id"
@@ -980,7 +1046,11 @@ def send_wake(
     reason = wake_skip_reason(glance_row)
     if reason is not None:
         if audit and audit_source:
-            oldest = _oldest_wake_row((glance_row or {}).get("unacked_messages"))
+            row = glance_row or {}
+            oldest = _oldest_wake_row(
+                row.get("unacked_messages"),
+                aggregate_count=row.get(WAKE_OBLIGATION_FIELD),
+            )
             _audit_wake(
                 settings,
                 entry.slug,
@@ -991,7 +1061,10 @@ def send_wake(
                 source=audit_source,
             )
         return {"ok": True, "sent": False, "skipped": reason, "slug": entry.slug}
-    oldest = _oldest_wake_row(glance_row.get("unacked_messages"))
+    oldest = _oldest_wake_row(
+        glance_row.get("unacked_messages"),
+        aggregate_count=glance_row.get(WAKE_OBLIGATION_FIELD),
+    )
     if oldest is None:  # defensive: wake_skip_reason already checks this condition
         if audit and audit_source:
             _audit_wake(
@@ -1718,10 +1791,7 @@ def create_app(
         outcomes: list[dict[str, Any]] = []
         for entry in manifest():
             row = rows.get(entry.slug) or {}
-            try:
-                oldest_age = float(row.get("oldest_unacked_age_sec") or 0)
-            except (TypeError, ValueError):
-                oldest_age = 0.0
+            oldest_age = _oldest_wake_age_sec(row)
             if (
                 entry.slug not in sessions
                 or row.get("is_working") is True
