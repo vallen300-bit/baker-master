@@ -672,6 +672,57 @@ def _oldest_unacked(messages: Any) -> tuple[Any, str] | None:
     return oldest.get("id"), str(oldest.get("topic") or "")
 
 
+# COCKPIT_CARD_CLICK_WAKE_INJECT_1 — a Director card-click nudge carries the payload
+# he pastes today: a count + the top-N oldest unacked (#id topic (from sender)) + a
+# "+K more" tail. Only click-origin wakes use this richer line; the sweep/auto wake
+# keeps the terse single-message form (so its dedupe key + tests are unchanged).
+WAKE_NUDGE_TOP_N = 3
+WAKE_CLICK_ORIGIN = "cockpit_click"
+# All origins that may legitimately appear in the wake audit log. "sweep" is
+# produced ONLY by the internal backlog-sweep loop, which calls send_wake directly.
+_WAKE_AUDIT_ORIGINS = frozenset({WAKE_CLICK_ORIGIN, "sweep"})
+# Origins a CLIENT (browser card click) is allowed to claim on the HTTP /wake
+# endpoint. Deliberately excludes "sweep": an authenticated browser must not be
+# able to label its wake as an internal sweep (codex FAIL #13397 P2c) — that would
+# forge the audit source and let a client borrow the sweep's behaviour envelope.
+_WAKE_CLIENT_ORIGINS = frozenset({WAKE_CLICK_ORIGIN})
+# Server-side click debounce (codex FAIL #13397 P2a). A click nudge sets force=1,
+# which INTENTIONALLY bypasses the per-message dedupe + seat-floor (merged
+# WAKE_INJECT arc — do-not-touch); the only idempotence was a per-PAGE JS debounce
+# that does not carry across a reload / second tab / delayed repeat. This per-slug
+# server window coalesces repeated click nudges regardless of the originating page.
+# Mirrors cockpit.js WAKE_CLICK_DEBOUNCE_MS (4000).
+WAKE_CLICK_DEBOUNCE_SECONDS = 4.0
+
+
+def compose_click_wake_line(glance_row: dict[str, Any] | None, *, limit: int = WAKE_NUDGE_TOP_N) -> str:
+    """The click-origin nudge line: the [wake] tag + a 'check your bus' instruction
+    naming the top-N oldest unacked as '#id topic (from sender)', then '+K more'.
+
+    The oldest #id stays FIRST so ``_composer_holds``'s ``#\\d+`` id-match (which reads
+    the first id) still anchors on the dedupe key. ``from sender`` is included only
+    when the message row carries ``from_terminal`` (fail-soft on the leaner glance)."""
+    rows = [
+        m for m in ((glance_row or {}).get("unacked_messages") or [])
+        if isinstance(m, dict) and m.get("id") is not None
+    ]
+    rows.sort(key=lambda m: str(m.get("created_at") or ""))
+    total = (glance_row or {}).get("unacked_count")
+    if not isinstance(total, int) or total < len(rows):
+        total = len(rows)
+    shown = rows[: max(1, limit)]
+    parts = []
+    for m in shown:
+        frag = f"#{m.get('id')} {str(m.get('topic') or '(no topic)')}"
+        sender = str(m.get("from_terminal") or "").strip()
+        if sender:
+            frag += f" (from {sender})"
+        parts.append(frag)
+    more = total - len(shown)
+    tail = f" +{more} more" if more > 0 else ""
+    return f"{WAKE_ORIGIN_TAG} check your bus: {total} unacked — {', '.join(parts)}{tail}".rstrip()
+
+
 def _wake_repeat_window(message: dict[str, Any]) -> float:
     """Return the repeat window for one message's typed intent."""
     kinds = {
@@ -902,7 +953,12 @@ def send_wake(
     msg_id = oldest.get("id")
     topic = str(oldest.get("topic") or "")
     repeat_window = _wake_repeat_window(oldest)
-    line = f"{WAKE_ORIGIN_TAG} check bus #{msg_id} {topic}".rstrip()
+    # Click-origin nudges carry the richer count + top-N + sender payload; the
+    # sweep/auto wake keeps the terse single-message line (dedupe key unchanged).
+    if audit_source == WAKE_CLICK_ORIGIN:
+        line = compose_click_wake_line(glance_row)
+    else:
+        line = f"{WAKE_ORIGIN_TAG} check bus #{msg_id} {topic}".rstrip()
 
     state = last_wake.get(entry.slug)
     if not isinstance(state, dict):
@@ -943,6 +999,12 @@ def send_wake(
         if isinstance(previous_message, dict)
         else previous_message
     )
+    # NOTE (COCKPIT_CARD_CLICK_WAKE_INJECT_1 item 4): force intentionally bypasses
+    # this per-message dedupe — that is the merged WAKE_INJECT arc's ratified
+    # behavior (test_send_wake_force_bypasses_dedupe_but_still_submits) and this
+    # brief's "Do NOT Touch wake dedupe/typed-repeat logic" holds it. Double-click
+    # idempotence is therefore enforced at the click layer (cockpit.js per-slug
+    # debounce), not here — so the protected wake logic is left unchanged.
     if (
         not force
         and previous_message_at is not None
@@ -982,6 +1044,31 @@ def send_wake(
             )
         return {"ok": True, "sent": False, "skipped": "seat_floor", "slug": entry.slug}
 
+    # P2a (codex FAIL #13397): the two guards above are `not force`-gated, so a click
+    # nudge (force=1) skips both by design. That left idempotence to a per-PAGE JS
+    # debounce, which does NOT survive a reload, a second tab, or a delayed repeat —
+    # each of those re-POSTs and double-injects. This is an INDEPENDENT per-slug click
+    # window (its own `last_click_injection` key; it never reads or writes the protected
+    # message_last / last_injection dedupe state), so it coalesces click nudges from any
+    # page/tab without touching the merged WAKE_INJECT arc's do-not-touch logic.
+    if audit_source == WAKE_CLICK_ORIGIN:
+        previous_click = state.get("last_click_injection")
+        if (
+            isinstance(previous_click, (int, float))
+            and (now - previous_click) < WAKE_CLICK_DEBOUNCE_SECONDS
+        ):
+            if audit:
+                _audit_wake(
+                    settings,
+                    entry.slug,
+                    msg_id,
+                    topic,
+                    line,
+                    skipped="click_deduped",
+                    source=audit_source,
+                )
+            return {"ok": True, "sent": False, "skipped": "click_deduped", "slug": entry.slug}
+
     # D3 — visible [wake] origin tag so freeform seat input is attributable at a
     # glance (WAKE_INJECT_SUBMIT_FIX_2). The nudge stays `check bus #<id> <topic>`.
     # Realise the injection from wake_inject_writes so the write pattern has ONE
@@ -1011,6 +1098,9 @@ def send_wake(
         LOG.warning("wake submit-Return failed for %s (wake already sent): %s",
                     entry.slug, resubmit.stderr.strip())
     state["last_injection"] = now
+    if audit_source == WAKE_CLICK_ORIGIN:
+        # Arm the P2a per-slug click-debounce window (see the guard above).
+        state["last_click_injection"] = now
     message_last[message_key] = {"at": now, "window": repeat_window}
     suppressed_count = int(suppressed_last.pop(message_key, 0))
     if audit:
@@ -1436,22 +1526,34 @@ def create_app(
         lab = await glance.read()
         row = lab.get(entry.slug) or {}
         force = request.query_params.get("force") == "1"
+        # COCKPIT_CARD_CLICK_WAKE_INJECT_1 — tag the origin so a Director card click
+        # is attributable in wake_audit.log and gets the richer nudge line. Only a
+        # known origin is honoured (never a caller-supplied free string).
+        origin = request.query_params.get("origin")
+        # Client may claim cockpit_click only; a spoofed origin=sweep is dropped to
+        # None so it can neither forge the audit source nor borrow sweep behaviour.
+        audit_source = origin if origin in _WAKE_CLIENT_ORIGINS else None
         try:
             result = send_wake(
                 config, entry, row,
                 now=time.monotonic(), last_wake=app.state.wake_last,
-                force=force,
+                force=force, audit_source=audit_source,
             )
-            if result.get("skipped") == "no unacked":
+            if result.get("skipped") in ("no unacked", "no unacked message id"):
                 # The Lab has its own short cache, and this controller has a
                 # separate glance cache. A cached zero must not be authoritative
                 # for a wake decision; one forced read closes the stale-glance gap.
+                # "no unacked message id" is the same staleness in a leaner shape
+                # (codex FAIL #13397 P1): a card hydrated status-only via /api/agents
+                # carries unacked_count>0 but unacked_messages=None, so wake_skip_reason
+                # returns "no unacked message id" and the click would silently no-op —
+                # a fresh read carries the message rows and the second send_wake sends.
                 fresh_lab = await _fresh_glance_read()
                 fresh_row = fresh_lab.get(entry.slug) or {}
                 result = send_wake(
                     config, entry, fresh_row,
                     now=time.monotonic(), last_wake=app.state.wake_last,
-                    force=force,
+                    force=force, audit_source=audit_source,
                 )
             return result
         except (OSError, RuntimeError, subprocess.TimeoutExpired) as exc:

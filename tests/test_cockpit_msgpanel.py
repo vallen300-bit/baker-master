@@ -55,6 +55,11 @@ def test_panel_lazily_merges_authenticated_body_previews():
 
 
 def test_summary_counts_only_driveable_terminal_attention():
-    assert "(meta.driveable && row.ttyd_up === false)" in JS
+    # Realigned to the ratified COCKPIT_REVAMP merge (b7007c84): the oversized digit
+    # block (with its needs_go/ttyd-down "Attention" count) was removed (spec item 6),
+    # and "driveable" was relabeled "with terminal" in the one green header line. The
+    # surviving intent — the header counts driveable terminals from the layout — is
+    # kept. (Merge-integration fix: the pre-merge assertions referenced removed code.)
     assert "const driveable = layout" in JS
-    assert '" driveable / " + total + " seats"' in JS
+    assert "card.driveable).length" in JS
+    assert '" with terminal / " + total + " seats"' in JS

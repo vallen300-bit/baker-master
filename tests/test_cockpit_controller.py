@@ -473,6 +473,56 @@ def test_start_go_are_allowlisted_and_use_exact_tmux_argv(tmp_path, monkeypatch)
     assert calls[2] == ["tmux", "send-keys", "-t", "b3", "Enter"]
 
 
+def _click_wake_app(tmp_path, monkeypatch):
+    """A wake app whose send_wake is stubbed to capture the audit_source kwarg."""
+    settings = _settings(tmp_path)
+    app = controller.create_app(
+        settings,
+        lab_glance=FakeLab(
+            {"b3": {"is_working": False, "needs_go": False, "unacked_count": 1,
+                    "unacked_messages": [{"id": 1, "topic": "t", "created_at": "z"}]}}
+        ),
+    )
+    monkeypatch.setattr(controller, "tmux_session_names", lambda _s: {"b3"})
+    captured = {}
+
+    def fake_send_wake(*args, **kwargs):
+        captured["audit_source"] = kwargs.get("audit_source")
+        return {"ok": True, "sent": True, "slug": "b3"}
+
+    monkeypatch.setattr(controller, "send_wake", fake_send_wake)
+    return TestClient(app), captured
+
+
+def test_wake_endpoint_tags_cockpit_click_origin(tmp_path, monkeypatch):
+    """COCKPIT_CARD_CLICK_WAKE_INJECT_1 — a card click passes origin=cockpit_click
+    through to the wake audit source."""
+    client, captured = _click_wake_app(tmp_path, monkeypatch)
+    r = client.post("/api/sessions/b3/wake?force=1&origin=cockpit_click",
+                    headers={"Host": "127.0.0.1:7800", **_auth()})
+    assert r.status_code == 200
+    assert captured["audit_source"] == "cockpit_click"
+
+
+def test_wake_endpoint_rejects_unknown_origin(tmp_path, monkeypatch):
+    """A caller-supplied free string is never used as the audit source (allow-list)."""
+    client, captured = _click_wake_app(tmp_path, monkeypatch)
+    r = client.post("/api/sessions/b3/wake?origin=evil",
+                    headers={"Host": "127.0.0.1:7800", **_auth()})
+    assert r.status_code == 200
+    assert captured["audit_source"] is None
+
+
+def test_wake_endpoint_rejects_client_spoofed_sweep_origin(tmp_path, monkeypatch):
+    """P2c (codex FAIL #13397): a client may claim cockpit_click only. A browser that
+    POSTs origin=sweep must NOT forge the internal sweep audit source — it drops to None."""
+    client, captured = _click_wake_app(tmp_path, monkeypatch)
+    r = client.post("/api/sessions/b3/wake?force=1&origin=sweep",
+                    headers={"Host": "127.0.0.1:7800", **_auth()})
+    assert r.status_code == 200
+    assert captured["audit_source"] is None
+
+
 def test_wake_endpoint_passes_force_query_flag(tmp_path, monkeypatch):
     settings = _settings(tmp_path)
     app = controller.create_app(
@@ -546,6 +596,51 @@ def test_wake_endpoint_rechecks_after_stale_no_unacked_glance(tmp_path, monkeypa
     assert lab.force_refresh_calls == 1
     assert len(calls) == 2
     assert calls[1][0]["unacked_count"] == 1
+
+
+def test_wake_endpoint_rechecks_after_lean_no_message_id_glance(tmp_path, monkeypatch):
+    """P1 (codex FAIL #13397): a card hydrated status-only via /api/agents carries
+    unacked_count>0 but unacked_messages=None, so send_wake skips 'no unacked message
+    id'. The endpoint must still force a fresh read — which DOES carry the message rows
+    — so a Director card click on that lean shape actually wakes the seat."""
+    settings = _settings(tmp_path)
+    lab = RefreshingFakeLab(
+        {"b3": {"is_working": False, "unacked_count": 2, "unacked_messages": None}},
+        {
+            "b3": {
+                "is_working": False,
+                "unacked_count": 2,
+                "unacked_messages": [
+                    {
+                        "id": 13416,
+                        "kind": "dispatch",
+                        "topic": "cockpit-card-click-wake-inject-1",
+                        "created_at": "2026-07-19T15:00:00Z",
+                    }
+                ],
+            }
+        },
+    )
+    app = controller.create_app(settings, lab_glance=lab)
+    monkeypatch.setattr(controller, "tmux_session_names", lambda _settings: {"b3"})
+    calls = []
+
+    def fake_send_wake(*args, **kwargs):
+        calls.append((args[2], kwargs))
+        if len(calls) == 1:
+            return {"ok": True, "sent": False, "skipped": "no unacked message id", "slug": "b3"}
+        return {"ok": True, "sent": True, "slug": "b3"}
+
+    monkeypatch.setattr(controller, "send_wake", fake_send_wake)
+    response = TestClient(app).post(
+        "/api/sessions/b3/wake?force=1&origin=cockpit_click",
+        headers={"Host": "127.0.0.1:7800", **_auth()},
+    )
+
+    assert response.status_code == 200
+    assert lab.force_refresh_calls == 1
+    assert len(calls) == 2
+    assert calls[1][0]["unacked_messages"][0]["id"] == 13416
 
 
 def test_backlog_sweep_tick_wakes_old_idle_session(tmp_path, monkeypatch):
