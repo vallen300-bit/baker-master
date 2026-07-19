@@ -71,6 +71,21 @@ class RefreshingFakeLab:
         return self.refreshed
 
 
+class FailingRefreshFakeLab:
+    """Initial authoritative miss followed by a failed forced Lab refresh."""
+    def __init__(self):
+        self.last_ok = True
+        self.force_refresh_calls = 0
+
+    async def read(self):
+        return {}
+
+    async def force_refresh(self):
+        self.force_refresh_calls += 1
+        self.last_ok = False
+        return {}
+
+
 def _prober(up_slugs):
     """Fake ttyd prober: reports the given slugs as reachable, all others down."""
     up = set(up_slugs)
@@ -596,6 +611,129 @@ def test_wake_endpoint_rechecks_after_stale_no_unacked_glance(tmp_path, monkeypa
     assert lab.force_refresh_calls == 1
     assert len(calls) == 2
     assert calls[1][0]["unacked_count"] == 1
+
+
+def test_wake_endpoint_rechecks_after_no_telemetry_glance(tmp_path, monkeypatch):
+    """A missing row is not an authoritative force/click no-op; refresh once."""
+    settings = _settings(tmp_path)
+    lab = RefreshingFakeLab(
+        {},
+        {
+            "b3": {
+                "is_working": False,
+                "unacked_count": 1,
+                "unacked_messages": [
+                    {
+                        "id": 13634,
+                        "kind": "dispatch",
+                        "topic": "wake-force-authoritative-read-1",
+                        "created_at": "2026-07-19T20:07:55Z",
+                    }
+                ],
+            }
+        },
+    )
+    app = controller.create_app(settings, lab_glance=lab)
+    monkeypatch.setattr(controller, "tmux_session_names", lambda _settings: {"b3"})
+    calls = []
+
+    def fake_send_wake(*args, **kwargs):
+        calls.append(args[2])
+        if len(calls) == 1:
+            return {"ok": True, "sent": False, "skipped": "no telemetry", "slug": "b3"}
+        return {"ok": True, "sent": True, "slug": "b3"}
+
+    monkeypatch.setattr(controller, "send_wake", fake_send_wake)
+    response = TestClient(app).post(
+        "/api/sessions/b3/wake?force=1&origin=cockpit_click",
+        headers={"Host": "127.0.0.1:7800", **_auth()},
+    )
+
+    assert response.status_code == 200
+    assert response.json()["sent"] is True
+    assert lab.force_refresh_calls == 1
+    assert len(calls) == 2
+    assert calls[1]["unacked_messages"][0]["id"] == 13634
+
+
+def test_force_wake_failed_refresh_is_explicit_503(tmp_path, monkeypatch):
+    """Lab starvation must never become 200 sent:false/no-telemetry."""
+    settings = _settings(tmp_path)
+    lab = FailingRefreshFakeLab()
+    app = controller.create_app(settings, lab_glance=lab)
+    monkeypatch.setattr(controller, "tmux_session_names", lambda _settings: {"b3"})
+    calls = []
+
+    def fake_send_wake(*_args, **_kwargs):
+        calls.append(True)
+        return {"ok": True, "sent": False, "skipped": "no telemetry", "slug": "b3"}
+
+    monkeypatch.setattr(controller, "send_wake", fake_send_wake)
+    response = TestClient(app).post(
+        "/api/sessions/b3/wake?force=1&origin=cockpit_click",
+        headers={"Host": "127.0.0.1:7800", **_auth()},
+    )
+
+    assert response.status_code == 503
+    assert response.json()["detail"] == {
+        "error": "wake_state_unknown",
+        "slug": "b3",
+        "reason": "lab_glance_unavailable",
+    }
+    assert lab.force_refresh_calls == 1
+    assert len(calls) == 1
+
+
+def test_lab_glance_failure_stale_serves_all_last_good_rows(tmp_path, monkeypatch):
+    """One Lab 503 cannot blank the last-good 28-seat fleet view."""
+    settings = replace(_settings(tmp_path), lab_cache_seconds=30.0)
+    terminals = [
+        {"slug": f"seat-{index}", "unacked_count": index + 1}
+        for index in range(28)
+    ]
+    lab_503 = httpx.HTTPStatusError(
+        "simulated Lab 503/read starvation",
+        request=httpx.Request("GET", settings.lab_url),
+        response=httpx.Response(503),
+    )
+    outcomes = [
+        {"terminals": terminals},
+        lab_503,
+    ]
+
+    class FakeResponse:
+        def __init__(self, payload):
+            self.payload = payload
+
+        def raise_for_status(self):
+            return None
+
+        def json(self):
+            return self.payload
+
+    class FakeClient:
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *_args):
+            return None
+
+        async def get(self, _url):
+            outcome = outcomes.pop(0)
+            if isinstance(outcome, Exception):
+                raise outcome
+            return FakeResponse(outcome)
+
+    monkeypatch.setattr(controller.httpx, "AsyncClient", lambda **_kwargs: FakeClient())
+    glance = controller.LabGlance(settings)
+
+    first = asyncio.run(glance.read())
+    degraded = asyncio.run(glance.force_refresh())
+
+    assert len(first) == 28
+    assert degraded == first
+    assert len(degraded) == 28
+    assert glance.last_ok is False
 
 
 def test_wake_endpoint_rechecks_after_lean_no_message_id_glance(tmp_path, monkeypatch):

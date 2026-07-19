@@ -1165,20 +1165,26 @@ class LabGlance:
                 response = await client.get(self.settings.lab_url)
                 response.raise_for_status()
                 payload = response.json()
+            if not isinstance(payload, dict) or not isinstance(
+                payload.get("terminals"), list
+            ):
+                raise ValueError("Lab glance payload missing terminals list")
         except (httpx.HTTPError, ValueError, TypeError) as exc:
             LOG.warning("Lab glance unavailable: %s", exc)
             self.last_ok = False
-            self._value = {}
             self._expires_at = now + min(self.settings.lab_cache_seconds, 5.0)
-            return {}
+            # WAKE_FORCE_AUTHORITATIVE_READ_1: a failed read is UNKNOWN, not an
+            # authoritative fleet-wide empty result. Preserve the last-good view
+            # for degraded rendering/diagnostics while last_ok=False tells action
+            # paths they must not treat these rows as fresh authority.
+            return self._value
 
         result: dict[str, dict[str, Any]] = {}
-        rows = payload.get("terminals", []) if isinstance(payload, dict) else []
-        if isinstance(rows, list):
-            for row in rows:
-                if not isinstance(row, dict) or not row.get("slug"):
-                    continue
-                result[str(row["slug"])] = glance_row_from_lab(row)
+        rows = payload["terminals"]
+        for row in rows:
+            if not isinstance(row, dict) or not row.get("slug"):
+                continue
+            result[str(row["slug"])] = glance_row_from_lab(row)
         self.last_ok = True
         self._value = result
         self._expires_at = now + self.settings.lab_cache_seconds
@@ -1523,8 +1529,6 @@ def create_app(
         entry = _entry_for(manifest(), slug)
         if entry.slug not in tmux_session_names(config):
             return {"ok": True, "sent": False, "skipped": "session down", "slug": entry.slug}
-        lab = await glance.read()
-        row = lab.get(entry.slug) or {}
         force = request.query_params.get("force") == "1"
         # COCKPIT_CARD_CLICK_WAKE_INJECT_1 — tag the origin so a Director card click
         # is attributable in wake_audit.log and gets the richer nudge line. Only a
@@ -1533,27 +1537,60 @@ def create_app(
         # Client may claim cockpit_click only; a spoofed origin=sweep is dropped to
         # None so it can neither forge the audit source nor borrow sweep behaviour.
         audit_source = origin if origin in _WAKE_CLIENT_ORIGINS else None
+        authoritative = force or audit_source == WAKE_CLICK_ORIGIN
+        lab = await glance.read()
+        if authoritative and not getattr(glance, "last_ok", True):
+            raise HTTPException(
+                status_code=503,
+                detail={
+                    "error": "wake_state_unknown",
+                    "slug": entry.slug,
+                    "reason": "lab_glance_unavailable",
+                },
+            )
+        row = lab.get(entry.slug) or {}
         try:
             result = send_wake(
                 config, entry, row,
                 now=time.monotonic(), last_wake=app.state.wake_last,
                 force=force, audit_source=audit_source,
             )
-            if result.get("skipped") in ("no unacked", "no unacked message id"):
+            if result.get("skipped") in (
+                "no telemetry", "no unacked", "no unacked message id"
+            ):
                 # The Lab has its own short cache, and this controller has a
-                # separate glance cache. A cached zero must not be authoritative
-                # for a wake decision; one forced read closes the stale-glance gap.
+                # separate glance cache. Missing telemetry, a cached zero, or a
+                # lean row without message IDs must not be authoritative for a wake
+                # decision; one forced read closes each stale-glance shape.
                 # "no unacked message id" is the same staleness in a leaner shape
                 # (codex FAIL #13397 P1): a card hydrated status-only via /api/agents
                 # carries unacked_count>0 but unacked_messages=None, so wake_skip_reason
                 # returns "no unacked message id" and the click would silently no-op —
                 # a fresh read carries the message rows and the second send_wake sends.
                 fresh_lab = await _fresh_glance_read()
+                if authoritative and not getattr(glance, "last_ok", True):
+                    raise HTTPException(
+                        status_code=503,
+                        detail={
+                            "error": "wake_state_unknown",
+                            "slug": entry.slug,
+                            "reason": "lab_glance_unavailable",
+                        },
+                    )
                 fresh_row = fresh_lab.get(entry.slug) or {}
                 result = send_wake(
                     config, entry, fresh_row,
                     now=time.monotonic(), last_wake=app.state.wake_last,
                     force=force, audit_source=audit_source,
+                )
+            if authoritative and result.get("skipped") == "no telemetry":
+                raise HTTPException(
+                    status_code=503,
+                    detail={
+                        "error": "wake_state_unknown",
+                        "slug": entry.slug,
+                        "reason": "seat_telemetry_unavailable",
+                    },
                 )
             return result
         except (OSError, RuntimeError, subprocess.TimeoutExpired) as exc:
@@ -1594,7 +1631,14 @@ def create_app(
         not dump the accumulated backlog as a burst of banners."""
         rows = await glance.read()
         if not getattr(glance, "last_ok", True):
-            return  # a full Lab outage collapses every seat to {}; do not fire
+            # APP_RESIDENT_NOTIFY_DEGRADED_1: preserve no-false-banner semantics,
+            # but do not let one cached/degraded read suppress the entire poll.
+            # Make one independent bounded refresh (LabGlance enforces the
+            # configured request timeout, 5s by default); only a second failure
+            # is allowed to skip the tick.
+            rows = await _fresh_glance_read()
+            if not getattr(glance, "last_ok", True):
+                return
         eligible = load_notify_seats(config.static_dir)
         to_fire, app.state.notify_prev, app.state.notify_last_fired = (
             compute_notifications(
