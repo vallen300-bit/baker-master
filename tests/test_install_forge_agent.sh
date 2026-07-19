@@ -24,10 +24,13 @@ new_env
 run_install --headless
 if bash "$INSTALLER" --check --headless >/dev/null 2>&1; then ok "install -> check clean (headless)"; else bad "install -> check clean (headless)"; fi
 
-# 4 forge scripts + 2 bus hooks deployed + executable
-depl=0; for s in session-start-hook.sh heartbeat-ticker.sh turn-start-hook.sh turn-stop-hook.sh; do [[ -x "$FORGE_AGENT_HOME/$s" ]] && depl=$((depl+1)); done
+# 6 forge scripts + 2 bus hooks deployed + executable
+depl=0; for s in session-start-hook.sh heartbeat-ticker.sh turn-start-hook.sh turn-stop-hook.sh codex-worktree.sh lifecycle-watch.sh; do [[ -x "$FORGE_AGENT_HOME/$s" ]] && depl=$((depl+1)); done
 for h in session-start-bus-drain.sh stop-bus-ack.sh; do [[ -x "$CLAUDE_HOME/hooks/$h" ]] && depl=$((depl+1)); done
-[[ "$depl" -eq 6 ]] && ok "6 scripts deployed + executable" || bad "6 scripts deployed (got $depl)"
+[[ "$depl" -eq 8 ]] && ok "8 scripts deployed + executable" || bad "8 scripts deployed (got $depl)"
+grep -q 'lifecycle-watch.sh' "$FORGE_AGENT_HOME/session-start-hook.sh" \
+  && ok "session-start wires lifecycle watcher" \
+  || bad "session-start lifecycle watcher wiring missing"
 
 # active/ dir + sessions.json seeded
 { [[ -d "$FORGE_AGENT_HOME/active" ]] && [[ -f "$FORGE_AGENT_HOME/sessions.json" ]]; } && ok "active/ + sessions.json seeded" || bad "active/ + sessions.json seeded"
