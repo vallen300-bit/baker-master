@@ -109,6 +109,7 @@ def test_api_agents_requires_auth_and_maps_only_pinned_glance_fields(
                     "has_telemetry": True,
                     "needs_go": False,
                     "unacked_count": 2,
+                    "wake_obligation_count": 1,
                     "oldest_unacked_age_sec": 700,
                     "unacked_topics": ["review/one"],
                     "body": "must not leak",
@@ -144,6 +145,7 @@ def test_api_agents_requires_auth_and_maps_only_pinned_glance_fields(
                 "has_telemetry": True,
                 "needs_go": False,
                 "unacked_count": 2,
+                "wake_obligation_count": 1,
                 "oldest_unacked_age_sec": 700,
                 "unacked_topics": ["review/one"],
                 "context_pct": None,
@@ -162,6 +164,7 @@ def test_api_agents_requires_auth_and_maps_only_pinned_glance_fields(
                 "has_telemetry": None,
                 "needs_go": None,
                 "unacked_count": None,
+                "wake_obligation_count": None,
                 "oldest_unacked_age_sec": None,
                 "unacked_topics": None,
                 "context_pct": None,
@@ -343,6 +346,7 @@ def test_glance_row_from_lab_projects_pinned_fields_and_context():
         "has_telemetry": True,
         "needs_go": False,
         "unacked_count": 1,
+        "wake_obligation_count": 1,
         "oldest_unacked_age_sec": 40,
         "unacked_topics": ["ops/x"],
         "unacked_messages": [{"id": 1, "topic": "ops/x", "created_at": "t"}],
@@ -357,6 +361,27 @@ def test_glance_row_from_lab_projects_pinned_fields_and_context():
     assert "context_band" not in glance
     assert glance["context_pct"] == 55.0
     assert glance["unacked_count"] == 1
+    assert glance["wake_obligation_count"] == 1
+
+
+def test_wake_obligation_count_prefers_server_field_and_falls_back_when_absent():
+    # A server-side zero must override the all-message display count.
+    assert controller.wake_obligation_count(
+        {"unacked_count": 4, "wake_obligation_count": 0}
+    ) == 0
+    assert controller.wake_skip_reason(
+        {
+            "unacked_count": 4,
+            "wake_obligation_count": 0,
+            "unacked_messages": [{"id": 1}],
+        }
+    ) == "no wake obligation"
+
+    # Older servers have no field: preserve the current unacked-count behavior.
+    assert controller.wake_obligation_count({"unacked_count": 4}) == 4
+    assert controller.wake_skip_reason(
+        {"unacked_count": 4, "unacked_messages": [{"id": 1}]}
+    ) is None
 
 
 def test_probe_ttyd_true_for_listening_false_for_closed():
@@ -570,6 +595,46 @@ def test_wake_endpoint_passes_force_query_flag(tmp_path, monkeypatch):
     )
     assert response.status_code == 200
     assert captured["force"] is True
+
+
+def test_force_wake_respects_zero_server_wake_obligation(tmp_path, monkeypatch):
+    """A click may show ordinary unacked rows but must not wake for them."""
+    settings = _settings(tmp_path)
+    app = controller.create_app(
+        settings,
+        lab_glance=FakeLab(
+            {
+                "b3": {
+                    "is_working": False,
+                    "needs_go": False,
+                    "unacked_count": 2,
+                    "wake_obligation_count": 0,
+                    "unacked_messages": [
+                        {
+                            "id": 1,
+                            "kind": "broadcast",
+                            "topic": "heartbeat/fleet",
+                            "created_at": "t",
+                        }
+                    ],
+                }
+            }
+        ),
+    )
+    monkeypatch.setattr(controller, "tmux_session_names", lambda _settings: {"b3"})
+
+    response = TestClient(app).post(
+        "/api/sessions/b3/wake?force=1&origin=cockpit_click",
+        headers={"Host": "127.0.0.1:7800", **_auth()},
+    )
+
+    assert response.status_code == 200
+    assert response.json() == {
+        "ok": True,
+        "sent": False,
+        "skipped": "no wake obligation",
+        "slug": "b3",
+    }
 
 
 def test_wake_endpoint_rechecks_after_stale_no_unacked_glance(tmp_path, monkeypatch):
@@ -818,6 +883,44 @@ def test_backlog_sweep_tick_wakes_old_idle_session(tmp_path, monkeypatch):
     assert len(calls) == 1
     assert calls[0][0] == "b3"
     assert calls[0][1]["audit_source"] == "sweep"
+
+
+def test_backlog_sweep_ignores_display_only_unacked_without_wake_obligation(
+    tmp_path, monkeypatch
+):
+    """A broadcast/status backlog may stay visible but must not drive re-wake."""
+    settings = replace(_settings(tmp_path), backlog_sweep_seconds=600)
+    app = controller.create_app(
+        settings,
+        lab_glance=FakeLab(
+            {
+                "b3": {
+                    "is_working": False,
+                    "unacked_count": 3,
+                    "wake_obligation_count": 0,
+                    "oldest_unacked_age_sec": 601,
+                    "unacked_messages": [
+                        {
+                            "id": 13129,
+                            "kind": "broadcast",
+                            "topic": "heartbeat/fleet",
+                            "created_at": "2026-07-19T08:00:00Z",
+                        }
+                    ],
+                }
+            }
+        ),
+    )
+    monkeypatch.setattr(controller, "tmux_session_names", lambda _settings: {"b3"})
+    monkeypatch.setattr(
+        controller,
+        "send_wake",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(
+            AssertionError("display-only backlog must not wake")
+        ),
+    )
+
+    assert asyncio.run(app.state.backlog_sweep_tick()) == []
 
 
 def test_backlog_sweep_tick_is_off_at_zero(tmp_path, monkeypatch):

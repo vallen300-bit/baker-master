@@ -49,6 +49,10 @@ GLANCE_FIELDS = (
     "has_telemetry",
     "needs_go",
     "unacked_count",
+    # WAKE_ATTRIBUTION_ADDRESSEE_FILTER_1: server-side count of unacked rows
+    # that are genuine execute obligations. Wake logic consumes this field;
+    # ``unacked_count`` remains the all-message display count.
+    "wake_obligation_count",
     "oldest_unacked_age_sec",
     "unacked_topics",
     # D4 — context-window usage. Populated by ``derive_context_pct`` from the
@@ -109,6 +113,7 @@ WAKE_ORIGIN_TAG = "[wake]"
 # straight through to a hidden band. Session age NEVER feeds this field
 # (codex-arch OBJECT, #12055) — the mapping only ever reads the usage percent.
 CONTEXT_USED_FIELD = "context_used_percent"
+WAKE_OBLIGATION_FIELD = "wake_obligation_count"
 
 
 def derive_context_pct(row: dict[str, Any]) -> float | None:
@@ -131,6 +136,25 @@ def derive_context_pct(row: dict[str, Any]) -> float | None:
                 continue
             return max(0.0, min(100.0, float(val)))
     return None
+
+
+def wake_obligation_count(row: dict[str, Any]) -> int:
+    """Return the authoritative count that may drive a wake decision.
+
+    New Lab servers provide ``wake_obligation_count``. An absent/null field
+    means an older server, so preserve the legacy ``unacked_count`` behavior.
+    A present but malformed value fails closed to zero instead of reviving the
+    all-message wake storm this field exists to prevent.
+    """
+    raw = row.get(WAKE_OBLIGATION_FIELD)
+    if raw is None:
+        raw = row.get("unacked_count")
+    if isinstance(raw, bool):
+        return 0
+    try:
+        return max(0, int(raw or 0))
+    except (TypeError, ValueError, OverflowError):
+        return 0
 
 
 def glance_row_from_lab(row: dict[str, Any]) -> dict[str, Any]:
@@ -744,7 +768,12 @@ def wake_skip_reason(glance_row: dict[str, Any] | None) -> str | None:
         return "needs_go (GO flow owns it)"
     if glance_row.get("is_working") is True:
         return "working"
-    if not (glance_row.get("unacked_count") or 0) > 0:
+    if wake_obligation_count(glance_row) <= 0:
+        # A server-supplied zero is authoritative even when the display count
+        # is nonzero. On an older field-absent server, retain the legacy reason
+        # so the HTTP wake path performs its existing one-refresh stale check.
+        if glance_row.get(WAKE_OBLIGATION_FIELD) is not None:
+            return "no wake obligation"
         return "no unacked"
     if _oldest_unacked(glance_row.get("unacked_messages")) is None:
         return "no unacked message id"
@@ -1670,7 +1699,7 @@ def create_app(
             if (
                 entry.slug not in sessions
                 or row.get("is_working") is True
-                or int(row.get("unacked_count") or 0) <= 0
+                or wake_obligation_count(row) <= 0
                 or oldest_age <= config.backlog_sweep_seconds
             ):
                 continue
