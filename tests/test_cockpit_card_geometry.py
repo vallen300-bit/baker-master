@@ -67,6 +67,15 @@ def test_stale_context_meter_is_dimmed_and_shows_age():
     assert ".r-ctx.ctx-stale" in CSS, "stale context style missing"
 
 
+def test_mobile_context_meter_keeps_a_visible_bar():
+    """The 320px layout must reserve room for both the stale-age label and bar."""
+    m = re.search(r"@media \(max-width:\s*640px\)\s*\{(.*?)\n\}", CSS, re.S)
+    assert m, "no phone media query"
+    block = m.group(1)
+    assert "auto 90px" in block, "mobile context cell must reserve a 90px column"
+    assert "flex: 0 0 24px" in block, "mobile context bar must keep a fixed width"
+
+
 def test_state_control_rendered_on_every_row():
     """D3: card() appends stateControl unconditionally, which falls through to a
     status chip so the control column is never absent (Start / GO / chip)."""

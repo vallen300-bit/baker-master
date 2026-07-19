@@ -14,7 +14,6 @@ import base64
 import binascii
 import contextlib
 from dataclasses import dataclass
-import hashlib
 import hmac
 import json
 import logging
@@ -1322,7 +1321,6 @@ def create_app(
     # D6/P2 — per-seat wake dedupe state: same-message timestamps plus a
     # cross-message injection floor.
     app.state.wake_last = {}
-    app.state.codex_pane_hashes = {}
     # NOTIFY_SLICE — per-seat last-observed unacked baseline + last-fire timestamps
     # for the 0→N transition detector (advanced by the lifespan poll loop).
     app.state.notify_prev = {}
@@ -1360,24 +1358,12 @@ def create_app(
         now_epoch = time.time()
         lab = await glance.read()
         lab_ok = getattr(glance, "last_ok", True)
-        previous_pane_hashes = dict(app.state.codex_pane_hashes)
-        pane_hashes = dict(previous_pane_hashes)
         pane_context: dict[str, int | None] = {}
-        pane_changed: dict[str, bool] = {}
         for slug in CODEX_FAMILY:
             pane = read_codex_pane(config, slug)
             if pane is None:
                 continue
-            digest = hashlib.sha256(
-                pane.encode("utf-8", errors="replace")
-            ).hexdigest()
-            pane_hashes[slug] = digest
-            pane_changed[slug] = (
-                slug in previous_pane_hashes
-                and previous_pane_hashes[slug] != digest
-            )
             pane_context[slug] = parse_codex_context(pane)
-        app.state.codex_pane_hashes = pane_hashes
         ttyd_states = await asyncio.gather(
             *(prober(entry) for entry in entries)
         )
@@ -1404,10 +1390,6 @@ def create_app(
                 and (now_epoch - last_act) <= LOCAL_WORKING_WINDOW_S
             )
             if local_working:
-                glance_fields["is_working"] = True
-            if entry.slug in CODEX_FAMILY_SLUGS and (
-                local_working or pane_changed.get(entry.slug, False)
-            ):
                 glance_fields["is_working"] = True
             agents.append(
                 {
@@ -1441,7 +1423,7 @@ def create_app(
                 session_up and last_act is not None
                 and (now_epoch - last_act) <= LOCAL_WORKING_WINDOW_S
             )
-            if slug in CODEX_FAMILY_SLUGS and (local_working or pane_changed.get(slug, False)):
+            if local_working:
                 glance_fields["is_working"] = True
             agents.append(
                 {

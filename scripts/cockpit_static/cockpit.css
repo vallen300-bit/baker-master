@@ -456,13 +456,13 @@ main.wrap { max-width: 1800px; margin: 0 auto; padding: 28px 28px 48px; }
   .state-legend { flex-wrap: wrap; gap: 8px 13px; }
   .fleet-columns { display: none; }
   .plate > h2 { margin-top: 18px; padding-left: 7px; }
-  .row { grid-template-columns: 10px minmax(0,1fr) auto 62px; min-height: 44px; padding: 5px 7px; column-gap: 8px; }
+  .row { grid-template-columns: 10px minmax(0,1fr) auto 90px; min-height: 44px; padding: 5px 7px; column-gap: 8px; }
   .r-unread { grid-column: 3; grid-row: 1; }
   .r-ctx { grid-column: 4; grid-row: 1; }
   .rbtn, .chip { grid-column: 4; grid-row: 2; }
   .r-id { grid-column: 2; grid-row: 1 / span 2; align-self: center; flex-wrap: wrap; row-gap: 4px; }
   .r-dot { grid-column: 1; grid-row: 1 / span 2; }
-  .r-ctx .ctxbar { max-width: 36px; }
+  .r-ctx .ctxbar { flex: 0 0 24px; max-width: 24px; }
   .r-slug { max-width: 100%; }
   #term { width: 100%; }
   #termbar { min-height: 62px; padding: 10px 13px; }

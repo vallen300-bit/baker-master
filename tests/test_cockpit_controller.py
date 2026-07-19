@@ -379,7 +379,9 @@ def test_context_fields_prefer_local_even_when_stale_then_lab(tmp_path, monkeypa
     }
 
 
-def test_api_agents_uses_local_context_and_pane_activity(tmp_path, monkeypatch):
+def test_api_agents_uses_local_context_and_ignores_codex_timer_change(
+    tmp_path, monkeypatch
+):
     settings = _settings(
         tmp_path,
         rows=[
@@ -388,7 +390,10 @@ def test_api_agents_uses_local_context_and_pane_activity(tmp_path, monkeypatch):
         ],
     )
     _write_band(settings.context_band_dir, "b3", percent=29)
-    panes = iter(["Context 18% used\n", "Context 18% used\nworking output\n"])
+    panes = iter([
+        "Context 18% used\nWorking (17m 26s)\n",
+        "Context 18% used\nWorking (17m 28s)\n",
+    ])
     app = controller.create_app(
         settings,
         lab_glance=FakeLab(
@@ -428,7 +433,7 @@ def test_api_agents_uses_local_context_and_pane_activity(tmp_path, monkeypatch):
     assert first["codex"]["context_pct"] == 18.0
     assert first["codex"]["context_src"] == "pane"
     assert first["codex"]["is_working"] is False
-    assert second["codex"]["is_working"] is True
+    assert second["codex"]["is_working"] is False
 
 
 def test_glance_row_from_lab_projects_pinned_fields_and_context():
