@@ -212,8 +212,7 @@
   // D5 — list the seat's unacked bus messages (id · topic · age) in the panel.
   function renderPanelUnacked(slug) {
     termUnacked.textContent = "";
-    const row = stateBySlug.get(slug) || {};
-    const msgs = Array.isArray(row.unacked_messages) ? row.unacked_messages : [];
+    const msgs = renderedUnackedRows(slug);
     // Drawer Copy + Nudge appear only when the open seat actually has unacked rows.
     if (termCopy) { termCopy.hidden = !msgs.length; termCopy.textContent = "Copy"; }
     if (termNudge) termNudge.hidden = !msgs.length;
@@ -340,7 +339,7 @@
 
   function renderMsgSummary(slug) {
     const row = stateBySlug.get(slug) || {};
-    const unacked = Array.isArray(row.unacked_messages) ? row.unacked_messages : [];
+    const unacked = renderedUnackedRows(slug);
     const last = row.last_message || null;
     const ackedCount = Number(row.acked_count) || 0;
     msgBody.textContent = "";
@@ -392,22 +391,26 @@
     return ok;
   }
 
-  // Shared `#id · topic · from` summary formatter — the ONE source of truth for
-  // both the card message-panel Copy and the terminal-drawer Copy (no duplicated
-  // line-building logic between the two).
-  function formatUnackedSummary(title, unacked) {
-    const rows = Array.isArray(unacked) ? unacked : [];
-    const lines = rows.map((m) =>
-      "#" + String((m && m.id) || "?") + "  " + String((m && m.topic) || "(no topic)") +
-      "  from " + String((m && m.from_terminal) || "?"));
-    return String(title || "") + "\n" +
-      (lines.length ? lines.join("\n") : "(no unacknowledged messages)");
+  // Reconciled unacked rows — the ONE source both the panel/drawer renderers AND the
+  // Copy buttons draw from, so Copy always copies EXACTLY what is rendered
+  // (COCKPIT_DRAWER_COPY_BUTTON_FIX_1). reconcileUnacked handles the status-only
+  // hydration shape (/api/agents ships unacked_count>0 with a lean/empty
+  // unacked_messages) by falling back to the already-fetched /api/messages detail
+  // rows — in memory only, never a refetch, so it still works while /api/messages
+  // is unavailable (bus degraded), and enriches each row with its body_preview.
+  function renderedUnackedRows(slug) {
+    const row = stateBySlug.get(slug) || {};
+    const details = messageDetailsBySlug.get(slug);
+    const detailList = details ? Array.from(details.values()) : [];
+    return window.reconcileUnacked(row, detailList);
   }
 
-  // Run a Copy button: format the open seat's unacked rows, copy, flash feedback.
+  // Run a Copy button: format the open seat's rendered unacked rows, copy, flash
+  // feedback. The formatter (glance_state.js) emits the placeholder ONLY when the
+  // reconciled list is genuinely empty.
   async function runCopy(btn, title, unacked) {
     if (!btn) return;
-    const payload = formatUnackedSummary(title, unacked);
+    const payload = window.formatUnackedSummary(title, unacked);
     btn.disabled = true;
     const ok = await copyToClipboard(payload);
     btn.disabled = false;
@@ -417,8 +420,7 @@
   }
 
   function unackedFor(slug) {
-    const row = stateBySlug.get(slug) || {};
-    return Array.isArray(row.unacked_messages) ? row.unacked_messages : [];
+    return renderedUnackedRows(slug);
   }
 
   async function doMsgCopy() {
