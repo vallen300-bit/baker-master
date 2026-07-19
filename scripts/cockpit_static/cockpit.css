@@ -307,7 +307,8 @@ main.wrap { max-width: 1800px; margin: 0 auto; padding: 28px 28px 48px; }
    sets --ctx-track-scale = (10000/pct)% so the gradient box always spans one full
    track regardless of fill width (background-size % is relative to the fill box). */
 .r-ctx .ctxfill { display: block; height: 100%; background-image: linear-gradient(90deg, #3fb950, #d29922 70%, #f85149 92%); background-repeat: no-repeat; background-position: left center; background-size: var(--ctx-track-scale, 100%) 100%; border-radius: inherit; }
-.r-ctx .ctxlbl { min-width: 31px; color: var(--muted-strong); font-size: 10px; font-variant-numeric: tabular-nums; text-align: right; }
+.r-ctx .ctxlbl { min-width: 58px; color: var(--muted-strong); font-size: 10px; font-variant-numeric: tabular-nums; text-align: right; white-space: nowrap; }
+.r-ctx.ctx-stale { opacity: .52; }
 .r-ctx-null { color: var(--muted); font-size: 13px; }
 .rbtn, .btn {
   min-height: 27px;

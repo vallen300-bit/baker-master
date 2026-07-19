@@ -59,6 +59,14 @@ def test_ctx_meter_rendered_on_every_row():
     assert ".r-ctx-null" in CSS, ".r-ctx-null placeholder style missing"
 
 
+def test_stale_context_meter_is_dimmed_and_shows_age():
+    """D2: stale last-known context remains visible and is identified by the
+    dimming class plus the compact age label rendered by cockpit.js."""
+    assert "ctx-stale" in JS, "stale context class missing from ctxCell"
+    assert "context_age_sec" in JS, "stale context age is not rendered"
+    assert ".r-ctx.ctx-stale" in CSS, "stale context style missing"
+
+
 def test_state_control_rendered_on_every_row():
     """D3: card() appends stateControl unconditionally, which falls through to a
     status chip so the control column is never absent (Start / GO / chip)."""

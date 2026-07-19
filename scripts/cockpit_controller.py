@@ -14,6 +14,7 @@ import base64
 import binascii
 import contextlib
 from dataclasses import dataclass
+import hashlib
 import hmac
 import json
 import logging
@@ -54,8 +55,12 @@ GLANCE_FIELDS = (
     # D4 — context-window usage. Populated by ``derive_context_pct`` from the
     # Lab context-band slice (LAB_CONTEXT_BAND_EXPOSURE_1 / #12055); until that
     # slice is live the source field is absent and null flows through, so the
-    # card-face context bar stays hidden (null-safe).
+    # card-face context bar stays hidden (null-safe). The controller fills the
+    # source/age/stale metadata after applying local and pane precedence.
     "context_pct",
+    "context_age_sec",
+    "context_stale",
+    "context_src",
     # D5 — per-seat unacked message list (id / kind / topic / created_at) so the
     # terminal panel can list them and D6 can name/type the oldest wake nudge.
     "unacked_messages",
@@ -95,7 +100,8 @@ WAKE_PARK_TAIL_LINES = 6
 WAKE_COMPOSER_MARKERS = ("❯", "│")  # ❯  │
 # Codex TUI prints "Ctrl+L is disabled" for the repaint keystroke. Keep the
 # capture verification, but skip that cosmetic repaint on Codex-family seats.
-CODEX_FAMILY_SLUGS = frozenset({"codex", "codex-arch", "deputy-codex"})
+CODEX_FAMILY = ("codex", "codex-arch", "deputy-codex")
+CODEX_FAMILY_SLUGS = frozenset(CODEX_FAMILY)
 # WAKE_INJECT_SUBMIT_FIX_2 D3 — every machine-injected nudge carries this visible
 # origin prefix so freeform seat input is attributable at a glance. The reading
 # agent treats a leading bracket tag as provenance, not instruction.
@@ -109,6 +115,7 @@ WAKE_ORIGIN_TAG = "[wake]"
 # straight through to a hidden band. Session age NEVER feeds this field
 # (codex-arch OBJECT, #12055) — the mapping only ever reads the usage percent.
 CONTEXT_USED_FIELD = "context_used_percent"
+CONTEXT_STALE_S = 900.0
 
 
 def derive_context_pct(row: dict[str, Any]) -> float | None:
@@ -133,6 +140,122 @@ def derive_context_pct(row: dict[str, Any]) -> float | None:
     return None
 
 
+def read_local_context_band(
+    slug: str,
+    context_dir: Path,
+    *,
+    alias: str | None = None,
+) -> tuple[float | None, float | None]:
+    """Read the latest local context band, returning ``(pct, age_seconds)``.
+
+    The alias path is preferred because the meter hook writes
+    ``<alias>.current``; the slug path is a compatibility fallback for seats
+    whose manifest alias differs or whose file was written by an older hook.
+    Broken links, malformed JSON, and invalid percentages are soft misses.
+    """
+    candidates: list[str] = []
+    for candidate in (alias, slug):
+        if isinstance(candidate, str) and candidate and candidate not in candidates:
+            candidates.append(candidate)
+    for candidate in candidates:
+        path = context_dir / f"{candidate}.current"
+        try:
+            stat = path.stat()
+            payload = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, ValueError, TypeError):
+            continue
+        pct = payload.get("context_percent") if isinstance(payload, dict) else None
+        if isinstance(pct, bool) or not isinstance(pct, (int, float)):
+            continue
+        if not math.isfinite(float(pct)):
+            continue
+        pct = max(0.0, min(100.0, float(pct)))
+        age = max(0.0, time.time() - stat.st_mtime)
+        return pct, age
+    return None, None
+
+
+def parse_codex_context(pane_text: str | None) -> int | None:
+    """Return the last valid ``Context N% used`` marker from a Codex pane."""
+    if not isinstance(pane_text, str):
+        return None
+    matches = re.findall(r"\bContext\s+(\d{1,3})%\s+used\b", pane_text, re.IGNORECASE)
+    for raw in reversed(matches):
+        value = int(raw)
+        if 0 <= value <= 100:
+            return value
+    return None
+
+
+def read_codex_pane(settings: "Settings", slug: str) -> str | None:
+    """Passive, read-only pane capture for Codex-family status telemetry."""
+    try:
+        result = _run_tmux(settings, ["capture-pane", "-t", slug, "-p"])
+    except (OSError, subprocess.TimeoutExpired):
+        return None
+    return result.stdout if result.returncode == 0 else None
+
+
+def context_fields_for(
+    values: dict[str, Any],
+    settings: "Settings",
+    slug: str,
+    alias: str,
+    *,
+    pane_pct: int | None = None,
+) -> dict[str, Any]:
+    """Apply pane > local band > Lab precedence to one seat's context fields."""
+    local_pct, local_age = read_local_context_band(
+        slug, settings.context_band_dir, alias=alias
+    )
+    lab_pct = derive_context_pct(values)
+    if pane_pct is not None:
+        return {
+            "context_pct": float(pane_pct),
+            "context_age_sec": 0.0,
+            "context_stale": False,
+            "context_src": "pane",
+        }
+    if local_pct is not None:
+        return {
+            "context_pct": local_pct,
+            "context_age_sec": local_age,
+            "context_stale": bool(local_age is not None and local_age > CONTEXT_STALE_S),
+            "context_src": "local",
+        }
+    return {
+        "context_pct": lab_pct,
+        "context_age_sec": None,
+        "context_stale": False,
+        "context_src": "lab" if lab_pct is not None else None,
+    }
+
+
+def load_cockpit_layout_cards(static_dir: Path) -> tuple[tuple[str, str], ...]:
+    """Read generated layout cards so status-only seats have live state rows."""
+    try:
+        raw = json.loads((static_dir / "cockpit_layout.json").read_text(encoding="utf-8"))
+    except (OSError, ValueError, TypeError):
+        return ()
+    plates = raw.get("plates") or raw.get("sections") or []
+    if not isinstance(plates, list):
+        return ()
+    cards: list[tuple[str, str]] = []
+    for plate in plates:
+        plate_cards = plate.get("cards", []) if isinstance(plate, dict) else []
+        for card in plate_cards or []:
+            if not isinstance(card, dict):
+                continue
+            slug = card.get("slug")
+            if not isinstance(slug, str) or not SLUG_RE.fullmatch(slug):
+                continue
+            alias = card.get("alias")
+            if not isinstance(alias, str) or not ALIAS_RE.fullmatch(alias):
+                alias = slug
+            cards.append((slug, alias))
+    return tuple(cards)
+
+
 def glance_row_from_lab(row: dict[str, Any]) -> dict[str, Any]:
     """Project one Lab /api/v2/terminals row down to the pinned glance fields.
 
@@ -141,6 +264,9 @@ def glance_row_from_lab(row: dict[str, Any]) -> dict[str, Any]:
     usage field."""
     glance = {field: row.get(field) for field in GLANCE_FIELDS}
     glance["context_pct"] = derive_context_pct(row)
+    glance["context_age_sec"] = None
+    glance["context_stale"] = False
+    glance["context_src"] = "lab" if glance["context_pct"] is not None else None
     return glance
 
 # LAB_COCKPIT_NOTIFY_SLICE_1 — controller-side macOS banner+sound when a bus
@@ -302,6 +428,9 @@ class Settings:
             "~/Library/Application Support/baker/cockpit/static"
         )
     )
+    context_band_dir: Path = Path(
+        os.path.expanduser("~/forge-agent/context-band")
+    )
     fleet_script: Path = Path(
         os.path.expanduser(
             "~/Library/Application Support/baker/cockpit/fleet_terminals.sh"
@@ -357,6 +486,13 @@ class Settings:
                 os.path.expanduser(
                     os.environ.get(
                         "COCKPIT_STATIC_DIR", str(defaults.static_dir)
+                    )
+                )
+            ),
+            context_band_dir=Path(
+                os.path.expanduser(
+                    os.environ.get(
+                        "COCKPIT_CONTEXT_BAND_DIR", str(defaults.context_band_dir)
                     )
                 )
             ),
@@ -1186,6 +1322,7 @@ def create_app(
     # D6/P2 — per-seat wake dedupe state: same-message timestamps plus a
     # cross-message injection floor.
     app.state.wake_last = {}
+    app.state.codex_pane_hashes = {}
     # NOTIFY_SLICE — per-seat last-observed unacked baseline + last-fire timestamps
     # for the 0→N transition detector (advanced by the lifespan poll loop).
     app.state.notify_prev = {}
@@ -1223,6 +1360,24 @@ def create_app(
         now_epoch = time.time()
         lab = await glance.read()
         lab_ok = getattr(glance, "last_ok", True)
+        previous_pane_hashes = dict(app.state.codex_pane_hashes)
+        pane_hashes = dict(previous_pane_hashes)
+        pane_context: dict[str, int | None] = {}
+        pane_changed: dict[str, bool] = {}
+        for slug in CODEX_FAMILY:
+            pane = read_codex_pane(config, slug)
+            if pane is None:
+                continue
+            digest = hashlib.sha256(
+                pane.encode("utf-8", errors="replace")
+            ).hexdigest()
+            pane_hashes[slug] = digest
+            pane_changed[slug] = (
+                slug in previous_pane_hashes
+                and previous_pane_hashes[slug] != digest
+            )
+            pane_context[slug] = parse_codex_context(pane)
+        app.state.codex_pane_hashes = pane_hashes
         ttyd_states = await asyncio.gather(
             *(prober(entry) for entry in entries)
         )
@@ -1230,6 +1385,15 @@ def create_app(
         for entry, ttyd_up in zip(entries, ttyd_states):
             values = lab.get(entry.slug, {})
             glance_fields = {field: values.get(field) for field in GLANCE_FIELDS}
+            glance_fields.update(
+                context_fields_for(
+                    values,
+                    config,
+                    entry.slug,
+                    entry.alias,
+                    pane_pct=pane_context.get(entry.slug),
+                )
+            )
             session_up = entry.slug in sessions
             # D8 — OR a local tmux output-activity signal into is_working so a seat
             # the Lab feed under-reports still reads as working while it produces
@@ -1241,6 +1405,10 @@ def create_app(
             )
             if local_working:
                 glance_fields["is_working"] = True
+            if entry.slug in CODEX_FAMILY_SLUGS and (
+                local_working or pane_changed.get(entry.slug, False)
+            ):
+                glance_fields["is_working"] = True
             agents.append(
                 {
                     "slug": entry.slug,
@@ -1250,6 +1418,40 @@ def create_app(
                     "ttyd_up": bool(ttyd_up),
                     **glance_fields,
                     "local_working": local_working,   # D8 — surfaced for tests/transparency
+                }
+            )
+        manifest_slugs = {entry.slug for entry in entries}
+        for slug, alias in load_cockpit_layout_cards(config.static_dir):
+            if slug in manifest_slugs:
+                continue
+            values = lab.get(slug, {})
+            glance_fields = {field: values.get(field) for field in GLANCE_FIELDS}
+            glance_fields.update(
+                context_fields_for(
+                    values,
+                    config,
+                    slug,
+                    alias,
+                    pane_pct=pane_context.get(slug),
+                )
+            )
+            session_up = slug in sessions
+            last_act = activity.get(slug)
+            local_working = bool(
+                session_up and last_act is not None
+                and (now_epoch - last_act) <= LOCAL_WORKING_WINDOW_S
+            )
+            if slug in CODEX_FAMILY_SLUGS and (local_working or pane_changed.get(slug, False)):
+                glance_fields["is_working"] = True
+            agents.append(
+                {
+                    "slug": slug,
+                    "alias": alias,
+                    "port": None,
+                    "session_up": session_up,
+                    "ttyd_up": False,
+                    **glance_fields,
+                    "local_working": local_working,
                 }
             )
         return {"agents": agents, "lab_glance_ok": bool(lab_ok)}

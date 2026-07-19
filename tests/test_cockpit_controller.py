@@ -2,8 +2,10 @@ import asyncio
 import base64
 from dataclasses import replace
 import json
+import os
 from pathlib import Path
 import subprocess
+import time
 
 import httpx
 import pytest
@@ -36,6 +38,7 @@ def _settings(tmp_path, *, rows=None, port=7800):
         manifest_path=manifest,
         credential_path=credential,
         static_dir=tmp_path / "static",
+        context_band_dir=tmp_path / "context-band",
         fleet_script=tmp_path / "fleet_terminals.sh",
     )
 
@@ -132,6 +135,9 @@ def test_api_agents_requires_auth_and_maps_only_pinned_glance_fields(
                 "oldest_unacked_age_sec": 700,
                 "unacked_topics": ["review/one"],
                 "context_pct": None,
+                "context_age_sec": None,
+                "context_stale": False,
+                "context_src": None,
                 "unacked_messages": None,
                 "last_message": None,
                 "acked_count": None,
@@ -150,6 +156,9 @@ def test_api_agents_requires_auth_and_maps_only_pinned_glance_fields(
                 "oldest_unacked_age_sec": None,
                 "unacked_topics": None,
                 "context_pct": None,
+                "context_age_sec": None,
+                "context_stale": False,
+                "context_src": None,
                 "unacked_messages": None,
                 "last_message": None,
                 "acked_count": None,
@@ -264,6 +273,164 @@ def test_derive_context_pct_never_reads_session_age():
     assert controller.derive_context_pct(row) is None
 
 
+def _write_band(
+    context_dir: Path,
+    name: str,
+    *,
+    percent: object = 42,
+    age_seconds: float = 0,
+    symlink: bool = True,
+) -> Path:
+    context_dir.mkdir(parents=True, exist_ok=True)
+    target = context_dir / f"{name}.json"
+    target.write_text(
+        json.dumps({"session_id": "session-1", "context_percent": percent}),
+        encoding="utf-8",
+    )
+    timestamp = time.time() - age_seconds
+    os.utime(target, (timestamp, timestamp))
+    if symlink:
+        link = context_dir / f"{name}.current"
+        link.symlink_to(target.name)
+        return link
+    return target
+
+
+def test_read_local_context_band_reads_alias_and_reports_age(tmp_path, monkeypatch):
+    link = _write_band(tmp_path, "manifest-alias", percent=42, age_seconds=250)
+    monkeypatch.setattr(controller.time, "time", lambda: link.stat().st_mtime + 250)
+
+    assert controller.read_local_context_band(
+        "b3", tmp_path, alias="manifest-alias"
+    ) == (42.0, 250.0)
+
+
+def test_read_local_context_band_falls_back_to_slug_and_is_fail_soft(tmp_path):
+    _write_band(tmp_path, "b3", percent=140)
+    pct, age = controller.read_local_context_band("b3", tmp_path, alias="missing")
+    assert pct == 100.0
+    assert age == pytest.approx(0.0, abs=2.0)
+
+    (tmp_path / "bad.current").write_text("{", encoding="utf-8")
+    (tmp_path / "broken.current").symlink_to("missing.json")
+    assert controller.read_local_context_band("bad", tmp_path) == (None, None)
+    assert controller.read_local_context_band("broken", tmp_path) == (None, None)
+    assert controller.read_local_context_band("missing", tmp_path) == (None, None)
+
+
+@pytest.mark.parametrize(
+    ("pane", "expected"),
+    [
+        ("Context 12% used", 12),
+        ("old Context 4% used\nnew Context 67% used", 67),
+        ("Context 101% used", None),
+        ("context unavailable", None),
+        (None, None),
+    ],
+)
+def test_parse_codex_context(pane, expected):
+    assert controller.parse_codex_context(pane) == expected
+
+
+def test_read_codex_pane_is_passive_capture_only(monkeypatch):
+    calls = []
+
+    def fake_run(_settings, args):
+        calls.append(args)
+        return subprocess.CompletedProcess(args, 0, "Context 31% used\n", "")
+
+    monkeypatch.setattr(controller, "_run_tmux", fake_run)
+    assert controller.read_codex_pane(_settings_stub(), "codex") == "Context 31% used\n"
+    assert calls == [["capture-pane", "-t", "codex", "-p"]]
+
+
+def test_context_fields_prefer_local_even_when_stale_then_lab(tmp_path, monkeypatch):
+    settings = _settings(tmp_path)
+    _write_band(settings.context_band_dir, "b3", percent=33, age_seconds=901)
+    now = time.time()
+    monkeypatch.setattr(controller.time, "time", lambda: now)
+
+    fields = controller.context_fields_for(
+        {"context_used_percent": 77}, settings, "b3", "b3"
+    )
+    assert fields["context_pct"] == 33.0
+    assert fields["context_src"] == "local"
+    assert fields["context_stale"] is True
+    assert fields["context_age_sec"] == pytest.approx(901, abs=1)
+
+    fields = controller.context_fields_for(
+        {"context_used_percent": 77}, settings, "b4", "b4"
+    )
+    assert fields == {
+        "context_pct": 77.0,
+        "context_age_sec": None,
+        "context_stale": False,
+        "context_src": "lab",
+    }
+
+    pane_fields = controller.context_fields_for(
+        {"context_used_percent": 77}, settings, "codex", "codex", pane_pct=12
+    )
+    assert pane_fields == {
+        "context_pct": 12.0,
+        "context_age_sec": 0.0,
+        "context_stale": False,
+        "context_src": "pane",
+    }
+
+
+def test_api_agents_uses_local_context_and_pane_activity(tmp_path, monkeypatch):
+    settings = _settings(
+        tmp_path,
+        rows=[
+            {"slug": "b3", "alias": "b3", "port": 17603, "eligible": True},
+            {"slug": "codex", "alias": "cvi", "port": 17612, "eligible": True},
+        ],
+    )
+    _write_band(settings.context_band_dir, "b3", percent=29)
+    panes = iter(["Context 18% used\n", "Context 18% used\nworking output\n"])
+    app = controller.create_app(
+        settings,
+        lab_glance=FakeLab(
+            {
+                "b3": {"is_working": False, "context_used_percent": 80},
+                "codex": {"is_working": False, "context_used_percent": 70},
+            }
+        ),
+        ttyd_prober=_prober({"b3", "codex"}),
+    )
+    monkeypatch.setattr(controller, "tmux_session_names", lambda _s: {"b3", "codex"})
+    monkeypatch.setattr(controller, "tmux_window_activity", lambda _s: {})
+    def fake_read_codex_pane(_settings, slug):
+        if slug == "codex":
+            return next(panes)
+        return None
+
+    monkeypatch.setattr(controller, "read_codex_pane", fake_read_codex_pane)
+    client = TestClient(app)
+
+    first = {
+        row["slug"]: row
+        for row in client.get(
+            "/api/agents", headers={"Host": "127.0.0.1:7800", **_auth()}
+        ).json()["agents"]
+    }
+    second = {
+        row["slug"]: row
+        for row in client.get(
+            "/api/agents", headers={"Host": "127.0.0.1:7800", **_auth()}
+        ).json()["agents"]
+    }
+
+    assert first["b3"]["context_pct"] == 29.0
+    assert first["b3"]["context_src"] == "local"
+    assert first["b3"]["context_stale"] is False
+    assert first["codex"]["context_pct"] == 18.0
+    assert first["codex"]["context_src"] == "pane"
+    assert first["codex"]["is_working"] is False
+    assert second["codex"]["is_working"] is True
+
+
 def test_glance_row_from_lab_projects_pinned_fields_and_context():
     # Full Lab-shaped row: only GLANCE_FIELDS survive (no body leak) and
     # context_pct is derived from context_used_percent.
@@ -369,7 +536,12 @@ def test_lab_failure_is_fail_soft_and_origin_is_strict(tmp_path, monkeypatch):
     # A full Lab outage must surface explicitly, not collapse to silent idle.
     assert body["lab_glance_ok"] is False
     assert all(
-        all(agent[field] is None for field in controller.GLANCE_FIELDS)
+        all(
+            agent[field] is None
+            for field in controller.GLANCE_FIELDS
+            if field != "context_stale"
+        )
+        and agent["context_stale"] is False
         for agent in body["agents"]
     )
 
