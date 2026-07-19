@@ -136,15 +136,16 @@
       for (const a of (data.agents || [])) m.set(a.slug, a);
       computeFlash(m);              // D9 — flag cards whose unacked count rose
       stateBySlug = m;
-      // lab_glance_ok=false ⇒ the Lab telemetry source is down; every seat's
-      // glance collapses to UNKNOWN. Surface it explicitly, don't read as idle.
+      // lab_glance_ok=false ⇒ the Lab telemetry source is down; the summary
+      // sync-note surfaces that (renderSummary below). It does NOT dim the header
+      // health line: the feed itself answered, so the line stays GREEN (spec item
+      // 6 — green whenever the feed is live, red ONLY when the feed is dead).
       const labOk = data.lab_glance_ok !== false;
       const total = totalCardCount();
-      // Header health line — plain words, all bright green when the feed is live
-      // (spec item 6). "driveable" → "with terminal" per the ratified relabel.
-      connEl.textContent = "live · " + m.size + " with terminal / " + total + " seats" +
-        (labOk ? "" : " · ⚠ telemetry offline");
-      connEl.className = labOk ? "conn ok" : "conn warn";
+      // Header health line — plain words, all bright green while the feed is live.
+      // "driveable" → "with terminal" per the ratified relabel.
+      connEl.textContent = "live · " + m.size + " with terminal / " + total + " seats";
+      connEl.className = "conn ok";
       renderSummary(labOk);
       render();
       syncPanelGo();             // reflect needs_go changes while the panel is open

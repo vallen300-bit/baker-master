@@ -33,8 +33,10 @@ function resolveGlanceState({ unacked, isWorking, hasTelemetry, isDoneGreen, nee
 // with unread mail reads running green; GO outranks unread; unread outranks offline.
 // QUIET-WHEN-HEALTHY (spec item 7): a cleanly not-started seat (session down) stays
 // muted grey, NOT offline-red — its Start button is the affordance; offline-red is
-// reserved for a seat that is UP but silent (terminal down / no telemetry while
-// expected up), which is the "no-signal + offline combined" case that needs eyes.
+// reserved for a seat that is UP but silent, which is the "no-signal + offline
+// combined" case that needs eyes: terminal down (ttyd_up===false) OR no telemetry
+// signal at all (has_telemetry is anything other than an explicit true — false,
+// null, or missing) while the session is up.
 var UNREAD_OLD_S = 600; // >10 min unread flips muted-amber → bright red (named, not magic)
 function resolveStateClass(row, sessionUp) {
   var r = row || {};
@@ -45,7 +47,9 @@ function resolveStateClass(row, sessionUp) {
     var age = Number(r.oldest_unacked_age_sec) || 0;
     return age > UNREAD_OLD_S ? "st-unread-old" : "st-unread";
   }
-  if (sessionUp === true && (r.ttyd_up === false || r.has_telemetry === false)) return "st-offline";
+  // up-but-silent → offline. has_telemetry must be an explicit true to read idle;
+  // null / undefined / false is a live-seat no-signal and resolves offline (pulse).
+  if (sessionUp === true && (r.ttyd_up === false || r.has_telemetry !== true)) return "st-offline";
   return "st-idle";
 }
 

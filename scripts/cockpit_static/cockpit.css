@@ -101,7 +101,8 @@ button { font: inherit; }
   text-align: right;
 }
 .cockpit-header .conn::before { content: "● "; color: currentColor; }
-.cockpit-header .conn.warn { color: #efc96e; }
+/* GREEN whenever the feed is live (base color above); RED only when it is dead.
+   No yellow/warn middle state — Lab-telemetry-down lives in the summary sync-note. */
 .cockpit-header .conn.feed-dead { color: var(--danger); }
 
 /* The first screen answers: what is this, how much is here, and is anything
@@ -283,8 +284,11 @@ main.wrap { max-width: 1800px; margin: 0 auto; padding: 28px 28px 48px; }
 .row.st-offline .r-dot { background: var(--st-offline); box-shadow: 0 0 6px rgba(207,106,99,.6); animation: dot-pulse-offline 1.5s ease-in-out infinite; }
 .row.st-offline .r-name { color: #d99089; }
 
-/* idle / not-started — muted grey, QUIET (no tint, no glow). */
+/* idle / not-started — muted grey, QUIET (no tint, no glow). The name takes the
+   chip color like every other state (item 3): muted grey, not white — a quiet seat
+   spends no attention budget. --muted clears WCAG AA on the row fill. */
 .row.st-idle .r-dot { background: var(--st-grey); }
+.row.st-idle .r-name { color: var(--muted); }
 @keyframes dot-pulse-offline { 0%,100% { box-shadow: 0 0 3px rgba(207,106,99,.4); } 50% { box-shadow: 0 0 9px rgba(207,106,99,.85); } }
 /* App/Cowork seats sit recessed with an inner shadow (mock v3: ".card.app"
    inset-shadow treatment) so status-only seats read as pressed-in vs the
