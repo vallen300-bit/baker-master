@@ -93,6 +93,9 @@ WAKE_PARK_TAIL_LINES = 6
 # turn renders as a plain `> ` line with neither, so this disambiguates parked
 # (boxed) from sent (plain) — see COMPOSER_RESIDUAL_DIAG_20260718 pane captures.
 WAKE_COMPOSER_MARKERS = ("❯", "│")  # ❯  │
+# Codex TUI prints "Ctrl+L is disabled" for the repaint keystroke. Keep the
+# capture verification, but skip that cosmetic repaint on Codex-family seats.
+CODEX_FAMILY_SLUGS = frozenset({"codex", "codex-arch", "deputy-codex"})
 # WAKE_INJECT_SUBMIT_FIX_2 D3 — every machine-injected nudge carries this visible
 # origin prefix so freeform seat input is attributable at a glance. The reading
 # agent treats a leading bracket tag as provenance, not instruction.
@@ -152,6 +155,10 @@ NOTIFY_POLL_SECONDS = 15.0
 # within this window as a storm guard.
 NOTIFY_COOLDOWN_SECONDS = 300.0
 NOTIFY_SOUND = "Ping"
+# WAKE_RESPAWN_BACKLOG_DRAIN_1 — self-heal for a wake lost during a seat refresh.
+# Zero disables the loop; positive values are seconds and can be tuned without a
+# code change. Existing per-message dedupe and seat-floor guards contain repeats.
+BACKLOG_SWEEP_SECONDS = 600.0
 
 
 def load_notify_seats(static_dir: Path) -> set[str]:
@@ -224,6 +231,17 @@ def write_mute(path: Path, muted: bool) -> None:
     firing, codex #12354). ``read_mute`` still fails safe (toward alerting)."""
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps({"muted": bool(muted)}), "utf-8")
+
+
+def _float_env(name: str, default: float, *, minimum: float = 0.0) -> float:
+    """Read a non-negative float setting without making startup env fragile."""
+    raw = os.environ.get(name)
+    if raw is None:
+        return default
+    try:
+        return max(minimum, float(raw))
+    except (TypeError, ValueError):
+        return default
 
 
 def notify_macos(settings: "Settings", slug: str, count: int) -> None:
@@ -308,6 +326,7 @@ class Settings:
     lab_url: str = "https://brisen-lab.onrender.com/api/v2/terminals"
     lab_cache_seconds: float = 30.0
     lab_timeout_seconds: float = 5.0
+    backlog_sweep_seconds: float = BACKLOG_SWEEP_SECONDS
     command_timeout_seconds: float = 10.0
     # Per-seat ttyd reachability probe budget — a local loopback TCP connect,
     # kept short so a hung seat never stalls the whole /api/agents response.
@@ -349,6 +368,10 @@ class Settings:
                 )
             ),
             lab_url=os.environ.get("COCKPIT_LAB_URL", defaults.lab_url),
+            backlog_sweep_seconds=_float_env(
+                "COCKPIT_BACKLOG_SWEEP_SECONDS",
+                defaults.backlog_sweep_seconds,
+            ),
             tmux_binary=os.environ.get("COCKPIT_TMUX_BINARY", defaults.tmux_binary),
             notify_enabled=os.environ.get(
                 "COCKPIT_NOTIFY_ENABLED", "1" if defaults.notify_enabled else "0"
@@ -626,6 +649,7 @@ def _audit_wake(
     *,
     suppressed_count: int = 0,
     skipped: str | None = None,
+    source: str | None = None,
 ) -> None:
     """Append a durable audit line for sent or coalesced wake attempts."""
     entry = {
@@ -634,6 +658,8 @@ def _audit_wake(
     }
     if skipped is not None:
         entry["skipped"] = skipped
+    if source is not None:
+        entry["source"] = source
     if suppressed_count > 0:
         entry["suppressed_count"] = suppressed_count
     try:
@@ -702,6 +728,10 @@ def _composer_holds(pane_text: str, injected_line: str) -> bool:
     return True
 
 
+def _is_codex_family_slug(slug: str) -> bool:
+    return slug in CODEX_FAMILY_SLUGS
+
+
 def _post_park_flag(settings: Settings, slug: str, needle: str) -> None:
     """Fail-loud on an unrecoverable park: append a durable local record AND
     best-effort post a bus flag to lead (topic ``fleet/wake-inject-park``). Both
@@ -742,8 +772,10 @@ def _verify_wake_submit(settings: Settings, slug: str, injected_line: str) -> di
     def _read_pane() -> str | None:
         # Force a redraw first: capture-pane serves a STALE composer render after
         # edits (diag stale-render caveat), so a naive read false-positives and
-        # false-negatives. C-l repaints; a short settle lets it land.
-        _run_tmux(settings, ["send-keys", "-t", slug, "C-l"])
+        # false-negatives. Codex TUI rejects C-l with cosmetic noise, so its
+        # family skips only the repaint and keeps the capture verification.
+        if not _is_codex_family_slug(slug):
+            _run_tmux(settings, ["send-keys", "-t", slug, "C-l"])
         time.sleep(WAKE_VERIFY_SETTLE_S)
         cap = _run_tmux(settings, ["capture-pane", "-t", slug, "-p"])
         return cap.stdout if cap.returncode == 0 else None
@@ -774,6 +806,7 @@ def send_wake(
     audit: bool = True,
     verify: bool = True,
     force: bool = False,
+    audit_source: str | None = None,
 ) -> dict[str, Any]:
     """D6 wake-on-open: send one `check bus #<oldest-id> <topic>` + Enter into the
     seat's tmux. Guarded (wake_skip_reason), deduped for the same message, and
@@ -781,9 +814,30 @@ def send_wake(
     no-op, not an error."""
     reason = wake_skip_reason(glance_row)
     if reason is not None:
+        if audit and audit_source:
+            oldest = _oldest_unacked_row((glance_row or {}).get("unacked_messages"))
+            _audit_wake(
+                settings,
+                entry.slug,
+                oldest.get("id") if oldest else None,
+                str(oldest.get("topic") or "") if oldest else "",
+                "",
+                skipped=reason,
+                source=audit_source,
+            )
         return {"ok": True, "sent": False, "skipped": reason, "slug": entry.slug}
     oldest = _oldest_unacked_row(glance_row.get("unacked_messages"))
     if oldest is None:  # defensive: wake_skip_reason already checks this condition
+        if audit and audit_source:
+            _audit_wake(
+                settings,
+                entry.slug,
+                None,
+                "",
+                "",
+                skipped="no unacked message id",
+                source=audit_source,
+            )
         return {"ok": True, "sent": False, "skipped": "no unacked message id", "slug": entry.slug}
     msg_id = oldest.get("id")
     topic = str(oldest.get("topic") or "")
@@ -844,6 +898,7 @@ def send_wake(
                 line,
                 suppressed_count=suppressed_last[message_key],
                 skipped="deduped",
+                source=audit_source,
             )
         return {"ok": True, "sent": False, "skipped": "deduped", "slug": entry.slug}
 
@@ -863,6 +918,7 @@ def send_wake(
                 line,
                 suppressed_count=suppressed_last[message_key],
                 skipped="seat_floor",
+                source=audit_source,
             )
         return {"ok": True, "sent": False, "skipped": "seat_floor", "slug": entry.slug}
 
@@ -905,6 +961,7 @@ def send_wake(
             topic,
             line,
             suppressed_count=suppressed_count,
+            source=audit_source,
         )
     result = {
         "ok": True, "sent": True, "slug": entry.slug,
@@ -976,6 +1033,11 @@ class LabGlance:
         self._value = result
         self._expires_at = now + self.settings.lab_cache_seconds
         return result
+
+    async def force_refresh(self) -> dict[str, dict[str, Any]]:
+        """Read Lab state immediately, bypassing the controller glance cache."""
+        self._expires_at = 0.0
+        return await self.read()
 
 
 def _allowed_authority(headers: Any, settings: Settings) -> bool:
@@ -1087,18 +1149,27 @@ def create_app(
 
     prober = ttyd_prober or default_prober
 
+    async def _fresh_glance_read() -> dict[str, dict[str, Any]]:
+        force_refresh = getattr(glance, "force_refresh", None)
+        if callable(force_refresh):
+            return await force_refresh()
+        # Test doubles and compatible glance providers may only expose read().
+        return await glance.read()
+
     @contextlib.asynccontextmanager
     async def lifespan(_app: FastAPI):
         # NOTIFY_SLICE — background poll loop for unread-bus banners. Runs only
         # when enabled; cleanly cancelled on shutdown. _notify_loop is defined
         # below in this closure and resolves at runtime (startup), not at def.
-        task = (
-            asyncio.create_task(_notify_loop()) if config.notify_enabled else None
-        )
+        tasks = []
+        if config.notify_enabled:
+            tasks.append(asyncio.create_task(_notify_loop()))
+        if config.backlog_sweep_seconds > 0:
+            tasks.append(asyncio.create_task(_backlog_sweep_loop()))
         try:
             yield
         finally:
-            if task is not None:
+            for task in tasks:
                 task.cancel()
                 with contextlib.suppress(asyncio.CancelledError):
                     await task
@@ -1209,11 +1280,23 @@ def create_app(
         row = lab.get(entry.slug) or {}
         force = request.query_params.get("force") == "1"
         try:
-            return send_wake(
+            result = send_wake(
                 config, entry, row,
                 now=time.monotonic(), last_wake=app.state.wake_last,
                 force=force,
             )
+            if result.get("skipped") == "no unacked":
+                # The Lab has its own short cache, and this controller has a
+                # separate glance cache. A cached zero must not be authoritative
+                # for a wake decision; one forced read closes the stale-glance gap.
+                fresh_lab = await _fresh_glance_read()
+                fresh_row = fresh_lab.get(entry.slug) or {}
+                result = send_wake(
+                    config, entry, fresh_row,
+                    now=time.monotonic(), last_wake=app.state.wake_last,
+                    force=force,
+                )
+            return result
         except (OSError, RuntimeError, subprocess.TimeoutExpired) as exc:
             raise HTTPException(status_code=502, detail=str(exc)) from exc
 
@@ -1265,10 +1348,54 @@ def create_app(
         for slug, count in to_fire:
             notify_macos(config, slug, count)
 
+    async def _backlog_sweep_tick() -> list[dict[str, Any]]:
+        """Re-wake idle seats whose old backlog outlived its original wake."""
+        if config.backlog_sweep_seconds <= 0:
+            return []
+        rows = await glance.read()
+        if not getattr(glance, "last_ok", True):
+            return []
+        sessions = tmux_session_names(config)
+        now = time.monotonic()
+        outcomes: list[dict[str, Any]] = []
+        for entry in manifest():
+            row = rows.get(entry.slug) or {}
+            try:
+                oldest_age = float(row.get("oldest_unacked_age_sec") or 0)
+            except (TypeError, ValueError):
+                oldest_age = 0.0
+            if (
+                entry.slug not in sessions
+                or row.get("is_working") is True
+                or int(row.get("unacked_count") or 0) <= 0
+                or oldest_age <= config.backlog_sweep_seconds
+            ):
+                continue
+            try:
+                result = send_wake(
+                    config,
+                    entry,
+                    row,
+                    now=now,
+                    last_wake=app.state.wake_last,
+                    audit_source="sweep",
+                )
+            except (OSError, RuntimeError, subprocess.TimeoutExpired) as exc:
+                LOG.warning("backlog sweep wake failed for %s: %s", entry.slug, exc)
+                result = {
+                    "ok": False,
+                    "sent": False,
+                    "skipped": "error",
+                    "slug": entry.slug,
+                }
+            outcomes.append(result)
+        return outcomes
+
     # Expose one tick for deterministic tests (codex #12354) — the committed test
     # awaits this directly to prove a 0→N transition banners once through the real
     # read→compute→fire path, without depending on background-task timing.
     app.state.notify_tick = _notify_tick
+    app.state.backlog_sweep_tick = _backlog_sweep_tick
 
     async def _notify_loop() -> None:
         while True:
@@ -1279,6 +1406,16 @@ def create_app(
             except Exception as exc:  # a bad tick must never kill the loop
                 LOG.warning("notify tick failed: %s", exc)
             await asyncio.sleep(config.notify_poll_seconds)
+
+    async def _backlog_sweep_loop() -> None:
+        while True:
+            try:
+                await _backlog_sweep_tick()
+            except asyncio.CancelledError:
+                raise
+            except Exception as exc:  # a bad cycle must never kill the loop
+                LOG.warning("backlog sweep tick failed: %s", exc)
+            await asyncio.sleep(config.backlog_sweep_seconds)
 
     async def proxy_http(request: Request, slug: str, tail: str = ""):
         entry = _entry_for(manifest(), slug)
