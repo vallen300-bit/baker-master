@@ -93,9 +93,21 @@ GC-ref)/N2(gauge naming) deferred. My review MISSED P1 → lesson
   - **MODEL REC (lead to lock):** Option A server-side bus.py `wake_obligation_count` = unacked where
     _is_delivery_tracked AND NOT _is_status_relay; keep all-kinds unacked_count for display; controller ONE-LINE
     re-point SERIALIZES after B+D (same file) or folds in; + empty-to_terminals write-reject hygiene.
-- **NEXT (me):** on lead model-lock → (a) **PING DIRECTOR** (Director directive 2026-07-19 ~20:5xZ: "ping me when
-  lead locks the model") → (b) commit full brief (briefs/BRIEF_WAKE_ATTRIBUTION_ADDRESSEE_FILTER_1.md) to main →
-  (c) dispatch b4 the build → BLOCKING codex gate → deputy cross-lane → lead deploy → deputy live-AC.
+- **✅ MODEL-LOCK EXECUTED** (#13672): Director pinged; brief committed 9444f855 (pushed, branch
+  deputy/brief-wake-listener-route-1); b4 dispatched build #13678; lead confirmed #13679.
+- **✅ b4 BUILD DONE (#13685) → my CROSS-LANE = PASS-WITH-2-FLAGS → lead #13686. AWAITING LEAD MERGE DECISION.**
+  brisen-lab **PR #160** (branch b4/wake-attribution-addressee-filter, HEAD 513f62b). In-scope wake_obligation_count
+  REVIEWED CORRECT (_is_wake_obligation stored-data predicate, helper==SQL post codex-P2-fix, display unchanged,
+  N1 strong-ref present). b4 codex PASS on 513f62b (⚠️ no msg-id cited — flagged for record).
+  - **⚠️ FLAG 1 GIT HYGIENE:** origin/main HEAD = db8e27f (POOL FIX ONLY). The combined deploy **@505f299
+    (b156519 #13609 gate-bypass + df5a114 N1/execute_values) IS DEPLOYED-TO-PROD BUT NOT MERGED TO origin/main.**
+    PR #160 branched off the deployed state, so merging #160 reconciles main↔prod + adds wake-attribution. Lead
+    chooses merge strategy + B+D order (B+D touch cockpit_controller.py + maybe bus.py — shared-file conflict risk).
+  - **⚠️ FLAG 2 HALF-FIX:** #160 supplies the FIELD; the live storm is CONTROLLER-driven (reads raw unacked_count);
+    server re-wake already obligation-gated + doesn't storm. Storm closes ONLY when B+D re-point cockpit_controller.py
+    to consume wake_obligation_count. Routed 'controller consumes wake_obligation_count' into B+D scope (via lead).
+  - **NEXT (me):** on lead merge+deploy → run live-AC (field present+correct now; storm-close verified AFTER B+D
+    re-point). Minor: no_job_ref persist-migration + empty-reject = can-wait (offered to B+D).
 - ⚠️ SEPARATE follow-on (NOT gating this deploy, matters for Monday fleet autonomy): b4 wake-listener
   controller-route (branch deputy-codex/wake-listener-route-via-controller-1 @a8d876d, NOT deployed) is
   a LATENT REGRESSION — glance outage → 'no telemetry' → HTTP 200 {sent:false} → b4 treats as success,
