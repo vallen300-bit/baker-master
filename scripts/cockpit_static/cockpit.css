@@ -232,15 +232,10 @@ main.wrap { max-width: 1800px; margin: 0 auto; padding: 28px 28px 48px; }
 .row:focus-visible { outline: 2px solid var(--blue); outline-offset: -2px; }
 .r-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--down); }
 .r-id { display: flex; align-items: baseline; gap: 9px; min-width: 0; }
+/* COCKPIT_SLUG_ONLY_CARDS_1: the card identity renders the SLUG in this .r-name
+   slot (name's 13px/500 + per-state color); the old muted-monospace .r-slug line
+   was dropped so the slug shows once and no display name is rendered. */
 .r-name { overflow: hidden; color: #fff; font-size: 13px; font-weight: 500; text-overflow: ellipsis; white-space: nowrap; }
-.r-slug {
-  flex: 0 0 auto;
-  overflow: hidden;
-  color: var(--muted);
-  font: 500 10.5px/1 ui-monospace, SFMono-Regular, Menlo, monospace;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
 .r-kind {
   flex: 0 0 auto;
   padding: 2px 6px;
@@ -481,7 +476,6 @@ main.wrap { max-width: 1800px; margin: 0 auto; padding: 28px 28px 48px; }
   .r-id { grid-column: 2; grid-row: 1 / span 2; align-self: center; flex-wrap: wrap; row-gap: 4px; }
   .r-dot { grid-column: 1; grid-row: 1 / span 2; }
   .r-ctx .ctxbar { max-width: 36px; }
-  .r-slug { max-width: 100%; }
   #term { width: 100%; }
   /* codex FAIL #13397 P2b: at 320px the bar overflowed (scrollWidth 326 > 319) with
      Copy + Nudge + GO + close all shown. Tighten gap/padding, let the title block
