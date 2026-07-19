@@ -9,7 +9,12 @@ SESSION_UUID="${1:-}"
 TERMINAL_ALIAS="${2:-}"
 PARENT_PID="${3:-}"
 INTERVAL="${FORGE_LIFECYCLE_WATCH_INTERVAL:-5}"
-DAEMON_URL="${BRISEN_LAB_DAEMON_URL:-https://brisen-lab.onrender.com}"
+DAEMON_URL="https://brisen-lab.onrender.com"
+# Test-only seam. Production has no endpoint override, preventing a terminal
+# key from being redirected by an inherited environment variable.
+if [ -n "${FORGE_LIFECYCLE_WATCH_TEST_URL:-}" ]; then
+  DAEMON_URL="$FORGE_LIFECYCLE_WATCH_TEST_URL"
+fi
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 . "$SCRIPT_DIR/codex-worktree.sh" 2>/dev/null || exit 0
 

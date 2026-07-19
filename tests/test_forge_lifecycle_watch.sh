@@ -60,9 +60,10 @@ sleep 4 &
 PARENT="$!"
 HOME="$T" \
 BRISEN_LAB_TERMINAL_KEY="test-key" \
-BRISEN_LAB_DAEMON_URL="http://127.0.0.1:$PORT" \
+FORGE_LIFECYCLE_WATCH_TEST_URL="http://127.0.0.1:$PORT" \
 FORGE_CODEX_WORKTREE_ROOTS="$T/worktrees" \
 FORGE_LIFECYCLE_WATCH_INTERVAL=1 \
+FORGE_AUTOSAVE_DIR="$T/autosave" \
 FORGE_AUTOSAVE_LOG="$T/autosave.log" \
   bash "$WATCHER" session-1 deputy-codex "$PARENT" >/dev/null 2>&1 &
 WATCHER_PID="$!"
@@ -72,15 +73,20 @@ wait "$WATCHER_PID" 2>/dev/null || true
 wait "$PARENT" 2>/dev/null || true
 wait "$SERVER" 2>/dev/null || true
 
-if [ -z "$(git -C "$T/worktrees/wip" status --porcelain --untracked-files=normal)" ]; then
-  ok "lifecycle/restart clears dirty worktree via autosave"
+if [ -n "$(git -C "$T/worktrees/wip" status --porcelain --untracked-files=normal)" ]; then
+  ok "lifecycle/restart leaves live worktree untouched"
 else
-  bad "lifecycle/restart left dirty worktree"
+  bad "lifecycle/restart mutated live worktree"
 fi
 if git -C "$T/worktrees/wip" for-each-ref --format='%(refname)' refs/wip/autosave-* | grep -q .; then
   ok "autosave creates refs/wip/autosave-*"
 else
   bad "autosave ref missing"
+fi
+if find "$T/autosave" -name '*.tar.gz' -print -quit 2>/dev/null | grep -q .; then
+  ok "autosave archives untracked WIP"
+else
+  bad "untracked WIP archive missing"
 fi
 if grep -q 'alias=deputy-codex' "$T/autosave.log" 2>/dev/null; then
   ok "autosave writes bounded audit line"
