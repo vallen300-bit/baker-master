@@ -7,10 +7,11 @@
  * browser session). Non-driveable active seats (app-*, service, headless) are status-only (no terminal). GO sends
  * Enter to the seat's tmux session; Start (re)creates a downed seat's session.
  *
- * Interaction contract: COCKPIT_CARD_BEHAVIOR_MOCK.html. Glance frames: §5.2 +
- * brisen-lab glance_state.js resolveGlanceState (precedence NEEDS_GO > WORKING
- * > NEW). GO affordance: §5.4. All card content is built via textContent / DOM
- * nodes — no innerHTML, so agent-supplied strings can never inject markup.
+ * Interaction contract: COCKPIT_CARD_BEHAVIOR_MOCK.html. Row colors: the FINAL
+ * 6-state palette (spec @d5e25efa item 3) via glance_state.js resolveStateClass
+ * (precedence running > GO > unread-old > unread > offline > idle). GO affordance:
+ * §5.4. All card content is built via textContent / DOM nodes — no innerHTML, so
+ * agent-supplied strings can never inject markup.
  */
 (() => {
   "use strict";
@@ -37,12 +38,9 @@
   const termGo = document.getElementById("term-go");
   const termUnacked = document.getElementById("term-unacked");
   const toastEl = document.getElementById("toast");
-  const notifyToggle = document.getElementById("notify-toggle");
+  const termCopy = document.getElementById("term-copy");
   const syncNoteEl = document.getElementById("sync-note");
   const rosterNoteEl = document.getElementById("roster-note");
-  const statTotalEl = document.getElementById("stat-total");
-  const statAttentionEl = document.getElementById("stat-attention");
-  const statTerminalsEl = document.getElementById("stat-terminals");
   // D9 — App-resident card bus-message panel.
   const msgVeil = document.getElementById("msgveil");
   const msgPanel = document.getElementById("msgpanel");
@@ -119,23 +117,11 @@
     }, 2600);
   }
 
-  function glanceClass(row) {
-    // No live row at all = telemetry never seen for this seat -> UNKNOWN, NOT idle.
-    if (!row) return "glance-unknown";
-    const g = window.resolveGlanceState({
-      unacked: row.unacked_count || 0,
-      isWorking: row.is_working === true,
-      hasTelemetry: row.has_telemetry === true,
-      isDoneGreen: false,               // no DONE signal on this surface
-      needsGo: row.needs_go === true,
-    });
-    if (g === "NEEDS_GO") return "glance-needs-go";      // green tint + GO
-    if (g === "WORKING") return "";                       // E6: running = bright, no frame
-    if (g === "NEW") return "glance-amber";               // D5/E6: amber = unread
-    // UNKNOWN (glance outage or telemetry-less seat) must read distinctly from
-    // IDLE — a quiet seat with telemetry vs a seat we have no signal for.
-    if (g === "UNKNOWN") return "glance-unknown";
-    return "";                          // IDLE
+  // COCKPIT_REVAMP_COLORS_1 — the row's glance color is the FINAL 6-state palette
+  // (spec item 3), resolved by the pure glance_state.js resolver so JS and its
+  // tests share one source of truth. Returns one st-* class; the CSS owns the color.
+  function glanceClass(row, up) {
+    return (window.resolveStateClass || (() => "st-idle"))(row, up === true);
   }
 
   function ageClass(sec) {
@@ -152,17 +138,8 @@
   function renderSummary(labOk = null) {
     if (!layout) return;
     const cards = layout.plates.flatMap((plate) => plate.cards);
-    const attention = cards.filter((meta) => {
-      const row = stateBySlug.get(meta.slug);
-      if (!row) return false;
-      return row.needs_go === true || (row.unacked_count || 0) > 0 ||
-        (meta.driveable && row.ttyd_up === false) ||
-        (!meta.status_only && row.session_up === false);
-    }).length;
-    const terminals = cards.filter((meta) => meta.driveable).length;
-    if (statTotalEl) statTotalEl.textContent = String(cards.length);
-    if (statAttentionEl) statAttentionEl.textContent = stateBySlug.size ? String(attention) : "—";
-    if (statTerminalsEl) statTerminalsEl.textContent = String(terminals);
+    // COCKPIT_REVAMP_HEADER_1: the oversized digit block (Seats/Attention/Terminals)
+    // was removed per spec item 6 — live counts stay in the green header line.
     if (rosterNoteEl) rosterNoteEl.textContent = cards.length + " seats · grouped by operating role";
     if (syncNoteEl) {
       syncNoteEl.textContent = labOk === false ? "Telemetry source offline" :
@@ -193,24 +170,29 @@
       for (const a of (data.agents || [])) m.set(a.slug, a);
       computeFlash(m);              // D9 — flag cards whose unacked count rose
       stateBySlug = m;
-      // lab_glance_ok=false ⇒ the Lab telemetry source is down; every seat's
-      // glance collapses to UNKNOWN. Surface it explicitly, don't read as idle.
+      // lab_glance_ok=false ⇒ the Lab telemetry source is down; the summary
+      // sync-note surfaces that (renderSummary below). It does NOT dim the header
+      // health line: the feed itself answered, so the line stays GREEN (spec item
+      // 6 — green whenever the feed is live, red ONLY when the feed is dead).
       const labOk = data.lab_glance_ok !== false;
       const total = totalCardCount();
+      // Header health line — plain words, all bright green while the feed is live
+      // (spec item 6 / codex #13356: no warn state). Count = layout driveable cards
+      // (codex #13286: /api/agents now hydrates ALL cards, so m.size ≠ terminals).
       const driveable = layout
         ? layout.plates.reduce((n, plate) =>
             n + plate.cards.filter((card) => card.driveable).length, 0)
         : 0;
-      connEl.textContent = "live · " + driveable + " driveable / " + total + " seats" +
-        (labOk ? "" : " · ⚠ telemetry offline");
-      connEl.className = labOk ? "conn ok" : "conn warn";
+      connEl.textContent = "live · " + driveable + " with terminal / " + total + " seats";
+      connEl.className = "conn ok";
       renderSummary(labOk);
       render();
       syncPanelGo();             // reflect needs_go changes while the panel is open
       if (openMsgSlug) renderMsgSummary(openMsgSlug);   // D9 — live-refresh open panel
     } catch (e) {
-      connEl.textContent = "offline — " + e.message;
-      connEl.className = "conn err";
+      // Feed stale/dead — the ONE health line turns red (spec item 6, .feed-dead).
+      connEl.textContent = "feed offline — " + e.message;
+      connEl.className = "conn feed-dead";
       renderSummary(false);
     }
   }
@@ -230,6 +212,8 @@
     termUnacked.textContent = "";
     const row = stateBySlug.get(slug) || {};
     const msgs = Array.isArray(row.unacked_messages) ? row.unacked_messages : [];
+    // Drawer Copy appears only when the open seat actually has unacked rows.
+    if (termCopy) { termCopy.hidden = !msgs.length; termCopy.textContent = "Copy"; }
     if (!msgs.length) { termUnacked.hidden = true; return; }
     const head = el("div", { class: "u-head",
       text: msgs.length + " unacked bus message" + (msgs.length === 1 ? "" : "s") });
@@ -301,6 +285,7 @@
     veilEl.classList.remove("open");
     termMount.textContent = "";   // remove iframe -> drops the ttyd WS connection
     termUnacked.textContent = ""; termUnacked.hidden = true;
+    if (termCopy) { termCopy.hidden = true; termCopy.textContent = "Copy"; }
   }
 
   // ---- D9 bus-message panel (App-resident cards) --------------------------
@@ -380,21 +365,44 @@
     return ok;
   }
 
-  async function doMsgCopy() {
-    if (!openMsgSlug) return;
-    const row = stateBySlug.get(openMsgSlug) || {};
-    const unacked = Array.isArray(row.unacked_messages) ? row.unacked_messages : [];
-    const lines = unacked.map((m) =>
+  // Shared `#id · topic · from` summary formatter — the ONE source of truth for
+  // both the card message-panel Copy and the terminal-drawer Copy (no duplicated
+  // line-building logic between the two).
+  function formatUnackedSummary(title, unacked) {
+    const rows = Array.isArray(unacked) ? unacked : [];
+    const lines = rows.map((m) =>
       "#" + String((m && m.id) || "?") + "  " + String((m && m.topic) || "(no topic)") +
       "  from " + String((m && m.from_terminal) || "?"));
-    const payload = (msgTitle.textContent || openMsgSlug) + "\n" +
+    return String(title || "") + "\n" +
       (lines.length ? lines.join("\n") : "(no unacknowledged messages)");
-    msgCopy.disabled = true;
+  }
+
+  // Run a Copy button: format the open seat's unacked rows, copy, flash feedback.
+  async function runCopy(btn, title, unacked) {
+    if (!btn) return;
+    const payload = formatUnackedSummary(title, unacked);
+    btn.disabled = true;
     const ok = await copyToClipboard(payload);
-    msgCopy.disabled = false;
-    msgCopy.textContent = ok ? "copied ✓" : "copy failed";
-    clearTimeout(msgCopy._t);
-    msgCopy._t = setTimeout(() => { msgCopy.textContent = "Copy"; }, 1800);
+    btn.disabled = false;
+    btn.textContent = ok ? "copied ✓" : "copy failed";
+    clearTimeout(btn._t);
+    btn._t = setTimeout(() => { btn.textContent = "Copy"; }, 1800);
+  }
+
+  function unackedFor(slug) {
+    const row = stateBySlug.get(slug) || {};
+    return Array.isArray(row.unacked_messages) ? row.unacked_messages : [];
+  }
+
+  async function doMsgCopy() {
+    if (!openMsgSlug) return;
+    await runCopy(msgCopy, msgTitle.textContent || openMsgSlug, unackedFor(openMsgSlug));
+  }
+
+  // Terminal-drawer Copy — same helper, scoped to the OPEN seat's unacked rows.
+  async function doTermCopy() {
+    if (!openSlug) return;
+    await runCopy(termCopy, termTitle.textContent || openSlug, unackedFor(openSlug));
   }
 
   // D9 flash-on-new-message: mark slugs whose unacked count rose since the last
@@ -447,21 +455,17 @@
   // needs_go → GO; otherwise a live status chip (running / unread / idle /
   // offline / no-signal for driveable seats, or the kind for status-only). The
   // chip is never omitted, so the control column is uniform.
+  const CHIP_LABEL = {
+    "st-running": "running", "st-go": "needs GO", "st-unread": "unread",
+    "st-unread-old": "unread", "st-offline": "offline", "st-idle": "idle",
+  };
   function statusChipText(meta, row, up) {
     if (meta.status_only) return meta.kind || "app";
     if (!up) return "down";
-    if (row && row.ttyd_up === false) return "offline";
-    const g = window.resolveGlanceState ? window.resolveGlanceState({
-      unacked: (row && row.unacked_count) || 0,
-      isWorking: !!(row && row.is_working),
-      hasTelemetry: !!(row && row.has_telemetry),
-      isDoneGreen: false,
-      needsGo: !!(row && row.needs_go),
-    }) : "";
-    if (g === "WORKING") return "running";
-    if (g === "NEW") return "unread";
-    if (g === "UNKNOWN") return "no signal";
-    return "idle";
+    // Chip label follows the same palette resolver the row color uses, so text
+    // and color can never disagree.
+    const sc = window.resolveStateClass ? window.resolveStateClass(row, up) : "st-idle";
+    return CHIP_LABEL[sc] || "idle";
   }
 
   function stateControl(meta, row, up) {
@@ -488,19 +492,15 @@
     const cls = ["row"];
     if (flashSlugs.has(meta.slug)) cls.push("flash");   // D9 flash-on-new-message
 
-    // State classes (color language preserved from the card design): app =
-    // status-only, error = ttyd down, up/working, glance frame, or down.
+    // State classes: status-only seats keep the recessed "app" chrome; every
+    // driveable seat (up OR down) carries exactly one st-* palette class (spec
+    // item 3) so its dot + name color reads its true state. up/down stay for the
+    // existing geometry/contrast selectors.
     if (meta.status_only) {
       cls.push("app");
-    } else if (up && row && row.ttyd_up === false) {
-      cls.push("up", "error");
-    } else if (up) {
-      cls.push("up");
-      const gc = glanceClass(row);
-      if (gc) cls.push(gc);
-      if (row && row.is_working) cls.push("working");
     } else {
-      cls.push("down");
+      cls.push(up ? "up" : "down");
+      cls.push(glanceClass(row, up));
     }
 
     // Col 2 — identity (name + slug, + kind badge for service/headless).
@@ -604,61 +604,12 @@
     (e) => { if (e.key === "Enter" || e.key === " ") closeMsgPanel(); });
   msgVeil.addEventListener("click", closeMsgPanel);
   msgCopy.addEventListener("click", doMsgCopy);
+  if (termCopy) termCopy.addEventListener("click", doTermCopy);
   document.addEventListener("keydown", (e) => { if (e.key === "Escape" && openMsgSlug) closeMsgPanel(); });
 
-  // ---- unread-bus notifications mute toggle (NOTIFY_SLICE) ----------------
-  // The controller fires banners even with the page closed; this toggle only
-  // reflects + flips the controller's persisted mute flag. localStorage gives an
-  // instant default before the controller answers; the controller is authoritative.
-  const NOTIFY_MUTE_KEY = "cockpit.notifyMuted";
-  let notifyMuted = false;
-
-  function applyNotifyUI() {
-    if (!notifyToggle) return;
-    notifyToggle.textContent = notifyMuted ? "🔕 Muted" : "🔔 Alerts";
-    notifyToggle.setAttribute("aria-pressed", notifyMuted ? "true" : "false");
-    notifyToggle.classList.toggle("muted", notifyMuted);
-  }
-
-  async function hydrateNotify() {
-    // Default from localStorage first (instant), then reconcile with controller.
-    try { notifyMuted = localStorage.getItem(NOTIFY_MUTE_KEY) === "1"; } catch (_e) {}
-    applyNotifyUI();
-    try {
-      const r = await fetch(url("/api/notify/state"), FETCH_OPTS);
-      if (r.ok) {
-        const s = await r.json();
-        notifyMuted = !!s.muted;
-        try { localStorage.setItem(NOTIFY_MUTE_KEY, notifyMuted ? "1" : "0"); } catch (_e) {}
-        applyNotifyUI();
-      }
-    } catch (_e) { /* offline: keep localStorage default */ }
-  }
-
-  async function toggleNotify() {
-    const prev = notifyMuted;
-    const next = !notifyMuted;
-    notifyMuted = next;                       // optimistic UI
-    try { localStorage.setItem(NOTIFY_MUTE_KEY, next ? "1" : "0"); } catch (_e) {}
-    applyNotifyUI();
-    try {
-      const r = await fetch(url("/api/notify/mute"), {
-        ...FETCH_OPTS, method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ muted: next }),
-      });
-      if (!r.ok) throw new Error("HTTP " + r.status);
-      toast(next ? "Bus alerts muted" : "Bus alerts on", "ok");
-    } catch (e) {
-      // Persist failed — revert so the toggle never lies about the real state.
-      notifyMuted = prev;
-      try { localStorage.setItem(NOTIFY_MUTE_KEY, prev ? "1" : "0"); } catch (_e2) {}
-      applyNotifyUI();
-      toast("Notify toggle failed — " + e.message, "err");
-    }
-  }
-
-  if (notifyToggle) notifyToggle.addEventListener("click", toggleNotify);
+  // NOTE (COCKPIT_REVAMP_HEADER_1, spec item 6): the header bell (notify-mute
+  // toggle) was removed. Banners stay ON; the controller's /api/notify/* endpoints
+  // + COCKPIT_NOTIFY_ENABLED env kill switch are untouched (engineer-only path).
 
   async function boot() {
     try {
@@ -667,12 +618,11 @@
     layout = await r.json();
     } catch (e) {
       connEl.textContent = "layout load failed — " + e.message;
-      connEl.className = "conn err";
+      connEl.className = "conn feed-dead";
       return;
     }
     render();                    // paint immediately from layout (metadata)
     renderSummary();
-    hydrateNotify();             // reflect the controller's mute state on the toggle
     await poll();                // then hydrate with live state
     pollTimer = setInterval(poll, POLL_MS);
   }

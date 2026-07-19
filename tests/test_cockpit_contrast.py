@@ -108,9 +108,14 @@ def _age_color(cls):
 
 
 def test_age_text_passes_aa_composited_over_glance_tints():
+    # COCKPIT_REVAMP_COLORS_1: the FINAL 6-state palette replaced glance-needs-go/
+    # glance-amber. Sweep every state that sets a semi-transparent row tint so the
+    # age text stays AA-legible composited over each one.
     overlays = {
-        "needs_go": _glance_tint(".row.glance-needs-go"),
-        "amber": _glance_tint(".row.glance-amber"),
+        "go": _glance_tint(".row.st-go"),
+        "unread": _glance_tint(".row.st-unread"),
+        "unread_old": _glance_tint(".row.st-unread-old"),
+        "offline": _glance_tint(".row.st-offline"),
     }
     failures = []
     for role in ("hot", "warn", "base"):
