@@ -384,6 +384,76 @@ def test_wake_obligation_count_prefers_server_field_and_falls_back_when_absent()
     ) is None
 
 
+def test_wake_row_selection_uses_server_truth_with_legacy_fallback():
+    mixed = [
+        {
+            "id": 10,
+            "kind": "broadcast",
+            "topic": "fleet/status",
+            "created_at": "2026-07-19T08:00:00Z",
+            "wake_obligation": False,
+        },
+        {
+            "id": 11,
+            "kind": "dispatch",
+            "topic": "real/work",
+            "created_at": "2026-07-19T09:00:00Z",
+            "wake_obligation": True,
+        },
+    ]
+    assert controller._oldest_wake_row(mixed)["id"] == 11
+
+    # A pre-WAKE_FORCE Lab has no per-row marker: preserve legacy selection.
+    legacy = [{"id": 20, "created_at": "a"}, {"id": 21, "created_at": "b"}]
+    assert controller._oldest_wake_row(legacy)["id"] == 20
+
+
+def test_obligation_count_without_authoritative_row_fails_closed():
+    """Codex #13735 omitted-row shape: never select a display-only row merely
+    because the aggregate says an obligation exists outside the old top-five."""
+    row = {
+        "unacked_count": 6,
+        "wake_obligation_count": 1,
+        "unacked_messages": [
+            {
+                "id": 30,
+                "kind": "broadcast",
+                "created_at": "a",
+                "wake_obligation": False,
+            }
+        ],
+    }
+    assert controller._oldest_wake_row(row["unacked_messages"]) is None
+    assert controller.wake_skip_reason(row) == "no wake obligation message id"
+
+
+def test_click_line_lists_only_authoritative_wake_rows():
+    row = {
+        "unacked_count": 7,
+        "wake_obligation_count": 1,
+        "unacked_messages": [
+            {
+                "id": 40,
+                "kind": "broadcast",
+                "topic": "fleet/status",
+                "created_at": "2026-07-19T08:00:00Z",
+                "wake_obligation": False,
+            },
+            {
+                "id": 41,
+                "kind": "dispatch",
+                "topic": "real/work",
+                "from_terminal": "lead",
+                "created_at": "2026-07-19T09:00:00Z",
+                "wake_obligation": True,
+            },
+        ],
+    }
+    line = controller.compose_click_wake_line(row)
+    assert line == "[wake] check your bus: 1 unacked — #41 real/work (from lead)"
+    assert "#40" not in line
+
+
 def test_probe_ttyd_true_for_listening_false_for_closed():
     import asyncio
 

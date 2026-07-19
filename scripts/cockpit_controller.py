@@ -688,6 +688,32 @@ def _oldest_unacked_row(messages: Any) -> dict[str, Any] | None:
     return min(rows, key=lambda m: str(m.get("created_at") or ""))
 
 
+def _wake_message_rows(messages: Any) -> list[dict[str, Any]]:
+    """Return only rows Lab classifies as actionable wake obligations.
+
+    WAKE_FORCE_AUTHORITATIVE_READ_1 makes the server's stored-data predicate
+    authoritative at row selection as well as at the aggregate count. A legacy
+    Lab has no per-row marker, so preserve its all-unacked behavior until the
+    additive field is deployed. Once any row is marked, unmarked/false rows are
+    display-only and must never become a click/sweep target.
+    """
+    rows = [
+        m for m in (messages or [])
+        if isinstance(m, dict) and m.get("id") is not None
+    ]
+    if not any("wake_obligation" in row for row in rows):
+        return rows
+    return [row for row in rows if row.get("wake_obligation") is True]
+
+
+def _oldest_wake_row(messages: Any) -> dict[str, Any] | None:
+    """The oldest server-authorized wake row, or None."""
+    rows = _wake_message_rows(messages)
+    if not rows:
+        return None
+    return min(rows, key=lambda m: str(m.get("created_at") or ""))
+
+
 def _oldest_unacked(messages: Any) -> tuple[Any, str] | None:
     """(id, topic) of the oldest unacked message by created_at, or None."""
     oldest = _oldest_unacked_row(messages)
@@ -726,12 +752,9 @@ def compose_click_wake_line(glance_row: dict[str, Any] | None, *, limit: int = W
     The oldest #id stays FIRST so ``_composer_holds``'s ``#\\d+`` id-match (which reads
     the first id) still anchors on the dedupe key. ``from sender`` is included only
     when the message row carries ``from_terminal`` (fail-soft on the leaner glance)."""
-    rows = [
-        m for m in ((glance_row or {}).get("unacked_messages") or [])
-        if isinstance(m, dict) and m.get("id") is not None
-    ]
+    rows = _wake_message_rows((glance_row or {}).get("unacked_messages"))
     rows.sort(key=lambda m: str(m.get("created_at") or ""))
-    total = (glance_row or {}).get("unacked_count")
+    total = wake_obligation_count(glance_row or {})
     if not isinstance(total, int) or total < len(rows):
         total = len(rows)
     shown = rows[: max(1, limit)]
@@ -775,7 +798,9 @@ def wake_skip_reason(glance_row: dict[str, Any] | None) -> str | None:
         if glance_row.get(WAKE_OBLIGATION_FIELD) is not None:
             return "no wake obligation"
         return "no unacked"
-    if _oldest_unacked(glance_row.get("unacked_messages")) is None:
+    if _oldest_wake_row(glance_row.get("unacked_messages")) is None:
+        if glance_row.get(WAKE_OBLIGATION_FIELD) is not None:
+            return "no wake obligation message id"
         return "no unacked message id"
     return None
 
@@ -955,7 +980,7 @@ def send_wake(
     reason = wake_skip_reason(glance_row)
     if reason is not None:
         if audit and audit_source:
-            oldest = _oldest_unacked_row((glance_row or {}).get("unacked_messages"))
+            oldest = _oldest_wake_row((glance_row or {}).get("unacked_messages"))
             _audit_wake(
                 settings,
                 entry.slug,
@@ -966,7 +991,7 @@ def send_wake(
                 source=audit_source,
             )
         return {"ok": True, "sent": False, "skipped": reason, "slug": entry.slug}
-    oldest = _oldest_unacked_row(glance_row.get("unacked_messages"))
+    oldest = _oldest_wake_row(glance_row.get("unacked_messages"))
     if oldest is None:  # defensive: wake_skip_reason already checks this condition
         if audit and audit_source:
             _audit_wake(
@@ -1585,7 +1610,8 @@ def create_app(
                 force=force, audit_source=audit_source,
             )
             if result.get("skipped") in (
-                "no telemetry", "no unacked", "no unacked message id"
+                "no telemetry", "no unacked", "no unacked message id",
+                "no wake obligation message id",
             ):
                 # The Lab has its own short cache, and this controller has a
                 # separate glance cache. Missing telemetry, a cached zero, or a
