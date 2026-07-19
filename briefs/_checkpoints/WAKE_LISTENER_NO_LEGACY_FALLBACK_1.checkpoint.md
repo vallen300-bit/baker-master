@@ -4,8 +4,8 @@ attempt: 1
 dispatched_by: lead (bus #13635, Director-ordered parallel lane)
 report_topic: wake-listener-no-legacy-fallback-1
 repos:
-  - brisen-lab b1/wake-listener-no-legacy-fallback-1 @2b05636 (off main @505f299)
-status: codex FAIL #13727 (2 P1s) RESOLVED @2b05636 (was @f2801b8); re-gate requested #13734. Awaiting lead re-gate -> merge -> deploy. Reconcile-retry (req3) + sent:false disposition BOTH deferred to a deputy-codex follow-up brief (lead ruling #13730). Today's quiet-uncertain sent:false gap accepted+documented.
+  - brisen-lab b1/wake-listener-no-legacy-fallback-1 @6377a68 (off main @505f299)
+status: codex round-2 FAIL #13742 (timeout budget only; credential split accepted) RESOLVED @6377a68; re-gate round-3 requested #13747. Awaiting lead re-gate -> merge -> deploy. Reconcile-retry (req3) + sent:false disposition + controller self-deadline (WAKE_DISPOSITION_REWAKE_1 §task-4) all deferred/out-of-scope.
 gate: codex bus gate on @f2801b8 -> lead merge
 ---
 
@@ -41,8 +41,17 @@ Brief = lead dispatch bus #13635 (Brief-C, self-contained). Repo brisen-lab,
 - Tests: 16 pass py3.9 + py3.12 (+credentials-unreadable-legacy, +timeout-env-override,
   +classifier local-error branch).
 
+## codex round-2 #13742 fix (@6377a68) — timeout budget only
+Derived CONTROLLER_TIMEOUT_S line-by-line from the ACTUAL controller path
+(baker-master scripts/cockpit_controller.py @b0f1d9bf, wake_session -> send_wake ->
+_verify_wake_submit): full synchronous worst-case = glance 5 + stale-reread 5 +
+inject/verify/recovery (8x _run_tmux @10 + settles) + park bus-post 15 = 107.6s;
+x1.15 margin = 123.7s default, documented in-code, env-overridable. Listener-side
+only (did NOT touch cockpit_controller.py). +cumulative-delay test (slow-but-live
+past old 20.3s -> not dropped). 17 pass py3.9 + py3.12.
+
 ## Next concrete step (owner = lead, then deputy-codex cross-lane)
-1. Lead: re-gate codex @2b05636 -> merge -> Render deploy.
+1. Lead: re-gate codex round-3 @6377a68 -> merge -> Render deploy.
 2. deputy-codex (contract flagged #13670): controller echoes X-Wake-Request-Id into
    wake_events/audit + a receipt-read endpoint {url}/{request_id}->{"landed":bool}; then set
    WAKE_RECEIPT_URL in the listener launchd env to enable reconcile-retry.
