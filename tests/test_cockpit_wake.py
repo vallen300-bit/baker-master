@@ -98,6 +98,43 @@ def test_send_wake_happy_path_sends_line_and_audits(tmp_path, fake_tmux):
     assert audited[-1]["slug"] == "b3" and audited[-1]["msg_id"] == 12063
 
 
+def test_compose_click_wake_line_top_n_with_sender_and_more():
+    """COCKPIT_CARD_CLICK_WAKE_INJECT_1 — the click nudge carries count + top-3
+    '#id topic (from sender)' + a '+K more' tail, oldest id first."""
+    row = {"unacked_count": 4, "unacked_messages": [
+        {"id": 10, "topic": "alpha", "from_terminal": "lead", "created_at": "2026-07-19T01:00:00Z"},
+        {"id": 11, "topic": "beta", "from_terminal": "codex", "created_at": "2026-07-19T02:00:00Z"},
+        {"id": 12, "topic": "gamma", "from_terminal": "lead", "created_at": "2026-07-19T03:00:00Z"},
+        {"id": 13, "topic": "delta", "from_terminal": "codex", "created_at": "2026-07-19T04:00:00Z"},
+    ]}
+    line = controller.compose_click_wake_line(row)
+    assert line == (
+        "[wake] check your bus: 4 unacked — #10 alpha (from lead), "
+        "#11 beta (from codex), #12 gamma (from lead) +1 more"
+    )
+    # oldest id first so _composer_holds' #\d+ anchor still matches the dedupe key.
+    assert line.index("#10") < line.index("#11")
+
+
+def test_compose_click_wake_line_omits_sender_when_absent():
+    """The leaner glance row (no from_terminal) still composes — sender omitted."""
+    row = {"unacked_count": 1, "unacked_messages": [
+        {"id": 7, "topic": "t", "created_at": "z"}]}
+    assert controller.compose_click_wake_line(row) == "[wake] check your bus: 1 unacked — #7 t"
+
+
+def test_send_wake_click_origin_uses_rich_line(tmp_path, fake_tmux):
+    """A click-origin wake injects the rich line; the sweep/default stays terse."""
+    settings = _settings(tmp_path)
+    rich = controller.send_wake(
+        settings, ENTRY, UNACKED_ROW, now=1000.0, last_wake={},
+        audit_source="cockpit_click",
+    )
+    assert rich["line"].startswith("[wake] check your bus: 2 unacked — #12063 ao-room-architecture")
+    bare = controller.send_wake(settings, ENTRY, UNACKED_ROW, now=2000.0, last_wake={})
+    assert bare["line"] == "[wake] check bus #12063 ao-room-architecture"
+
+
 def test_codex_family_verify_skips_c_l_repaint(tmp_path, fake_tmux):
     entry = controller.ManifestEntry(slug="deputy-codex", alias="aihead2", port=17603)
     result = controller.send_wake(

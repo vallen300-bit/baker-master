@@ -4,7 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Baker Cockpit</title>
-<link rel="stylesheet" href="cockpit.css?v=2">
+<link rel="stylesheet" href="cockpit.css?v=3">
 </head>
 <body>
 <header class="cockpit-header">
@@ -58,6 +58,9 @@
          when the seat has unacked rows (JS renderPanelUnacked). Same helper as the
          card message-panel Copy. -->
     <button class="btn" id="term-copy" type="button" title="Copy unacknowledged summary" hidden>Copy</button>
+    <!-- Re-push the composed "check your bus" wake into this open seat's terminal
+         (force + origin=cockpit_click). Shown only when the seat has unacked rows. -->
+    <button class="btn" id="term-nudge" type="button" title="Push a check-your-bus nudge into this seat" hidden>Nudge</button>
     <!-- hidden until a seat that is awaiting a GO is opened (JS syncPanelGo). -->
     <button class="btn go" id="term-go" type="button" title="Send Enter (answer GO)" hidden>GO ⏎</button>
     <div id="x" role="button" tabindex="0" aria-label="Close">✕</div>
@@ -83,7 +86,7 @@
   <div id="msg-body"></div>
 </div>
 
-<script src="glance_state.js?v=2"></script>
-<script src="cockpit.js?v=2"></script>
+<script src="glance_state.js?v=3"></script>
+<script src="cockpit.js?v=3"></script>
 </body>
 </html>

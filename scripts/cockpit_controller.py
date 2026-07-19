@@ -672,6 +672,43 @@ def _oldest_unacked(messages: Any) -> tuple[Any, str] | None:
     return oldest.get("id"), str(oldest.get("topic") or "")
 
 
+# COCKPIT_CARD_CLICK_WAKE_INJECT_1 — a Director card-click nudge carries the payload
+# he pastes today: a count + the top-N oldest unacked (#id topic (from sender)) + a
+# "+K more" tail. Only click-origin wakes use this richer line; the sweep/auto wake
+# keeps the terse single-message form (so its dedupe key + tests are unchanged).
+WAKE_NUDGE_TOP_N = 3
+WAKE_CLICK_ORIGIN = "cockpit_click"
+_WAKE_AUDIT_ORIGINS = frozenset({WAKE_CLICK_ORIGIN, "sweep"})
+
+
+def compose_click_wake_line(glance_row: dict[str, Any] | None, *, limit: int = WAKE_NUDGE_TOP_N) -> str:
+    """The click-origin nudge line: the [wake] tag + a 'check your bus' instruction
+    naming the top-N oldest unacked as '#id topic (from sender)', then '+K more'.
+
+    The oldest #id stays FIRST so ``_composer_holds``'s ``#\\d+`` id-match (which reads
+    the first id) still anchors on the dedupe key. ``from sender`` is included only
+    when the message row carries ``from_terminal`` (fail-soft on the leaner glance)."""
+    rows = [
+        m for m in ((glance_row or {}).get("unacked_messages") or [])
+        if isinstance(m, dict) and m.get("id") is not None
+    ]
+    rows.sort(key=lambda m: str(m.get("created_at") or ""))
+    total = (glance_row or {}).get("unacked_count")
+    if not isinstance(total, int) or total < len(rows):
+        total = len(rows)
+    shown = rows[: max(1, limit)]
+    parts = []
+    for m in shown:
+        frag = f"#{m.get('id')} {str(m.get('topic') or '(no topic)')}"
+        sender = str(m.get("from_terminal") or "").strip()
+        if sender:
+            frag += f" (from {sender})"
+        parts.append(frag)
+    more = total - len(shown)
+    tail = f" +{more} more" if more > 0 else ""
+    return f"{WAKE_ORIGIN_TAG} check your bus: {total} unacked — {', '.join(parts)}{tail}".rstrip()
+
+
 def _wake_repeat_window(message: dict[str, Any]) -> float:
     """Return the repeat window for one message's typed intent."""
     kinds = {
@@ -902,7 +939,12 @@ def send_wake(
     msg_id = oldest.get("id")
     topic = str(oldest.get("topic") or "")
     repeat_window = _wake_repeat_window(oldest)
-    line = f"{WAKE_ORIGIN_TAG} check bus #{msg_id} {topic}".rstrip()
+    # Click-origin nudges carry the richer count + top-N + sender payload; the
+    # sweep/auto wake keeps the terse single-message line (dedupe key unchanged).
+    if audit_source == WAKE_CLICK_ORIGIN:
+        line = compose_click_wake_line(glance_row)
+    else:
+        line = f"{WAKE_ORIGIN_TAG} check bus #{msg_id} {topic}".rstrip()
 
     state = last_wake.get(entry.slug)
     if not isinstance(state, dict):
@@ -943,6 +985,12 @@ def send_wake(
         if isinstance(previous_message, dict)
         else previous_message
     )
+    # NOTE (COCKPIT_CARD_CLICK_WAKE_INJECT_1 item 4): force intentionally bypasses
+    # this per-message dedupe — that is the merged WAKE_INJECT arc's ratified
+    # behavior (test_send_wake_force_bypasses_dedupe_but_still_submits) and this
+    # brief's "Do NOT Touch wake dedupe/typed-repeat logic" holds it. Double-click
+    # idempotence is therefore enforced at the click layer (cockpit.js per-slug
+    # debounce), not here — so the protected wake logic is left unchanged.
     if (
         not force
         and previous_message_at is not None
@@ -1436,11 +1484,16 @@ def create_app(
         lab = await glance.read()
         row = lab.get(entry.slug) or {}
         force = request.query_params.get("force") == "1"
+        # COCKPIT_CARD_CLICK_WAKE_INJECT_1 — tag the origin so a Director card click
+        # is attributable in wake_audit.log and gets the richer nudge line. Only a
+        # known origin is honoured (never a caller-supplied free string).
+        origin = request.query_params.get("origin")
+        audit_source = origin if origin in _WAKE_AUDIT_ORIGINS else None
         try:
             result = send_wake(
                 config, entry, row,
                 now=time.monotonic(), last_wake=app.state.wake_last,
-                force=force,
+                force=force, audit_source=audit_source,
             )
             if result.get("skipped") == "no unacked":
                 # The Lab has its own short cache, and this controller has a
@@ -1451,7 +1504,7 @@ def create_app(
                 result = send_wake(
                     config, entry, fresh_row,
                     now=time.monotonic(), last_wake=app.state.wake_last,
-                    force=force,
+                    force=force, audit_source=audit_source,
                 )
             return result
         except (OSError, RuntimeError, subprocess.TimeoutExpired) as exc:

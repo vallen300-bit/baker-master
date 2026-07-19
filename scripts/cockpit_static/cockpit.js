@@ -39,6 +39,7 @@
   const termUnacked = document.getElementById("term-unacked");
   const toastEl = document.getElementById("toast");
   const termCopy = document.getElementById("term-copy");
+  const termNudge = document.getElementById("term-nudge");
   const syncNoteEl = document.getElementById("sync-note");
   const rosterNoteEl = document.getElementById("roster-note");
   // D9 — App-resident card bus-message panel.
@@ -51,6 +52,7 @@
   let layout = null;             // { plates: [{label, cards:[...]}, ...] }
   let stateBySlug = new Map();   // slug -> live /api/agents row
   let openSlug = null;           // currently open terminal, or null
+  let openName = null;           // display name of the open seat (for the drawer nudge)
   let openMsgSlug = null;        // currently open bus-message panel, or null (D9)
   let messageDetailsBySlug = new Map(); // slug -> message id -> authenticated preview
   let prevUnacked = new Map();   // slug -> last-seen unacked_count (D9 flash-on-new)
@@ -212,8 +214,9 @@
     termUnacked.textContent = "";
     const row = stateBySlug.get(slug) || {};
     const msgs = Array.isArray(row.unacked_messages) ? row.unacked_messages : [];
-    // Drawer Copy appears only when the open seat actually has unacked rows.
+    // Drawer Copy + Nudge appear only when the open seat actually has unacked rows.
     if (termCopy) { termCopy.hidden = !msgs.length; termCopy.textContent = "Copy"; }
+    if (termNudge) termNudge.hidden = !msgs.length;
     if (!msgs.length) { termUnacked.hidden = true; return; }
     const head = el("div", { class: "u-head",
       text: msgs.length + " unacked bus message" + (msgs.length === 1 ? "" : "s") });
@@ -237,24 +240,46 @@
     termUnacked.hidden = false;
   }
 
-  // D6 — wake-on-open. Opening a driveable seat that has unacked>0 and is not
-  // WORKING (and not needs_go — that is the GO flow) nudges its tmux once. The
-  // controller enforces the guards + a 10-min dedupe + audit; the page just asks.
-  function maybeWakeOnOpen(slug) {
+  // COCKPIT_CARD_CLICK_WAKE_INJECT_1 — an explicit Director click (card open or the
+  // drawer Nudge button) force-pushes the composed "check your bus" nudge into the
+  // seat's terminal. force=1 bypasses the controller seat-floor (human intent wins);
+  // origin=cockpit_click gets the richer nudge line + a wake_audit origin tag.
+  //
+  // Idempotence lives HERE: the controller's force path intentionally bypasses
+  // per-message dedupe (merged WAKE_INJECT arc — do-not-touch), so a per-slug
+  // debounce coalesces a rapid double-click and it never double-posts.
+  //
+  // Every outcome is a VISIBLE toast — sent, guarded-skip, or failure — never silent
+  // (fail loud). Only seats that actually have unacked mail are nudged; the
+  // controller's own guards still refuse a working / needs_go / no-unacked seat.
+  const WAKE_CLICK_DEBOUNCE_MS = 4000;
+  const lastNudgeAt = new Map();       // slug -> ms of the last click-nudge POST
+
+  function nudgeSeat(slug, name) {
     const row = stateBySlug.get(slug);
-    if (window.amberState(row)) {
-      fetch(url("/api/sessions/" + slug + "/wake"), { ...FETCH_OPTS, method: "POST" })
-        .catch(() => { /* best-effort nudge; never blocks opening the terminal */ });
-    }
+    if (!row || !((row.unacked_count || 0) > 0)) return;   // nothing to nudge about
+    const now = Date.now();
+    if (now - (lastNudgeAt.get(slug) || 0) < WAKE_CLICK_DEBOUNCE_MS) return;  // double-click coalesce
+    lastNudgeAt.set(slug, now);
+    const label = name || slug;
+    fetch(url("/api/sessions/" + slug + "/wake?force=1&origin=cockpit_click"),
+          { ...FETCH_OPTS, method: "POST" })
+      .then((r) => { if (!r.ok) throw new Error("HTTP " + r.status); return r.json(); })
+      .then((res) => {
+        if (res && res.sent) toast("Nudged " + label + " ✓", "ok");
+        else toast(label + " — " + ((res && res.skipped) || "not nudged"), "");  // visible notice
+      })
+      .catch((e) => { toast("Nudge " + label + " failed — " + e.message, "err"); });  // fail loud
   }
 
   function openTerm(slug, name) {
     openSlug = slug;
+    openName = name;
     termTitle.textContent = name + " — live terminal";
     syncPanelGo();
     renderPanelUnacked(slug);
     void fetchMessageDetails(slug);
-    maybeWakeOnOpen(slug);
+    nudgeSeat(slug, name);       // explicit-click wake (force + origin, toasted)
     termMount.textContent = "";
     const frame = el("iframe", { id: "termframe", src: url("/term/" + slug + "/"),
                                  title: name + " terminal" });
@@ -280,12 +305,14 @@
 
   function closeTerm() {
     openSlug = null;
+    openName = null;
     syncPanelGo();                // openSlug null -> panel GO hidden
     termEl.classList.remove("open");
     veilEl.classList.remove("open");
     termMount.textContent = "";   // remove iframe -> drops the ttyd WS connection
     termUnacked.textContent = ""; termUnacked.hidden = true;
     if (termCopy) { termCopy.hidden = true; termCopy.textContent = "Copy"; }
+    if (termNudge) termNudge.hidden = true;
   }
 
   // ---- D9 bus-message panel (App-resident cards) --------------------------
@@ -605,6 +632,8 @@
   msgVeil.addEventListener("click", closeMsgPanel);
   msgCopy.addEventListener("click", doMsgCopy);
   if (termCopy) termCopy.addEventListener("click", doTermCopy);
+  // Drawer Nudge — re-push the composed wake into an already-open seat (same call).
+  if (termNudge) termNudge.addEventListener("click", () => { if (openSlug) nudgeSeat(openSlug, openName); });
   document.addEventListener("keydown", (e) => { if (e.key === "Escape" && openMsgSlug) closeMsgPanel(); });
 
   // NOTE (COCKPIT_REVAMP_HEADER_1, spec item 6): the header bell (notify-mute

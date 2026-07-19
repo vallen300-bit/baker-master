@@ -473,6 +473,46 @@ def test_start_go_are_allowlisted_and_use_exact_tmux_argv(tmp_path, monkeypatch)
     assert calls[2] == ["tmux", "send-keys", "-t", "b3", "Enter"]
 
 
+def _click_wake_app(tmp_path, monkeypatch):
+    """A wake app whose send_wake is stubbed to capture the audit_source kwarg."""
+    settings = _settings(tmp_path)
+    app = controller.create_app(
+        settings,
+        lab_glance=FakeLab(
+            {"b3": {"is_working": False, "needs_go": False, "unacked_count": 1,
+                    "unacked_messages": [{"id": 1, "topic": "t", "created_at": "z"}]}}
+        ),
+    )
+    monkeypatch.setattr(controller, "tmux_session_names", lambda _s: {"b3"})
+    captured = {}
+
+    def fake_send_wake(*args, **kwargs):
+        captured["audit_source"] = kwargs.get("audit_source")
+        return {"ok": True, "sent": True, "slug": "b3"}
+
+    monkeypatch.setattr(controller, "send_wake", fake_send_wake)
+    return TestClient(app), captured
+
+
+def test_wake_endpoint_tags_cockpit_click_origin(tmp_path, monkeypatch):
+    """COCKPIT_CARD_CLICK_WAKE_INJECT_1 — a card click passes origin=cockpit_click
+    through to the wake audit source."""
+    client, captured = _click_wake_app(tmp_path, monkeypatch)
+    r = client.post("/api/sessions/b3/wake?force=1&origin=cockpit_click",
+                    headers={"Host": "127.0.0.1:7800", **_auth()})
+    assert r.status_code == 200
+    assert captured["audit_source"] == "cockpit_click"
+
+
+def test_wake_endpoint_rejects_unknown_origin(tmp_path, monkeypatch):
+    """A caller-supplied free string is never used as the audit source (allow-list)."""
+    client, captured = _click_wake_app(tmp_path, monkeypatch)
+    r = client.post("/api/sessions/b3/wake?origin=evil",
+                    headers={"Host": "127.0.0.1:7800", **_auth()})
+    assert r.status_code == 200
+    assert captured["audit_source"] is None
+
+
 def test_wake_endpoint_passes_force_query_flag(tmp_path, monkeypatch):
     settings = _settings(tmp_path)
     app = controller.create_app(
