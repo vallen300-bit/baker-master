@@ -399,6 +399,40 @@ def test_start_go_are_allowlisted_and_use_exact_tmux_argv(tmp_path, monkeypatch)
     assert calls[2] == ["tmux", "send-keys", "-t", "b3", "Enter"]
 
 
+def test_wake_endpoint_passes_force_query_flag(tmp_path, monkeypatch):
+    settings = _settings(tmp_path)
+    app = controller.create_app(
+        settings,
+        lab_glance=FakeLab(
+            {
+                "b3": {
+                    "is_working": False,
+                    "needs_go": False,
+                    "unacked_count": 1,
+                    "unacked_messages": [
+                        {"id": 1, "kind": "dispatch", "topic": "wake/x", "created_at": "t"}
+                    ],
+                }
+            }
+        ),
+    )
+    monkeypatch.setattr(controller, "tmux_session_names", lambda _settings: {"b3"})
+    captured = {}
+
+    def fake_send_wake(*args, **kwargs):
+        captured["force"] = kwargs["force"]
+        return {"ok": True, "sent": True, "slug": "b3"}
+
+    monkeypatch.setattr(controller, "send_wake", fake_send_wake)
+    client = TestClient(app)
+    response = client.post(
+        "/api/sessions/b3/wake?force=1",
+        headers={"Host": "127.0.0.1:7800", **_auth()},
+    )
+    assert response.status_code == 200
+    assert captured["force"] is True
+
+
 def test_credential_file_must_be_private(tmp_path):
     manifest, credential = _write_fixture(tmp_path, mode=0o644)
     settings = controller.Settings(
