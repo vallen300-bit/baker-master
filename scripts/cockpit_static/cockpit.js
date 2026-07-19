@@ -54,6 +54,7 @@
   let stateBySlug = new Map();   // slug -> live /api/agents row
   let openSlug = null;           // currently open terminal, or null
   let openMsgSlug = null;        // currently open bus-message panel, or null (D9)
+  let messageDetailsBySlug = new Map(); // slug -> message id -> authenticated preview
   let prevUnacked = new Map();   // slug -> last-seen unacked_count (D9 flash-on-new)
   let flashSlugs = new Set();    // slugs whose unacked count rose this poll (D9)
   let pollTimer = null;
@@ -69,6 +70,39 @@
     }
     for (const c of [].concat(children)) if (c) n.appendChild(c);
     return n;
+  }
+
+  function messageDetailFor(slug, message) {
+    const details = messageDetailsBySlug.get(slug);
+    if (!details || !message || message.id === undefined || message.id === null) {
+      return null;
+    }
+    return details.get(String(message.id)) || null;
+  }
+
+  function mergeMessageDetails(slug, rows) {
+    const details = new Map();
+    for (const row of rows || []) {
+      if (row && row.id !== undefined && row.id !== null) {
+        details.set(String(row.id), row);
+      }
+    }
+    messageDetailsBySlug.set(slug, details);
+  }
+
+  async function fetchMessageDetails(slug) {
+    try {
+      const r = await fetch(url("/api/messages/" + encodeURIComponent(slug)), FETCH_OPTS);
+      if (!r.ok) return;
+      const data = await r.json();
+      if (data && data.available === true && Array.isArray(data.messages)) {
+        mergeMessageDetails(slug, data.messages);
+        if (openMsgSlug === slug) renderMsgSummary(slug);
+        if (openSlug === slug) renderPanelUnacked(slug);
+      }
+    } catch (_) {
+      // Envelope-only rendering is the intentional Lab-outage fallback.
+    }
   }
 
   let toastTimer = null;
@@ -197,10 +231,16 @@
     const list = el("div", { class: "u-list" }, msgs.map((m) => {
       const ts = m && m.created_at ? Date.parse(m.created_at) : NaN;
       const age = Number.isFinite(ts) ? window.formatUnreadAge((Date.now() - ts) / 1000) : "";
+      const detail = messageDetailFor(slug, m);
       return el("div", { class: "u-row" }, [
-        el("span", { class: "u-id", text: "#" + String((m && m.id) || "?") }),
-        el("span", { class: "u-topic", text: String((m && m.topic) || "(no topic)") }),
-        age ? el("span", { class: "u-age", text: age }) : null,
+        el("div", { class: "u-main" }, [
+          el("span", { class: "u-id", text: "#" + String((m && m.id) || "?") }),
+          el("span", { class: "u-topic", text: String((m && m.topic) || "(no topic)") }),
+          age ? el("span", { class: "u-age", text: age }) : null,
+        ]),
+        detail && detail.body_preview
+          ? el("div", { class: "u-preview", text: detail.body_preview })
+          : null,
       ]);
     }));
     termUnacked.appendChild(head);
@@ -224,6 +264,7 @@
     termTitle.textContent = name + " — live terminal";
     syncPanelGo();
     renderPanelUnacked(slug);
+    void fetchMessageDetails(slug);
     maybeWakeOnOpen(slug);
     termMount.textContent = "";
     const frame = el("iframe", { id: "termframe", src: url("/term/" + slug + "/"),
@@ -262,15 +303,21 @@
   // Last message / Acknowledged(count) sections, from the same per-agent bus
   // fields (unacked_messages / last_message / acked_count). DOM-node built —
   // no innerHTML, so agent-supplied strings can never inject markup.
-  function msgEnvelope(m, extraCls) {
+  function msgEnvelope(m, extraCls, slug) {
     const created = m && m.created_at ? Date.parse(m.created_at) : NaN;
     const age = Number.isFinite(created)
       ? window.formatUnreadAge((Date.now() - created) / 1000) : "";
+    const detail = messageDetailFor(slug, m);
     return el("div", { class: "hrow " + (extraCls || "") }, [
-      el("span", { class: "hfrom", text: "from " + String((m && m.from_terminal) || "?") }),
-      el("span", { class: "htopic", text: String((m && m.topic) || "(no topic)") }),
-      el("span", { class: "hid", text: "#" + String((m && m.id) || "?") }),
-      age ? el("span", { class: "hage", text: age }) : null,
+      el("div", { class: "hmain" }, [
+        el("span", { class: "hfrom", text: "from " + String((m && m.from_terminal) || "?") }),
+        el("span", { class: "htopic", text: String((m && m.topic) || "(no topic)") }),
+        el("span", { class: "hid", text: "#" + String((m && m.id) || "?") }),
+        age ? el("span", { class: "hage", text: age }) : null,
+      ]),
+      detail && detail.body_preview
+        ? el("div", { class: "hpreview", text: detail.body_preview })
+        : null,
     ]);
   }
 
@@ -284,12 +331,12 @@
     const s1 = el("section", { class: "hsec" },
       [el("h3", { class: "hsec-t", text: "Unacknowledged (" + unacked.length + ")" })]);
     if (!unacked.length) s1.appendChild(el("div", { class: "hempty", text: "(none)" }));
-    else unacked.forEach((m) => s1.appendChild(msgEnvelope(m, "hrow-unacked")));
+    else unacked.forEach((m) => s1.appendChild(msgEnvelope(m, "hrow-unacked", slug)));
     msgBody.appendChild(s1);
 
     msgBody.appendChild(el("section", { class: "hsec" }, [
       el("h3", { class: "hsec-t", text: "Last message" }),
-      last ? msgEnvelope(last, last.acked ? "hrow-acked" : "hrow-unacked")
+      last ? msgEnvelope(last, last.acked ? "hrow-acked" : "hrow-unacked", slug)
            : el("div", { class: "hempty", text: "(no messages)" }),
     ]));
 
@@ -305,6 +352,7 @@
     renderMsgSummary(slug);
     msgVeil.classList.add("open");
     msgPanel.classList.add("open");
+    void fetchMessageDetails(slug);
   }
 
   function closeMsgPanel() {

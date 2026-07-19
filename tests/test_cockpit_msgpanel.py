@@ -43,3 +43,12 @@ def test_flash_on_new_message():
 def test_panel_refreshes_live_and_closes():
     assert "if (openMsgSlug) renderMsgSummary(openMsgSlug)" in JS, "panel must live-refresh on poll"
     assert "closeMsgPanel" in JS
+
+
+def test_panel_lazily_merges_authenticated_body_previews():
+    assert "/api/messages/" in JS
+    assert "mergeMessageDetails" in JS
+    assert "messageDetailFor" in JS
+    assert "detail.body_preview" in JS
+    assert "text: detail.body_preview" in JS
+    assert ".hpreview" in CSS

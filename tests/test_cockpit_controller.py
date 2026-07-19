@@ -1,4 +1,5 @@
 import base64
+from dataclasses import replace
 import json
 from pathlib import Path
 import subprocess
@@ -431,6 +432,127 @@ def test_wake_endpoint_passes_force_query_flag(tmp_path, monkeypatch):
     )
     assert response.status_code == 200
     assert captured["force"] is True
+
+
+def test_api_messages_reads_authenticated_preview_and_caches(tmp_path, monkeypatch):
+    settings = replace(_settings(tmp_path), lab_messages_url="https://lab.test/msg")
+    key_dir = tmp_path / "keys"
+    key_dir.mkdir()
+    (key_dir / "b3").write_text("seat-key\n", encoding="utf-8")
+    settings = replace(settings, lab_key_dir=key_dir)
+
+    class FakeResponse:
+        def raise_for_status(self):
+            return None
+
+        def json(self):
+            return {
+                "messages": [
+                    {
+                        "id": 17,
+                        "from_terminal": "lead",
+                        "topic": "cockpit-msg-panel-body-preview-1",
+                        "kind": "dispatch",
+                        "created_at": "2026-07-19T08:31:28Z",
+                        "acknowledged_at": None,
+                        "body_preview": "x" * 500,
+                    }
+                ]
+            }
+
+    calls = []
+
+    class FakeClient:
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *args):
+            return None
+
+        async def get(self, url, params, headers):
+            calls.append((url, params, headers))
+            return FakeResponse()
+
+    monkeypatch.setattr(
+        controller.httpx, "AsyncClient", lambda **_kwargs: FakeClient()
+    )
+    app = controller.create_app(settings, lab_glance=FakeLab({}))
+    client = TestClient(app)
+
+    first = client.get(
+        "/api/messages/b3",
+        headers={"Host": "127.0.0.1:7800", **_auth()},
+    )
+    second = client.get(
+        "/api/messages/b3",
+        headers={"Host": "127.0.0.1:7800", **_auth()},
+    )
+
+    assert first.status_code == 200
+    assert second.status_code == 200
+    assert len(calls) == 1
+    assert calls[0][0] == "https://lab.test/msg/b3"
+    assert calls[0][1] == {"limit": 12}
+    assert calls[0][2] == {"X-Terminal-Key": "seat-key"}
+    payload = first.json()
+    assert payload["available"] is True
+    assert payload["messages"][0]["acked"] is False
+    assert len(payload["messages"][0]["body_preview"]) == 400
+    assert "acknowledged_at" not in payload["messages"][0]
+
+
+def test_api_messages_allows_layout_slug_and_fails_soft_without_key(tmp_path):
+    settings = replace(_settings(tmp_path), lab_key_dir=tmp_path / "keys")
+    settings.static_dir.mkdir()
+    (settings.static_dir / "cockpit_layout.json").write_text(
+        json.dumps({"plates": [{"cards": [{"slug": "codex-arch"}]}]}),
+        encoding="utf-8",
+    )
+    app = controller.create_app(settings, lab_glance=FakeLab({}))
+    client = TestClient(app)
+
+    response = client.get(
+        "/api/messages/codex-arch",
+        headers={"Host": "127.0.0.1:7800", **_auth()},
+    )
+    unknown = client.get(
+        "/api/messages/not-a-cockpit-seat",
+        headers={"Host": "127.0.0.1:7800", **_auth()},
+    )
+
+    assert response.status_code == 200
+    assert response.json() == {"available": False, "reason": "no key"}
+    assert unknown.status_code == 404
+
+
+def test_api_messages_upstream_failure_is_panel_safe(tmp_path, monkeypatch):
+    settings = replace(_settings(tmp_path), lab_messages_url="https://lab.test/msg")
+    key_dir = tmp_path / "keys"
+    key_dir.mkdir()
+    (key_dir / "b3").write_text("seat-key", encoding="utf-8")
+    settings = replace(settings, lab_key_dir=key_dir)
+
+    class FailingClient:
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *args):
+            return None
+
+        async def get(self, *args, **kwargs):
+            raise httpx.ConnectError("lab unavailable")
+
+    monkeypatch.setattr(
+        controller.httpx, "AsyncClient", lambda **_kwargs: FailingClient()
+    )
+    app = controller.create_app(settings, lab_glance=FakeLab({}))
+    response = TestClient(app).get(
+        "/api/messages/b3",
+        headers={"Host": "127.0.0.1:7800", **_auth()},
+    )
+
+    assert response.status_code == 200
+    assert response.json() == {"available": False}
 
 
 def test_credential_file_must_be_private(tmp_path):
