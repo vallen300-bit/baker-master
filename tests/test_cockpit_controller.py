@@ -1793,3 +1793,26 @@ def test_static_root_is_inside_the_single_basic_auth_origin(tmp_path):
     )
     assert response.status_code == 200
     assert response.text == "cockpit"
+
+
+# COCKPIT_SWEEP_INTERVAL_PERSISTENCE_GUARD_1 — Director ruled the backlog-sweep
+# interval is 120s. Before this guard it lived ONLY as COCKPIT_BACKLOG_SWEEP_SECONDS
+# in the hand-injected launchd plist env; the repo default was 600, so any plist
+# regeneration/reinstall silently reverted the ruling. Pin 120 at the single
+# source of truth (the code default) so NO launch path — plist regen, env-less
+# run, or direct invocation — can drift back off the ratified value.
+def test_backlog_sweep_default_is_the_ratified_120s(monkeypatch):
+    # The constant IS the repo default.
+    assert controller.BACKLOG_SWEEP_SECONDS == 120.0
+    # The dataclass default mirrors the constant.
+    assert controller.Settings().backlog_sweep_seconds == 120.0
+    # from_env with the override UNSET resolves to 120 — the exact revert path the
+    # guard defends (no plist env present after a regenerate).
+    monkeypatch.delenv("COCKPIT_BACKLOG_SWEEP_SECONDS", raising=False)
+    assert controller.Settings.from_env().backlog_sweep_seconds == 120.0
+
+
+def test_backlog_sweep_env_override_still_tunable(monkeypatch):
+    # Making 120 the default must not remove the ability to tune via env.
+    monkeypatch.setenv("COCKPIT_BACKLOG_SWEEP_SECONDS", "300")
+    assert controller.Settings.from_env().backlog_sweep_seconds == 300.0

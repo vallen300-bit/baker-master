@@ -313,7 +313,11 @@ NOTIFY_SOUND = "Ping"
 # WAKE_RESPAWN_BACKLOG_DRAIN_1 — self-heal for a wake lost during a seat refresh.
 # Zero disables the loop; positive values are seconds and can be tuned without a
 # code change. Existing per-message dedupe and seat-floor guards contain repeats.
-BACKLOG_SWEEP_SECONDS = 600.0
+# COCKPIT_SWEEP_INTERVAL_PERSISTENCE_GUARD_1: 120 is the Director-ratified sweep
+# interval. It lives here as the repo default (single source of truth) so a plist
+# regenerate/reinstall — which drops any hand-injected COCKPIT_BACKLOG_SWEEP_SECONDS
+# env — cannot silently revert the ruling. Override still tunable via that env.
+BACKLOG_SWEEP_SECONDS = 120.0
 MESSAGE_PREVIEW_LIMIT = 12
 MESSAGE_PREVIEW_MAX_CHARS = 400
 MESSAGE_PREVIEW_CACHE_SECONDS = 10.0
