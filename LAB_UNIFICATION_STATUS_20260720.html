@@ -1,0 +1,30 @@
+<!doctype html><html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Brisen Lab Unification — Status Registry · 2026-07-20</title>
+<style>
+:root{--bg:#101418;--card:#1a2027;--ink:#e8ecf0;--muted:#8a97a3;--green:#3fb96e;--amber:#d9a53f;--blue:#4f8fd9;--line:#2a323b}
+body{margin:0;background:var(--bg);color:var(--ink);font:15px/1.5 -apple-system,Helvetica,Arial,sans-serif;padding:28px}
+h1{font-size:19px;letter-spacing:.05em;text-transform:uppercase;margin:0 0 4px}
+.sub{color:var(--muted);font-size:12.5px;margin-bottom:20px}
+table{border-collapse:collapse;width:100%;max-width:980px}
+th,td{text-align:left;padding:9px 12px;border-bottom:1px solid var(--line);vertical-align:top}
+th{color:var(--muted);font-size:11px;text-transform:uppercase;letter-spacing:.06em}
+.b{display:inline-block;padding:2px 9px;border-radius:10px;font-size:11.5px;font-weight:600}
+.b.live{background:#173523;color:var(--green)}.b.build{background:#332a14;color:var(--amber)}
+.b.plan{background:#16283d;color:var(--blue)}.b.hold{background:#242a31;color:var(--muted)}
+.note{color:var(--muted);font-size:12.5px;max-width:980px;margin-top:16px}
+</style></head><body>
+<h1>Brisen Lab Unification — Status Registry</h1>
+<div class="sub">Ratified layout 2026-07-20 (6-entry sidebar, ACTIVE landing) · build plan approved "go" · living registry — lead updates at every state change · last update 2026-07-20 ~20:47Z</div>
+<table>
+<thead><tr><th>#</th><th>Item</th><th>Phase</th><th>Owner</th><th>State</th><th>Evidence</th></tr></thead>
+<tbody>
+<tr><td>0</td><td>Build plan (Director sign-off gate)</td><td>—</td><td>lead</td><td><span class="b live">APPROVED</span></td><td>plan @4ca243e3; Director "go" + plan-mode revision approved 2026-07-20 eve</td></tr>
+<tr><td>1</td><td>/v2 shell · sidebar · cockpit embed · link entries</td><td>1</td><td>b2</td><td><span class="b build">BUILDING</span></td><td>brief LAB_UNIFY_P1_SHELL_1 @2c7a2e2e · dispatch #14139</td></tr>
+<tr><td>2</td><td>Settings &amp; Logs skeleton (Token / Maintenance / History)</td><td>1</td><td>b1</td><td><span class="b build">BUILDING</span></td><td>brief LAB_UNIFY_P1_SETTINGS_LOGS_1 @2c7a2e2e · dispatch #14140</td></tr>
+<tr><td>3</td><td>SKILLS catalog (Director groups + templates links)</td><td>2</td><td>TBD</td><td><span class="b plan">PLANNED</span></td><td>feed ready: skill-registry generator vault @4bc37c2</td></tr>
+<tr><td>4</td><td>LOOPS first-class pages (Research + Airport)</td><td>3</td><td>TBD</td><td><span class="b plan">PLANNED</span></td><td>Airport diagram deferred per Director workbook note</td></tr>
+<tr><td>5</td><td>Default-page switch `/` → new shell + old-page retirement</td><td>post-1</td><td>Director</td><td><span class="b hold">HELD</span></td><td>fires only on Director "switch" after live /v2 review</td></tr>
+</tbody></table>
+<p class="note">Constraints in force: old Lab pages untouched until absorbed · machine feeds/endpoints never change · cockpit embeds unchanged (revamp 9/9 register is style reference) · every item: formal brief → blocking codex gate → lead merge/deploy → post-deploy AC.</p>
+</body></html>
