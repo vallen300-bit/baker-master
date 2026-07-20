@@ -4,8 +4,8 @@ attempt: 1
 dispatched_by: lead (bus #13635, Director-ordered parallel lane)
 report_topic: wake-listener-no-legacy-fallback-1
 repos:
-  - brisen-lab b1/wake-listener-no-legacy-fallback-1 @eb7a396 (rebased onto lab main @07cd4c8)
-status: codex round-4 CLI FAIL #13796 (135s synchronous dispatch head-of-line-blocks single-threaded SSE reader) RESOLVED @eb7a396 — async per-slug dispatch; re-gate round-5 requested #13802 (lead CLI lane, codex seat unstable). Awaiting re-gate -> merge -> deploy. Reconcile-retry (req3) + sent:false disposition + controller self-deadline (WAKE_DISPOSITION_REWAKE_1 §task-4) all deferred/out-of-scope.
+  - brisen-lab b1/wake-listener-no-legacy-fallback-1 @932f542 (rebased onto lab main @07cd4c8)
+status: codex round-5 CLI FAIL #13811 (concurrency layer discarded wakes: P1a coalesce dropped later/newer; P1b saturation dropped 9th) RESOLVED @932f542 — pending-latest slot + pool-queues; re-gate round-6 requested #13816 (lead CLI lane). Awaiting re-gate -> merge -> deploy. Reconcile-retry (req3) + sent:false disposition + controller self-deadline (WAKE_DISPOSITION_REWAKE_1 §task-4) all deferred/out-of-scope.
 gate: codex bus gate on @f2801b8 -> lead merge
 ---
 
@@ -66,8 +66,16 @@ concurrent → at-most-once); different seats parallel. Saturated pool fails lou
 dispatch_wake unchanged. +hung-A-does-not-delay-B test, +same-slug-coalesce test.
 20 pass py3.9 + py3.12.
 
+## codex round-5 CLI #13811 fix (@932f542) — never discard a wake
+- P1a: replaced coalesce-drop with per-alias pending-LATEST slot (_pending_wakes);
+  _run_dispatch loops to drain the parked newest before releasing the alias. At-most-one
+  concurrent per alias, newest never lost.
+- P1b: no drop on saturation — always submit(), pool queues internally; WARN when
+  outstanding depth > 2x workers (WAKE_DISPATCH_BACKLOG_WARN).
+- +pending-latest test, +saturation-queues test. 21 pass py3.9 + py3.12.
+
 ## Next concrete step (owner = lead, then deputy-codex cross-lane)
-1. Lead: re-gate codex round-5 @eb7a396 (CLI lane) -> merge -> Render deploy.
+1. Lead: re-gate codex round-6 @932f542 (CLI lane) -> merge -> Render deploy.
 2. deputy-codex (contract flagged #13670): controller echoes X-Wake-Request-Id into
    wake_events/audit + a receipt-read endpoint {url}/{request_id}->{"landed":bool}; then set
    WAKE_RECEIPT_URL in the listener launchd env to enable reconcile-retry.
