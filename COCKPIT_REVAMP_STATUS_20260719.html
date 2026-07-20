@@ -1,0 +1,151 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Fleet Cockpit Revamp — Status &amp; Process · 2026-07-19</title>
+<style>
+  :root{--paper:#fafaf7;--ink:#1c1c1c;--navy:#1a3a52;--muted:#6b6b66;--line:#e2e0d8;
+        --green:#1e7d3c;--blue:#1558c9;--amber:#a8771c;--red:#b3261e;--grey:#8a8a84;}
+  *{box-sizing:border-box;margin:0;padding:0;}
+  body{font-family:"Helvetica Neue",Helvetica,Arial,sans-serif;background:var(--paper);
+       color:var(--ink);line-height:1.5;padding:48px 56px;max-width:1080px;margin:0 auto;}
+  h1{font-size:26px;color:var(--navy);letter-spacing:.5px;margin-bottom:4px;}
+  .sub{color:var(--muted);font-size:13px;margin-bottom:28px;}
+  h2{font-size:13px;text-transform:uppercase;letter-spacing:2px;color:var(--navy);
+     border-bottom:2px solid var(--navy);padding-bottom:6px;margin:36px 0 14px;}
+  .callout{background:#fff;border-left:4px solid var(--navy);padding:14px 18px;
+           font-size:14px;margin-bottom:8px;}
+  table{width:100%;border-collapse:collapse;font-size:13.5px;background:#fff;}
+  th{text-align:left;font-size:11px;text-transform:uppercase;letter-spacing:1px;
+     color:var(--muted);padding:8px 10px;border-bottom:2px solid var(--line);}
+  td{padding:9px 10px;border-bottom:1px solid var(--line);vertical-align:top;}
+  .pill{display:inline-block;font-size:11px;font-weight:600;letter-spacing:.5px;
+        padding:2px 9px;border-radius:10px;white-space:nowrap;}
+  .p-live{background:#e3f2e6;color:var(--green);}
+  .p-gate{background:#e6edfb;color:var(--blue);}
+  .p-build{background:#fdf3e0;color:var(--amber);}
+  .p-queue{background:#ececea;color:var(--grey);}
+  .p-defer{background:#f4f4f2;color:var(--muted);border:1px dashed var(--line);}
+  .p-ruling{background:#fbe9e8;color:var(--red);}
+  .sw{display:inline-block;width:11px;height:11px;border-radius:3px;margin-right:7px;
+      vertical-align:middle;}
+  .pulse{animation:pu 1.4s ease-in-out infinite;}
+  @keyframes pu{0%,100%{opacity:1}50%{opacity:.35}}
+  .note{font-size:12.5px;color:var(--muted);}
+  .flow{display:flex;gap:6px;flex-wrap:wrap;align-items:center;font-size:13px;margin:6px 0 2px;}
+  .step{background:#fff;border:1px solid var(--line);border-radius:6px;padding:6px 12px;}
+  .arr{color:var(--muted);}
+  .ruling-new{background:#fff8e6;border-left:4px solid var(--amber);padding:12px 18px;
+              font-size:14px;margin-top:8px;}
+  ul{margin:6px 0 6px 20px;font-size:13.5px;}
+  li{margin-bottom:4px;}
+  .mono{font-family:ui-monospace,Menlo,monospace;font-size:12px;color:var(--muted);}
+</style>
+</head>
+<body>
+
+<h1>FLEET COCKPIT — REVAMP STATUS</h1>
+<div class="sub">Your 9 ratified items from the 2026-07-19 walkthrough · state as of <b>2026-07-20 16:00</b> · prepared by AH1 · living registry — refresh this page for current state</div>
+
+<div class="callout"><b>Bottom line:</b> all 9 items are LIVE. The revamp is complete —
+task history and pass/fail verdict cards shipped 2026-07-20 evening as the final piece.
+Lab unification waits for your content sign-off (your ruling 2026-07-20 evening) — no build starts before we agree what goes in.</div>
+
+<div class="ruling-new"><b>✋ Your ruling just now (captured &amp; relayed to the builder):</b>
+the colored-states page you saw in the browser is a <b>test demo only</b>. The live cockpit keeps
+its current visual structure — cards, grid, sizes stay as they are. Only the state colors/symbols,
+header and new functions change. Builder confirmed instruction received.</div>
+
+<h2>The 9 items — where each one stands</h2>
+<table>
+<tr><th style="width:30px">#</th><th style="width:290px">Item (your ruling)</th><th style="width:110px">Status</th><th>Detail</th></tr>
+<tr><td>3</td><td><b>Final state colors</b> — running green · GO blue pulsing · unread amber →
+red after 10 min · offline muted red pulsing · idle grey · name matches chip</td>
+<td><span class="pill p-live">LIVE</span></td>
+<td>Merged &amp; installed 2026-07-19 (PR #606, reviewer PASS). On your screen now.</td></tr>
+<tr><td>6</td><td><b>Header rework</b> — FLEET COCKPIT in caps, big digits removed, green
+health line, bell removed, corner kept empty</td>
+<td><span class="pill p-live">LIVE</span></td>
+<td>Same package as item 3 — merged &amp; installed 2026-07-19.</td></tr>
+<tr><td>2</td><td><b>Copy button</b> on the open-terminal drawer</td>
+<td><span class="pill p-live">LIVE</span></td>
+<td>Merged &amp; installed. One copy mechanism, drawer + card panel. (2026-07-20: your "no messages" paste traced to a dead cached tab on port 7809 — live cockpit verified correct.)</td></tr>
+<tr><td>7</td><td><b>Quiet when healthy</b> — color only where your eyes are needed</td>
+<td><span class="pill p-live">LIVE</span></td>
+<td>Standing stylesheet rule, merged. Applies to every future element.</td></tr>
+<tr><td>4</td><td><b>True split view</b> — grid stays live and clickable beside the open terminal</td>
+<td><span class="pill p-live">LIVE</span></td>
+<td>Shipped 2026-07-20 (PR #612, reviewer PASS, 218 tests). Grid stays sharp and clickable — no blur, locked by an automated test.</td></tr>
+<tr><td>5</td><td><b>Left sidebar</b> — ACTIVE home view, plain-word groups, red badges, remembered choice</td>
+<td><span class="pill p-live">LIVE</span></td>
+<td>Shipped with split view (PR #612): 8 entries, ACTIVE default, red badges, choice remembered.</td></tr>
+<tr><td>1</td><td><b>Context bars on every card</b> — local source, never hidden, dimmed when stale;
+Codex seats get real bars + real working status</td>
+<td><span class="pill p-live">LIVE</span></td>
+<td>Shipped 2026-07-20 15:15. Five review rounds — reviewer caught falsely-idle Codex seats, then two parsing bugs; all fixed and re-verified before merge. Bars now read from the local source and Codex seats show real numbers.</td></tr>
+<tr><td>8</td><td><b>Task history tab</b> — job rows with status, seat, duration, outcome</td>
+<td><span class="pill p-live">LIVE</span></td>
+<td>Shipped 2026-07-20 16:00 (PR #613, reviewer PASS, 264 tests). New History entry in the sidebar — job rows with status, seat, duration, outcome, fed live from the message bus. Verified live: 20 real job rows on first load.</td></tr>
+<tr><td>9</td><td><b>Gate verdicts as pass/fail cards</b> — no more raw text</td>
+<td><span class="pill p-live">LIVE</span></td>
+<td>Shipped with the history tab — green PASS / red FAIL cards across the top of the History view. Early quirk: a message that merely quotes a verdict can be mislabeled; polish candidate, not a blocker.</td></tr>
+</table>
+
+<h2>Ratified 2026-07-20 (added to scope)</h2>
+<ul>
+  <li><b>Lab unification sequencing</b> — starts ONLY after items 1, 8, 9 ship. Old Lab pages untouched until absorbed section-by-section, cockpit style as reference.</li>
+  <li><b>Baker dashboard embedding</b> — folded into unification scope: menu entry + embedded section under the one Lab roof (same bridge pattern as the cockpit), styling aligned; engines stay separate, no code merge.</li>
+  <li><b>Wake design ratified complete</b> — busy seats never interrupted, deferred wakes re-fire on idle; per-turn mail pull for active sessions in final review.</li>
+</ul>
+
+<h2>The new color language (item 3, as ratified)</h2>
+<table>
+<tr><th style="width:240px">Seat state</th><th>What you see</th></tr>
+<tr><td>Working</td><td><span class="sw" style="background:#22a94e"></span>bright green</td></tr>
+<tr><td>Waiting for your GO</td><td><span class="sw pulse" style="background:#1558c9"></span>bright blue, pulsating</td></tr>
+<tr><td>Unread, under 10 min</td><td><span class="sw" style="background:#c9973a"></span>muted amber — from second zero</td></tr>
+<tr><td>Unread, over 10 min</td><td><span class="sw" style="background:#d63a31"></span>bright red</td></tr>
+<tr><td>Offline / no signal</td><td><span class="sw pulse" style="background:#a05a55"></span>muted red, pulsating</td></tr>
+<tr><td>Idle / quiet</td><td><span class="sw" style="background:#9a9a94"></span>muted grey</td></tr>
+</table>
+<p class="note" style="margin-top:6px">Structure unchanged per your ruling — these colors land on the
+existing cards. Agent names take their chip's color, slightly softer.</p>
+
+<h2>Corrections &amp; comments folded in today</h2>
+<ul>
+  <li><b>Your mock-up ruling</b> — live visual structure preserved; mock was function-demo only. Relayed. ✋ <i>covered</i></li>
+  <li><b>No neutral 2-minute window</b> — amber starts at second zero ("sometimes I don't have two minutes"). In the build.</li>
+  <li><b>Stale bars dimmed, not hidden</b> — last-known % always visible with age. In the context-bars brief.</li>
+  <li><b>Header final form</b> — green health line stays top-right small; earlier same-day relocate/grey rulings superseded. In the build.</li>
+  <li><b>Sidebar stays empty</b> beyond the 8 entries — future buttons parked. Enforced in the brief.</li>
+  <li><b>Cockpit diverges from Lab colors</b> this round — Lab untouched; fleet-wide alignment revisited after a week.</li>
+</ul>
+
+<h2>Related fixes shipped today (same surface)</h2>
+<ul>
+  <li><b>Message previews on cards</b> — merged &amp; live this afternoon. All 43 cards now report state,
+      including app seats that showed nothing before. <span class="pill p-live">LIVE</span></li>
+  <li><b>Wake after seat restart</b> — queued messages no longer lost; live on both servers. <span class="pill p-live">LIVE</span></li>
+  <li><b>Wake-visibility root cause fixed (2026-07-20)</b> — server cap silently hid ~10 of 42 seats from the wake system (the "no automation" you felt). Removed; proven end-to-end: staged probe → automatic wake → seat acked unaided. <span class="pill p-live">LIVE</span></li>
+  <li><b>Backstop sweep 10 min → 2 min (your ruling 2026-07-20)</b> — missed wakes now recovered within ~4 minutes worst-case. <span class="pill p-live">LIVE</span></li>
+  <li><b>Mid-session mail pull (lead seat)</b> — messages arriving during an active conversation surface on your next prompt; no more hand-pasting. <span class="pill p-live">LIVE</span></li>
+  <li><b>Known limitation right now:</b> preview text falls back to envelope-only while the bus
+      read-path is congested — diagnosis running; not a cockpit bug.</li>
+</ul>
+
+<h2>How each item ships (the process you're watching)</h2>
+<div class="flow">
+  <span class="step">Your ruling</span><span class="arr">→</span>
+  <span class="step">AH1 writes brief</span><span class="arr">→</span>
+  <span class="step">Builder builds (b2 / Codex deputy)</span><span class="arr">→</span>
+  <span class="step">Independent cross-vendor review</span><span class="arr">→</span>
+  <span class="step">AH1 merges + installs</span><span class="arr">→</span>
+  <span class="step">Live check on your cockpit</span>
+</div>
+<p class="note" style="margin-top:8px">Parked by your instruction: fleet cost counter · per-card send box ·
+docked "ask an agent" box · Lab color alignment. Next week (not started): one unified style across the
+whole Brisen Lab site — this revamp becomes the reference.</p>
+
+<p class="note" style="margin-top:26px">AH1 · 2026-07-19 · spec on file: COCKPIT_REVAMP_SPEC_20260719</p>
+</body>
+</html>
