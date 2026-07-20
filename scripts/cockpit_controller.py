@@ -14,6 +14,7 @@ import base64
 import binascii
 import contextlib
 from dataclasses import dataclass
+from datetime import datetime, timezone
 import hmac
 import json
 import logging
@@ -49,6 +50,10 @@ GLANCE_FIELDS = (
     "has_telemetry",
     "needs_go",
     "unacked_count",
+    # WAKE_ATTRIBUTION_ADDRESSEE_FILTER_1: server-side count of unacked rows
+    # that are genuine execute obligations. Wake logic consumes this field;
+    # ``unacked_count`` remains the all-message display count.
+    "wake_obligation_count",
     "oldest_unacked_age_sec",
     "unacked_topics",
     # D4 — context-window usage. Populated by ``derive_context_pct`` from the
@@ -109,6 +114,7 @@ WAKE_ORIGIN_TAG = "[wake]"
 # straight through to a hidden band. Session age NEVER feeds this field
 # (codex-arch OBJECT, #12055) — the mapping only ever reads the usage percent.
 CONTEXT_USED_FIELD = "context_used_percent"
+WAKE_OBLIGATION_FIELD = "wake_obligation_count"
 
 
 def derive_context_pct(row: dict[str, Any]) -> float | None:
@@ -131,6 +137,25 @@ def derive_context_pct(row: dict[str, Any]) -> float | None:
                 continue
             return max(0.0, min(100.0, float(val)))
     return None
+
+
+def wake_obligation_count(row: dict[str, Any]) -> int:
+    """Return the authoritative count that may drive a wake decision.
+
+    New Lab servers provide ``wake_obligation_count``. An absent/null field
+    means an older server, so preserve the legacy ``unacked_count`` behavior.
+    A present but malformed value fails closed to zero instead of reviving the
+    all-message wake storm this field exists to prevent.
+    """
+    raw = row.get(WAKE_OBLIGATION_FIELD)
+    if raw is None:
+        raw = row.get("unacked_count")
+    if isinstance(raw, bool):
+        return 0
+    try:
+        return max(0, int(raw or 0))
+    except (TypeError, ValueError, OverflowError):
+        return 0
 
 
 def glance_row_from_lab(row: dict[str, Any]) -> dict[str, Any]:
@@ -664,6 +689,90 @@ def _oldest_unacked_row(messages: Any) -> dict[str, Any] | None:
     return min(rows, key=lambda m: str(m.get("created_at") or ""))
 
 
+_WAKE_COUNT_UNSET = object()
+
+
+def _wake_message_rows(
+    messages: Any,
+    *,
+    aggregate_count: Any = _WAKE_COUNT_UNSET,
+) -> list[dict[str, Any]]:
+    """Return only rows Lab classifies as actionable wake obligations.
+
+    WAKE_FORCE_AUTHORITATIVE_READ_1 makes the server's stored-data predicate
+    authoritative at row selection as well as at the aggregate count. A present
+    aggregate means the server contract is authoritative even when the capped
+    row payload carries no per-row marker; in that shape, fail closed. A legacy
+    Lab has neither aggregate nor marker, so preserve its all-unacked behavior.
+    """
+    rows = [
+        m for m in (messages or [])
+        if isinstance(m, dict) and m.get("id") is not None
+    ]
+    if aggregate_count is not _WAKE_COUNT_UNSET and aggregate_count is not None:
+        return [row for row in rows if row.get("wake_obligation") is True]
+    if not any("wake_obligation" in row for row in rows):
+        return rows
+    return [row for row in rows if row.get("wake_obligation") is True]
+
+
+def _oldest_wake_row(
+    messages: Any,
+    *,
+    aggregate_count: Any = _WAKE_COUNT_UNSET,
+) -> dict[str, Any] | None:
+    """The oldest server-authorized wake row, or None."""
+    rows = _wake_message_rows(messages, aggregate_count=aggregate_count)
+    if not rows:
+        return None
+    return min(rows, key=lambda m: str(m.get("created_at") or ""))
+
+
+def _created_at_epoch(value: Any) -> float | None:
+    """Parse a Lab ISO timestamp without turning malformed data into age."""
+    if not isinstance(value, str) or not value.strip():
+        return None
+    text = value.strip()
+    if text.endswith("Z"):
+        text = text[:-1] + "+00:00"
+    try:
+        parsed = datetime.fromisoformat(text)
+    except ValueError:
+        return None
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=timezone.utc)
+    return parsed.timestamp()
+
+
+def _oldest_wake_age_sec(glance_row: dict[str, Any]) -> float:
+    """Age only the rows the server says are wake obligations.
+
+    ``oldest_unacked_age_sec`` covers every display row, including broadcasts
+    and status messages. Once the aggregate is present, using it for the sweep
+    would let an old display-only row re-wake a seat with a fresh obligation.
+    Timestamp parsing fails closed for the authoritative shape; legacy rows
+    retain the pre-field aggregate age behavior.
+    """
+    aggregate_count = glance_row.get(WAKE_OBLIGATION_FIELD)
+    rows = _wake_message_rows(
+        glance_row.get("unacked_messages"), aggregate_count=aggregate_count,
+    )
+    if not rows:
+        return 0.0
+    if aggregate_count is None:
+        try:
+            return max(0.0, float(glance_row.get("oldest_unacked_age_sec") or 0))
+        except (TypeError, ValueError):
+            return 0.0
+    now_epoch = time.time()
+    ages = [
+        max(0.0, now_epoch - created_at)
+        for row in rows
+        if (created_at := _created_at_epoch(row.get("created_at"))) is not None
+    ]
+    return max(ages, default=0.0)
+
+
 def _oldest_unacked(messages: Any) -> tuple[Any, str] | None:
     """(id, topic) of the oldest unacked message by created_at, or None."""
     oldest = _oldest_unacked_row(messages)
@@ -702,12 +811,13 @@ def compose_click_wake_line(glance_row: dict[str, Any] | None, *, limit: int = W
     The oldest #id stays FIRST so ``_composer_holds``'s ``#\\d+`` id-match (which reads
     the first id) still anchors on the dedupe key. ``from sender`` is included only
     when the message row carries ``from_terminal`` (fail-soft on the leaner glance)."""
-    rows = [
-        m for m in ((glance_row or {}).get("unacked_messages") or [])
-        if isinstance(m, dict) and m.get("id") is not None
-    ]
+    row = glance_row or {}
+    rows = _wake_message_rows(
+        row.get("unacked_messages"),
+        aggregate_count=row.get(WAKE_OBLIGATION_FIELD),
+    )
     rows.sort(key=lambda m: str(m.get("created_at") or ""))
-    total = (glance_row or {}).get("unacked_count")
+    total = wake_obligation_count(glance_row or {})
     if not isinstance(total, int) or total < len(rows):
         total = len(rows)
     shown = rows[: max(1, limit)]
@@ -744,9 +854,19 @@ def wake_skip_reason(glance_row: dict[str, Any] | None) -> str | None:
         return "needs_go (GO flow owns it)"
     if glance_row.get("is_working") is True:
         return "working"
-    if not (glance_row.get("unacked_count") or 0) > 0:
+    if wake_obligation_count(glance_row) <= 0:
+        # A server-supplied zero is authoritative even when the display count
+        # is nonzero. On an older field-absent server, retain the legacy reason
+        # so the HTTP wake path performs its existing one-refresh stale check.
+        if glance_row.get(WAKE_OBLIGATION_FIELD) is not None:
+            return "no wake obligation"
         return "no unacked"
-    if _oldest_unacked(glance_row.get("unacked_messages")) is None:
+    if _oldest_wake_row(
+        glance_row.get("unacked_messages"),
+        aggregate_count=glance_row.get(WAKE_OBLIGATION_FIELD),
+    ) is None:
+        if glance_row.get(WAKE_OBLIGATION_FIELD) is not None:
+            return "no wake obligation message id"
         return "no unacked message id"
     return None
 
@@ -926,7 +1046,11 @@ def send_wake(
     reason = wake_skip_reason(glance_row)
     if reason is not None:
         if audit and audit_source:
-            oldest = _oldest_unacked_row((glance_row or {}).get("unacked_messages"))
+            row = glance_row or {}
+            oldest = _oldest_wake_row(
+                row.get("unacked_messages"),
+                aggregate_count=row.get(WAKE_OBLIGATION_FIELD),
+            )
             _audit_wake(
                 settings,
                 entry.slug,
@@ -937,7 +1061,10 @@ def send_wake(
                 source=audit_source,
             )
         return {"ok": True, "sent": False, "skipped": reason, "slug": entry.slug}
-    oldest = _oldest_unacked_row(glance_row.get("unacked_messages"))
+    oldest = _oldest_wake_row(
+        glance_row.get("unacked_messages"),
+        aggregate_count=glance_row.get(WAKE_OBLIGATION_FIELD),
+    )
     if oldest is None:  # defensive: wake_skip_reason already checks this condition
         if audit and audit_source:
             _audit_wake(
@@ -1165,20 +1292,26 @@ class LabGlance:
                 response = await client.get(self.settings.lab_url)
                 response.raise_for_status()
                 payload = response.json()
+            if not isinstance(payload, dict) or not isinstance(
+                payload.get("terminals"), list
+            ):
+                raise ValueError("Lab glance payload missing terminals list")
         except (httpx.HTTPError, ValueError, TypeError) as exc:
             LOG.warning("Lab glance unavailable: %s", exc)
             self.last_ok = False
-            self._value = {}
             self._expires_at = now + min(self.settings.lab_cache_seconds, 5.0)
-            return {}
+            # WAKE_FORCE_AUTHORITATIVE_READ_1: a failed read is UNKNOWN, not an
+            # authoritative fleet-wide empty result. Preserve the last-good view
+            # for degraded rendering/diagnostics while last_ok=False tells action
+            # paths they must not treat these rows as fresh authority.
+            return self._value
 
         result: dict[str, dict[str, Any]] = {}
-        rows = payload.get("terminals", []) if isinstance(payload, dict) else []
-        if isinstance(rows, list):
-            for row in rows:
-                if not isinstance(row, dict) or not row.get("slug"):
-                    continue
-                result[str(row["slug"])] = glance_row_from_lab(row)
+        rows = payload["terminals"]
+        for row in rows:
+            if not isinstance(row, dict) or not row.get("slug"):
+                continue
+            result[str(row["slug"])] = glance_row_from_lab(row)
         self.last_ok = True
         self._value = result
         self._expires_at = now + self.settings.lab_cache_seconds
@@ -1523,8 +1656,6 @@ def create_app(
         entry = _entry_for(manifest(), slug)
         if entry.slug not in tmux_session_names(config):
             return {"ok": True, "sent": False, "skipped": "session down", "slug": entry.slug}
-        lab = await glance.read()
-        row = lab.get(entry.slug) or {}
         force = request.query_params.get("force") == "1"
         # COCKPIT_CARD_CLICK_WAKE_INJECT_1 — tag the origin so a Director card click
         # is attributable in wake_audit.log and gets the richer nudge line. Only a
@@ -1533,27 +1664,61 @@ def create_app(
         # Client may claim cockpit_click only; a spoofed origin=sweep is dropped to
         # None so it can neither forge the audit source nor borrow sweep behaviour.
         audit_source = origin if origin in _WAKE_CLIENT_ORIGINS else None
+        authoritative = force or audit_source == WAKE_CLICK_ORIGIN
+        lab = await glance.read()
+        if authoritative and not getattr(glance, "last_ok", True):
+            raise HTTPException(
+                status_code=503,
+                detail={
+                    "error": "wake_state_unknown",
+                    "slug": entry.slug,
+                    "reason": "lab_glance_unavailable",
+                },
+            )
+        row = lab.get(entry.slug) or {}
         try:
             result = send_wake(
                 config, entry, row,
                 now=time.monotonic(), last_wake=app.state.wake_last,
                 force=force, audit_source=audit_source,
             )
-            if result.get("skipped") in ("no unacked", "no unacked message id"):
+            if result.get("skipped") in (
+                "no telemetry", "no unacked", "no unacked message id",
+                "no wake obligation message id",
+            ):
                 # The Lab has its own short cache, and this controller has a
-                # separate glance cache. A cached zero must not be authoritative
-                # for a wake decision; one forced read closes the stale-glance gap.
+                # separate glance cache. Missing telemetry, a cached zero, or a
+                # lean row without message IDs must not be authoritative for a wake
+                # decision; one forced read closes each stale-glance shape.
                 # "no unacked message id" is the same staleness in a leaner shape
                 # (codex FAIL #13397 P1): a card hydrated status-only via /api/agents
                 # carries unacked_count>0 but unacked_messages=None, so wake_skip_reason
                 # returns "no unacked message id" and the click would silently no-op —
                 # a fresh read carries the message rows and the second send_wake sends.
                 fresh_lab = await _fresh_glance_read()
+                if authoritative and not getattr(glance, "last_ok", True):
+                    raise HTTPException(
+                        status_code=503,
+                        detail={
+                            "error": "wake_state_unknown",
+                            "slug": entry.slug,
+                            "reason": "lab_glance_unavailable",
+                        },
+                    )
                 fresh_row = fresh_lab.get(entry.slug) or {}
                 result = send_wake(
                     config, entry, fresh_row,
                     now=time.monotonic(), last_wake=app.state.wake_last,
                     force=force, audit_source=audit_source,
+                )
+            if authoritative and result.get("skipped") == "no telemetry":
+                raise HTTPException(
+                    status_code=503,
+                    detail={
+                        "error": "wake_state_unknown",
+                        "slug": entry.slug,
+                        "reason": "seat_telemetry_unavailable",
+                    },
                 )
             return result
         except (OSError, RuntimeError, subprocess.TimeoutExpired) as exc:
@@ -1594,7 +1759,14 @@ def create_app(
         not dump the accumulated backlog as a burst of banners."""
         rows = await glance.read()
         if not getattr(glance, "last_ok", True):
-            return  # a full Lab outage collapses every seat to {}; do not fire
+            # APP_RESIDENT_NOTIFY_DEGRADED_1: preserve no-false-banner semantics,
+            # but do not let one cached/degraded read suppress the entire poll.
+            # Make one independent bounded refresh (LabGlance enforces the
+            # configured request timeout, 5s by default); only a second failure
+            # is allowed to skip the tick.
+            rows = await _fresh_glance_read()
+            if not getattr(glance, "last_ok", True):
+                return
         eligible = load_notify_seats(config.static_dir)
         to_fire, app.state.notify_prev, app.state.notify_last_fired = (
             compute_notifications(
@@ -1619,14 +1791,11 @@ def create_app(
         outcomes: list[dict[str, Any]] = []
         for entry in manifest():
             row = rows.get(entry.slug) or {}
-            try:
-                oldest_age = float(row.get("oldest_unacked_age_sec") or 0)
-            except (TypeError, ValueError):
-                oldest_age = 0.0
+            oldest_age = _oldest_wake_age_sec(row)
             if (
                 entry.slug not in sessions
                 or row.get("is_working") is True
-                or int(row.get("unacked_count") or 0) <= 0
+                or wake_obligation_count(row) <= 0
                 or oldest_age <= config.backlog_sweep_seconds
             ):
                 continue
