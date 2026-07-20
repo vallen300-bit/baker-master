@@ -180,6 +180,54 @@ else
   bad "turn drain cooldown skips curl"
 fi
 
+# HTTP-error JSON must not arm the cooldown; the next prompt retries the daemon.
+cat > "$TMP/bin/curl" <<'SH'
+#!/usr/bin/env bash
+printf '%s\n' "called" >> "$CURL_LOG"
+printf '%s\n' '{"detail":"bus_busy_retry"}'
+SH
+chmod +x "$TMP/bin/curl"
+rm -f "$TMP/.brisen-lab-bus-turn-drain-lead.txt"
+http_error_first="$(printf '{}' | "$CLAUDE_HOME/hooks/turn-bus-drain.sh")"
+http_error_second="$(printf '{}' | "$CLAUDE_HOME/hooks/turn-bus-drain.sh")"
+if grep -q 'daemon error' <<<"$http_error_first" \
+   && grep -q 'daemon error' <<<"$http_error_second" \
+   && [[ "$(wc -l < "$CURL_LOG")" -eq 3 ]]; then
+  ok "HTTP-error response does not arm cooldown"
+else
+  bad "HTTP-error response does not arm cooldown"
+fi
+
+# Concurrent prompts for one slug: the atomic claim lets exactly one drain
+# render/ledger the arrival while the other exits silently.
+cat > "$TMP/bin/curl" <<'SH'
+#!/usr/bin/env bash
+printf '%s\n' "called" >> "$CURL_LOG"
+sleep 0.2
+printf '%s\n' '{"messages":[{"id":992,"kind":"dispatch","from_terminal":"lead","to_terminals":["lead"],"topic":"race-test","thread_id":"t-2","acknowledged_at":null,"created_at":"2026-07-20T09:01:00Z","body_preview":"single render"}]}'
+SH
+chmod +x "$TMP/bin/curl"
+rm -f "$TMP/.brisen-lab-bus-turn-drain-lead.txt" \
+      "$TMP/.brisen-lab-bus-last-seen-lead.txt" \
+      "$TMP/.brisen-lab-bus-rendered-lead.txt" \
+      "$TMP/.brisen-lab-bus-turn-drain-lead.lock" \
+      "$CURL_LOG"
+printf '{}' | "$CLAUDE_HOME/hooks/turn-bus-drain.sh" > "$TMP/race-a.out" 2>/dev/null &
+race_a=$!
+sleep 0.05
+printf '{}' | "$CLAUDE_HOME/hooks/turn-bus-drain.sh" > "$TMP/race-b.out" 2>/dev/null &
+race_b=$!
+wait "$race_a"
+wait "$race_b"
+race_rendered="$(grep -h -c 'race-test' "$TMP/race-a.out" "$TMP/race-b.out" 2>/dev/null | awk '{sum += $1} END {print sum+0}')"
+if [[ "$(wc -l < "$CURL_LOG")" -eq 1 \
+   && "$race_rendered" -eq 1 \
+   && "$(wc -l < "$TMP/.brisen-lab-bus-rendered-lead.txt")" -eq 1 ]]; then
+  ok "concurrent turn drain renders once"
+else
+  bad "concurrent turn drain renders once"
+fi
+
 cat > "$TMP/bin/curl" <<'SH'
 #!/usr/bin/env bash
 exit 28

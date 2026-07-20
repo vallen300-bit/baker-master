@@ -113,8 +113,75 @@ esac
 # unset, while turn-bus-drain.sh sets it to 60 seconds. Check before key lookup
 # and curl so a rapid prompt burst is completely silent and network-free.
 COOLDOWN_SECONDS="${BUS_DRAIN_COOLDOWN_SECONDS:-0}"
+TURN_LOCK_DIR=""
+TURN_LOCK_HELD=0
+TURN_LOCK_STALE_SECONDS=15
+
+_release_turn_lock() {
+    if [[ "$TURN_LOCK_HELD" -ne 1 ]]; then
+        return
+    fi
+    rm -f "$TURN_LOCK_DIR/owner" 2>/dev/null || true
+    rmdir "$TURN_LOCK_DIR" 2>/dev/null || true
+    TURN_LOCK_HELD=0
+}
+
+_acquire_turn_lock() {
+    TURN_LOCK_DIR="${HOME}/.brisen-lab-bus-turn-drain-${SLUG}.lock"
+    if mkdir "$TURN_LOCK_DIR" 2>/dev/null; then
+        if printf '%s\n' "$$" > "$TURN_LOCK_DIR/owner" 2>/dev/null; then
+            TURN_LOCK_HELD=1
+            trap _release_turn_lock EXIT
+            return 0
+        fi
+        rmdir "$TURN_LOCK_DIR" 2>/dev/null || true
+        return 1
+    fi
+
+    # A hard-killed hook must not leave the seat permanently locked. Only
+    # remove a lock whose directory mtime is older than the bounded hook budget.
+    if python3 - "$TURN_LOCK_DIR" "$TURN_LOCK_STALE_SECONDS" <<'PY' 2>/dev/null
+import os
+import sys
+import time
+
+try:
+    age = time.time() - os.stat(sys.argv[1]).st_mtime
+except OSError:
+    raise SystemExit(1)
+raise SystemExit(0 if age >= float(sys.argv[2]) else 1)
+PY
+    then
+        rm -f "$TURN_LOCK_DIR/owner" 2>/dev/null || true
+        if rmdir "$TURN_LOCK_DIR" 2>/dev/null; then
+            if mkdir "$TURN_LOCK_DIR" 2>/dev/null \
+                && printf '%s\n' "$$" > "$TURN_LOCK_DIR/owner" 2>/dev/null; then
+                TURN_LOCK_HELD=1
+                trap _release_turn_lock EXIT
+                return 0
+            fi
+            rmdir "$TURN_LOCK_DIR" 2>/dev/null || true
+        fi
+    fi
+    return 1
+}
+
+_response_is_valid() {
+    RESP="$RESP" python3 -c '
+import json, os, sys
+try:
+    data = json.loads(os.environ["RESP"])
+except (KeyError, json.JSONDecodeError, TypeError, ValueError):
+    raise SystemExit(1)
+if isinstance(data, dict) and "messages" in data and "detail" not in data:
+    raise SystemExit(0)
+raise SystemExit(1)
+' 2>/dev/null
+}
+
 if [[ "$COOLDOWN_SECONDS" =~ ^[1-9][0-9]*$ ]]; then
     COOLDOWN_FILE="${HOME}/.brisen-lab-bus-turn-drain-${SLUG}.txt"
+    _acquire_turn_lock || exit 0
     NOW_EPOCH="$(date +%s 2>/dev/null || true)"
     LAST_EPOCH="$(cat "$COOLDOWN_FILE" 2>/dev/null | tr -d '\n\r ')"
     if [[ "$NOW_EPOCH" =~ ^[0-9]+$ && "$LAST_EPOCH" =~ ^[0-9]+$ ]] \
@@ -255,18 +322,20 @@ RESP="$(curl -sS "${CURL_TIMEOUT_ARGS[@]}" -G -H "X-Terminal-Key: ${KEY}" \
     exit 0
 }
 
-# Mark a completed drain attempt so the turn wrapper can suppress the next
-# prompt for the cooldown window. A failed curl deliberately does not advance
-# this state, allowing the next prompt to retry a transient outage.
+# Mark a valid drain response so the turn wrapper can suppress the next prompt
+# for the cooldown window. HTTP-error JSON and malformed responses deliberately
+# do not advance this state, allowing the next prompt to retry the outage.
 if [[ "$COOLDOWN_SECONDS" =~ ^[1-9][0-9]*$ ]]; then
-    NOW_EPOCH="$(date +%s 2>/dev/null || true)"
-    if [[ "$NOW_EPOCH" =~ ^[0-9]+$ ]]; then
-        COOLDOWN_DIR="$(dirname "$COOLDOWN_FILE")"
-        COOLDOWN_TMP="$(mktemp "${COOLDOWN_DIR}/.brisen-lab-bus-turn-drain-tmp.XXXXXX" 2>/dev/null || true)"
-        if [ -n "$COOLDOWN_TMP" ]; then
-            printf '%s\n' "$NOW_EPOCH" > "$COOLDOWN_TMP" 2>/dev/null \
-                && mv -f "$COOLDOWN_TMP" "$COOLDOWN_FILE" 2>/dev/null \
-                || rm -f "$COOLDOWN_TMP" 2>/dev/null || true
+    if _response_is_valid; then
+        NOW_EPOCH="$(date +%s 2>/dev/null || true)"
+        if [[ "$NOW_EPOCH" =~ ^[0-9]+$ ]]; then
+            COOLDOWN_DIR="$(dirname "$COOLDOWN_FILE")"
+            COOLDOWN_TMP="$(mktemp "${COOLDOWN_DIR}/.brisen-lab-bus-turn-drain-tmp.XXXXXX" 2>/dev/null || true)"
+            if [ -n "$COOLDOWN_TMP" ]; then
+                printf '%s\n' "$NOW_EPOCH" > "$COOLDOWN_TMP" 2>/dev/null \
+                    && mv -f "$COOLDOWN_TMP" "$COOLDOWN_FILE" 2>/dev/null \
+                    || rm -f "$COOLDOWN_TMP" 2>/dev/null || true
+            fi
         fi
     fi
 fi
