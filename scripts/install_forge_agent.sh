@@ -51,7 +51,7 @@ FORGE_SCRIPTS=(session-start-hook.sh heartbeat-ticker.sh turn-start-hook.sh turn
   codex-worktree.sh lifecycle-watch.sh)
 # Bus hooks: canonical source is tests/fixtures/ (already tracked); deployed to
 # ~/.claude/hooks/.
-BUS_HOOKS=(session-start-bus-drain.sh stop-bus-ack.sh)
+BUS_HOOKS=(session-start-bus-drain.sh turn-bus-drain.sh stop-bus-ack.sh)
 
 MODE="install"
 CLASS_OVERRIDE=""
@@ -109,6 +109,7 @@ frag = {
     ],
     "UserPromptSubmit": [
         g(f"{forge}/turn-start-hook.sh", matcher="*"),
+        g(f"{hooks}/turn-bus-drain.sh", timeout=6, matcher="*"),
     ],
     "Stop": [
         g(f"{forge}/turn-stop-hook.sh", matcher="*"),
@@ -175,7 +176,7 @@ def cmds(ev): return [norm(h.get("command","")) for g in hooks.get(ev,[]) for h 
 forge, hd = os.environ["FORGE_HOME"], os.environ["HOOKS_DIR"]
 need = {
     "SessionStart": [f"{forge}/session-start-hook.sh", f"{hd}/session-start-bus-drain.sh"],
-    "UserPromptSubmit": [f"{forge}/turn-start-hook.sh"],
+    "UserPromptSubmit": [f"{forge}/turn-start-hook.sh", f"{hd}/turn-bus-drain.sh"],
     "Stop": [f"{forge}/turn-stop-hook.sh", f"{hd}/stop-bus-ack.sh"],
 }
 missing = [f"{ev}:{c}" for ev, cs in need.items() for c in cs if norm(c) not in cmds(ev)]

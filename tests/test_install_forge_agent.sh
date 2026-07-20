@@ -24,10 +24,10 @@ new_env
 run_install --headless
 if bash "$INSTALLER" --check --headless >/dev/null 2>&1; then ok "install -> check clean (headless)"; else bad "install -> check clean (headless)"; fi
 
-# 6 forge scripts + 2 bus hooks deployed + executable
+# 6 forge scripts + 3 bus hooks deployed + executable
 depl=0; for s in session-start-hook.sh heartbeat-ticker.sh turn-start-hook.sh turn-stop-hook.sh codex-worktree.sh lifecycle-watch.sh; do [[ -x "$FORGE_AGENT_HOME/$s" ]] && depl=$((depl+1)); done
-for h in session-start-bus-drain.sh stop-bus-ack.sh; do [[ -x "$CLAUDE_HOME/hooks/$h" ]] && depl=$((depl+1)); done
-[[ "$depl" -eq 8 ]] && ok "8 scripts deployed + executable" || bad "8 scripts deployed (got $depl)"
+for h in session-start-bus-drain.sh turn-bus-drain.sh stop-bus-ack.sh; do [[ -x "$CLAUDE_HOME/hooks/$h" ]] && depl=$((depl+1)); done
+[[ "$depl" -eq 9 ]] && ok "9 scripts deployed + executable" || bad "9 scripts deployed (got $depl)"
 grep -q 'lifecycle-watch.sh' "$FORGE_AGENT_HOME/session-start-hook.sh" \
   && ok "session-start wires lifecycle watcher" \
   || bad "session-start lifecycle watcher wiring missing"
@@ -149,6 +149,50 @@ run_install --headless   # re-install against $HOME-form settings must not dupli
 dupct="$(python3 -c 'import json;d=json.load(open("'"$CLAUDE_HOME"'/settings.json"));print(sum(1 for g in d["hooks"].get("UserPromptSubmit",[]) for h in g.get("hooks",[]) if "turn-start-hook" in h.get("command","")))')"
 [[ "$dupct" == "1" ]] && ok "re-install no dup vs HOME-form turn hook" || bad "re-install no dup vs HOME-form (count=$dupct)"
 rm -rf "$HTMP"
+
+# --- 11. UserPromptSubmit turn drain renders once, then cooldown is silent ----
+new_env
+run_install --headless
+export HOME="$TMP"
+mkdir -p "$TMP/bin"
+cat > "$TMP/bin/curl" <<'SH'
+#!/usr/bin/env bash
+printf '%s\n' "called" >> "$CURL_LOG"
+printf '%s\n' '{"messages":[{"id":991,"kind":"dispatch","from_terminal":"lead","to_terminals":["lead"],"topic":"turn-test","thread_id":"t-1","acknowledged_at":null,"created_at":"2026-07-20T09:00:00Z","body_preview":"mid-session arrival"}]}'
+SH
+chmod +x "$TMP/bin/curl"
+export PATH="$TMP/bin:$PATH" BAKER_ROLE=lead BRISEN_LAB_TERMINAL_KEY=dummy \
+       CURL_LOG="$TMP/curl.log"
+first="$(printf '{}' | "$CLAUDE_HOME/hooks/turn-bus-drain.sh")"
+if grep -q 'UserPromptSubmit' <<<"$first" \
+   && grep -q 'turn-test' <<<"$first" \
+   && [[ "$(cat "$TMP/.brisen-lab-bus-last-seen-lead.txt")" == "2026-07-20T09:00:00Z" ]] \
+   && grep -qx '991' "$TMP/.brisen-lab-bus-rendered-lead.txt" \
+   && [[ "$(wc -l < "$CURL_LOG")" -eq 1 ]]; then
+  ok "turn drain renders additionalContext"
+else
+  bad "turn drain renders additionalContext"
+fi
+second="$(printf '{}' | "$CLAUDE_HOME/hooks/turn-bus-drain.sh")"
+if [[ -z "$second" && "$(wc -l < "$CURL_LOG")" -eq 1 ]]; then
+  ok "turn drain cooldown skips curl"
+else
+  bad "turn drain cooldown skips curl"
+fi
+
+cat > "$TMP/bin/curl" <<'SH'
+#!/usr/bin/env bash
+exit 28
+SH
+chmod +x "$TMP/bin/curl"
+rm -f "$TMP/.brisen-lab-bus-turn-drain-lead.txt"
+failed="$(printf '{}' | "$CLAUDE_HOME/hooks/turn-bus-drain.sh")"
+if grep -q 'daemon unreachable' <<<"$failed"; then
+  ok "turn drain failure stays non-blocking"
+else
+  bad "turn drain failure stays non-blocking"
+fi
+rm -rf "$TMP"
 
 echo "----"
 echo "PASS=$PASS FAIL=$FAIL"

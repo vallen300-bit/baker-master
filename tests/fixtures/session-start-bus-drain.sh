@@ -1,14 +1,15 @@
 #!/usr/bin/env bash
-# SessionStart hook: drain Brisen Lab V2 bus inbox for the current terminal's
+# Shared bus-drain core: drain Brisen Lab V2 bus inbox for the current terminal's
 # BAKER_ROLE slug and emit unread messages as additionalContext.
 #
 # Canonical source: tests/fixtures/session-start-bus-drain.sh in baker-master.
-# Deployed as user-global at ~/.claude/hooks/session-start-bus-drain.sh
+# Deployed as user-global at ~/.claude/hooks/session-start-bus-drain.sh and
+# called by the UserPromptSubmit turn-bus-drain wrapper.
 # (Director ratifies the cp pre-merge per BRIEF_BRISEN_LAB_TERMINAL_BUS_DRAIN
 # §Sequencing step 3). Drift detectable via:
 #   diff ~/.claude/hooks/session-start-bus-drain.sh tests/fixtures/session-start-bus-drain.sh
 #
-# Contract: never block session start. Exit 0 on every path. Errors emit a
+# Contract: never block the hook event. Exit 0 on every path. Errors emit a
 # short status line as additionalContext so Director sees the gap.
 #
 # Auth: resolves per-terminal key by literal env, then
@@ -41,9 +42,10 @@ DAEMON_URL="${BRISEN_LAB_DAEMON_URL:-https://brisen-lab.onrender.com}"
 # Helper: emit a JSON envelope with the given text as additionalContext.
 _emit() {
   python3 -c '
-import json, sys
+import json, os, sys
 text = sys.stdin.read()
-print(json.dumps({"hookSpecificOutput": {"hookEventName": "SessionStart", "additionalContext": text}}))
+event = os.environ.get("BUS_DRAIN_HOOK_EVENT", "SessionStart")
+print(json.dumps({"hookSpecificOutput": {"hookEventName": event, "additionalContext": text}}))
 ' 2>/dev/null || true
 }
 
@@ -106,6 +108,20 @@ case "${BAKER_ROLE:-}" in
         ;;
 esac
 # END GENERATED AGENT IDENTITY ROLE MAP
+
+# UserPromptSubmit drain cost guard. The SessionStart wrapper leaves this
+# unset, while turn-bus-drain.sh sets it to 60 seconds. Check before key lookup
+# and curl so a rapid prompt burst is completely silent and network-free.
+COOLDOWN_SECONDS="${BUS_DRAIN_COOLDOWN_SECONDS:-0}"
+if [[ "$COOLDOWN_SECONDS" =~ ^[1-9][0-9]*$ ]]; then
+    COOLDOWN_FILE="${HOME}/.brisen-lab-bus-turn-drain-${SLUG}.txt"
+    NOW_EPOCH="$(date +%s 2>/dev/null || true)"
+    LAST_EPOCH="$(cat "$COOLDOWN_FILE" 2>/dev/null | tr -d '\n\r ')"
+    if [[ "$NOW_EPOCH" =~ ^[0-9]+$ && "$LAST_EPOCH" =~ ^[0-9]+$ ]] \
+       && (( NOW_EPOCH - LAST_EPOCH < COOLDOWN_SECONDS )); then
+        exit 0
+    fi
+fi
 
 # --- fetch terminal key: literal env → cache → 1Password fallback ---
 
@@ -224,14 +240,36 @@ fi
 # permanent false-pending floor in every agent's drain (b2 saw 25, BB-desk 20->42).
 # Directed dispatches are unaffected — they are named recipients and still render.
 
-RESP="$(curl -sS --max-time 10 -G -H "X-Terminal-Key: ${KEY}" \
+MAX_TIME="${BUS_DRAIN_MAX_TIME:-10}"
+CONNECT_TIMEOUT="${BUS_DRAIN_CONNECT_TIMEOUT:-}"
+CURL_TIMEOUT_ARGS=(--max-time "$MAX_TIME")
+if [[ "$CONNECT_TIMEOUT" =~ ^[1-9][0-9]*(\.[0-9]+)?$ ]]; then
+    CURL_TIMEOUT_ARGS+=(--connect-timeout "$CONNECT_TIMEOUT")
+fi
+RESP="$(curl -sS "${CURL_TIMEOUT_ARGS[@]}" -G -H "X-Terminal-Key: ${KEY}" \
         --data-urlencode "since=${SINCE}" \
         --data-urlencode "limit=50" \
         --data-urlencode "unread=true" \
         "${DAEMON_URL}/msg/${SLUG}" 2>/dev/null)" || {
-    printf '[bus-drain] daemon unreachable (timeout 10s) for slug=%s — skipping.\n' "$SLUG" | _emit
+    printf '[bus-drain] daemon unreachable (timeout %ss) for slug=%s — skipping.\n' "$MAX_TIME" "$SLUG" | _emit
     exit 0
 }
+
+# Mark a completed drain attempt so the turn wrapper can suppress the next
+# prompt for the cooldown window. A failed curl deliberately does not advance
+# this state, allowing the next prompt to retry a transient outage.
+if [[ "$COOLDOWN_SECONDS" =~ ^[1-9][0-9]*$ ]]; then
+    NOW_EPOCH="$(date +%s 2>/dev/null || true)"
+    if [[ "$NOW_EPOCH" =~ ^[0-9]+$ ]]; then
+        COOLDOWN_DIR="$(dirname "$COOLDOWN_FILE")"
+        COOLDOWN_TMP="$(mktemp "${COOLDOWN_DIR}/.brisen-lab-bus-turn-drain-tmp.XXXXXX" 2>/dev/null || true)"
+        if [ -n "$COOLDOWN_TMP" ]; then
+            printf '%s\n' "$NOW_EPOCH" > "$COOLDOWN_TMP" 2>/dev/null \
+                && mv -f "$COOLDOWN_TMP" "$COOLDOWN_FILE" 2>/dev/null \
+                || rm -f "$COOLDOWN_TMP" 2>/dev/null || true
+        fi
+    fi
+fi
 
 # --- resolve a FRESH bus_post.sh for the reply hint (INSTALL_TOOLING_FASTFOLLOW_1
 #     FIX 2, Director-ratified Option (b) via lead #4358) ---
