@@ -4,8 +4,8 @@ attempt: 1
 dispatched_by: lead (bus #13635, Director-ordered parallel lane)
 report_topic: wake-listener-no-legacy-fallback-1
 repos:
-  - brisen-lab b1/wake-listener-no-legacy-fallback-1 @3491cf0 (rebased onto lab main @07cd4c8)
-status: codex round-3 FAIL #13763 (P1a missed tmux_session_names op; P1b post-send reset misclassified) RESOLVED @3491cf0 (force-pushed post-rebase); re-gate round-4 requested #13792. Awaiting lead re-gate -> merge -> deploy. Reconcile-retry (req3) + sent:false disposition + controller self-deadline (WAKE_DISPOSITION_REWAKE_1 §task-4) all deferred/out-of-scope.
+  - brisen-lab b1/wake-listener-no-legacy-fallback-1 @eb7a396 (rebased onto lab main @07cd4c8)
+status: codex round-4 CLI FAIL #13796 (135s synchronous dispatch head-of-line-blocks single-threaded SSE reader) RESOLVED @eb7a396 — async per-slug dispatch; re-gate round-5 requested #13802 (lead CLI lane, codex seat unstable). Awaiting re-gate -> merge -> deploy. Reconcile-retry (req3) + sent:false disposition + controller self-deadline (WAKE_DISPOSITION_REWAKE_1 §task-4) all deferred/out-of-scope.
 gate: codex bus gate on @f2801b8 -> lead merge
 ---
 
@@ -58,8 +58,16 @@ past old 20.3s -> not dropped). 17 pass py3.9 + py3.12.
   (no legacy, no double-wake). +connection-reset test; existing unreachable test uses typed err.
 - 18 pass py3.9 + py3.12 (isolated TEST_DATABASE_URL, not skipped). Rebased onto lab main @07cd4c8.
 
+## codex round-4 CLI #13796 fix (@eb7a396) — async dispatch
+Made dispatch asynchronous: submit_dispatch() runs each wake in a bounded
+ThreadPoolExecutor (WAKE_DISPATCH_WORKERS=8), SSE reader never blocks; 135.2s budget
+is now per-dispatch. Per-slug serialization via in-flight coalesce (same seat never
+concurrent → at-most-once); different seats parallel. Saturated pool fails loud+drops.
+dispatch_wake unchanged. +hung-A-does-not-delay-B test, +same-slug-coalesce test.
+20 pass py3.9 + py3.12.
+
 ## Next concrete step (owner = lead, then deputy-codex cross-lane)
-1. Lead: re-gate codex round-4 @3491cf0 -> merge -> Render deploy.
+1. Lead: re-gate codex round-5 @eb7a396 (CLI lane) -> merge -> Render deploy.
 2. deputy-codex (contract flagged #13670): controller echoes X-Wake-Request-Id into
    wake_events/audit + a receipt-read endpoint {url}/{request_id}->{"landed":bool}; then set
    WAKE_RECEIPT_URL in the listener launchd env to enable reconcile-retry.
