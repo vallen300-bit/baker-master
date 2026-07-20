@@ -4,8 +4,8 @@ attempt: 1
 dispatched_by: lead (bus #13635, Director-ordered parallel lane)
 report_topic: wake-listener-no-legacy-fallback-1
 repos:
-  - brisen-lab b1/wake-listener-no-legacy-fallback-1 @6377a68 (off main @505f299)
-status: codex round-2 FAIL #13742 (timeout budget only; credential split accepted) RESOLVED @6377a68; re-gate round-3 requested #13747. Awaiting lead re-gate -> merge -> deploy. Reconcile-retry (req3) + sent:false disposition + controller self-deadline (WAKE_DISPOSITION_REWAKE_1 §task-4) all deferred/out-of-scope.
+  - brisen-lab b1/wake-listener-no-legacy-fallback-1 @3491cf0 (rebased onto lab main @07cd4c8)
+status: codex round-3 FAIL #13763 (P1a missed tmux_session_names op; P1b post-send reset misclassified) RESOLVED @3491cf0 (force-pushed post-rebase); re-gate round-4 requested #13792. Awaiting lead re-gate -> merge -> deploy. Reconcile-retry (req3) + sent:false disposition + controller self-deadline (WAKE_DISPOSITION_REWAKE_1 §task-4) all deferred/out-of-scope.
 gate: codex bus gate on @f2801b8 -> lead merge
 ---
 
@@ -50,8 +50,16 @@ x1.15 margin = 123.7s default, documented in-code, env-overridable. Listener-sid
 only (did NOT touch cockpit_controller.py). +cumulative-delay test (slow-but-live
 past old 20.3s -> not dropped). 17 pass py3.9 + py3.12.
 
+## codex round-3 #13763 fix (@3491cf0)
+- P1a: added the INITIAL tmux_session_names() 'tmux ls' (10s, runs before glance) to the
+  derivation -> worst-case 117.6s, x1.15 = 135.2s default; +derived-floor regression assert.
+- P1b: phase-aware transport — ConnectionRefusedError/socket.gaierror = proven pre-send ->
+  unreachable(legacy); ConnectionResetError/BrokenPipeError + unknown = post-send -> ambiguous
+  (no legacy, no double-wake). +connection-reset test; existing unreachable test uses typed err.
+- 18 pass py3.9 + py3.12 (isolated TEST_DATABASE_URL, not skipped). Rebased onto lab main @07cd4c8.
+
 ## Next concrete step (owner = lead, then deputy-codex cross-lane)
-1. Lead: re-gate codex round-3 @6377a68 -> merge -> Render deploy.
+1. Lead: re-gate codex round-4 @3491cf0 -> merge -> Render deploy.
 2. deputy-codex (contract flagged #13670): controller echoes X-Wake-Request-Id into
    wake_events/audit + a receipt-read endpoint {url}/{request_id}->{"landed":bool}; then set
    WAKE_RECEIPT_URL in the listener launchd env to enable reconcile-retry.
