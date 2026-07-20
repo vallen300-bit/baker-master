@@ -174,7 +174,16 @@ try:
 except (KeyError, json.JSONDecodeError, TypeError, ValueError):
     raise SystemExit(1)
 if isinstance(data, dict) and "messages" in data and "detail" not in data:
-    raise SystemExit(0)
+    messages = data["messages"]
+    required = {
+        "id", "kind", "from_terminal", "to_terminals",
+        "acknowledged_at", "created_at",
+    }
+    if isinstance(messages, list) and all(
+        isinstance(message, dict) and required.issubset(message)
+        for message in messages
+    ):
+        raise SystemExit(0)
 raise SystemExit(1)
 ' 2>/dev/null
 }
@@ -383,6 +392,12 @@ if isinstance(d, dict) and "detail" in d and "messages" not in d:
     sys.exit(0)
 
 msgs = d.get("messages", []) if isinstance(d, dict) else []
+required = {"id", "kind", "from_terminal", "to_terminals", "acknowledged_at", "created_at"}
+if not isinstance(msgs, list) or any(
+    not isinstance(m, dict) or not required.issubset(m) for m in msgs
+):
+    print("[bus-drain] malformed daemon response — skipping.")
+    sys.exit(0)
 if not msgs:
     # Quiet on empty — avoid noise in every session-start.
     sys.exit(0)

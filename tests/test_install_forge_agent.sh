@@ -198,6 +198,25 @@ else
   bad "HTTP-error response does not arm cooldown"
 fi
 
+# A malformed messages envelope must also stay retryable and never arm cooldown.
+cat > "$TMP/bin/curl" <<'SH'
+#!/usr/bin/env bash
+printf '%s\n' "called" >> "$CURL_LOG"
+printf '%s\n' '{"messages":"malformed"}'
+SH
+chmod +x "$TMP/bin/curl"
+rm -f "$TMP/.brisen-lab-bus-turn-drain-lead.txt"
+malformed_first="$(printf '{}' | "$CLAUDE_HOME/hooks/turn-bus-drain.sh")"
+malformed_second="$(printf '{}' | "$CLAUDE_HOME/hooks/turn-bus-drain.sh")"
+if grep -q 'malformed daemon response' <<<"$malformed_first" \
+   && grep -q 'malformed daemon response' <<<"$malformed_second" \
+   && [[ "$(wc -l < "$CURL_LOG")" -eq 5 ]] \
+   && [[ ! -e "$TMP/.brisen-lab-bus-turn-drain-lead.txt" ]]; then
+  ok "malformed response does not arm cooldown"
+else
+  bad "malformed response does not arm cooldown"
+fi
+
 # Concurrent prompts for one slug: the atomic claim lets exactly one drain
 # render/ledger the arrival while the other exits silently.
 cat > "$TMP/bin/curl" <<'SH'
