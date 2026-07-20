@@ -40,6 +40,11 @@
   --st-grey: #8b95a3;       /* idle / not-started — muted */
   --shadow: inset 0 1px 0 rgba(255,255,255,.035), 0 8px 26px rgba(0,0,0,.2);
   --row-columns: 10px minmax(0, 1fr) minmax(72px, auto) 128px 116px;
+  /* COCKPIT_REVAMP_SPLIT_VIEW_SIDEBAR_1: shell geometry. Header height anchors the
+     sticky sidebar + terminal pane; sidebar width collapses on narrow screens. */
+  --header-h: 54px;
+  --sidebar-w: 158px;
+  --pane-w: min(760px, 52vw);
 }
 
 * { box-sizing: border-box; }
@@ -105,9 +110,94 @@ button { font: inherit; }
    No yellow/warn middle state — Lab-telemetry-down lives in the summary sync-note. */
 .cockpit-header .conn.feed-dead { color: var(--danger); }
 
+/* ── Three-column app shell (spec items 4 + 5) ──────────────────────────────
+   left sidebar | middle live grid | right terminal pane. The pane track is 0
+   until a seat opens (.pane-open), so the grid owns the full middle width and the
+   fleet stays live + clickable beside an open terminal — no modal, no blur. */
+.app-shell {
+  display: grid;
+  grid-template-columns: var(--sidebar-w) minmax(0, 1fr) 0;
+  align-items: start;
+  max-width: 2200px;
+  margin: 0 auto;
+  transition: grid-template-columns 150ms ease;
+}
+.app-shell.pane-open { grid-template-columns: var(--sidebar-w) minmax(0, 1fr) var(--pane-w); }
+
+/* Sidebar: quiet by default, sticky so it stays put while the grid scrolls.
+   Reserved for future buttons (spec item 5.6) — only the 8 view entries now. */
+.sidebar {
+  position: sticky;
+  top: var(--header-h);
+  align-self: start;
+  height: calc(100vh - var(--header-h));
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 16px 10px;
+  background: var(--bg-subtle);
+  border-right: 1px solid var(--border);
+  overflow-y: auto;
+}
+.nav-item {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  padding: 8px 11px;
+  color: var(--muted);
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: 7px;
+  cursor: pointer;
+  font: 500 12px/1 -apple-system, sans-serif;
+  letter-spacing: .02em;
+  text-align: left;
+  white-space: nowrap;
+}
+.nav-item:hover { background: var(--panel-raised); color: var(--text); }
+.nav-item.active { color: var(--text); background: var(--panel-raised); border-color: var(--border); }
+.nav-item.active .nav-label { font-weight: 600; }
+/* Separate the two view entries (ACTIVE / ALL) from the six group entries. */
+.nav-item[data-view="Pilots"] { margin-top: 11px; }
+.nav-abbr { display: none; flex: 0 0 auto; width: 22px; text-align: center; font-weight: 600; letter-spacing: .04em; }
+.nav-label { flex: 1 1 auto; overflow: hidden; text-overflow: ellipsis; }
+/* Red attention badge (spec item 5.3): only for attention, never green — a group
+   with unread/GO/offline seats you're not currently viewing. QUIET WHEN HEALTHY. */
+.nav-badge {
+  flex: 0 0 auto;
+  width: 8px; height: 8px;
+  border-radius: 50%;
+  background: var(--st-red);
+  box-shadow: 0 0 6px rgba(248,81,73,.7);
+}
+.nav-badge[hidden] { display: none; }
+
+/* ACTIVE-view grey seats collapse behind one "N quiet" line per group. */
+.quiet-wrap { margin: 2px 0 5px; }
+.quiet-line {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding: 5px 12px;
+  color: var(--muted);
+  background: transparent;
+  border: 1px dashed var(--border-soft);
+  border-radius: 6px;
+  cursor: pointer;
+  font: 500 11px/1 -apple-system, sans-serif;
+  letter-spacing: .02em;
+  text-align: left;
+}
+.quiet-line:hover { background: var(--panel-raised); color: var(--muted-strong); }
+.quiet-caret { flex: 0 0 auto; width: 10px; color: var(--muted); font-size: 9px; }
+.quiet-rows { margin-top: 3px; opacity: .82; }
+.view-empty { padding: 44px 12px; color: var(--muted); font-size: 13px; text-align: center; }
+
 /* The first screen answers: what is this, how much is here, and is anything
    asking for attention? It stays a line of information, not a card wall. */
-main.wrap { max-width: 1800px; margin: 0 auto; padding: 28px 28px 48px; }
+main.wrap { min-width: 0; padding: 28px 28px 48px; }
 .cockpit-summary {
   display: flex;
   align-items: flex-end;
@@ -351,30 +441,23 @@ main.wrap { max-width: 1800px; margin: 0 auto; padding: 28px 28px 48px; }
 .row.st-unread-old .chip { color: #ff8f87; }
 .row.st-offline .chip { color: #d99089; }
 
-/* The live terminal is a raised right-hand work surface, not a full-screen
-   replacement. The fleet remains visible behind it for orientation. */
-#veil {
+/* The live terminal is the right column of the shell (spec item 4) — a raised
+   work surface beside the live grid, NOT a modal. Sticky + full-height so it stays
+   pinned while the Director scrolls the fleet in the middle column. The pane is
+   collapsed (display:none, 0-width track) until .pane-open. */
+.term-pane {
   display: none;
-  position: fixed;
-  inset: 0;
-  z-index: 8;
-  background: rgba(4,7,10,.58);
-  backdrop-filter: blur(2px);
-}
-#veil.open { display: block; }
-#term {
-  display: none;
-  position: fixed;
-  inset: 0 0 0 auto;
-  z-index: 9;
-  width: min(760px, 52vw);
+  position: sticky;
+  top: var(--header-h);
+  align-self: start;
+  height: calc(100vh - var(--header-h));
   flex-direction: column;
   overflow: hidden;
   background: #080b0f;
   border-left: 1px solid var(--blue);
   box-shadow: -24px 0 70px rgba(0,0,0,.52);
 }
-#term.open { display: flex; }
+.app-shell.pane-open .term-pane { display: flex; }
 #termbar {
   display: flex;
   align-items: center;
@@ -448,13 +531,35 @@ main.wrap { max-width: 1800px; margin: 0 auto; padding: 28px 28px 48px; }
 #toast.err { color: #ffb4ad; border-color: var(--danger); }
 #toast.ok { border-color: var(--needs-go); }
 
+/* Narrow screens (spec item 5.5): the sidebar collapses to a 48px icon rail
+   showing two-letter abbreviations; hovering it expands back to labels. Pure CSS —
+   the :has() hover widens the sidebar track, no JS breakpoint logic. */
+@media (max-width: 1100px) {
+  .app-shell { grid-template-columns: 48px minmax(0, 1fr) 0; }
+  .app-shell.pane-open { grid-template-columns: 48px minmax(0, 1fr) var(--pane-w); }
+  .app-shell:has(.sidebar:hover) { grid-template-columns: 172px minmax(0, 1fr) 0; }
+  .app-shell.pane-open:has(.sidebar:hover) { grid-template-columns: 172px minmax(0, 1fr) var(--pane-w); }
+  .sidebar { padding: 14px 6px; }
+  .nav-item { justify-content: center; gap: 0; padding: 8px 4px; }
+  .nav-abbr { display: block; }
+  .nav-label { display: none; }
+  .nav-item[data-view="Pilots"] { margin-top: 9px; }
+  /* Badge floats to the top-right corner of the collapsed pill so it stays visible. */
+  .nav-badge { position: absolute; top: 5px; right: 5px; }
+  .sidebar:hover .nav-item { justify-content: flex-start; gap: 9px; padding: 8px 11px; }
+  .sidebar:hover .nav-abbr { display: none; }
+  .sidebar:hover .nav-label { display: block; }
+  .sidebar:hover .nav-badge { position: relative; top: auto; right: auto; }
+}
+
 @media (max-width: 900px) {
   .cockpit-header { padding: 0 15px; }
   .cockpit-header .tab { padding: 0 11px; }
   .cockpit-header .conn { min-width: 0; }
   main.wrap { padding: 22px 16px 40px; }
   .cockpit-summary { align-items: flex-start; flex-direction: column; gap: 18px; }
-  #term { width: min(680px, 76vw); }
+  /* Terminal pane takes more of the row on smaller desktops. */
+  :root { --pane-w: min(680px, 62vw); }
 }
 
 @media (max-width: 640px) {
@@ -476,7 +581,11 @@ main.wrap { max-width: 1800px; margin: 0 auto; padding: 28px 28px 48px; }
   .r-id { grid-column: 2; grid-row: 1 / span 2; align-self: center; flex-wrap: wrap; row-gap: 4px; }
   .r-dot { grid-column: 1; grid-row: 1 / span 2; }
   .r-ctx .ctxbar { max-width: 36px; }
-  #term { width: 100%; }
+  /* Phone: a three-column split can't fit — the opened terminal takes over the
+     content area (grid hidden) while the icon rail stays; close returns to grid. */
+  .app-shell.pane-open { grid-template-columns: 48px 0 minmax(0, 1fr); }
+  .app-shell.pane-open .wrap { display: none; }
+  .term-pane { border-left: 0; }
   /* codex FAIL #13397 P2b: at 320px the bar overflowed (scrollWidth 326 > 319) with
      Copy + Nudge + GO + close all shown. Tighten gap/padding, let the title block
      shrink first, and wrap as a hard backstop so controls can never overflow. */

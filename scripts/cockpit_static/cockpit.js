@@ -31,7 +31,11 @@
 
   const gridEl = document.getElementById("grid");
   const connEl = document.getElementById("conn");
-  const veilEl = document.getElementById("veil");
+  // COCKPIT_REVAMP_SPLIT_VIEW_SIDEBAR_1: the terminal is a right-hand pane inside
+  // the three-column app shell (no #veil modal). Opening a seat toggles
+  // `.pane-open` on the shell, which widens the pane column; the grid stays live.
+  const appShellEl = document.getElementById("appShell");
+  const sidebarEl = document.getElementById("sidebar");
   const termEl = document.getElementById("term");
   const termMount = document.getElementById("term-mount");
   const termTitle = document.getElementById("term-title");
@@ -58,6 +62,38 @@
   let prevUnacked = new Map();   // slug -> last-seen unacked_count (D9 flash-on-new)
   let flashSlugs = new Set();    // slugs whose unacked count rose this poll (D9)
   let pollTimer = null;
+
+  // ---- sidebar view state (COCKPIT_REVAMP_SPLIT_VIEW_SIDEBAR_1, spec item 5) ----
+  // Sidebar entries in order. ACTIVE is the default home; ALL is the flat view;
+  // the rest are the six operating-role groups in plain words. Reserved for future
+  // buttons — nothing else is added here now (candidates parked in the spec).
+  const NAV_ORDER = ["ACTIVE", "ALL", "Pilots", "Control Tower", "Engineering",
+                     "Support", "Legal/Finance", "Interns"];
+  // Two-letter abbreviations shown when the sidebar collapses to icons on narrow
+  // screens (spec item 5 — CSS media query + hover expansion, no JS breakpoints).
+  const NAV_ABBR = { "ACTIVE": "AC", "ALL": "ALL", "Pilots": "Pi", "Control Tower": "CT",
+                     "Engineering": "En", "Support": "Su", "Legal/Finance": "LF", "Interns": "In" };
+  // The ONE plate-label → nav-name mapping (spec item 5). Fail-soft: an unknown
+  // plate falls back to its raw label so a new plate is never silently dropped.
+  const PLATE_TO_NAV = {
+    "PILOTS & PILOT TEAMS": "Pilots",
+    "Control Tower & VERIFICATION": "Control Tower",
+    "ENGINEERING , TECHNICAL & STAFF MANAGEMENT": "Engineering",
+    "FLIGHTS SUPPORT & DOMAIN SPECIFIC": "Support",
+    "LEGAL ,FINANCIAL , PR, MARKETING & COMMUNICATIONS": "Legal/Finance",
+    "INTERNS": "Interns",
+  };
+  const VIEW_KEY = "cockpit.view";        // persisted across sessions (spec item 5.4)
+  let currentView = readStoredView();     // hydrate on load, default ACTIVE
+  let expandedGroups = new Set();          // ACTIVE-view groups whose "N quiet" line is expanded
+
+  function readStoredView() {
+    try {
+      const v = localStorage.getItem(VIEW_KEY);
+      if (v && NAV_ORDER.indexOf(v) !== -1) return v;
+    } catch (_) { /* storage blocked — fall through to default */ }
+    return "ACTIVE";
+  }
 
   // ---- helpers ------------------------------------------------------------
   function el(tag, attrs = {}, children = []) {
@@ -283,7 +319,8 @@
     const frame = el("iframe", { id: "termframe", src: url("/term/" + slug + "/"),
                                  title: name + " terminal" });
     termMount.appendChild(frame);
-    veilEl.classList.add("open");
+    // Open the right pane column (grid stays live in the middle column, no blur).
+    appShellEl.classList.add("pane-open");
     termEl.classList.add("open");
     // Focus the terminal so keystrokes land in the session immediately. The
     // ttyd page is same-origin (proxied via the controller), so we can also
@@ -307,7 +344,7 @@
     openName = null;
     syncPanelGo();                // openSlug null -> panel GO hidden
     termEl.classList.remove("open");
-    veilEl.classList.remove("open");
+    appShellEl.classList.remove("pane-open");   // collapse the pane column back to 0
     termMount.textContent = "";   // remove iframe -> drops the ttyd WS connection
     termUnacked.textContent = ""; termUnacked.hidden = true;
     if (termCopy) { termCopy.hidden = true; termCopy.textContent = "Copy"; }
@@ -590,18 +627,126 @@
     return c;
   }
 
+  // ---- sidebar navigation + view filtering (spec item 5) ------------------
+  // Logical state class for view filtering. Driveable seats resolve via the shared
+  // palette resolver; status-only (app) seats have no st-* chrome, so map them for
+  // filtering only: unacked mail → attention (amber/red by age), else grey/quiet.
+  function cardStateClass(meta, row, up) {
+    if (meta.status_only) {
+      const n = (row && row.unacked_count) || 0;
+      if (n > 0) {
+        const age = (row && row.oldest_unacked_age_sec) || 0;
+        return age > (window.UNREAD_OLD_S || 600) ? "st-unread-old" : "st-unread";
+      }
+      return "st-idle";
+    }
+    return glanceClass(row, up);
+  }
+
+  // planView input: each plate → { nav, label, cards:[{slug, stClass, meta}] }.
+  function navGroups() {
+    if (!layout) return [];
+    return layout.plates.map((plate) => {
+      const nav = PLATE_TO_NAV[plate.label] || plate.label;
+      const cards = plate.cards.map((meta) => {
+        const row = stateBySlug.get(meta.slug) || null;
+        const up = row ? row.session_up === true : false;
+        return { slug: meta.slug, stClass: cardStateClass(meta, row, up), meta };
+      });
+      return { nav, label: plate.label, cards };
+    });
+  }
+
+  // Build the 8 sidebar entries once (static order). Active highlight + red
+  // attention badges update per render() from the planView badge set.
+  function buildSidebar() {
+    if (!sidebarEl) return;
+    sidebarEl.textContent = "";
+    NAV_ORDER.forEach((nav) => {
+      const badge = el("span", { class: "nav-badge", "aria-label": "needs attention" });
+      badge.hidden = true;
+      const item = el("button", { class: "nav-item", type: "button", "data-view": nav,
+        title: nav, onclick: () => setView(nav) }, [
+        el("span", { class: "nav-abbr", "aria-hidden": "true", text: NAV_ABBR[nav] || nav.slice(0, 2) }),
+        el("span", { class: "nav-label", text: nav }),
+        badge,
+      ]);
+      sidebarEl.appendChild(item);
+    });
+  }
+
+  function updateSidebar(badges) {
+    if (!sidebarEl) return;
+    Array.from(sidebarEl.children).forEach((item) => {
+      const nav = item.getAttribute("data-view");
+      const isActive = nav === currentView;
+      item.classList.toggle("active", isActive);
+      item.setAttribute("aria-current", isActive ? "page" : "false");
+      const badge = item.querySelector(".nav-badge");
+      if (badge) badge.hidden = !badges[nav];
+    });
+  }
+
+  function setView(view) {
+    if (NAV_ORDER.indexOf(view) === -1) view = "ACTIVE";
+    currentView = view;
+    try { localStorage.setItem(VIEW_KEY, view); } catch (_) { /* storage blocked */ }
+    render();
+  }
+
+  // ACTIVE-view collapsed grey line: "N quiet" (compact form carries the group
+  // label, e.g. "Engineering — 5 quiet"). Click toggles inline expansion.
+  function quietGroup(g, compact) {
+    const expanded = expandedGroups.has(g.nav);
+    const text = (compact ? g.label + " — " : "") + g.greyCount + " quiet";
+    const line = el("button", { class: "quiet-line" + (compact ? " quiet-compact" : ""),
+      type: "button", "aria-expanded": expanded ? "true" : "false",
+      onclick: () => toggleQuiet(g.nav) }, [
+      el("span", { class: "quiet-caret", "aria-hidden": "true", text: expanded ? "▾" : "▸" }),
+      el("span", { class: "quiet-text", text: text }),
+    ]);
+    const wrap = el("div", { class: "quiet-wrap" }, [line]);
+    if (expanded) {
+      wrap.appendChild(el("div", { class: "rows quiet-rows" }, g.greyCards.map((c) => card(c.meta))));
+    }
+    return wrap;
+  }
+
+  function toggleQuiet(nav) {
+    if (expandedGroups.has(nav)) expandedGroups.delete(nav);
+    else expandedGroups.add(nav);
+    render();
+  }
+
   function render() {
     if (!layout) return;
+    // View filter is one pure function (glance_state.js planView) so the DOM and
+    // its unit vectors share a source. Plates → nav groups → visible plan + badges.
+    const plan = window.planView(navGroups(), currentView);
+    updateSidebar(plan.badges);
+
     const frag = document.createDocumentFragment();
-    // Plate groupings survive as slim section headers (D1); rows list under each.
-    layout.plates.forEach((plate) => {
-      const list = el("div", { class: "rows" }, plate.cards.map(card));
-      frag.appendChild(el("div", { class: "plate" }, [
-        el("h2", {}, [document.createTextNode(plate.label),
-          el("span", { class: "count", text: plate.cards.length })]),
-        list,
-      ]));
+    const isActive = currentView === "ACTIVE";
+    plan.groups.forEach((g) => {
+      const hasActive = g.activeCards.length > 0;
+      // ACTIVE view, a fully-quiet group → one compact "Label — N quiet" line only.
+      if (isActive && !hasActive) {
+        if (g.greyCount > 0) frag.appendChild(quietGroup(g, true));
+        return;
+      }
+      if (!hasActive && g.greyCount === 0) return;   // nothing to show for this group
+      const children = [
+        el("h2", {}, [document.createTextNode(g.label),
+          el("span", { class: "count", text: g.activeCards.length })]),
+        el("div", { class: "rows" }, g.activeCards.map((c) => card(c.meta))),
+      ];
+      if (isActive && g.greyCount > 0) children.push(quietGroup(g, false));
+      frag.appendChild(el("div", { class: "plate" }, children));
     });
+    if (!frag.childNodes.length) {
+      frag.appendChild(el("div", { class: "view-empty",
+        text: "Nothing needs attention — every seat is quiet." }));
+    }
     gridEl.textContent = "";
     gridEl.appendChild(frag);
     renderSummary();
@@ -623,7 +768,6 @@
   // ---- wiring -------------------------------------------------------------
   document.getElementById("x").addEventListener("click", closeTerm);
   document.getElementById("x").addEventListener("keydown", (e) => { if (e.key === "Enter" || e.key === " ") closeTerm(); });
-  veilEl.addEventListener("click", closeTerm);
   // Defense in depth: the button is hidden when GO isn't allowed, but re-check
   // the predicate on click so a stale/racy click can never send a bare Enter.
   termGo.addEventListener("click", () => {
@@ -656,6 +800,7 @@
       connEl.className = "conn feed-dead";
       return;
     }
+    buildSidebar();              // 8 static nav entries (badges hydrate on poll)
     render();                    // paint immediately from layout (metadata)
     renderSummary();
     await poll();                // then hydrate with live state

@@ -53,6 +53,62 @@ function resolveStateClass(row, sessionUp) {
   return "st-idle";
 }
 
+// COCKPIT_REVAMP_SPLIT_VIEW_SIDEBAR_1 (spec @d5e25efa item 5) — left-sidebar view
+// filter as ONE pure function so the DOM layer and its unit vectors share a source.
+//
+// ATTENTION_CLASSES = the four states that earn a red group badge (item 5.3):
+// unread (amber), unread-old (red), GO (blue), offline (muted-red). running-green
+// is healthy and quiet-when-healthy (item 7) — it is non-grey (shows in ACTIVE)
+// but NEVER badges. st-idle is grey (quiet).
+var ATTENTION_CLASSES = ["st-unread", "st-unread-old", "st-go", "st-offline"];
+
+// planView(groups, view) — pure. Inputs:
+//   groups: [{ nav, label, cards: [{ ...anyCardObj, stClass }] }] in display order.
+//           stClass is the resolved one-of-six st-* class (status-only app cards are
+//           pre-mapped by the caller: unacked → st-unread(-old), else st-idle).
+//   view:   "ACTIVE" (home) | "ALL" | a nav name (Pilots / Control Tower / …).
+// Returns:
+//   { groups: [{ nav, label, activeCards, greyCards, greyCount }], badges: {nav:true} }
+//   - ACTIVE:      every group; activeCards = non-grey (stClass !== st-idle),
+//                  greyCards = the grey (st-idle) seats collapsed behind an "N quiet"
+//                  line the caller can expand.
+//   - ALL:         every group; activeCards = all cards, greyCards empty.
+//   - a nav name:  only that group; activeCards = all its cards.
+//   badges: a group with ≥1 attention card earns a badge UNLESS you are currently
+//   viewing exactly that group (item 5.3 — "while you're in another view"). ACTIVE
+//   and ALL are not group names, so every attention group badges in those views.
+//   Card objects are passed through untouched (the caller carries card metadata on
+//   them), so this stays pure and DOM-free.
+function planView(groups, view) {
+  var list = Array.isArray(groups) ? groups : [];
+  var isActive = view === "ACTIVE";
+  var isAll = view === "ALL";
+  var out = [];
+  var badges = {};
+  for (var i = 0; i < list.length; i++) {
+    var g = list[i] || {};
+    var cards = Array.isArray(g.cards) ? g.cards : [];
+    var hasAttention = false;
+    for (var j = 0; j < cards.length; j++) {
+      if (ATTENTION_CLASSES.indexOf((cards[j] || {}).stClass) !== -1) { hasAttention = true; break; }
+    }
+    if (hasAttention && g.nav !== view) badges[g.nav] = true;
+    // A specific group view shows only that group; ACTIVE / ALL show every group.
+    if (!isActive && !isAll && view !== g.nav) continue;
+    var activeCards, greyCards;
+    if (isActive) {
+      activeCards = cards.filter(function (c) { return (c || {}).stClass !== "st-idle"; });
+      greyCards = cards.filter(function (c) { return (c || {}).stClass === "st-idle"; });
+    } else {
+      activeCards = cards.slice();
+      greyCards = [];
+    }
+    out.push({ nav: g.nav, label: g.label, activeCards: activeCards,
+               greyCards: greyCards, greyCount: greyCards.length });
+  }
+  return { groups: out, badges: badges };
+}
+
 // D5 amber-state predicate: a seat shows the AMBER "unread" card state when it
 // has unacked bus messages and is NOT working (and not awaiting GO — needs_go
 // owns the green state). This is exactly resolveGlanceState === "NEW", exposed
@@ -184,7 +240,9 @@ if (typeof window !== "undefined") {
   window.buildUnreadCopyPayload = buildUnreadCopyPayload;
   window.reconcileUnacked = reconcileUnacked;
   window.formatUnackedSummary = formatUnackedSummary;
+  window.ATTENTION_CLASSES = ATTENTION_CLASSES;
+  window.planView = planView;
 }
 if (typeof module !== "undefined" && module.exports) {
-  module.exports = { resolveGlanceState, resolveStateClass, UNREAD_OLD_S, goAffordanceVisible, amberState, formatUnreadAge, buildUnreadCopyPayload, reconcileUnacked, formatUnackedSummary };
+  module.exports = { resolveGlanceState, resolveStateClass, UNREAD_OLD_S, goAffordanceVisible, amberState, formatUnreadAge, buildUnreadCopyPayload, reconcileUnacked, formatUnackedSummary, ATTENTION_CLASSES, planView };
 }
