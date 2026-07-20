@@ -4,8 +4,8 @@ attempt: 1
 dispatched_by: lead (bus #13840, phase-2 release)
 report_topic: wake-disposition-rewake-1
 repos:
-  - brisen-lab b1/wake-disposition-rewake-1 @feb0af5 (off lab main @ceb53e5)
-status: PHASE-2 (listener, tasks 4-5) BUILT + pushed; gate requested #13842 (lead CLI lane). Awaiting codex gate -> lead merge -> re-sync ~/.brisen-lab + kickstart -> live AC3 (undelivered WARNING + receipt probe + reconcile-retry). Phase-1 (controller) already merged/live (baker PR #611).
+  - brisen-lab b1/wake-disposition-rewake-1 @e91f2e9 (off lab main @ceb53e5)
+status: codex phase-2 gate FAIL #13843 (1 P1: receipt GET reused 135s budget -> pool exhaustion on outage) RESOLVED @e91f2e9 — short independent WAKE_RECEIPT_TIMEOUT_S(10s); re-gate requested #13845 (lead CLI lane). Awaiting re-gate -> lead merge -> re-sync ~/.brisen-lab + kickstart -> live AC3. Phase-1 (controller) merged/live (baker PR #611).
 gate: lead CLI codex-verify merged-tree vs current lab main
 ---
 
