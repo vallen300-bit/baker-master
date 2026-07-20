@@ -227,6 +227,9 @@ def test_send_wake_unrecoverable_park_fails_loud(tmp_path, monkeypatch):
     monkeypatch.setattr(controller, "_post_park_flag", lambda *a: flags.append(a))
     res = controller.send_wake(_settings(tmp_path), ENTRY, UNACKED_ROW, now=1.0, last_wake={})
     assert res["verified"] == "park_unrecovered"
+    assert res["disposition"] == "undelivered"
+    assert res["reason"] == "park_unrecovered"
+    assert res["skipped"] == "park_unrecovered"
     enters = [c for c in calls if c == ["send-keys", "-t", "b3", "Enter"]]
     assert len(enters) == 3  # never more than one recovery Enter (double-submit guard)
     assert len(flags) == 1 and flags[0][1] == "b3"
@@ -248,6 +251,9 @@ def test_send_wake_unreadable_pane_takes_no_action(tmp_path, monkeypatch):
     monkeypatch.setattr(controller, "_post_park_flag", lambda *a: flags.append(a))
     res = controller.send_wake(_settings(tmp_path), ENTRY, UNACKED_ROW, now=1.0, last_wake={})
     assert res["verified"] == "unknown"
+    assert res["disposition"] == "undelivered"
+    assert res["reason"] == "unverified"
+    assert res["skipped"] == "unverified"
     enters = [c for c in calls if c == ["send-keys", "-t", "b3", "Enter"]]
     assert len(enters) == 2  # only the FIX_1 submit-Returns, no recovery
     assert flags == []

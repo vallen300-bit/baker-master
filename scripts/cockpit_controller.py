@@ -1488,6 +1488,9 @@ def send_wake(
                 "unverified" if result.get("verified") == "unknown"
                 else str(result.get("verified") or "unverified")
             )
+            # Verification can change an initially-delivered result into an
+            # undelivered outcome; keep legacy cockpit.js informed too.
+            result["skipped"] = result["reason"]
     if audit:
         _audit_wake(
             settings,
@@ -1767,12 +1770,11 @@ def create_app(
 
     @contextlib.asynccontextmanager
     async def lifespan(_app: FastAPI):
-        # NOTIFY_SLICE — background poll loop for unread-bus banners. Runs only
-        # when enabled; cleanly cancelled on shutdown. _notify_loop is defined
-        # below in this closure and resolves at runtime (startup), not at def.
+        # NOTIFY_SLICE — background poll loop for unread-bus banners and deferred
+        # wakes. It always runs because notify_enabled gates only the banner
+        # portion; cleanly cancelled on shutdown.
         tasks = []
-        if config.notify_enabled:
-            tasks.append(asyncio.create_task(_notify_loop()))
+        tasks.append(asyncio.create_task(_notify_loop()))
         if config.backlog_sweep_seconds > 0:
             tasks.append(asyncio.create_task(_backlog_sweep_loop()))
         try:
@@ -2026,6 +2028,7 @@ def create_app(
                     "slug": entry.slug,
                     "disposition": failure["disposition"],
                     "reason": failure["reason"],
+                    "skipped": failure["skipped"],
                     "sent": failure["sent"],
                 },
             )
@@ -2058,6 +2061,7 @@ def create_app(
                             "slug": entry.slug,
                             "disposition": failure["disposition"],
                             "reason": failure["reason"],
+                            "skipped": failure["skipped"],
                             "sent": failure["sent"],
                         },
                     )
@@ -2083,6 +2087,7 @@ def create_app(
                         "slug": entry.slug,
                         "disposition": "undelivered",
                         "reason": "seat_telemetry_unavailable",
+                        "skipped": "seat_telemetry_unavailable",
                         "sent": False,
                     },
                 )
@@ -2137,7 +2142,7 @@ def create_app(
             ) from exc
         return {"ok": True, "muted": muted}
 
-    async def _notify_tick() -> None:
+    async def _notify_tick(*, include_notifications: bool = True) -> None:
         """One poll cycle: read glance, detect 0→N on eligible seats, banner unless
         muted. The baseline is ALWAYS advanced (even while muted) so un-muting does
         not dump the accumulated backlog as a burst of banners."""
@@ -2152,6 +2157,8 @@ def create_app(
             if not getattr(glance, "last_ok", True):
                 return
         await _deferred_wake_tick(rows)
+        if not include_notifications:
+            return
         eligible = load_notify_seats(config.static_dir)
         to_fire, app.state.notify_prev, app.state.notify_last_fired = (
             compute_notifications(
@@ -2188,10 +2195,11 @@ def create_app(
             app.state.wake_prev_working[slug] = current_working
             if previous_working is not True or current_working:
                 continue
-            pending = app.state.pending_wakes.pop(slug, None)
+            pending = app.state.pending_wakes.get(slug)
             if not isinstance(pending, dict):
                 continue
             if wake_obligation_count(row) <= 0:
+                app.state.pending_wakes.pop(slug, None)
                 continue
             try:
                 result = _call_send_wake(
@@ -2211,6 +2219,8 @@ def create_app(
                     reason="controller-write",
                     request_id=None,
                 )
+            if result.get("disposition") == "delivered":
+                app.state.pending_wakes.pop(slug, None)
             result["deferred_msg_id"] = pending.get("msg_id")
             outcomes.append(result)
         return outcomes
@@ -2265,7 +2275,7 @@ def create_app(
     async def _notify_loop() -> None:
         while True:
             try:
-                await _notify_tick()
+                await _notify_tick(include_notifications=config.notify_enabled)
             except asyncio.CancelledError:
                 raise
             except Exception as exc:  # a bad tick must never kill the loop
