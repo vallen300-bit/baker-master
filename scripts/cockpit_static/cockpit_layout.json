@@ -527,18 +527,6 @@
       "label": "INTERNS",
       "cards": [
         {
-          "slug": "deep55",
-          "alias": "deep-55",
-          "display_name": "Deep55",
-          "driveable": true,
-          "app_seat": false,
-          "status_only": false,
-          "kind": "TERMINAL",
-          "badge": null,
-          "port": 7617,
-          "notify_eligible": false
-        },
-        {
           "slug": "clerk",
           "alias": "clerk",
           "display_name": "Clerk Qwen",
