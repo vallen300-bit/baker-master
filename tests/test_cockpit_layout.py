@@ -83,9 +83,8 @@ def test_counts_consistent(layout):
         assert meta["driveable"] == drive
         assert meta["status_only"] == status
         assert meta.get("unassigned", 0) == 0
-    # deep55 was intentionally removed from the cockpit by current main
-    # (Director 2026-07-20, commit 53fe7ace); the registry remains dormant-capable.
-    assert len(cards) == 41, f"expected 41 cards, got {len(cards)}"
+    # Current main keeps librarian in the cockpit while deep55 is parked.
+    assert len(cards) == 42, f"expected 42 cards, got {len(cards)}"
 
 
 def test_contract_display_names_applied(layout):
@@ -107,14 +106,17 @@ def test_codex_arch_app_seat_in_control_tower(layout):
 
 
 def test_scopeadd_driveable_seats_in_interns(layout):
-    """Current contract keeps clerk and clerk-haiku as driveable Terminal seats
-    grouped in the INTERNS plate; deep55 is parked from the cockpit."""
+    """Current contract keeps librarian, clerk, and clerk-haiku as driveable
+    Terminal seats; deep55 is parked from the cockpit."""
     for slug in ("clerk", "clerk-haiku"):
         plate, c = _find(layout, slug)
         assert c, f"{slug} missing"
         assert c["driveable"] is True and c["status_only"] is False, f"{slug} not driveable"
         assert plate == "INTERNS", f"{slug} in {plate}, expected INTERNS"
     assert _find(layout, "deep55") == (None, None)
+    plate, c = _find(layout, "librarian")
+    assert c and c["driveable"] is True and c["status_only"] is False
+    assert plate == "FLIGHTS SUPPORT & DOMAIN SPECIFIC"
 
 
 def test_cortex_status_only_service_card(layout):

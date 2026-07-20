@@ -210,6 +210,13 @@
           "y": 4
         },
         {
+          "slug": "librarian",
+          "display_name": "Librarian",
+          "app": false,
+          "x": 132,
+          "y": 6
+        },
+        {
           "slug": "CM-1",
           "display_name": "CM-1",
           "app": false,

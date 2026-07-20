@@ -181,9 +181,13 @@ def read_local_context_band(
         pct = payload.get("context_percent") if isinstance(payload, dict) else None
         if isinstance(pct, bool) or not isinstance(pct, (int, float)):
             continue
-        if not math.isfinite(float(pct)):
+        try:
+            pct = float(pct)
+        except (TypeError, ValueError, OverflowError):
             continue
-        pct = max(0.0, min(100.0, float(pct)))
+        if not math.isfinite(pct):
+            continue
+        pct = max(0.0, min(100.0, pct))
         age = max(0.0, time.time() - stat.st_mtime)
         return pct, age
     return None, None
@@ -194,11 +198,10 @@ def parse_codex_context(pane_text: str | None) -> int | None:
     if not isinstance(pane_text, str):
         return None
     matches = re.findall(r"\bContext\s+(\d{1,3})%\s+used\b", pane_text, re.IGNORECASE)
-    for raw in reversed(matches):
-        value = int(raw)
-        if 0 <= value <= 100:
-            return value
-    return None
+    if not matches:
+        return None
+    value = int(matches[-1])
+    return value if 0 <= value <= 100 else None
 
 
 _CODEX_WORKING_TIMER_RE = re.compile(

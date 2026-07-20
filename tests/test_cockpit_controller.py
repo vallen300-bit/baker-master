@@ -385,6 +385,8 @@ def test_read_local_context_band_falls_back_to_slug_and_is_fail_soft(tmp_path):
     pct, age = controller.read_local_context_band("b3", tmp_path, alias="missing")
     assert pct == 100.0
     assert age == pytest.approx(0.0, abs=2.0)
+    _write_band(tmp_path, "huge", percent=10**1000)
+    assert controller.read_local_context_band("huge", tmp_path) == (None, None)
 
     (tmp_path / "bad.current").write_text("{", encoding="utf-8")
     (tmp_path / "broken.current").symlink_to("missing.json")
@@ -398,6 +400,7 @@ def test_read_local_context_band_falls_back_to_slug_and_is_fail_soft(tmp_path):
     [
         ("Context 12% used", 12),
         ("old Context 4% used\nnew Context 67% used", 67),
+        ("Context 12% used\nContext 101% used", None),
         ("Context 101% used", None),
         ("context unavailable", None),
         (None, None),
