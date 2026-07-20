@@ -1,14 +1,15 @@
 #!/usr/bin/env bash
-# SessionStart hook: drain Brisen Lab V2 bus inbox for the current terminal's
+# Shared bus-drain core: drain Brisen Lab V2 bus inbox for the current terminal's
 # BAKER_ROLE slug and emit unread messages as additionalContext.
 #
 # Canonical source: tests/fixtures/session-start-bus-drain.sh in baker-master.
-# Deployed as user-global at ~/.claude/hooks/session-start-bus-drain.sh
+# Deployed as user-global at ~/.claude/hooks/session-start-bus-drain.sh and
+# called by the UserPromptSubmit turn-bus-drain wrapper.
 # (Director ratifies the cp pre-merge per BRIEF_BRISEN_LAB_TERMINAL_BUS_DRAIN
 # §Sequencing step 3). Drift detectable via:
 #   diff ~/.claude/hooks/session-start-bus-drain.sh tests/fixtures/session-start-bus-drain.sh
 #
-# Contract: never block session start. Exit 0 on every path. Errors emit a
+# Contract: never block the hook event. Exit 0 on every path. Errors emit a
 # short status line as additionalContext so Director sees the gap.
 #
 # Auth: resolves per-terminal key by literal env, then
@@ -41,9 +42,11 @@ DAEMON_URL="${BRISEN_LAB_DAEMON_URL:-https://brisen-lab.onrender.com}"
 # Helper: emit a JSON envelope with the given text as additionalContext.
 _emit() {
   python3 -c '
-import json, sys
+import json, os, sys
+from datetime import datetime
 text = sys.stdin.read()
-print(json.dumps({"hookSpecificOutput": {"hookEventName": "SessionStart", "additionalContext": text}}))
+event = os.environ.get("BUS_DRAIN_HOOK_EVENT", "SessionStart")
+print(json.dumps({"hookSpecificOutput": {"hookEventName": event, "additionalContext": text}}))
 ' 2>/dev/null || true
 }
 
@@ -106,6 +109,132 @@ case "${BAKER_ROLE:-}" in
         ;;
 esac
 # END GENERATED AGENT IDENTITY ROLE MAP
+
+# UserPromptSubmit drain cost guard. The SessionStart wrapper leaves this
+# unset, while turn-bus-drain.sh sets it to 60 seconds. Check before key lookup
+# and curl so a rapid prompt burst is completely silent and network-free.
+COOLDOWN_SECONDS="${BUS_DRAIN_COOLDOWN_SECONDS:-0}"
+TURN_LOCK_DIR=""
+TURN_LOCK_HELD=0
+TURN_LOCK_STALE_SECONDS=15
+
+_release_turn_lock() {
+    if [[ "$TURN_LOCK_HELD" -ne 1 ]]; then
+        return
+    fi
+    rm -f "$TURN_LOCK_DIR/owner" 2>/dev/null || true
+    rmdir "$TURN_LOCK_DIR" 2>/dev/null || true
+    TURN_LOCK_HELD=0
+}
+
+_acquire_turn_lock() {
+    TURN_LOCK_DIR="${HOME}/.brisen-lab-bus-turn-drain-${SLUG}.lock"
+    if mkdir "$TURN_LOCK_DIR" 2>/dev/null; then
+        if printf '%s\n' "$$" > "$TURN_LOCK_DIR/owner" 2>/dev/null; then
+            TURN_LOCK_HELD=1
+            trap _release_turn_lock EXIT
+            return 0
+        fi
+        rmdir "$TURN_LOCK_DIR" 2>/dev/null || true
+        return 1
+    fi
+
+    # A hard-killed hook must not leave the seat permanently locked. Only
+    # remove a lock whose directory mtime is older than the bounded hook budget.
+    if python3 - "$TURN_LOCK_DIR" "$TURN_LOCK_STALE_SECONDS" <<'PY' 2>/dev/null
+import os
+import sys
+import time
+
+try:
+    age = time.time() - os.stat(sys.argv[1]).st_mtime
+except OSError:
+    raise SystemExit(1)
+raise SystemExit(0 if age >= float(sys.argv[2]) else 1)
+PY
+    then
+        rm -f "$TURN_LOCK_DIR/owner" 2>/dev/null || true
+        if rmdir "$TURN_LOCK_DIR" 2>/dev/null; then
+            if mkdir "$TURN_LOCK_DIR" 2>/dev/null \
+                && printf '%s\n' "$$" > "$TURN_LOCK_DIR/owner" 2>/dev/null; then
+                TURN_LOCK_HELD=1
+                trap _release_turn_lock EXIT
+                return 0
+            fi
+            rmdir "$TURN_LOCK_DIR" 2>/dev/null || true
+        fi
+    fi
+    return 1
+}
+
+_response_is_valid() {
+    RESP="$RESP" python3 -c '
+import json, os, sys
+from datetime import datetime
+try:
+    data = json.loads(os.environ["RESP"])
+except (KeyError, json.JSONDecodeError, TypeError, ValueError):
+    raise SystemExit(1)
+if isinstance(data, dict) and "messages" in data and "detail" not in data:
+    messages = data["messages"]
+    required = {
+        "id", "kind", "from_terminal", "to_terminals",
+        "acknowledged_at", "created_at",
+    }
+    def parseable_cursor(value):
+        if not isinstance(value, str) or not value:
+            return False
+        try:
+            parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
+        except ValueError:
+            return False
+        return parsed.tzinfo is not None
+
+    def render_safe(message):
+        if not isinstance(message, dict) or not required.issubset(message):
+            return False
+        return (
+            type(message["id"]) is int
+            and isinstance(message["kind"], str)
+            and isinstance(message["from_terminal"], str)
+            and isinstance(message["to_terminals"], list)
+            and parseable_cursor(message["created_at"])
+            and (
+                message["acknowledged_at"] is None
+                or isinstance(message["acknowledged_at"], str)
+            )
+            and (
+                message.get("topic") is None
+                or isinstance(message["topic"], str)
+            )
+            and (
+                message.get("thread_id") is None
+                or isinstance(message["thread_id"], str)
+            )
+            and (
+                message.get("body_preview") is None
+                or isinstance(message["body_preview"], str)
+            )
+        )
+    if isinstance(messages, list) and all(
+        render_safe(message)
+        for message in messages
+    ):
+        raise SystemExit(0)
+raise SystemExit(1)
+' 2>/dev/null
+}
+
+if [[ "$COOLDOWN_SECONDS" =~ ^[1-9][0-9]*$ ]]; then
+    COOLDOWN_FILE="${HOME}/.brisen-lab-bus-turn-drain-${SLUG}.txt"
+    _acquire_turn_lock || exit 0
+    NOW_EPOCH="$(date +%s 2>/dev/null || true)"
+    LAST_EPOCH="$(cat "$COOLDOWN_FILE" 2>/dev/null | tr -d '\n\r ')"
+    if [[ "$NOW_EPOCH" =~ ^[0-9]+$ && "$LAST_EPOCH" =~ ^[0-9]+$ ]] \
+       && (( NOW_EPOCH - LAST_EPOCH < COOLDOWN_SECONDS )); then
+        exit 0
+    fi
+fi
 
 # --- fetch terminal key: literal env → cache → 1Password fallback ---
 
@@ -224,14 +353,38 @@ fi
 # permanent false-pending floor in every agent's drain (b2 saw 25, BB-desk 20->42).
 # Directed dispatches are unaffected — they are named recipients and still render.
 
-RESP="$(curl -sS --max-time 10 -G -H "X-Terminal-Key: ${KEY}" \
+MAX_TIME="${BUS_DRAIN_MAX_TIME:-10}"
+CONNECT_TIMEOUT="${BUS_DRAIN_CONNECT_TIMEOUT:-}"
+CURL_TIMEOUT_ARGS=(--max-time "$MAX_TIME")
+if [[ "$CONNECT_TIMEOUT" =~ ^[1-9][0-9]*(\.[0-9]+)?$ ]]; then
+    CURL_TIMEOUT_ARGS+=(--connect-timeout "$CONNECT_TIMEOUT")
+fi
+RESP="$(curl -sS "${CURL_TIMEOUT_ARGS[@]}" -G -H "X-Terminal-Key: ${KEY}" \
         --data-urlencode "since=${SINCE}" \
         --data-urlencode "limit=50" \
         --data-urlencode "unread=true" \
         "${DAEMON_URL}/msg/${SLUG}" 2>/dev/null)" || {
-    printf '[bus-drain] daemon unreachable (timeout 10s) for slug=%s — skipping.\n' "$SLUG" | _emit
+    printf '[bus-drain] daemon unreachable (timeout %ss) for slug=%s — skipping.\n' "$MAX_TIME" "$SLUG" | _emit
     exit 0
 }
+
+# Mark a valid drain response so the turn wrapper can suppress the next prompt
+# for the cooldown window. HTTP-error JSON and malformed responses deliberately
+# do not advance this state, allowing the next prompt to retry the outage.
+if [[ "$COOLDOWN_SECONDS" =~ ^[1-9][0-9]*$ ]]; then
+    if _response_is_valid; then
+        NOW_EPOCH="$(date +%s 2>/dev/null || true)"
+        if [[ "$NOW_EPOCH" =~ ^[0-9]+$ ]]; then
+            COOLDOWN_DIR="$(dirname "$COOLDOWN_FILE")"
+            COOLDOWN_TMP="$(mktemp "${COOLDOWN_DIR}/.brisen-lab-bus-turn-drain-tmp.XXXXXX" 2>/dev/null || true)"
+            if [ -n "$COOLDOWN_TMP" ]; then
+                printf '%s\n' "$NOW_EPOCH" > "$COOLDOWN_TMP" 2>/dev/null \
+                    && mv -f "$COOLDOWN_TMP" "$COOLDOWN_FILE" 2>/dev/null \
+                    || rm -f "$COOLDOWN_TMP" 2>/dev/null || true
+            fi
+        fi
+    fi
+fi
 
 # --- resolve a FRESH bus_post.sh for the reply hint (INSTALL_TOOLING_FASTFOLLOW_1
 #     FIX 2, Director-ratified Option (b) via lead #4358) ---
@@ -264,6 +417,7 @@ RENDERED="$(RESP="$RESP" SLUG="$SLUG" STATE_FILE="$STATE_FILE" LEDGER_FILE="$LED
             BUS_POST_HINT="$BUS_POST_HINT" \
             python3 -c '
 import json, os, sys, tempfile
+from datetime import datetime
 
 try:
     d = json.loads(os.environ["RESP"])
@@ -276,6 +430,47 @@ if isinstance(d, dict) and "detail" in d and "messages" not in d:
     sys.exit(0)
 
 msgs = d.get("messages", []) if isinstance(d, dict) else []
+required = {"id", "kind", "from_terminal", "to_terminals", "acknowledged_at", "created_at"}
+def parseable_cursor(value):
+    if not isinstance(value, str) or not value:
+        return False
+    try:
+        parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
+    except ValueError:
+        return False
+    return parsed.tzinfo is not None
+
+def render_safe(message):
+    if not isinstance(message, dict) or not required.issubset(message):
+        return False
+    return (
+        type(message["id"]) is int
+        and isinstance(message["kind"], str)
+        and isinstance(message["from_terminal"], str)
+        and isinstance(message["to_terminals"], list)
+        and parseable_cursor(message["created_at"])
+        and (
+            message["acknowledged_at"] is None
+            or isinstance(message["acknowledged_at"], str)
+        )
+        and (
+            message.get("topic") is None
+            or isinstance(message["topic"], str)
+        )
+        and (
+            message.get("thread_id") is None
+            or isinstance(message["thread_id"], str)
+        )
+        and (
+            message.get("body_preview") is None
+            or isinstance(message["body_preview"], str)
+        )
+    )
+if not isinstance(msgs, list) or any(
+    not render_safe(m) for m in msgs
+):
+    print("[bus-drain] malformed daemon response — skipping.")
+    sys.exit(0)
 if not msgs:
     # Quiet on empty — avoid noise in every session-start.
     sys.exit(0)
