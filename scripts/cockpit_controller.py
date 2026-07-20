@@ -266,31 +266,6 @@ def context_fields_for(
     }
 
 
-def load_cockpit_layout_cards(static_dir: Path) -> tuple[tuple[str, str], ...]:
-    """Read generated layout cards so status-only seats have live state rows."""
-    try:
-        raw = json.loads((static_dir / "cockpit_layout.json").read_text(encoding="utf-8"))
-    except (OSError, ValueError, TypeError):
-        return ()
-    plates = raw.get("plates") or raw.get("sections") or []
-    if not isinstance(plates, list):
-        return ()
-    cards: list[tuple[str, str]] = []
-    for plate in plates:
-        plate_cards = plate.get("cards", []) if isinstance(plate, dict) else []
-        for card in plate_cards or []:
-            if not isinstance(card, dict):
-                continue
-            slug = card.get("slug")
-            if not isinstance(slug, str) or not SLUG_RE.fullmatch(slug):
-                continue
-            alias = card.get("alias")
-            if not isinstance(alias, str) or not ALIAS_RE.fullmatch(alias):
-                alias = slug
-            cards.append((slug, alias))
-    return tuple(cards)
-
-
 def wake_obligation_count(row: dict[str, Any]) -> int:
     """Return the authoritative count that may drive a wake decision.
 
