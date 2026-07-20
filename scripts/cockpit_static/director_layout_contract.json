@@ -210,13 +210,6 @@
           "y": 4
         },
         {
-          "slug": "librarian",
-          "display_name": "Librarian",
-          "app": false,
-          "x": 132,
-          "y": 6
-        },
-        {
           "slug": "CM-1",
           "display_name": "CM-1",
           "app": false,
@@ -310,13 +303,6 @@
     {
       "label": "INTERNS",
       "cards": [
-        {
-          "slug": "deep55",
-          "display_name": "Deep55",
-          "app": false,
-          "x": 5,
-          "y": 6
-        },
         {
           "slug": "clerk",
           "display_name": "Clerk Qwen",

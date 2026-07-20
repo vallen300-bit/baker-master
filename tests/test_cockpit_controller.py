@@ -6,6 +6,7 @@ import json
 import os
 from pathlib import Path
 import subprocess
+import threading
 import time
 
 import httpx
@@ -533,6 +534,64 @@ def test_api_agents_uses_local_context_and_normalized_codex_pane_activity(
     assert first["codex"]["is_working"] is False
     assert second["codex"]["is_working"] is False
     assert third["codex"]["is_working"] is True
+
+
+def test_api_agents_captures_codex_panes_concurrently(tmp_path, monkeypatch):
+    settings = _settings(
+        tmp_path,
+        rows=[
+            {
+                "slug": slug,
+                "alias": slug,
+                "port": 17612 + index,
+                "eligible": True,
+            }
+            for index, slug in enumerate(controller.CODEX_FAMILY)
+        ],
+    )
+    app = controller.create_app(
+        settings,
+        lab_glance=FakeLab({
+            slug: {"is_working": False}
+            for slug in controller.CODEX_FAMILY
+        }),
+        ttyd_prober=_prober(set(controller.CODEX_FAMILY)),
+    )
+    monkeypatch.setattr(
+        controller, "tmux_session_names", lambda _settings: set(controller.CODEX_FAMILY)
+    )
+    monkeypatch.setattr(controller, "tmux_window_activity", lambda _settings: {})
+
+    barrier = threading.Barrier(len(controller.CODEX_FAMILY))
+    lock = threading.Lock()
+    active = 0
+    peak = 0
+
+    def fake_read_codex_pane(_settings, slug):
+        nonlocal active, peak
+        with lock:
+            active += 1
+            peak = max(peak, active)
+        try:
+            barrier.wait(timeout=1.0)
+            time.sleep(0.15)
+            return f"Context 15% used\n{slug}\n"
+        finally:
+            with lock:
+                active -= 1
+
+    monkeypatch.setattr(controller, "read_codex_pane", fake_read_codex_pane)
+    client = TestClient(app)
+
+    started = time.perf_counter()
+    response = client.get(
+        "/api/agents", headers={"Host": "127.0.0.1:7800", **_auth()}
+    )
+    elapsed = time.perf_counter() - started
+
+    assert response.status_code == 200
+    assert peak == len(controller.CODEX_FAMILY)
+    assert elapsed < 0.45, f"Codex pane captures serialized: {elapsed:.3f}s"
 
 
 def test_glance_row_from_lab_projects_pinned_fields_and_context():

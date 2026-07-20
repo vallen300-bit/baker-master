@@ -2068,8 +2068,13 @@ def create_app(
         pane_hashes = dict(previous_pane_hashes)
         pane_context: dict[str, int | None] = {}
         pane_changed: dict[str, bool] = {}
-        for slug in CODEX_FAMILY:
-            pane = read_codex_pane(config, slug)
+        panes = await asyncio.gather(
+            *(
+                asyncio.to_thread(read_codex_pane, config, slug)
+                for slug in CODEX_FAMILY
+            )
+        )
+        for slug, pane in zip(CODEX_FAMILY, panes):
             if pane is None:
                 continue
             digest = hashlib.sha256(
