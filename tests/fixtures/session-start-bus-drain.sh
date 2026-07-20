@@ -43,6 +43,7 @@ DAEMON_URL="${BRISEN_LAB_DAEMON_URL:-https://brisen-lab.onrender.com}"
 _emit() {
   python3 -c '
 import json, os, sys
+from datetime import datetime
 text = sys.stdin.read()
 event = os.environ.get("BUS_DRAIN_HOOK_EVENT", "SessionStart")
 print(json.dumps({"hookSpecificOutput": {"hookEventName": event, "additionalContext": text}}))
@@ -169,6 +170,7 @@ PY
 _response_is_valid() {
     RESP="$RESP" python3 -c '
 import json, os, sys
+from datetime import datetime
 try:
     data = json.loads(os.environ["RESP"])
 except (KeyError, json.JSONDecodeError, TypeError, ValueError):
@@ -179,6 +181,15 @@ if isinstance(data, dict) and "messages" in data and "detail" not in data:
         "id", "kind", "from_terminal", "to_terminals",
         "acknowledged_at", "created_at",
     }
+    def parseable_cursor(value):
+        if not isinstance(value, str) or not value:
+            return False
+        try:
+            parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
+        except ValueError:
+            return False
+        return parsed.tzinfo is not None
+
     def render_safe(message):
         if not isinstance(message, dict) or not required.issubset(message):
             return False
@@ -187,8 +198,7 @@ if isinstance(data, dict) and "messages" in data and "detail" not in data:
             and isinstance(message["kind"], str)
             and isinstance(message["from_terminal"], str)
             and isinstance(message["to_terminals"], list)
-            and isinstance(message["created_at"], str)
-            and bool(message["created_at"])
+            and parseable_cursor(message["created_at"])
             and (
                 message["acknowledged_at"] is None
                 or isinstance(message["acknowledged_at"], str)
@@ -407,6 +417,7 @@ RENDERED="$(RESP="$RESP" SLUG="$SLUG" STATE_FILE="$STATE_FILE" LEDGER_FILE="$LED
             BUS_POST_HINT="$BUS_POST_HINT" \
             python3 -c '
 import json, os, sys, tempfile
+from datetime import datetime
 
 try:
     d = json.loads(os.environ["RESP"])
@@ -420,6 +431,15 @@ if isinstance(d, dict) and "detail" in d and "messages" not in d:
 
 msgs = d.get("messages", []) if isinstance(d, dict) else []
 required = {"id", "kind", "from_terminal", "to_terminals", "acknowledged_at", "created_at"}
+def parseable_cursor(value):
+    if not isinstance(value, str) or not value:
+        return False
+    try:
+        parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
+    except ValueError:
+        return False
+    return parsed.tzinfo is not None
+
 def render_safe(message):
     if not isinstance(message, dict) or not required.issubset(message):
         return False
@@ -428,8 +448,7 @@ def render_safe(message):
         and isinstance(message["kind"], str)
         and isinstance(message["from_terminal"], str)
         and isinstance(message["to_terminals"], list)
-        and isinstance(message["created_at"], str)
-        and bool(message["created_at"])
+        and parseable_cursor(message["created_at"])
         and (
             message["acknowledged_at"] is None
             or isinstance(message["acknowledged_at"], str)

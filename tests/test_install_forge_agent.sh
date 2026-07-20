@@ -236,6 +236,27 @@ else
   bad "typed-invalid response does not arm cooldown"
 fi
 
+# A non-ISO cursor timestamp must not be persisted or arm cooldown.
+cat > "$TMP/bin/curl" <<'SH'
+#!/usr/bin/env bash
+printf '%s\n' "called" >> "$CURL_LOG"
+printf '%s\n' '{"messages":[{"id":994,"kind":"dispatch","from_terminal":"lead","to_terminals":["lead"],"acknowledged_at":null,"created_at":"not-a-date","body_preview":"bad cursor"}]}'
+SH
+chmod +x "$TMP/bin/curl"
+rm -f "$TMP/.brisen-lab-bus-turn-drain-lead.txt" \
+      "$TMP/.brisen-lab-bus-last-seen-lead.txt"
+invalid_cursor_first="$(printf '{}' | "$CLAUDE_HOME/hooks/turn-bus-drain.sh")"
+invalid_cursor_second="$(printf '{}' | "$CLAUDE_HOME/hooks/turn-bus-drain.sh")"
+if grep -q 'malformed daemon response' <<<"$invalid_cursor_first" \
+   && grep -q 'malformed daemon response' <<<"$invalid_cursor_second" \
+   && [[ "$(wc -l < "$CURL_LOG")" -eq 9 ]] \
+   && [[ ! -e "$TMP/.brisen-lab-bus-turn-drain-lead.txt" ]] \
+   && [[ ! -e "$TMP/.brisen-lab-bus-last-seen-lead.txt" ]]; then
+  ok "invalid cursor timestamp does not arm cooldown"
+else
+  bad "invalid cursor timestamp does not arm cooldown"
+fi
+
 # Concurrent prompts for one slug: the atomic claim lets exactly one drain
 # render/ledger the arrival while the other exits silently.
 cat > "$TMP/bin/curl" <<'SH'
