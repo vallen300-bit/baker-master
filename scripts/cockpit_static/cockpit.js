@@ -69,10 +69,17 @@
   // buttons — nothing else is added here now (candidates parked in the spec).
   const NAV_ORDER = ["ACTIVE", "ALL", "Pilots", "Control Tower", "Engineering",
                      "Support", "Legal/Finance", "Interns"];
+  // History (revamp items 8+9) is a distinct bus-derived job/verdict MODE, not a
+  // plate-group filter — so it lives OUTSIDE NAV_ORDER (which stays the 8 plate
+  // views) and is appended to the sidebar via SIDEBAR_ORDER. It swaps the middle
+  // column rather than filtering the grid.
+  const HISTORY_VIEW = "History";
+  const SIDEBAR_ORDER = NAV_ORDER.concat([HISTORY_VIEW]);
   // Two-letter abbreviations shown when the sidebar collapses to icons on narrow
   // screens (spec item 5 — CSS media query + hover expansion, no JS breakpoints).
   const NAV_ABBR = { "ACTIVE": "AC", "ALL": "ALL", "Pilots": "Pi", "Control Tower": "CT",
-                     "Engineering": "En", "Support": "Su", "Legal/Finance": "LF", "Interns": "In" };
+                     "Engineering": "En", "Support": "Su", "Legal/Finance": "LF", "Interns": "In",
+                     "History": "Hi" };
   // The ONE plate-label → nav-name mapping (spec item 5). Fail-soft: an unknown
   // plate falls back to its raw label so a new plate is never silently dropped.
   const PLATE_TO_NAV = {
@@ -87,10 +94,21 @@
   let currentView = readStoredView();     // hydrate on load, default ACTIVE
   let expandedGroups = new Set();          // ACTIVE-view groups whose "N quiet" line is expanded
 
+  // ---- History view state (revamp items 8+9) ------------------------------
+  // The History view fetches lead's Lab job stream on its OWN 15s cadence (NOT
+  // the 4s /api/agents poll) and owns the middle column while active.
+  const HISTORY_REFRESH_MS = 15000;
+  let historyTimer = null;
+  let historyJobs = [];
+  let historyStale = false;
+  let historyLoaded = false;
+  let expandedHistory = new Set();         // job keys expanded inline
+  let pendingScrollKey = null;             // job key to scroll into view next paint
+
   function readStoredView() {
     try {
       const v = localStorage.getItem(VIEW_KEY);
-      if (v && NAV_ORDER.indexOf(v) !== -1) return v;
+      if (v && SIDEBAR_ORDER.indexOf(v) !== -1) return v;
     } catch (_) { /* storage blocked — fall through to default */ }
     return "ACTIVE";
   }
@@ -675,7 +693,7 @@
   function buildSidebar() {
     if (!sidebarEl) return;
     sidebarEl.textContent = "";
-    NAV_ORDER.forEach((nav) => {
+    SIDEBAR_ORDER.forEach((nav) => {
       const badge = el("span", { class: "nav-badge", "aria-label": "needs attention" });
       badge.hidden = true;
       const item = el("button", { class: "nav-item", type: "button", "data-view": nav,
@@ -701,10 +719,159 @@
   }
 
   function setView(view) {
-    if (NAV_ORDER.indexOf(view) === -1) view = "ACTIVE";
+    if (SIDEBAR_ORDER.indexOf(view) === -1) view = "ACTIVE";
+    const leavingHistory = currentView === "History" && view !== "History";
     currentView = view;
     try { localStorage.setItem(VIEW_KEY, view); } catch (_) { /* storage blocked */ }
+    if (view === "History") enterHistory();
+    else if (leavingHistory) stopHistory();
     render();
+  }
+
+  // ---- History view (revamp items 8+9) ------------------------------------
+  function enterHistory() {
+    renderHistory();                 // paint immediately (loading / last snapshot)
+    fetchHistory();                  // refresh now …
+    if (historyTimer === null) {     // … then every 15s while the view is active.
+      historyTimer = setInterval(fetchHistory, HISTORY_REFRESH_MS);
+    }
+  }
+
+  function stopHistory() {
+    if (historyTimer !== null) { clearInterval(historyTimer); historyTimer = null; }
+  }
+
+  async function fetchHistory() {
+    try {
+      const r = await fetch(url("/api/history?limit=30"), FETCH_OPTS);
+      if (!r.ok) throw new Error("history HTTP " + r.status);
+      const data = await r.json();
+      historyJobs = Array.isArray(data.jobs) ? data.jobs : [];
+      historyStale = data.stale === true;
+    } catch (_e) {
+      historyStale = true;           // keep the last-good jobs, mark them stale
+    }
+    historyLoaded = true;
+    if (currentView === "History") renderHistory();
+  }
+
+  function fmtDuration(sec) {
+    if (sec === null || sec === undefined || isNaN(sec)) return "—";
+    const s = Math.max(0, Math.round(sec));
+    return Math.floor(s / 60) + "m " + (s % 60) + "s";
+  }
+
+  function elapsedSince(iso) {
+    const t = Date.parse(iso);
+    if (isNaN(t)) return "—";
+    return fmtDuration((Date.now() - t) / 1000);
+  }
+
+  function fmtAge(iso) {
+    if (!iso) return "—";
+    const t = Date.parse(iso);
+    if (isNaN(t)) return "—";
+    let s = Math.max(0, Math.round((Date.now() - t) / 1000));
+    if (s < 60) return s + "s ago";
+    const m = Math.floor(s / 60);
+    if (m < 60) return m + "m ago";
+    const h = Math.floor(m / 60);
+    if (h < 24) return h + "h ago";
+    return Math.floor(h / 24) + "d ago";
+  }
+
+  function historyDotClass(j) {
+    if (j.outcome === "pass") return "hist-dot-pass";
+    if (j.outcome === "fail") return "hist-dot-fail";
+    return j.status === "in-flight" ? "hist-dot-live" : "hist-dot-idle";
+  }
+
+  // Verdict-strip card (item 9). Click expands + scrolls to the matching row.
+  function verdictCard(j) {
+    return el("button", { class: "verdict-card vc-" + j.outcome, type: "button",
+      title: j.topic || j.key || "", onclick: () => focusHistory(j.key) }, [
+      el("span", { class: "verdict-badge vb-" + j.outcome,
+        text: j.outcome === "pass" ? "PASS" : "FAIL" }),
+      el("span", { class: "verdict-topic", text: j.topic || j.key || "—" }),
+      el("span", { class: "verdict-meta",
+        text: (j.seat || "—") + " · " + fmtAge(j.ended_at) }),
+    ]);
+  }
+
+  // One history job row (item 8). All bus-derived text via el's textContent path.
+  function historyRow(j) {
+    const expanded = expandedHistory.has(j.key);
+    const dur = j.status === "in-flight"
+      ? elapsedSince(j.started_at) : fmtDuration(j.duration_sec);
+    const head = el("button", { class: "hist-row", type: "button",
+      "aria-expanded": expanded ? "true" : "false",
+      onclick: () => toggleHistory(j.key) }, [
+      el("span", { class: "hist-dot " + historyDotClass(j), "aria-hidden": "true" }),
+      el("span", { class: "hist-topic", text: j.topic || j.key || "—" }),
+      el("span", { class: "hist-seat", text: j.seat || "—" }),
+      el("span", { class: "hist-status", text: j.status || "" }),
+      el("span", { class: "hist-dur", text: dur }),
+      el("span", { class: "hist-age", text: fmtAge(j.ended_at || j.started_at) }),
+    ]);
+    const wrap = el("div", { class: "hist-wrap", "data-key": j.key }, [head]);
+    if (expanded) {
+      const ids = Array.isArray(j.msg_ids) ? j.msg_ids.join(", ") : "";
+      wrap.appendChild(el("div", { class: "hist-expand" }, [
+        el("div", { class: "hist-preview", text: j.last_preview || "(no preview)" }),
+        el("div", { class: "hist-ids", text: "msg ids: " + ids }),
+      ]));
+    }
+    return wrap;
+  }
+
+  function toggleHistory(key) {
+    if (!key) return;
+    if (expandedHistory.has(key)) expandedHistory.delete(key);
+    else expandedHistory.add(key);
+    renderHistory();
+  }
+
+  function focusHistory(key) {
+    if (!key) return;
+    expandedHistory.add(key);        // verdict-card click always opens the row
+    pendingScrollKey = key;
+    renderHistory();
+  }
+
+  function renderHistory() {
+    if (currentView !== "History") return;
+    const frag = document.createDocumentFragment();
+
+    // Item 9 — verdict strip: most recent ≤8 jobs that carry an outcome.
+    const verdictJobs = historyJobs.filter((j) => j && j.outcome).slice(0, 8);
+    if (verdictJobs.length) {
+      frag.appendChild(el("div", { class: "verdict-wrap" }, [
+        el("h2", {}, [document.createTextNode("Gate verdicts")]),
+        el("div", { class: "verdict-strip" }, verdictJobs.map(verdictCard)),
+      ]));
+    }
+
+    // Item 8 — job rows, newest first (backend already sorts).
+    const rows = historyJobs.map(historyRow);
+    frag.appendChild(el("div", { class: "history-list" }, [
+      el("h2", {}, [document.createTextNode("Task history"),
+        historyStale ? el("span", { class: "history-stale", text: "stale" }) : null]),
+      rows.length
+        ? el("div", { class: "history-rows" }, rows)
+        : el("div", { class: "view-empty",
+            text: historyLoaded ? "No recent jobs." : "Loading…" }),
+    ]));
+
+    gridEl.textContent = "";
+    gridEl.appendChild(frag);
+
+    if (pendingScrollKey) {
+      const wraps = gridEl.querySelectorAll(".hist-wrap");
+      for (const w of wraps) {
+        if (w.dataset.key === pendingScrollKey) { w.scrollIntoView({ block: "nearest" }); break; }
+      }
+      pendingScrollKey = null;
+    }
   }
 
   // ACTIVE-view collapsed grey line: "N quiet" (compact form carries the group
@@ -737,6 +904,10 @@
     // its unit vectors share a source. Plates → nav groups → visible plan + badges.
     const plan = window.planView(navGroups(), currentView);
     updateSidebar(plan.badges);
+
+    // History owns the middle column on its own 15s cadence — the 4s poll must
+    // NOT repaint (or refetch) it. Keep the sidebar/summary fresh, then bail.
+    if (currentView === "History") { renderSummary(); return; }
 
     const frag = document.createDocumentFragment();
     const isActive = currentView === "ACTIVE";
@@ -813,9 +984,10 @@
       connEl.className = "conn feed-dead";
       return;
     }
-    buildSidebar();              // 8 static nav entries (badges hydrate on poll)
+    buildSidebar();              // 9 static nav entries (badges hydrate on poll)
     render();                    // paint immediately from layout (metadata)
     renderSummary();
+    if (currentView === "History") enterHistory();   // restore a persisted History view
     await poll();                // then hydrate with live state
     pollTimer = setInterval(poll, POLL_MS);
   }
