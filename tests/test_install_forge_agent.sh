@@ -24,10 +24,13 @@ new_env
 run_install --headless
 if bash "$INSTALLER" --check --headless >/dev/null 2>&1; then ok "install -> check clean (headless)"; else bad "install -> check clean (headless)"; fi
 
-# 4 forge scripts + 2 bus hooks deployed + executable
-depl=0; for s in session-start-hook.sh heartbeat-ticker.sh turn-start-hook.sh turn-stop-hook.sh; do [[ -x "$FORGE_AGENT_HOME/$s" ]] && depl=$((depl+1)); done
-for h in session-start-bus-drain.sh stop-bus-ack.sh; do [[ -x "$CLAUDE_HOME/hooks/$h" ]] && depl=$((depl+1)); done
-[[ "$depl" -eq 6 ]] && ok "6 scripts deployed + executable" || bad "6 scripts deployed (got $depl)"
+# 6 forge scripts + 3 bus hooks deployed + executable
+depl=0; for s in session-start-hook.sh heartbeat-ticker.sh turn-start-hook.sh turn-stop-hook.sh codex-worktree.sh lifecycle-watch.sh; do [[ -x "$FORGE_AGENT_HOME/$s" ]] && depl=$((depl+1)); done
+for h in session-start-bus-drain.sh turn-bus-drain.sh stop-bus-ack.sh; do [[ -x "$CLAUDE_HOME/hooks/$h" ]] && depl=$((depl+1)); done
+[[ "$depl" -eq 9 ]] && ok "9 scripts deployed + executable" || bad "9 scripts deployed (got $depl)"
+grep -q 'lifecycle-watch.sh' "$FORGE_AGENT_HOME/session-start-hook.sh" \
+  && ok "session-start wires lifecycle watcher" \
+  || bad "session-start lifecycle watcher wiring missing"
 
 # active/ dir + sessions.json seeded
 { [[ -d "$FORGE_AGENT_HOME/active" ]] && [[ -f "$FORGE_AGENT_HOME/sessions.json" ]]; } && ok "active/ + sessions.json seeded" || bad "active/ + sessions.json seeded"
@@ -146,6 +149,157 @@ run_install --headless   # re-install against $HOME-form settings must not dupli
 dupct="$(python3 -c 'import json;d=json.load(open("'"$CLAUDE_HOME"'/settings.json"));print(sum(1 for g in d["hooks"].get("UserPromptSubmit",[]) for h in g.get("hooks",[]) if "turn-start-hook" in h.get("command","")))')"
 [[ "$dupct" == "1" ]] && ok "re-install no dup vs HOME-form turn hook" || bad "re-install no dup vs HOME-form (count=$dupct)"
 rm -rf "$HTMP"
+
+# --- 11. UserPromptSubmit turn drain renders once, then cooldown is silent ----
+new_env
+run_install --headless
+export HOME="$TMP"
+mkdir -p "$TMP/bin"
+cat > "$TMP/bin/curl" <<'SH'
+#!/usr/bin/env bash
+printf '%s\n' "called" >> "$CURL_LOG"
+printf '%s\n' '{"messages":[{"id":991,"kind":"dispatch","from_terminal":"lead","to_terminals":["lead"],"topic":"turn-test","thread_id":"t-1","acknowledged_at":null,"created_at":"2026-07-20T09:00:00Z","body_preview":"mid-session arrival"}]}'
+SH
+chmod +x "$TMP/bin/curl"
+export PATH="$TMP/bin:$PATH" BAKER_ROLE=lead BRISEN_LAB_TERMINAL_KEY=dummy \
+       CURL_LOG="$TMP/curl.log"
+first="$(printf '{}' | "$CLAUDE_HOME/hooks/turn-bus-drain.sh")"
+if grep -q 'UserPromptSubmit' <<<"$first" \
+   && grep -q 'turn-test' <<<"$first" \
+   && [[ "$(cat "$TMP/.brisen-lab-bus-last-seen-lead.txt")" == "2026-07-20T09:00:00Z" ]] \
+   && grep -qx '991' "$TMP/.brisen-lab-bus-rendered-lead.txt" \
+   && [[ "$(wc -l < "$CURL_LOG")" -eq 1 ]]; then
+  ok "turn drain renders additionalContext"
+else
+  bad "turn drain renders additionalContext"
+fi
+second="$(printf '{}' | "$CLAUDE_HOME/hooks/turn-bus-drain.sh")"
+if [[ -z "$second" && "$(wc -l < "$CURL_LOG")" -eq 1 ]]; then
+  ok "turn drain cooldown skips curl"
+else
+  bad "turn drain cooldown skips curl"
+fi
+
+# HTTP-error JSON must not arm the cooldown; the next prompt retries the daemon.
+cat > "$TMP/bin/curl" <<'SH'
+#!/usr/bin/env bash
+printf '%s\n' "called" >> "$CURL_LOG"
+printf '%s\n' '{"detail":"bus_busy_retry"}'
+SH
+chmod +x "$TMP/bin/curl"
+rm -f "$TMP/.brisen-lab-bus-turn-drain-lead.txt"
+http_error_first="$(printf '{}' | "$CLAUDE_HOME/hooks/turn-bus-drain.sh")"
+http_error_second="$(printf '{}' | "$CLAUDE_HOME/hooks/turn-bus-drain.sh")"
+if grep -q 'daemon error' <<<"$http_error_first" \
+   && grep -q 'daemon error' <<<"$http_error_second" \
+   && [[ "$(wc -l < "$CURL_LOG")" -eq 3 ]]; then
+  ok "HTTP-error response does not arm cooldown"
+else
+  bad "HTTP-error response does not arm cooldown"
+fi
+
+# A malformed messages envelope must also stay retryable and never arm cooldown.
+cat > "$TMP/bin/curl" <<'SH'
+#!/usr/bin/env bash
+printf '%s\n' "called" >> "$CURL_LOG"
+printf '%s\n' '{"messages":"malformed"}'
+SH
+chmod +x "$TMP/bin/curl"
+rm -f "$TMP/.brisen-lab-bus-turn-drain-lead.txt"
+malformed_first="$(printf '{}' | "$CLAUDE_HOME/hooks/turn-bus-drain.sh")"
+malformed_second="$(printf '{}' | "$CLAUDE_HOME/hooks/turn-bus-drain.sh")"
+if grep -q 'malformed daemon response' <<<"$malformed_first" \
+   && grep -q 'malformed daemon response' <<<"$malformed_second" \
+   && [[ "$(wc -l < "$CURL_LOG")" -eq 5 ]] \
+   && [[ ! -e "$TMP/.brisen-lab-bus-turn-drain-lead.txt" ]]; then
+  ok "malformed response does not arm cooldown"
+else
+  bad "malformed response does not arm cooldown"
+fi
+
+# A typed-but-invalid message must not arm cooldown before state persistence.
+cat > "$TMP/bin/curl" <<'SH'
+#!/usr/bin/env bash
+printf '%s\n' "called" >> "$CURL_LOG"
+printf '%s\n' '{"messages":[{"id":993,"kind":"dispatch","from_terminal":"lead","to_terminals":["lead"],"acknowledged_at":null,"created_at":null,"body_preview":"bad timestamp"}]}'
+SH
+chmod +x "$TMP/bin/curl"
+rm -f "$TMP/.brisen-lab-bus-turn-drain-lead.txt"
+typed_invalid_first="$(printf '{}' | "$CLAUDE_HOME/hooks/turn-bus-drain.sh")"
+typed_invalid_second="$(printf '{}' | "$CLAUDE_HOME/hooks/turn-bus-drain.sh")"
+if grep -q 'malformed daemon response' <<<"$typed_invalid_first" \
+   && grep -q 'malformed daemon response' <<<"$typed_invalid_second" \
+   && [[ "$(wc -l < "$CURL_LOG")" -eq 7 ]] \
+   && [[ ! -e "$TMP/.brisen-lab-bus-turn-drain-lead.txt" ]]; then
+  ok "typed-invalid response does not arm cooldown"
+else
+  bad "typed-invalid response does not arm cooldown"
+fi
+
+# A non-ISO cursor timestamp must not be persisted or arm cooldown.
+cat > "$TMP/bin/curl" <<'SH'
+#!/usr/bin/env bash
+printf '%s\n' "called" >> "$CURL_LOG"
+printf '%s\n' '{"messages":[{"id":994,"kind":"dispatch","from_terminal":"lead","to_terminals":["lead"],"acknowledged_at":null,"created_at":"not-a-date","body_preview":"bad cursor"}]}'
+SH
+chmod +x "$TMP/bin/curl"
+rm -f "$TMP/.brisen-lab-bus-turn-drain-lead.txt" \
+      "$TMP/.brisen-lab-bus-last-seen-lead.txt"
+invalid_cursor_first="$(printf '{}' | "$CLAUDE_HOME/hooks/turn-bus-drain.sh")"
+invalid_cursor_second="$(printf '{}' | "$CLAUDE_HOME/hooks/turn-bus-drain.sh")"
+if grep -q 'malformed daemon response' <<<"$invalid_cursor_first" \
+   && grep -q 'malformed daemon response' <<<"$invalid_cursor_second" \
+   && [[ "$(wc -l < "$CURL_LOG")" -eq 9 ]] \
+   && [[ ! -e "$TMP/.brisen-lab-bus-turn-drain-lead.txt" ]] \
+   && [[ ! -e "$TMP/.brisen-lab-bus-last-seen-lead.txt" ]]; then
+  ok "invalid cursor timestamp does not arm cooldown"
+else
+  bad "invalid cursor timestamp does not arm cooldown"
+fi
+
+# Concurrent prompts for one slug: the atomic claim lets exactly one drain
+# render/ledger the arrival while the other exits silently.
+cat > "$TMP/bin/curl" <<'SH'
+#!/usr/bin/env bash
+printf '%s\n' "called" >> "$CURL_LOG"
+sleep 0.2
+printf '%s\n' '{"messages":[{"id":992,"kind":"dispatch","from_terminal":"lead","to_terminals":["lead"],"topic":"race-test","thread_id":"t-2","acknowledged_at":null,"created_at":"2026-07-20T09:01:00Z","body_preview":"single render"}]}'
+SH
+chmod +x "$TMP/bin/curl"
+rm -f "$TMP/.brisen-lab-bus-turn-drain-lead.txt" \
+      "$TMP/.brisen-lab-bus-last-seen-lead.txt" \
+      "$TMP/.brisen-lab-bus-rendered-lead.txt" \
+      "$TMP/.brisen-lab-bus-turn-drain-lead.lock" \
+      "$CURL_LOG"
+printf '{}' | "$CLAUDE_HOME/hooks/turn-bus-drain.sh" > "$TMP/race-a.out" 2>/dev/null &
+race_a=$!
+sleep 0.05
+printf '{}' | "$CLAUDE_HOME/hooks/turn-bus-drain.sh" > "$TMP/race-b.out" 2>/dev/null &
+race_b=$!
+wait "$race_a"
+wait "$race_b"
+race_rendered="$(grep -h -c 'race-test' "$TMP/race-a.out" "$TMP/race-b.out" 2>/dev/null | awk '{sum += $1} END {print sum+0}')"
+if [[ "$(wc -l < "$CURL_LOG")" -eq 1 \
+   && "$race_rendered" -eq 1 \
+   && "$(wc -l < "$TMP/.brisen-lab-bus-rendered-lead.txt")" -eq 1 ]]; then
+  ok "concurrent turn drain renders once"
+else
+  bad "concurrent turn drain renders once"
+fi
+
+cat > "$TMP/bin/curl" <<'SH'
+#!/usr/bin/env bash
+exit 28
+SH
+chmod +x "$TMP/bin/curl"
+rm -f "$TMP/.brisen-lab-bus-turn-drain-lead.txt"
+failed="$(printf '{}' | "$CLAUDE_HOME/hooks/turn-bus-drain.sh")"
+if grep -q 'daemon unreachable' <<<"$failed"; then
+  ok "turn drain failure stays non-blocking"
+else
+  bad "turn drain failure stays non-blocking"
+fi
+rm -rf "$TMP"
 
 echo "----"
 echo "PASS=$PASS FAIL=$FAIL"

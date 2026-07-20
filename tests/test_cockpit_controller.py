@@ -1,6 +1,7 @@
 import asyncio
 import base64
 from dataclasses import replace
+from datetime import datetime, timezone
 import json
 import os
 from pathlib import Path
@@ -74,6 +75,21 @@ class RefreshingFakeLab:
         return self.refreshed
 
 
+class FailingRefreshFakeLab:
+    """Initial authoritative miss followed by a failed forced Lab refresh."""
+    def __init__(self):
+        self.last_ok = True
+        self.force_refresh_calls = 0
+
+    async def read(self):
+        return {}
+
+    async def force_refresh(self):
+        self.force_refresh_calls += 1
+        self.last_ok = False
+        return {}
+
+
 def _prober(up_slugs):
     """Fake ttyd prober: reports the given slugs as reachable, all others down."""
     up = set(up_slugs)
@@ -97,6 +113,7 @@ def test_api_agents_requires_auth_and_maps_only_pinned_glance_fields(
                     "has_telemetry": True,
                     "needs_go": False,
                     "unacked_count": 2,
+                    "wake_obligation_count": 1,
                     "oldest_unacked_age_sec": 700,
                     "unacked_topics": ["review/one"],
                     "body": "must not leak",
@@ -132,6 +149,7 @@ def test_api_agents_requires_auth_and_maps_only_pinned_glance_fields(
                 "has_telemetry": True,
                 "needs_go": False,
                 "unacked_count": 2,
+                "wake_obligation_count": 1,
                 "oldest_unacked_age_sec": 700,
                 "unacked_topics": ["review/one"],
                 "context_pct": None,
@@ -153,6 +171,7 @@ def test_api_agents_requires_auth_and_maps_only_pinned_glance_fields(
                 "has_telemetry": None,
                 "needs_go": None,
                 "unacked_count": None,
+                "wake_obligation_count": None,
                 "oldest_unacked_age_sec": None,
                 "unacked_topics": None,
                 "context_pct": None,
@@ -224,6 +243,61 @@ def test_d8_local_activity_ors_into_is_working(tmp_path, monkeypatch):
     assert agents["b3"]["is_working"] is True     # OR'd on despite Lab false
     assert agents["b4"]["local_working"] is False
     assert agents["b4"]["is_working"] is False     # stale activity → not working
+
+
+def test_api_agents_hydrates_status_only_layout_cards(tmp_path, monkeypatch):
+    settings = _settings(tmp_path)
+    settings.static_dir.mkdir()
+    (settings.static_dir / "cockpit_layout.json").write_text(
+        json.dumps(
+            {
+                "plates": [
+                    {
+                        "label": "Control Tower",
+                        "cards": [
+                            {
+                                "slug": "codex-arch",
+                                "alias": "codex-arch",
+                                "status_only": True,
+                            }
+                        ],
+                    }
+                ]
+            }
+        ),
+        encoding="utf-8",
+    )
+    app = controller.create_app(
+        settings,
+        lab_glance=FakeLab(
+            {
+                "codex-arch": {
+                    "is_working": True,
+                    "has_telemetry": True,
+                    "unacked_count": 1,
+                    "unacked_messages": [{"id": 901, "topic": "review/test"}],
+                    "last_message": {"id": 901, "topic": "review/test"},
+                    "acked_count": 0,
+                }
+            }
+        ),
+        ttyd_prober=_prober(set()),
+    )
+    monkeypatch.setattr(controller, "tmux_session_names", lambda _s: set())
+    monkeypatch.setattr(controller, "tmux_window_activity", lambda _s: {})
+
+    agents = {
+        row["slug"]: row
+        for row in TestClient(app).get(
+            "/api/agents",
+            headers={"Host": "127.0.0.1:7800", **_auth()},
+        ).json()["agents"]
+    }
+    assert agents["codex-arch"]["alias"] == "codex-arch"
+    assert agents["codex-arch"]["session_up"] is False
+    assert agents["codex-arch"]["ttyd_up"] is False
+    assert agents["codex-arch"]["unacked_count"] == 1
+    assert agents["codex-arch"]["last_message"]["id"] == 901
 
 
 def test_derive_context_pct_maps_lab_used_percent():
@@ -470,6 +544,7 @@ def test_glance_row_from_lab_projects_pinned_fields_and_context():
         "has_telemetry": True,
         "needs_go": False,
         "unacked_count": 1,
+        "wake_obligation_count": 1,
         "oldest_unacked_age_sec": 40,
         "unacked_topics": ["ops/x"],
         "unacked_messages": [{"id": 1, "topic": "ops/x", "created_at": "t"}],
@@ -484,6 +559,110 @@ def test_glance_row_from_lab_projects_pinned_fields_and_context():
     assert "context_band" not in glance
     assert glance["context_pct"] == 55.0
     assert glance["unacked_count"] == 1
+    assert glance["wake_obligation_count"] == 1
+
+
+def test_wake_obligation_count_prefers_server_field_and_falls_back_when_absent():
+    # A server-side zero must override the all-message display count.
+    assert controller.wake_obligation_count(
+        {"unacked_count": 4, "wake_obligation_count": 0}
+    ) == 0
+    assert controller.wake_skip_reason(
+        {
+            "unacked_count": 4,
+            "wake_obligation_count": 0,
+            "unacked_messages": [{"id": 1}],
+        }
+    ) == "no wake obligation"
+
+    # Older servers have no field: preserve the current unacked-count behavior.
+    assert controller.wake_obligation_count({"unacked_count": 4}) == 4
+    assert controller.wake_skip_reason(
+        {"unacked_count": 4, "unacked_messages": [{"id": 1}]}
+    ) is None
+
+
+def test_wake_row_selection_uses_server_truth_with_legacy_fallback():
+    mixed = [
+        {
+            "id": 10,
+            "kind": "broadcast",
+            "topic": "fleet/status",
+            "created_at": "2026-07-19T08:00:00Z",
+            "wake_obligation": False,
+        },
+        {
+            "id": 11,
+            "kind": "dispatch",
+            "topic": "real/work",
+            "created_at": "2026-07-19T09:00:00Z",
+            "wake_obligation": True,
+        },
+    ]
+    assert controller._oldest_wake_row(mixed, aggregate_count=1)["id"] == 11
+
+    # A pre-WAKE_FORCE Lab has no per-row marker: preserve legacy selection.
+    legacy = [{"id": 20, "created_at": "a"}, {"id": 21, "created_at": "b"}]
+    assert controller._oldest_wake_row(legacy)["id"] == 20
+
+
+def test_aggregate_present_without_row_marker_fails_closed():
+    row = {
+        "wake_obligation_count": 1,
+        "unacked_messages": [{"id": 30, "created_at": "a"}],
+    }
+    assert controller._oldest_wake_row(
+        row["unacked_messages"], aggregate_count=row["wake_obligation_count"]
+    ) is None
+    assert controller.wake_skip_reason(row) == "no wake obligation message id"
+
+
+def test_obligation_count_without_authoritative_row_fails_closed():
+    """Codex #13735 omitted-row shape: never select a display-only row merely
+    because the aggregate says an obligation exists outside the old top-five."""
+    row = {
+        "unacked_count": 6,
+        "wake_obligation_count": 1,
+        "unacked_messages": [
+            {
+                "id": 30,
+                "kind": "broadcast",
+                "created_at": "a",
+                "wake_obligation": False,
+            }
+        ],
+    }
+    assert controller._oldest_wake_row(
+        row["unacked_messages"], aggregate_count=row["wake_obligation_count"]
+    ) is None
+    assert controller.wake_skip_reason(row) == "no wake obligation message id"
+
+
+def test_click_line_lists_only_authoritative_wake_rows():
+    row = {
+        "unacked_count": 7,
+        "wake_obligation_count": 1,
+        "unacked_messages": [
+            {
+                "id": 40,
+                "kind": "broadcast",
+                "topic": "fleet/status",
+                "created_at": "2026-07-19T08:00:00Z",
+                "wake_obligation": False,
+            },
+            {
+                "id": 41,
+                "kind": "dispatch",
+                "topic": "real/work",
+                "from_terminal": "lead",
+                "created_at": "2026-07-19T09:00:00Z",
+                "wake_obligation": True,
+            },
+        ],
+    }
+    line = controller.compose_click_wake_line(row)
+    assert line == "[wake] check your bus: 1 unacked — #41 real/work (from lead)"
+    assert "#40" not in line
 
 
 def test_probe_ttyd_true_for_listening_false_for_closed():
@@ -620,6 +799,56 @@ def test_start_go_are_allowlisted_and_use_exact_tmux_argv(tmp_path, monkeypatch)
     assert calls[2] == ["tmux", "send-keys", "-t", "b3", "Enter"]
 
 
+def _click_wake_app(tmp_path, monkeypatch):
+    """A wake app whose send_wake is stubbed to capture the audit_source kwarg."""
+    settings = _settings(tmp_path)
+    app = controller.create_app(
+        settings,
+        lab_glance=FakeLab(
+            {"b3": {"is_working": False, "needs_go": False, "unacked_count": 1,
+                    "unacked_messages": [{"id": 1, "topic": "t", "created_at": "z"}]}}
+        ),
+    )
+    monkeypatch.setattr(controller, "tmux_session_names", lambda _s: {"b3"})
+    captured = {}
+
+    def fake_send_wake(*args, **kwargs):
+        captured["audit_source"] = kwargs.get("audit_source")
+        return {"ok": True, "sent": True, "slug": "b3"}
+
+    monkeypatch.setattr(controller, "send_wake", fake_send_wake)
+    return TestClient(app), captured
+
+
+def test_wake_endpoint_tags_cockpit_click_origin(tmp_path, monkeypatch):
+    """COCKPIT_CARD_CLICK_WAKE_INJECT_1 — a card click passes origin=cockpit_click
+    through to the wake audit source."""
+    client, captured = _click_wake_app(tmp_path, monkeypatch)
+    r = client.post("/api/sessions/b3/wake?force=1&origin=cockpit_click",
+                    headers={"Host": "127.0.0.1:7800", **_auth()})
+    assert r.status_code == 200
+    assert captured["audit_source"] == "cockpit_click"
+
+
+def test_wake_endpoint_rejects_unknown_origin(tmp_path, monkeypatch):
+    """A caller-supplied free string is never used as the audit source (allow-list)."""
+    client, captured = _click_wake_app(tmp_path, monkeypatch)
+    r = client.post("/api/sessions/b3/wake?origin=evil",
+                    headers={"Host": "127.0.0.1:7800", **_auth()})
+    assert r.status_code == 200
+    assert captured["audit_source"] is None
+
+
+def test_wake_endpoint_rejects_client_spoofed_sweep_origin(tmp_path, monkeypatch):
+    """P2c (codex FAIL #13397): a client may claim cockpit_click only. A browser that
+    POSTs origin=sweep must NOT forge the internal sweep audit source — it drops to None."""
+    client, captured = _click_wake_app(tmp_path, monkeypatch)
+    r = client.post("/api/sessions/b3/wake?force=1&origin=sweep",
+                    headers={"Host": "127.0.0.1:7800", **_auth()})
+    assert r.status_code == 200
+    assert captured["audit_source"] is None
+
+
 def test_wake_endpoint_passes_force_query_flag(tmp_path, monkeypatch):
     settings = _settings(tmp_path)
     app = controller.create_app(
@@ -652,6 +881,308 @@ def test_wake_endpoint_passes_force_query_flag(tmp_path, monkeypatch):
     )
     assert response.status_code == 200
     assert captured["force"] is True
+
+
+def test_force_wake_respects_zero_server_wake_obligation(tmp_path, monkeypatch):
+    """A click may show ordinary unacked rows but must not wake for them."""
+    settings = _settings(tmp_path)
+    app = controller.create_app(
+        settings,
+        lab_glance=FakeLab(
+            {
+                "b3": {
+                    "is_working": False,
+                    "needs_go": False,
+                    "unacked_count": 2,
+                    "wake_obligation_count": 0,
+                    "unacked_messages": [
+                        {
+                            "id": 1,
+                            "kind": "broadcast",
+                            "topic": "heartbeat/fleet",
+                            "created_at": "t",
+                        }
+                    ],
+                }
+            }
+        ),
+    )
+    monkeypatch.setattr(controller, "tmux_session_names", lambda _settings: {"b3"})
+
+    response = TestClient(app).post(
+        "/api/sessions/b3/wake?force=1&origin=cockpit_click",
+        headers={"Host": "127.0.0.1:7800", **_auth()},
+    )
+
+    assert response.status_code == 200
+    assert response.json() == {
+        "ok": True,
+        "sent": False,
+        "disposition": "skipped",
+        "reason": "no wake obligation",
+        "skipped": "no wake obligation",
+        "slug": "b3",
+    }
+
+
+def test_wake_structured_disposition_and_request_receipt(tmp_path, monkeypatch):
+    settings = _settings(tmp_path)
+    app = controller.create_app(
+        settings,
+        lab_glance=FakeLab(
+            {
+                "b3": {
+                    "is_working": False,
+                    "unacked_count": 1,
+                    "unacked_messages": [
+                        {
+                            "id": 7,
+                            "kind": "dispatch",
+                            "topic": "wake/receipt",
+                            "created_at": "2026-07-20T00:00:00Z",
+                        }
+                    ],
+                }
+            }
+        ),
+    )
+    monkeypatch.setattr(controller, "tmux_session_names", lambda _settings: {"b3"})
+    monkeypatch.setattr(
+        controller,
+        "_run_tmux",
+        lambda _settings, _args, **_kwargs: subprocess.CompletedProcess(
+            args=[], returncode=0, stdout="", stderr=""
+        ),
+    )
+    monkeypatch.setattr(
+        controller,
+        "_verify_wake_submit",
+        lambda *_args, **_kwargs: {"verified": "submitted"},
+    )
+
+    client = TestClient(app)
+    headers = {
+        "Host": "127.0.0.1:7800",
+        "X-Wake-Request-Id": "rid-structured-7",
+        **_auth(),
+    }
+    response = client.post("/api/sessions/b3/wake", headers=headers)
+
+    assert response.status_code == 200
+    assert response.json()["sent"] is True
+    assert response.json()["disposition"] == "delivered"
+    assert response.json()["reason"] == "delivered"
+    receipt = client.get(
+        "/api/wake-receipt/rid-structured-7",
+        headers={"Host": "127.0.0.1:7800", **_auth()},
+    )
+    assert receipt.status_code == 200
+    assert receipt.json() == {"landed": True}
+    audit = [json.loads(line) for line in settings.wake_audit_path.read_text().splitlines()]
+    assert audit[-1]["request_id"] == "rid-structured-7"
+    assert audit[-1]["landed"] is True
+
+
+def test_wake_deadline_returns_undelivered_disposition(tmp_path, monkeypatch):
+    settings = _settings(tmp_path)
+    app = controller.create_app(settings, lab_glance=FakeLab({}))
+
+    def expired(_settings, *, deadline=None):
+        raise controller.WakeDeadlineExceeded("test deadline")
+
+    monkeypatch.setattr(controller, "tmux_session_names", expired)
+    response = TestClient(app).post(
+        "/api/sessions/b3/wake",
+        headers={
+            "Host": "127.0.0.1:7800",
+            "X-Wake-Request-Id": "rid-deadline-7",
+            **_auth(),
+        },
+    )
+
+    assert response.status_code == 200
+    assert response.json()["sent"] is False
+    assert response.json()["disposition"] == "undelivered"
+    assert response.json()["reason"] == "controller-deadline"
+    assert response.json()["skipped"] == "controller-deadline"
+    receipt = TestClient(app).get(
+        "/api/wake-receipt/rid-deadline-7",
+        headers={"Host": "127.0.0.1:7800", **_auth()},
+    )
+    assert receipt.json() == {"landed": False}
+
+
+def test_undelivered_wake_result_keeps_legacy_skipped_reason():
+    result = controller._wake_result(
+        "undelivered", "controller-deadline", slug="b3"
+    )
+
+    assert result["disposition"] == "undelivered"
+    assert result["reason"] == "controller-deadline"
+    assert result["skipped"] == "controller-deadline"
+
+
+def test_wake_tmux_probe_timeout_returns_undelivered_disposition(tmp_path, monkeypatch):
+    settings = _settings(tmp_path)
+    app = controller.create_app(settings, lab_glance=FakeLab({}))
+
+    def tmux_probe_timeout(_settings, **kwargs):
+        assert kwargs["timeout"] > 0
+        raise subprocess.TimeoutExpired(["tmux", "ls"], kwargs["timeout"])
+
+    monkeypatch.setattr(controller.subprocess, "run", tmux_probe_timeout)
+    response = TestClient(app).post(
+        "/api/sessions/b3/wake",
+        headers={
+            "Host": "127.0.0.1:7800",
+            "X-Wake-Request-Id": "rid-tmux-timeout-7",
+            **_auth(),
+        },
+    )
+
+    assert response.status_code == 200
+    assert response.json()["sent"] is False
+    assert response.json()["disposition"] == "undelivered"
+    assert response.json()["reason"] == "controller-deadline"
+
+
+def test_working_skip_rewakes_once_on_idle_transition(tmp_path, monkeypatch):
+    settings = _settings(tmp_path)
+
+    class SequencedLab:
+        last_ok = True
+
+        def __init__(self):
+            self.read_count = 0
+
+        async def read(self):
+            self.read_count += 1
+            working = self.read_count == 1
+            return {
+                "b3": {
+                    "is_working": working,
+                    "unacked_count": 1,
+                    "unacked_messages": [{
+                        "id": 42,
+                        "kind": "dispatch",
+                        "topic": "rewake/idle",
+                        "created_at": "2026-07-20T00:00:00Z",
+                    }],
+                }
+            }
+
+    lab = SequencedLab()
+    app = controller.create_app(settings, lab_glance=lab)
+    monkeypatch.setattr(controller, "tmux_session_names", lambda _settings: {"b3"})
+    calls = []
+
+    def fake_send_wake(*args, **kwargs):
+        calls.append(kwargs)
+        if len(calls) == 1:
+            return controller._wake_result(
+                "skipped", "working", slug="b3", msg_id=42, topic="rewake/idle"
+            )
+        return controller._wake_result(
+            "delivered", "delivered", slug="b3", msg_id=42, topic="rewake/idle"
+        )
+
+    monkeypatch.setattr(controller, "send_wake", fake_send_wake)
+    client = TestClient(app)
+    first = client.post(
+        "/api/sessions/b3/wake",
+        headers={"Host": "127.0.0.1:7800", **_auth()},
+    )
+    assert first.json()["reason"] == "working"
+
+    asyncio.run(app.state.notify_tick())
+    asyncio.run(app.state.notify_tick())
+
+    assert len(calls) == 2
+    assert calls[1]["audit_source"] == "deferred"
+
+
+def test_deferred_wake_retains_pending_until_delivered(tmp_path, monkeypatch):
+    settings = _settings(tmp_path)
+    app = controller.create_app(settings, lab_glance=FakeLab({}))
+    app.state.pending_wakes["b3"] = {"msg_id": 42}
+    app.state.wake_prev_working["b3"] = True
+    calls = []
+
+    def fake_send_wake(*args, **kwargs):
+        calls.append(kwargs)
+        if len(calls) == 1:
+            return controller._wake_result(
+                "skipped", "seat_floor", slug="b3", msg_id=42, topic="rewake/idle"
+            )
+        return controller._wake_result(
+            "delivered", "delivered", slug="b3", msg_id=42, topic="rewake/idle"
+        )
+
+    monkeypatch.setattr(controller, "send_wake", fake_send_wake)
+    row = {
+        "is_working": False,
+        "wake_obligation_count": 1,
+        "unacked_messages": [{"id": 42, "topic": "rewake/idle"}],
+    }
+
+    first = asyncio.run(app.state.deferred_wake_tick({"b3": row}))
+    assert first[0]["disposition"] == "skipped"
+    assert "b3" in app.state.pending_wakes
+
+    app.state.wake_prev_working["b3"] = True
+    second = asyncio.run(app.state.deferred_wake_tick({"b3": row}))
+    assert second[0]["disposition"] == "delivered"
+    assert "b3" not in app.state.pending_wakes
+
+
+def test_deferred_rewake_runs_when_notifications_disabled(tmp_path, monkeypatch):
+    settings = replace(_settings(tmp_path), notify_enabled=False, notify_poll_seconds=0.01)
+
+    class SequencedLab:
+        last_ok = True
+
+        def __init__(self):
+            self.read_count = 0
+
+        async def read(self):
+            self.read_count += 1
+            working = self.read_count <= 2
+            return {
+                "b3": {
+                    "is_working": working,
+                    "unacked_count": 1,
+                    "unacked_messages": [{"id": 43, "topic": "rewake/disabled"}],
+                }
+            }
+
+    lab = SequencedLab()
+    app = controller.create_app(settings, lab_glance=lab)
+    monkeypatch.setattr(controller, "tmux_session_names", lambda _settings: {"b3"})
+    calls = []
+
+    def fake_send_wake(*args, **kwargs):
+        calls.append(kwargs)
+        if len(calls) == 1:
+            return controller._wake_result(
+                "skipped", "working", slug="b3", msg_id=43, topic="rewake/disabled"
+            )
+        return controller._wake_result(
+            "delivered", "delivered", slug="b3", msg_id=43, topic="rewake/disabled"
+        )
+
+    monkeypatch.setattr(controller, "send_wake", fake_send_wake)
+    with TestClient(app) as client:
+        response = client.post(
+            "/api/sessions/b3/wake",
+            headers={"Host": "127.0.0.1:7800", **_auth()},
+        )
+        assert response.status_code == 200
+        deadline = time.time() + 2.0
+        while len(calls) < 2 and time.time() < deadline:
+            time.sleep(0.01)
+
+    assert len(calls) == 2
+    assert calls[1]["audit_source"] == "deferred"
 
 
 def test_wake_endpoint_rechecks_after_stale_no_unacked_glance(tmp_path, monkeypatch):
@@ -695,6 +1226,177 @@ def test_wake_endpoint_rechecks_after_stale_no_unacked_glance(tmp_path, monkeypa
     assert calls[1][0]["unacked_count"] == 1
 
 
+def test_wake_endpoint_rechecks_after_no_telemetry_glance(tmp_path, monkeypatch):
+    """A missing row is not an authoritative force/click no-op; refresh once."""
+    settings = _settings(tmp_path)
+    lab = RefreshingFakeLab(
+        {},
+        {
+            "b3": {
+                "is_working": False,
+                "unacked_count": 1,
+                "unacked_messages": [
+                    {
+                        "id": 13634,
+                        "kind": "dispatch",
+                        "topic": "wake-force-authoritative-read-1",
+                        "created_at": "2026-07-19T20:07:55Z",
+                    }
+                ],
+            }
+        },
+    )
+    app = controller.create_app(settings, lab_glance=lab)
+    monkeypatch.setattr(controller, "tmux_session_names", lambda _settings: {"b3"})
+    calls = []
+
+    def fake_send_wake(*args, **kwargs):
+        calls.append(args[2])
+        if len(calls) == 1:
+            return {"ok": True, "sent": False, "skipped": "no telemetry", "slug": "b3"}
+        return {"ok": True, "sent": True, "slug": "b3"}
+
+    monkeypatch.setattr(controller, "send_wake", fake_send_wake)
+    response = TestClient(app).post(
+        "/api/sessions/b3/wake?force=1&origin=cockpit_click",
+        headers={"Host": "127.0.0.1:7800", **_auth()},
+    )
+
+    assert response.status_code == 200
+    assert response.json()["sent"] is True
+    assert lab.force_refresh_calls == 1
+    assert len(calls) == 2
+    assert calls[1]["unacked_messages"][0]["id"] == 13634
+
+
+def test_force_wake_failed_refresh_is_explicit_503(tmp_path, monkeypatch):
+    """Lab starvation must never become 200 sent:false/no-telemetry."""
+    settings = _settings(tmp_path)
+    lab = FailingRefreshFakeLab()
+    app = controller.create_app(settings, lab_glance=lab)
+    monkeypatch.setattr(controller, "tmux_session_names", lambda _settings: {"b3"})
+    calls = []
+
+    def fake_send_wake(*_args, **_kwargs):
+        calls.append(True)
+        return {"ok": True, "sent": False, "skipped": "no telemetry", "slug": "b3"}
+
+    monkeypatch.setattr(controller, "send_wake", fake_send_wake)
+    response = TestClient(app).post(
+        "/api/sessions/b3/wake?force=1&origin=cockpit_click",
+        headers={"Host": "127.0.0.1:7800", **_auth()},
+    )
+
+    assert response.status_code == 503
+    assert response.json()["detail"] == {
+        "error": "wake_state_unknown",
+        "slug": "b3",
+        "disposition": "undelivered",
+        "reason": "lab_glance_unavailable",
+        "skipped": "lab_glance_unavailable",
+        "sent": False,
+    }
+    assert lab.force_refresh_calls == 1
+    assert len(calls) == 1
+
+
+def test_lab_glance_failure_stale_serves_all_last_good_rows(tmp_path, monkeypatch):
+    """One Lab 503 cannot blank the last-good 28-seat fleet view."""
+    settings = replace(_settings(tmp_path), lab_cache_seconds=30.0)
+    terminals = [
+        {"slug": f"seat-{index}", "unacked_count": index + 1}
+        for index in range(28)
+    ]
+    lab_503 = httpx.HTTPStatusError(
+        "simulated Lab 503/read starvation",
+        request=httpx.Request("GET", settings.lab_url),
+        response=httpx.Response(503),
+    )
+    outcomes = [
+        {"terminals": terminals},
+        lab_503,
+    ]
+
+    class FakeResponse:
+        def __init__(self, payload):
+            self.payload = payload
+
+        def raise_for_status(self):
+            return None
+
+        def json(self):
+            return self.payload
+
+    class FakeClient:
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *_args):
+            return None
+
+        async def get(self, _url):
+            outcome = outcomes.pop(0)
+            if isinstance(outcome, Exception):
+                raise outcome
+            return FakeResponse(outcome)
+
+    monkeypatch.setattr(controller.httpx, "AsyncClient", lambda **_kwargs: FakeClient())
+    glance = controller.LabGlance(settings)
+
+    first = asyncio.run(glance.read())
+    degraded = asyncio.run(glance.force_refresh())
+
+    assert len(first) == 28
+    assert degraded == first
+    assert len(degraded) == 28
+    assert glance.last_ok is False
+
+
+def test_wake_endpoint_rechecks_after_lean_no_message_id_glance(tmp_path, monkeypatch):
+    """P1 (codex FAIL #13397): a card hydrated status-only via /api/agents carries
+    unacked_count>0 but unacked_messages=None, so send_wake skips 'no unacked message
+    id'. The endpoint must still force a fresh read — which DOES carry the message rows
+    — so a Director card click on that lean shape actually wakes the seat."""
+    settings = _settings(tmp_path)
+    lab = RefreshingFakeLab(
+        {"b3": {"is_working": False, "unacked_count": 2, "unacked_messages": None}},
+        {
+            "b3": {
+                "is_working": False,
+                "unacked_count": 2,
+                "unacked_messages": [
+                    {
+                        "id": 13416,
+                        "kind": "dispatch",
+                        "topic": "cockpit-card-click-wake-inject-1",
+                        "created_at": "2026-07-19T15:00:00Z",
+                    }
+                ],
+            }
+        },
+    )
+    app = controller.create_app(settings, lab_glance=lab)
+    monkeypatch.setattr(controller, "tmux_session_names", lambda _settings: {"b3"})
+    calls = []
+
+    def fake_send_wake(*args, **kwargs):
+        calls.append((args[2], kwargs))
+        if len(calls) == 1:
+            return {"ok": True, "sent": False, "skipped": "no unacked message id", "slug": "b3"}
+        return {"ok": True, "sent": True, "slug": "b3"}
+
+    monkeypatch.setattr(controller, "send_wake", fake_send_wake)
+    response = TestClient(app).post(
+        "/api/sessions/b3/wake?force=1&origin=cockpit_click",
+        headers={"Host": "127.0.0.1:7800", **_auth()},
+    )
+
+    assert response.status_code == 200
+    assert lab.force_refresh_calls == 1
+    assert len(calls) == 2
+    assert calls[1][0]["unacked_messages"][0]["id"] == 13416
+
+
 def test_backlog_sweep_tick_wakes_old_idle_session(tmp_path, monkeypatch):
     settings = replace(_settings(tmp_path), backlog_sweep_seconds=600)
     app = controller.create_app(
@@ -734,6 +1436,90 @@ def test_backlog_sweep_tick_wakes_old_idle_session(tmp_path, monkeypatch):
     assert calls[0][1]["audit_source"] == "sweep"
 
 
+def test_backlog_sweep_ignores_display_only_unacked_without_wake_obligation(
+    tmp_path, monkeypatch
+):
+    """A broadcast/status backlog may stay visible but must not drive re-wake."""
+    settings = replace(_settings(tmp_path), backlog_sweep_seconds=600)
+    app = controller.create_app(
+        settings,
+        lab_glance=FakeLab(
+            {
+                "b3": {
+                    "is_working": False,
+                    "unacked_count": 3,
+                    "wake_obligation_count": 0,
+                    "oldest_unacked_age_sec": 601,
+                    "unacked_messages": [
+                        {
+                            "id": 13129,
+                            "kind": "broadcast",
+                            "topic": "heartbeat/fleet",
+                            "created_at": "2026-07-19T08:00:00Z",
+                        }
+                    ],
+                }
+            }
+        ),
+    )
+    monkeypatch.setattr(controller, "tmux_session_names", lambda _settings: {"b3"})
+    monkeypatch.setattr(
+        controller,
+        "send_wake",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(
+            AssertionError("display-only backlog must not wake")
+        ),
+    )
+
+    assert asyncio.run(app.state.backlog_sweep_tick()) == []
+
+
+def test_backlog_sweep_ages_only_authoritative_wake_rows(tmp_path, monkeypatch):
+    settings = replace(_settings(tmp_path), backlog_sweep_seconds=600)
+    now = datetime(2026, 7, 20, 12, 0, tzinfo=timezone.utc).timestamp()
+    app = controller.create_app(
+        settings,
+        lab_glance=FakeLab(
+            {
+                "b3": {
+                    "is_working": False,
+                    "unacked_count": 2,
+                    "wake_obligation_count": 1,
+                    # The display-only broadcast is old; the obligation is fresh.
+                    "oldest_unacked_age_sec": 3600,
+                    "unacked_messages": [
+                        {
+                            "id": 1,
+                            "kind": "broadcast",
+                            "topic": "fleet/status",
+                            "created_at": "2026-07-20T11:00:00Z",
+                            "wake_obligation": False,
+                        },
+                        {
+                            "id": 2,
+                            "kind": "dispatch",
+                            "topic": "real/work",
+                            "created_at": "2026-07-20T11:59:30Z",
+                            "wake_obligation": True,
+                        },
+                    ],
+                }
+            }
+        ),
+    )
+    monkeypatch.setattr(controller.time, "time", lambda: now)
+    monkeypatch.setattr(controller, "tmux_session_names", lambda _settings: {"b3"})
+    monkeypatch.setattr(
+        controller,
+        "send_wake",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(
+            AssertionError("fresh obligation must not trigger a sweep")
+        ),
+    )
+
+    assert asyncio.run(app.state.backlog_sweep_tick()) == []
+
+
 def test_backlog_sweep_tick_is_off_at_zero(tmp_path, monkeypatch):
     settings = replace(_settings(tmp_path), backlog_sweep_seconds=0)
     app = controller.create_app(settings, lab_glance=FakeLab({}))
@@ -744,6 +1530,127 @@ def test_backlog_sweep_tick_is_off_at_zero(tmp_path, monkeypatch):
     )
 
     assert asyncio.run(app.state.backlog_sweep_tick()) == []
+
+
+def test_api_messages_reads_authenticated_preview_and_caches(tmp_path, monkeypatch):
+    settings = replace(_settings(tmp_path), lab_messages_url="https://lab.test/msg")
+    key_dir = tmp_path / "keys"
+    key_dir.mkdir()
+    (key_dir / "b3").write_text("seat-key\n", encoding="utf-8")
+    settings = replace(settings, lab_key_dir=key_dir)
+
+    class FakeResponse:
+        def raise_for_status(self):
+            return None
+
+        def json(self):
+            return {
+                "messages": [
+                    {
+                        "id": 17,
+                        "from_terminal": "lead",
+                        "topic": "cockpit-msg-panel-body-preview-1",
+                        "kind": "dispatch",
+                        "created_at": "2026-07-19T08:31:28Z",
+                        "acknowledged_at": None,
+                        "body_preview": "x" * 500,
+                    }
+                ]
+            }
+
+    calls = []
+
+    class FakeClient:
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *args):
+            return None
+
+        async def get(self, url, params, headers):
+            calls.append((url, params, headers))
+            return FakeResponse()
+
+    monkeypatch.setattr(
+        controller.httpx, "AsyncClient", lambda **_kwargs: FakeClient()
+    )
+    app = controller.create_app(settings, lab_glance=FakeLab({}))
+    client = TestClient(app)
+
+    first = client.get(
+        "/api/messages/b3",
+        headers={"Host": "127.0.0.1:7800", **_auth()},
+    )
+    second = client.get(
+        "/api/messages/b3",
+        headers={"Host": "127.0.0.1:7800", **_auth()},
+    )
+
+    assert first.status_code == 200
+    assert second.status_code == 200
+    assert len(calls) == 1
+    assert calls[0][0] == "https://lab.test/msg/b3"
+    assert calls[0][1] == {"limit": 12}
+    assert calls[0][2] == {"X-Terminal-Key": "seat-key"}
+    payload = first.json()
+    assert payload["available"] is True
+    assert payload["messages"][0]["acked"] is False
+    assert len(payload["messages"][0]["body_preview"]) == 400
+    assert "acknowledged_at" not in payload["messages"][0]
+
+
+def test_api_messages_allows_layout_slug_and_fails_soft_without_key(tmp_path):
+    settings = replace(_settings(tmp_path), lab_key_dir=tmp_path / "keys")
+    settings.static_dir.mkdir()
+    (settings.static_dir / "cockpit_layout.json").write_text(
+        json.dumps({"plates": [{"cards": [{"slug": "codex-arch"}]}]}),
+        encoding="utf-8",
+    )
+    app = controller.create_app(settings, lab_glance=FakeLab({}))
+    client = TestClient(app)
+
+    response = client.get(
+        "/api/messages/codex-arch",
+        headers={"Host": "127.0.0.1:7800", **_auth()},
+    )
+    unknown = client.get(
+        "/api/messages/not-a-cockpit-seat",
+        headers={"Host": "127.0.0.1:7800", **_auth()},
+    )
+
+    assert response.status_code == 200
+    assert response.json() == {"available": False, "reason": "no key"}
+    assert unknown.status_code == 404
+
+
+def test_api_messages_upstream_failure_is_panel_safe(tmp_path, monkeypatch):
+    settings = replace(_settings(tmp_path), lab_messages_url="https://lab.test/msg")
+    key_dir = tmp_path / "keys"
+    key_dir.mkdir()
+    (key_dir / "b3").write_text("seat-key", encoding="utf-8")
+    settings = replace(settings, lab_key_dir=key_dir)
+
+    class FailingClient:
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *args):
+            return None
+
+        async def get(self, *args, **kwargs):
+            raise httpx.ConnectError("lab unavailable")
+
+    monkeypatch.setattr(
+        controller.httpx, "AsyncClient", lambda **_kwargs: FailingClient()
+    )
+    app = controller.create_app(settings, lab_glance=FakeLab({}))
+    response = TestClient(app).get(
+        "/api/messages/b3",
+        headers={"Host": "127.0.0.1:7800", **_auth()},
+    )
+
+    assert response.status_code == 200
+    assert response.json() == {"available": False}
 
 
 def test_credential_file_must_be_private(tmp_path):

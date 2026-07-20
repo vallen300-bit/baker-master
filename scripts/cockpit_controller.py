@@ -15,7 +15,9 @@ import binascii
 import contextlib
 from dataclasses import dataclass
 import hashlib
+from datetime import datetime, timezone
 import hmac
+import inspect
 import json
 import logging
 import math
@@ -50,6 +52,10 @@ GLANCE_FIELDS = (
     "has_telemetry",
     "needs_go",
     "unacked_count",
+    # WAKE_ATTRIBUTION_ADDRESSEE_FILTER_1: server-side count of unacked rows
+    # that are genuine execute obligations. Wake logic consumes this field;
+    # ``unacked_count`` remains the all-message display count.
+    "wake_obligation_count",
     "oldest_unacked_age_sec",
     "unacked_topics",
     # D4 — context-window usage. Populated by ``derive_context_pct`` from the
@@ -79,6 +85,13 @@ WAKE_DEDUPE_SECONDS = 600.0
 WAKE_COMMAND_DEDUPE_SECONDS = 120.0
 # Minimum spacing between any two injections into one seat, regardless of message.
 WAKE_SEAT_FLOOR_SECONDS = 60.0
+# WAKE_DISPOSITION_REWAKE_1 — the controller owns a cumulative budget below the
+# listener's timeout so a slow local path returns a structured outcome instead of
+# letting the listener time out with an ambiguous delivery state.
+WAKE_CONTROLLER_DEADLINE_SECONDS = 110.0
+WAKE_REQUEST_ID_MAX_CHARS = 128
+WAKE_REQUEST_ID_RE = re.compile(r"^[A-Za-z0-9._:-]{1,128}$")
+WAKE_RECEIPT_ROUTE = "/api/wake-receipt"
 # WAKE_COMPOSER_SUBMIT_FIX_1: settle gap between text→Enter and Enter→submit-Return.
 # 0.3s mirrors the ratified `delay 0.3` in the wake handler app's submit-Return
 # (BUS_AUTOWAKE_SUBMIT_GENERALIZE_1) — long enough for the composer to absorb the
@@ -116,6 +129,7 @@ WAKE_ORIGIN_TAG = "[wake]"
 # (codex-arch OBJECT, #12055) — the mapping only ever reads the usage percent.
 CONTEXT_USED_FIELD = "context_used_percent"
 CONTEXT_STALE_S = 900.0
+WAKE_OBLIGATION_FIELD = "wake_obligation_count"
 
 
 def derive_context_pct(row: dict[str, Any]) -> float | None:
@@ -274,6 +288,25 @@ def load_cockpit_layout_cards(static_dir: Path) -> tuple[tuple[str, str], ...]:
     return tuple(cards)
 
 
+def wake_obligation_count(row: dict[str, Any]) -> int:
+    """Return the authoritative count that may drive a wake decision.
+
+    New Lab servers provide ``wake_obligation_count``. An absent/null field
+    means an older server, so preserve the legacy ``unacked_count`` behavior.
+    A present but malformed value fails closed to zero instead of reviving the
+    all-message wake storm this field exists to prevent.
+    """
+    raw = row.get(WAKE_OBLIGATION_FIELD)
+    if raw is None:
+        raw = row.get("unacked_count")
+    if isinstance(raw, bool):
+        return 0
+    try:
+        return max(0, int(raw or 0))
+    except (TypeError, ValueError, OverflowError):
+        return 0
+
+
 def glance_row_from_lab(row: dict[str, Any]) -> dict[str, Any]:
     """Project one Lab /api/v2/terminals row down to the pinned glance fields.
 
@@ -303,6 +336,9 @@ NOTIFY_SOUND = "Ping"
 # Zero disables the loop; positive values are seconds and can be tuned without a
 # code change. Existing per-message dedupe and seat-floor guards contain repeats.
 BACKLOG_SWEEP_SECONDS = 600.0
+MESSAGE_PREVIEW_LIMIT = 12
+MESSAGE_PREVIEW_MAX_CHARS = 400
+MESSAGE_PREVIEW_CACHE_SECONDS = 10.0
 
 
 def load_notify_seats(static_dir: Path) -> set[str]:
@@ -324,6 +360,53 @@ def load_notify_seats(static_dir: Path) -> set[str]:
             if isinstance(card, dict) and card.get("notify_eligible") and card.get("slug"):
                 seats.add(str(card["slug"]))
     return seats
+
+
+def load_cockpit_layout_cards(static_dir: Path) -> tuple[tuple[str, str], ...]:
+    """Return valid layout slugs and aliases, including status-only cards."""
+    try:
+        raw = json.loads((static_dir / "cockpit_layout.json").read_text("utf-8"))
+    except (OSError, ValueError, TypeError):
+        return ()
+    out: list[tuple[str, str]] = []
+    plates = raw.get("plates") or raw.get("sections") or []
+    if not isinstance(plates, list):
+        return ()
+    for plate in plates:
+        plate_cards = (plate or {}).get("cards", []) if isinstance(plate, dict) else []
+        for card in plate_cards or []:
+            if not isinstance(card, dict):
+                continue
+            candidate = card.get("slug")
+            if isinstance(candidate, str) and SLUG_RE.fullmatch(candidate):
+                alias = card.get("alias")
+                if not isinstance(alias, str) or not ALIAS_RE.fullmatch(alias):
+                    alias = candidate
+                out.append((candidate, alias))
+    return tuple(out)
+
+
+def load_cockpit_layout_slugs(static_dir: Path) -> set[str]:
+    """Return valid slugs rendered by the generated cockpit layout."""
+    return {slug for slug, _alias in load_cockpit_layout_cards(static_dir)}
+
+
+def trim_message_preview(row: dict[str, Any]) -> dict[str, Any] | None:
+    """Project one authenticated Lab row onto the browser-safe preview shape."""
+    if not isinstance(row, dict) or row.get("id") is None:
+        return None
+    body_preview = row.get("body_preview")
+    if not isinstance(body_preview, str):
+        body_preview = ""
+    return {
+        "id": row.get("id"),
+        "from_terminal": row.get("from_terminal"),
+        "topic": row.get("topic"),
+        "kind": row.get("kind"),
+        "created_at": row.get("created_at"),
+        "acked": row.get("acknowledged_at") is not None,
+        "body_preview": body_preview[:MESSAGE_PREVIEW_MAX_CHARS],
+    }
 
 
 def compute_notifications(
@@ -471,9 +554,12 @@ class Settings:
     notify_cooldown_seconds: float = NOTIFY_COOLDOWN_SECONDS
     notify_sound: str = NOTIFY_SOUND
     lab_url: str = "https://brisen-lab.onrender.com/api/v2/terminals"
+    lab_messages_url: str = "https://brisen-lab.onrender.com/msg"
+    lab_key_dir: Path = Path(os.path.expanduser("~/.brisen-lab/keys"))
     lab_cache_seconds: float = 30.0
     lab_timeout_seconds: float = 5.0
     backlog_sweep_seconds: float = BACKLOG_SWEEP_SECONDS
+    wake_deadline_seconds: float = WAKE_CONTROLLER_DEADLINE_SECONDS
     command_timeout_seconds: float = 10.0
     # Per-seat ttyd reachability probe budget — a local loopback TCP connect,
     # kept short so a hung seat never stalls the whole /api/agents response.
@@ -525,6 +611,19 @@ class Settings:
             backlog_sweep_seconds=_float_env(
                 "COCKPIT_BACKLOG_SWEEP_SECONDS",
                 defaults.backlog_sweep_seconds,
+            ),
+            wake_deadline_seconds=_float_env(
+                "COCKPIT_WAKE_DEADLINE_SECONDS",
+                defaults.wake_deadline_seconds,
+                minimum=0.01,
+            ),
+            lab_messages_url=os.environ.get(
+                "COCKPIT_LAB_MESSAGES_URL", defaults.lab_messages_url
+            ),
+            lab_key_dir=Path(
+                os.path.expanduser(
+                    os.environ.get("COCKPIT_LAB_KEY_DIR", str(defaults.lab_key_dir))
+                )
             ),
             tmux_binary=os.environ.get("COCKPIT_TMUX_BINARY", defaults.tmux_binary),
             notify_enabled=os.environ.get(
@@ -641,16 +740,31 @@ class CredentialStore:
         )
 
 
-def tmux_session_names(settings: Settings) -> set[str]:
+def tmux_session_names(
+    settings: Settings,
+    *,
+    deadline: float | None = None,
+) -> set[str]:
+    remaining = _deadline_remaining(deadline)
     try:
         result = subprocess.run(
             [settings.tmux_binary, "ls", "-F", "#{session_name}"],
             capture_output=True,
             text=True,
-            timeout=settings.command_timeout_seconds,
+            timeout=min(settings.command_timeout_seconds, remaining)
+            if remaining is not None else settings.command_timeout_seconds,
             check=False,
         )
-    except (OSError, subprocess.TimeoutExpired):
+    except OSError:
+        return set()
+    except subprocess.TimeoutExpired as exc:
+        # A deadline-aware probe must not collapse a live-but-slow seat into
+        # the empty-session result.  That would turn a controller timeout into
+        # a deliberate "session down" skip and suppress caller retries.
+        if deadline is not None:
+            raise WakeDeadlineExceeded(
+                "controller wake deadline exceeded during tmux probe"
+            ) from exc
         return set()
     if result.returncode not in (0, 1):
         LOG.warning("tmux ls failed: %s", result.stderr.strip())
@@ -702,14 +816,81 @@ def tmux_window_activity(settings: Settings) -> dict[str, int]:
     return out
 
 
-def _run_tmux(settings: Settings, args: Iterable[str]) -> subprocess.CompletedProcess[str]:
+class WakeDeadlineExceeded(RuntimeError):
+    """The controller's cumulative wake budget expired before completion."""
+
+
+def _deadline_remaining(deadline: float | None) -> float | None:
+    if deadline is None:
+        return None
+    remaining = deadline - time.monotonic()
+    if remaining <= 0:
+        raise WakeDeadlineExceeded("controller wake deadline exceeded")
+    return remaining
+
+
+def _sleep_with_deadline(seconds: float, deadline: float | None) -> None:
+    remaining = _deadline_remaining(deadline)
+    if remaining is not None and remaining < seconds:
+        raise WakeDeadlineExceeded("controller wake deadline exceeded")
+    time.sleep(seconds)
+
+
+def _run_tmux(
+    settings: Settings,
+    args: Iterable[str],
+    *,
+    deadline: float | None = None,
+) -> subprocess.CompletedProcess[str]:
+    remaining = _deadline_remaining(deadline)
     return subprocess.run(
         [settings.tmux_binary, *args],
         capture_output=True,
         text=True,
-        timeout=settings.command_timeout_seconds,
+        timeout=min(settings.command_timeout_seconds, remaining)
+        if remaining is not None else settings.command_timeout_seconds,
         check=False,
     )
+
+
+def _run_tmux_with_deadline(
+    settings: Settings,
+    args: Iterable[str],
+    deadline: float | None,
+) -> subprocess.CompletedProcess[str]:
+    """Keep legacy test doubles/callers compatible with the new optional budget."""
+    if deadline is None:
+        return _run_tmux(settings, args)
+    return _run_tmux(settings, args, deadline=deadline)
+
+
+def _tmux_sessions_with_deadline(
+    settings: Settings,
+    deadline: float | None,
+) -> set[str]:
+    if deadline is None:
+        return tmux_session_names(settings)
+    try:
+        return tmux_session_names(settings, deadline=deadline)
+    except TypeError as exc:
+        # A narrow compatibility path for injected legacy providers; production
+        # uses the deadline-aware implementation above.
+        if "unexpected keyword argument 'deadline'" not in str(exc):
+            raise
+        return tmux_session_names(settings)
+
+
+def _call_send_wake(*args: Any, **kwargs: Any) -> dict[str, Any]:
+    """Invoke wake implementations while tolerating old injected test doubles."""
+    try:
+        signature = inspect.signature(send_wake)
+    except (TypeError, ValueError):
+        return send_wake(*args, **kwargs)
+    parameters = signature.parameters.values()
+    if not any(p.kind == inspect.Parameter.VAR_KEYWORD for p in parameters):
+        kwargs = {key: value for key, value in kwargs.items()
+                  if key in signature.parameters}
+    return send_wake(*args, **kwargs)
 
 
 def ensure_session(settings: Settings, entry: ManifestEntry) -> dict[str, Any]:
@@ -758,12 +939,148 @@ def _oldest_unacked_row(messages: Any) -> dict[str, Any] | None:
     return min(rows, key=lambda m: str(m.get("created_at") or ""))
 
 
+_WAKE_COUNT_UNSET = object()
+
+
+def _wake_message_rows(
+    messages: Any,
+    *,
+    aggregate_count: Any = _WAKE_COUNT_UNSET,
+) -> list[dict[str, Any]]:
+    """Return only rows Lab classifies as actionable wake obligations.
+
+    WAKE_FORCE_AUTHORITATIVE_READ_1 makes the server's stored-data predicate
+    authoritative at row selection as well as at the aggregate count. A present
+    aggregate means the server contract is authoritative even when the capped
+    row payload carries no per-row marker; in that shape, fail closed. A legacy
+    Lab has neither aggregate nor marker, so preserve its all-unacked behavior.
+    """
+    rows = [
+        m for m in (messages or [])
+        if isinstance(m, dict) and m.get("id") is not None
+    ]
+    if aggregate_count is not _WAKE_COUNT_UNSET and aggregate_count is not None:
+        return [row for row in rows if row.get("wake_obligation") is True]
+    if not any("wake_obligation" in row for row in rows):
+        return rows
+    return [row for row in rows if row.get("wake_obligation") is True]
+
+
+def _oldest_wake_row(
+    messages: Any,
+    *,
+    aggregate_count: Any = _WAKE_COUNT_UNSET,
+) -> dict[str, Any] | None:
+    """The oldest server-authorized wake row, or None."""
+    rows = _wake_message_rows(messages, aggregate_count=aggregate_count)
+    if not rows:
+        return None
+    return min(rows, key=lambda m: str(m.get("created_at") or ""))
+
+
+def _created_at_epoch(value: Any) -> float | None:
+    """Parse a Lab ISO timestamp without turning malformed data into age."""
+    if not isinstance(value, str) or not value.strip():
+        return None
+    text = value.strip()
+    if text.endswith("Z"):
+        text = text[:-1] + "+00:00"
+    try:
+        parsed = datetime.fromisoformat(text)
+    except ValueError:
+        return None
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=timezone.utc)
+    return parsed.timestamp()
+
+
+def _oldest_wake_age_sec(glance_row: dict[str, Any]) -> float:
+    """Age only the rows the server says are wake obligations.
+
+    ``oldest_unacked_age_sec`` covers every display row, including broadcasts
+    and status messages. Once the aggregate is present, using it for the sweep
+    would let an old display-only row re-wake a seat with a fresh obligation.
+    Timestamp parsing fails closed for the authoritative shape; legacy rows
+    retain the pre-field aggregate age behavior.
+    """
+    aggregate_count = glance_row.get(WAKE_OBLIGATION_FIELD)
+    rows = _wake_message_rows(
+        glance_row.get("unacked_messages"), aggregate_count=aggregate_count,
+    )
+    if not rows:
+        return 0.0
+    if aggregate_count is None:
+        try:
+            return max(0.0, float(glance_row.get("oldest_unacked_age_sec") or 0))
+        except (TypeError, ValueError):
+            return 0.0
+    now_epoch = time.time()
+    ages = [
+        max(0.0, now_epoch - created_at)
+        for row in rows
+        if (created_at := _created_at_epoch(row.get("created_at"))) is not None
+    ]
+    return max(ages, default=0.0)
+
+
 def _oldest_unacked(messages: Any) -> tuple[Any, str] | None:
     """(id, topic) of the oldest unacked message by created_at, or None."""
     oldest = _oldest_unacked_row(messages)
     if oldest is None:
         return None
     return oldest.get("id"), str(oldest.get("topic") or "")
+
+
+# COCKPIT_CARD_CLICK_WAKE_INJECT_1 — a Director card-click nudge carries the payload
+# he pastes today: a count + the top-N oldest unacked (#id topic (from sender)) + a
+# "+K more" tail. Only click-origin wakes use this richer line; the sweep/auto wake
+# keeps the terse single-message form (so its dedupe key + tests are unchanged).
+WAKE_NUDGE_TOP_N = 3
+WAKE_CLICK_ORIGIN = "cockpit_click"
+# All origins that may legitimately appear in the wake audit log. "sweep" is
+# produced ONLY by the internal backlog-sweep loop, which calls send_wake directly.
+_WAKE_AUDIT_ORIGINS = frozenset({WAKE_CLICK_ORIGIN, "sweep", "deferred"})
+# Origins a CLIENT (browser card click) is allowed to claim on the HTTP /wake
+# endpoint. Deliberately excludes "sweep": an authenticated browser must not be
+# able to label its wake as an internal sweep (codex FAIL #13397 P2c) — that would
+# forge the audit source and let a client borrow the sweep's behaviour envelope.
+_WAKE_CLIENT_ORIGINS = frozenset({WAKE_CLICK_ORIGIN})
+# Server-side click debounce (codex FAIL #13397 P2a). A click nudge sets force=1,
+# which INTENTIONALLY bypasses the per-message dedupe + seat-floor (merged
+# WAKE_INJECT arc — do-not-touch); the only idempotence was a per-PAGE JS debounce
+# that does not carry across a reload / second tab / delayed repeat. This per-slug
+# server window coalesces repeated click nudges regardless of the originating page.
+# Mirrors cockpit.js WAKE_CLICK_DEBOUNCE_MS (4000).
+WAKE_CLICK_DEBOUNCE_SECONDS = 4.0
+
+
+def compose_click_wake_line(glance_row: dict[str, Any] | None, *, limit: int = WAKE_NUDGE_TOP_N) -> str:
+    """The click-origin nudge line: the [wake] tag + a 'check your bus' instruction
+    naming the top-N oldest unacked as '#id topic (from sender)', then '+K more'.
+
+    The oldest #id stays FIRST so ``_composer_holds``'s ``#\\d+`` id-match (which reads
+    the first id) still anchors on the dedupe key. ``from sender`` is included only
+    when the message row carries ``from_terminal`` (fail-soft on the leaner glance)."""
+    row = glance_row or {}
+    rows = _wake_message_rows(
+        row.get("unacked_messages"),
+        aggregate_count=row.get(WAKE_OBLIGATION_FIELD),
+    )
+    rows.sort(key=lambda m: str(m.get("created_at") or ""))
+    total = wake_obligation_count(glance_row or {})
+    if not isinstance(total, int) or total < len(rows):
+        total = len(rows)
+    shown = rows[: max(1, limit)]
+    parts = []
+    for m in shown:
+        frag = f"#{m.get('id')} {str(m.get('topic') or '(no topic)')}"
+        sender = str(m.get("from_terminal") or "").strip()
+        if sender:
+            frag += f" (from {sender})"
+        parts.append(frag)
+    more = total - len(shown)
+    tail = f" +{more} more" if more > 0 else ""
+    return f"{WAKE_ORIGIN_TAG} check your bus: {total} unacked — {', '.join(parts)}{tail}".rstrip()
 
 
 def _wake_repeat_window(message: dict[str, Any]) -> float:
@@ -787,11 +1104,83 @@ def wake_skip_reason(glance_row: dict[str, Any] | None) -> str | None:
         return "needs_go (GO flow owns it)"
     if glance_row.get("is_working") is True:
         return "working"
-    if not (glance_row.get("unacked_count") or 0) > 0:
+    if wake_obligation_count(glance_row) <= 0:
+        # A server-supplied zero is authoritative even when the display count
+        # is nonzero. On an older field-absent server, retain the legacy reason
+        # so the HTTP wake path performs its existing one-refresh stale check.
+        if glance_row.get(WAKE_OBLIGATION_FIELD) is not None:
+            return "no wake obligation"
         return "no unacked"
-    if _oldest_unacked(glance_row.get("unacked_messages")) is None:
+    if _oldest_wake_row(
+        glance_row.get("unacked_messages"),
+        aggregate_count=glance_row.get(WAKE_OBLIGATION_FIELD),
+    ) is None:
+        if glance_row.get(WAKE_OBLIGATION_FIELD) is not None:
+            return "no wake obligation message id"
         return "no unacked message id"
     return None
+
+
+def _wake_disposition(reason: str) -> str:
+    """Classify a controller outcome without making the listener guess."""
+    if reason in {
+        "no telemetry",
+        "no unacked message id",
+        "no wake obligation message id",
+    }:
+        return "undelivered"
+    return "skipped"
+
+
+def _wake_result(
+    disposition: str,
+    reason: str,
+    *,
+    slug: str,
+    **fields: Any,
+) -> dict[str, Any]:
+    """Build the additive disposition contract plus the legacy sent boolean."""
+    result: dict[str, Any] = {
+        "ok": True,
+        "sent": disposition == "delivered",
+        "disposition": disposition,
+        "reason": reason,
+        "slug": slug,
+    }
+    # Keep the old field for cockpit.js and mixed-version callers. New consumers
+    # must use disposition/reason; skipped is compatibility-only. Undelivered
+    # outcomes still need it so legacy clients can display the reason.
+    if disposition in {"skipped", "undelivered"}:
+        result["skipped"] = reason
+    result.update(fields)
+    return result
+
+
+def _wake_result_reason(result: dict[str, Any]) -> str | None:
+    """Read new reason first, then the legacy skipped field during rollout."""
+    return result.get("reason") or result.get("skipped")
+
+
+def _request_id_from_header(value: str | None) -> str | None:
+    """Accept listener UUIDs and safe opaque IDs; reject log/path injection."""
+    request_id = str(value or "").strip()
+    if not request_id or len(request_id) > WAKE_REQUEST_ID_MAX_CHARS:
+        return None
+    return request_id if WAKE_REQUEST_ID_RE.fullmatch(request_id) else None
+
+
+def _wake_deadline_from_request(request: Request, settings: Settings) -> float:
+    """Build one monotonic deadline, honoring a lower client budget."""
+    budget = settings.wake_deadline_seconds
+    raw_header = request.headers.get("x-wake-deadline-ms")
+    if raw_header:
+        try:
+            requested = float(raw_header) / 1000.0
+        except (TypeError, ValueError):
+            requested = None
+        if requested is not None and requested > 0:
+            budget = min(budget, requested)
+    return time.monotonic() + max(0.01, budget)
 
 
 def _audit_wake(
@@ -804,6 +1193,10 @@ def _audit_wake(
     suppressed_count: int = 0,
     skipped: str | None = None,
     source: str | None = None,
+    request_id: str | None = None,
+    landed: bool | None = None,
+    disposition: str | None = None,
+    reason: str | None = None,
 ) -> None:
     """Append a durable audit line for sent or coalesced wake attempts."""
     entry = {
@@ -814,6 +1207,14 @@ def _audit_wake(
         entry["skipped"] = skipped
     if source is not None:
         entry["source"] = source
+    if request_id is not None:
+        entry["request_id"] = request_id
+    if landed is not None:
+        entry["landed"] = bool(landed)
+    if disposition is not None:
+        entry["disposition"] = disposition
+    if reason is not None:
+        entry["reason"] = reason
     if suppressed_count > 0:
         entry["suppressed_count"] = suppressed_count
     try:
@@ -886,7 +1287,13 @@ def _is_codex_family_slug(slug: str) -> bool:
     return slug in CODEX_FAMILY_SLUGS
 
 
-def _post_park_flag(settings: Settings, slug: str, needle: str) -> None:
+def _post_park_flag(
+    settings: Settings,
+    slug: str,
+    needle: str,
+    *,
+    deadline: float | None = None,
+) -> None:
     """Fail-loud on an unrecoverable park: append a durable local record AND
     best-effort post a bus flag to lead (topic ``fleet/wake-inject-park``). Both
     are wrapped so a park never fails the wake; the local record is the guaranteed
@@ -901,16 +1308,27 @@ def _post_park_flag(settings: Settings, slug: str, needle: str) -> None:
     body = f"wake nudge PARKED unrecovered on {slug}: {needle!r} — recovery Enter did not submit"
     script = Path(__file__).resolve().parent / "bus_post.sh"
     try:
+        remaining = _deadline_remaining(deadline)
+        if remaining is None:
+            timeout = 15
+        else:
+            timeout = min(15, remaining)
         subprocess.run(
             ["bash", str(script), "lead", body, "fleet/wake-inject-park"],
-            capture_output=True, text=True, timeout=15, check=False,
+            capture_output=True, text=True, timeout=timeout, check=False,
             env={**os.environ, "BAKER_ROLE": os.environ.get("BAKER_ROLE", "cockpit")},
         )
-    except (OSError, subprocess.TimeoutExpired) as exc:
+    except (OSError, subprocess.TimeoutExpired, WakeDeadlineExceeded) as exc:
         LOG.warning("park-flag bus post failed for %s: %s", slug, exc)
 
 
-def _verify_wake_submit(settings: Settings, slug: str, injected_line: str) -> dict[str, Any]:
+def _verify_wake_submit(
+    settings: Settings,
+    slug: str,
+    injected_line: str,
+    *,
+    deadline: float | None = None,
+) -> dict[str, Any]:
     """WAKE_INJECT_SUBMIT_FIX_2 D2 — confirm the nudge left the composer; recover
     once if it parked; fail loud if it can't be recovered.
 
@@ -929,9 +1347,13 @@ def _verify_wake_submit(settings: Settings, slug: str, injected_line: str) -> di
         # false-negatives. Codex TUI rejects C-l with cosmetic noise, so its
         # family skips only the repaint and keeps the capture verification.
         if not _is_codex_family_slug(slug):
-            _run_tmux(settings, ["send-keys", "-t", slug, "C-l"])
-        time.sleep(WAKE_VERIFY_SETTLE_S)
-        cap = _run_tmux(settings, ["capture-pane", "-t", slug, "-p"])
+            _run_tmux_with_deadline(
+                settings, ["send-keys", "-t", slug, "C-l"], deadline,
+            )
+        _sleep_with_deadline(WAKE_VERIFY_SETTLE_S, deadline)
+        cap = _run_tmux_with_deadline(
+            settings, ["capture-pane", "-t", slug, "-p"], deadline,
+        )
         return cap.stdout if cap.returncode == 0 else None
 
     pane = _read_pane()
@@ -941,12 +1363,17 @@ def _verify_wake_submit(settings: Settings, slug: str, injected_line: str) -> di
         return {"verified": "submitted"}
     # Parked. Exactly ONE recovery Enter — never more (double-submit guard from
     # FIX_1 stands; a second recovery could double parked text on a live seat).
-    _run_tmux(settings, ["send-keys", "-t", slug, "Enter"])
+    _run_tmux_with_deadline(
+        settings, ["send-keys", "-t", slug, "Enter"], deadline,
+    )
     pane2 = _read_pane()
     if pane2 is None or not _composer_holds(pane2, needle):
         return {"verified": "recovered"}
     LOG.error("wake nudge PARKED unrecovered for %s: %r", slug, needle)
-    _post_park_flag(settings, slug, needle)
+    if deadline is None:
+        _post_park_flag(settings, slug, needle)
+    else:
+        _post_park_flag(settings, slug, needle, deadline=deadline)
     return {"verified": "park_unrecovered"}
 
 
@@ -961,15 +1388,23 @@ def send_wake(
     verify: bool = True,
     force: bool = False,
     audit_source: str | None = None,
+    request_id: str | None = None,
+    deadline: float | None = None,
 ) -> dict[str, Any]:
     """D6 wake-on-open: send one `check bus #<oldest-id> <topic>` + Enter into the
     seat's tmux. Guarded (wake_skip_reason), deduped for the same message, and
     rate-limited per seat. Returns a result dict; a guarded/deduped skip is a
     no-op, not an error."""
+    _deadline_remaining(deadline)
+    row = glance_row or {}
+    oldest = _oldest_wake_row(
+        row.get("unacked_messages"),
+        aggregate_count=row.get(WAKE_OBLIGATION_FIELD),
+    )
     reason = wake_skip_reason(glance_row)
     if reason is not None:
-        if audit and audit_source:
-            oldest = _oldest_unacked_row((glance_row or {}).get("unacked_messages"))
+        disposition = _wake_disposition(reason)
+        if audit and (audit_source or request_id):
             _audit_wake(
                 settings,
                 entry.slug,
@@ -978,25 +1413,46 @@ def send_wake(
                 "",
                 skipped=reason,
                 source=audit_source,
+                request_id=request_id,
+                landed=False,
+                disposition=disposition,
+                reason=reason,
             )
-        return {"ok": True, "sent": False, "skipped": reason, "slug": entry.slug}
-    oldest = _oldest_unacked_row(glance_row.get("unacked_messages"))
+        return _wake_result(
+            disposition,
+            reason,
+            slug=entry.slug,
+            **({"msg_id": oldest.get("id"), "topic": str(oldest.get("topic") or "")}
+               if oldest else {}),
+        )
     if oldest is None:  # defensive: wake_skip_reason already checks this condition
-        if audit and audit_source:
+        reason = "no unacked message id"
+        if audit and (audit_source or request_id):
             _audit_wake(
                 settings,
                 entry.slug,
                 None,
                 "",
                 "",
-                skipped="no unacked message id",
+                skipped=reason,
                 source=audit_source,
+                request_id=request_id,
+                landed=False,
+                disposition="undelivered",
+                reason=reason,
             )
-        return {"ok": True, "sent": False, "skipped": "no unacked message id", "slug": entry.slug}
+        return _wake_result(
+            "undelivered", reason, slug=entry.slug,
+        )
     msg_id = oldest.get("id")
     topic = str(oldest.get("topic") or "")
     repeat_window = _wake_repeat_window(oldest)
-    line = f"{WAKE_ORIGIN_TAG} check bus #{msg_id} {topic}".rstrip()
+    # Click-origin nudges carry the richer count + top-N + sender payload; the
+    # sweep/auto wake keeps the terse single-message line (dedupe key unchanged).
+    if audit_source == WAKE_CLICK_ORIGIN:
+        line = compose_click_wake_line(glance_row)
+    else:
+        line = f"{WAKE_ORIGIN_TAG} check bus #{msg_id} {topic}".rstrip()
 
     state = last_wake.get(entry.slug)
     if not isinstance(state, dict):
@@ -1037,6 +1493,12 @@ def send_wake(
         if isinstance(previous_message, dict)
         else previous_message
     )
+    # NOTE (COCKPIT_CARD_CLICK_WAKE_INJECT_1 item 4): force intentionally bypasses
+    # this per-message dedupe — that is the merged WAKE_INJECT arc's ratified
+    # behavior (test_send_wake_force_bypasses_dedupe_but_still_submits) and this
+    # brief's "Do NOT Touch wake dedupe/typed-repeat logic" holds it. Double-click
+    # idempotence is therefore enforced at the click layer (cockpit.js per-slug
+    # debounce), not here — so the protected wake logic is left unchanged.
     if (
         not force
         and previous_message_at is not None
@@ -1053,8 +1515,13 @@ def send_wake(
                 suppressed_count=suppressed_last[message_key],
                 skipped="deduped",
                 source=audit_source,
+                request_id=request_id,
+                landed=False,
+                disposition="skipped",
+                reason="deduped",
             )
-        return {"ok": True, "sent": False, "skipped": "deduped", "slug": entry.slug}
+        return _wake_result("skipped", "deduped", slug=entry.slug,
+                            msg_id=msg_id, topic=topic)
 
     previous_injection = state.get("last_injection")
     if (
@@ -1073,8 +1540,43 @@ def send_wake(
                 suppressed_count=suppressed_last[message_key],
                 skipped="seat_floor",
                 source=audit_source,
+                request_id=request_id,
+                landed=False,
+                disposition="skipped",
+                reason="seat_floor",
             )
-        return {"ok": True, "sent": False, "skipped": "seat_floor", "slug": entry.slug}
+        return _wake_result("skipped", "seat_floor", slug=entry.slug,
+                            msg_id=msg_id, topic=topic)
+
+    # P2a (codex FAIL #13397): the two guards above are `not force`-gated, so a click
+    # nudge (force=1) skips both by design. That left idempotence to a per-PAGE JS
+    # debounce, which does NOT survive a reload, a second tab, or a delayed repeat —
+    # each of those re-POSTs and double-injects. This is an INDEPENDENT per-slug click
+    # window (its own `last_click_injection` key; it never reads or writes the protected
+    # message_last / last_injection dedupe state), so it coalesces click nudges from any
+    # page/tab without touching the merged WAKE_INJECT arc's do-not-touch logic.
+    if audit_source == WAKE_CLICK_ORIGIN:
+        previous_click = state.get("last_click_injection")
+        if (
+            isinstance(previous_click, (int, float))
+            and (now - previous_click) < WAKE_CLICK_DEBOUNCE_SECONDS
+        ):
+            if audit:
+                _audit_wake(
+                    settings,
+                    entry.slug,
+                    msg_id,
+                    topic,
+                    line,
+                    skipped="click_deduped",
+                    source=audit_source,
+                    request_id=request_id,
+                    landed=False,
+                    disposition="skipped",
+                    reason="click_deduped",
+                )
+            return _wake_result("skipped", "click_deduped", slug=entry.slug,
+                                msg_id=msg_id, topic=topic)
 
     # D3 — visible [wake] origin tag so freeform seat input is attributable at a
     # glance (WAKE_INJECT_SUBMIT_FIX_2). The nudge stays `check bus #<id> <topic>`.
@@ -1082,7 +1584,11 @@ def send_wake(
     # production source (also exercised by the PTY regression test): a literal
     # text write, then a bare CR as its own write. '#'/spaces stay literal.
     literal_kind, literal_data = wake_inject_writes(line)[0]
-    literal = _run_tmux(settings, _tmux_write_args(entry.slug, literal_kind, literal_data))
+    literal = _run_tmux_with_deadline(
+        settings,
+        _tmux_write_args(entry.slug, literal_kind, literal_data),
+        deadline,
+    )
     if literal.returncode != 0:
         raise RuntimeError(literal.stderr.strip() or "tmux wake send failed")
     # WAKE_COMPOSER_SUBMIT_FIX_1 (gap 5, bus #12631): a burst-injected Enter can be
@@ -1095,18 +1601,50 @@ def send_wake(
     # NEVER retried beyond this (lead ruling #5897 — re-injection on a busy-but-
     # live seat could double parked text; log-only on failure).
     cr_kind, cr_data = wake_inject_writes(line)[1]
-    time.sleep(WAKE_SUBMIT_SETTLE_S)
-    enter = _run_tmux(settings, _tmux_write_args(entry.slug, cr_kind, cr_data))
+    _sleep_with_deadline(WAKE_SUBMIT_SETTLE_S, deadline)
+    enter = _run_tmux_with_deadline(
+        settings,
+        _tmux_write_args(entry.slug, cr_kind, cr_data),
+        deadline,
+    )
     if enter.returncode != 0:
         raise RuntimeError(enter.stderr.strip() or "tmux wake Enter failed")
-    time.sleep(WAKE_SUBMIT_SETTLE_S)
-    resubmit = _run_tmux(settings, _tmux_write_args(entry.slug, cr_kind, cr_data))
+    _sleep_with_deadline(WAKE_SUBMIT_SETTLE_S, deadline)
+    resubmit = _run_tmux_with_deadline(
+        settings,
+        _tmux_write_args(entry.slug, cr_kind, cr_data),
+        deadline,
+    )
     if resubmit.returncode != 0:
         LOG.warning("wake submit-Return failed for %s (wake already sent): %s",
                     entry.slug, resubmit.stderr.strip())
+    _deadline_remaining(deadline)
     state["last_injection"] = now
+    if audit_source == WAKE_CLICK_ORIGIN:
+        # Arm the P2a per-slug click-debounce window (see the guard above).
+        state["last_click_injection"] = now
     message_last[message_key] = {"at": now, "window": repeat_window}
     suppressed_count = int(suppressed_last.pop(message_key, 0))
+    result = _wake_result(
+        "delivered", "delivered", slug=entry.slug,
+        msg_id=msg_id, topic=topic, line=line,
+    )
+    # D2 — verify the nudge left the composer; recover once; fail loud otherwise.
+    if verify:
+        result.update(_verify_wake_submit(
+            settings, entry.slug, line, deadline=deadline,
+        ))
+        _deadline_remaining(deadline)
+        if result.get("verified") not in {"submitted", "recovered"}:
+            result["disposition"] = "undelivered"
+            result["sent"] = False
+            result["reason"] = (
+                "unverified" if result.get("verified") == "unknown"
+                else str(result.get("verified") or "unverified")
+            )
+            # Verification can change an initially-delivered result into an
+            # undelivered outcome; keep legacy cockpit.js informed too.
+            result["skipped"] = result["reason"]
     if audit:
         _audit_wake(
             settings,
@@ -1116,14 +1654,11 @@ def send_wake(
             line,
             suppressed_count=suppressed_count,
             source=audit_source,
+            request_id=request_id,
+            landed=result["disposition"] == "delivered",
+            disposition=result["disposition"],
+            reason=result["reason"],
         )
-    result = {
-        "ok": True, "sent": True, "slug": entry.slug,
-        "msg_id": msg_id, "topic": topic, "line": line,
-    }
-    # D2 — verify the nudge left the composer; recover once; fail loud otherwise.
-    if verify:
-        result.update(_verify_wake_submit(settings, entry.slug, line))
     return result
 
 
@@ -1169,20 +1704,26 @@ class LabGlance:
                 response = await client.get(self.settings.lab_url)
                 response.raise_for_status()
                 payload = response.json()
+            if not isinstance(payload, dict) or not isinstance(
+                payload.get("terminals"), list
+            ):
+                raise ValueError("Lab glance payload missing terminals list")
         except (httpx.HTTPError, ValueError, TypeError) as exc:
             LOG.warning("Lab glance unavailable: %s", exc)
             self.last_ok = False
-            self._value = {}
             self._expires_at = now + min(self.settings.lab_cache_seconds, 5.0)
-            return {}
+            # WAKE_FORCE_AUTHORITATIVE_READ_1: a failed read is UNKNOWN, not an
+            # authoritative fleet-wide empty result. Preserve the last-good view
+            # for degraded rendering/diagnostics while last_ok=False tells action
+            # paths they must not treat these rows as fresh authority.
+            return self._value
 
         result: dict[str, dict[str, Any]] = {}
-        rows = payload.get("terminals", []) if isinstance(payload, dict) else []
-        if isinstance(rows, list):
-            for row in rows:
-                if not isinstance(row, dict) or not row.get("slug"):
-                    continue
-                result[str(row["slug"])] = glance_row_from_lab(row)
+        rows = payload["terminals"]
+        for row in rows:
+            if not isinstance(row, dict) or not row.get("slug"):
+                continue
+            result[str(row["slug"])] = glance_row_from_lab(row)
         self.last_ok = True
         self._value = result
         self._expires_at = now + self.settings.lab_cache_seconds
@@ -1249,6 +1790,65 @@ class BasicAuthMiddleware(BaseHTTPMiddleware):
         return await call_next(request)
 
 
+def _wake_receipt_landed(path: Path, request_id: str) -> bool:
+    """Read the latest local audit outcome for one listener request ID."""
+    try:
+        lines = path.read_text(encoding="utf-8").splitlines()
+    except FileNotFoundError:
+        return False
+    landed = False
+    found = False
+    for line in lines:
+        try:
+            entry = json.loads(line)
+        except (TypeError, ValueError):
+            continue
+        if not isinstance(entry, dict) or entry.get("request_id") != request_id:
+            continue
+        found = True
+        if isinstance(entry.get("landed"), bool):
+            landed = entry["landed"]
+        else:
+            # Pre-disposition audit rows remain readable during rollout.
+            landed = entry.get("skipped") is None and bool(entry.get("line"))
+    return landed if found else False
+
+
+def _undelivered_wake_result(
+    settings: Settings,
+    entry: ManifestEntry,
+    row: dict[str, Any] | None,
+    *,
+    reason: str,
+    request_id: str | None,
+) -> dict[str, Any]:
+    """Record a failed/uncertain request and return the listener contract."""
+    glance_row = row or {}
+    oldest = _oldest_wake_row(
+        glance_row.get("unacked_messages"),
+        aggregate_count=glance_row.get(WAKE_OBLIGATION_FIELD),
+    )
+    _audit_wake(
+        settings,
+        entry.slug,
+        oldest.get("id") if oldest else None,
+        str(oldest.get("topic") or "") if oldest else "",
+        "",
+        skipped=reason,
+        request_id=request_id,
+        landed=False,
+        disposition="undelivered",
+        reason=reason,
+    )
+    return _wake_result(
+        "undelivered",
+        reason,
+        slug=entry.slug,
+        **({"msg_id": oldest.get("id"), "topic": str(oldest.get("topic") or "")}
+           if oldest else {}),
+    )
+
+
 def _copy_response_headers(headers: httpx.Headers) -> dict[str, str]:
     return {
         key: value
@@ -1303,21 +1903,32 @@ def create_app(
 
     prober = ttyd_prober or default_prober
 
-    async def _fresh_glance_read() -> dict[str, dict[str, Any]]:
+    async def _fresh_glance_read(
+        *,
+        deadline: float | None = None,
+    ) -> dict[str, dict[str, Any]]:
+        remaining = _deadline_remaining(deadline)
         force_refresh = getattr(glance, "force_refresh", None)
         if callable(force_refresh):
-            return await force_refresh()
+            operation = force_refresh()
+        else:
+            # Test doubles and compatible glance providers may only expose read().
+            operation = glance.read()
+        if remaining is None:
+            return await operation
         # Test doubles and compatible glance providers may only expose read().
-        return await glance.read()
+        try:
+            return await asyncio.wait_for(operation, timeout=remaining)
+        except asyncio.TimeoutError as exc:
+            raise WakeDeadlineExceeded("controller wake deadline exceeded") from exc
 
     @contextlib.asynccontextmanager
     async def lifespan(_app: FastAPI):
-        # NOTIFY_SLICE — background poll loop for unread-bus banners. Runs only
-        # when enabled; cleanly cancelled on shutdown. _notify_loop is defined
-        # below in this closure and resolves at runtime (startup), not at def.
+        # NOTIFY_SLICE — background poll loop for unread-bus banners and deferred
+        # wakes. It always runs because notify_enabled gates only the banner
+        # portion; cleanly cancelled on shutdown.
         tasks = []
-        if config.notify_enabled:
-            tasks.append(asyncio.create_task(_notify_loop()))
+        tasks.append(asyncio.create_task(_notify_loop()))
         if config.backlog_sweep_seconds > 0:
             tasks.append(asyncio.create_task(_backlog_sweep_loop()))
         try:
@@ -1341,10 +1952,16 @@ def create_app(
     # cross-message injection floor.
     app.state.wake_last = {}
     app.state.codex_pane_hashes = {}
+    # WAKE_DISPOSITION_REWAKE_1 — a working-skip is held until the existing
+    # glance poll observes the same seat transition to idle.
+    app.state.pending_wakes = {}
+    app.state.wake_prev_working = {}
     # NOTIFY_SLICE — per-seat last-observed unacked baseline + last-fire timestamps
     # for the 0→N transition detector (advanced by the lifespan poll loop).
     app.state.notify_prev = {}
     app.state.notify_last_fired = {}
+    message_preview_cache: dict[str, tuple[float, dict[str, Any]]] = {}
+    message_preview_lock: asyncio.Lock | None = None
 
     def manifest() -> tuple[ManifestEntry, ...]:
         try:
@@ -1355,6 +1972,75 @@ def create_app(
                 status_code=503,
                 detail="launch manifest unavailable",
             ) from exc
+
+    def message_slugs() -> set[str]:
+        return {entry.slug for entry in manifest()} | load_cockpit_layout_slugs(
+            config.static_dir
+        )
+
+    async def load_message_previews(slug: str) -> dict[str, Any]:
+        nonlocal message_preview_lock
+        if message_preview_lock is None:
+            message_preview_lock = asyncio.Lock()
+        now = time.monotonic()
+        cached = message_preview_cache.get(slug)
+        if cached is not None and cached[0] > now:
+            return cached[1]
+
+        async with message_preview_lock:
+            now = time.monotonic()
+            cached = message_preview_cache.get(slug)
+            if cached is not None and cached[0] > now:
+                return cached[1]
+
+            key_path = config.lab_key_dir / slug
+            try:
+                terminal_key = key_path.read_text(encoding="utf-8").strip()
+            except OSError:
+                result = {"available": False, "reason": "no key"}
+                message_preview_cache[slug] = (
+                    time.monotonic() + MESSAGE_PREVIEW_CACHE_SECONDS,
+                    result,
+                )
+                return result
+            if not terminal_key:
+                result = {"available": False, "reason": "no key"}
+                message_preview_cache[slug] = (
+                    time.monotonic() + MESSAGE_PREVIEW_CACHE_SECONDS,
+                    result,
+                )
+                return result
+
+            result: dict[str, Any]
+            try:
+                async with httpx.AsyncClient(
+                    timeout=config.lab_timeout_seconds
+                ) as client:
+                    response = await client.get(
+                        f"{config.lab_messages_url.rstrip('/')}/{slug}",
+                        params={"limit": MESSAGE_PREVIEW_LIMIT},
+                        headers={"X-Terminal-Key": terminal_key},
+                    )
+                    response.raise_for_status()
+                    payload = response.json()
+                raw_rows = (
+                    payload.get("messages", [])
+                    if isinstance(payload, dict) else []
+                )
+                rows = [
+                    trimmed
+                    for row in raw_rows
+                    if (trimmed := trim_message_preview(row)) is not None
+                ] if isinstance(raw_rows, list) else []
+                result = {"available": True, "messages": rows}
+            except (OSError, httpx.HTTPError, ValueError, TypeError):
+                result = {"available": False}
+
+            message_preview_cache[slug] = (
+                time.monotonic() + MESSAGE_PREVIEW_CACHE_SECONDS,
+                result,
+            )
+            return result
 
     async def require_websocket_auth(websocket: WebSocket) -> bool:
         if not _allowed_authority(websocket.headers, config):
@@ -1437,8 +2123,11 @@ def create_app(
                     **glance_fields,
                     "local_working": local_working,   # D8 — surfaced for tests/transparency
                 }
-            )
+        )
         manifest_slugs = {entry.slug for entry in entries}
+        # Status-only app/service cards are intentionally absent from the launch
+        # manifest, but still need a live /api/agents row so their bus envelope
+        # and lazy authenticated preview panel can render.
         for slug, alias in load_cockpit_layout_cards(config.static_dir):
             if slug in manifest_slugs:
                 continue
@@ -1453,28 +2142,24 @@ def create_app(
                     pane_pct=pane_context.get(slug),
                 )
             )
-            session_up = slug in sessions
-            last_act = activity.get(slug)
-            local_working = bool(
-                session_up and last_act is not None
-                and (now_epoch - last_act) <= LOCAL_WORKING_WINDOW_S
-            )
-            if local_working:
-                glance_fields["is_working"] = True
-            if slug in CODEX_FAMILY_SLUGS and pane_changed.get(slug, False):
-                glance_fields["is_working"] = True
             agents.append(
                 {
                     "slug": slug,
                     "alias": alias,
                     "port": None,
-                    "session_up": session_up,
+                    "session_up": False,
                     "ttyd_up": False,
                     **glance_fields,
-                    "local_working": local_working,
+                    "local_working": False,
                 }
             )
         return {"agents": agents, "lab_glance_ok": bool(lab_ok)}
+
+    @app.get("/api/messages/{slug}")
+    async def get_messages(slug: str):
+        if slug not in message_slugs():
+            raise HTTPException(status_code=404, detail="unknown cockpit seat")
+        return await load_message_previews(slug)
 
     @app.post("/api/sessions/{slug}/start")
     async def start_session(slug: str, request: Request):
@@ -1496,31 +2181,132 @@ def create_app(
     async def wake_session(slug: str, request: Request):
         # D6 — wake-on-open. Same origin/auth guards as start/go (middleware).
         entry = _entry_for(manifest(), slug)
-        if entry.slug not in tmux_session_names(config):
-            return {"ok": True, "sent": False, "skipped": "session down", "slug": entry.slug}
-        lab = await glance.read()
-        row = lab.get(entry.slug) or {}
-        force = request.query_params.get("force") == "1"
+        request_id = _request_id_from_header(
+            request.headers.get("x-wake-request-id")
+        )
+        deadline = _wake_deadline_from_request(request, config)
         try:
-            result = send_wake(
+            if entry.slug not in _tmux_sessions_with_deadline(config, deadline):
+                return _wake_result("skipped", "session down", slug=entry.slug)
+        except WakeDeadlineExceeded:
+            return _undelivered_wake_result(
+                config, entry, None,
+                reason="controller-deadline", request_id=request_id,
+            )
+        force = request.query_params.get("force") == "1"
+        # COCKPIT_CARD_CLICK_WAKE_INJECT_1 — tag the origin so a Director card click
+        # is attributable in wake_audit.log and gets the richer nudge line. Only a
+        # known origin is honoured (never a caller-supplied free string).
+        origin = request.query_params.get("origin")
+        # Client may claim cockpit_click only; a spoofed origin=sweep is dropped to
+        # None so it can neither forge the audit source nor borrow sweep behaviour.
+        audit_source = origin if origin in _WAKE_CLIENT_ORIGINS else None
+        authoritative = force or audit_source == WAKE_CLICK_ORIGIN
+        row: dict[str, Any] = {}
+        try:
+            remaining = _deadline_remaining(deadline)
+            lab = await asyncio.wait_for(glance.read(), timeout=remaining)
+        except (asyncio.TimeoutError, WakeDeadlineExceeded):
+            return _undelivered_wake_result(
+                config, entry, row,
+                reason="controller-deadline", request_id=request_id,
+            )
+        if authoritative and not getattr(glance, "last_ok", True):
+            failure = _undelivered_wake_result(
+                config, entry, row,
+                reason="lab_glance_unavailable", request_id=request_id,
+            )
+            raise HTTPException(
+                status_code=503,
+                detail={
+                    "error": "wake_state_unknown",
+                    "slug": entry.slug,
+                    "disposition": failure["disposition"],
+                    "reason": failure["reason"],
+                    "skipped": failure["skipped"],
+                    "sent": failure["sent"],
+                },
+            )
+        row = lab.get(entry.slug) or {}
+        try:
+            result = _call_send_wake(
                 config, entry, row,
                 now=time.monotonic(), last_wake=app.state.wake_last,
-                force=force,
+                force=force, audit_source=audit_source,
+                request_id=request_id, deadline=deadline,
             )
-            if result.get("skipped") == "no unacked":
+            if _wake_result_reason(result) in (
+                "no telemetry", "no unacked", "no unacked message id",
+                "no wake obligation message id",
+            ):
                 # The Lab has its own short cache, and this controller has a
-                # separate glance cache. A cached zero must not be authoritative
-                # for a wake decision; one forced read closes the stale-glance gap.
-                fresh_lab = await _fresh_glance_read()
-                fresh_row = fresh_lab.get(entry.slug) or {}
-                result = send_wake(
-                    config, entry, fresh_row,
+                # separate glance cache. Missing telemetry, a cached zero, or a
+                # lean row without message IDs must not be authoritative for a wake
+                # decision; one forced read closes each stale-glance shape.
+                fresh_lab = await _fresh_glance_read(deadline=deadline)
+                if authoritative and not getattr(glance, "last_ok", True):
+                    failure = _undelivered_wake_result(
+                        config, entry, row,
+                        reason="lab_glance_unavailable", request_id=request_id,
+                    )
+                    raise HTTPException(
+                        status_code=503,
+                        detail={
+                            "error": "wake_state_unknown",
+                            "slug": entry.slug,
+                            "disposition": failure["disposition"],
+                            "reason": failure["reason"],
+                            "skipped": failure["skipped"],
+                            "sent": failure["sent"],
+                        },
+                    )
+                row = fresh_lab.get(entry.slug) or {}
+                result = _call_send_wake(
+                    config, entry, row,
                     now=time.monotonic(), last_wake=app.state.wake_last,
-                    force=force,
+                    force=force, audit_source=audit_source,
+                    request_id=request_id, deadline=deadline,
+                )
+            if _wake_result_reason(result) == "working" and result.get("msg_id") is not None:
+                app.state.pending_wakes[entry.slug] = {
+                    "msg_id": result["msg_id"],
+                }
+                # If no poll seeded the baseline yet, this request itself proves
+                # the seat was working; the next idle observation is the edge.
+                app.state.wake_prev_working[entry.slug] = True
+            if authoritative and _wake_result_reason(result) == "no telemetry":
+                raise HTTPException(
+                    status_code=503,
+                    detail={
+                        "error": "wake_state_unknown",
+                        "slug": entry.slug,
+                        "disposition": "undelivered",
+                        "reason": "seat_telemetry_unavailable",
+                        "skipped": "seat_telemetry_unavailable",
+                        "sent": False,
+                    },
                 )
             return result
-        except (OSError, RuntimeError, subprocess.TimeoutExpired) as exc:
-            raise HTTPException(status_code=502, detail=str(exc)) from exc
+        except WakeDeadlineExceeded:
+            return _undelivered_wake_result(
+                config, entry, row,
+                reason="controller-deadline", request_id=request_id,
+            )
+        except (OSError, RuntimeError, subprocess.TimeoutExpired):
+            return _undelivered_wake_result(
+                config, entry, row,
+                reason="controller-write", request_id=request_id,
+            )
+
+    @app.get(f"{WAKE_RECEIPT_ROUTE}/{{request_id}}")
+    async def wake_receipt(request_id: str):
+        if _request_id_from_header(request_id) != request_id:
+            raise HTTPException(status_code=400, detail="invalid wake request id")
+        try:
+            landed = _wake_receipt_landed(config.wake_audit_path, request_id)
+        except OSError as exc:
+            raise HTTPException(status_code=503, detail="wake receipt unavailable") from exc
+        return {"landed": landed}
 
     @app.get("/api/notify/state")
     async def notify_state(request: Request):
@@ -1551,13 +2337,23 @@ def create_app(
             ) from exc
         return {"ok": True, "muted": muted}
 
-    async def _notify_tick() -> None:
+    async def _notify_tick(*, include_notifications: bool = True) -> None:
         """One poll cycle: read glance, detect 0→N on eligible seats, banner unless
         muted. The baseline is ALWAYS advanced (even while muted) so un-muting does
         not dump the accumulated backlog as a burst of banners."""
         rows = await glance.read()
         if not getattr(glance, "last_ok", True):
-            return  # a full Lab outage collapses every seat to {}; do not fire
+            # APP_RESIDENT_NOTIFY_DEGRADED_1: preserve no-false-banner semantics,
+            # but do not let one cached/degraded read suppress the entire poll.
+            # Make one independent bounded refresh (LabGlance enforces the
+            # configured request timeout, 5s by default); only a second failure
+            # is allowed to skip the tick.
+            rows = await _fresh_glance_read()
+            if not getattr(glance, "last_ok", True):
+                return
+        await _deferred_wake_tick(rows)
+        if not include_notifications:
+            return
         eligible = load_notify_seats(config.static_dir)
         to_fire, app.state.notify_prev, app.state.notify_last_fired = (
             compute_notifications(
@@ -1569,6 +2365,60 @@ def create_app(
             return
         for slug, count in to_fire:
             notify_macos(config, slug, count)
+
+    async def _deferred_wake_tick(
+        rows: dict[str, dict[str, Any]],
+    ) -> list[dict[str, Any]]:
+        """Fire one deferred wake on a confirmed working→idle transition."""
+        try:
+            entries = {entry.slug: entry for entry in manifest()}
+        except HTTPException:
+            return []
+        outcomes: list[dict[str, Any]] = []
+        now = time.monotonic()
+        for slug, entry in entries.items():
+            row = rows.get(slug)
+            if not isinstance(row, dict):
+                continue
+            current_signal = row.get("is_working")
+            # A missing/null telemetry signal is not proof of idleness; hold the
+            # pending obligation until the Lab reports an explicit False.
+            if current_signal not in (True, False):
+                continue
+            current_working = current_signal is True
+            previous_working = app.state.wake_prev_working.get(slug)
+            app.state.wake_prev_working[slug] = current_working
+            if previous_working is not True or current_working:
+                continue
+            pending = app.state.pending_wakes.get(slug)
+            if not isinstance(pending, dict):
+                continue
+            if wake_obligation_count(row) <= 0:
+                app.state.pending_wakes.pop(slug, None)
+                continue
+            try:
+                result = _call_send_wake(
+                    config,
+                    entry,
+                    row,
+                    now=now,
+                    last_wake=app.state.wake_last,
+                    audit_source="deferred",
+                )
+            except (OSError, RuntimeError, subprocess.TimeoutExpired) as exc:
+                LOG.warning("deferred wake failed for %s: %s", slug, exc)
+                result = _undelivered_wake_result(
+                    config,
+                    entry,
+                    row,
+                    reason="controller-write",
+                    request_id=None,
+                )
+            if result.get("disposition") == "delivered":
+                app.state.pending_wakes.pop(slug, None)
+            result["deferred_msg_id"] = pending.get("msg_id")
+            outcomes.append(result)
+        return outcomes
 
     async def _backlog_sweep_tick() -> list[dict[str, Any]]:
         """Re-wake idle seats whose old backlog outlived its original wake."""
@@ -1582,14 +2432,11 @@ def create_app(
         outcomes: list[dict[str, Any]] = []
         for entry in manifest():
             row = rows.get(entry.slug) or {}
-            try:
-                oldest_age = float(row.get("oldest_unacked_age_sec") or 0)
-            except (TypeError, ValueError):
-                oldest_age = 0.0
+            oldest_age = _oldest_wake_age_sec(row)
             if (
                 entry.slug not in sessions
                 or row.get("is_working") is True
-                or int(row.get("unacked_count") or 0) <= 0
+                or wake_obligation_count(row) <= 0
                 or oldest_age <= config.backlog_sweep_seconds
             ):
                 continue
@@ -1617,12 +2464,13 @@ def create_app(
     # awaits this directly to prove a 0→N transition banners once through the real
     # read→compute→fire path, without depending on background-task timing.
     app.state.notify_tick = _notify_tick
+    app.state.deferred_wake_tick = _deferred_wake_tick
     app.state.backlog_sweep_tick = _backlog_sweep_tick
 
     async def _notify_loop() -> None:
         while True:
             try:
-                await _notify_tick()
+                await _notify_tick(include_notifications=config.notify_enabled)
             except asyncio.CancelledError:
                 raise
             except Exception as exc:  # a bad tick must never kill the loop

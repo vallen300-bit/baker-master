@@ -7,10 +7,11 @@
  * browser session). Non-driveable active seats (app-*, service, headless) are status-only (no terminal). GO sends
  * Enter to the seat's tmux session; Start (re)creates a downed seat's session.
  *
- * Interaction contract: COCKPIT_CARD_BEHAVIOR_MOCK.html. Glance frames: §5.2 +
- * brisen-lab glance_state.js resolveGlanceState (precedence NEEDS_GO > WORKING
- * > NEW). GO affordance: §5.4. All card content is built via textContent / DOM
- * nodes — no innerHTML, so agent-supplied strings can never inject markup.
+ * Interaction contract: COCKPIT_CARD_BEHAVIOR_MOCK.html. Row colors: the FINAL
+ * 6-state palette (spec @d5e25efa item 3) via glance_state.js resolveStateClass
+ * (precedence running > GO > unread-old > unread > offline > idle). GO affordance:
+ * §5.4. All card content is built via textContent / DOM nodes — no innerHTML, so
+ * agent-supplied strings can never inject markup.
  */
 (() => {
   "use strict";
@@ -30,19 +31,21 @@
 
   const gridEl = document.getElementById("grid");
   const connEl = document.getElementById("conn");
-  const veilEl = document.getElementById("veil");
+  // COCKPIT_REVAMP_SPLIT_VIEW_SIDEBAR_1: the terminal is a right-hand pane inside
+  // the three-column app shell (no #veil modal). Opening a seat toggles
+  // `.pane-open` on the shell, which widens the pane column; the grid stays live.
+  const appShellEl = document.getElementById("appShell");
+  const sidebarEl = document.getElementById("sidebar");
   const termEl = document.getElementById("term");
   const termMount = document.getElementById("term-mount");
   const termTitle = document.getElementById("term-title");
   const termGo = document.getElementById("term-go");
   const termUnacked = document.getElementById("term-unacked");
   const toastEl = document.getElementById("toast");
-  const notifyToggle = document.getElementById("notify-toggle");
+  const termCopy = document.getElementById("term-copy");
+  const termNudge = document.getElementById("term-nudge");
   const syncNoteEl = document.getElementById("sync-note");
   const rosterNoteEl = document.getElementById("roster-note");
-  const statTotalEl = document.getElementById("stat-total");
-  const statAttentionEl = document.getElementById("stat-attention");
-  const statTerminalsEl = document.getElementById("stat-terminals");
   // D9 — App-resident card bus-message panel.
   const msgVeil = document.getElementById("msgveil");
   const msgPanel = document.getElementById("msgpanel");
@@ -53,10 +56,44 @@
   let layout = null;             // { plates: [{label, cards:[...]}, ...] }
   let stateBySlug = new Map();   // slug -> live /api/agents row
   let openSlug = null;           // currently open terminal, or null
+  let openName = null;           // display name of the open seat (for the drawer nudge)
   let openMsgSlug = null;        // currently open bus-message panel, or null (D9)
+  let messageDetailsBySlug = new Map(); // slug -> message id -> authenticated preview
   let prevUnacked = new Map();   // slug -> last-seen unacked_count (D9 flash-on-new)
   let flashSlugs = new Set();    // slugs whose unacked count rose this poll (D9)
   let pollTimer = null;
+
+  // ---- sidebar view state (COCKPIT_REVAMP_SPLIT_VIEW_SIDEBAR_1, spec item 5) ----
+  // Sidebar entries in order. ACTIVE is the default home; ALL is the flat view;
+  // the rest are the six operating-role groups in plain words. Reserved for future
+  // buttons — nothing else is added here now (candidates parked in the spec).
+  const NAV_ORDER = ["ACTIVE", "ALL", "Pilots", "Control Tower", "Engineering",
+                     "Support", "Legal/Finance", "Interns"];
+  // Two-letter abbreviations shown when the sidebar collapses to icons on narrow
+  // screens (spec item 5 — CSS media query + hover expansion, no JS breakpoints).
+  const NAV_ABBR = { "ACTIVE": "AC", "ALL": "ALL", "Pilots": "Pi", "Control Tower": "CT",
+                     "Engineering": "En", "Support": "Su", "Legal/Finance": "LF", "Interns": "In" };
+  // The ONE plate-label → nav-name mapping (spec item 5). Fail-soft: an unknown
+  // plate falls back to its raw label so a new plate is never silently dropped.
+  const PLATE_TO_NAV = {
+    "PILOTS & PILOT TEAMS": "Pilots",
+    "Control Tower & VERIFICATION": "Control Tower",
+    "ENGINEERING , TECHNICAL & STAFF MANAGEMENT": "Engineering",
+    "FLIGHTS SUPPORT & DOMAIN SPECIFIC": "Support",
+    "LEGAL ,FINANCIAL , PR, MARKETING & COMMUNICATIONS": "Legal/Finance",
+    "INTERNS": "Interns",
+  };
+  const VIEW_KEY = "cockpit.view";        // persisted across sessions (spec item 5.4)
+  let currentView = readStoredView();     // hydrate on load, default ACTIVE
+  let expandedGroups = new Set();          // ACTIVE-view groups whose "N quiet" line is expanded
+
+  function readStoredView() {
+    try {
+      const v = localStorage.getItem(VIEW_KEY);
+      if (v && NAV_ORDER.indexOf(v) !== -1) return v;
+    } catch (_) { /* storage blocked — fall through to default */ }
+    return "ACTIVE";
+  }
 
   // ---- helpers ------------------------------------------------------------
   function el(tag, attrs = {}, children = []) {
@@ -69,6 +106,39 @@
     }
     for (const c of [].concat(children)) if (c) n.appendChild(c);
     return n;
+  }
+
+  function messageDetailFor(slug, message) {
+    const details = messageDetailsBySlug.get(slug);
+    if (!details || !message || message.id === undefined || message.id === null) {
+      return null;
+    }
+    return details.get(String(message.id)) || null;
+  }
+
+  function mergeMessageDetails(slug, rows) {
+    const details = new Map();
+    for (const row of rows || []) {
+      if (row && row.id !== undefined && row.id !== null) {
+        details.set(String(row.id), row);
+      }
+    }
+    messageDetailsBySlug.set(slug, details);
+  }
+
+  async function fetchMessageDetails(slug) {
+    try {
+      const r = await fetch(url("/api/messages/" + encodeURIComponent(slug)), FETCH_OPTS);
+      if (!r.ok) return;
+      const data = await r.json();
+      if (data && data.available === true && Array.isArray(data.messages)) {
+        mergeMessageDetails(slug, data.messages);
+        if (openMsgSlug === slug) renderMsgSummary(slug);
+        if (openSlug === slug) renderPanelUnacked(slug);
+      }
+    } catch (_) {
+      // Envelope-only rendering is the intentional Lab-outage fallback.
+    }
   }
 
   let toastTimer = null;
@@ -85,23 +155,11 @@
     }, 2600);
   }
 
-  function glanceClass(row) {
-    // No live row at all = telemetry never seen for this seat -> UNKNOWN, NOT idle.
-    if (!row) return "glance-unknown";
-    const g = window.resolveGlanceState({
-      unacked: row.unacked_count || 0,
-      isWorking: row.is_working === true,
-      hasTelemetry: row.has_telemetry === true,
-      isDoneGreen: false,               // no DONE signal on this surface
-      needsGo: row.needs_go === true,
-    });
-    if (g === "NEEDS_GO") return "glance-needs-go";      // green tint + GO
-    if (g === "WORKING") return "";                       // E6: running = bright, no frame
-    if (g === "NEW") return "glance-amber";               // D5/E6: amber = unread
-    // UNKNOWN (glance outage or telemetry-less seat) must read distinctly from
-    // IDLE — a quiet seat with telemetry vs a seat we have no signal for.
-    if (g === "UNKNOWN") return "glance-unknown";
-    return "";                          // IDLE
+  // COCKPIT_REVAMP_COLORS_1 — the row's glance color is the FINAL 6-state palette
+  // (spec item 3), resolved by the pure glance_state.js resolver so JS and its
+  // tests share one source of truth. Returns one st-* class; the CSS owns the color.
+  function glanceClass(row, up) {
+    return (window.resolveStateClass || (() => "st-idle"))(row, up === true);
   }
 
   function ageClass(sec) {
@@ -118,16 +176,8 @@
   function renderSummary(labOk = null) {
     if (!layout) return;
     const cards = layout.plates.flatMap((plate) => plate.cards);
-    const attention = cards.filter((meta) => {
-      const row = stateBySlug.get(meta.slug);
-      if (!row) return false;
-      return row.needs_go === true || (row.unacked_count || 0) > 0 ||
-        row.ttyd_up === false || (!meta.status_only && row.session_up === false);
-    }).length;
-    const terminals = cards.filter((meta) => meta.driveable).length;
-    if (statTotalEl) statTotalEl.textContent = String(cards.length);
-    if (statAttentionEl) statAttentionEl.textContent = stateBySlug.size ? String(attention) : "—";
-    if (statTerminalsEl) statTerminalsEl.textContent = String(terminals);
+    // COCKPIT_REVAMP_HEADER_1: the oversized digit block (Seats/Attention/Terminals)
+    // was removed per spec item 6 — live counts stay in the green header line.
     if (rosterNoteEl) rosterNoteEl.textContent = cards.length + " seats · grouped by operating role";
     if (syncNoteEl) {
       syncNoteEl.textContent = labOk === false ? "Telemetry source offline" :
@@ -158,20 +208,29 @@
       for (const a of (data.agents || [])) m.set(a.slug, a);
       computeFlash(m);              // D9 — flag cards whose unacked count rose
       stateBySlug = m;
-      // lab_glance_ok=false ⇒ the Lab telemetry source is down; every seat's
-      // glance collapses to UNKNOWN. Surface it explicitly, don't read as idle.
+      // lab_glance_ok=false ⇒ the Lab telemetry source is down; the summary
+      // sync-note surfaces that (renderSummary below). It does NOT dim the header
+      // health line: the feed itself answered, so the line stays GREEN (spec item
+      // 6 — green whenever the feed is live, red ONLY when the feed is dead).
       const labOk = data.lab_glance_ok !== false;
       const total = totalCardCount();
-      connEl.textContent = "live · " + m.size + " driveable / " + total + " seats" +
-        (labOk ? "" : " · ⚠ telemetry offline");
-      connEl.className = labOk ? "conn ok" : "conn warn";
+      // Header health line — plain words, all bright green while the feed is live
+      // (spec item 6 / codex #13356: no warn state). Count = layout driveable cards
+      // (codex #13286: /api/agents now hydrates ALL cards, so m.size ≠ terminals).
+      const driveable = layout
+        ? layout.plates.reduce((n, plate) =>
+            n + plate.cards.filter((card) => card.driveable).length, 0)
+        : 0;
+      connEl.textContent = "live · " + driveable + " with terminal / " + total + " seats";
+      connEl.className = "conn ok";
       renderSummary(labOk);
       render();
       syncPanelGo();             // reflect needs_go changes while the panel is open
       if (openMsgSlug) renderMsgSummary(openMsgSlug);   // D9 — live-refresh open panel
     } catch (e) {
-      connEl.textContent = "offline — " + e.message;
-      connEl.className = "conn err";
+      // Feed stale/dead — the ONE health line turns red (spec item 6, .feed-dead).
+      connEl.textContent = "feed offline — " + e.message;
+      connEl.className = "conn feed-dead";
       renderSummary(false);
     }
   }
@@ -189,18 +248,26 @@
   // D5 — list the seat's unacked bus messages (id · topic · age) in the panel.
   function renderPanelUnacked(slug) {
     termUnacked.textContent = "";
-    const row = stateBySlug.get(slug) || {};
-    const msgs = Array.isArray(row.unacked_messages) ? row.unacked_messages : [];
+    const msgs = renderedUnackedRows(slug);
+    // Drawer Copy + Nudge appear only when the open seat actually has unacked rows.
+    if (termCopy) { termCopy.hidden = !msgs.length; termCopy.textContent = "Copy"; }
+    if (termNudge) termNudge.hidden = !msgs.length;
     if (!msgs.length) { termUnacked.hidden = true; return; }
     const head = el("div", { class: "u-head",
       text: msgs.length + " unacked bus message" + (msgs.length === 1 ? "" : "s") });
     const list = el("div", { class: "u-list" }, msgs.map((m) => {
       const ts = m && m.created_at ? Date.parse(m.created_at) : NaN;
       const age = Number.isFinite(ts) ? window.formatUnreadAge((Date.now() - ts) / 1000) : "";
+      const detail = messageDetailFor(slug, m);
       return el("div", { class: "u-row" }, [
-        el("span", { class: "u-id", text: "#" + String((m && m.id) || "?") }),
-        el("span", { class: "u-topic", text: String((m && m.topic) || "(no topic)") }),
-        age ? el("span", { class: "u-age", text: age }) : null,
+        el("div", { class: "u-main" }, [
+          el("span", { class: "u-id", text: "#" + String((m && m.id) || "?") }),
+          el("span", { class: "u-topic", text: String((m && m.topic) || "(no topic)") }),
+          age ? el("span", { class: "u-age", text: age }) : null,
+        ]),
+        detail && detail.body_preview
+          ? el("div", { class: "u-preview", text: detail.body_preview })
+          : null,
       ]);
     }));
     termUnacked.appendChild(head);
@@ -208,28 +275,52 @@
     termUnacked.hidden = false;
   }
 
-  // D6 — wake-on-open. Opening a driveable seat that has unacked>0 and is not
-  // WORKING (and not needs_go — that is the GO flow) nudges its tmux once. The
-  // controller enforces the guards + a 10-min dedupe + audit; the page just asks.
-  function maybeWakeOnOpen(slug) {
+  // COCKPIT_CARD_CLICK_WAKE_INJECT_1 — an explicit Director click (card open or the
+  // drawer Nudge button) force-pushes the composed "check your bus" nudge into the
+  // seat's terminal. force=1 bypasses the controller seat-floor (human intent wins);
+  // origin=cockpit_click gets the richer nudge line + a wake_audit origin tag.
+  //
+  // Idempotence lives HERE: the controller's force path intentionally bypasses
+  // per-message dedupe (merged WAKE_INJECT arc — do-not-touch), so a per-slug
+  // debounce coalesces a rapid double-click and it never double-posts.
+  //
+  // Every outcome is a VISIBLE toast — sent, guarded-skip, or failure — never silent
+  // (fail loud). Only seats that actually have unacked mail are nudged; the
+  // controller's own guards still refuse a working / needs_go / no-unacked seat.
+  const WAKE_CLICK_DEBOUNCE_MS = 4000;
+  const lastNudgeAt = new Map();       // slug -> ms of the last click-nudge POST
+
+  function nudgeSeat(slug, name) {
     const row = stateBySlug.get(slug);
-    if (window.amberState(row)) {
-      fetch(url("/api/sessions/" + slug + "/wake"), { ...FETCH_OPTS, method: "POST" })
-        .catch(() => { /* best-effort nudge; never blocks opening the terminal */ });
-    }
+    if (!row || !((row.unacked_count || 0) > 0)) return;   // nothing to nudge about
+    const now = Date.now();
+    if (now - (lastNudgeAt.get(slug) || 0) < WAKE_CLICK_DEBOUNCE_MS) return;  // double-click coalesce
+    lastNudgeAt.set(slug, now);
+    const label = name || slug;
+    fetch(url("/api/sessions/" + slug + "/wake?force=1&origin=cockpit_click"),
+          { ...FETCH_OPTS, method: "POST" })
+      .then((r) => { if (!r.ok) throw new Error("HTTP " + r.status); return r.json(); })
+      .then((res) => {
+        if (res && res.sent) toast("Nudged " + label + " ✓", "ok");
+        else toast(label + " — " + ((res && res.skipped) || "not nudged"), "");  // visible notice
+      })
+      .catch((e) => { toast("Nudge " + label + " failed — " + e.message, "err"); });  // fail loud
   }
 
   function openTerm(slug, name) {
     openSlug = slug;
+    openName = name;
     termTitle.textContent = name + " — live terminal";
     syncPanelGo();
     renderPanelUnacked(slug);
-    maybeWakeOnOpen(slug);
+    void fetchMessageDetails(slug);
+    nudgeSeat(slug, name);       // explicit-click wake (force + origin, toasted)
     termMount.textContent = "";
     const frame = el("iframe", { id: "termframe", src: url("/term/" + slug + "/"),
                                  title: name + " terminal" });
     termMount.appendChild(frame);
-    veilEl.classList.add("open");
+    // Open the right pane column (grid stays live in the middle column, no blur).
+    appShellEl.classList.add("pane-open");
     termEl.classList.add("open");
     // Focus the terminal so keystrokes land in the session immediately. The
     // ttyd page is same-origin (proxied via the controller), so we can also
@@ -250,11 +341,14 @@
 
   function closeTerm() {
     openSlug = null;
+    openName = null;
     syncPanelGo();                // openSlug null -> panel GO hidden
     termEl.classList.remove("open");
-    veilEl.classList.remove("open");
+    appShellEl.classList.remove("pane-open");   // collapse the pane column back to 0
     termMount.textContent = "";   // remove iframe -> drops the ttyd WS connection
     termUnacked.textContent = ""; termUnacked.hidden = true;
+    if (termCopy) { termCopy.hidden = true; termCopy.textContent = "Copy"; }
+    if (termNudge) termNudge.hidden = true;
   }
 
   // ---- D9 bus-message panel (App-resident cards) --------------------------
@@ -262,21 +356,27 @@
   // Last message / Acknowledged(count) sections, from the same per-agent bus
   // fields (unacked_messages / last_message / acked_count). DOM-node built —
   // no innerHTML, so agent-supplied strings can never inject markup.
-  function msgEnvelope(m, extraCls) {
+  function msgEnvelope(m, extraCls, slug) {
     const created = m && m.created_at ? Date.parse(m.created_at) : NaN;
     const age = Number.isFinite(created)
       ? window.formatUnreadAge((Date.now() - created) / 1000) : "";
+    const detail = messageDetailFor(slug, m);
     return el("div", { class: "hrow " + (extraCls || "") }, [
-      el("span", { class: "hfrom", text: "from " + String((m && m.from_terminal) || "?") }),
-      el("span", { class: "htopic", text: String((m && m.topic) || "(no topic)") }),
-      el("span", { class: "hid", text: "#" + String((m && m.id) || "?") }),
-      age ? el("span", { class: "hage", text: age }) : null,
+      el("div", { class: "hmain" }, [
+        el("span", { class: "hfrom", text: "from " + String((m && m.from_terminal) || "?") }),
+        el("span", { class: "htopic", text: String((m && m.topic) || "(no topic)") }),
+        el("span", { class: "hid", text: "#" + String((m && m.id) || "?") }),
+        age ? el("span", { class: "hage", text: age }) : null,
+      ]),
+      detail && detail.body_preview
+        ? el("div", { class: "hpreview", text: detail.body_preview })
+        : null,
     ]);
   }
 
   function renderMsgSummary(slug) {
     const row = stateBySlug.get(slug) || {};
-    const unacked = Array.isArray(row.unacked_messages) ? row.unacked_messages : [];
+    const unacked = renderedUnackedRows(slug);
     const last = row.last_message || null;
     const ackedCount = Number(row.acked_count) || 0;
     msgBody.textContent = "";
@@ -284,12 +384,12 @@
     const s1 = el("section", { class: "hsec" },
       [el("h3", { class: "hsec-t", text: "Unacknowledged (" + unacked.length + ")" })]);
     if (!unacked.length) s1.appendChild(el("div", { class: "hempty", text: "(none)" }));
-    else unacked.forEach((m) => s1.appendChild(msgEnvelope(m, "hrow-unacked")));
+    else unacked.forEach((m) => s1.appendChild(msgEnvelope(m, "hrow-unacked", slug)));
     msgBody.appendChild(s1);
 
     msgBody.appendChild(el("section", { class: "hsec" }, [
       el("h3", { class: "hsec-t", text: "Last message" }),
-      last ? msgEnvelope(last, last.acked ? "hrow-acked" : "hrow-unacked")
+      last ? msgEnvelope(last, last.acked ? "hrow-acked" : "hrow-unacked", slug)
            : el("div", { class: "hempty", text: "(no messages)" }),
     ]));
 
@@ -301,10 +401,11 @@
 
   function openMsgPanel(slug, name) {
     openMsgSlug = slug;
-    msgTitle.textContent = name + " [" + slug + "] messages";
+    msgTitle.textContent = slug + " messages";   // slug-only (name === slug now)
     renderMsgSummary(slug);
     msgVeil.classList.add("open");
     msgPanel.classList.add("open");
+    void fetchMessageDetails(slug);
   }
 
   function closeMsgPanel() {
@@ -327,21 +428,47 @@
     return ok;
   }
 
+  // Reconciled unacked rows — the ONE source both the panel/drawer renderers AND the
+  // Copy buttons draw from, so Copy always copies EXACTLY what is rendered
+  // (COCKPIT_DRAWER_COPY_BUTTON_FIX_1). reconcileUnacked handles the status-only
+  // hydration shape (/api/agents ships unacked_count>0 with a lean/empty
+  // unacked_messages) by falling back to the already-fetched /api/messages detail
+  // rows — in memory only, never a refetch, so it still works while /api/messages
+  // is unavailable (bus degraded), and enriches each row with its body_preview.
+  function renderedUnackedRows(slug) {
+    const row = stateBySlug.get(slug) || {};
+    const details = messageDetailsBySlug.get(slug);
+    const detailList = details ? Array.from(details.values()) : [];
+    return window.reconcileUnacked(row, detailList);
+  }
+
+  // Run a Copy button: format the open seat's rendered unacked rows, copy, flash
+  // feedback. The formatter (glance_state.js) emits the placeholder ONLY when the
+  // reconciled list is genuinely empty.
+  async function runCopy(btn, title, unacked) {
+    if (!btn) return;
+    const payload = window.formatUnackedSummary(title, unacked);
+    btn.disabled = true;
+    const ok = await copyToClipboard(payload);
+    btn.disabled = false;
+    btn.textContent = ok ? "copied ✓" : "copy failed";
+    clearTimeout(btn._t);
+    btn._t = setTimeout(() => { btn.textContent = "Copy"; }, 1800);
+  }
+
+  function unackedFor(slug) {
+    return renderedUnackedRows(slug);
+  }
+
   async function doMsgCopy() {
     if (!openMsgSlug) return;
-    const row = stateBySlug.get(openMsgSlug) || {};
-    const unacked = Array.isArray(row.unacked_messages) ? row.unacked_messages : [];
-    const lines = unacked.map((m) =>
-      "#" + String((m && m.id) || "?") + "  " + String((m && m.topic) || "(no topic)") +
-      "  from " + String((m && m.from_terminal) || "?"));
-    const payload = (msgTitle.textContent || openMsgSlug) + "\n" +
-      (lines.length ? lines.join("\n") : "(no unacknowledged messages)");
-    msgCopy.disabled = true;
-    const ok = await copyToClipboard(payload);
-    msgCopy.disabled = false;
-    msgCopy.textContent = ok ? "copied ✓" : "copy failed";
-    clearTimeout(msgCopy._t);
-    msgCopy._t = setTimeout(() => { msgCopy.textContent = "Copy"; }, 1800);
+    await runCopy(msgCopy, msgTitle.textContent || openMsgSlug, unackedFor(openMsgSlug));
+  }
+
+  // Terminal-drawer Copy — same helper, scoped to the OPEN seat's unacked rows.
+  async function doTermCopy() {
+    if (!openSlug) return;
+    await runCopy(termCopy, termTitle.textContent || openSlug, unackedFor(openSlug));
   }
 
   // D9 flash-on-new-message: mark slugs whose unacked count rose since the last
@@ -407,33 +534,29 @@
   // needs_go → GO; otherwise a live status chip (running / unread / idle /
   // offline / no-signal for driveable seats, or the kind for status-only). The
   // chip is never omitted, so the control column is uniform.
+  const CHIP_LABEL = {
+    "st-running": "running", "st-go": "needs GO", "st-unread": "unread",
+    "st-unread-old": "unread", "st-offline": "offline", "st-idle": "idle",
+  };
   function statusChipText(meta, row, up) {
     if (meta.status_only) return meta.kind || "app";
     if (!up) return "down";
-    if (row && row.ttyd_up === false) return "offline";
-    const g = window.resolveGlanceState ? window.resolveGlanceState({
-      unacked: (row && row.unacked_count) || 0,
-      isWorking: !!(row && row.is_working),
-      hasTelemetry: !!(row && row.has_telemetry),
-      isDoneGreen: false,
-      needsGo: !!(row && row.needs_go),
-    }) : "";
-    if (g === "WORKING") return "running";
-    if (g === "NEW") return "unread";
-    if (g === "UNKNOWN") return "no signal";
-    return "idle";
+    // Chip label follows the same palette resolver the row color uses, so text
+    // and color can never disagree.
+    const sc = window.resolveStateClass ? window.resolveStateClass(row, up) : "st-idle";
+    return CHIP_LABEL[sc] || "idle";
   }
 
   function stateControl(meta, row, up) {
     if (!meta.status_only) {
       if (!up) {
         return el("button", { class: "rbtn start", type: "button", text: "▶ Start",
-          title: "Start " + (meta.display_name || meta.slug),
+          title: "Start " + meta.slug,
           onclick: (ev) => { ev.stopPropagation(); doStart(meta.slug, ev.currentTarget); } });
       }
       if (row && window.goAffordanceVisible(row)) {
         return el("button", { class: "rbtn go", type: "button", text: "GO ⏎",
-          title: "Answer GO for " + (meta.display_name || meta.slug),
+          title: "Answer GO for " + meta.slug,
           onclick: (ev) => { ev.stopPropagation(); doGo(meta.slug, ev.currentTarget); } });
       }
     }
@@ -448,25 +571,23 @@
     const cls = ["row"];
     if (flashSlugs.has(meta.slug)) cls.push("flash");   // D9 flash-on-new-message
 
-    // State classes (color language preserved from the card design): app =
-    // status-only, error = ttyd down, up/working, glance frame, or down.
+    // State classes: status-only seats keep the recessed "app" chrome; every
+    // driveable seat (up OR down) carries exactly one st-* palette class (spec
+    // item 3) so its dot + name color reads its true state. up/down stay for the
+    // existing geometry/contrast selectors.
     if (meta.status_only) {
       cls.push("app");
-    } else if (up && row && row.ttyd_up === false) {
-      cls.push("up", "error");
-    } else if (up) {
-      cls.push("up");
-      const gc = glanceClass(row);
-      if (gc) cls.push(gc);
-      if (row && row.is_working) cls.push("working");
     } else {
-      cls.push("down");
+      cls.push(up ? "up" : "down");
+      cls.push(glanceClass(row, up));
     }
 
-    // Col 2 — identity (name + slug, + kind badge for service/headless).
+    // Col 2 — identity. COCKPIT_SLUG_ONLY_CARDS_1 (Director: "the name is for me,
+    // not for agents"): the SLUG renders in the name's slot — .r-name keeps the
+    // name's 13px/500 + per-state color — and the separate small .r-slug line is
+    // dropped, so each card shows the slug ONCE and no display name is rendered.
     const idKids = [
-      el("span", { class: "r-name", text: meta.display_name || meta.slug }),
-      el("span", { class: "r-slug", text: meta.slug }),
+      el("span", { class: "r-name", text: meta.slug }),
     ];
     if (meta.badge) idKids.push(el("span", { class: "r-kind", text: meta.kind }));
 
@@ -495,7 +616,9 @@
     // D9 — two card modes, ZERO dead clicks. A tmux-backed (driveable) seat
     // opens its terminal (unchanged); an App-resident card opens the bus-message
     // panel (same data + section shape as the Lab "Production & Lab" component).
-    const name = meta.display_name || meta.slug;
+    // Slug, not the display name, everywhere the identity is surfaced to agents
+    // (drawer header, panel title, toasts) — COCKPIT_SLUG_ONLY_CARDS_1.
+    const name = meta.slug;
     let open;
     if (!meta.status_only) {
       open = () => {
@@ -517,18 +640,126 @@
     return c;
   }
 
+  // ---- sidebar navigation + view filtering (spec item 5) ------------------
+  // Logical state class for view filtering. Driveable seats resolve via the shared
+  // palette resolver; status-only (app) seats have no st-* chrome, so map them for
+  // filtering only: unacked mail → attention (amber/red by age), else grey/quiet.
+  function cardStateClass(meta, row, up) {
+    if (meta.status_only) {
+      const n = (row && row.unacked_count) || 0;
+      if (n > 0) {
+        const age = (row && row.oldest_unacked_age_sec) || 0;
+        return age > (window.UNREAD_OLD_S || 600) ? "st-unread-old" : "st-unread";
+      }
+      return "st-idle";
+    }
+    return glanceClass(row, up);
+  }
+
+  // planView input: each plate → { nav, label, cards:[{slug, stClass, meta}] }.
+  function navGroups() {
+    if (!layout) return [];
+    return layout.plates.map((plate) => {
+      const nav = PLATE_TO_NAV[plate.label] || plate.label;
+      const cards = plate.cards.map((meta) => {
+        const row = stateBySlug.get(meta.slug) || null;
+        const up = row ? row.session_up === true : false;
+        return { slug: meta.slug, stClass: cardStateClass(meta, row, up), meta };
+      });
+      return { nav, label: plate.label, cards };
+    });
+  }
+
+  // Build the 8 sidebar entries once (static order). Active highlight + red
+  // attention badges update per render() from the planView badge set.
+  function buildSidebar() {
+    if (!sidebarEl) return;
+    sidebarEl.textContent = "";
+    NAV_ORDER.forEach((nav) => {
+      const badge = el("span", { class: "nav-badge", "aria-label": "needs attention" });
+      badge.hidden = true;
+      const item = el("button", { class: "nav-item", type: "button", "data-view": nav,
+        title: nav, onclick: () => setView(nav) }, [
+        el("span", { class: "nav-abbr", "aria-hidden": "true", text: NAV_ABBR[nav] || nav.slice(0, 2) }),
+        el("span", { class: "nav-label", text: nav }),
+        badge,
+      ]);
+      sidebarEl.appendChild(item);
+    });
+  }
+
+  function updateSidebar(badges) {
+    if (!sidebarEl) return;
+    Array.from(sidebarEl.children).forEach((item) => {
+      const nav = item.getAttribute("data-view");
+      const isActive = nav === currentView;
+      item.classList.toggle("active", isActive);
+      item.setAttribute("aria-current", isActive ? "page" : "false");
+      const badge = item.querySelector(".nav-badge");
+      if (badge) badge.hidden = !badges[nav];
+    });
+  }
+
+  function setView(view) {
+    if (NAV_ORDER.indexOf(view) === -1) view = "ACTIVE";
+    currentView = view;
+    try { localStorage.setItem(VIEW_KEY, view); } catch (_) { /* storage blocked */ }
+    render();
+  }
+
+  // ACTIVE-view collapsed grey line: "N quiet" (compact form carries the group
+  // label, e.g. "Engineering — 5 quiet"). Click toggles inline expansion.
+  function quietGroup(g, compact) {
+    const expanded = expandedGroups.has(g.nav);
+    const text = (compact ? g.label + " — " : "") + g.greyCount + " quiet";
+    const line = el("button", { class: "quiet-line" + (compact ? " quiet-compact" : ""),
+      type: "button", "aria-expanded": expanded ? "true" : "false",
+      onclick: () => toggleQuiet(g.nav) }, [
+      el("span", { class: "quiet-caret", "aria-hidden": "true", text: expanded ? "▾" : "▸" }),
+      el("span", { class: "quiet-text", text: text }),
+    ]);
+    const wrap = el("div", { class: "quiet-wrap" }, [line]);
+    if (expanded) {
+      wrap.appendChild(el("div", { class: "rows quiet-rows" }, g.greyCards.map((c) => card(c.meta))));
+    }
+    return wrap;
+  }
+
+  function toggleQuiet(nav) {
+    if (expandedGroups.has(nav)) expandedGroups.delete(nav);
+    else expandedGroups.add(nav);
+    render();
+  }
+
   function render() {
     if (!layout) return;
+    // View filter is one pure function (glance_state.js planView) so the DOM and
+    // its unit vectors share a source. Plates → nav groups → visible plan + badges.
+    const plan = window.planView(navGroups(), currentView);
+    updateSidebar(plan.badges);
+
     const frag = document.createDocumentFragment();
-    // Plate groupings survive as slim section headers (D1); rows list under each.
-    layout.plates.forEach((plate) => {
-      const list = el("div", { class: "rows" }, plate.cards.map(card));
-      frag.appendChild(el("div", { class: "plate" }, [
-        el("h2", {}, [document.createTextNode(plate.label),
-          el("span", { class: "count", text: plate.cards.length })]),
-        list,
-      ]));
+    const isActive = currentView === "ACTIVE";
+    plan.groups.forEach((g) => {
+      const hasActive = g.activeCards.length > 0;
+      // ACTIVE view, a fully-quiet group → one compact "Label — N quiet" line only.
+      if (isActive && !hasActive) {
+        if (g.greyCount > 0) frag.appendChild(quietGroup(g, true));
+        return;
+      }
+      if (!hasActive && g.greyCount === 0) return;   // nothing to show for this group
+      const children = [
+        el("h2", {}, [document.createTextNode(g.label),
+          el("span", { class: "count", text: g.activeCards.length })]),
+        el("div", { class: "rows" }, g.activeCards.map((c) => card(c.meta))),
+      ];
+      if (isActive && g.greyCount > 0) children.push(quietGroup(g, false));
+      frag.appendChild(el("div", { class: "plate" }, children));
     });
+    if (!frag.childNodes.length) {
+      frag.appendChild(el("div", { class: "view-empty",
+        text: "Nothing needs attention — every seat is quiet." }));
+    }
     gridEl.textContent = "";
     gridEl.appendChild(frag);
     renderSummary();
@@ -550,7 +781,6 @@
   // ---- wiring -------------------------------------------------------------
   document.getElementById("x").addEventListener("click", closeTerm);
   document.getElementById("x").addEventListener("keydown", (e) => { if (e.key === "Enter" || e.key === " ") closeTerm(); });
-  veilEl.addEventListener("click", closeTerm);
   // Defense in depth: the button is hidden when GO isn't allowed, but re-check
   // the predicate on click so a stale/racy click can never send a bare Enter.
   termGo.addEventListener("click", () => {
@@ -564,61 +794,14 @@
     (e) => { if (e.key === "Enter" || e.key === " ") closeMsgPanel(); });
   msgVeil.addEventListener("click", closeMsgPanel);
   msgCopy.addEventListener("click", doMsgCopy);
+  if (termCopy) termCopy.addEventListener("click", doTermCopy);
+  // Drawer Nudge — re-push the composed wake into an already-open seat (same call).
+  if (termNudge) termNudge.addEventListener("click", () => { if (openSlug) nudgeSeat(openSlug, openName); });
   document.addEventListener("keydown", (e) => { if (e.key === "Escape" && openMsgSlug) closeMsgPanel(); });
 
-  // ---- unread-bus notifications mute toggle (NOTIFY_SLICE) ----------------
-  // The controller fires banners even with the page closed; this toggle only
-  // reflects + flips the controller's persisted mute flag. localStorage gives an
-  // instant default before the controller answers; the controller is authoritative.
-  const NOTIFY_MUTE_KEY = "cockpit.notifyMuted";
-  let notifyMuted = false;
-
-  function applyNotifyUI() {
-    if (!notifyToggle) return;
-    notifyToggle.textContent = notifyMuted ? "🔕 Muted" : "🔔 Alerts";
-    notifyToggle.setAttribute("aria-pressed", notifyMuted ? "true" : "false");
-    notifyToggle.classList.toggle("muted", notifyMuted);
-  }
-
-  async function hydrateNotify() {
-    // Default from localStorage first (instant), then reconcile with controller.
-    try { notifyMuted = localStorage.getItem(NOTIFY_MUTE_KEY) === "1"; } catch (_e) {}
-    applyNotifyUI();
-    try {
-      const r = await fetch(url("/api/notify/state"), FETCH_OPTS);
-      if (r.ok) {
-        const s = await r.json();
-        notifyMuted = !!s.muted;
-        try { localStorage.setItem(NOTIFY_MUTE_KEY, notifyMuted ? "1" : "0"); } catch (_e) {}
-        applyNotifyUI();
-      }
-    } catch (_e) { /* offline: keep localStorage default */ }
-  }
-
-  async function toggleNotify() {
-    const prev = notifyMuted;
-    const next = !notifyMuted;
-    notifyMuted = next;                       // optimistic UI
-    try { localStorage.setItem(NOTIFY_MUTE_KEY, next ? "1" : "0"); } catch (_e) {}
-    applyNotifyUI();
-    try {
-      const r = await fetch(url("/api/notify/mute"), {
-        ...FETCH_OPTS, method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ muted: next }),
-      });
-      if (!r.ok) throw new Error("HTTP " + r.status);
-      toast(next ? "Bus alerts muted" : "Bus alerts on", "ok");
-    } catch (e) {
-      // Persist failed — revert so the toggle never lies about the real state.
-      notifyMuted = prev;
-      try { localStorage.setItem(NOTIFY_MUTE_KEY, prev ? "1" : "0"); } catch (_e2) {}
-      applyNotifyUI();
-      toast("Notify toggle failed — " + e.message, "err");
-    }
-  }
-
-  if (notifyToggle) notifyToggle.addEventListener("click", toggleNotify);
+  // NOTE (COCKPIT_REVAMP_HEADER_1, spec item 6): the header bell (notify-mute
+  // toggle) was removed. Banners stay ON; the controller's /api/notify/* endpoints
+  // + COCKPIT_NOTIFY_ENABLED env kill switch are untouched (engineer-only path).
 
   async function boot() {
     try {
@@ -627,12 +810,12 @@
     layout = await r.json();
     } catch (e) {
       connEl.textContent = "layout load failed — " + e.message;
-      connEl.className = "conn err";
+      connEl.className = "conn feed-dead";
       return;
     }
+    buildSidebar();              // 8 static nav entries (badges hydrate on poll)
     render();                    // paint immediately from layout (metadata)
     renderSummary();
-    hydrateNotify();             // reflect the controller's mute state on the toggle
     await poll();                // then hydrate with live state
     pollTimer = setInterval(poll, POLL_MS);
   }

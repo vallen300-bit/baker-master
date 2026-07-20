@@ -1,6 +1,17 @@
 /* Baker Cockpit — live operational surface.
  * Pattern C: calm, precise, dense, and evidence-led. The grid keeps every
  * backend-provided parameter visible: identity, inbox, context, and session.
+ *
+ * ── QUIET WHEN HEALTHY (spec @d5e25efa item 7, Director-ratified 2026-07-19) ──
+ * Color is an attention budget, not decoration. Healthy / steady-state elements
+ * are colorless or muted grey; color appears ONLY for a state that needs the
+ * Director's eyes (running green, GO blue, unread amber→red, offline red). The
+ * single exception is the one green header health line. Apply this rule to every
+ * cockpit element by default — if it isn't asking for attention, it stays quiet.
+ *
+ * FINAL 6-state palette (item 3): st-running green · st-go blue (pulse) ·
+ * st-unread amber · st-unread-old red · st-offline muted-red (pulse) · st-idle grey.
+ * Cockpit deliberately diverges from Lab colors this round (Lab untouched).
  */
 :root {
   --bg: #0d1117;
@@ -19,8 +30,21 @@
   --new: #00d5ff;
   --down: #5f6b78;
   --danger: #f85149;
+  /* FINAL 6-state palette (spec item 3). running reuses --needs-go (green);
+     unread reuses --working (amber); unread-old reuses --danger (red). */
+  --st-green: #2bd964;      /* running */
+  --st-blue: #388bfd;       /* GO — pulsating */
+  --st-amber: #d29922;      /* unread 0–10 min */
+  --st-red: #f85149;        /* unread > 10 min */
+  --st-offline: #cf6a63;    /* no-signal + offline — muted red, pulsating */
+  --st-grey: #8b95a3;       /* idle / not-started — muted */
   --shadow: inset 0 1px 0 rgba(255,255,255,.035), 0 8px 26px rgba(0,0,0,.2);
   --row-columns: 10px minmax(0, 1fr) minmax(72px, auto) 128px 116px;
+  /* COCKPIT_REVAMP_SPLIT_VIEW_SIDEBAR_1: shell geometry. Header height anchors the
+     sticky sidebar + terminal pane; sidebar width collapses on narrow screens. */
+  --header-h: 54px;
+  --sidebar-w: 158px;
+  --pane-w: min(760px, 52vw);
 }
 
 * { box-sizing: border-box; }
@@ -71,39 +95,109 @@ button { font: inherit; }
   font-size: 12px;
 }
 .cockpit-header .spacer { flex: 1; }
-.cockpit-header .notify-toggle {
-  margin-right: 13px;
-  padding: 7px 12px;
-  color: var(--muted-strong);
-  background: transparent;
-  border: 1px solid var(--border);
-  border-radius: 7px;
-  cursor: pointer;
-  font-size: 11px;
-  letter-spacing: .02em;
-}
-.cockpit-header .notify-toggle:hover,
-.cockpit-header .notify-toggle:focus-visible {
-  color: var(--text);
-  border-color: var(--blue);
-  outline: none;
-}
-.cockpit-header .notify-toggle.muted { color: var(--muted); opacity: .72; }
+/* The one green health line (spec item 6, the QUIET-WHEN-HEALTHY exception):
+   all words bright green while the /api/agents feed is live; turns red only when
+   the feed is stale/dead (.feed-dead). Warn = feed alive but Lab telemetry down. */
 .cockpit-header .conn {
   min-width: 205px;
-  color: var(--muted);
+  color: var(--st-green);
   font-size: 11px;
   font-variant-numeric: tabular-nums;
   text-align: right;
 }
-.cockpit-header .conn.ok::before { content: "● "; color: var(--needs-go); }
-.cockpit-header .conn.err::before { content: "● "; color: var(--danger); }
-.cockpit-header .conn.warn { color: #efc96e; }
-.cockpit-header .conn.warn::before { content: "● "; color: var(--working); }
+.cockpit-header .conn::before { content: "● "; color: currentColor; }
+/* GREEN whenever the feed is live (base color above); RED only when it is dead.
+   No yellow/warn middle state — Lab-telemetry-down lives in the summary sync-note. */
+.cockpit-header .conn.feed-dead { color: var(--danger); }
+
+/* ── Three-column app shell (spec items 4 + 5) ──────────────────────────────
+   left sidebar | middle live grid | right terminal pane. The pane track is 0
+   until a seat opens (.pane-open), so the grid owns the full middle width and the
+   fleet stays live + clickable beside an open terminal — no modal, no blur. */
+.app-shell {
+  display: grid;
+  grid-template-columns: var(--sidebar-w) minmax(0, 1fr) 0;
+  align-items: start;
+  max-width: 2200px;
+  margin: 0 auto;
+  transition: grid-template-columns 150ms ease;
+}
+.app-shell.pane-open { grid-template-columns: var(--sidebar-w) minmax(0, 1fr) var(--pane-w); }
+
+/* Sidebar: quiet by default, sticky so it stays put while the grid scrolls.
+   Reserved for future buttons (spec item 5.6) — only the 8 view entries now. */
+.sidebar {
+  position: sticky;
+  top: var(--header-h);
+  align-self: start;
+  height: calc(100vh - var(--header-h));
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 16px 10px;
+  background: var(--bg-subtle);
+  border-right: 1px solid var(--border);
+  overflow-y: auto;
+}
+.nav-item {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  padding: 8px 11px;
+  color: var(--muted);
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: 7px;
+  cursor: pointer;
+  font: 500 12px/1 -apple-system, sans-serif;
+  letter-spacing: .02em;
+  text-align: left;
+  white-space: nowrap;
+}
+.nav-item:hover { background: var(--panel-raised); color: var(--text); }
+.nav-item.active { color: var(--text); background: var(--panel-raised); border-color: var(--border); }
+.nav-item.active .nav-label { font-weight: 600; }
+/* Separate the two view entries (ACTIVE / ALL) from the six group entries. */
+.nav-item[data-view="Pilots"] { margin-top: 11px; }
+.nav-abbr { display: none; flex: 0 0 auto; width: 22px; text-align: center; font-weight: 600; letter-spacing: .04em; }
+.nav-label { flex: 1 1 auto; overflow: hidden; text-overflow: ellipsis; }
+/* Red attention badge (spec item 5.3): only for attention, never green — a group
+   with unread/GO/offline seats you're not currently viewing. QUIET WHEN HEALTHY. */
+.nav-badge {
+  flex: 0 0 auto;
+  width: 8px; height: 8px;
+  border-radius: 50%;
+  background: var(--st-red);
+  box-shadow: 0 0 6px rgba(248,81,73,.7);
+}
+.nav-badge[hidden] { display: none; }
+
+/* ACTIVE-view grey seats collapse behind one "N quiet" line per group. */
+.quiet-wrap { margin: 2px 0 5px; }
+.quiet-line {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding: 5px 12px;
+  color: var(--muted);
+  background: transparent;
+  border: 1px dashed var(--border-soft);
+  border-radius: 6px;
+  cursor: pointer;
+  font: 500 11px/1 -apple-system, sans-serif;
+  letter-spacing: .02em;
+  text-align: left;
+}
+.quiet-line:hover { background: var(--panel-raised); color: var(--muted-strong); }
+.quiet-caret { flex: 0 0 auto; width: 10px; color: var(--muted); font-size: 9px; }
+.quiet-rows { margin-top: 3px; opacity: .82; }
+.view-empty { padding: 44px 12px; color: var(--muted); font-size: 13px; text-align: center; }
 
 /* The first screen answers: what is this, how much is here, and is anything
    asking for attention? It stays a line of information, not a card wall. */
-main.wrap { max-width: 1800px; margin: 0 auto; padding: 28px 28px 48px; }
+main.wrap { min-width: 0; padding: 28px 28px 48px; }
 .cockpit-summary {
   display: flex;
   align-items: flex-end;
@@ -140,25 +234,8 @@ main.wrap { max-width: 1800px; margin: 0 auto; padding: 28px 28px 48px; }
 }
 .summary-status::before { content: ""; width: 6px; height: 6px; border-radius: 50%; background: currentColor; }
 .summary-status.is-warn { color: #efc96e; }
-.summary-stats {
-  display: flex;
-  gap: 28px;
-  margin: 0;
-  flex: 0 0 auto;
-}
-.summary-stats div { min-width: 70px; }
-.summary-stats dt {
-  color: var(--muted);
-  font-size: 10px;
-  letter-spacing: .12em;
-  text-transform: uppercase;
-}
-.summary-stats dd {
-  margin: 2px 0 0;
-  color: var(--text);
-  font-size: 20px;
-  font-variant-numeric: tabular-nums;
-}
+/* COCKPIT_REVAMP_HEADER_1 (spec item 6): the oversized digit block
+   (.summary-stats) was removed; live counts live in the green header line. */
 
 .fleet-toolbar {
   display: flex;
@@ -171,11 +248,13 @@ main.wrap { max-width: 1800px; margin: 0 auto; padding: 28px 28px 48px; }
 .roster-title span { color: var(--muted); font-size: 11px; font-weight: 400; margin-left: 8px; }
 .state-legend { display: flex; gap: 15px; color: var(--muted); font-size: 10px; }
 .state-legend span { display: inline-flex; align-items: center; gap: 6px; white-space: nowrap; }
-.legend-dot { width: 6px; height: 6px; border-radius: 50%; background: var(--down); }
-.legend-working { background: var(--working); }
-.legend-go { background: var(--needs-go); box-shadow: 0 0 6px rgba(43,217,100,.6); }
-.legend-idle { background: var(--blue); }
-.legend-down { background: var(--down); }
+/* Legend mirrors the FINAL palette: Working green · Needs GO blue · Idle grey ·
+   No signal muted-red. */
+.legend-dot { width: 6px; height: 6px; border-radius: 50%; background: var(--st-grey); }
+.legend-working { background: var(--st-green); }
+.legend-go { background: var(--st-blue); box-shadow: 0 0 6px rgba(56,139,253,.6); }
+.legend-idle { background: var(--st-grey); }
+.legend-down { background: var(--st-offline); }
 
 /* Explicit column grammar keeps the useful backend parameters legible. The
    header uses the --row-columns token; .row mirrors the same template literally
@@ -243,15 +322,10 @@ main.wrap { max-width: 1800px; margin: 0 auto; padding: 28px 28px 48px; }
 .row:focus-visible { outline: 2px solid var(--blue); outline-offset: -2px; }
 .r-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--down); }
 .r-id { display: flex; align-items: baseline; gap: 9px; min-width: 0; }
+/* COCKPIT_SLUG_ONLY_CARDS_1: the card identity renders the SLUG in this .r-name
+   slot (name's 13px/500 + per-state color); the old muted-monospace .r-slug line
+   was dropped so the slug shows once and no display name is rendered. */
 .r-name { overflow: hidden; color: #fff; font-size: 13px; font-weight: 500; text-overflow: ellipsis; white-space: nowrap; }
-.r-slug {
-  flex: 0 0 auto;
-  overflow: hidden;
-  color: var(--muted);
-  font: 500 10.5px/1 ui-monospace, SFMono-Regular, Menlo, monospace;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
 .r-kind {
   flex: 0 0 auto;
   padding: 2px 6px;
@@ -263,20 +337,44 @@ main.wrap { max-width: 1800px; margin: 0 auto; padding: 28px 28px 48px; }
   text-transform: uppercase;
 }
 
-/* Semantic state language: color is paired with a readable session label. */
-.row.up .r-dot { background: var(--blue); }
-.row.working { background: rgba(210,153,34,.055); }
-.row.working .r-dot { background: var(--working); box-shadow: 0 0 7px rgba(210,153,34,.7); }
-.row.down .r-dot { background: var(--down); }
-.row.error { background: rgba(248,81,73,.055); }
-.row.error .r-dot { background: var(--danger); box-shadow: 0 0 7px rgba(248,81,73,.65); }
-.row.glance-unknown .r-dot { background: var(--muted); }
-.row.glance-unknown .r-slug { font-style: italic; }
-.row.glance-amber { background: rgba(210,153,34,.09); }
-.row.glance-amber .r-dot { background: var(--working); box-shadow: 0 0 6px rgba(210,153,34,.6); }
-.row.glance-needs-go { background: rgba(43,217,100,.11); border-color: rgba(43,217,100,.42); }
-.row.glance-needs-go .r-dot { background: var(--needs-go); box-shadow: 0 0 8px rgba(43,217,100,.85); animation: dot-go-pulse 1.1s ease-in-out infinite; }
-@keyframes dot-go-pulse { 0%,100% { box-shadow: 0 0 4px rgba(43,217,100,.45); } 50% { box-shadow: 0 0 11px rgba(43,217,100,.95); } }
+/* ── FINAL 6-state palette (spec item 3) ────────────────────────────────────
+   Each driveable row carries exactly one st-* class. The dot always takes the
+   state color; the name text takes the SAME color a touch softer (item 3);
+   a background tint is added only for states that need the Director's eyes
+   (QUIET-WHEN-HEALTHY — idle stays untinted). st-go + st-offline pulse. */
+.r-dot { background: var(--st-grey); }
+
+/* running — bright green (healthy signal Director wants to see; no loud tint). */
+.row.st-running .r-dot { background: var(--st-green); box-shadow: 0 0 7px rgba(43,217,100,.7); }
+.row.st-running .r-name { color: #7ce8a2; }
+
+/* GO — bright blue, PULSATING (awaiting the Director). */
+.row.st-go { background: rgba(56,139,253,.10); border-color: rgba(56,139,253,.42); }
+.row.st-go .r-dot { background: var(--st-blue); box-shadow: 0 0 8px rgba(56,139,253,.85); animation: dot-pulse-go 1.1s ease-in-out infinite; }
+.row.st-go .r-name { color: #8fbcff; }
+@keyframes dot-pulse-go { 0%,100% { box-shadow: 0 0 4px rgba(56,139,253,.45); } 50% { box-shadow: 0 0 11px rgba(56,139,253,.95); } }
+
+/* unread 0–10 min — muted amber (from second zero). */
+.row.st-unread { background: rgba(210,153,34,.09); }
+.row.st-unread .r-dot { background: var(--st-amber); box-shadow: 0 0 6px rgba(210,153,34,.6); }
+.row.st-unread .r-name { color: #e3b652; }
+
+/* unread > 10 min — bright red (escalated). */
+.row.st-unread-old { background: rgba(248,81,73,.10); border-color: rgba(248,81,73,.40); }
+.row.st-unread-old .r-dot { background: var(--st-red); box-shadow: 0 0 7px rgba(248,81,73,.7); }
+.row.st-unread-old .r-name { color: #ff8f87; }
+
+/* offline / no-signal — muted red, PULSATING (up but silent). */
+.row.st-offline { background: rgba(207,106,99,.07); }
+.row.st-offline .r-dot { background: var(--st-offline); box-shadow: 0 0 6px rgba(207,106,99,.6); animation: dot-pulse-offline 1.5s ease-in-out infinite; }
+.row.st-offline .r-name { color: #d99089; }
+
+/* idle / not-started — muted grey, QUIET (no tint, no glow). The name takes the
+   chip color like every other state (item 3): muted grey, not white — a quiet seat
+   spends no attention budget. --muted clears WCAG AA on the row fill. */
+.row.st-idle .r-dot { background: var(--st-grey); }
+.row.st-idle .r-name { color: var(--muted); }
+@keyframes dot-pulse-offline { 0%,100% { box-shadow: 0 0 3px rgba(207,106,99,.4); } 50% { box-shadow: 0 0 9px rgba(207,106,99,.85); } }
 /* App/Cowork seats sit recessed with an inner shadow (mock v3: ".card.app"
    inset-shadow treatment) so status-only seats read as pressed-in vs the
    driveable terminal rows. Darker fill keeps light row text well above AA. */
@@ -337,33 +435,30 @@ main.wrap { max-width: 1800px; margin: 0 auto; padding: 28px 28px 48px; }
   text-overflow: ellipsis;
   white-space: nowrap;
 }
-.row.working .chip, .row.glance-amber .chip { color: var(--working); }
-.row.error .chip { color: #ffb4ad; }
+/* Chip label color tracks the row's state palette (item 3). */
+.row.st-running .chip { color: var(--st-green); }
+.row.st-go .chip { color: var(--st-blue); }
+.row.st-unread .chip { color: var(--st-amber); }
+.row.st-unread-old .chip { color: #ff8f87; }
+.row.st-offline .chip { color: #d99089; }
 
-/* The live terminal is a raised right-hand work surface, not a full-screen
-   replacement. The fleet remains visible behind it for orientation. */
-#veil {
+/* The live terminal is the right column of the shell (spec item 4) — a raised
+   work surface beside the live grid, NOT a modal. Sticky + full-height so it stays
+   pinned while the Director scrolls the fleet in the middle column. The pane is
+   collapsed (display:none, 0-width track) until .pane-open. */
+.term-pane {
   display: none;
-  position: fixed;
-  inset: 0;
-  z-index: 8;
-  background: rgba(4,7,10,.58);
-  backdrop-filter: blur(2px);
-}
-#veil.open { display: block; }
-#term {
-  display: none;
-  position: fixed;
-  inset: 0 0 0 auto;
-  z-index: 9;
-  width: min(760px, 52vw);
+  position: sticky;
+  top: var(--header-h);
+  align-self: start;
+  height: calc(100vh - var(--header-h));
   flex-direction: column;
   overflow: hidden;
   background: #080b0f;
   border-left: 1px solid var(--blue);
   box-shadow: -24px 0 70px rgba(0,0,0,.52);
 }
-#term.open { display: flex; }
+.app-shell.pane-open .term-pane { display: flex; }
 #termbar {
   display: flex;
   align-items: center;
@@ -384,13 +479,20 @@ main.wrap { max-width: 1800px; margin: 0 auto; padding: 28px 28px 48px; }
 #term-unacked { max-height: 22vh; padding: 10px 18px; overflow: auto; background: var(--panel); border-bottom: 1px solid var(--border); }
 #term-unacked[hidden] { display: none; }
 #term-unacked .u-head { margin-bottom: 7px; color: #efc96e; font-size: 10px; letter-spacing: .1em; text-transform: uppercase; }
-#term-unacked .u-row { display: flex; align-items: baseline; gap: 10px; padding: 3px 0; font-size: 12px; }
+#term-unacked .u-row { display: block; padding: 3px 0; font-size: 12px; }
+#term-unacked .u-main { display: flex; align-items: baseline; gap: 10px; min-width: 0; }
 #term-unacked .u-id { flex: 0 0 auto; color: var(--muted); font: 11px ui-monospace, Menlo, monospace; }
 #term-unacked .u-topic { overflow: hidden; color: var(--text); text-overflow: ellipsis; white-space: nowrap; }
 #term-unacked .u-age { flex: 0 0 auto; margin-left: auto; color: var(--muted); font-size: 11px; }
+#term-unacked .u-preview { margin: 3px 0 0 35px; color: var(--muted); font-size: 11px; line-height: 1.35; overflow-wrap: anywhere; white-space: pre-wrap; }
 
 /* App/service bus detail keeps the same raised surface grammar. */
-#msgveil { display: none; position: fixed; inset: 0; z-index: 8; background: rgba(4,7,10,.58); backdrop-filter: blur(2px); }
+/* COCKPIT_REVAMP_SPLIT_VIEW_SIDEBAR_1 (Director-verified AC, bus #13922): the grid
+   must NOT blur when a card is opened — this applies to the message-panel backdrop
+   too. The blur is removed; #msgveil stays only as a light, transparent-ish scrim
+   that keeps the panel readable + click-to-close, with the live grid visible and
+   unblurred behind it. */
+#msgveil { display: none; position: fixed; inset: 0; z-index: 8; background: rgba(4,7,10,.32); }
 #msgveil.open { display: block; }
 #msgpanel {
   display: none;
@@ -419,12 +521,14 @@ main.wrap { max-width: 1800px; margin: 0 auto; padding: 28px 28px 48px; }
 .hsec-t { margin: 0 0 7px; color: #efc96e; font-size: 10px; letter-spacing: .12em; text-transform: uppercase; }
 .hsec-compact .hsec-t { color: var(--muted); }
 .hempty, .hcount { padding: 3px 0; color: var(--muted); font-size: 12px; }
-.hrow { display: grid; grid-template-columns: minmax(80px,auto) 1fr auto auto; align-items: baseline; gap: 10px; padding: 5px 0; border-top: 1px solid var(--border-soft); font-size: 12px; }
+.hrow { display: block; padding: 5px 0; border-top: 1px solid var(--border-soft); font-size: 12px; }
 .hrow:first-of-type { border-top: none; }
+.hmain { display: grid; grid-template-columns: minmax(80px,auto) 1fr auto auto; align-items: baseline; gap: 10px; min-width: 0; }
 .hfrom { color: var(--muted); white-space: nowrap; }
 .htopic { overflow: hidden; color: var(--text); text-overflow: ellipsis; white-space: nowrap; }
 .hid { color: var(--muted); font: 11px ui-monospace, Menlo, monospace; }
 .hage { color: var(--muted); font-size: 11px; white-space: nowrap; }
+.hpreview { margin: 4px 0 0; color: var(--muted); font-size: 11px; line-height: 1.4; overflow-wrap: anywhere; white-space: pre-wrap; }
 .hrow-unacked .htopic { color: #f0d68a; }
 
 /* Toast feedback for start, GO, copy, and connection actions. */
@@ -433,21 +537,41 @@ main.wrap { max-width: 1800px; margin: 0 auto; padding: 28px 28px 48px; }
 #toast.err { color: #ffb4ad; border-color: var(--danger); }
 #toast.ok { border-color: var(--needs-go); }
 
+/* Narrow screens (spec item 5.5): the sidebar collapses to a 48px icon rail
+   showing two-letter abbreviations; hovering it expands back to labels. Pure CSS —
+   the :has() hover widens the sidebar track, no JS breakpoint logic. */
+@media (max-width: 1100px) {
+  .app-shell { grid-template-columns: 48px minmax(0, 1fr) 0; }
+  .app-shell.pane-open { grid-template-columns: 48px minmax(0, 1fr) var(--pane-w); }
+  .app-shell:has(.sidebar:hover) { grid-template-columns: 172px minmax(0, 1fr) 0; }
+  .app-shell.pane-open:has(.sidebar:hover) { grid-template-columns: 172px minmax(0, 1fr) var(--pane-w); }
+  .sidebar { padding: 14px 6px; }
+  .nav-item { justify-content: center; gap: 0; padding: 8px 4px; }
+  .nav-abbr { display: block; }
+  .nav-label { display: none; }
+  .nav-item[data-view="Pilots"] { margin-top: 9px; }
+  /* Badge floats to the top-right corner of the collapsed pill so it stays visible. */
+  .nav-badge { position: absolute; top: 5px; right: 5px; }
+  .sidebar:hover .nav-item { justify-content: flex-start; gap: 9px; padding: 8px 11px; }
+  .sidebar:hover .nav-abbr { display: none; }
+  .sidebar:hover .nav-label { display: block; }
+  .sidebar:hover .nav-badge { position: relative; top: auto; right: auto; }
+}
+
 @media (max-width: 900px) {
   .cockpit-header { padding: 0 15px; }
   .cockpit-header .tab { padding: 0 11px; }
   .cockpit-header .conn { min-width: 0; }
   main.wrap { padding: 22px 16px 40px; }
   .cockpit-summary { align-items: flex-start; flex-direction: column; gap: 18px; }
-  .summary-stats { gap: 24px; }
-  #term { width: min(680px, 76vw); }
+  /* Terminal pane takes more of the row on smaller desktops. */
+  :root { --pane-w: min(680px, 62vw); }
 }
 
 @media (max-width: 640px) {
   .cockpit-header { min-height: 50px; padding: 0 10px; }
   .cockpit-header .tab { padding: 0 7px; font-size: 9px; letter-spacing: .08em; }
   .cockpit-header .tab.brand { padding-left: 0; }
-  .cockpit-header .notify-toggle { margin-right: 5px; padding: 6px 8px; }
   .cockpit-header .conn { display: none; }
   main.wrap { padding: 18px 8px 32px; }
   .cockpit-summary { padding: 0 5px 17px; }
@@ -462,11 +586,19 @@ main.wrap { max-width: 1800px; margin: 0 auto; padding: 28px 28px 48px; }
   .rbtn, .chip { grid-column: 4; grid-row: 2; }
   .r-id { grid-column: 2; grid-row: 1 / span 2; align-self: center; flex-wrap: wrap; row-gap: 4px; }
   .r-dot { grid-column: 1; grid-row: 1 / span 2; }
-  .r-ctx .ctxbar { flex: 0 0 24px; max-width: 24px; }
-  .r-slug { max-width: 100%; }
-  #term { width: 100%; }
-  #termbar { min-height: 62px; padding: 10px 13px; }
-  #termbar .sub { max-width: 180px; }
+  .r-ctx .ctxbar { flex: 0 0 24px; max-width: 36px; }
+  /* Phone: a three-column split can't fit — the opened terminal takes over the
+     content area (grid hidden) while the icon rail stays; close returns to grid. */
+  .app-shell.pane-open { grid-template-columns: 48px 0 minmax(0, 1fr); }
+  .app-shell.pane-open .wrap { display: none; }
+  .term-pane { border-left: 0; }
+  /* codex FAIL #13397 P2b: at 320px the bar overflowed (scrollWidth 326 > 319) with
+     Copy + Nudge + GO + close all shown. Tighten gap/padding, let the title block
+     shrink first, and wrap as a hard backstop so controls can never overflow. */
+  #termbar { min-height: 62px; padding: 10px 13px; gap: 8px; flex-wrap: wrap; }
+  #termbar > div:first-child { min-width: 0; flex-shrink: 1; }
+  #termbar .sub { max-width: 150px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  #term .btn { padding: 5px 8px; }
   .hrow { grid-template-columns: 1fr auto; }
   .hfrom { grid-column: 1; }
   .htopic { grid-column: 1 / span 2; grid-row: 2; }

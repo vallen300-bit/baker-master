@@ -98,6 +98,43 @@ def test_send_wake_happy_path_sends_line_and_audits(tmp_path, fake_tmux):
     assert audited[-1]["slug"] == "b3" and audited[-1]["msg_id"] == 12063
 
 
+def test_compose_click_wake_line_top_n_with_sender_and_more():
+    """COCKPIT_CARD_CLICK_WAKE_INJECT_1 — the click nudge carries count + top-3
+    '#id topic (from sender)' + a '+K more' tail, oldest id first."""
+    row = {"unacked_count": 4, "unacked_messages": [
+        {"id": 10, "topic": "alpha", "from_terminal": "lead", "created_at": "2026-07-19T01:00:00Z"},
+        {"id": 11, "topic": "beta", "from_terminal": "codex", "created_at": "2026-07-19T02:00:00Z"},
+        {"id": 12, "topic": "gamma", "from_terminal": "lead", "created_at": "2026-07-19T03:00:00Z"},
+        {"id": 13, "topic": "delta", "from_terminal": "codex", "created_at": "2026-07-19T04:00:00Z"},
+    ]}
+    line = controller.compose_click_wake_line(row)
+    assert line == (
+        "[wake] check your bus: 4 unacked — #10 alpha (from lead), "
+        "#11 beta (from codex), #12 gamma (from lead) +1 more"
+    )
+    # oldest id first so _composer_holds' #\d+ anchor still matches the dedupe key.
+    assert line.index("#10") < line.index("#11")
+
+
+def test_compose_click_wake_line_omits_sender_when_absent():
+    """The leaner glance row (no from_terminal) still composes — sender omitted."""
+    row = {"unacked_count": 1, "unacked_messages": [
+        {"id": 7, "topic": "t", "created_at": "z"}]}
+    assert controller.compose_click_wake_line(row) == "[wake] check your bus: 1 unacked — #7 t"
+
+
+def test_send_wake_click_origin_uses_rich_line(tmp_path, fake_tmux):
+    """A click-origin wake injects the rich line; the sweep/default stays terse."""
+    settings = _settings(tmp_path)
+    rich = controller.send_wake(
+        settings, ENTRY, UNACKED_ROW, now=1000.0, last_wake={},
+        audit_source="cockpit_click",
+    )
+    assert rich["line"].startswith("[wake] check your bus: 2 unacked — #12063 ao-room-architecture")
+    bare = controller.send_wake(settings, ENTRY, UNACKED_ROW, now=2000.0, last_wake={})
+    assert bare["line"] == "[wake] check bus #12063 ao-room-architecture"
+
+
 def test_codex_family_verify_skips_c_l_repaint(tmp_path, fake_tmux):
     entry = controller.ManifestEntry(slug="deputy-codex", alias="aihead2", port=17603)
     result = controller.send_wake(
@@ -190,6 +227,9 @@ def test_send_wake_unrecoverable_park_fails_loud(tmp_path, monkeypatch):
     monkeypatch.setattr(controller, "_post_park_flag", lambda *a: flags.append(a))
     res = controller.send_wake(_settings(tmp_path), ENTRY, UNACKED_ROW, now=1.0, last_wake={})
     assert res["verified"] == "park_unrecovered"
+    assert res["disposition"] == "undelivered"
+    assert res["reason"] == "park_unrecovered"
+    assert res["skipped"] == "park_unrecovered"
     enters = [c for c in calls if c == ["send-keys", "-t", "b3", "Enter"]]
     assert len(enters) == 3  # never more than one recovery Enter (double-submit guard)
     assert len(flags) == 1 and flags[0][1] == "b3"
@@ -211,6 +251,9 @@ def test_send_wake_unreadable_pane_takes_no_action(tmp_path, monkeypatch):
     monkeypatch.setattr(controller, "_post_park_flag", lambda *a: flags.append(a))
     res = controller.send_wake(_settings(tmp_path), ENTRY, UNACKED_ROW, now=1.0, last_wake={})
     assert res["verified"] == "unknown"
+    assert res["disposition"] == "undelivered"
+    assert res["reason"] == "unverified"
+    assert res["skipped"] == "unverified"
     enters = [c for c in calls if c == ["send-keys", "-t", "b3", "Enter"]]
     assert len(enters) == 2  # only the FIX_1 submit-Returns, no recovery
     assert flags == []
@@ -455,6 +498,60 @@ def test_send_wake_force_bypasses_dedupe_but_still_submits(tmp_path, fake_tmux):
     assert res["sent"] is True
     assert res["verified"] == "submitted"
     assert len(fake_tmux) == 5
+
+
+def test_send_wake_click_debounce_coalesces_repeat_across_pages(tmp_path, fake_tmux):
+    """P2a (codex FAIL #13397): a click nudge (force=1) bypasses the per-message
+    dedupe + seat-floor by design, so the ONLY prior idempotence was a per-PAGE JS
+    debounce — which a reload / second tab / delayed repeat defeats. The server-side
+    per-slug click window coalesces those repeats regardless of the originating page."""
+    settings = _settings(tmp_path)
+    last = {}
+    first = controller.send_wake(
+        settings, ENTRY, UNACKED_ROW, now=1000.0, last_wake=last,
+        force=True, audit_source="cockpit_click", verify=False,
+    )
+    assert first["sent"] is True
+    assert last["b3"]["last_click_injection"] == 1000.0
+    fake_tmux.clear()
+    # A second click within the window — e.g. a reopened tab that never saw the first
+    # page's JS debounce — is coalesced server-side. Nothing is injected.
+    second = controller.send_wake(
+        settings, ENTRY, UNACKED_ROW,
+        now=1000.0 + controller.WAKE_CLICK_DEBOUNCE_SECONDS - 0.1,
+        last_wake=last, force=True, audit_source="cockpit_click", verify=False,
+    )
+    assert second["sent"] is False and second["skipped"] == "click_deduped"
+    assert fake_tmux == []
+
+
+def test_send_wake_click_debounce_releases_after_window(tmp_path, fake_tmux):
+    """A genuine later re-nudge (past the click window) still fires — the debounce
+    only coalesces rapid repeats, it does not permanently mute the seat."""
+    settings = _settings(tmp_path)
+    last = {}
+    controller.send_wake(
+        settings, ENTRY, UNACKED_ROW, now=1000.0, last_wake=last,
+        force=True, audit_source="cockpit_click", verify=False,
+    )
+    later = controller.send_wake(
+        settings, ENTRY, UNACKED_ROW,
+        now=1000.0 + controller.WAKE_CLICK_DEBOUNCE_SECONDS + 0.1,
+        last_wake=last, force=True, audit_source="cockpit_click", verify=False,
+    )
+    assert later["sent"] is True
+
+
+def test_send_wake_click_debounce_is_click_origin_only(tmp_path, fake_tmux):
+    """The click debounce is independent of the protected dedupe/typed-repeat state:
+    a non-click forced wake neither arms it nor is blocked by a recent click window."""
+    settings = _settings(tmp_path)
+    last = {"b3": {"last_click_injection": 1000.0, "message_last": {}}}
+    res = controller.send_wake(
+        settings, ENTRY, UNACKED_ROW, now=1000.5, last_wake=last,
+        force=True, verify=False,
+    )
+    assert res["sent"] is True  # not click_deduped despite a recent click window
 
 
 def test_send_wake_guarded_seat_is_noop(tmp_path, fake_tmux):

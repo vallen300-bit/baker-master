@@ -205,6 +205,24 @@ class _Flip:
         return {self.slug: {"unacked_count": 0 if self.n < 2 else self.count}}
 
 
+class _DegradedThenFresh:
+    """First glance is degraded; one independent refresh may recover it."""
+    def __init__(self, *, recover=True):
+        self.last_ok = False
+        self.force_refresh_calls = 0
+        self.recover = recover
+
+    async def read(self):
+        return {}
+
+    async def force_refresh(self):
+        self.force_refresh_calls += 1
+        self.last_ok = self.recover
+        if self.recover:
+            return {"codex-arch": {"unacked_count": 3}}
+        return {}
+
+
 def _seed_layout(settings, slug):
     (settings.static_dir / "cockpit_layout.json").write_text(
         json.dumps(_layout_with([{"slug": slug, "notify_eligible": True}])),
@@ -250,6 +268,44 @@ def test_notify_tick_muted_does_not_fire_but_advances_baseline(tmp_path, monkeyp
     asyncio.run(drive())
     assert fired == []                                        # muted → silent
     assert app.state.notify_prev.get("codex-arch") == 2      # baseline still advanced
+
+
+def test_notify_tick_retries_one_degraded_glance_then_fires(tmp_path, monkeypatch):
+    settings = _settings(tmp_path)
+    _seed_layout(settings, "codex-arch")
+    lab = _DegradedThenFresh(recover=True)
+    app = controller.create_app(settings, lab_glance=lab)
+    app.state.notify_prev = {"codex-arch": 0}
+    fired = []
+    monkeypatch.setattr(
+        controller, "notify_macos",
+        lambda _cfg, slug, count: fired.append((slug, count)),
+    )
+
+    asyncio.run(app.state.notify_tick())
+
+    assert lab.force_refresh_calls == 1
+    assert fired == [("codex-arch", 3)]
+    assert app.state.notify_prev["codex-arch"] == 3
+
+
+def test_notify_tick_two_degraded_reads_skip_without_false_banner(tmp_path, monkeypatch):
+    settings = _settings(tmp_path)
+    _seed_layout(settings, "codex-arch")
+    lab = _DegradedThenFresh(recover=False)
+    app = controller.create_app(settings, lab_glance=lab)
+    app.state.notify_prev = {"codex-arch": 0}
+    fired = []
+    monkeypatch.setattr(
+        controller, "notify_macos",
+        lambda _cfg, slug, count: fired.append((slug, count)),
+    )
+
+    asyncio.run(app.state.notify_tick())
+
+    assert lab.force_refresh_calls == 1
+    assert fired == []
+    assert app.state.notify_prev == {"codex-arch": 0}
 
 
 def test_lifespan_background_task_fires_on_transition(tmp_path, monkeypatch):

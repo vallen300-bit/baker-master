@@ -25,6 +25,12 @@ TERMINAL_ALIAS="$2"
 PARENT_PID="$3"
 INTERVAL="${HEARTBEAT_INTERVAL:-45}"            # 45s vs the 120s freshness window
 TIMEOUT="${HEARTBEAT_HTTP_TIMEOUT:-5}"          # short, fire-and-forget
+# CODEX_ACTIVE_WORK_SIGNAL_1 — the daemon consumes these advisory fields when
+# the Part-A guard is deployed. Unknown heartbeat fields are ignored by older
+# daemons, so this remains backward-compatible during the split rollout.
+CODEX_CPU_ACTIVE_THRESHOLD="${FORGE_CODEX_CPU_ACTIVE_THRESHOLD:-0.1}"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+. "$SCRIPT_DIR/codex-worktree.sh" 2>/dev/null || true
 # LIVENESS_WORKING_SPLIT_1 (PR 2) — low-frequency IDLE keepalive. While idle (no
 # turn flag) the ticker still POSTs at this cadence with idle=true, which the
 # daemon uses to refresh last_alive_at (the SESSION-ALIVE signal slug_live reads)
@@ -82,16 +88,44 @@ PY
 # body, never the key). `|| true` so a curl failure can never surface to or kill
 # the ticker. Logs class/status only on a non-2xx, keeping the log tiny + key-free.
 _post_heartbeat() {
-  local idle_flag="$1" body code
+  local idle_flag="$1" body code signal_json
   # P0.1 carry (B2): the Stop hook writes the measured context band to a local
   # file keyed by session; carry its fields on the beat so the daemon can meter
   # context mechanically. Best-effort: any parse failure yields "" (plain body).
   local band_json
   band_json="$(_band_json)"
+  signal_json=""
+  if is_codex_family "$TERMINAL_ALIAS"; then
+    local active="false" active_source="none"
+    local dirty="false" dirty_source="clean" scan_rc
+    if [ -f "$HOME/forge-agent/active/$SESSION_UUID" ]; then
+      active="true"
+      active_source="turn_flag"
+    else
+      local cpu
+      cpu="$(ps -p "$PARENT_PID" -o %cpu= 2>/dev/null | awk 'NF {print $1; exit}')"
+      if [ -n "$cpu" ] && awk -v cpu="$cpu" -v threshold="$CODEX_CPU_ACTIVE_THRESHOLD" \
+          'BEGIN { exit !((cpu + 0) >= (threshold + 0)) }'; then
+        active="true"
+        active_source="pid_cpu"
+      fi
+    fi
+    if codex_worktree_dirty "$TERMINAL_ALIAS"; then
+      dirty="true"
+      dirty_source="git_status"
+    else
+      scan_rc=$?
+      if [ "$scan_rc" -eq 2 ]; then
+        dirty="true"
+        dirty_source="scan_unavailable"
+      fi
+    fi
+    signal_json=",\"active_work\":${active},\"active_work_source\":\"${active_source}\",\"worktree_dirty\":${dirty},\"worktree_dirty_source\":\"${dirty_source}\""
+  fi
   if [ "$idle_flag" = "true" ]; then
-    body="{\"session_uuid\":\"$SESSION_UUID\",\"terminal_alias\":\"$TERMINAL_ALIAS\",\"idle\":true$band_json}"
+    body="{\"session_uuid\":\"$SESSION_UUID\",\"terminal_alias\":\"$TERMINAL_ALIAS\",\"idle\":true${signal_json}${band_json}}"
   else
-    body="{\"session_uuid\":\"$SESSION_UUID\",\"terminal_alias\":\"$TERMINAL_ALIAS\"$band_json}"
+    body="{\"session_uuid\":\"$SESSION_UUID\",\"terminal_alias\":\"$TERMINAL_ALIAS\"${signal_json}${band_json}}"
   fi
   code=$(curl -s -o /dev/null -w "%{http_code}" -X POST "$LAB_URL/api/heartbeat" \
     -H "X-Forge-Key: $FORGE_KEY" \
