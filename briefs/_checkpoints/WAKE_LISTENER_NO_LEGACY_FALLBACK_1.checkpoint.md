@@ -4,8 +4,8 @@ attempt: 1
 dispatched_by: lead (bus #13635, Director-ordered parallel lane)
 report_topic: wake-listener-no-legacy-fallback-1
 repos:
-  - brisen-lab b1/wake-listener-no-legacy-fallback-1 @932f542 (rebased onto lab main @07cd4c8)
-status: codex round-5 CLI FAIL #13811 (concurrency layer discarded wakes: P1a coalesce dropped later/newer; P1b saturation dropped 9th) RESOLVED @932f542 — pending-latest slot + pool-queues; re-gate round-6 requested #13816 (lead CLI lane). Awaiting re-gate -> merge -> deploy. Reconcile-retry (req3) + sent:false disposition + controller self-deadline (WAKE_DISPOSITION_REWAKE_1 §task-4) all deferred/out-of-scope.
+  - brisen-lab b1/wake-listener-no-legacy-fallback-1 @932f542 -> MERGED lab PR #162 @ceb53e5
+status: CLOSED 2026-07-20 — codex CLI PASS round 6 @932f542 (zero findings, 6-round arc). Merged + deployed; installed ~/.brisen-lab/wake-listener.py updated, com.baker.wake-listener running pid 4229 (#13817). PHASE-2 (disposition consumption, WAKE_DISPOSITION_REWAKE_1 §tasks 4-5) PARKED — waits for lead's EXPLICIT release on this topic after deputy-codex controller phase-1 merges (3 more P2s in flight there). Do NOT start phase-2 unprompted.
 gate: codex bus gate on @f2801b8 -> lead merge
 ---
 
