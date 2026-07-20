@@ -55,4 +55,17 @@ if [ -x "$TICKER" ] || [ -f "$TICKER" ]; then
     >/dev/null 2>&1 &
 fi
 
+# SWEEP_TIMING_ACTIVE_WORK_GUARD_1 — codex-family seats need a host-side
+# lifecycle watcher because the remote daemon cannot inspect the Codex process
+# or its worktrees before the 60s SIGTERM window expires.
+case "$FORGE_TERMINAL" in
+  codex|deputy-codex)
+    WATCHER="$HOME/forge-agent/lifecycle-watch.sh"
+    if [ -x "$WATCHER" ] || [ -f "$WATCHER" ]; then
+      nohup bash "$WATCHER" "$SESSION_UUID" "$FORGE_TERMINAL" "$CLAUDE_SESSION_PID" \
+        >/dev/null 2>&1 &
+    fi
+    ;;
+esac
+
 exit 0

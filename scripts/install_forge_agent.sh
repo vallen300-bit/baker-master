@@ -47,7 +47,8 @@ HOST_CLASS_FILE="${BRISEN_LAB_HOST_CLASS_FILE:-$HOME/.brisen-lab/host-class}"
 LAB_URL_DEFAULT="https://brisen-lab.onrender.com"
 
 # Deployed forge scripts (canonical source -> deploy basename).
-FORGE_SCRIPTS=(session-start-hook.sh heartbeat-ticker.sh turn-start-hook.sh turn-stop-hook.sh)
+FORGE_SCRIPTS=(session-start-hook.sh heartbeat-ticker.sh turn-start-hook.sh turn-stop-hook.sh \
+  codex-worktree.sh lifecycle-watch.sh)
 # Bus hooks: canonical source is tests/fixtures/ (already tracked); deployed to
 # ~/.claude/hooks/.
 BUS_HOOKS=(session-start-bus-drain.sh stop-bus-ack.sh)

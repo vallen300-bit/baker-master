@@ -58,6 +58,45 @@ CAP="$(run_scenario active 3)"
 CAP="$(run_scenario nokey 2)"
 [ ! -s "$CAP" ] && ok "no key/url -> no POST" || bad "no key/url -> unexpected POST"
 
+# --- 4. CODEX -> PID CPU + dirty worktree advisory fields --------------------
+T="$(mktemp -d)"; B="$T/bin"; C="$T/cap"; uuid="u-codex-$$"
+mkdir -p "$B" "$T/forge-agent/active" "$T/worktrees/wip"
+git -C "$T/worktrees/wip" init -q
+git -C "$T/worktrees/wip" config user.name "forge-test"
+git -C "$T/worktrees/wip" config user.email "forge-test@example.test"
+printf 'base\n' > "$T/worktrees/wip/README"
+git -C "$T/worktrees/wip" add README
+git -C "$T/worktrees/wip" commit -q -m base
+printf 'dirty\n' >> "$T/worktrees/wip/README"
+cat > "$B/curl" <<SH
+#!/usr/bin/env bash
+prev=""; for a in "\$@"; do [ "\$prev" = "-d" ] && printf '%s\n' "\$a" >> "$C"; prev="\$a"; done; printf '200'
+SH
+cat > "$B/ps" <<'SH'
+#!/usr/bin/env bash
+printf '  1.5\n'
+SH
+chmod +x "$B/curl" "$B/ps"; : > "$C"
+sleep 30 & parent=$!
+PATH="$B:$PATH" HOME="$T" FORGE_KEY="k" LAB_URL="https://example.test" \
+  FORGE_CODEX_WORKTREE_ROOTS="$T/worktrees" HEARTBEAT_INTERVAL=1 \
+  HEARTBEAT_IDLE_KEEPALIVE_INTERVAL=1 \
+  bash "$TICKER" "$uuid" "deputy-codex" "$parent" >/dev/null 2>&1 & tk=$!
+sleep 2
+kill "$tk" "$parent" 2>/dev/null || true
+wait "$tk" 2>/dev/null; wait "$parent" 2>/dev/null
+if grep -q '"active_work":true' "$C" && grep -q '"active_work_source":"pid_cpu"' "$C"; then
+  ok "codex CPU activity -> active_work=true"
+else
+  bad "codex CPU activity missing (cap: $(tr '\n' '|' < "$C"))"
+fi
+if grep -q '"worktree_dirty":true' "$C" && grep -q '"worktree_dirty_source":"git_status"' "$C"; then
+  ok "codex dirty worktree -> worktree_dirty=true"
+else
+  bad "codex dirty worktree missing (cap: $(tr '\n' '|' < "$C"))"
+fi
+rm -rf "$T"
+
 echo "----"
 echo "PASS=$PASS FAIL=$FAIL"
 [ "$FAIL" -eq 0 ]
