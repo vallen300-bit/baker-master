@@ -82,6 +82,17 @@ def test_render_routes_through_pure_planview():
     assert "updateSidebar(plan.badges)" in JS, "sidebar badges must come from planView"
 
 
+def test_grid_never_blurs_behind_an_open_card():
+    """Director-verified AC (bus #13922): opening a card must NOT blur the grid —
+    for the terminal (#veil removed) AND the app-card message panel (#msgveil). No
+    backdrop-filter blur may remain anywhere in the cockpit stylesheet."""
+    assert "backdrop-filter" not in CSS, "no grid-blurring backdrop-filter may remain"
+    assert 'id="veil"' not in HTML  # terminal modal fully gone
+    # #msgveil survives only as a click-to-close scrim, not a blur.
+    m = re.search(r"^#msgveil\s*\{([^}]*)\}", CSS, flags=re.M)
+    assert m and "blur" not in m.group(1), "#msgveil must not blur the grid"
+
+
 def test_narrow_sidebar_collapses_to_icons():
     assert ".nav-abbr" in CSS and ".nav-label" in CSS
     assert ":has(.sidebar:hover)" in CSS, "hover-expand must be CSS-only (:has)"

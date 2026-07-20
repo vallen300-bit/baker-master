@@ -486,7 +486,12 @@ main.wrap { min-width: 0; padding: 28px 28px 48px; }
 #term-unacked .u-preview { margin: 3px 0 0 35px; color: var(--muted); font-size: 11px; line-height: 1.35; overflow-wrap: anywhere; white-space: pre-wrap; }
 
 /* App/service bus detail keeps the same raised surface grammar. */
-#msgveil { display: none; position: fixed; inset: 0; z-index: 8; background: rgba(4,7,10,.58); backdrop-filter: blur(2px); }
+/* COCKPIT_REVAMP_SPLIT_VIEW_SIDEBAR_1 (Director-verified AC, bus #13922): the grid
+   must NOT blur when a card is opened — this applies to the message-panel backdrop
+   too. The blur is removed; #msgveil stays only as a light, transparent-ish scrim
+   that keeps the panel readable + click-to-close, with the live grid visible and
+   unblurred behind it. */
+#msgveil { display: none; position: fixed; inset: 0; z-index: 8; background: rgba(4,7,10,.32); }
 #msgveil.open { display: block; }
 #msgpanel {
   display: none;
