@@ -344,6 +344,19 @@ def test_read_codex_pane_is_passive_capture_only(monkeypatch):
     assert calls == [["capture-pane", "-t", "codex", "-p"]]
 
 
+def test_normalize_codex_pane_for_activity_ignores_only_working_timer():
+    before = "Context 18% used\nWorking (17m 26s)\n"
+    after_timer = "Context 18% used\nWorking (17m 28s)\n"
+    after_output = "Context 18% used\nWorking (17m 30s)\nnew output\n"
+
+    assert controller.normalize_codex_pane_for_activity(before) == (
+        controller.normalize_codex_pane_for_activity(after_timer)
+    )
+    assert controller.normalize_codex_pane_for_activity(before) != (
+        controller.normalize_codex_pane_for_activity(after_output)
+    )
+
+
 def test_context_fields_prefer_local_even_when_stale_then_lab(tmp_path, monkeypatch):
     settings = _settings(tmp_path)
     _write_band(settings.context_band_dir, "b3", percent=33, age_seconds=901)
@@ -379,7 +392,7 @@ def test_context_fields_prefer_local_even_when_stale_then_lab(tmp_path, monkeypa
     }
 
 
-def test_api_agents_uses_local_context_and_ignores_codex_timer_change(
+def test_api_agents_uses_local_context_and_normalized_codex_pane_activity(
     tmp_path, monkeypatch
 ):
     settings = _settings(
@@ -393,6 +406,7 @@ def test_api_agents_uses_local_context_and_ignores_codex_timer_change(
     panes = iter([
         "Context 18% used\nWorking (17m 26s)\n",
         "Context 18% used\nWorking (17m 28s)\n",
+        "Context 18% used\nWorking (17m 30s)\nnew output\n",
     ])
     app = controller.create_app(
         settings,
@@ -426,6 +440,12 @@ def test_api_agents_uses_local_context_and_ignores_codex_timer_change(
             "/api/agents", headers={"Host": "127.0.0.1:7800", **_auth()}
         ).json()["agents"]
     }
+    third = {
+        row["slug"]: row
+        for row in client.get(
+            "/api/agents", headers={"Host": "127.0.0.1:7800", **_auth()}
+        ).json()["agents"]
+    }
 
     assert first["b3"]["context_pct"] == 29.0
     assert first["b3"]["context_src"] == "local"
@@ -434,6 +454,7 @@ def test_api_agents_uses_local_context_and_ignores_codex_timer_change(
     assert first["codex"]["context_src"] == "pane"
     assert first["codex"]["is_working"] is False
     assert second["codex"]["is_working"] is False
+    assert third["codex"]["is_working"] is True
 
 
 def test_glance_row_from_lab_projects_pinned_fields_and_context():
