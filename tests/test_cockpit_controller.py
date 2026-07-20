@@ -5,6 +5,7 @@ from datetime import datetime, timezone
 import json
 from pathlib import Path
 import subprocess
+import time
 
 import httpx
 import pytest
@@ -716,9 +717,271 @@ def test_force_wake_respects_zero_server_wake_obligation(tmp_path, monkeypatch):
     assert response.json() == {
         "ok": True,
         "sent": False,
+        "disposition": "skipped",
+        "reason": "no wake obligation",
         "skipped": "no wake obligation",
         "slug": "b3",
     }
+
+
+def test_wake_structured_disposition_and_request_receipt(tmp_path, monkeypatch):
+    settings = _settings(tmp_path)
+    app = controller.create_app(
+        settings,
+        lab_glance=FakeLab(
+            {
+                "b3": {
+                    "is_working": False,
+                    "unacked_count": 1,
+                    "unacked_messages": [
+                        {
+                            "id": 7,
+                            "kind": "dispatch",
+                            "topic": "wake/receipt",
+                            "created_at": "2026-07-20T00:00:00Z",
+                        }
+                    ],
+                }
+            }
+        ),
+    )
+    monkeypatch.setattr(controller, "tmux_session_names", lambda _settings: {"b3"})
+    monkeypatch.setattr(
+        controller,
+        "_run_tmux",
+        lambda _settings, _args, **_kwargs: subprocess.CompletedProcess(
+            args=[], returncode=0, stdout="", stderr=""
+        ),
+    )
+    monkeypatch.setattr(
+        controller,
+        "_verify_wake_submit",
+        lambda *_args, **_kwargs: {"verified": "submitted"},
+    )
+
+    client = TestClient(app)
+    headers = {
+        "Host": "127.0.0.1:7800",
+        "X-Wake-Request-Id": "rid-structured-7",
+        **_auth(),
+    }
+    response = client.post("/api/sessions/b3/wake", headers=headers)
+
+    assert response.status_code == 200
+    assert response.json()["sent"] is True
+    assert response.json()["disposition"] == "delivered"
+    assert response.json()["reason"] == "delivered"
+    receipt = client.get(
+        "/api/wake-receipt/rid-structured-7",
+        headers={"Host": "127.0.0.1:7800", **_auth()},
+    )
+    assert receipt.status_code == 200
+    assert receipt.json() == {"landed": True}
+    audit = [json.loads(line) for line in settings.wake_audit_path.read_text().splitlines()]
+    assert audit[-1]["request_id"] == "rid-structured-7"
+    assert audit[-1]["landed"] is True
+
+
+def test_wake_deadline_returns_undelivered_disposition(tmp_path, monkeypatch):
+    settings = _settings(tmp_path)
+    app = controller.create_app(settings, lab_glance=FakeLab({}))
+
+    def expired(_settings, *, deadline=None):
+        raise controller.WakeDeadlineExceeded("test deadline")
+
+    monkeypatch.setattr(controller, "tmux_session_names", expired)
+    response = TestClient(app).post(
+        "/api/sessions/b3/wake",
+        headers={
+            "Host": "127.0.0.1:7800",
+            "X-Wake-Request-Id": "rid-deadline-7",
+            **_auth(),
+        },
+    )
+
+    assert response.status_code == 200
+    assert response.json()["sent"] is False
+    assert response.json()["disposition"] == "undelivered"
+    assert response.json()["reason"] == "controller-deadline"
+    assert response.json()["skipped"] == "controller-deadline"
+    receipt = TestClient(app).get(
+        "/api/wake-receipt/rid-deadline-7",
+        headers={"Host": "127.0.0.1:7800", **_auth()},
+    )
+    assert receipt.json() == {"landed": False}
+
+
+def test_undelivered_wake_result_keeps_legacy_skipped_reason():
+    result = controller._wake_result(
+        "undelivered", "controller-deadline", slug="b3"
+    )
+
+    assert result["disposition"] == "undelivered"
+    assert result["reason"] == "controller-deadline"
+    assert result["skipped"] == "controller-deadline"
+
+
+def test_wake_tmux_probe_timeout_returns_undelivered_disposition(tmp_path, monkeypatch):
+    settings = _settings(tmp_path)
+    app = controller.create_app(settings, lab_glance=FakeLab({}))
+
+    def tmux_probe_timeout(_settings, **kwargs):
+        assert kwargs["timeout"] > 0
+        raise subprocess.TimeoutExpired(["tmux", "ls"], kwargs["timeout"])
+
+    monkeypatch.setattr(controller.subprocess, "run", tmux_probe_timeout)
+    response = TestClient(app).post(
+        "/api/sessions/b3/wake",
+        headers={
+            "Host": "127.0.0.1:7800",
+            "X-Wake-Request-Id": "rid-tmux-timeout-7",
+            **_auth(),
+        },
+    )
+
+    assert response.status_code == 200
+    assert response.json()["sent"] is False
+    assert response.json()["disposition"] == "undelivered"
+    assert response.json()["reason"] == "controller-deadline"
+
+
+def test_working_skip_rewakes_once_on_idle_transition(tmp_path, monkeypatch):
+    settings = _settings(tmp_path)
+
+    class SequencedLab:
+        last_ok = True
+
+        def __init__(self):
+            self.read_count = 0
+
+        async def read(self):
+            self.read_count += 1
+            working = self.read_count == 1
+            return {
+                "b3": {
+                    "is_working": working,
+                    "unacked_count": 1,
+                    "unacked_messages": [{
+                        "id": 42,
+                        "kind": "dispatch",
+                        "topic": "rewake/idle",
+                        "created_at": "2026-07-20T00:00:00Z",
+                    }],
+                }
+            }
+
+    lab = SequencedLab()
+    app = controller.create_app(settings, lab_glance=lab)
+    monkeypatch.setattr(controller, "tmux_session_names", lambda _settings: {"b3"})
+    calls = []
+
+    def fake_send_wake(*args, **kwargs):
+        calls.append(kwargs)
+        if len(calls) == 1:
+            return controller._wake_result(
+                "skipped", "working", slug="b3", msg_id=42, topic="rewake/idle"
+            )
+        return controller._wake_result(
+            "delivered", "delivered", slug="b3", msg_id=42, topic="rewake/idle"
+        )
+
+    monkeypatch.setattr(controller, "send_wake", fake_send_wake)
+    client = TestClient(app)
+    first = client.post(
+        "/api/sessions/b3/wake",
+        headers={"Host": "127.0.0.1:7800", **_auth()},
+    )
+    assert first.json()["reason"] == "working"
+
+    asyncio.run(app.state.notify_tick())
+    asyncio.run(app.state.notify_tick())
+
+    assert len(calls) == 2
+    assert calls[1]["audit_source"] == "deferred"
+
+
+def test_deferred_wake_retains_pending_until_delivered(tmp_path, monkeypatch):
+    settings = _settings(tmp_path)
+    app = controller.create_app(settings, lab_glance=FakeLab({}))
+    app.state.pending_wakes["b3"] = {"msg_id": 42}
+    app.state.wake_prev_working["b3"] = True
+    calls = []
+
+    def fake_send_wake(*args, **kwargs):
+        calls.append(kwargs)
+        if len(calls) == 1:
+            return controller._wake_result(
+                "skipped", "seat_floor", slug="b3", msg_id=42, topic="rewake/idle"
+            )
+        return controller._wake_result(
+            "delivered", "delivered", slug="b3", msg_id=42, topic="rewake/idle"
+        )
+
+    monkeypatch.setattr(controller, "send_wake", fake_send_wake)
+    row = {
+        "is_working": False,
+        "wake_obligation_count": 1,
+        "unacked_messages": [{"id": 42, "topic": "rewake/idle"}],
+    }
+
+    first = asyncio.run(app.state.deferred_wake_tick({"b3": row}))
+    assert first[0]["disposition"] == "skipped"
+    assert "b3" in app.state.pending_wakes
+
+    app.state.wake_prev_working["b3"] = True
+    second = asyncio.run(app.state.deferred_wake_tick({"b3": row}))
+    assert second[0]["disposition"] == "delivered"
+    assert "b3" not in app.state.pending_wakes
+
+
+def test_deferred_rewake_runs_when_notifications_disabled(tmp_path, monkeypatch):
+    settings = replace(_settings(tmp_path), notify_enabled=False, notify_poll_seconds=0.01)
+
+    class SequencedLab:
+        last_ok = True
+
+        def __init__(self):
+            self.read_count = 0
+
+        async def read(self):
+            self.read_count += 1
+            working = self.read_count <= 2
+            return {
+                "b3": {
+                    "is_working": working,
+                    "unacked_count": 1,
+                    "unacked_messages": [{"id": 43, "topic": "rewake/disabled"}],
+                }
+            }
+
+    lab = SequencedLab()
+    app = controller.create_app(settings, lab_glance=lab)
+    monkeypatch.setattr(controller, "tmux_session_names", lambda _settings: {"b3"})
+    calls = []
+
+    def fake_send_wake(*args, **kwargs):
+        calls.append(kwargs)
+        if len(calls) == 1:
+            return controller._wake_result(
+                "skipped", "working", slug="b3", msg_id=43, topic="rewake/disabled"
+            )
+        return controller._wake_result(
+            "delivered", "delivered", slug="b3", msg_id=43, topic="rewake/disabled"
+        )
+
+    monkeypatch.setattr(controller, "send_wake", fake_send_wake)
+    with TestClient(app) as client:
+        response = client.post(
+            "/api/sessions/b3/wake",
+            headers={"Host": "127.0.0.1:7800", **_auth()},
+        )
+        assert response.status_code == 200
+        deadline = time.time() + 2.0
+        while len(calls) < 2 and time.time() < deadline:
+            time.sleep(0.01)
+
+    assert len(calls) == 2
+    assert calls[1]["audit_source"] == "deferred"
 
 
 def test_wake_endpoint_rechecks_after_stale_no_unacked_glance(tmp_path, monkeypatch):
@@ -827,7 +1090,10 @@ def test_force_wake_failed_refresh_is_explicit_503(tmp_path, monkeypatch):
     assert response.json()["detail"] == {
         "error": "wake_state_unknown",
         "slug": "b3",
+        "disposition": "undelivered",
         "reason": "lab_glance_unavailable",
+        "skipped": "lab_glance_unavailable",
+        "sent": False,
     }
     assert lab.force_refresh_calls == 1
     assert len(calls) == 1
