@@ -601,7 +601,16 @@ def tmux_session_names(
             if remaining is not None else settings.command_timeout_seconds,
             check=False,
         )
-    except (OSError, subprocess.TimeoutExpired):
+    except OSError:
+        return set()
+    except subprocess.TimeoutExpired as exc:
+        # A deadline-aware probe must not collapse a live-but-slow seat into
+        # the empty-session result.  That would turn a controller timeout into
+        # a deliberate "session down" skip and suppress caller retries.
+        if deadline is not None:
+            raise WakeDeadlineExceeded(
+                "controller wake deadline exceeded during tmux probe"
+            ) from exc
         return set()
     if result.returncode not in (0, 1):
         LOG.warning("tmux ls failed: %s", result.stderr.strip())

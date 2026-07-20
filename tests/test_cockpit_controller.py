@@ -809,6 +809,30 @@ def test_wake_deadline_returns_undelivered_disposition(tmp_path, monkeypatch):
     assert receipt.json() == {"landed": False}
 
 
+def test_wake_tmux_probe_timeout_returns_undelivered_disposition(tmp_path, monkeypatch):
+    settings = _settings(tmp_path)
+    app = controller.create_app(settings, lab_glance=FakeLab({}))
+
+    def tmux_probe_timeout(_settings, **kwargs):
+        assert kwargs["timeout"] > 0
+        raise subprocess.TimeoutExpired(["tmux", "ls"], kwargs["timeout"])
+
+    monkeypatch.setattr(controller.subprocess, "run", tmux_probe_timeout)
+    response = TestClient(app).post(
+        "/api/sessions/b3/wake",
+        headers={
+            "Host": "127.0.0.1:7800",
+            "X-Wake-Request-Id": "rid-tmux-timeout-7",
+            **_auth(),
+        },
+    )
+
+    assert response.status_code == 200
+    assert response.json()["sent"] is False
+    assert response.json()["disposition"] == "undelivered"
+    assert response.json()["reason"] == "controller-deadline"
+
+
 def test_working_skip_rewakes_once_on_idle_transition(tmp_path, monkeypatch):
     settings = _settings(tmp_path)
 
