@@ -994,8 +994,9 @@ def _wake_result(
         "slug": slug,
     }
     # Keep the old field for cockpit.js and mixed-version callers. New consumers
-    # must use disposition/reason; skipped is compatibility-only.
-    if disposition == "skipped":
+    # must use disposition/reason; skipped is compatibility-only. Undelivered
+    # outcomes still need it so legacy clients can display the reason.
+    if disposition in {"skipped", "undelivered"}:
         result["skipped"] = reason
     result.update(fields)
     return result

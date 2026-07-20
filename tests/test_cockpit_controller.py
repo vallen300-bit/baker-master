@@ -802,11 +802,22 @@ def test_wake_deadline_returns_undelivered_disposition(tmp_path, monkeypatch):
     assert response.json()["sent"] is False
     assert response.json()["disposition"] == "undelivered"
     assert response.json()["reason"] == "controller-deadline"
+    assert response.json()["skipped"] == "controller-deadline"
     receipt = TestClient(app).get(
         "/api/wake-receipt/rid-deadline-7",
         headers={"Host": "127.0.0.1:7800", **_auth()},
     )
     assert receipt.json() == {"landed": False}
+
+
+def test_undelivered_wake_result_keeps_legacy_skipped_reason():
+    result = controller._wake_result(
+        "undelivered", "controller-deadline", slug="b3"
+    )
+
+    assert result["disposition"] == "undelivered"
+    assert result["reason"] == "controller-deadline"
+    assert result["skipped"] == "controller-deadline"
 
 
 def test_wake_tmux_probe_timeout_returns_undelivered_disposition(tmp_path, monkeypatch):
