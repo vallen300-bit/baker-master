@@ -364,7 +364,7 @@
 
   function openMsgPanel(slug, name) {
     openMsgSlug = slug;
-    msgTitle.textContent = name + " [" + slug + "] messages";
+    msgTitle.textContent = slug + " messages";   // slug-only (name === slug now)
     renderMsgSummary(slug);
     msgVeil.classList.add("open");
     msgPanel.classList.add("open");
@@ -501,12 +501,12 @@
     if (!meta.status_only) {
       if (!up) {
         return el("button", { class: "rbtn start", type: "button", text: "▶ Start",
-          title: "Start " + (meta.display_name || meta.slug),
+          title: "Start " + meta.slug,
           onclick: (ev) => { ev.stopPropagation(); doStart(meta.slug, ev.currentTarget); } });
       }
       if (row && window.goAffordanceVisible(row)) {
         return el("button", { class: "rbtn go", type: "button", text: "GO ⏎",
-          title: "Answer GO for " + (meta.display_name || meta.slug),
+          title: "Answer GO for " + meta.slug,
           onclick: (ev) => { ev.stopPropagation(); doGo(meta.slug, ev.currentTarget); } });
       }
     }
@@ -532,10 +532,12 @@
       cls.push(glanceClass(row, up));
     }
 
-    // Col 2 — identity (name + slug, + kind badge for service/headless).
+    // Col 2 — identity. COCKPIT_SLUG_ONLY_CARDS_1 (Director: "the name is for me,
+    // not for agents"): the SLUG renders in the name's slot — .r-name keeps the
+    // name's 13px/500 + per-state color — and the separate small .r-slug line is
+    // dropped, so each card shows the slug ONCE and no display name is rendered.
     const idKids = [
-      el("span", { class: "r-name", text: meta.display_name || meta.slug }),
-      el("span", { class: "r-slug", text: meta.slug }),
+      el("span", { class: "r-name", text: meta.slug }),
     ];
     if (meta.badge) idKids.push(el("span", { class: "r-kind", text: meta.kind }));
 
@@ -564,7 +566,9 @@
     // D9 — two card modes, ZERO dead clicks. A tmux-backed (driveable) seat
     // opens its terminal (unchanged); an App-resident card opens the bus-message
     // panel (same data + section shape as the Lab "Production & Lab" component).
-    const name = meta.display_name || meta.slug;
+    // Slug, not the display name, everywhere the identity is surfaced to agents
+    // (drawer header, panel title, toasts) — COCKPIT_SLUG_ONLY_CARDS_1.
+    const name = meta.slug;
     let open;
     if (!meta.status_only) {
       open = () => {
