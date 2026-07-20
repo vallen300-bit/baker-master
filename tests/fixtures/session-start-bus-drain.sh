@@ -179,8 +179,35 @@ if isinstance(data, dict) and "messages" in data and "detail" not in data:
         "id", "kind", "from_terminal", "to_terminals",
         "acknowledged_at", "created_at",
     }
+    def render_safe(message):
+        if not isinstance(message, dict) or not required.issubset(message):
+            return False
+        return (
+            type(message["id"]) is int
+            and isinstance(message["kind"], str)
+            and isinstance(message["from_terminal"], str)
+            and isinstance(message["to_terminals"], list)
+            and isinstance(message["created_at"], str)
+            and bool(message["created_at"])
+            and (
+                message["acknowledged_at"] is None
+                or isinstance(message["acknowledged_at"], str)
+            )
+            and (
+                message.get("topic") is None
+                or isinstance(message["topic"], str)
+            )
+            and (
+                message.get("thread_id") is None
+                or isinstance(message["thread_id"], str)
+            )
+            and (
+                message.get("body_preview") is None
+                or isinstance(message["body_preview"], str)
+            )
+        )
     if isinstance(messages, list) and all(
-        isinstance(message, dict) and required.issubset(message)
+        render_safe(message)
         for message in messages
     ):
         raise SystemExit(0)
@@ -393,8 +420,35 @@ if isinstance(d, dict) and "detail" in d and "messages" not in d:
 
 msgs = d.get("messages", []) if isinstance(d, dict) else []
 required = {"id", "kind", "from_terminal", "to_terminals", "acknowledged_at", "created_at"}
+def render_safe(message):
+    if not isinstance(message, dict) or not required.issubset(message):
+        return False
+    return (
+        type(message["id"]) is int
+        and isinstance(message["kind"], str)
+        and isinstance(message["from_terminal"], str)
+        and isinstance(message["to_terminals"], list)
+        and isinstance(message["created_at"], str)
+        and bool(message["created_at"])
+        and (
+            message["acknowledged_at"] is None
+            or isinstance(message["acknowledged_at"], str)
+        )
+        and (
+            message.get("topic") is None
+            or isinstance(message["topic"], str)
+        )
+        and (
+            message.get("thread_id") is None
+            or isinstance(message["thread_id"], str)
+        )
+        and (
+            message.get("body_preview") is None
+            or isinstance(message["body_preview"], str)
+        )
+    )
 if not isinstance(msgs, list) or any(
-    not isinstance(m, dict) or not required.issubset(m) for m in msgs
+    not render_safe(m) for m in msgs
 ):
     print("[bus-drain] malformed daemon response — skipping.")
     sys.exit(0)
