@@ -494,11 +494,18 @@
   // All content is built via textContent / DOM nodes (no innerHTML), so
   // agent-supplied strings can never inject markup.
 
-  // D2 — context meter on every row. Driveable seat with a numeric context_pct
-  // → mini bar + label; anything else (status-only, down, telemetry-less) → an
-  // em-dash placeholder. Never blank, never hidden.
+  function compactContextAge(sec) {
+    if (!Number.isFinite(sec) || sec < 0) return "";
+    if (sec < 60) return "<1m";
+    if (sec < 3600) return Math.floor(sec / 60) + "m";
+    if (sec < 86400) return Math.floor(sec / 3600) + "h";
+    return Math.floor(sec / 86400) + "d";
+  }
+
+  // D2 — context meter on every row. Last-known values remain visible even
+  // when stale; staleness is communicated by dimming plus a compact age.
   function ctxCell(meta, row) {
-    const pct = (meta.driveable && row && typeof row.context_pct === "number")
+    const pct = (row && typeof row.context_pct === "number")
       ? Math.max(0, Math.min(100, row.context_pct)) : null;
     if (pct === null) {
       return el("span", { class: "r-ctx r-ctx-null", text: "—",
@@ -510,10 +517,16 @@
     // box, and the fill is pct% of the track, so a scale of (10000/pct)% makes the
     // gradient box exactly one track wide → colour at the fill edge == severity(pct).
     const scale = pct > 0 ? (10000 / pct) : 100;
-    return el("span", { class: "r-ctx", title: "context window " + Math.round(pct) + "% used" }, [
+    const stale = row.context_stale === true;
+    const age = stale ? compactContextAge(Number(row.context_age_sec)) : "";
+    const label = Math.round(pct) + "%" + (age ? " · " + age : "");
+    return el("span", {
+      class: "r-ctx" + (stale ? " ctx-stale" : ""),
+      title: "context window " + Math.round(pct) + "% used" + (age ? " · updated " + age + " ago" : ""),
+    }, [
       el("span", { class: "ctxbar" }, [el("span", { class: "ctxfill",
         style: "width:" + pct + "%;--ctx-track-scale:" + scale + "%" })]),
-      el("span", { class: "ctxlbl", text: Math.round(pct) + "%" }),
+      el("span", { class: "ctxlbl", text: label }),
     ]);
   }
 

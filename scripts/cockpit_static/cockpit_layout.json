@@ -10,8 +10,8 @@
     },
     "_grouping": "plates + order + in-plate position from the Director layout contract (LAB_COCKPIT_REDESIGN_1 D1); membership gated by registry active status + manifest driveable/ports",
     "counts": {
-      "cards": 43,
-      "driveable": 29,
+      "cards": 42,
+      "driveable": 28,
       "status_only": 14,
       "app_seat": 13,
       "unassigned": 0
