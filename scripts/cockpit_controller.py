@@ -188,7 +188,9 @@ def parse_codex_context(pane_text: str | None) -> int | None:
 
 
 _CODEX_WORKING_TIMER_RE = re.compile(
-    r"^(\s*Working\s+)\((?:(?:\d+h\s*)?(?:\d+m\s*)?(?:\d+s))\)\s*$",
+    r"^(\s*(?:[^\w\s]\s+)?Working\s+)"
+    r"\((?:(?:\d+h\s*)?(?:\d+m\s*)?(?:\d+s))"
+    r"(?:\s*[^\w\s]?\s*esc\s+to\s+interrupt)?\)\s*$",
     re.IGNORECASE,
 )
 

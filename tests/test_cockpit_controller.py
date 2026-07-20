@@ -345,9 +345,13 @@ def test_read_codex_pane_is_passive_capture_only(monkeypatch):
 
 
 def test_normalize_codex_pane_for_activity_ignores_only_working_timer():
-    before = "Context 18% used\nWorking (17m 26s)\n"
-    after_timer = "Context 18% used\nWorking (17m 28s)\n"
-    after_output = "Context 18% used\nWorking (17m 30s)\nnew output\n"
+    # Real tmux capture from deputy-codex, 2026-07-20:
+    # ``• Working (42s • esc to interrupt)``
+    before = "Context 15% used\n• Working (42s • esc to interrupt)\n"
+    after_timer = "Context 15% used\n• Working (1m 02s • esc to interrupt)\n"
+    after_output = (
+        "Context 15% used\n• Working (1m 03s • esc to interrupt)\nnew output\n"
+    )
 
     assert controller.normalize_codex_pane_for_activity(before) == (
         controller.normalize_codex_pane_for_activity(after_timer)
@@ -404,9 +408,9 @@ def test_api_agents_uses_local_context_and_normalized_codex_pane_activity(
     )
     _write_band(settings.context_band_dir, "b3", percent=29)
     panes = iter([
-        "Context 18% used\nWorking (17m 26s)\n",
-        "Context 18% used\nWorking (17m 28s)\n",
-        "Context 18% used\nWorking (17m 30s)\nnew output\n",
+        "Context 15% used\n• Working (42s • esc to interrupt)\n",
+        "Context 15% used\n• Working (1m 02s • esc to interrupt)\n",
+        "Context 15% used\n• Working (1m 03s • esc to interrupt)\nnew output\n",
     ])
     app = controller.create_app(
         settings,
@@ -450,7 +454,7 @@ def test_api_agents_uses_local_context_and_normalized_codex_pane_activity(
     assert first["b3"]["context_pct"] == 29.0
     assert first["b3"]["context_src"] == "local"
     assert first["b3"]["context_stale"] is False
-    assert first["codex"]["context_pct"] == 18.0
+    assert first["codex"]["context_pct"] == 15.0
     assert first["codex"]["context_src"] == "pane"
     assert first["codex"]["is_working"] is False
     assert second["codex"]["is_working"] is False
