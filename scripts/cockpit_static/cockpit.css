@@ -606,6 +606,83 @@ main.wrap { min-width: 0; padding: 28px 28px 48px; }
   .hage { grid-column: 2; grid-row: 2; }
 }
 
+/* ---- History view + gate-verdict cards (revamp items 8+9) ----------------
+   Reuses the item-3 state palette (--st-green pass, --st-red fail, --st-blue
+   in-flight, --st-grey idle). No grid-blurring filter anywhere (hard AC:
+   test_grid_never_blurs_behind_an_open_card). */
+.history-list h2, .verdict-wrap h2 {
+  display: flex; align-items: center; gap: 8px;
+  margin: 14px 0 8px; font-size: 12px; letter-spacing: .08em;
+  text-transform: uppercase; color: var(--muted);
+}
+.history-stale {
+  font-size: 10px; letter-spacing: .04em; text-transform: uppercase;
+  color: var(--st-amber); border: 1px solid var(--st-amber);
+  border-radius: 4px; padding: 1px 5px;
+}
+
+/* Verdict card strip (item 9) */
+.verdict-strip { display: flex; flex-wrap: wrap; gap: 8px; }
+.verdict-card {
+  display: flex; align-items: center; gap: 8px;
+  max-width: 320px; padding: 7px 10px;
+  background: var(--panel); color: var(--text);
+  border: 1px solid var(--border); border-left-width: 3px;
+  border-radius: 6px; cursor: pointer; text-align: left;
+  transition: background-color 120ms ease, border-color 120ms ease;
+}
+.verdict-card:hover { background: var(--panel-raised); }
+.verdict-card.vc-pass { border-left-color: var(--st-green); }
+.verdict-card.vc-fail { border-left-color: var(--st-red); }
+.verdict-badge {
+  font-size: 10px; font-weight: 700; letter-spacing: .06em;
+  padding: 2px 6px; border-radius: 4px; flex: 0 0 auto;
+}
+.verdict-badge.vb-pass { color: #0d1117; background: var(--st-green); }
+.verdict-badge.vb-fail { color: #0d1117; background: var(--st-red); }
+.verdict-topic {
+  min-width: 0; flex: 1 1 auto; overflow: hidden;
+  text-overflow: ellipsis; white-space: nowrap; font-size: 12px;
+}
+.verdict-meta { flex: 0 0 auto; color: var(--muted); font-size: 11px; }
+
+/* History job rows (item 8) */
+.history-rows { display: flex; flex-direction: column; gap: 2px; }
+.hist-wrap { border-radius: 6px; }
+.hist-row {
+  display: grid;
+  grid-template-columns: 10px minmax(0, 1fr) minmax(72px, auto) 82px 92px 96px;
+  align-items: center; column-gap: 12px; width: 100%;
+  padding: 5px 12px; min-height: 26px;
+  background: transparent; color: var(--text);
+  border: 1px solid transparent; border-radius: 6px;
+  cursor: pointer; text-align: left;
+  transition: background-color 120ms ease, border-color 120ms ease;
+}
+.hist-row:hover { background: var(--panel-raised); border-color: var(--border-soft); }
+.hist-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--st-grey); }
+.hist-dot-pass { background: var(--st-green); box-shadow: 0 0 6px rgba(43,217,100,.6); }
+.hist-dot-fail { background: var(--st-red); box-shadow: 0 0 6px rgba(248,81,73,.6); }
+.hist-dot-live { background: var(--st-blue); box-shadow: 0 0 6px rgba(56,139,253,.6); }
+.hist-dot-idle { background: var(--st-grey); }
+.hist-topic { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 13px; }
+.hist-seat { color: var(--muted-strong); font-size: 12px; }
+.hist-status { color: var(--muted); font-size: 11px; text-transform: uppercase; letter-spacing: .04em; }
+.hist-dur, .hist-age { color: var(--muted); font-size: 11px; text-align: right; }
+.hist-expand {
+  margin: 2px 0 6px; padding: 8px 12px;
+  background: var(--bg-subtle); border: 1px solid var(--border-soft);
+  border-radius: 6px;
+}
+.hist-preview { font-size: 12px; color: var(--muted-strong); white-space: pre-wrap; word-break: break-word; }
+.hist-ids { margin-top: 6px; font-size: 11px; color: var(--muted); }
+
+@media (max-width: 720px) {
+  .hist-row { grid-template-columns: 10px minmax(0, 1fr) auto; row-gap: 2px; }
+  .hist-status, .hist-dur { display: none; }
+  .hist-age { grid-column: 3; }
+}
+
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { animation-duration: .01ms !important; transition-duration: .01ms !important; }
 }

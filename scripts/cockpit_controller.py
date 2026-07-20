@@ -318,6 +318,160 @@ MESSAGE_PREVIEW_LIMIT = 12
 MESSAGE_PREVIEW_MAX_CHARS = 400
 MESSAGE_PREVIEW_CACHE_SECONDS = 10.0
 
+# --- COCKPIT_REVAMP_HISTORY_TAB_VERDICT_CARDS_1 (revamp items 8+9) ---------
+HISTORY_DEFAULT_LIMIT = 30
+HISTORY_CACHE_SECONDS = 10.0
+HISTORY_PREVIEW_MAX_CHARS = 160
+HISTORY_VERDICT_HEAD_CHARS = 400
+
+# Verdict markers, matched on the up-cased head of a bus body. PASS covers the
+# PASS-WITH-NOTE(S) variants and the APPROVE/APPROVED/LGTM synonyms; FAIL covers
+# the REQUEST_CHANGES / REQUEST CHANGES / REJECTED / BLOCKED family.
+VERDICT_PASS_RE = re.compile(r"\b(PASS(?:-WITH-NOTE(?:S)?)?|APPROVED?|LGTM)\b")
+VERDICT_FAIL_RE = re.compile(r"\b(FAIL(?:ED)?|REQUEST[_ ]CHANGES|REJECTED|BLOCKED)\b")
+
+
+def classify_verdict(body: str) -> str | None:
+    """Classify a gate verdict from a bus message body.
+
+    Reads only the first ``HISTORY_VERDICT_HEAD_CHARS`` chars, up-cased. A FAIL
+    marker wins whenever it exists and no PASS marker precedes it; otherwise a
+    PASS marker wins. No marker (or empty/None body) -> ``None``."""
+    head = (body or "")[:HISTORY_VERDICT_HEAD_CHARS].upper()
+    fail = VERDICT_FAIL_RE.search(head)
+    ok = VERDICT_PASS_RE.search(head)
+    if fail and (not ok or fail.start() < ok.start()):
+        return "fail"
+    if ok:
+        return "pass"
+    return None
+
+
+def _history_body(row: dict) -> str:
+    """Best available body text for a Lab row. The list endpoint returns
+    ``body_preview`` (``body`` is null there); a full/direct row may carry
+    ``body``. Prefer whichever is a non-empty string, else empty."""
+    for field in ("body", "body_preview"):
+        value = row.get(field)
+        if isinstance(value, str) and value:
+            return value
+    return ""
+
+
+def _history_created_at(value) -> datetime | None:
+    """Parse an ISO-8601 ``created_at``; naive stamps are coerced to UTC so all
+    parsed datetimes are comparable. Returns ``None`` on anything unparseable
+    (never raises) — the caller treats that row as malformed and skips it."""
+    if not isinstance(value, str) or not value:
+        return None
+    try:
+        parsed = datetime.fromisoformat(value)
+    except (ValueError, TypeError):
+        return None
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=timezone.utc)
+    return parsed
+
+
+def build_history_jobs(messages, limit: int | None = None) -> list:
+    """Group bus messages into job rows, newest first.
+
+    Group key: ``thread_id`` if set, else ``topic`` if set, else
+    ``untopiced-<id>``. Rows missing a parseable ``created_at`` (or that are not
+    dicts) are skipped, never raised. Each returned row:
+
+      ``key``, ``topic``, ``seat`` (``from_terminal`` of the latest non-lead
+      message, else ``"lead"``), ``started_at`` (earliest ``created_at``),
+      ``ended_at`` (``created_at`` of the latest verdict-classified message,
+      else ``None``), ``duration_sec`` (ended-started, else ``None``),
+      ``status`` (``"done"`` if a verdict was found, else ``"in-flight"``),
+      ``outcome`` (``"pass"``/``"fail"``/``None``), ``msg_ids`` (ascending by
+      time), ``last_preview`` (<=160 chars).
+
+    Rows are sorted by their most recent ``created_at`` descending; ``limit``
+    (when given) caps the returned list after that sort."""
+    if not isinstance(messages, list):
+        return []
+
+    groups: dict[str, list[tuple[datetime, dict]]] = {}
+    order: list[str] = []
+    for row in messages:
+        if not isinstance(row, dict):
+            continue
+        created = _history_created_at(row.get("created_at"))
+        if created is None:
+            continue
+        thread = row.get("thread_id")
+        topic = row.get("topic")
+        if thread:
+            key = str(thread)
+        elif topic:
+            key = str(topic)
+        else:
+            key = f"untopiced-{row.get('id')}"
+        if key not in groups:
+            groups[key] = []
+            order.append(key)
+        groups[key].append((created, row))
+
+    jobs: list[tuple[datetime, dict]] = []
+    for key in order:
+        entries = sorted(groups[key], key=lambda pair: pair[0])
+        started_dt, started_row = entries[0]
+        latest_dt, latest_row = entries[-1]
+
+        # seat: from_terminal of the latest non-lead message, else lead.
+        seat = "lead"
+        for _created, row in reversed(entries):
+            sender = row.get("from_terminal")
+            if sender and sender != "lead":
+                seat = sender
+                break
+
+        # verdict: the latest verdict-classified message drives outcome/ended_at.
+        outcome = None
+        ended_at = None
+        ended_dt = None
+        for created, row in reversed(entries):
+            verdict = classify_verdict(_history_body(row))
+            if verdict is not None:
+                outcome = verdict
+                ended_at = row.get("created_at")
+                ended_dt = created
+                break
+
+        duration_sec = (
+            int((ended_dt - started_dt).total_seconds())
+            if ended_dt is not None else None
+        )
+
+        # topic: the latest non-empty topic in the group.
+        topic_val = None
+        for _created, row in reversed(entries):
+            if row.get("topic"):
+                topic_val = row.get("topic")
+                break
+
+        job = {
+            "key": key,
+            "topic": topic_val,
+            "seat": seat,
+            "started_at": started_row.get("created_at"),
+            "ended_at": ended_at,
+            "duration_sec": duration_sec,
+            "status": "done" if outcome is not None else "in-flight",
+            "outcome": outcome,
+            "msg_ids": [row.get("id") for _created, row in entries],
+            "last_preview": _history_body(latest_row)[:HISTORY_PREVIEW_MAX_CHARS],
+        }
+        jobs.append((latest_dt, job))
+
+    jobs.sort(key=lambda pair: pair[0], reverse=True)
+    rows = [job for _dt, job in jobs]
+    if limit is not None:
+        rows = rows[:limit]
+    return rows
+
 
 def load_notify_seats(static_dir: Path) -> set[str]:
     """Return the slugs whose generated card carries ``notify_eligible`` true.
@@ -1940,6 +2094,11 @@ def create_app(
     app.state.notify_last_fired = {}
     message_preview_cache: dict[str, tuple[float, dict[str, Any]]] = {}
     message_preview_lock: asyncio.Lock | None = None
+    # History view (revamp items 8+9): single lead-stream fetch, keyed by the
+    # upstream limit, 10s TTL. Never cleared on error so a Lab-down request can
+    # serve the last good snapshot with stale=True.
+    history_cache: dict[int, tuple[float, dict[str, Any]]] = {}
+    history_lock: asyncio.Lock | None = None
 
     def manifest() -> tuple[ManifestEntry, ...]:
         try:
@@ -2143,6 +2302,74 @@ def create_app(
         if slug not in message_slugs():
             raise HTTPException(status_code=404, detail="unknown cockpit seat")
         return await load_message_previews(slug)
+
+    def _history_slice(result: dict[str, Any], limit: int) -> dict[str, Any]:
+        jobs = result.get("jobs") or []
+        return {"jobs": jobs[:limit], "stale": bool(result.get("stale"))}
+
+    async def load_history_jobs(limit: int) -> dict[str, Any]:
+        """Fetch lead's Lab message stream (lead receives STARTED/verdict/report
+        traffic for every dispatch arc), group it into job rows, cache 10s. On
+        any Lab error / bus-busy payload, serve the last cached snapshot with
+        ``stale=True``; if none, return an empty stale result — NEVER 500."""
+        nonlocal history_lock
+        if history_lock is None:
+            history_lock = asyncio.Lock()
+        upstream = max(1, min(200, limit * 6))
+        now = time.monotonic()
+        cached = history_cache.get(upstream)
+        if cached is not None and cached[0] > now:
+            return _history_slice(cached[1], limit)
+
+        async with history_lock:
+            now = time.monotonic()
+            cached = history_cache.get(upstream)
+            if cached is not None and cached[0] > now:
+                return _history_slice(cached[1], limit)
+
+            def _fallback() -> dict[str, Any]:
+                prev = history_cache.get(upstream)
+                if prev is not None:
+                    return {"jobs": list(prev[1].get("jobs") or []), "stale": True}
+                return {"jobs": [], "stale": True}
+
+            key_path = config.lab_key_dir / "lead"
+            try:
+                terminal_key = key_path.read_text(encoding="utf-8").strip()
+            except OSError:
+                terminal_key = ""
+            if not terminal_key:
+                return _history_slice(_fallback(), limit)
+
+            try:
+                async with httpx.AsyncClient(
+                    timeout=config.lab_timeout_seconds
+                ) as client:
+                    response = await client.get(
+                        f"{config.lab_messages_url.rstrip('/')}/lead",
+                        params={"limit": upstream},
+                        headers={"X-Terminal-Key": terminal_key},
+                    )
+                    response.raise_for_status()
+                    payload = response.json()
+                raw_rows = (
+                    payload.get("messages") if isinstance(payload, dict) else None
+                )
+                if not isinstance(raw_rows, list):
+                    # bus_busy_retry / error payload with no "messages" key.
+                    raise ValueError("no messages in Lab payload")
+                result = {"jobs": build_history_jobs(raw_rows), "stale": False}
+                history_cache[upstream] = (
+                    time.monotonic() + HISTORY_CACHE_SECONDS, result
+                )
+                return _history_slice(result, limit)
+            except (OSError, httpx.HTTPError, ValueError, TypeError):
+                return _history_slice(_fallback(), limit)
+
+    @app.get("/api/history")
+    async def api_history(limit: int = HISTORY_DEFAULT_LIMIT):
+        limit = max(1, min(200, limit))
+        return await load_history_jobs(limit)
 
     @app.post("/api/sessions/{slug}/start")
     async def start_session(slug: str, request: Request):
