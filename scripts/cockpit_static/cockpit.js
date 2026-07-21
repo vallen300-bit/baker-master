@@ -18,6 +18,9 @@
 
   const POLL_MS = 4000;
   const POLL_TIMEOUT_MS = 10000;
+  const LAYOUT_RETRY_DELAYS_MS = [1500, 4000];
+  const LAYOUT_TIMEOUT_MS = 8000;
+  const LAYOUT_SELF_HEAL_MS = 60000;
   const FETCH_OPTS = { credentials: "same-origin", cache: "no-store" };
   // location.origin has NO userinfo, so building request URLs from it avoids
   // "Request cannot be constructed from a URL that includes credentials" when
@@ -66,6 +69,9 @@
   let flashSlugs = new Set();    // slugs whose unacked count rose this poll (D9)
   let pollTimer = null;
   let pollInFlight = null;
+  let bootInFlight = null;
+  let bootReady = false;
+  let layoutHealTimer = null;
 
   // ---- sidebar view state (COCKPIT_REVAMP_SPLIT_VIEW_SIDEBAR_1, spec item 5) ----
   // Sidebar entries in order. ACTIVE is the default home; ALL is the flat view;
@@ -260,6 +266,49 @@
     } finally {
       clearTimeout(timeoutId);
     }
+  }
+
+  function setLayoutStatus(text) {
+    if (!syncNoteEl) return;
+    syncNoteEl.textContent = text;
+    syncNoteEl.className = "summary-status feed-dead";
+  }
+
+  async function loadLayoutWithRetry() {
+    const maxAttempts = LAYOUT_RETRY_DELAYS_MS.length + 1;
+    for (let attempt = 0; attempt < maxAttempts; attempt += 1) {
+      try {
+        const r = await fetchWithTimeout(
+          url("/cockpit_layout.json"),
+          FETCH_OPTS,
+          LAYOUT_TIMEOUT_MS,
+        );
+        if (!r.ok) throw new Error("layout HTTP " + r.status);
+        return await r.json();
+      } catch (e) {
+        if (attempt === maxAttempts - 1) throw e;
+        setLayoutStatus("Layout load failed — retrying");
+        await new Promise((resolve) => setTimeout(
+          resolve,
+          LAYOUT_RETRY_DELAYS_MS[attempt],
+        ));
+      }
+    }
+    throw new Error("layout retry exhausted");
+  }
+
+  function clearLayoutSelfHeal() {
+    if (layoutHealTimer !== null) {
+      clearInterval(layoutHealTimer);
+      layoutHealTimer = null;
+    }
+  }
+
+  function scheduleLayoutSelfHeal() {
+    if (layoutHealTimer !== null) return;
+    layoutHealTimer = setInterval(() => {
+      if (document.visibilityState === "visible" && !bootReady) void boot();
+    }, LAYOUT_SELF_HEAL_MS);
   }
 
   function poll() {
@@ -1023,27 +1072,35 @@
   // toggle) was removed. Banners stay ON; the controller's /api/notify/* endpoints
   // + COCKPIT_NOTIFY_ENABLED env kill switch are untouched (engineer-only path).
 
-  async function boot() {
-    try {
-      const r = await fetch(url("/cockpit_layout.json"), FETCH_OPTS);
-      if (!r.ok) throw new Error("layout HTTP " + r.status);
-    layout = await r.json();
-    } catch (e) {
-      // Layout failed before we have any layout — renderSummary early-returns
-      // without one, so write the health line directly (red).
-      if (syncNoteEl) {
-        syncNoteEl.textContent = "Layout load failed — " + e.message;
-        syncNoteEl.className = "summary-status feed-dead";
+  function boot() {
+    if (bootReady) return Promise.resolve();
+    if (bootInFlight) return bootInFlight;
+    bootInFlight = (async () => {
+      try {
+        layout = await loadLayoutWithRetry();
+        clearLayoutSelfHeal();
+        buildSidebar();              // 9 static nav entries (badges hydrate on poll)
+        render();                    // paint immediately from layout (metadata)
+        renderSummary();
+        if (currentView === "History") enterHistory();   // restore a persisted History view
+        await poll();                // then hydrate with live state
+        if (pollTimer === null) pollTimer = setInterval(poll, POLL_MS);
+        bootReady = true;
+      } catch (e) {
+        // Layout failed before we have any layout — renderSummary early-returns
+        // without one, so write the health line directly (red).
+        setLayoutStatus("Layout load failed — " + e.message);
+        scheduleLayoutSelfHeal();
+      } finally {
+        bootInFlight = null;
       }
-      return;
-    }
-    buildSidebar();              // 9 static nav entries (badges hydrate on poll)
-    render();                    // paint immediately from layout (metadata)
-    renderSummary();
-    if (currentView === "History") enterHistory();   // restore a persisted History view
-    await poll();                // then hydrate with live state
-    pollTimer = setInterval(poll, POLL_MS);
+    })();
+    return bootInFlight;
   }
+
+  document.addEventListener("visibilitychange", () => {
+    if (document.visibilityState === "visible" && !bootReady) void boot();
+  });
 
   // LAB_UNIFY_THEME_COCKPIT_EXTENSION_1: live-follow the /v2 theme. The head
   // bootstrap already applied the stored theme before paint; here we re-theme

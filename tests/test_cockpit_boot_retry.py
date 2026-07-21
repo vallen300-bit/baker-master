@@ -35,7 +35,7 @@ def test_hung_fetch_is_aborted_by_the_real_browser_helper():
 const fs = require("fs");
 const source = fs.readFileSync(process.argv[1], "utf8");
 const start = source.indexOf("async function fetchWithTimeout");
-const end = source.indexOf("function poll", start);
+const end = source.indexOf("function setLayoutStatus", start);
 const helper = eval("(" + source.slice(start, end) + ")");
 
 global.fetch = (_url, options) => new Promise((_resolve, reject) => {
@@ -72,7 +72,25 @@ def test_hung_poll_cannot_stack_and_boot_reaches_interval_setup():
     assert "if (pollInFlight) return pollInFlight;" in poll
     assert "pollInFlight = null;" in poll
 
-    boot = _between(JS, "async function boot()", "  // LAB_UNIFY_THEME_COCKPIT_EXTENSION_1")
+    boot = _between(JS, "function boot()", "  // LAB_UNIFY_THEME_COCKPIT_EXTENSION_1")
+    assert "if (bootReady) return Promise.resolve();" in boot
+    assert "if (bootInFlight) return bootInFlight;" in boot
     assert "await poll();" in boot
-    assert "pollTimer = setInterval(poll, POLL_MS);" in boot
+    assert "if (pollTimer === null) pollTimer = setInterval(poll, POLL_MS);" in boot
     assert JS.index("const POLL_TIMEOUT_MS = 10000;") < JS.index("async function fetchWithTimeout")
+
+
+def test_layout_boot_retries_and_self_heals_without_duplicate_timers():
+    assert "const LAYOUT_RETRY_DELAYS_MS = [1500, 4000];" in JS
+    assert "const LAYOUT_TIMEOUT_MS = 8000;" in JS
+    assert "const LAYOUT_SELF_HEAL_MS = 60000;" in JS
+    loader = _between(JS, "async function loadLayoutWithRetry()", "function clearLayoutSelfHeal")
+    assert 'url("/cockpit_layout.json")' in loader
+    assert "LAYOUT_TIMEOUT_MS" in loader
+    assert 'setLayoutStatus("Layout load failed — retrying")' in loader
+    assert "LAYOUT_RETRY_DELAYS_MS[attempt]" in loader
+    assert 'setLayoutStatus("Layout load failed — " + e.message)' in JS
+    assert 'document.addEventListener("visibilitychange"' in JS
+    assert "document.visibilityState === \"visible\"" in JS
+    assert "clearInterval(layoutHealTimer)" in JS
+    assert "if (layoutHealTimer !== null) return;" in JS
