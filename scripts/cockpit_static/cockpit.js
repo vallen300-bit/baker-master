@@ -251,15 +251,25 @@
     }
   }
 
-  async function fetchWithTimeout(requestUrl, options, timeoutMs) {
+  async function fetchWithTimeout(requestUrl, options, timeoutMs, consumeResponse = null) {
     const controller = new AbortController();
     let timedOut = false;
-    const timeoutId = setTimeout(() => {
-      timedOut = true;
-      controller.abort();
-    }, timeoutMs);
+    let timeoutId = null;
+    const timeoutPromise = new Promise((_, reject) => {
+      timeoutId = setTimeout(() => {
+        timedOut = true;
+        controller.abort();
+        reject(new Error("request timed out after " + timeoutMs + "ms"));
+      }, timeoutMs);
+    });
     try {
-      return await fetch(requestUrl, { ...options, signal: controller.signal });
+      const requestPromise = fetch(
+        requestUrl,
+        { ...options, signal: controller.signal },
+      ).then((response) => (
+        consumeResponse ? consumeResponse(response) : response
+      ));
+      return await Promise.race([requestPromise, timeoutPromise]);
     } catch (e) {
       if (timedOut) throw new Error("request timed out after " + timeoutMs + "ms");
       throw e;
@@ -278,13 +288,16 @@
     const maxAttempts = LAYOUT_RETRY_DELAYS_MS.length + 1;
     for (let attempt = 0; attempt < maxAttempts; attempt += 1) {
       try {
-        const r = await fetchWithTimeout(
+        const data = await fetchWithTimeout(
           url("/cockpit_layout.json"),
           FETCH_OPTS,
           LAYOUT_TIMEOUT_MS,
+          async (response) => {
+            if (!response.ok) throw new Error("layout HTTP " + response.status);
+            return response.json();
+          },
         );
-        if (!r.ok) throw new Error("layout HTTP " + r.status);
-        return await r.json();
+        return data;
       } catch (e) {
         if (attempt === maxAttempts - 1) throw e;
         setLayoutStatus("Layout load failed — retrying");
@@ -316,9 +329,15 @@
     if (pollInFlight) return pollInFlight;
     pollInFlight = (async () => {
       try {
-        const r = await fetchWithTimeout(url("/api/agents"), FETCH_OPTS, POLL_TIMEOUT_MS);
-        if (!r.ok) throw new Error("HTTP " + r.status);
-        const data = await r.json();
+        const data = await fetchWithTimeout(
+          url("/api/agents"),
+          FETCH_OPTS,
+          POLL_TIMEOUT_MS,
+          async (response) => {
+            if (!response.ok) throw new Error("HTTP " + response.status);
+            return response.json();
+          },
+        );
         const m = new Map();
         for (const a of (data.agents || [])) m.set(a.slug, a);
         computeFlash(m);              // D9 — flag cards whose unacked count rose

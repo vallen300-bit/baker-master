@@ -20,11 +20,13 @@ def _between(source: str, start: str, end: str) -> str:
 
 
 def test_poll_abort_timeout_is_wired_to_the_agents_fetch():
-    helper = _between(JS, "async function fetchWithTimeout", "function poll")
+    helper = _between(JS, "async function fetchWithTimeout", "function setLayoutStatus")
+    assert "consumeResponse = null" in helper
     assert "new AbortController()" in helper
     assert "setTimeout" in helper
     assert "controller.abort()" in helper
     assert "signal: controller.signal" in helper
+    assert "Promise.race([requestPromise, timeoutPromise])" in helper
     assert "clearTimeout(timeoutId)" in helper
     assert 'request timed out after " + timeoutMs + "ms' in helper
 
@@ -38,25 +40,35 @@ const start = source.indexOf("async function fetchWithTimeout");
 const end = source.indexOf("function setLayoutStatus", start);
 const helper = eval("(" + source.slice(start, end) + ")");
 
-global.fetch = (_url, options) => new Promise((_resolve, reject) => {
-  options.signal.addEventListener("abort", () => reject(new Error("aborted")));
-});
-const started = Date.now();
-helper("/api/agents", {}, 25).then(
-  () => { throw new Error("hung fetch unexpectedly resolved"); },
-  (error) => {
+async function expectTimeout(fetchImpl, consumeResponse = null) {
+  global.fetch = fetchImpl;
+  const started = Date.now();
+  try {
+    await helper("/api/agents", {}, 25, consumeResponse);
+    throw new Error("hung request unexpectedly resolved");
+  } catch (error) {
     if (!String(error).includes("request timed out after 25ms")) {
       throw new Error("unexpected timeout error: " + error);
     }
     if (Date.now() - started > 500) {
       throw new Error("timeout helper exceeded probe budget");
     }
-    process.exit(0);
   }
-);
-setTimeout(() => {
-  throw new Error("hung fetch was not aborted");
-}, 1000);
+}
+
+(async () => {
+  await expectTimeout((_url, options) => new Promise((_resolve, reject) => {
+    options.signal.addEventListener("abort", () => reject(new Error("aborted")));
+  }));
+  await expectTimeout(
+    () => Promise.resolve({ ok: true, json: () => new Promise(() => {}) }),
+    (response) => response.json(),
+  );
+  process.exit(0);
+})().catch((error) => {
+  console.error(error);
+  process.exit(1);
+});
 """
     result = subprocess.run(
         ["node", "-e", probe, str(Path(__file__).resolve().parent.parent / "scripts" / "cockpit_static" / "cockpit.js")],
