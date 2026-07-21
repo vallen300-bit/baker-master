@@ -82,6 +82,23 @@ def test_bus_console_auth_gate(monkeypatch):
     assert client.get("/bus-console").status_code == 200
 
 
+# --- ARRIVALS_EMBED_COOKIE_FIX_1 (lead ruling #14431) ----------------------
+def test_bus_console_page_carries_frame_ancestors_csp(monkeypatch):
+    # /bus-console shares the now-SameSite=None arrivals cookie, so the page must
+    # gain the identical frame-ancestors fence (no surface loses Strict without
+    # gaining the fence, even read-only).
+    client = _client(monkeypatch, rows=SAMPLE_ROWS)
+    page = client.get("/bus-console?key=test-key")
+    assert page.status_code == 200
+    assert page.headers.get("Content-Security-Policy") == (
+        "frame-ancestors 'self' https://brisen-lab.onrender.com"
+    )
+    # the 404 disguise must NOT leak the CSP header
+    disguised = client.get("/bus-console")
+    assert disguised.status_code == 404
+    assert "Content-Security-Policy" not in disguised.headers
+
+
 # --- AC2 -------------------------------------------------------------------
 def test_bus_console_json_rows_and_no_key_leak(monkeypatch):
     client = _client(monkeypatch, rows=SAMPLE_ROWS)

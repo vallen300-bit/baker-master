@@ -8805,6 +8805,14 @@ async def bus_console_page(request: Request):
         logger.exception("bus_console_page: template read failed")
         return HTMLResponse("Service unavailable", status_code=503)
     response = HTMLResponse(html)
+    # ARRIVALS_EMBED_COOKIE_FIX_1 (b3, lead ruling #14431): /bus-console shares
+    # the arrivals_board_access cookie, which is now SameSite=None — so it too
+    # can be framed by any site. A surface must never lose Strict without gaining
+    # the frame-ancestors fence (even read-only), so mirror the /arrivals guard:
+    # constrain framing to self + the Lab shell.
+    response.headers["Content-Security-Policy"] = (
+        "frame-ancestors 'self' https://brisen-lab.onrender.com"
+    )
     if set_cookie:
         _set_arrivals_board_cookie(response)
     return response
