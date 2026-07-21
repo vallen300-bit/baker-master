@@ -578,7 +578,13 @@ main.wrap { min-width: 0; padding: 0 28px 48px; }
     grid-template-areas: "title" "status" "meta";
     padding: 8px 5px 0;
   }
-  .cockpit-sticky > .summary-status { justify-self: start; }
+  .cockpit-sticky > .summary-status {
+    justify-self: start;
+    min-width: 0;
+    max-width: 100%;
+    white-space: normal;
+    overflow-wrap: anywhere;
+  }
   .cockpit-sticky-meta {
     align-items: center;
     flex-direction: row;

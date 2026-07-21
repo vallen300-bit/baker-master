@@ -82,3 +82,23 @@ def test_390px_mobile_keeps_reference_title_single_line_and_compact():
     assert 'grid-template-areas: "title" "status" "meta"' in body
     assert "padding: 8px 5px 0" in body
     assert "overflow: hidden" in body
+
+
+def test_mobile_status_wraps_inside_sticky_content_width():
+    mobile = re.search(
+        r"@media\s*\(max-width:\s*640px\)\s*\{(.*?)\n\}",
+        CSS,
+        flags=re.S,
+    )
+    assert mobile, "mobile cockpit rules missing"
+    status = re.search(
+        r"\.cockpit-sticky\s*>\s*\.summary-status\s*\{([^}]*)\}",
+        mobile.group(1),
+        flags=re.S,
+    )
+    assert status, "mobile sticky status override missing"
+    body = status.group(1)
+    assert "min-width: 0" in body
+    assert "max-width: 100%" in body
+    assert "white-space: normal" in body
+    assert "overflow-wrap: anywhere" in body
