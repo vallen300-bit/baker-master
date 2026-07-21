@@ -215,12 +215,13 @@
       syncNoteEl.textContent = "Feed offline — " + (health.error || "unreachable");
       syncNoteEl.className = "summary-status feed-dead";
     } else if (health && health.live === true) {
-      // Feed live — green health line carries the count Director wants. If Lab
-      // telemetry is degraded (feed answered but lab_glance_ok=false), the line
-      // goes amber and says so, so that signal is not lost with #conn's removal.
+      // Feed live — the line stays GREEN whenever the feed answers (the original
+      // #conn contract: red is reserved for a dead feed). Degraded Lab telemetry
+      // (feed answered but lab_glance_ok=false) is surfaced in TEXT, not color, so
+      // that signal is not lost with #conn's removal without breaking green=live.
       const bits = "Live · " + health.driveable + " with terminal / " + health.total + " seats";
       syncNoteEl.textContent = labOk === false ? bits + " · telemetry source degraded" : bits;
-      syncNoteEl.className = "summary-status" + (labOk === false ? " is-warn" : "");
+      syncNoteEl.className = "summary-status";
     } else {
       // No health probe yet (first paint from layout metadata).
       syncNoteEl.textContent = labOk === false ? "Telemetry source offline" :

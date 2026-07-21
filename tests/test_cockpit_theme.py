@@ -52,6 +52,14 @@ def test_conn_removed_and_health_migrated_to_sync_note():
     assert '" with terminal / " + health.total + " seats"' in JS, "live count must survive"
 
 
+def test_light_mode_error_toast_is_legible():
+    # #toast.err hardcodes a pale red (readable on the dark toast, unreadable on
+    # the white light-mode panel) — light mode must override it to a dark red.
+    assert 'html[data-theme="light"] #toast.err' in CSS, (
+        "error toast needs a light-mode color override for contrast"
+    )
+
+
 def test_dark_is_default_no_forced_attr():
     assert '<html lang="en" data-theme' not in HTML
     assert "<html data-theme" not in HTML
