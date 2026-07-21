@@ -527,6 +527,27 @@ def load_cockpit_layout_slugs(static_dir: Path) -> set[str]:
     return {slug for slug, _alias in load_cockpit_layout_cards(static_dir)}
 
 
+def load_cockpit_status_only_slugs(static_dir: Path) -> set[str]:
+    """Return generated cockpit cards that do not have a tmux-backed seat."""
+    try:
+        raw = json.loads((static_dir / "cockpit_layout.json").read_text("utf-8"))
+    except (OSError, ValueError, TypeError):
+        return set()
+    plates = raw.get("plates") or raw.get("sections") or []
+    if not isinstance(plates, list):
+        return set()
+    return {
+        str(card["slug"])
+        for plate in plates
+        if isinstance(plate, dict)
+        for card in (plate.get("cards") or [])
+        if isinstance(card, dict)
+        and card.get("status_only") is True
+        and isinstance(card.get("slug"), str)
+        and SLUG_RE.fullmatch(card["slug"])
+    }
+
+
 def trim_message_preview(row: dict[str, Any]) -> dict[str, Any] | None:
     """Project one authenticated Lab row onto the browser-safe preview shape."""
     if not isinstance(row, dict) or row.get("id") is None:
@@ -1062,6 +1083,29 @@ def send_go(settings: Settings, entry: ManifestEntry) -> dict[str, Any]:
         detail = result.stderr.strip() or "tmux GO failed"
         raise RuntimeError(detail)
     return {"ok": True, "sent": "Enter", "slug": entry.slug}
+
+
+def send_refresh_context(settings: Settings, entry: ManifestEntry) -> dict[str, Any]:
+    """Send Claude Code's literal /clear command as separate text and Enter writes."""
+    for kind, data in wake_inject_writes("/clear"):
+        result = _run_tmux(settings, _tmux_write_args(entry.slug, kind, data))
+        if result.returncode != 0:
+            detail = result.stderr.strip() or "context refresh failed"
+            raise RuntimeError(detail)
+        if kind == "literal":
+            time.sleep(WAKE_SUBMIT_SETTLE_S)
+    _audit_wake(
+        settings,
+        entry.slug,
+        None,
+        "context-refresh",
+        "/clear",
+        source=WAKE_CLICK_ORIGIN,
+        landed=True,
+        disposition="delivered",
+        reason="context refresh",
+    )
+    return {"ok": True, "sent": "/clear", "slug": entry.slug}
 
 
 def _oldest_unacked_row(messages: Any) -> dict[str, Any] | None:
@@ -2388,6 +2432,21 @@ def create_app(
         entry = _entry_for(manifest(), slug)
         try:
             return send_go(config, entry)
+        except (OSError, RuntimeError, subprocess.TimeoutExpired) as exc:
+            raise HTTPException(status_code=502, detail=str(exc)) from exc
+
+    @app.post("/api/sessions/{slug}/refresh_context")
+    async def refresh_context_session(slug: str, request: Request):
+        entries = manifest()
+        entry = next((candidate for candidate in entries if candidate.slug == slug), None)
+        if entry is None:
+            if slug in load_cockpit_status_only_slugs(config.static_dir):
+                raise HTTPException(status_code=409, detail="app seat has no context session")
+            raise HTTPException(status_code=404, detail="unknown cockpit seat")
+        if entry.slug not in tmux_session_names(config):
+            raise HTTPException(status_code=409, detail="session down")
+        try:
+            return send_refresh_context(config, entry)
         except (OSError, RuntimeError, subprocess.TimeoutExpired) as exc:
             raise HTTPException(status_code=502, detail=str(exc)) from exc
 

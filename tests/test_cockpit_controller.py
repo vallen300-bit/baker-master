@@ -861,6 +861,70 @@ def test_start_go_are_allowlisted_and_use_exact_tmux_argv(tmp_path, monkeypatch)
     assert calls[2] == ["tmux", "send-keys", "-t", "b3", "Enter"]
 
 
+def test_refresh_context_sends_literal_clear_then_enter(tmp_path, monkeypatch):
+    settings = replace(_settings(tmp_path), wake_audit_path=tmp_path / "wake_audit.log")
+    app = controller.create_app(settings, lab_glance=FakeLab({}))
+    client = TestClient(app)
+    calls = []
+
+    def fake_run(argv, **kwargs):
+        calls.append(argv)
+        return subprocess.CompletedProcess(argv, 0, "", "")
+
+    monkeypatch.setattr(controller.subprocess, "run", fake_run)
+    monkeypatch.setattr(controller, "tmux_session_names", lambda _settings: {"b3"})
+    monkeypatch.setattr(controller.time, "sleep", lambda _seconds: None)
+
+    response = client.post(
+        "/api/sessions/b3/refresh_context",
+        headers={"Host": "127.0.0.1:7800", **_auth()},
+    )
+
+    assert response.status_code == 200
+    assert response.json() == {"ok": True, "sent": "/clear", "slug": "b3"}
+    assert calls == [
+        ["tmux", "send-keys", "-t", "b3", "-l", "/clear"],
+        ["tmux", "send-keys", "-t", "b3", "Enter"],
+    ]
+    audit = json.loads((tmp_path / "wake_audit.log").read_text().splitlines()[0])
+    assert audit["slug"] == "b3"
+    assert audit["line"] == "/clear"
+    assert audit["source"] == "cockpit_click"
+
+
+def test_refresh_context_rejects_down_app_and_unknown_seats(tmp_path, monkeypatch):
+    settings = replace(_settings(tmp_path), wake_audit_path=tmp_path / "wake_audit.log")
+    settings.static_dir.mkdir()
+    (settings.static_dir / "cockpit_layout.json").write_text(
+        json.dumps(
+            {"plates": [{"cards": [{"slug": "app-seat", "status_only": True}]}]}
+        ),
+        encoding="utf-8",
+    )
+    app = controller.create_app(settings, lab_glance=FakeLab({}))
+    client = TestClient(app)
+    monkeypatch.setattr(controller, "tmux_session_names", lambda _settings: set())
+
+    down = client.post(
+        "/api/sessions/b3/refresh_context",
+        headers={"Host": "127.0.0.1:7800", **_auth()},
+    )
+    app_seat = client.post(
+        "/api/sessions/app-seat/refresh_context",
+        headers={"Host": "127.0.0.1:7800", **_auth()},
+    )
+    unknown = client.post(
+        "/api/sessions/unknown/refresh_context",
+        headers={"Host": "127.0.0.1:7800", **_auth()},
+    )
+
+    assert down.status_code == 409
+    assert down.json()["detail"] == "session down"
+    assert app_seat.status_code == 409
+    assert app_seat.json()["detail"] == "app seat has no context session"
+    assert unknown.status_code == 404
+
+
 def _click_wake_app(tmp_path, monkeypatch):
     """A wake app whose send_wake is stubbed to capture the audit_source kwarg."""
     settings = _settings(tmp_path)

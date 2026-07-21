@@ -39,7 +39,7 @@
   --st-offline: #cf6a63;    /* no-signal + offline — muted red, pulsating */
   --st-grey: #8b95a3;       /* idle / not-started — muted */
   --shadow: inset 0 1px 0 rgba(255,255,255,.035), 0 8px 26px rgba(0,0,0,.2);
-  --row-columns: 10px minmax(0, 1fr) minmax(72px, auto) 128px 116px;
+  --row-columns: 10px minmax(0, 1fr) 128px minmax(72px, auto) 116px;
   /* COCKPIT_REVAMP_SPLIT_VIEW_SIDEBAR_1: shell geometry. Header height anchors the
      sticky sidebar + terminal pane; sidebar width collapses on narrow screens. */
   --header-h: 54px;
@@ -311,9 +311,8 @@ main.wrap { min-width: 0; padding: 28px 28px 48px; }
 .legend-idle { background: var(--st-grey); }
 .legend-down { background: var(--st-offline); }
 
-/* Explicit column grammar keeps the useful backend parameters legible. The
-   header uses the --row-columns token; .row mirrors the same template literally
-   (below) so the thin-row geometry guard can read the 5-column grid directly. */
+/* Explicit column grammar keeps the useful backend parameters legible. Header
+   and rows consume the same --row-columns token so their geometry cannot drift. */
 .fleet-columns {
   display: grid;
   grid-template-columns: var(--row-columns);
@@ -357,10 +356,7 @@ main.wrap { min-width: 0; padding: 28px 28px 48px; }
 .rows { display: flex; flex-direction: column; }
 .row {
   display: grid;
-  /* Mirrors :root --row-columns so the .fleet-columns header stays aligned with
-     the rows. Kept literal (not var) so the thin-row geometry guard reads the
-     5-column template; keep this in sync with --row-columns above. */
-  grid-template-columns: 10px minmax(0, 1fr) minmax(72px, auto) 128px 116px;
+  grid-template-columns: var(--row-columns);
   align-items: center;
   column-gap: 12px;
   position: relative;
@@ -472,6 +468,16 @@ main.wrap { min-width: 0; padding: 28px 28px 48px; }
   white-space: nowrap;
 }
 .rbtn { width: 100%; }
+.control-actions { display: flex; align-items: center; justify-content: flex-end; gap: 6px; }
+.control-actions .rbtn { width: auto; }
+.rbtn.refresh-context {
+  width: 30px;
+  min-width: 30px;
+  padding: 5px 6px;
+  color: var(--muted-strong);
+  font-size: 14px;
+}
+.rbtn.refresh-context.armed { color: var(--needs-go); border-color: var(--needs-go); }
 .rbtn:hover, .btn:hover { background: rgba(88,166,255,.13); }
 .rbtn.go, .btn.go { color: var(--needs-go); border-color: var(--needs-go); }
 .rbtn.go:hover, .btn.go:hover { background: rgba(43,217,100,.14); }
@@ -633,7 +639,7 @@ main.wrap { min-width: 0; padding: 28px 28px 48px; }
   .row { grid-template-columns: 10px minmax(0,1fr) auto 90px; min-height: 44px; padding: 5px 7px; column-gap: 8px; }
   .r-unread { grid-column: 3; grid-row: 1; }
   .r-ctx { grid-column: 4; grid-row: 1; }
-  .rbtn, .chip { grid-column: 4; grid-row: 2; }
+  .rbtn, .chip, .control-actions { grid-column: 4; grid-row: 2; }
   .r-id { grid-column: 2; grid-row: 1 / span 2; align-self: center; flex-wrap: wrap; row-gap: 4px; }
   .r-dot { grid-column: 1; grid-row: 1 / span 2; }
   .r-ctx .ctxbar { flex: 0 0 24px; max-width: 36px; }

@@ -621,10 +621,10 @@
 
   // ---- rendering ----------------------------------------------------------
   // COCKPIT_UI_POLISH_1 (Director #12800): thin Lab-list rows — the whole fleet
-  // on one screen. Each row is a fixed 5-column CSS grid (dot · identity · unread
-  // · ctx · control) so every row's columns align table-style across all plates.
+  // on one screen. Each row is a fixed 5-column CSS grid (dot · identity · ctx
+  // · unread · control) so every row's columns align table-style across all plates.
   //   D2: the ctx cell renders on EVERY row (em-dash placeholder when null).
-  //   D3: the control cell renders on EVERY row (Start / GO / status chip) —
+  //   D3: the control cell renders on EVERY row (refresh / GO / status chip) —
   //       never conditionally absent.
   // All content is built via textContent / DOM nodes (no innerHTML), so
   // agent-supplied strings can never inject markup.
@@ -675,10 +675,10 @@
     ]);
   }
 
-  // D3 — state control on every row. Driveable + down → Start; driveable + up +
-  // needs_go → GO; otherwise a live status chip (running / unread / idle /
-  // offline / no-signal for driveable seats, or the kind for status-only). The
-  // chip is never omitted, so the control column is uniform.
+  // D3 — state control on every row. Driveable + down → status chip; driveable +
+  // up → context refresh plus GO when needed; otherwise a live status chip
+  // (running / unread / idle / offline / no-signal, or the kind for status-only).
+  // The chip or action group is never omitted, so the control column is uniform.
   const CHIP_LABEL = {
     "st-running": "running", "st-go": "needs GO", "st-unread": "unread",
     "st-unread-old": "unread", "st-offline": "offline", "st-idle": "idle",
@@ -692,20 +692,37 @@
     return CHIP_LABEL[sc] || "idle";
   }
 
+  const CONTEXT_REFRESH_ARM_MS = 3000;
+  const contextRefreshArmed = new Map();
+
+  function refreshContextButton(meta) {
+    return el("button", {
+      class: "rbtn refresh-context",
+      type: "button",
+      text: "⟳",
+      title: "Refresh context (/clear)",
+      "aria-label": "Refresh context for " + meta.slug,
+      onclick: (ev) => {
+        ev.stopPropagation();
+        refreshContext(meta.slug, ev.currentTarget);
+      },
+    });
+  }
+
   function stateControl(meta, row, up) {
-    if (!meta.status_only) {
-      if (!up) {
-        return el("button", { class: "rbtn start", type: "button", text: "▶ Start",
-          title: "Start " + meta.slug,
-          onclick: (ev) => { ev.stopPropagation(); doStart(meta.slug, ev.currentTarget); } });
-      }
-      if (row && window.goAffordanceVisible(row)) {
-        return el("button", { class: "rbtn go", type: "button", text: "GO ⏎",
-          title: "Answer GO for " + meta.slug,
-          onclick: (ev) => { ev.stopPropagation(); doGo(meta.slug, ev.currentTarget); } });
-      }
+    if (meta.status_only || !up) {
+      return el("span", { class: "chip", text: statusChipText(meta, row, up) });
     }
-    return el("span", { class: "chip", text: statusChipText(meta, row, up) });
+    const actions = [];
+    if (row && window.goAffordanceVisible(row)) {
+      actions.push(el("button", { class: "rbtn go", type: "button", text: "GO ⏎",
+        title: "Answer GO for " + meta.slug,
+        onclick: (ev) => { ev.stopPropagation(); doGo(meta.slug, ev.currentTarget); } }));
+    } else {
+      actions.push(el("span", { class: "chip", text: statusChipText(meta, row, up) }));
+    }
+    actions.push(refreshContextButton(meta));
+    return el("span", { class: "control-actions" }, actions);
   }
 
   function card(meta) {
@@ -752,8 +769,8 @@
     const c = el("div", { class: cls.join(" "), "data-slug": meta.slug }, [
       el("span", { class: "r-dot" }),
       el("span", { class: "r-id" }, idKids),
-      unread,
       ctxCell(meta, row),          // D2 — every row
+      unread,
       stateControl(meta, row, up), // D3 — every row
     ]);
 
@@ -767,7 +784,7 @@
     if (!meta.status_only) {
       open = () => {
         const r = stateBySlug.get(meta.slug) || {};
-        if (!r.session_up) { toast(name + " is down — press Start first"); return; }
+        if (!r.session_up) { toast(name + " is down — start it in the terminal"); return; }
         // ttyd down ⇒ the proxy would 502; don't open a dead terminal frame.
         if (r.ttyd_up === false) { toast(name + " — terminal server offline"); return; }
         openTerm(meta.slug, name);
@@ -1066,6 +1083,36 @@
     if (btn) btn.disabled = true;
     const ok = await post("/api/sessions/" + slug + "/go", "GO → " + slug);
     if (btn) { btn.disabled = false; if (ok) { btn.classList.add("flash-ok"); setTimeout(() => btn.classList.remove("flash-ok"), 900); } }
+  }
+
+  function refreshContext(slug, btn) {
+    const armed = contextRefreshArmed.get(slug);
+    if (armed && armed.expiresAt > Date.now()) {
+      clearTimeout(armed.timer);
+      contextRefreshArmed.delete(slug);
+      btn.disabled = true;
+      post("/api/sessions/" + slug + "/refresh_context", "context refreshed → " + slug)
+        .then((ok) => { if (ok) return poll(); })
+        .finally(() => {
+          btn.disabled = false;
+          btn.textContent = "⟳";
+          btn.classList.remove("armed");
+        });
+      return;
+    }
+    if (armed) clearTimeout(armed.timer);
+    btn.textContent = "sure?";
+    btn.classList.add("armed");
+    const timer = setTimeout(() => {
+      if (contextRefreshArmed.get(slug)?.timer !== timer) return;
+      contextRefreshArmed.delete(slug);
+      btn.textContent = "⟳";
+      btn.classList.remove("armed");
+    }, CONTEXT_REFRESH_ARM_MS);
+    contextRefreshArmed.set(slug, {
+      expiresAt: Date.now() + CONTEXT_REFRESH_ARM_MS,
+      timer,
+    });
   }
 
   async function doStart(slug, btn) {
