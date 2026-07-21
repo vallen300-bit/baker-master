@@ -71,7 +71,12 @@ def test_bus_console_auth_gate(monkeypatch):
     assert "arrivals_board_access" in set_cookie
     assert "HttpOnly" in set_cookie
     assert "Secure" in set_cookie
-    assert "SameSite=strict" in set_cookie
+    # ARRIVALS_EMBED_COOKIE_FIX_1: bus-console reuses the shared
+    # arrivals_board_access cookie helper, so it inherits SameSite=None. The
+    # cookie stays HttpOnly (unreadable cross-site); the bus-console page itself
+    # is NOT reframed with a frame-ancestors CSP by this brief (arrivals-scoped)
+    # — flagged to lead as a follow-up (read-only surface, low clickjacking risk).
+    assert "SameSite=none" in set_cookie
 
     # cookie now carries → bare request authorized
     assert client.get("/bus-console").status_code == 200
