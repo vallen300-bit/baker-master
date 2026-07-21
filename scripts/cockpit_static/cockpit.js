@@ -30,7 +30,9 @@
   const url = (p) => BASE + (p.charAt(0) === "/" ? p : "/" + p);
 
   const gridEl = document.getElementById("grid");
-  const connEl = document.getElementById("conn");
+  // LAB_UNIFY_THEME_COCKPIT_EXTENSION_1: the top-right #conn health line was
+  // removed (Director 2026-07-21); its live/offline signal now renders into the
+  // #sync-note surface next to FLEET COCKPIT (see renderSummary).
   // COCKPIT_REVAMP_SPLIT_VIEW_SIDEBAR_1: the terminal is a right-hand pane inside
   // the three-column app shell (no #veil modal). Opening a seat toggles
   // `.pane-open` on the shell, which widens the pane column; the grid stays live.
@@ -191,13 +193,37 @@
     return layout.plates.reduce((n, p) => n + p.cards.length, 0);
   }
 
-  function renderSummary(labOk = null) {
+  // The single health line next to FLEET COCKPIT (#sync-note). It ABSORBS the
+  // removed top-right #conn (Director 2026-07-21): green with the driveable/seat
+  // count while the feed is live, RED (.feed-dead) when the feed is dead, amber
+  // (.is-warn) when the feed answered but Lab telemetry is degraded. `health`
+  // (when provided by poll) = { live, driveable, total, error }.
+  // The health line is now sticky: renderSummary is also called args-less from
+  // view/render refreshes (below), and those must NOT wipe the migrated live/
+  // offline state. Remember the latest poll probe and reuse it when not passed one.
+  let lastHealth = null;
+  let lastLabOk = null;
+  function renderSummary(labOk = null, health = null) {
     if (!layout) return;
+    if (labOk !== null) lastLabOk = labOk; else labOk = lastLabOk;
+    if (health !== null) lastHealth = health; else health = lastHealth;
     const cards = layout.plates.flatMap((plate) => plate.cards);
-    // COCKPIT_REVAMP_HEADER_1: the oversized digit block (Seats/Attention/Terminals)
-    // was removed per spec item 6 — live counts stay in the green header line.
     if (rosterNoteEl) rosterNoteEl.textContent = cards.length + " seats · grouped by operating role";
-    if (syncNoteEl) {
+    if (!syncNoteEl) return;
+    if (health && health.live === false) {
+      // Feed dead — the ONE health line turns red (migrated .feed-dead semantics).
+      syncNoteEl.textContent = "Feed offline — " + (health.error || "unreachable");
+      syncNoteEl.className = "summary-status feed-dead";
+    } else if (health && health.live === true) {
+      // Feed live — the line stays GREEN whenever the feed answers (the original
+      // #conn contract: red is reserved for a dead feed). Degraded Lab telemetry
+      // (feed answered but lab_glance_ok=false) is surfaced in TEXT, not color, so
+      // that signal is not lost with #conn's removal without breaking green=live.
+      const bits = "Live · " + health.driveable + " with terminal / " + health.total + " seats";
+      syncNoteEl.textContent = labOk === false ? bits + " · telemetry source degraded" : bits;
+      syncNoteEl.className = "summary-status";
+    } else {
+      // No health probe yet (first paint from layout metadata).
       syncNoteEl.textContent = labOk === false ? "Telemetry source offline" :
         (stateBySlug.size ? "Live · refreshed just now" : "Waiting for telemetry");
       syncNoteEl.className = "summary-status" + (labOk === false ? " is-warn" : "");
@@ -239,17 +265,14 @@
         ? layout.plates.reduce((n, plate) =>
             n + plate.cards.filter((card) => card.driveable).length, 0)
         : 0;
-      connEl.textContent = "live · " + driveable + " with terminal / " + total + " seats";
-      connEl.className = "conn ok";
-      renderSummary(labOk);
+      // Health line (migrated from #conn) renders through the single owner.
+      renderSummary(labOk, { live: true, driveable, total });
       render();
       syncPanelGo();             // reflect needs_go changes while the panel is open
       if (openMsgSlug) renderMsgSummary(openMsgSlug);   // D9 — live-refresh open panel
     } catch (e) {
       // Feed stale/dead — the ONE health line turns red (spec item 6, .feed-dead).
-      connEl.textContent = "feed offline — " + e.message;
-      connEl.className = "conn feed-dead";
-      renderSummary(false);
+      renderSummary(false, { live: false, error: e.message });
     }
   }
 
@@ -980,8 +1003,12 @@
       if (!r.ok) throw new Error("layout HTTP " + r.status);
     layout = await r.json();
     } catch (e) {
-      connEl.textContent = "layout load failed — " + e.message;
-      connEl.className = "conn feed-dead";
+      // Layout failed before we have any layout — renderSummary early-returns
+      // without one, so write the health line directly (red).
+      if (syncNoteEl) {
+        syncNoteEl.textContent = "Layout load failed — " + e.message;
+        syncNoteEl.className = "summary-status feed-dead";
+      }
       return;
     }
     buildSidebar();              // 9 static nav entries (badges hydrate on poll)
@@ -991,6 +1018,24 @@
     await poll();                // then hydrate with live state
     pollTimer = setInterval(poll, POLL_MS);
   }
+
+  // LAB_UNIFY_THEME_COCKPIT_EXTENSION_1: live-follow the /v2 theme. The head
+  // bootstrap already applied the stored theme before paint; here we re-theme
+  // live when the shell toggles. The cockpit runs as a same-origin iframe inside
+  // the Lab, so it receives the shell's `storage` event on the labTheme write.
+  (function wireTheme() {
+    function applyTheme(t) {
+      var el = document.documentElement;
+      if (t === "light") { el.setAttribute("data-theme", "light"); }
+      else { el.removeAttribute("data-theme"); }
+    }
+    try { applyTheme(localStorage.getItem("labTheme")); } catch (e) { /* storage off */ }
+    window.addEventListener("storage", function (e) {
+      if (e.key === "labTheme") {
+        try { applyTheme(localStorage.getItem("labTheme")); } catch (_) { /* storage off */ }
+      }
+    });
+  })();
 
   boot();
 })();
