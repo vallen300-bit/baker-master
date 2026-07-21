@@ -621,11 +621,11 @@
 
   // ---- rendering ----------------------------------------------------------
   // COCKPIT_UI_POLISH_1 (Director #12800): thin Lab-list rows — the whole fleet
-  // on one screen. Each row is a fixed 5-column CSS grid (dot · identity · ctx
-  // · unread · control) so every row's columns align table-style across all plates.
-  //   D2: the ctx cell renders on EVERY row (em-dash placeholder when null).
-  //   D3: the control cell renders on EVERY row (refresh / GO / status chip) —
-  //       never conditionally absent.
+  // on one screen. Each row is a fixed 6-column CSS grid (dot · identity · ctx
+  // · unread · session · refresh) so every row's columns align table-style.
+  //   D2: the ctx cell renders on EVERY row (muted empty track when inactive).
+  //   D3: the session cell always renders a status word; the refresh/action cell
+  //       stays present at the right edge, with GO + refresh only when driveable.
   // All content is built via textContent / DOM nodes (no innerHTML), so
   // agent-supplied strings can never inject markup.
 
@@ -642,9 +642,13 @@
   function ctxCell(meta, row) {
     const pct = (row && typeof row.context_pct === "number")
       ? Math.max(0, Math.min(100, row.context_pct)) : null;
-    if (pct === null) {
-      return el("span", { class: "r-ctx r-ctx-null", text: "—",
-                          title: "no context telemetry" });
+    const stale = row && row.context_stale === true;
+    const ageSec = stale ? Number(row.context_age_sec) : NaN;
+    const staleLong = stale && Number.isFinite(ageSec) && ageSec > 3600;
+    if (pct === null || staleLong) {
+      return el("span", { class: "r-ctx r-ctx-null", title: "no context telemetry" }, [
+        el("span", { class: "ctxbar" }),
+      ]);
     }
     // SEVERITY-BY-VALUE (lead ruling #12977): the fill width still tracks pct, but
     // the gradient is scaled to span one FULL track so its colour reads the true
@@ -652,19 +656,14 @@
     // box, and the fill is pct% of the track, so a scale of (10000/pct)% makes the
     // gradient box exactly one track wide → colour at the fill edge == severity(pct).
     const scale = pct > 0 ? (10000 / pct) : 100;
-    const stale = row.context_stale === true;
-    const ageSec = stale ? Number(row.context_age_sec) : NaN;
     const age = stale ? compactContextAge(ageSec) : "";
-    const staleLong = stale && Number.isFinite(ageSec) && ageSec > 3600;
     const label = stale
       ? (age ? age + " old · " + Math.round(pct) + "%" : "stale · " + Math.round(pct) + "%")
       : Math.round(pct) + "%";
-    const bar = staleLong
-      ? el("span", { class: "ctxbar ctxbar-stale", text: "?" })
-      : el("span", { class: "ctxbar" }, [el("span", { class: "ctxfill",
-          style: "width:" + pct + "%;--ctx-track-scale:" + scale + "%" })]);
+    const bar = el("span", { class: "ctxbar" }, [el("span", { class: "ctxfill",
+        style: "width:" + pct + "%;--ctx-track-scale:" + scale + "%" })]);
     return el("span", {
-      class: "r-ctx" + (stale ? " ctx-stale" : "") + (staleLong ? " ctx-stale-long" : ""),
+      class: "r-ctx" + (stale ? " ctx-stale" : ""),
       title: stale
         ? (age ? "stale context: " + age + " old · " + Math.round(pct) + "% used"
                : "stale context · " + Math.round(pct) + "% used")
@@ -675,10 +674,7 @@
     ]);
   }
 
-  // D3 — state control on every row. Driveable + down → status chip; driveable +
-  // up → context refresh plus GO when needed; otherwise a live status chip
-  // (running / unread / idle / offline / no-signal, or the kind for status-only).
-  // The chip or action group is never omitted, so the control column is uniform.
+  // D3 — Session is status-only. Actions live in the rightmost Refresh column.
   const CHIP_LABEL = {
     "st-running": "running", "st-go": "needs GO", "st-unread": "unread",
     "st-unread-old": "unread", "st-offline": "offline", "st-idle": "idle",
@@ -714,20 +710,24 @@
     });
   }
 
-  function stateControl(meta, row, up) {
-    if (meta.status_only || !up) {
-      return el("span", { class: "chip", text: statusChipText(meta, row, up) });
-    }
+  function sessionControl(meta, row, up) {
+    return el("span", { class: "session-cell" }, [
+      el("span", { class: "chip", text: statusChipText(meta, row, up) }),
+    ]);
+  }
+
+  function refreshControl(meta, row, up) {
+    const cell = el("span", { class: "refresh-cell" });
+    if (meta.status_only || !up) return cell;
     const actions = [];
     if (row && window.goAffordanceVisible(row)) {
       actions.push(el("button", { class: "rbtn go", type: "button", text: "GO ⏎",
         title: "Answer GO for " + meta.slug,
         onclick: (ev) => { ev.stopPropagation(); doGo(meta.slug, ev.currentTarget); } }));
-    } else {
-      actions.push(el("span", { class: "chip", text: statusChipText(meta, row, up) }));
     }
     actions.push(refreshContextButton(meta));
-    return el("span", { class: "control-actions" }, actions);
+    cell.appendChild(el("span", { class: "control-actions" }, actions));
+    return cell;
   }
 
   function card(meta) {
@@ -776,7 +776,8 @@
       el("span", { class: "r-id" }, idKids),
       ctxCell(meta, row),          // D2 — every row
       unread,
-      stateControl(meta, row, up), // D3 — every row
+      sessionControl(meta, row, up), // D3 — status-only Session cell
+      refreshControl(meta, row, up), // D3 — rightmost action cell
     ]);
 
     // D9 — two card modes, ZERO dead clicks. A tmux-backed (driveable) seat

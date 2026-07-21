@@ -5,9 +5,9 @@ Supersedes the fixed-height CARD contract (LAB_COCKPIT_REDESIGN_1 #12246/#12262/
 whole fleet fits one screen. This locks the row invariants that make D1/D2/D3
 impossible to regress, parsed from cockpit.css/js (CI has no browser).
 
-  D1 — one thin row per seat, a fixed 5-column grid so columns align table-style.
-  D2 — the context meter renders on EVERY row (em-dash placeholder when null).
-  D3 — the state control renders on EVERY row (refresh / GO / status chip).
+  D1 — one thin row per seat, a fixed 6-column grid so columns align table-style.
+  D2 — the context meter renders on EVERY row (muted empty track when inactive).
+  D3 — the session status and rightmost refresh/action cells render on EVERY row.
 """
 import re
 from pathlib import Path
@@ -39,9 +39,9 @@ def test_row_is_a_fixed_column_grid():
     assert m.group(1).strip() == "var(--row-columns)"
     root = re.search(r"--row-columns:\s*([^;]+);", CSS)
     assert root, "--row-columns custom property missing"
-    # 5 columns: dot · identity · ctx · unread · control.
+    # 6 columns: dot · identity · ctx · unread · session · refresh.
     cols = root.group(1).split()
-    assert len(cols) >= 5, f".row grid needs >=5 columns, got {root.group(1)!r}"
+    assert len(cols) >= 6, f".row grid needs >=6 columns, got {root.group(1)!r}"
 
 
 def test_rows_are_thin_not_fixed_card_height():
@@ -56,12 +56,13 @@ def test_rows_are_thin_not_fixed_card_height():
 
 def test_ctx_meter_rendered_on_every_row():
     """D2: card() appends ctxCell unconditionally, and ctxCell returns a node in
-    BOTH branches — a bar when numeric, an em-dash placeholder when null."""
+    BOTH branches — a filled bar when numeric, an empty track when inactive."""
     assert "ctxCell(meta, row)" in JS, "card() no longer appends ctxCell for every row"
     assert "function ctxCell" in JS, "ctxCell helper missing"
-    # Null branch renders the em-dash placeholder; never null, never hidden.
-    assert 'class: "r-ctx r-ctx-null"' in JS, "ctxCell null branch must render an em-dash placeholder"
-    assert ".r-ctx-null" in CSS, ".r-ctx-null placeholder style missing"
+    # Inactive branch renders a normal muted track; never a glyph or a hidden cell.
+    assert 'class: "r-ctx r-ctx-null"' in JS, "ctxCell inactive branch must render an empty track"
+    assert 'el("span", { class: "ctxbar" })' in JS
+    assert ".r-ctx-null .ctxbar" in CSS, "inactive context track style missing"
 
 
 def test_stale_context_meter_is_dimmed_and_shows_age():
@@ -70,8 +71,6 @@ def test_stale_context_meter_is_dimmed_and_shows_age():
     assert "context_age_sec" in JS, "stale context age is not rendered"
     assert ".r-ctx.ctx-stale" in CSS, "stale context style missing"
     assert 'age + " old · "' in JS, "stale label must lead with age"
-    assert 'text: "?"' in JS, "long-stale context must replace the fill with ?"
-    assert ".r-ctx.ctx-stale-long" in CSS, "long-stale context treatment missing"
     assert "#d2d9e1" in CSS, "dark stale label color missing"
     assert 'html[data-theme="light"] .r-ctx.ctx-stale .ctxlbl' in CSS, \
         "light stale label override missing"
@@ -95,18 +94,23 @@ def test_mobile_context_meter_keeps_a_visible_bar():
     m = re.search(r"@media \(max-width:\s*640px\)\s*\{(.*?)\n\}", CSS, re.S)
     assert m, "no phone media query"
     block = m.group(1)
-    assert "auto 90px" in block, "mobile context cell must reserve a 90px column"
+    assert "auto 104px" in block, "mobile action cell must reserve a 104px column"
     assert "flex: 0 0 24px" in block, "mobile context bar must keep a fixed width"
 
 
-def test_state_control_rendered_on_every_row():
-    """D3: card() appends stateControl unconditionally, which returns an action
-    group or status chip so the control column is never absent."""
-    assert "stateControl(meta, row, up)" in JS, "card() no longer appends stateControl for every row"
-    assert "function stateControl" in JS, "stateControl helper missing"
+def test_session_and_refresh_cells_render_on_every_row():
+    """D3: card() appends a status-only Session cell and a rightmost Refresh
+    cell unconditionally; actions never leak back into Session."""
+    assert "sessionControl(meta, row, up)" in JS
+    assert "refreshControl(meta, row, up)" in JS
+    assert "function sessionControl" in JS
+    assert "function refreshControl" in JS
     assert "refreshContextButton(meta)" in JS, "context refresh action missing"
-    assert 'class: "chip"' in JS, "stateControl must always fall through to a status chip"
-    assert ".rbtn" in CSS and ".chip" in CSS, "row control styles (.rbtn/.chip) missing"
+    session_start = JS.index("function sessionControl")
+    refresh_start = JS.index("function refreshControl")
+    assert 'class: "rbtn' not in JS[session_start:refresh_start]
+    assert ".session-cell" in CSS and ".refresh-cell" in CSS
+    assert ".rbtn" in CSS and ".chip" in CSS
 
 
 def test_header_and_rows_share_column_template_and_order():
@@ -115,10 +119,18 @@ def test_header_and_rows_share_column_template_and_order():
     assert CSS.count("--row-columns:") == 1
     assert re.search(
         r"<span></span><span>Agent / identity</span><span>Context window</span>"
-        r"<span>Inbox</span><span>Session</span>",
+        r"<span>Inbox</span><span>Session</span><span>Refresh</span>",
         HTML,
     )
     assert re.search(r"\.fleet-columns\s*\{[^}]*padding:\s*0 12px;", CSS, re.S)
+    assert re.search(
+        r"\.fleet-columns\s*\{[^}]*border-left:\s*1px solid transparent;"
+        r"[^}]*border-right:\s*1px solid transparent;",
+        CSS,
+        re.S,
+    )
+    assert "text-align: justify" in CSS
+    assert "text-align-last: justify" in CSS
     assert re.search(r"\.row\s*\{[^}]*padding:\s*4px 12px;", CSS, re.S)
 
 
@@ -167,6 +179,15 @@ def test_context_refresh_arm_is_cleared_before_grid_replacement():
 def test_subtitle_slot_is_reserved_but_empty():
     assert "Every terminal, app seat, desk, and service in one scan surface." not in HTML
     assert "reserved: future header line, same font slot" in HTML
+
+
+def test_inactive_context_has_only_an_empty_track():
+    """Director ruling: no telemetry reads as an ordinary muted empty bar, with
+    no question mark or square placeholder."""
+    assert "ctx-stale-long" not in JS
+    assert "ctx-stale-long" not in CSS
+    assert 'text: "?"' not in JS
+    assert ".r-ctx-null .ctxbar" in CSS
 
 
 def test_phone_rows_stay_tappable():
