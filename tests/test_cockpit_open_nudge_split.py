@@ -1,4 +1,4 @@
-"""COCKPIT_OPEN_NUDGE_SPLIT_1 — opening a terminal is inspection, not a wake."""
+"""COCKPIT_OPEN_NUDGE_SPLIT_1 - opening a terminal is inspection, not a wake."""
 import re
 from pathlib import Path
 
