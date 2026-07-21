@@ -15,6 +15,16 @@
 # production brief lived there (not the BRIEF_ prefix) and skipped this gate.
 # Now covered; CODE_*_PENDING state-flips + _reports stay excluded.
 #
+# Extended 2026-07-21 (AH2 HARNESS_V2_ADOPTION_AUDIT 07-21, lead #14741): inline
+# mailbox dispatches (briefs/_tasks/CODE_<N>_PENDING.md) were still hook-blind —
+# 5/8 sampled production PRs shipped inline with no formal brief, so items 2-5
+# (Context Contract, task class, done rubric, gate plan / post-deploy AC) escaped
+# the gate entirely. Now the CODE_<N>_PENDING dispatch is checked for the Harness
+# V2 essentials, but WARN-ONLY (never hard-blocks — an incident fix dispatched
+# inline must not stall). Escalate to hard-block after a clean week by setting
+# BAKER_BRIEF_SOP_INLINE_HARD_BLOCK=1 (default 0). CODE_* state-flips
+# (COMPLETE/DROPPED/...) + _reports stay fully excluded.
+#
 # Blocks if 3+ of 5 canonical SOP section headers are missing in the staged
 # content:
 #   1. ## Context
@@ -59,6 +69,14 @@ STAGED_BRIEFS="$(git diff --cached --name-only --diff-filter=AM \
     | grep -vE '/_reports/|/_tasks/CODE_[1-5]_(PENDING|COMPLETE|DROPPED|RETURN|PARKED)' \
     || true)"
 
+# Inline mailbox dispatches (CODE_<N>_PENDING only — the fresh-dispatch envelope;
+# state-flips COMPLETE/DROPPED/RETURN/PARKED are NOT re-checked). These get the
+# WARN-level Harness V2 pass below (lead #14741). Kept as a SEPARATE set so the
+# formal-brief hard-block path is untouched.
+STAGED_INLINE="$(git diff --cached --name-only --diff-filter=AM \
+    | grep -E '(^|/)briefs/_tasks/CODE_[1-5]_PENDING\.md$' \
+    || true)"
+
 # Env-var bypass for `-m`/`-F` flows where COMMIT_EDITMSG isn't yet written
 # (matches render-env-guard Part 4 pattern for the same constraint).
 # HARDENED 2026-06-10 (HARNESS_V2_ADOPTION_AUDIT — silent-bypass drift on PR
@@ -76,7 +94,7 @@ if [ "${BAKER_BRIEF_SOP_BYPASS:-}" = "1" ]; then
     fi
 fi
 
-[ -z "$STAGED_BRIEFS" ] && exit 0
+[ -z "$STAGED_BRIEFS" ] && [ -z "$STAGED_INLINE" ] && exit 0
 
 # For each staged brief, scan staged content for required section headers.
 # 3+ missing of 5 = block. Required headers (accept variant headings):
@@ -127,6 +145,44 @@ while IFS= read -r brief_path; do
         fi
     fi
 done <<< "$STAGED_BRIEFS"
+
+# --- Inline mailbox dispatch (CODE_<N>_PENDING) — Harness V2 WARN-level pass ---
+# lead #14741 (deputy HARNESS_V2_ADOPTION_AUDIT 2026-07-21): inline dispatches
+# escaped the gate because the trigger above excludes CODE_*_PENDING. Enforce the
+# HV2 essentials here too, but WARN-ONLY on the first pass so an incident fix
+# dispatched inline is never stalled. The 4th essential accepts gate plan OR
+# post-deploy AC OR acceptance criteria (lead's #14741 wording folds items 5+6).
+# Flip to hard-block after a clean week via BAKER_BRIEF_SOP_INLINE_HARD_BLOCK=1.
+if [ -n "$STAGED_INLINE" ]; then
+    INLINE_WARN=""
+    while IFS= read -r inline_path; do
+        [ -z "$inline_path" ] && continue
+        STAGED_CONTENT="$(git show ":$inline_path" 2>/dev/null)" || continue
+        # Author escape hatch, same convention as the formal path.
+        grep -qiE '^Harness-V2:[[:space:]]*N/?A' <<< "$STAGED_CONTENT" && continue
+        HV2_MISSING=()
+        grep -qiE 'context contract' <<< "$STAGED_CONTENT" || HV2_MISSING+=("Context Contract")
+        grep -qiE 'task[ _-]?class' <<< "$STAGED_CONTENT" || HV2_MISSING+=("task class")
+        grep -qiE 'done[ -]?state|done rubric|required final state' <<< "$STAGED_CONTENT" || HV2_MISSING+=("done rubric/done-state class")
+        grep -qiE 'gate plan|post[ -]?deploy ac|acceptance criteria' <<< "$STAGED_CONTENT" || HV2_MISSING+=("gate plan / post-deploy AC")
+        if [ ${#HV2_MISSING[@]} -ge 2 ]; then
+            INLINE_WARN+=$'\n  - '"$inline_path"' — Harness V2 essentials missing: '"${HV2_MISSING[*]}"
+        fi
+    done <<< "$STAGED_INLINE"
+
+    if [ -n "$INLINE_WARN" ]; then
+        cat >&2 <<MSG
+WARN [brief-sop-check]: inline dispatch(es) missing Harness V2 essentials:$INLINE_WARN
+
+  Add Context Contract, task class, done rubric / done-state, and gate plan / post-deploy AC,
+  or declare \`Harness-V2: N/A — <reason>\`. First-pass WARN only (lead #14741) — not blocking.
+MSG
+        if [ "${BAKER_BRIEF_SOP_INLINE_HARD_BLOCK:-0}" = "1" ]; then
+            echo "[pre-commit] BLOCKED (brief-sop-check): inline hard-block mode enabled (BAKER_BRIEF_SOP_INLINE_HARD_BLOCK=1)." >&2
+            exit 1
+        fi
+    fi
+fi
 
 if [ -n "$VIOLATIONS" ]; then
     cat >&2 <<MSG
