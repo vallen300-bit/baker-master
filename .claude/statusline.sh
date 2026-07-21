@@ -52,7 +52,7 @@ context_window_tokens() {
 }
 
 write_live_context_band() {
-  local alias pct_raw pct now mtime tmp band window link link_target target_name target_path link_tmp
+  local alias pct_raw pct now mtime tmp band window link link_target target_name target_path link_tmp existing_record
   alias="$(context_alias)"
   [ -n "$alias" ] || return 0
   pct_raw="$(printf '%s' "$input" | jq -r \
@@ -99,8 +99,22 @@ write_live_context_band() {
 
   tmp="$(mktemp "$CONTEXT_BAND_DIR/.${alias}.json.tmp.XXXXXX" 2>/dev/null || true)"
   [ -n "$tmp" ] || return 0
-  printf '{"context_percent":%s,"band":"%s","measured":true,"window_tokens":%s}\n' \
-    "$pct" "$band" "$window" >"$tmp" 2>/dev/null || {
+  existing_record='{}'
+  if [ -f "$target_path" ]; then
+    existing_record="$(jq -c 'if type == "object" then . else {} end' \
+      "$target_path" 2>/dev/null || printf '{}')"
+  fi
+  jq -cn \
+    --argjson existing "$existing_record" \
+    --argjson context_percent "$pct" \
+    --arg band "$band" \
+    --argjson window_tokens "$window" \
+    '$existing + {
+      context_percent: $context_percent,
+      band: $band,
+      measured: true,
+      window_tokens: $window_tokens
+    }' >"$tmp" 2>/dev/null || {
       rm -f "$tmp" 2>/dev/null || true
       return 0
     }

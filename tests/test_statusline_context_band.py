@@ -105,7 +105,14 @@ def test_invalid_live_window_uses_existing_model_fallback(tmp_path):
 
 def test_statusline_updates_symlink_target_without_replacing_current_link(tmp_path):
     target = tmp_path / "session.json"
-    target.write_text("old\n", encoding="utf-8")
+    target.write_text(
+        json.dumps({
+            "session_id": "sess-1",
+            "metadata": {"source": "context-threshold-check"},
+            "context_percent": 1,
+        }),
+        encoding="utf-8",
+    )
     current = tmp_path / "lead.current"
     current.symlink_to(target.name)
 
@@ -118,4 +125,7 @@ def test_statusline_updates_symlink_target_without_replacing_current_link(tmp_pa
     assert current.is_symlink()
     assert current.readlink() == Path("session.json")
     assert record["context_percent"] == 67
-    assert json.loads(target.read_text(encoding="utf-8"))["context_percent"] == 67
+    updated = json.loads(target.read_text(encoding="utf-8"))
+    assert updated["context_percent"] == 67
+    assert updated["session_id"] == "sess-1"
+    assert updated["metadata"] == {"source": "context-threshold-check"}
