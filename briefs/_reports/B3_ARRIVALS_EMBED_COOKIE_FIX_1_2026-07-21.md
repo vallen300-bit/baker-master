@@ -3,7 +3,7 @@
 - **Brief:** `briefs/_tasks/ARRIVALS_EMBED_COOKIE_FIX_1.md` (dispatched_by: lead; assigned_to: b3)
 - **Dispatch:** wake bus #14418 → ship bus #14427
 - **Branch:** `b3/arrivals-embed-cookie-fix-1` off `origin/main`
-- **PR:** #616 · **SHA:** `2cfc6ce4`
+- **PR:** #616 · **SHA:** `0dc1487c` (was `2cfc6ce4`; +bus-console guard per lead #14431)
 - **Date:** 2026-07-21
 - **Ship to:** lead (cc b2)
 
@@ -58,13 +58,14 @@ Updated existing SameSite assertions in `test_arrivals_board.py` (2) and
 3. ✅ 404 disguise for unauthenticated requests unchanged.
 4. ⏳ Live embed AC — pending, with b2 + lead post-deploy.
 
-## Flag to lead (scope observation)
+## Flag to lead → RESOLVED in-branch (lead ruling #14431)
 
 `/bus-console` reuses the shared `arrivals_board_access` cookie helper, so it
-inherited `SameSite=None` but is NOT reframed with a frame-ancestors CSP (this
-brief is arrivals-scoped; brief §"Do NOT Touch" = non-arrivals routes). Cookie
-stays HttpOnly (unreadable cross-site); `/bus-console` is a read-only surface, so
-clickjacking risk is low. Separate ruling if lead wants it guarded too.
+inherited `SameSite=None`. I flagged it (bus #14427). Lead ruled #14431: a
+surface must never lose Strict without gaining the fence, even read-only — guard
+it now, same branch. Done at SHA `0dc1487c`: identical frame-ancestors CSP added
+to the `/bus-console` HTML route (200 path only; 404 disguise unchanged, no CSP
+leak) + a test. Reply with SHA on bus #14438.
 
 ## Post-deploy note
 
