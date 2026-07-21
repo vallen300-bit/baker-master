@@ -129,6 +129,17 @@ def test_header_and_rows_share_column_template_and_order():
         CSS,
         re.S,
     )
+    assert re.search(
+        r"\.fleet-columns\s*\{[^}]*position:\s*sticky;"
+        r"[^}]*top:\s*var\(--header-h\);"
+        r"[^}]*z-index:\s*2;"
+        r"[^}]*background:\s*var\(--bg\);",
+        CSS,
+        re.S,
+    ), "column header must pin with an opaque low-level theme background"
+    assert re.search(r"#msgveil\s*\{[^}]*z-index:\s*8;", CSS, re.S)
+    assert re.search(r"#msgpanel\s*\{[^}]*z-index:\s*9;", CSS, re.S)
+    assert re.search(r"#toast\s*\{[^}]*z-index:\s*11;", CSS, re.S)
     assert "text-align: justify" in CSS
     assert "text-align-last: justify" in CSS
     assert re.search(r"\.row\s*\{[^}]*padding:\s*4px 12px;", CSS, re.S)
