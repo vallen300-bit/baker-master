@@ -164,7 +164,10 @@ if [ -n "$STAGED_INLINE" ]; then
         grep -qiE 'context contract' <<< "$STAGED_CONTENT" || HV2_MISSING+=("Context Contract")
         grep -qiE 'task[ _-]?class' <<< "$STAGED_CONTENT" || HV2_MISSING+=("task class")
         grep -qiE 'done[ -]?state|done rubric|required final state' <<< "$STAGED_CONTENT" || HV2_MISSING+=("done rubric/done-state class")
-        grep -qiE 'gate plan|post[ -]?deploy ac|acceptance criteria' <<< "$STAGED_CONTENT" || HV2_MISSING+=("gate plan / post-deploy AC")
+        # Separator class covers space / underscore / hyphen so the repo-normal
+        # POST_DEPLOY_AC / POST_DEPLOY_AC_VERDICT forms match, not just "post-deploy ac"
+        # (codex #14750 P2: underscore forms were slipping through).
+        grep -qiE 'gate plan|post[ _-]?deploy[ _-]?ac|acceptance criteria' <<< "$STAGED_CONTENT" || HV2_MISSING+=("gate plan / post-deploy AC")
         if [ ${#HV2_MISSING[@]} -ge 2 ]; then
             INLINE_WARN+=$'\n  - '"$inline_path"' — Harness V2 essentials missing: '"${HV2_MISSING[*]}"
         fi

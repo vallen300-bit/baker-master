@@ -52,6 +52,22 @@ Harness-V2: N/A — docs-only inline dispatch, no production code.
 Nothing to enforce.
 """
 
+# codex #14750 P2 regression: the underscore POST_DEPLOY_AC_VERDICT form must
+# satisfy the 4th essential. Has Context Contract + done-state class + the verdict
+# block, omits ONLY task class => 1 missing => below the >=2 threshold => must NOT
+# be flagged, even under hard-block. Before the fix the underscore form failed the
+# space/hyphen-only regex, counting the 4th essential missing too (2) and blocking.
+UNDERSCORE_AC_INLINE = """\
+# CODE_1_PENDING — SYNTHETIC_UNDERSCORE_AC
+
+## Context
+Inline dispatch citing the repo-normal underscore AC form.
+
+Context Contract: routed owner b3.
+Done-state class: merged to main, codex PASS.
+POST_DEPLOY_AC_VERDICT v1 — topic post-deploy-ac/synthetic.
+"""
+
 # A formal brief missing 3+ of the 5 SOP headers — used to prove the existing
 # hard-block path is untouched by the inline change.
 BAD_FORMAL_BRIEF = """\
@@ -133,6 +149,17 @@ def test_state_flip_complete_is_not_checked(tmp_path):
     r = _run(tmp_path, hook, {"BAKER_BRIEF_SOP_INLINE_HARD_BLOCK": "1"})
     assert r.returncode == 0, "state-flip file must not be checked"
     assert "WARN [brief-sop-check]" not in r.stderr
+
+
+def test_underscore_post_deploy_ac_form_satisfies_4th_essential(tmp_path):
+    # codex #14750 P2: POST_DEPLOY_AC_VERDICT (underscore) must count as the 4th
+    # essential. Only task class is omitted => 1 missing => below threshold => no
+    # flag, even in hard-block mode.
+    hook = _init_repo(tmp_path)
+    _stage(tmp_path, "briefs/_tasks/CODE_1_PENDING.md", UNDERSCORE_AC_INLINE)
+    r = _run(tmp_path, hook, {"BAKER_BRIEF_SOP_INLINE_HARD_BLOCK": "1"})
+    assert r.returncode == 0, f"underscore AC form must satisfy 4th essential: {r.stderr}"
+    assert "Harness V2 essentials missing" not in r.stderr
 
 
 def test_formal_brief_hardblock_still_fires(tmp_path):
