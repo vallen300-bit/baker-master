@@ -1,7 +1,7 @@
 {
   "statusLine": {
     "type": "command",
-    "command": "/Users/dimitry/.claude/bin/baker-statusline.sh '${BAKER_ROLE:-?}'"
+    "command": "bash .claude/statusline.sh"
   },
   "hooks": {
     "SessionStart": [
