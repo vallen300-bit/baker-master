@@ -191,35 +191,41 @@ button { font: inherit; }
 .quiet-rows { margin-top: 3px; opacity: .82; }
 .view-empty { padding: 44px 12px; color: var(--muted); font-size: 13px; text-align: center; }
 
-/* The first screen answers: what is this, how much is here, and is anything
-   asking for attention? It stays a line of information, not a card wall. */
-main.wrap { min-width: 0; padding: 28px 28px 48px; }
-.cockpit-summary {
-  display: flex;
-  align-items: flex-end;
-  justify-content: space-between;
-  gap: 28px;
-  padding: 0 8px 22px;
+/* The first screen answers what this is, how much is here, and whether the
+   fleet needs attention. Keep the four content units in one compact sticky
+   block so the row labels never detach from the roster they describe. */
+main.wrap { min-width: 0; padding: 0 28px 48px; }
+.cockpit-sticky {
+  position: sticky;
+  top: 0;
+  z-index: 4;
+  display: grid;
+  grid-template-columns: minmax(0, auto) minmax(0, 1fr);
+  grid-template-areas:
+    "title status"
+    "meta meta"
+    "columns columns";
+  align-items: center;
+  min-height: 0;
+  padding: 9px 8px 0;
+  background: var(--bg);
   border-bottom: 1px solid var(--border);
 }
-.summary-copy { min-width: 0; }
-.eyebrow {
-  margin-bottom: 7px;
-  color: var(--blue);
-  font-size: 10px;
-  font-weight: 600;
-  letter-spacing: .15em;
+.cockpit-sticky.is-stuck {
+  box-shadow: 0 10px 18px rgba(0, 0, 0, .22);
 }
-.eyebrow span { color: var(--muted); padding: 0 3px; }
-.summary-title-row { display: flex; align-items: center; gap: 13px; flex-wrap: wrap; }
-.summary-title-row h1 {
-  margin: 0;
+.cockpit-sticky-title {
+  grid-area: title;
+  margin: 0 0 2px;
   color: var(--text);
-  font-size: 26px;
-  font-weight: 500;
-  letter-spacing: -.02em;
+  font: 600 16px/24px -apple-system, "system-ui", monospace;
+  letter-spacing: 0;
+  white-space: nowrap;
 }
-.summary-copy p { margin: 7px 0 0; color: var(--muted); font-size: 12px; }
+.cockpit-sticky > .summary-status {
+  grid-area: status;
+  justify-self: end;
+}
 .summary-status {
   display: inline-flex;
   align-items: center;
@@ -236,12 +242,14 @@ main.wrap { min-width: 0; padding: 28px 28px 48px; }
 /* COCKPIT_REVAMP_HEADER_1 (spec item 6): the oversized digit block
    (.summary-stats) was removed; live counts live in the green header line. */
 
-.fleet-toolbar {
+.cockpit-sticky-meta {
+  grid-area: meta;
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: 18px;
-  padding: 22px 8px 11px;
+  min-width: 0;
+  padding: 5px 0 6px;
 }
 .roster-title { color: var(--text); font-size: 12px; font-weight: 600; }
 .roster-title span { color: var(--muted); font-size: 11px; font-weight: 400; margin-left: 8px; }
@@ -259,16 +267,14 @@ main.wrap { min-width: 0; padding: 28px 28px 48px; }
    and rows consume the same --row-columns token so their geometry cannot drift. */
 .fleet-columns {
   display: grid;
+  grid-area: columns;
   grid-template-columns: var(--row-columns);
   align-items: center;
   column-gap: 12px;
 }
 .fleet-columns {
-  min-height: 27px;
+  min-height: 24px;
   padding: 0 12px;
-  position: sticky;
-  top: var(--header-h);
-  z-index: 2;
   color: var(--muted);
   background: var(--bg);
   border-left: 1px solid transparent;
@@ -560,18 +566,45 @@ main.wrap { min-width: 0; padding: 28px 28px 48px; }
 #toast.ok { border-color: var(--needs-go); }
 
 @media (max-width: 900px) {
-  main.wrap { padding: 22px 16px 40px; }
-  .cockpit-summary { align-items: flex-start; flex-direction: column; gap: 18px; }
+  main.wrap { padding: 0 16px 40px; }
   /* Terminal pane takes more of the row on smaller desktops. */
   :root { --pane-w: min(680px, 62vw); }
 }
 
 @media (max-width: 640px) {
-  main.wrap { padding: 18px 8px 32px; }
-  .cockpit-summary { padding: 0 5px 17px; }
-  .summary-title-row h1 { font-size: 23px; }
-  .fleet-toolbar { align-items: flex-start; flex-direction: column; gap: 10px; padding: 18px 5px 9px; }
-  .state-legend { flex-wrap: wrap; gap: 8px 13px; }
+  main.wrap { padding: 0 8px 32px; }
+  .cockpit-sticky {
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-areas: "title" "status" "meta";
+    padding: 8px 5px 0;
+  }
+  .cockpit-sticky > .summary-status { justify-self: start; }
+  .cockpit-sticky-meta {
+    align-items: center;
+    flex-direction: row;
+    gap: 8px;
+    padding: 5px 0 6px;
+    overflow: hidden;
+  }
+  .cockpit-sticky-meta .roster-title {
+    flex: 1 1 auto;
+    min-width: 0;
+    font-size: 11px;
+    line-height: 14px;
+  }
+  .cockpit-sticky-meta .roster-title span {
+    margin-left: 4px;
+    font-size: 10px;
+  }
+  .state-legend {
+    flex: 0 1 50%;
+    min-width: 0;
+    flex-wrap: nowrap;
+    gap: 8px;
+    overflow-x: auto;
+    scrollbar-width: none;
+  }
+  .state-legend::-webkit-scrollbar { display: none; }
   .fleet-columns { display: none; }
   .plate > h2 { margin-top: 18px; padding-left: 7px; }
   .row { grid-template-columns: 10px minmax(0,1fr) auto 104px; min-height: 44px; padding: 5px 7px; column-gap: 8px; }

@@ -52,6 +52,7 @@
   const termNudge = document.getElementById("term-nudge");
   const syncNoteEl = document.getElementById("sync-note");
   const rosterNoteEl = document.getElementById("roster-note");
+  const stickyHeaderEl = document.getElementById("cockpit-sticky");
   // D9 — App-resident card bus-message panel.
   const msgVeil = document.getElementById("msgveil");
   const msgPanel = document.getElementById("msgpanel");
@@ -231,6 +232,12 @@
         (stateBySlug.size ? "Live · refreshed just now" : "Waiting for telemetry");
       syncNoteEl.className = "summary-status" + (labOk === false ? " is-warn" : "");
     }
+  }
+
+  // COCKPIT_HEADER_BLOCK_STICKY_1: keep the header block quiet at page-top and
+  // add depth only after it starts covering the scrolling roster rows.
+  function syncStickyShadow() {
+    if (stickyHeaderEl) stickyHeaderEl.classList.toggle("is-stuck", window.scrollY > 0);
   }
 
   // ---- network ------------------------------------------------------------
@@ -1137,6 +1144,8 @@
   // Drawer Nudge — re-push the composed wake into an already-open seat (same call).
   if (termNudge) termNudge.addEventListener("click", () => { if (openSlug) nudgeSeat(openSlug, openName); });
   document.addEventListener("keydown", (e) => { if (e.key === "Escape" && openMsgSlug) closeMsgPanel(); });
+  window.addEventListener("scroll", syncStickyShadow, { passive: true });
+  syncStickyShadow();
 
   // NOTE (COCKPIT_REVAMP_HEADER_1, spec item 6): the header bell (notify-mute
   // toggle) was removed. Banners stay ON; the controller's /api/notify/* endpoints

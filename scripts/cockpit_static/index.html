@@ -9,7 +9,7 @@
      (different origin, no labTheme key) stays dark — zero change. -->
 <script>try{if(localStorage.getItem("labTheme")==="light")document.documentElement.setAttribute("data-theme","light")}catch(e){}</script>
 <title>Baker Cockpit</title>
-<link rel="stylesheet" href="cockpit.css?v=10">
+<link rel="stylesheet" href="cockpit.css?v=11">
 </head>
 <body>
 <!-- COCKPIT_REVAMP_SPLIT_VIEW_SIDEBAR_1 (spec items 4+5): three-column app shell —
@@ -22,29 +22,22 @@
   <nav class="sidebar" id="sidebar" aria-label="Fleet views"></nav>
 
   <main class="wrap" id="wrap">
-    <section class="cockpit-summary" aria-labelledby="cockpit-title">
-      <div class="summary-copy">
-        <div class="eyebrow">LIVE OPERATIONS <span>·</span> BRISEN LAB</div>
-        <div class="summary-title-row">
-          <h1 id="cockpit-title">FLEET COCKPIT</h1>
-          <span class="summary-status" id="sync-note">Waiting for telemetry</span>
+    <div class="cockpit-sticky" id="cockpit-sticky">
+      <h1 class="cockpit-sticky-title" id="cockpit-title">FLEET COCKPIT</h1>
+      <span class="summary-status" id="sync-note">Waiting for telemetry</span>
+      <!-- reserved: future header line, same font slot -->
+      <div class="cockpit-sticky-meta">
+        <div class="roster-title">Fleet roster <span id="roster-note">43 seats · grouped by operating role</span></div>
+        <div class="state-legend" aria-label="State legend">
+          <span><i class="legend-dot legend-working"></i>Working</span>
+          <span><i class="legend-dot legend-go"></i>Needs GO</span>
+          <span><i class="legend-dot legend-idle"></i>Idle</span>
+          <span><i class="legend-dot legend-down"></i>No signal</span>
         </div>
-        <!-- reserved: future header line, same font slot -->
       </div>
-      <!-- COCKPIT_REVAMP_HEADER_1 (spec item 6): oversized digit block removed;
-           live counts live in the green header line. -->
-    </section>
-    <div class="fleet-toolbar">
-      <div class="roster-title">Fleet roster <span id="roster-note">43 seats · grouped by operating role</span></div>
-      <div class="state-legend" aria-label="State legend">
-        <span><i class="legend-dot legend-working"></i>Working</span>
-        <span><i class="legend-dot legend-go"></i>Needs GO</span>
-        <span><i class="legend-dot legend-idle"></i>Idle</span>
-        <span><i class="legend-dot legend-down"></i>No signal</span>
+      <div class="fleet-columns" aria-hidden="true">
+        <span></span><span>Agent / identity</span><span>Context window</span><span>Inbox</span><span>Session</span><span>Refresh</span>
       </div>
-    </div>
-    <div class="fleet-columns" aria-hidden="true">
-      <span></span><span>Agent / identity</span><span>Context window</span><span>Inbox</span><span>Session</span><span>Refresh</span>
     </div>
     <div id="grid"></div>
   </main>
@@ -94,6 +87,6 @@
 </div>
 
 <script src="glance_state.js?v=8"></script>
-<script src="cockpit.js?v=10"></script>
+<script src="cockpit.js?v=11"></script>
 </body>
 </html>
