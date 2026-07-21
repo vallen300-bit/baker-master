@@ -44,7 +44,10 @@ mkdir -p "${BUNDLE_ROOT}/scripts/forge-agent" "${BUNDLE_ROOT}/tests/fixtures" "$
 cp "$SRC_INSTALLER" "${BUNDLE_ROOT}/scripts/install_forge_agent.sh"
 cp "$SRC_WRAPPER"   "${BUNDLE_ROOT}/forge_drift_check.sh"
 cp "${SRC_FORGE_DIR}"/*.sh "${BUNDLE_ROOT}/scripts/forge-agent/"
-cp "${SRC_FIXTURES_DIR}/session-start-bus-drain.sh" "${SRC_FIXTURES_DIR}/stop-bus-ack.sh" "${BUNDLE_ROOT}/tests/fixtures/"
+cp "${SRC_FIXTURES_DIR}/session-start-bus-drain.sh" \
+   "${SRC_FIXTURES_DIR}/turn-bus-drain.sh" \
+   "${SRC_FIXTURES_DIR}/stop-bus-ack.sh" \
+   "${BUNDLE_ROOT}/tests/fixtures/"
 chmod +x "${BUNDLE_ROOT}/forge_drift_check.sh" "${BUNDLE_ROOT}/scripts/install_forge_agent.sh" \
          "${BUNDLE_ROOT}/scripts/forge-agent/"*.sh "${BUNDLE_ROOT}/tests/fixtures/"*.sh
 echo "  deployed check bundle -> $BUNDLE_ROOT"

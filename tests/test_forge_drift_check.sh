@@ -23,6 +23,7 @@ FORGE_DRIFT_BUNDLE_DIR="$BUNDLE" FORGE_DRIFT_LOGDIR="$TMP/logs" FORGE_DRIFT_DRYR
   bash "$CRON" >/dev/null 2>&1
 { [[ -f "$BUNDLE/forge_drift_check.sh" ]] && [[ -f "$BUNDLE/scripts/install_forge_agent.sh" ]] \
   && [[ -f "$BUNDLE/scripts/forge-agent/heartbeat-ticker.sh" ]] \
+  && [[ -f "$BUNDLE/tests/fixtures/turn-bus-drain.sh" ]] \
   && [[ -f "$BUNDLE/tests/fixtures/stop-bus-ack.sh" ]]; } \
   && ok "bundle layout (installer + forge scripts + fixtures + wrapper)" || bad "bundle layout"
 
