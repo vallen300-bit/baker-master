@@ -695,6 +695,11 @@
   const CONTEXT_REFRESH_ARM_MS = 3000;
   const contextRefreshArmed = new Map();
 
+  function clearContextRefreshArms() {
+    for (const armed of contextRefreshArmed.values()) clearTimeout(armed.timer);
+    contextRefreshArmed.clear();
+  }
+
   function refreshContextButton(meta) {
     return el("button", {
       class: "rbtn refresh-context",
@@ -1043,6 +1048,9 @@
 
   function render() {
     if (!layout) return;
+    // Grid replacement creates new buttons; never carry a hidden arm token over
+    // to a visually fresh button.
+    clearContextRefreshArms();
     // View filter is one pure function (glance_state.js planView) so the DOM and
     // its unit vectors share a source. Plates → nav groups → visible plan + badges.
     const plan = window.planView(navGroups(), currentView);

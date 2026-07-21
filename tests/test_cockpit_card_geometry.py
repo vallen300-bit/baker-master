@@ -143,6 +143,27 @@ def test_context_refresh_is_click_armed_and_driveable_only():
     assert ".control-actions" in CSS
 
 
+def test_context_refresh_arm_is_cleared_before_grid_replacement():
+    """A poll/view render replaces the button node, so its arm token must not
+    survive invisibly and turn the replacement's first click into /clear."""
+    clear = re.search(
+        r"function clearContextRefreshArms\(\)\s*\{(.*?)\n\s*\}",
+        JS,
+        re.S,
+    )
+    assert clear, "context-refresh arm cleanup helper missing"
+    assert "clearTimeout(armed.timer)" in clear.group(1)
+    assert "contextRefreshArmed.clear()" in clear.group(1)
+
+    render_start = JS.find("function render()")
+    assert render_start >= 0, "render helper missing"
+    render_body = JS[render_start:]
+    assert "clearContextRefreshArms();" in render_body
+    assert render_body.index("clearContextRefreshArms();") < render_body.index(
+        "gridEl.textContent = \"\";"
+    )
+
+
 def test_subtitle_slot_is_reserved_but_empty():
     assert "Every terminal, app seat, desk, and service in one scan surface." not in HTML
     assert "reserved: future header line, same font slot" in HTML
