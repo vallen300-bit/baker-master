@@ -130,13 +130,18 @@ def test_header_and_rows_share_column_template_and_order():
         re.S,
     )
     assert re.search(
-        r"\.fleet-columns\s*\{[^}]*position:\s*sticky;"
-        r"[^}]*top:\s*var\(--header-h\);"
-        r"[^}]*z-index:\s*2;"
+        r"\.cockpit-sticky\s*\{[^}]*position:\s*sticky;"
+        r"[^}]*top:\s*0;"
+        r"[^}]*z-index:\s*4;"
         r"[^}]*background:\s*var\(--bg\);",
         CSS,
         re.S,
-    ), "column header must pin with an opaque low-level theme background"
+    ), "whole cockpit header block must pin with an opaque background"
+    assert not re.search(
+        r"\.fleet-columns\s*\{[^}]*position:\s*sticky;",
+        CSS,
+        re.S,
+    ), "column row must not create a competing nested sticky surface"
     assert re.search(r"#msgveil\s*\{[^}]*z-index:\s*8;", CSS, re.S)
     assert re.search(r"#msgpanel\s*\{[^}]*z-index:\s*9;", CSS, re.S)
     assert re.search(r"#toast\s*\{[^}]*z-index:\s*11;", CSS, re.S)
