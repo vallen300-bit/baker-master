@@ -52,7 +52,7 @@ context_window_tokens() {
 }
 
 write_live_context_band() {
-  local alias pct_raw pct now mtime tmp band window
+  local alias pct_raw pct now mtime tmp band window link link_target target_name target_path link_tmp
   alias="$(context_alias)"
   [ -n "$alias" ] || return 0
   pct_raw="$(printf '%s' "$input" | jq -r \
@@ -82,14 +82,43 @@ write_live_context_band() {
     band="hard"
   fi
   window="$(context_window_tokens)"
-  tmp="$(mktemp "$CONTEXT_BAND_DIR/.${alias}.current.tmp.XXXXXX" 2>/dev/null || true)"
+  link="$CONTEXT_BAND_DIR/$alias.current"
+  link_target="$(readlink "$link" 2>/dev/null || true)"
+  case "$link_target" in
+    ""|*[!A-Za-z0-9._-]*)
+      link_target=""
+      ;;
+  esac
+  if [ -n "$link_target" ]; then
+    target_name="$link_target"
+    target_path="$CONTEXT_BAND_DIR/$target_name"
+  else
+    target_name="${alias}.$(uuidgen 2>/dev/null || printf '%s-%s' "$$" "$now").json"
+    target_path="$CONTEXT_BAND_DIR/$target_name"
+  fi
+
+  tmp="$(mktemp "$CONTEXT_BAND_DIR/.${alias}.json.tmp.XXXXXX" 2>/dev/null || true)"
   [ -n "$tmp" ] || return 0
   printf '{"context_percent":%s,"band":"%s","measured":true,"window_tokens":%s}\n' \
     "$pct" "$band" "$window" >"$tmp" 2>/dev/null || {
       rm -f "$tmp" 2>/dev/null || true
       return 0
     }
-  mv -f "$tmp" "$CONTEXT_BAND_DIR/$alias.current" 2>/dev/null || rm -f "$tmp" 2>/dev/null || true
+  mv -f "$tmp" "$target_path" 2>/dev/null || {
+    rm -f "$tmp" 2>/dev/null || true
+    return 0
+  }
+
+  if [ -z "$link_target" ]; then
+    link_tmp="$(mktemp "$CONTEXT_BAND_DIR/.${alias}.current.link.tmp.XXXXXX" 2>/dev/null || true)"
+    [ -n "$link_tmp" ] || return 0
+    rm -f "$link_tmp" 2>/dev/null || true
+    ln -s "$target_name" "$link_tmp" 2>/dev/null || {
+      rm -f "$link_tmp" 2>/dev/null || true
+      return 0
+    }
+    mv -f "$link_tmp" "$link" 2>/dev/null || rm -f "$link_tmp" 2>/dev/null || true
+  fi
 }
 
 # --- Model (short name) ---

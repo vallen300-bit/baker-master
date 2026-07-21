@@ -60,11 +60,16 @@ def test_ctx_meter_rendered_on_every_row():
 
 
 def test_stale_context_meter_is_dimmed_and_shows_age():
-    """D2: stale last-known context remains visible and is identified by the
-    dimming class plus the compact age label rendered by cockpit.js."""
+    """D2: stale last-known context leads with age and uses a distinct treatment."""
     assert "ctx-stale" in JS, "stale context class missing from ctxCell"
     assert "context_age_sec" in JS, "stale context age is not rendered"
     assert ".r-ctx.ctx-stale" in CSS, "stale context style missing"
+    assert 'age + " old · "' in JS, "stale label must lead with age"
+    assert 'text: "?"' in JS, "long-stale context must replace the fill with ?"
+    assert ".r-ctx.ctx-stale-long" in CSS, "long-stale context treatment missing"
+    assert "#d2d9e1" in CSS, "dark stale label color missing"
+    assert 'html[data-theme="light"] .r-ctx.ctx-stale .ctxlbl' in CSS, \
+        "light stale label override missing"
 
 
 def test_mobile_context_meter_keeps_a_visible_bar():

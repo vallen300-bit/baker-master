@@ -101,3 +101,21 @@ def test_invalid_live_window_uses_existing_model_fallback(tmp_path):
     record = json.loads((tmp_path / "lead.current").read_text(encoding="utf-8"))
     assert record["window_tokens"] == 1_000_000
     assert record["band"] == "hard"
+
+
+def test_statusline_updates_symlink_target_without_replacing_current_link(tmp_path):
+    target = tmp_path / "session.json"
+    target.write_text("old\n", encoding="utf-8")
+    current = tmp_path / "lead.current"
+    current.symlink_to(target.name)
+
+    record, _ = run_statusline(
+        tmp_path,
+        window_tokens=200_000,
+        used_percentage=67,
+    )
+
+    assert current.is_symlink()
+    assert current.readlink() == Path("session.json")
+    assert record["context_percent"] == 67
+    assert json.loads(target.read_text(encoding="utf-8"))["context_percent"] == 67
