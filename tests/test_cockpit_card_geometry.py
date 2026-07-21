@@ -7,7 +7,7 @@ impossible to regress, parsed from cockpit.css/js (CI has no browser).
 
   D1 — one thin row per seat, a fixed 5-column grid so columns align table-style.
   D2 — the context meter renders on EVERY row (em-dash placeholder when null).
-  D3 — the state control renders on EVERY row (Start / GO / status chip).
+  D3 — the state control renders on EVERY row (refresh / GO / status chip).
 """
 import re
 from pathlib import Path
@@ -19,6 +19,8 @@ CSS = re.sub(r"/\*.*?\*/", "", _RAW, flags=re.S)
 
 JS = (Path(__file__).resolve().parent.parent
       / "scripts" / "cockpit_static" / "cockpit.js").read_text()
+HTML = (Path(__file__).resolve().parent.parent
+        / "scripts" / "cockpit_static" / "index.html").read_text()
 
 
 def _row_block():
@@ -33,10 +35,13 @@ def test_row_is_a_fixed_column_grid():
     block = _row_block()
     assert "display: grid" in block, ".row must be a CSS grid"
     m = re.search(r"grid-template-columns:\s*([^;]+);", block)
-    assert m, ".row has no fixed grid-template-columns"
-    # 5 columns: dot · identity · unread · ctx · control.
-    cols = m.group(1).split()
-    assert len(cols) >= 5, f".row grid needs >=5 columns, got {m.group(1)!r}"
+    assert m, ".row has no grid-template-columns"
+    assert m.group(1).strip() == "var(--row-columns)"
+    root = re.search(r"--row-columns:\s*([^;]+);", CSS)
+    assert root, "--row-columns custom property missing"
+    # 5 columns: dot · identity · ctx · unread · control.
+    cols = root.group(1).split()
+    assert len(cols) >= 5, f".row grid needs >=5 columns, got {root.group(1)!r}"
 
 
 def test_rows_are_thin_not_fixed_card_height():
@@ -95,13 +100,73 @@ def test_mobile_context_meter_keeps_a_visible_bar():
 
 
 def test_state_control_rendered_on_every_row():
-    """D3: card() appends stateControl unconditionally, which falls through to a
-    status chip so the control column is never absent (Start / GO / chip)."""
+    """D3: card() appends stateControl unconditionally, which returns an action
+    group or status chip so the control column is never absent."""
     assert "stateControl(meta, row, up)" in JS, "card() no longer appends stateControl for every row"
     assert "function stateControl" in JS, "stateControl helper missing"
-    # The final, unconditional return is a status chip (never null).
+    assert "refreshContextButton(meta)" in JS, "context refresh action missing"
     assert 'class: "chip"' in JS, "stateControl must always fall through to a status chip"
     assert ".rbtn" in CSS and ".chip" in CSS, "row control styles (.rbtn/.chip) missing"
+
+
+def test_header_and_rows_share_column_template_and_order():
+    """Director pass: header and rows use one desktop template, with context
+    before inbox and matching horizontal padding."""
+    assert CSS.count("--row-columns:") == 1
+    assert re.search(
+        r"<span></span><span>Agent / identity</span><span>Context window</span>"
+        r"<span>Inbox</span><span>Session</span>",
+        HTML,
+    )
+    assert re.search(r"\.fleet-columns\s*\{[^}]*padding:\s*0 12px;", CSS, re.S)
+    assert re.search(r"\.row\s*\{[^}]*padding:\s*4px 12px;", CSS, re.S)
+
+
+def test_start_button_removed_but_endpoint_and_down_guard_remain():
+    """Start remains a backend capability, but the Director-facing card no
+    longer offers it."""
+    assert 'class: "rbtn start"' not in JS
+    assert '"/api/sessions/" + slug + "/start"' in JS
+    assert "function doStart" in JS
+    assert "start it in the terminal" in JS
+
+
+def test_context_refresh_is_click_armed_and_driveable_only():
+    """The /clear action is a two-step click on up driveable rows, with no
+    action rendered for down or status-only rows."""
+    assert 'class: "rbtn refresh-context"' in JS
+    assert 'title: "Refresh context (/clear)"' in JS
+    assert "CONTEXT_REFRESH_ARM_MS = 3000" in JS
+    assert "refreshContext(meta.slug, ev.currentTarget)" in JS
+    assert '"/api/sessions/" + slug + "/refresh_context"' in JS
+    assert "if (meta.status_only || !up)" in JS
+    assert ".control-actions" in CSS
+
+
+def test_context_refresh_arm_is_cleared_before_grid_replacement():
+    """A poll/view render replaces the button node, so its arm token must not
+    survive invisibly and turn the replacement's first click into /clear."""
+    clear = re.search(
+        r"function clearContextRefreshArms\(\)\s*\{(.*?)\n\s*\}",
+        JS,
+        re.S,
+    )
+    assert clear, "context-refresh arm cleanup helper missing"
+    assert "clearTimeout(armed.timer)" in clear.group(1)
+    assert "contextRefreshArmed.clear()" in clear.group(1)
+
+    render_start = JS.find("function render()")
+    assert render_start >= 0, "render helper missing"
+    render_body = JS[render_start:]
+    assert "clearContextRefreshArms();" in render_body
+    assert render_body.index("clearContextRefreshArms();") < render_body.index(
+        "gridEl.textContent = \"\";"
+    )
+
+
+def test_subtitle_slot_is_reserved_but_empty():
+    assert "Every terminal, app seat, desk, and service in one scan surface." not in HTML
+    assert "reserved: future header line, same font slot" in HTML
 
 
 def test_phone_rows_stay_tappable():
