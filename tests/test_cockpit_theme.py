@@ -31,8 +31,8 @@ def test_html_bootstrap_before_paint_and_cache_busted():
     assert HTML.index(BOOTSTRAP_MARKER) < HTML.index("cockpit.css?v="), (
         "theme bootstrap must run before the stylesheet"
     )
-    assert "cockpit.css?v=9" in HTML, "cockpit.css cache-bust not bumped"
-    assert "cockpit.js?v=9" in HTML, "cockpit.js cache-bust not bumped"
+    assert "cockpit.css?v=10" in HTML, "cockpit.css cache-bust not bumped"
+    assert "cockpit.js?v=10" in HTML, "cockpit.js cache-bust not bumped"
 
 
 def test_js_live_follows_theme():

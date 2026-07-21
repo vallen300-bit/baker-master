@@ -129,6 +129,17 @@ def test_header_and_rows_share_column_template_and_order():
         CSS,
         re.S,
     )
+    assert re.search(
+        r"\.fleet-columns\s*\{[^}]*position:\s*sticky;"
+        r"[^}]*top:\s*var\(--header-h\);"
+        r"[^}]*z-index:\s*2;"
+        r"[^}]*background:\s*var\(--bg\);",
+        CSS,
+        re.S,
+    ), "column header must pin with an opaque low-level theme background"
+    assert re.search(r"#msgveil\s*\{[^}]*z-index:\s*8;", CSS, re.S)
+    assert re.search(r"#msgpanel\s*\{[^}]*z-index:\s*9;", CSS, re.S)
+    assert re.search(r"#toast\s*\{[^}]*z-index:\s*11;", CSS, re.S)
     assert "text-align: justify" in CSS
     assert "text-align-last: justify" in CSS
     assert re.search(r"\.row\s*\{[^}]*padding:\s*4px 12px;", CSS, re.S)
@@ -144,14 +155,22 @@ def test_start_button_removed_but_endpoint_and_down_guard_remain():
 
 
 def test_context_refresh_is_click_armed_and_driveable_only():
-    """The /clear action is a two-step click on up driveable rows, with no
-    action rendered for down or status-only rows."""
+    """The /clear action is a two-step click on up driveable rows, with a
+    color-only armed state and no action rendered for down/status-only rows."""
     assert 'class: "rbtn refresh-context"' in JS
+    assert 'text: "⟳"' in JS
     assert 'title: "Refresh context (/clear)"' in JS
     assert "CONTEXT_REFRESH_ARM_MS = 3000" in JS
     assert "refreshContext(meta.slug, ev.currentTarget)" in JS
     assert '"/api/sessions/" + slug + "/refresh_context"' in JS
     assert "if (meta.status_only || !up)" in JS
+    assert 'text: "sure?"' not in JS
+    refresh_start = JS.index("function refreshContext")
+    refresh_end = JS.index("\n  async function doStart", refresh_start)
+    refresh_body = JS[refresh_start:refresh_end]
+    assert "btn.textContent" not in refresh_body
+    assert 'btn.classList.add("armed")' in refresh_body
+    assert 'btn.classList.remove("armed")' in refresh_body
     assert ".control-actions" in CSS
 
 
