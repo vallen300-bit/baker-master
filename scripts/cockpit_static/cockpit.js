@@ -17,6 +17,7 @@
   "use strict";
 
   const POLL_MS = 4000;
+  const POLL_TIMEOUT_MS = 10000;
   const FETCH_OPTS = { credentials: "same-origin", cache: "no-store" };
   // location.origin has NO userinfo, so building request URLs from it avoids
   // "Request cannot be constructed from a URL that includes credentials" when
@@ -64,6 +65,7 @@
   let prevUnacked = new Map();   // slug -> last-seen unacked_count (D9 flash-on-new)
   let flashSlugs = new Set();    // slugs whose unacked count rose this poll (D9)
   let pollTimer = null;
+  let pollInFlight = null;
 
   // ---- sidebar view state (COCKPIT_REVAMP_SPLIT_VIEW_SIDEBAR_1, spec item 5) ----
   // Sidebar entries in order. ACTIVE is the default home; ALL is the flat view;
@@ -243,37 +245,61 @@
     }
   }
 
-  async function poll() {
+  async function fetchWithTimeout(requestUrl, options, timeoutMs) {
+    const controller = new AbortController();
+    let timedOut = false;
+    const timeoutId = setTimeout(() => {
+      timedOut = true;
+      controller.abort();
+    }, timeoutMs);
     try {
-      const r = await fetch(url("/api/agents"), FETCH_OPTS);
-      if (!r.ok) throw new Error("HTTP " + r.status);
-      const data = await r.json();
-      const m = new Map();
-      for (const a of (data.agents || [])) m.set(a.slug, a);
-      computeFlash(m);              // D9 — flag cards whose unacked count rose
-      stateBySlug = m;
-      // lab_glance_ok=false ⇒ the Lab telemetry source is down; the summary
-      // sync-note surfaces that (renderSummary below). It does NOT dim the header
-      // health line: the feed itself answered, so the line stays GREEN (spec item
-      // 6 — green whenever the feed is live, red ONLY when the feed is dead).
-      const labOk = data.lab_glance_ok !== false;
-      const total = totalCardCount();
-      // Header health line — plain words, all bright green while the feed is live
-      // (spec item 6 / codex #13356: no warn state). Count = layout driveable cards
-      // (codex #13286: /api/agents now hydrates ALL cards, so m.size ≠ terminals).
-      const driveable = layout
-        ? layout.plates.reduce((n, plate) =>
-            n + plate.cards.filter((card) => card.driveable).length, 0)
-        : 0;
-      // Health line (migrated from #conn) renders through the single owner.
-      renderSummary(labOk, { live: true, driveable, total });
-      render();
-      syncPanelGo();             // reflect needs_go changes while the panel is open
-      if (openMsgSlug) renderMsgSummary(openMsgSlug);   // D9 — live-refresh open panel
+      return await fetch(requestUrl, { ...options, signal: controller.signal });
     } catch (e) {
-      // Feed stale/dead — the ONE health line turns red (spec item 6, .feed-dead).
-      renderSummary(false, { live: false, error: e.message });
+      if (timedOut) throw new Error("request timed out after " + timeoutMs + "ms");
+      throw e;
+    } finally {
+      clearTimeout(timeoutId);
     }
+  }
+
+  function poll() {
+    // A hung fetch must not wedge boot or stack interval requests behind it.
+    if (pollInFlight) return pollInFlight;
+    pollInFlight = (async () => {
+      try {
+        const r = await fetchWithTimeout(url("/api/agents"), FETCH_OPTS, POLL_TIMEOUT_MS);
+        if (!r.ok) throw new Error("HTTP " + r.status);
+        const data = await r.json();
+        const m = new Map();
+        for (const a of (data.agents || [])) m.set(a.slug, a);
+        computeFlash(m);              // D9 — flag cards whose unacked count rose
+        stateBySlug = m;
+        // lab_glance_ok=false ⇒ the Lab telemetry source is down; the summary
+        // sync-note surfaces that (renderSummary below). It does NOT dim the header
+        // health line: the feed itself answered, so the line stays GREEN (spec item
+        // 6 — green whenever the feed is live, red ONLY when the feed is dead).
+        const labOk = data.lab_glance_ok !== false;
+        const total = totalCardCount();
+        // Header health line — plain words, all bright green while the feed is live
+        // (spec item 6 / codex #13356: no warn state). Count = layout driveable cards
+        // (codex #13286: /api/agents now hydrates ALL cards, so m.size ≠ terminals).
+        const driveable = layout
+          ? layout.plates.reduce((n, plate) =>
+              n + plate.cards.filter((card) => card.driveable).length, 0)
+          : 0;
+        // Health line (migrated from #conn) renders through the single owner.
+        renderSummary(labOk, { live: true, driveable, total });
+        render();
+        syncPanelGo();             // reflect needs_go changes while the panel is open
+        if (openMsgSlug) renderMsgSummary(openMsgSlug);   // D9 — live-refresh open panel
+      } catch (e) {
+        // Feed stale/dead — the ONE health line turns red (spec item 6, .feed-dead).
+        renderSummary(false, { live: false, error: e.message });
+      } finally {
+        pollInFlight = null;
+      }
+    })();
+    return pollInFlight;
   }
 
   // ---- terminal overlay ---------------------------------------------------
