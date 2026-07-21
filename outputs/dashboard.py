@@ -2117,7 +2117,14 @@ def _set_arrivals_board_cookie(response: HTMLResponse | JSONResponse) -> None:
         max_age=_ARRIVALS_BOARD_PIN_COOKIE_MAX_AGE_S,
         httponly=True,
         secure=True,
-        samesite="strict",
+        # ARRIVALS_EMBED_COOKIE_FIX_1 (b3, lead brief; b2 prototype #14414):
+        # SameSite=None so the browser sends this cookie when /arrivals is
+        # embedded in a cross-origin iframe (top-level = brisen-lab.onrender.com,
+        # Director Triaga direct-embed ruling 2026-07-21). SameSite=None REQUIRES
+        # Secure (already true). Clickjacking is compensated by the
+        # frame-ancestors CSP on the /arrivals HTML page; HttpOnly stays so the
+        # cookie value is unreadable by any framing site.
+        samesite="none",
     )
 
 
@@ -8610,6 +8617,14 @@ async def arrivals_board_page(request: Request):
 
     rows = arrivals_board.list_board_rows()
     response = HTMLResponse(arrivals_board.render_board_html(rows))
+    # ARRIVALS_EMBED_COOKIE_FIX_1 (b3, lead brief; b2 #14414): the SameSite=None
+    # arrivals cookie lets ANY site frame this board even though HttpOnly keeps
+    # the cookie unreadable. Constrain framing to self + the Lab shell so only
+    # the ratified brisen-lab embed can host the board (CSP frame-ancestors is
+    # the only header that expresses an allowlist; X-Frame-Options cannot).
+    response.headers["Content-Security-Policy"] = (
+        "frame-ancestors 'self' https://brisen-lab.onrender.com"
+    )
     if set_cookie:
         _set_arrivals_board_cookie(response)
     return response
@@ -8790,6 +8805,14 @@ async def bus_console_page(request: Request):
         logger.exception("bus_console_page: template read failed")
         return HTMLResponse("Service unavailable", status_code=503)
     response = HTMLResponse(html)
+    # ARRIVALS_EMBED_COOKIE_FIX_1 (b3, lead ruling #14431): /bus-console shares
+    # the arrivals_board_access cookie, which is now SameSite=None — so it too
+    # can be framed by any site. A surface must never lose Strict without gaining
+    # the frame-ancestors fence (even read-only), so mirror the /arrivals guard:
+    # constrain framing to self + the Lab shell.
+    response.headers["Content-Security-Policy"] = (
+        "frame-ancestors 'self' https://brisen-lab.onrender.com"
+    )
     if set_cookie:
         _set_arrivals_board_cookie(response)
     return response

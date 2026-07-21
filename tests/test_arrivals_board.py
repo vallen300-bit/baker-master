@@ -251,7 +251,9 @@ def test_arrivals_json_uses_effective_status(monkeypatch):
     assert "arrivals_board_access" in set_cookie
     assert "HttpOnly" in set_cookie
     assert "Secure" in set_cookie
-    assert "SameSite=strict" in set_cookie
+    # ARRIVALS_EMBED_COOKIE_FIX_1: SameSite=None so the cookie survives the
+    # cross-origin Lab iframe (was strict — withheld in-frame, broke the embed).
+    assert "SameSite=none" in set_cookie
 
     bare_page_with_cookie = client.get("/arrivals")
     assert bare_page_with_cookie.status_code == 200
@@ -270,11 +272,88 @@ def test_arrivals_json_uses_effective_status(monkeypatch):
     assert "arrivals_board_access" in api_set_cookie
     assert "HttpOnly" in api_set_cookie
     assert "Secure" in api_set_cookie
-    assert "SameSite=strict" in api_set_cookie
+    assert "SameSite=none" in api_set_cookie
 
     cookie_resp = fresh_client.get("/api/arrivals.json")
     assert cookie_resp.status_code == 200
     assert cookie_resp.json()["rows"][0]["effective_status"] == "DELAYED"
+
+
+# =====================================================================
+# ARRIVALS_EMBED_COOKIE_FIX_1 — cross-origin Lab embed (cookie + CSP)
+# =====================================================================
+# TDD seams (brief): (1) cookie set SameSite=None; Secure; HttpOnly;
+# (2) /arrivals HTML carries frame-ancestors CSP allowing the Lab shell;
+# (3) valid cookie still passes the gate; (4) no-cookie still 404-disguised;
+# (5) the JSON API is NOT a framable document -> no CSP header.
+_CSP = "Content-Security-Policy"
+_FRAME_ANCESTORS = "frame-ancestors 'self' https://brisen-lab.onrender.com"
+
+
+def _embed_client(monkeypatch):
+    monkeypatch.setenv("BAKER_API_KEY", "test-key")
+    monkeypatch.setenv("ARRIVALS_BOARD_PIN", "123456")
+    from outputs import dashboard
+
+    rows = [{
+        "project_number": "BB-AUK-001", "desk_owner": "baden-baden-desk",
+        "matter_slug": "lilienmatt", "status": "ON TIME",
+        "arrives_on": date(2026, 7, 7), "updated_at": NOW,
+    }]
+    monkeypatch.setattr(ab, "list_board_rows", lambda: rows)
+    monkeypatch.setattr(dashboard, "_BAKER_API_KEY", "test-key", raising=False)
+    return TestClient(dashboard.app, base_url="https://testserver")
+
+
+def test_arrivals_cookie_is_samesite_none_secure_httponly(monkeypatch):
+    # (1) The pin-issued cookie must be SameSite=None (survives the cross-origin
+    # iframe) AND Secure AND HttpOnly (SameSite=None is invalid without Secure).
+    client = _embed_client(monkeypatch)
+    set_cookie = client.get("/arrivals?pin=123456").headers.get("set-cookie", "")
+    assert "arrivals_board_access" in set_cookie
+    assert "SameSite=none" in set_cookie
+    assert "Secure" in set_cookie
+    assert "HttpOnly" in set_cookie
+    assert "SameSite=strict" not in set_cookie
+
+
+def test_arrivals_page_carries_frame_ancestors_csp(monkeypatch):
+    # (2) The allowed /arrivals HTML page must carry the frame-ancestors CSP so
+    # only self + the Lab shell can frame it.
+    client = _embed_client(monkeypatch)
+    page = client.get("/arrivals?key=test-key")
+    assert page.status_code == 200
+    assert page.headers.get(_CSP) == _FRAME_ANCESTORS
+
+
+def test_arrivals_valid_cookie_still_passes_gate(monkeypatch):
+    # (3) After a pin visit sets the cookie, a bare cookie-only request still
+    # renders the board (gate logic unchanged).
+    client = _embed_client(monkeypatch)
+    client.get("/arrivals?pin=123456")  # sets cookie on the client jar
+    bare = client.get("/arrivals")
+    assert bare.status_code == 200
+    assert 'data-flap="BB-AUK-001"' in bare.text
+    assert bare.headers.get(_CSP) == _FRAME_ANCESTORS
+
+
+def test_arrivals_no_cookie_still_404_disguised_without_csp(monkeypatch):
+    # (4) Unauthenticated requests keep the 404 disguise unchanged; the disguise
+    # response does NOT leak the CSP header (only the allowed board does).
+    client = _embed_client(monkeypatch)
+    resp = client.get("/arrivals")
+    assert resp.status_code == 404
+    assert resp.text == "Not Found"
+    assert _CSP not in resp.headers
+
+
+def test_arrivals_json_api_has_no_frame_ancestors_csp(monkeypatch):
+    # (5) The JSON API is not a framable document -> no CSP header (blast radius
+    # stays on the HTML page only, per brief).
+    client = _embed_client(monkeypatch)
+    resp = client.get("/api/arrivals.json?key=test-key")
+    assert resp.status_code == 200
+    assert _CSP not in resp.headers
 
 
 # =====================================================================

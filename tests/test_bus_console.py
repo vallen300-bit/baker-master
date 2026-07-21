@@ -71,10 +71,32 @@ def test_bus_console_auth_gate(monkeypatch):
     assert "arrivals_board_access" in set_cookie
     assert "HttpOnly" in set_cookie
     assert "Secure" in set_cookie
-    assert "SameSite=strict" in set_cookie
+    # ARRIVALS_EMBED_COOKIE_FIX_1: bus-console reuses the shared
+    # arrivals_board_access cookie helper, so it inherits SameSite=None. The
+    # cookie stays HttpOnly (unreadable cross-site); the bus-console page itself
+    # is NOT reframed with a frame-ancestors CSP by this brief (arrivals-scoped)
+    # — flagged to lead as a follow-up (read-only surface, low clickjacking risk).
+    assert "SameSite=none" in set_cookie
 
     # cookie now carries → bare request authorized
     assert client.get("/bus-console").status_code == 200
+
+
+# --- ARRIVALS_EMBED_COOKIE_FIX_1 (lead ruling #14431) ----------------------
+def test_bus_console_page_carries_frame_ancestors_csp(monkeypatch):
+    # /bus-console shares the now-SameSite=None arrivals cookie, so the page must
+    # gain the identical frame-ancestors fence (no surface loses Strict without
+    # gaining the fence, even read-only).
+    client = _client(monkeypatch, rows=SAMPLE_ROWS)
+    page = client.get("/bus-console?key=test-key")
+    assert page.status_code == 200
+    assert page.headers.get("Content-Security-Policy") == (
+        "frame-ancestors 'self' https://brisen-lab.onrender.com"
+    )
+    # the 404 disguise must NOT leak the CSP header
+    disguised = client.get("/bus-console")
+    assert disguised.status_code == 404
+    assert "Content-Security-Policy" not in disguised.headers
 
 
 # --- AC2 -------------------------------------------------------------------
