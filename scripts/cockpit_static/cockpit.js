@@ -85,11 +85,6 @@
   // column rather than filtering the grid.
   const HISTORY_VIEW = "History";
   const SIDEBAR_ORDER = NAV_ORDER.concat([HISTORY_VIEW]);
-  // Two-letter abbreviations shown when the sidebar collapses to icons on narrow
-  // screens (spec item 5 — CSS media query + hover expansion, no JS breakpoints).
-  const NAV_ABBR = { "ACTIVE": "AC", "ALL": "ALL", "Pilots": "Pi", "Control Tower": "CT",
-                     "Engineering": "En", "Support": "Su", "Legal/Finance": "LF", "Interns": "In",
-                     "History": "Hi" };
   // The ONE plate-label → nav-name mapping (spec item 5). Fail-soft: an unknown
   // plate falls back to its raw label so a new plate is never silently dropped.
   const PLATE_TO_NAV = {
@@ -837,33 +832,27 @@
     });
   }
 
-  // Build the 8 sidebar entries once (static order). Active highlight + red
-  // attention badges update per render() from the planView badge set.
+  // Build the sidebar entries once (static order). Full labels stay in the DOM
+  // at every viewport width; active state updates per render().
   function buildSidebar() {
     if (!sidebarEl) return;
     sidebarEl.textContent = "";
     SIDEBAR_ORDER.forEach((nav) => {
-      const badge = el("span", { class: "nav-badge", "aria-label": "needs attention" });
-      badge.hidden = true;
       const item = el("button", { class: "nav-item", type: "button", "data-view": nav,
         title: nav, onclick: () => setView(nav) }, [
-        el("span", { class: "nav-abbr", "aria-hidden": "true", text: NAV_ABBR[nav] || nav.slice(0, 2) }),
         el("span", { class: "nav-label", text: nav }),
-        badge,
       ]);
       sidebarEl.appendChild(item);
     });
   }
 
-  function updateSidebar(badges) {
+  function updateSidebar() {
     if (!sidebarEl) return;
     Array.from(sidebarEl.children).forEach((item) => {
       const nav = item.getAttribute("data-view");
       const isActive = nav === currentView;
       item.classList.toggle("active", isActive);
       item.setAttribute("aria-current", isActive ? "page" : "false");
-      const badge = item.querySelector(".nav-badge");
-      if (badge) badge.hidden = !badges[nav];
     });
   }
 
@@ -1053,9 +1042,9 @@
     // to a visually fresh button.
     clearContextRefreshArms();
     // View filter is one pure function (glance_state.js planView) so the DOM and
-    // its unit vectors share a source. Plates → nav groups → visible plan + badges.
+    // its unit vectors share a source. Plates → nav groups → visible plan.
     const plan = window.planView(navGroups(), currentView);
-    updateSidebar(plan.badges);
+    updateSidebar();
 
     // History owns the middle column on its own 15s cadence — the 4s poll must
     // NOT repaint (or refetch) it. Keep the sidebar/summary fresh, then bail.
@@ -1163,7 +1152,7 @@
       try {
         layout = await loadLayoutWithRetry();
         clearLayoutSelfHeal();
-        buildSidebar();              // 9 static nav entries (badges hydrate on poll)
+        buildSidebar();              // 9 static full-name nav entries
         render();                    // paint immediately from layout (metadata)
         renderSummary();
         if (currentView === "History") enterHistory();   // restore a persisted History view

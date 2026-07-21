@@ -21,8 +21,9 @@ def test_css_defines_light_palette():
     # The light block redefines the core tokens (1:1 with :root).
     for tok in ("--bg:", "--panel:", "--text:", "--border:", "--st-green:", "--danger:"):
         assert CSS.count(tok) >= 2, f"light override must redefine {tok}"
-    # Header bg was token-ized so it re-themes (no dark bar on white).
-    assert "--header-bg" in CSS and "background: var(--header-bg)" in CSS
+    # The legacy in-page tab bar is gone; theme tokens still cover the shell.
+    assert "--header-bg" not in CSS
+    assert "cockpit-header" not in CSS and "cockpit-header" not in HTML
 
 
 def test_html_bootstrap_before_paint_and_cache_busted():

@@ -80,7 +80,7 @@ def test_view_persisted_only_cockpit_view_key():
 def test_render_routes_through_pure_planview():
     assert "window.planView(navGroups()" in JS, "render must use the pure planView"
     assert "function navGroups(" in JS and "function cardStateClass(" in JS
-    assert "updateSidebar(plan.badges)" in JS, "sidebar badges must come from planView"
+    assert "updateSidebar()" in JS, "sidebar active state must update on render"
 
 
 def test_grid_never_blurs_behind_an_open_card():
@@ -94,9 +94,26 @@ def test_grid_never_blurs_behind_an_open_card():
     assert m and "blur" not in m.group(1), "#msgveil must not blur the grid"
 
 
-def test_narrow_sidebar_collapses_to_icons():
-    assert ".nav-abbr" in CSS and ".nav-label" in CSS
-    assert ":has(.sidebar:hover)" in CSS, "hover-expand must be CSS-only (:has)"
+def test_sidebar_is_fixed_full_name_rail_without_attention_dots():
+    assert ".nav-label" in CSS
+    assert ".nav-abbr" not in CSS and ".nav-abbr" not in JS
+    assert "NAV_ABBR" not in JS
+    assert "nav-badge" not in CSS and "nav-badge" not in JS
+    assert ":has(.sidebar:hover)" not in CSS
+    assert 'class: "nav-label", text: nav' in JS
+    m = re.search(r"--sidebar-w:\s*(\d+)px;", CSS)
+    assert m and int(m.group(1)) == 130
+    assert "overflow: visible" in CSS
+
+
+def test_legacy_top_navigation_bar_is_removed():
+    assert 'class="cockpit-header"' not in HTML
+    assert "cockpit-header" not in CSS
+    assert "Brisen Lab</div>" not in HTML
+    assert "Control Room</div>" not in HTML
+
+
+def test_slug_only_identity_invariant_is_preserved():
     # slug-only invariant preserved (COCKPIT_SLUG_ONLY_CARDS_1): no display_name.
     assert "display_name" not in JS
 

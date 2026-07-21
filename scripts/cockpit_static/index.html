@@ -12,25 +12,13 @@
 <link rel="stylesheet" href="cockpit.css?v=9">
 </head>
 <body>
-<header class="cockpit-header">
-  <div class="tab brand">Brisen Lab</div>
-  <div class="tab">Control Room</div>
-  <div class="tab active">Cockpit</div>
-  <div class="spacer"></div>
-  <!-- COCKPIT_REVAMP_HEADER_1 + LAB_UNIFY_THEME_COCKPIT_EXTENSION_1: bell removed;
-       the duplicate top-right health line (#conn) was removed per Director
-       2026-07-21 — the ONE live/offline health line now lives next to FLEET
-       COCKPIT (#sync-note). This corner is intentionally empty (future: fleet cost). -->
-</header>
-
 <!-- COCKPIT_REVAMP_SPLIT_VIEW_SIDEBAR_1 (spec items 4+5): three-column app shell —
      left sidebar nav | middle live grid | right terminal pane. The terminal pane
      column is width 0 (collapsed) until a seat is opened; the grid stays live,
      unblurred, and clickable beside an open terminal (no modal, no #veil). -->
 <div class="app-shell" id="appShell">
   <!-- Sidebar navigation (spec item 5). Entries are built by cockpit.js from the
-       fixed NAV_ORDER so the 8 entries + their red attention badges live in one
-       place. Reserved for future buttons — nothing else is added here now. -->
+       fixed NAV_ORDER so the full group names live in one place. -->
   <nav class="sidebar" id="sidebar" aria-label="Fleet views"></nav>
 
   <main class="wrap" id="wrap">
