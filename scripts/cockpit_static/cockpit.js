@@ -642,13 +642,12 @@
     ];
     if (meta.badge) idKids.push(el("span", { class: "r-kind", text: meta.kind }));
 
-    // Col 3 — unread badge + oldest age (empty spacer keeps the column aligned).
+    // Col 3 — oldest unacked age only (empty spacer keeps the column aligned).
     // D9: shown whenever the seat has unacked messages, including App cards
     // (which are not session_up but do carry a bus identity).
     let unread;
     if (row && row.unacked_count > 0) {
       unread = el("span", { class: "r-unread" }, [
-        el("span", { class: "unread", text: String(row.unacked_count) }),
         el("span", { class: ageClass(row.oldest_unacked_age_sec || 0),
                      text: window.formatUnreadAge(row.oldest_unacked_age_sec || 0) }),
       ]);

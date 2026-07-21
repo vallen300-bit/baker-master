@@ -440,13 +440,6 @@ main.wrap { min-width: 0; padding: 28px 28px 48px; }
 @keyframes row-flash { 0% { background: rgba(0,213,255,.28); } 100% { background: transparent; } }
 
 .r-unread { display: flex; align-items: baseline; justify-content: flex-end; gap: 7px; min-width: 0; }
-.unread {
-  padding: 3px 7px;
-  color: #121820;
-  background: #f0b429;
-  border-radius: 10px;
-  font: 700 10px/1 ui-monospace, Menlo, monospace;
-}
 .age { color: var(--muted); font-size: 10px; font-variant-numeric: tabular-nums; }
 .age.warn { color: var(--working); }
 .age.hot { color: #ff8f87; }

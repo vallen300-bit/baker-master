@@ -72,6 +72,19 @@ def test_stale_context_meter_is_dimmed_and_shows_age():
         "light stale label override missing"
 
 
+def test_inbox_card_shows_age_without_count_pill():
+    """Director ruling: the card face shows oldest-message age only; counts stay
+    available to the behavior logic and drawer/panel surfaces."""
+    assert 'class: "r-unread"' in JS
+    assert "formatUnreadAge(row.oldest_unacked_age_sec || 0)" in JS
+    assert 'class: "unread"' not in JS
+    assert ".unread" not in CSS
+    assert "row.unacked_count > 0" in JS
+    assert "flashSlugs" in JS
+    assert "nudgeSeat" in JS
+    assert 'class: "r-unread r-unread-empty"' in JS
+
+
 def test_mobile_context_meter_keeps_a_visible_bar():
     """The 320px layout must reserve room for both the stale-age label and bar."""
     m = re.search(r"@media \(max-width:\s*640px\)\s*\{(.*?)\n\}", CSS, re.S)
