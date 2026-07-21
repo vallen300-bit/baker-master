@@ -3,8 +3,13 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
+<!-- Theme bootstrap (LAB_UNIFY_THEME_COCKPIT_EXTENSION_1): apply the /v2 shared
+     labTheme BEFORE CSS paint so the embedded cockpit pane re-themes with the
+     Lab and never flashes. Dark is the default. Standalone local cockpit
+     (different origin, no labTheme key) stays dark — zero change. -->
+<script>try{if(localStorage.getItem("labTheme")==="light")document.documentElement.setAttribute("data-theme","light")}catch(e){}</script>
 <title>Baker Cockpit</title>
-<link rel="stylesheet" href="cockpit.css?v=8">
+<link rel="stylesheet" href="cockpit.css?v=9">
 </head>
 <body>
 <header class="cockpit-header">
@@ -12,9 +17,10 @@
   <div class="tab">Control Room</div>
   <div class="tab active">Cockpit</div>
   <div class="spacer"></div>
-  <!-- COCKPIT_REVAMP_HEADER_1 (spec item 6): bell removed; freed corner reserved,
-       empty (future tenant: fleet cost). The one green health line lives here. -->
-  <div class="conn" id="conn">connecting…</div>
+  <!-- COCKPIT_REVAMP_HEADER_1 + LAB_UNIFY_THEME_COCKPIT_EXTENSION_1: bell removed;
+       the duplicate top-right health line (#conn) was removed per Director
+       2026-07-21 — the ONE live/offline health line now lives next to FLEET
+       COCKPIT (#sync-note). This corner is intentionally empty (future: fleet cost). -->
 </header>
 
 <!-- COCKPIT_REVAMP_SPLIT_VIEW_SIDEBAR_1 (spec items 4+5): three-column app shell —
@@ -100,6 +106,6 @@
 </div>
 
 <script src="glance_state.js?v=8"></script>
-<script src="cockpit.js?v=8"></script>
+<script src="cockpit.js?v=9"></script>
 </body>
 </html>

@@ -71,9 +71,10 @@ def test_plate_to_nav_mapping_is_one_const_fail_soft():
 def test_view_persisted_only_cockpit_view_key():
     assert 'VIEW_KEY = "cockpit.view"' in JS, "persisted view key must be cockpit.view"
     assert "localStorage.setItem(VIEW_KEY" in JS and "localStorage.getItem(VIEW_KEY" in JS
-    # No other new localStorage keys introduced (quality checkpoint 4).
+    # Allowed string keys: cockpit.notifyMuted + labTheme (the shared /v2 theme key
+    # the cockpit follows per LAB_UNIFY_THEME_COCKPIT_EXTENSION_1). No others.
     keys = set(re.findall(r'localStorage\.(?:get|set)Item\("([^"]+)"', JS))
-    assert keys <= {"cockpit.notifyMuted"}, f"unexpected localStorage string keys: {keys}"
+    assert keys <= {"cockpit.notifyMuted", "labTheme"}, f"unexpected localStorage string keys: {keys}"
 
 
 def test_render_routes_through_pure_planview():

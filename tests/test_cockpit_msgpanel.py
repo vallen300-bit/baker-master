@@ -66,6 +66,10 @@ def test_summary_counts_only_driveable_terminal_attention():
     # and "driveable" was relabeled "with terminal" in the one green header line. The
     # surviving intent — the header counts driveable terminals from the layout — is
     # kept. (Merge-integration fix: the pre-merge assertions referenced removed code.)
+    # LAB_UNIFY_THEME_COCKPIT_EXTENSION_1: the health line moved OUT of the removed
+    # top-right #conn INTO the FLEET COCKPIT #sync-note (renderSummary), and the count
+    # is passed via a `health` object. The driveable-count intent is unchanged.
     assert "const driveable = layout" in JS
     assert "card.driveable).length" in JS
-    assert '" with terminal / " + total + " seats"' in JS
+    assert '" with terminal / " + health.total + " seats"' in JS
+    assert 'getElementById("conn")' not in JS, "the duplicate top-right #conn line must be removed"

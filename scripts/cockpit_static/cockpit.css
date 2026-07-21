@@ -45,7 +45,64 @@
   --header-h: 54px;
   --sidebar-w: 158px;
   --pane-w: min(760px, 52vw);
+  --header-bg: #080b0f;      /* darkest bar; token-ized for the light override */
 }
+
+/* ── Light theme (LAB_UNIFY_THEME_COCKPIT_EXTENSION_1) ──────────────────────
+ * Opt-in override driven by the shared /v2 `labTheme` localStorage key + a
+ * pre-paint bootstrap in index.html. Redefines the SAME token names 1:1 so the
+ * grid, header, sidebar, panels, and status line re-theme with zero rule edits.
+ * Dark stays the default (no data-theme attr = the :root values above). The live
+ * terminal (.term-pane / #termframe) is an inherently dark xterm and is left dark
+ * in both themes. Muted McKinsey-adjacent palette; status semantics preserved
+ * (green live, blue GO, amber unread, red offline — darkened for white contrast). */
+html[data-theme="light"] {
+  --bg: #f6f7f9;
+  --bg-subtle: #eef0f3;
+  --panel: #ffffff;
+  --panel-raised: #ffffff;
+  --border: rgba(60, 72, 88, .28);
+  --border-soft: rgba(60, 72, 88, .14);
+  --text: #1c2733;
+  --muted: #5a6a7a;
+  --muted-strong: #3d4c5c;
+  --blue: #2f6feb;
+  --accent: #2f6feb;
+  --working: #9a6700;
+  --needs-go: #1a7f37;
+  --new: #0a7ea4;
+  --down: #8593a1;
+  --danger: #cf222e;
+  --st-green: #1a7f37;
+  --st-blue: #2f6feb;
+  --st-amber: #9a6700;
+  --st-red: #cf222e;
+  --st-offline: #b0403a;
+  --st-grey: #8593a1;
+  --shadow: 0 1px 3px rgba(27,35,45,.12), 0 8px 24px rgba(27,35,45,.08);
+  --header-bg: #ffffff;
+}
+/* Light-mode targeted overrides for the few hardcoded-hex spots that would
+ * otherwise be light-mode artifacts (invisible white text / pale attention
+ * colors on white). Everything else re-themes through the tokens above. */
+html[data-theme="light"] .row.st-running .r-name { color: var(--st-green); }
+html[data-theme="light"] .row.st-go .r-name { color: var(--st-blue); }
+html[data-theme="light"] .row.st-unread .r-name { color: var(--st-amber); }
+html[data-theme="light"] .row.st-unread-old .r-name,
+html[data-theme="light"] .row.st-unread-old .chip,
+html[data-theme="light"] .age.hot { color: var(--st-red); }
+html[data-theme="light"] .row.st-offline .r-name,
+html[data-theme="light"] .row.st-offline .chip { color: var(--st-offline); }
+html[data-theme="light"] .summary-status.is-warn,
+html[data-theme="light"] #term-unacked .u-head,
+html[data-theme="light"] .hsec-t { color: var(--st-amber); }
+html[data-theme="light"] .hrow-unacked .htopic { color: #9a6700; }
+html[data-theme="light"] .r-ctx .ctxbar { background: #dfe3e8; }
+/* App/service rows use a dark rgba overlay (subtle on dark, a heavy grey bar on
+   white) — give them a light-grey tint in light mode instead. */
+html[data-theme="light"] .row.app { background: rgba(60,72,88,.06); box-shadow: inset 0 1px 3px rgba(60,72,88,.10); }
+html[data-theme="light"] .row.app:hover { background: rgba(60,72,88,.11); }
+html[data-theme="light"] .row.app .r-dot { background: #8593a1; }
 
 * { box-sizing: border-box; }
 html, body { margin: 0; min-height: 100%; }
@@ -64,7 +121,7 @@ button { font: inherit; }
   gap: 2px;
   min-height: 54px;
   padding: 0 24px;
-  background: #080b0f;
+  background: var(--header-bg);
   border-bottom: 1px solid var(--border);
   position: sticky;
   top: 0;
@@ -95,20 +152,9 @@ button { font: inherit; }
   font-size: 12px;
 }
 .cockpit-header .spacer { flex: 1; }
-/* The one green health line (spec item 6, the QUIET-WHEN-HEALTHY exception):
-   all words bright green while the /api/agents feed is live; turns red only when
-   the feed is stale/dead (.feed-dead). Warn = feed alive but Lab telemetry down. */
-.cockpit-header .conn {
-  min-width: 205px;
-  color: var(--st-green);
-  font-size: 11px;
-  font-variant-numeric: tabular-nums;
-  text-align: right;
-}
-.cockpit-header .conn::before { content: "● "; color: currentColor; }
-/* GREEN whenever the feed is live (base color above); RED only when it is dead.
-   No yellow/warn middle state — Lab-telemetry-down lives in the summary sync-note. */
-.cockpit-header .conn.feed-dead { color: var(--danger); }
+/* The top-right #conn health line was removed (LAB_UNIFY_THEME_COCKPIT_EXTENSION_1,
+   Director 2026-07-21); the single live/offline health line now lives next to
+   FLEET COCKPIT (.summary-status). Its rules were retired with the element. */
 
 /* ── Three-column app shell (spec items 4 + 5) ──────────────────────────────
    left sidebar | middle live grid | right terminal pane. The pane track is 0
@@ -234,6 +280,9 @@ main.wrap { min-width: 0; padding: 28px 28px 48px; }
 }
 .summary-status::before { content: ""; width: 6px; height: 6px; border-radius: 50%; background: currentColor; }
 .summary-status.is-warn { color: #efc96e; }
+/* Feed-dead state migrated from the removed top-right #conn (Director 2026-07-21):
+   the ONE health line turns red when the /api/agents feed is stale/dead. */
+.summary-status.feed-dead { color: var(--danger); }
 /* COCKPIT_REVAMP_HEADER_1 (spec item 6): the oversized digit block
    (.summary-stats) was removed; live counts live in the green header line. */
 
@@ -325,7 +374,7 @@ main.wrap { min-width: 0; padding: 28px 28px 48px; }
 /* COCKPIT_SLUG_ONLY_CARDS_1: the card identity renders the SLUG in this .r-name
    slot (name's 13px/500 + per-state color); the old muted-monospace .r-slug line
    was dropped so the slug shows once and no display name is rendered. */
-.r-name { overflow: hidden; color: #fff; font-size: 13px; font-weight: 500; text-overflow: ellipsis; white-space: nowrap; }
+.r-name { overflow: hidden; color: var(--text); font-size: 13px; font-weight: 500; text-overflow: ellipsis; white-space: nowrap; }
 .r-kind {
   flex: 0 0 auto;
   padding: 2px 6px;
@@ -468,12 +517,12 @@ main.wrap { min-width: 0; padding: 28px 28px 48px; }
   background: var(--panel);
   border-bottom: 1px solid var(--border);
 }
-#termbar b { color: #fff; font-size: 14px; font-weight: 500; }
+#termbar b { color: var(--text); font-size: 14px; font-weight: 500; }
 #termbar .sub { display: block; margin-top: 3px; color: var(--muted); font-size: 11px; }
 #termbar .spacer { flex: 1; }
 #term .btn.go { min-height: 30px; padding: 7px 14px; font-size: 11px; }
 #x, #msg-x { padding: 5px 8px; color: var(--muted); cursor: pointer; font-size: 18px; line-height: 1; }
-#x:hover, #msg-x:hover { color: #fff; }
+#x:hover, #msg-x:hover { color: var(--text); }
 #term-mount { min-height: 0; }
 #termframe { width: 100%; height: 100%; min-height: 0; flex: 1; border: 0; background: #000; }
 #term-unacked { max-height: 22vh; padding: 10px 18px; overflow: auto; background: var(--panel); border-bottom: 1px solid var(--border); }
@@ -512,7 +561,7 @@ main.wrap { min-width: 0; padding: 28px 28px 48px; }
 }
 #msgpanel.open { display: flex; }
 #msgbar { display: flex; align-items: center; gap: 12px; padding: 13px 17px; background: var(--panel-raised); border-bottom: 1px solid var(--border); }
-#msgbar b { color: #fff; font-size: 13px; font-weight: 500; }
+#msgbar b { color: var(--text); font-size: 13px; font-weight: 500; }
 #msgbar .spacer { flex: 1; }
 #msg-copy { min-height: 26px; padding: 5px 11px; font-size: 10.5px; }
 #msg-copy.flash-ok, .history-copy-success { color: var(--needs-go); border-color: var(--needs-go); }
@@ -561,7 +610,6 @@ main.wrap { min-width: 0; padding: 28px 28px 48px; }
 @media (max-width: 900px) {
   .cockpit-header { padding: 0 15px; }
   .cockpit-header .tab { padding: 0 11px; }
-  .cockpit-header .conn { min-width: 0; }
   main.wrap { padding: 22px 16px 40px; }
   .cockpit-summary { align-items: flex-start; flex-direction: column; gap: 18px; }
   /* Terminal pane takes more of the row on smaller desktops. */
@@ -572,7 +620,6 @@ main.wrap { min-width: 0; padding: 28px 28px 48px; }
   .cockpit-header { min-height: 50px; padding: 0 10px; }
   .cockpit-header .tab { padding: 0 7px; font-size: 9px; letter-spacing: .08em; }
   .cockpit-header .tab.brand { padding-left: 0; }
-  .cockpit-header .conn { display: none; }
   main.wrap { padding: 18px 8px 32px; }
   .cockpit-summary { padding: 0 5px 17px; }
   .summary-title-row h1 { font-size: 23px; }
