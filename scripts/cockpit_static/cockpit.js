@@ -17,6 +17,10 @@
   "use strict";
 
   const POLL_MS = 4000;
+  const POLL_TIMEOUT_MS = 10000;
+  const LAYOUT_RETRY_DELAYS_MS = [1500, 4000];
+  const LAYOUT_TIMEOUT_MS = 8000;
+  const LAYOUT_SELF_HEAL_MS = 60000;
   const FETCH_OPTS = { credentials: "same-origin", cache: "no-store" };
   // location.origin has NO userinfo, so building request URLs from it avoids
   // "Request cannot be constructed from a URL that includes credentials" when
@@ -64,6 +68,10 @@
   let prevUnacked = new Map();   // slug -> last-seen unacked_count (D9 flash-on-new)
   let flashSlugs = new Set();    // slugs whose unacked count rose this poll (D9)
   let pollTimer = null;
+  let pollInFlight = null;
+  let bootInFlight = null;
+  let bootReady = false;
+  let layoutHealTimer = null;
 
   // ---- sidebar view state (COCKPIT_REVAMP_SPLIT_VIEW_SIDEBAR_1, spec item 5) ----
   // Sidebar entries in order. ACTIVE is the default home; ALL is the flat view;
@@ -243,37 +251,123 @@
     }
   }
 
-  async function poll() {
+  async function fetchWithTimeout(requestUrl, options, timeoutMs, consumeResponse = null) {
+    const controller = new AbortController();
+    let timedOut = false;
+    let timeoutId = null;
+    const timeoutPromise = new Promise((_, reject) => {
+      timeoutId = setTimeout(() => {
+        timedOut = true;
+        controller.abort();
+        reject(new Error("request timed out after " + timeoutMs + "ms"));
+      }, timeoutMs);
+    });
     try {
-      const r = await fetch(url("/api/agents"), FETCH_OPTS);
-      if (!r.ok) throw new Error("HTTP " + r.status);
-      const data = await r.json();
-      const m = new Map();
-      for (const a of (data.agents || [])) m.set(a.slug, a);
-      computeFlash(m);              // D9 — flag cards whose unacked count rose
-      stateBySlug = m;
-      // lab_glance_ok=false ⇒ the Lab telemetry source is down; the summary
-      // sync-note surfaces that (renderSummary below). It does NOT dim the header
-      // health line: the feed itself answered, so the line stays GREEN (spec item
-      // 6 — green whenever the feed is live, red ONLY when the feed is dead).
-      const labOk = data.lab_glance_ok !== false;
-      const total = totalCardCount();
-      // Header health line — plain words, all bright green while the feed is live
-      // (spec item 6 / codex #13356: no warn state). Count = layout driveable cards
-      // (codex #13286: /api/agents now hydrates ALL cards, so m.size ≠ terminals).
-      const driveable = layout
-        ? layout.plates.reduce((n, plate) =>
-            n + plate.cards.filter((card) => card.driveable).length, 0)
-        : 0;
-      // Health line (migrated from #conn) renders through the single owner.
-      renderSummary(labOk, { live: true, driveable, total });
-      render();
-      syncPanelGo();             // reflect needs_go changes while the panel is open
-      if (openMsgSlug) renderMsgSummary(openMsgSlug);   // D9 — live-refresh open panel
+      const requestPromise = fetch(
+        requestUrl,
+        { ...options, signal: controller.signal },
+      ).then((response) => (
+        consumeResponse ? consumeResponse(response) : response
+      ));
+      return await Promise.race([requestPromise, timeoutPromise]);
     } catch (e) {
-      // Feed stale/dead — the ONE health line turns red (spec item 6, .feed-dead).
-      renderSummary(false, { live: false, error: e.message });
+      if (timedOut) throw new Error("request timed out after " + timeoutMs + "ms");
+      throw e;
+    } finally {
+      clearTimeout(timeoutId);
     }
+  }
+
+  function setLayoutStatus(text) {
+    if (!syncNoteEl) return;
+    syncNoteEl.textContent = text;
+    syncNoteEl.className = "summary-status feed-dead";
+  }
+
+  async function loadLayoutWithRetry() {
+    const maxAttempts = LAYOUT_RETRY_DELAYS_MS.length + 1;
+    for (let attempt = 0; attempt < maxAttempts; attempt += 1) {
+      try {
+        const data = await fetchWithTimeout(
+          url("/cockpit_layout.json"),
+          FETCH_OPTS,
+          LAYOUT_TIMEOUT_MS,
+          async (response) => {
+            if (!response.ok) throw new Error("layout HTTP " + response.status);
+            return response.json();
+          },
+        );
+        return data;
+      } catch (e) {
+        if (attempt === maxAttempts - 1) throw e;
+        setLayoutStatus("Layout load failed — retrying");
+        await new Promise((resolve) => setTimeout(
+          resolve,
+          LAYOUT_RETRY_DELAYS_MS[attempt],
+        ));
+      }
+    }
+    throw new Error("layout retry exhausted");
+  }
+
+  function clearLayoutSelfHeal() {
+    if (layoutHealTimer !== null) {
+      clearInterval(layoutHealTimer);
+      layoutHealTimer = null;
+    }
+  }
+
+  function scheduleLayoutSelfHeal() {
+    if (layoutHealTimer !== null) return;
+    layoutHealTimer = setInterval(() => {
+      if (document.visibilityState === "visible" && !bootReady) void boot();
+    }, LAYOUT_SELF_HEAL_MS);
+  }
+
+  function poll() {
+    // A hung fetch must not wedge boot or stack interval requests behind it.
+    if (pollInFlight) return pollInFlight;
+    pollInFlight = (async () => {
+      try {
+        const data = await fetchWithTimeout(
+          url("/api/agents"),
+          FETCH_OPTS,
+          POLL_TIMEOUT_MS,
+          async (response) => {
+            if (!response.ok) throw new Error("HTTP " + response.status);
+            return response.json();
+          },
+        );
+        const m = new Map();
+        for (const a of (data.agents || [])) m.set(a.slug, a);
+        computeFlash(m);              // D9 — flag cards whose unacked count rose
+        stateBySlug = m;
+        // lab_glance_ok=false ⇒ the Lab telemetry source is down; the summary
+        // sync-note surfaces that (renderSummary below). It does NOT dim the header
+        // health line: the feed itself answered, so the line stays GREEN (spec item
+        // 6 — green whenever the feed is live, red ONLY when the feed is dead).
+        const labOk = data.lab_glance_ok !== false;
+        const total = totalCardCount();
+        // Header health line — plain words, all bright green while the feed is live
+        // (spec item 6 / codex #13356: no warn state). Count = layout driveable cards
+        // (codex #13286: /api/agents now hydrates ALL cards, so m.size ≠ terminals).
+        const driveable = layout
+          ? layout.plates.reduce((n, plate) =>
+              n + plate.cards.filter((card) => card.driveable).length, 0)
+          : 0;
+        // Health line (migrated from #conn) renders through the single owner.
+        renderSummary(labOk, { live: true, driveable, total });
+        render();
+        syncPanelGo();             // reflect needs_go changes while the panel is open
+        if (openMsgSlug) renderMsgSummary(openMsgSlug);   // D9 — live-refresh open panel
+      } catch (e) {
+        // Feed stale/dead — the ONE health line turns red (spec item 6, .feed-dead).
+        renderSummary(false, { live: false, error: e.message });
+      } finally {
+        pollInFlight = null;
+      }
+    })();
+    return pollInFlight;
   }
 
   // ---- terminal overlay ---------------------------------------------------
@@ -997,27 +1091,35 @@
   // toggle) was removed. Banners stay ON; the controller's /api/notify/* endpoints
   // + COCKPIT_NOTIFY_ENABLED env kill switch are untouched (engineer-only path).
 
-  async function boot() {
-    try {
-      const r = await fetch(url("/cockpit_layout.json"), FETCH_OPTS);
-      if (!r.ok) throw new Error("layout HTTP " + r.status);
-    layout = await r.json();
-    } catch (e) {
-      // Layout failed before we have any layout — renderSummary early-returns
-      // without one, so write the health line directly (red).
-      if (syncNoteEl) {
-        syncNoteEl.textContent = "Layout load failed — " + e.message;
-        syncNoteEl.className = "summary-status feed-dead";
+  function boot() {
+    if (bootReady) return Promise.resolve();
+    if (bootInFlight) return bootInFlight;
+    bootInFlight = (async () => {
+      try {
+        layout = await loadLayoutWithRetry();
+        clearLayoutSelfHeal();
+        buildSidebar();              // 9 static nav entries (badges hydrate on poll)
+        render();                    // paint immediately from layout (metadata)
+        renderSummary();
+        if (currentView === "History") enterHistory();   // restore a persisted History view
+        await poll();                // then hydrate with live state
+        if (pollTimer === null) pollTimer = setInterval(poll, POLL_MS);
+        bootReady = true;
+      } catch (e) {
+        // Layout failed before we have any layout — renderSummary early-returns
+        // without one, so write the health line directly (red).
+        setLayoutStatus("Layout load failed — " + e.message);
+        scheduleLayoutSelfHeal();
+      } finally {
+        bootInFlight = null;
       }
-      return;
-    }
-    buildSidebar();              // 9 static nav entries (badges hydrate on poll)
-    render();                    // paint immediately from layout (metadata)
-    renderSummary();
-    if (currentView === "History") enterHistory();   // restore a persisted History view
-    await poll();                // then hydrate with live state
-    pollTimer = setInterval(poll, POLL_MS);
+    })();
+    return bootInFlight;
   }
+
+  document.addEventListener("visibilitychange", () => {
+    if (document.visibilityState === "visible" && !bootReady) void boot();
+  });
 
   // LAB_UNIFY_THEME_COCKPIT_EXTENSION_1: live-follow the /v2 theme. The head
   // bootstrap already applied the stored theme before paint; here we re-theme
