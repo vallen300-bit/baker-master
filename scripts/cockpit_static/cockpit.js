@@ -1093,18 +1093,15 @@
         .then((ok) => { if (ok) return poll(); })
         .finally(() => {
           btn.disabled = false;
-          btn.textContent = "⟳";
           btn.classList.remove("armed");
         });
       return;
     }
     if (armed) clearTimeout(armed.timer);
-    btn.textContent = "sure?";
     btn.classList.add("armed");
     const timer = setTimeout(() => {
       if (contextRefreshArmed.get(slug)?.timer !== timer) return;
       contextRefreshArmed.delete(slug);
-      btn.textContent = "⟳";
       btn.classList.remove("armed");
     }, CONTEXT_REFRESH_ARM_MS);
     contextRefreshArmed.set(slug, {

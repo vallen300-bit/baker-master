@@ -144,14 +144,22 @@ def test_start_button_removed_but_endpoint_and_down_guard_remain():
 
 
 def test_context_refresh_is_click_armed_and_driveable_only():
-    """The /clear action is a two-step click on up driveable rows, with no
-    action rendered for down or status-only rows."""
+    """The /clear action is a two-step click on up driveable rows, with a
+    color-only armed state and no action rendered for down/status-only rows."""
     assert 'class: "rbtn refresh-context"' in JS
+    assert 'text: "⟳"' in JS
     assert 'title: "Refresh context (/clear)"' in JS
     assert "CONTEXT_REFRESH_ARM_MS = 3000" in JS
     assert "refreshContext(meta.slug, ev.currentTarget)" in JS
     assert '"/api/sessions/" + slug + "/refresh_context"' in JS
     assert "if (meta.status_only || !up)" in JS
+    assert 'text: "sure?"' not in JS
+    refresh_start = JS.index("function refreshContext")
+    refresh_end = JS.index("\n  async function doStart", refresh_start)
+    refresh_body = JS[refresh_start:refresh_end]
+    assert "btn.textContent" not in refresh_body
+    assert 'btn.classList.add("armed")' in refresh_body
+    assert 'btn.classList.remove("armed")' in refresh_body
     assert ".control-actions" in CSS
 
 
