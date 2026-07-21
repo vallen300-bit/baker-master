@@ -40,12 +40,11 @@
   --st-grey: #8b95a3;       /* idle / not-started — muted */
   --shadow: inset 0 1px 0 rgba(255,255,255,.035), 0 8px 26px rgba(0,0,0,.2);
   --row-columns: 10px minmax(0, 1fr) 128px minmax(72px, auto) 116px 104px;
-  /* COCKPIT_REVAMP_SPLIT_VIEW_SIDEBAR_1: shell geometry. Header height anchors the
-     sticky sidebar + terminal pane; sidebar width collapses on narrow screens. */
-  --header-h: 54px;
-  --sidebar-w: 158px;
+  /* COCKPIT_AGENTS_GRID_POLISH_3: no in-page navigation header. The fixed rail
+     fits the widest label ("Control Tower") at the normal item padding. */
+  --header-h: 0px;
+  --sidebar-w: 130px;
   --pane-w: min(760px, 52vw);
-  --header-bg: #080b0f;      /* darkest bar; token-ized for the light override */
 }
 
 /* ── Light theme (LAB_UNIFY_THEME_COCKPIT_EXTENSION_1) ──────────────────────
@@ -80,7 +79,6 @@ html[data-theme="light"] {
   --st-offline: #b0403a;
   --st-grey: #8593a1;
   --shadow: 0 1px 3px rgba(27,35,45,.12), 0 8px 24px rgba(27,35,45,.08);
-  --header-bg: #ffffff;
 }
 /* Light-mode targeted overrides for the few hardcoded-hex spots that would
  * otherwise be light-mode artifacts (invisible white text / pale attention
@@ -120,48 +118,6 @@ body {
 }
 button { font: inherit; }
 
-/* Global navigation: restrained, quiet, and always available. */
-.cockpit-header {
-  display: flex;
-  align-items: center;
-  gap: 2px;
-  min-height: 54px;
-  padding: 0 24px;
-  background: var(--header-bg);
-  border-bottom: 1px solid var(--border);
-  position: sticky;
-  top: 0;
-  z-index: 5;
-}
-.cockpit-header .tab {
-  align-self: stretch;
-  display: inline-flex;
-  align-items: center;
-  padding: 0 17px;
-  color: var(--muted);
-  font-size: 11px;
-  letter-spacing: .11em;
-  text-transform: uppercase;
-  white-space: nowrap;
-}
-.cockpit-header .tab.brand {
-  padding-left: 0;
-  color: var(--text);
-  font-weight: 700;
-  letter-spacing: .14em;
-}
-.cockpit-header .tab.active {
-  color: var(--text);
-  border-bottom: 2px solid var(--blue);
-  text-transform: none;
-  letter-spacing: .02em;
-  font-size: 12px;
-}
-.cockpit-header .spacer { flex: 1; }
-/* The top-right #conn health line was removed (LAB_UNIFY_THEME_COCKPIT_EXTENSION_1,
-   Director 2026-07-21); the single live/offline health line now lives next to
-   FLEET COCKPIT (.summary-status). Its rules were retired with the element. */
-
 /* ── Three-column app shell (spec items 4 + 5) ──────────────────────────────
    left sidebar | middle live grid | right terminal pane. The pane track is 0
    until a seat opens (.pane-open), so the grid owns the full middle width and the
@@ -177,7 +133,7 @@ button { font: inherit; }
 .app-shell.pane-open { grid-template-columns: var(--sidebar-w) minmax(0, 1fr) var(--pane-w); }
 
 /* Sidebar: quiet by default, sticky so it stays put while the grid scrolls.
-   Reserved for future buttons (spec item 5.6) — only the 8 view entries now. */
+   Full group names remain readable at every viewport width. */
 .sidebar {
   position: sticky;
   top: var(--header-h);
@@ -195,7 +151,6 @@ button { font: inherit; }
   position: relative;
   display: flex;
   align-items: center;
-  gap: 9px;
   padding: 8px 11px;
   color: var(--muted);
   background: transparent;
@@ -212,18 +167,7 @@ button { font: inherit; }
 .nav-item.active .nav-label { font-weight: 600; }
 /* Separate the two view entries (ACTIVE / ALL) from the six group entries. */
 .nav-item[data-view="Pilots"] { margin-top: 11px; }
-.nav-abbr { display: none; flex: 0 0 auto; width: 22px; text-align: center; font-weight: 600; letter-spacing: .04em; }
-.nav-label { flex: 1 1 auto; overflow: hidden; text-overflow: ellipsis; }
-/* Red attention badge (spec item 5.3): only for attention, never green — a group
-   with unread/GO/offline seats you're not currently viewing. QUIET WHEN HEALTHY. */
-.nav-badge {
-  flex: 0 0 auto;
-  width: 8px; height: 8px;
-  border-radius: 50%;
-  background: var(--st-red);
-  box-shadow: 0 0 6px rgba(248,81,73,.7);
-}
-.nav-badge[hidden] { display: none; }
+.nav-label { flex: 1 1 auto; overflow: visible; }
 
 /* ACTIVE-view grey seats collapse behind one "N quiet" line per group. */
 .quiet-wrap { margin: 2px 0 5px; }
@@ -611,30 +555,7 @@ main.wrap { min-width: 0; padding: 28px 28px 48px; }
 #toast.err { color: #ffb4ad; border-color: var(--danger); }
 #toast.ok { border-color: var(--needs-go); }
 
-/* Narrow screens (spec item 5.5): the sidebar collapses to a 48px icon rail
-   showing two-letter abbreviations; hovering it expands back to labels. Pure CSS —
-   the :has() hover widens the sidebar track, no JS breakpoint logic. */
-@media (max-width: 1100px) {
-  .app-shell { grid-template-columns: 48px minmax(0, 1fr) 0; }
-  .app-shell.pane-open { grid-template-columns: 48px minmax(0, 1fr) var(--pane-w); }
-  .app-shell:has(.sidebar:hover) { grid-template-columns: 172px minmax(0, 1fr) 0; }
-  .app-shell.pane-open:has(.sidebar:hover) { grid-template-columns: 172px minmax(0, 1fr) var(--pane-w); }
-  .sidebar { padding: 14px 6px; }
-  .nav-item { justify-content: center; gap: 0; padding: 8px 4px; }
-  .nav-abbr { display: block; }
-  .nav-label { display: none; }
-  .nav-item[data-view="Pilots"] { margin-top: 9px; }
-  /* Badge floats to the top-right corner of the collapsed pill so it stays visible. */
-  .nav-badge { position: absolute; top: 5px; right: 5px; }
-  .sidebar:hover .nav-item { justify-content: flex-start; gap: 9px; padding: 8px 11px; }
-  .sidebar:hover .nav-abbr { display: none; }
-  .sidebar:hover .nav-label { display: block; }
-  .sidebar:hover .nav-badge { position: relative; top: auto; right: auto; }
-}
-
 @media (max-width: 900px) {
-  .cockpit-header { padding: 0 15px; }
-  .cockpit-header .tab { padding: 0 11px; }
   main.wrap { padding: 22px 16px 40px; }
   .cockpit-summary { align-items: flex-start; flex-direction: column; gap: 18px; }
   /* Terminal pane takes more of the row on smaller desktops. */
@@ -642,9 +563,6 @@ main.wrap { min-width: 0; padding: 28px 28px 48px; }
 }
 
 @media (max-width: 640px) {
-  .cockpit-header { min-height: 50px; padding: 0 10px; }
-  .cockpit-header .tab { padding: 0 7px; font-size: 9px; letter-spacing: .08em; }
-  .cockpit-header .tab.brand { padding-left: 0; }
   main.wrap { padding: 18px 8px 32px; }
   .cockpit-summary { padding: 0 5px 17px; }
   .summary-title-row h1 { font-size: 23px; }
@@ -662,7 +580,7 @@ main.wrap { min-width: 0; padding: 28px 28px 48px; }
   .r-ctx .ctxbar { flex: 0 0 24px; max-width: 36px; }
   /* Phone: a three-column split can't fit — the opened terminal takes over the
      content area (grid hidden) while the icon rail stays; close returns to grid. */
-  .app-shell.pane-open { grid-template-columns: 48px 0 minmax(0, 1fr); }
+  .app-shell.pane-open { grid-template-columns: var(--sidebar-w) 0 minmax(0, 1fr); }
   .app-shell.pane-open .wrap { display: none; }
   .term-pane { border-left: 0; }
   /* codex FAIL #13397 P2b: at 320px the bar overflowed (scrollWidth 326 > 319) with
