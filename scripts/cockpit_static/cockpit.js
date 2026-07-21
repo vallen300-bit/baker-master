@@ -18,6 +18,9 @@
 
   const POLL_MS = 4000;
   const FETCH_OPTS = { credentials: "same-origin", cache: "no-store" };
+  const BOOT_RETRY_DELAYS_MS = [0, 1500, 4000];
+  const BOOT_FETCH_TIMEOUT_MS = 8000;
+  const BOOT_SELF_HEAL_MS = 60000;
   // location.origin has NO userinfo, so building request URLs from it avoids
   // "Request cannot be constructed from a URL that includes credentials" when
   // the page itself was opened with credentials embedded in the URL.
@@ -62,6 +65,9 @@
   let prevUnacked = new Map();   // slug -> last-seen unacked_count (D9 flash-on-new)
   let flashSlugs = new Set();    // slugs whose unacked count rose this poll (D9)
   let pollTimer = null;
+  let bootReady = false;
+  let bootInFlight = false;
+  let bootSelfHealTimer = null;
 
   // ---- sidebar view state (COCKPIT_REVAMP_SPLIT_VIEW_SIDEBAR_1, spec item 5) ----
   // Sidebar entries in order. ACTIVE is the default home; ALL is the flat view;
@@ -755,6 +761,60 @@
     if (currentView === "History") renderHistory();
   }
 
+  function wait(ms) {
+    return new Promise((resolve) => setTimeout(resolve, ms));
+  }
+
+  function bootFetchConfig() {
+    if (typeof AbortSignal !== "undefined" &&
+        typeof AbortSignal.timeout === "function") {
+      return {
+        options: { ...FETCH_OPTS, signal: AbortSignal.timeout(BOOT_FETCH_TIMEOUT_MS) },
+        cleanup: () => {},
+      };
+    }
+    if (typeof AbortController === "undefined") {
+      return { options: FETCH_OPTS, cleanup: () => {} };
+    }
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), BOOT_FETCH_TIMEOUT_MS);
+    return {
+      options: { ...FETCH_OPTS, signal: controller.signal },
+      cleanup: () => clearTimeout(timer),
+    };
+  }
+
+  async function fetchLayoutWithRetry() {
+    let lastError = new Error("layout unavailable");
+    for (const delay of BOOT_RETRY_DELAYS_MS) {
+      if (delay > 0) await wait(delay);
+      const { options, cleanup } = bootFetchConfig();
+      try {
+        const r = await fetch(url("/cockpit_layout.json"), options);
+        if (!r.ok) throw new Error("layout HTTP " + r.status);
+        return await r.json();
+      } catch (e) {
+        lastError = e;
+      } finally {
+        cleanup();
+      }
+    }
+    throw lastError;
+  }
+
+  function armBootSelfHeal() {
+    if (bootSelfHealTimer === null) {
+      bootSelfHealTimer = setInterval(() => { void boot(); }, BOOT_SELF_HEAL_MS);
+    }
+  }
+
+  function disarmBootSelfHeal() {
+    if (bootSelfHealTimer !== null) {
+      clearInterval(bootSelfHealTimer);
+      bootSelfHealTimer = null;
+    }
+  }
+
   function fmtDuration(sec) {
     if (sec === null || sec === undefined || isNaN(sec)) return "—";
     const s = Math.max(0, Math.round(sec));
@@ -975,22 +1035,30 @@
   // + COCKPIT_NOTIFY_ENABLED env kill switch are untouched (engineer-only path).
 
   async function boot() {
+    if (bootReady || bootInFlight) return;
+    bootInFlight = true;
     try {
-      const r = await fetch(url("/cockpit_layout.json"), FETCH_OPTS);
-      if (!r.ok) throw new Error("layout HTTP " + r.status);
-    layout = await r.json();
+      layout = await fetchLayoutWithRetry();
+      buildSidebar();              // 9 static nav entries (badges hydrate on poll)
+      render();                    // paint immediately from layout (metadata)
+      renderSummary();
+      if (currentView === "History") enterHistory();   // restore a persisted History view
+      await poll();                // then hydrate with live state
+      if (pollTimer === null) pollTimer = setInterval(poll, POLL_MS);
+      bootReady = true;
+      disarmBootSelfHeal();
     } catch (e) {
-      connEl.textContent = "layout load failed — " + e.message;
+      connEl.textContent = "layout load failed — retrying";
       connEl.className = "conn feed-dead";
-      return;
+      armBootSelfHeal();
+    } finally {
+      bootInFlight = false;
     }
-    buildSidebar();              // 9 static nav entries (badges hydrate on poll)
-    render();                    // paint immediately from layout (metadata)
-    renderSummary();
-    if (currentView === "History") enterHistory();   // restore a persisted History view
-    await poll();                // then hydrate with live state
-    pollTimer = setInterval(poll, POLL_MS);
   }
+
+  document.addEventListener("visibilitychange", () => {
+    if (document.visibilityState === "visible" && !bootReady) void boot();
+  });
 
   boot();
 })();
