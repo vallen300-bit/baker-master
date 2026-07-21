@@ -637,8 +637,8 @@
     return Math.floor(sec / 86400) + "d";
   }
 
-  // D2 — context meter on every row. Last-known values remain visible even
-  // when stale; staleness is communicated by dimming plus a compact age.
+  // D2 — context meter on every row. Fresh values show the percentage; stale
+  // values lead with their age so the number cannot be mistaken for current.
   function ctxCell(meta, row) {
     const pct = (row && typeof row.context_pct === "number")
       ? Math.max(0, Math.min(100, row.context_pct)) : null;
@@ -653,14 +653,24 @@
     // gradient box exactly one track wide → colour at the fill edge == severity(pct).
     const scale = pct > 0 ? (10000 / pct) : 100;
     const stale = row.context_stale === true;
-    const age = stale ? compactContextAge(Number(row.context_age_sec)) : "";
-    const label = Math.round(pct) + "%" + (age ? " · " + age : "");
+    const ageSec = stale ? Number(row.context_age_sec) : NaN;
+    const age = stale ? compactContextAge(ageSec) : "";
+    const staleLong = stale && Number.isFinite(ageSec) && ageSec > 3600;
+    const label = stale
+      ? (age ? age + " old · " + Math.round(pct) + "%" : "stale · " + Math.round(pct) + "%")
+      : Math.round(pct) + "%";
+    const bar = staleLong
+      ? el("span", { class: "ctxbar ctxbar-stale", text: "?" })
+      : el("span", { class: "ctxbar" }, [el("span", { class: "ctxfill",
+          style: "width:" + pct + "%;--ctx-track-scale:" + scale + "%" })]);
     return el("span", {
-      class: "r-ctx" + (stale ? " ctx-stale" : ""),
-      title: "context window " + Math.round(pct) + "% used" + (age ? " · updated " + age + " ago" : ""),
+      class: "r-ctx" + (stale ? " ctx-stale" : "") + (staleLong ? " ctx-stale-long" : ""),
+      title: stale
+        ? (age ? "stale context: " + age + " old · " + Math.round(pct) + "% used"
+               : "stale context · " + Math.round(pct) + "% used")
+        : "context window " + Math.round(pct) + "% used",
     }, [
-      el("span", { class: "ctxbar" }, [el("span", { class: "ctxfill",
-        style: "width:" + pct + "%;--ctx-track-scale:" + scale + "%" })]),
+      bar,
       el("span", { class: "ctxlbl", text: label }),
     ]);
   }
@@ -726,13 +736,12 @@
     ];
     if (meta.badge) idKids.push(el("span", { class: "r-kind", text: meta.kind }));
 
-    // Col 3 — unread badge + oldest age (empty spacer keeps the column aligned).
+    // Col 3 — oldest unacked age only (empty spacer keeps the column aligned).
     // D9: shown whenever the seat has unacked messages, including App cards
     // (which are not session_up but do carry a bus identity).
     let unread;
     if (row && row.unacked_count > 0) {
       unread = el("span", { class: "r-unread" }, [
-        el("span", { class: "unread", text: String(row.unacked_count) }),
         el("span", { class: ageClass(row.oldest_unacked_age_sec || 0),
                      text: window.formatUnreadAge(row.oldest_unacked_age_sec || 0) }),
       ]);
