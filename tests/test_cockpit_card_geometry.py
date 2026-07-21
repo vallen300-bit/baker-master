@@ -6,7 +6,7 @@ whole fleet fits one screen. This locks the row invariants that make D1/D2/D3
 impossible to regress, parsed from cockpit.css/js (CI has no browser).
 
   D1 — one thin row per seat, a fixed 5-column grid so columns align table-style.
-  D2 — the context meter renders on EVERY row (em-dash placeholder when null).
+  D2 — the context meter renders on EVERY row (muted empty track when inactive).
   D3 — the state control renders on EVERY row (refresh / GO / status chip).
 """
 import re
@@ -56,12 +56,13 @@ def test_rows_are_thin_not_fixed_card_height():
 
 def test_ctx_meter_rendered_on_every_row():
     """D2: card() appends ctxCell unconditionally, and ctxCell returns a node in
-    BOTH branches — a bar when numeric, an em-dash placeholder when null."""
+    BOTH branches — a filled bar when numeric, an empty track when inactive."""
     assert "ctxCell(meta, row)" in JS, "card() no longer appends ctxCell for every row"
     assert "function ctxCell" in JS, "ctxCell helper missing"
-    # Null branch renders the em-dash placeholder; never null, never hidden.
-    assert 'class: "r-ctx r-ctx-null"' in JS, "ctxCell null branch must render an em-dash placeholder"
-    assert ".r-ctx-null" in CSS, ".r-ctx-null placeholder style missing"
+    # Inactive branch renders a normal muted track; never a glyph or a hidden cell.
+    assert 'class: "r-ctx r-ctx-null"' in JS, "ctxCell inactive branch must render an empty track"
+    assert 'el("span", { class: "ctxbar" })' in JS
+    assert ".r-ctx-null .ctxbar" in CSS, "inactive context track style missing"
 
 
 def test_stale_context_meter_is_dimmed_and_shows_age():
@@ -70,8 +71,6 @@ def test_stale_context_meter_is_dimmed_and_shows_age():
     assert "context_age_sec" in JS, "stale context age is not rendered"
     assert ".r-ctx.ctx-stale" in CSS, "stale context style missing"
     assert 'age + " old · "' in JS, "stale label must lead with age"
-    assert 'text: "?"' in JS, "long-stale context must replace the fill with ?"
-    assert ".r-ctx.ctx-stale-long" in CSS, "long-stale context treatment missing"
     assert "#d2d9e1" in CSS, "dark stale label color missing"
     assert 'html[data-theme="light"] .r-ctx.ctx-stale .ctxlbl' in CSS, \
         "light stale label override missing"
@@ -119,6 +118,14 @@ def test_header_and_rows_share_column_template_and_order():
         HTML,
     )
     assert re.search(r"\.fleet-columns\s*\{[^}]*padding:\s*0 12px;", CSS, re.S)
+    assert re.search(
+        r"\.fleet-columns\s*\{[^}]*border-left:\s*1px solid transparent;"
+        r"[^}]*border-right:\s*1px solid transparent;",
+        CSS,
+        re.S,
+    )
+    assert "text-align: justify" in CSS
+    assert "text-align-last: justify" in CSS
     assert re.search(r"\.row\s*\{[^}]*padding:\s*4px 12px;", CSS, re.S)
 
 
@@ -167,6 +174,15 @@ def test_context_refresh_arm_is_cleared_before_grid_replacement():
 def test_subtitle_slot_is_reserved_but_empty():
     assert "Every terminal, app seat, desk, and service in one scan surface." not in HTML
     assert "reserved: future header line, same font slot" in HTML
+
+
+def test_inactive_context_has_only_an_empty_track():
+    """Director ruling: no telemetry reads as an ordinary muted empty bar, with
+    no question mark or square placeholder."""
+    assert "ctx-stale-long" not in JS
+    assert "ctx-stale-long" not in CSS
+    assert 'text: "?"' not in JS
+    assert ".r-ctx-null .ctxbar" in CSS
 
 
 def test_phone_rows_stay_tappable():

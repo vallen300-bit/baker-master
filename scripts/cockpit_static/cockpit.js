@@ -642,9 +642,13 @@
   function ctxCell(meta, row) {
     const pct = (row && typeof row.context_pct === "number")
       ? Math.max(0, Math.min(100, row.context_pct)) : null;
-    if (pct === null) {
-      return el("span", { class: "r-ctx r-ctx-null", text: "—",
-                          title: "no context telemetry" });
+    const stale = row && row.context_stale === true;
+    const ageSec = stale ? Number(row.context_age_sec) : NaN;
+    const staleLong = stale && Number.isFinite(ageSec) && ageSec > 3600;
+    if (pct === null || staleLong) {
+      return el("span", { class: "r-ctx r-ctx-null", title: "no context telemetry" }, [
+        el("span", { class: "ctxbar" }),
+      ]);
     }
     // SEVERITY-BY-VALUE (lead ruling #12977): the fill width still tracks pct, but
     // the gradient is scaled to span one FULL track so its colour reads the true
@@ -652,19 +656,14 @@
     // box, and the fill is pct% of the track, so a scale of (10000/pct)% makes the
     // gradient box exactly one track wide → colour at the fill edge == severity(pct).
     const scale = pct > 0 ? (10000 / pct) : 100;
-    const stale = row.context_stale === true;
-    const ageSec = stale ? Number(row.context_age_sec) : NaN;
     const age = stale ? compactContextAge(ageSec) : "";
-    const staleLong = stale && Number.isFinite(ageSec) && ageSec > 3600;
     const label = stale
       ? (age ? age + " old · " + Math.round(pct) + "%" : "stale · " + Math.round(pct) + "%")
       : Math.round(pct) + "%";
-    const bar = staleLong
-      ? el("span", { class: "ctxbar ctxbar-stale", text: "?" })
-      : el("span", { class: "ctxbar" }, [el("span", { class: "ctxfill",
-          style: "width:" + pct + "%;--ctx-track-scale:" + scale + "%" })]);
+    const bar = el("span", { class: "ctxbar" }, [el("span", { class: "ctxfill",
+        style: "width:" + pct + "%;--ctx-track-scale:" + scale + "%" })]);
     return el("span", {
-      class: "r-ctx" + (stale ? " ctx-stale" : "") + (staleLong ? " ctx-stale-long" : ""),
+      class: "r-ctx" + (stale ? " ctx-stale" : ""),
       title: stale
         ? (age ? "stale context: " + age + " old · " + Math.round(pct) + "% used"
                : "stale context · " + Math.round(pct) + "% used")

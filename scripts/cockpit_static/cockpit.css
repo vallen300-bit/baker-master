@@ -100,7 +100,7 @@ html[data-theme="light"] .hrow-unacked .htopic { color: #9a6700; }
 html[data-theme="light"] .r-ctx .ctxbar { background: #dfe3e8; }
 html[data-theme="light"] .r-ctx.ctx-stale .ctxbar { background: #aeb7c2; }
 html[data-theme="light"] .r-ctx.ctx-stale .ctxlbl { color: #495463; }
-html[data-theme="light"] .r-ctx.ctx-stale-long .ctxbar { color: #27303d; }
+html[data-theme="light"] .r-ctx-null .ctxbar { background: #aeb7c2; }
 /* App/service rows use a dark rgba overlay (subtle on dark, a heavy grey bar on
    white) — give them a light-grey tint in light mode instead. */
 html[data-theme="light"] .row.app { background: rgba(60,72,88,.06); box-shadow: inset 0 1px 3px rgba(60,72,88,.10); }
@@ -323,6 +323,8 @@ main.wrap { min-width: 0; padding: 28px 28px 48px; }
   min-height: 27px;
   padding: 0 12px;
   color: var(--muted);
+  border-left: 1px solid transparent;
+  border-right: 1px solid transparent;
   border-bottom: 1px solid var(--border-soft);
   font-size: 9px;
   letter-spacing: .12em;
@@ -331,6 +333,12 @@ main.wrap { min-width: 0; padding: 28px 28px 48px; }
 .fleet-columns span:nth-child(3),
 .fleet-columns span:nth-child(4),
 .fleet-columns span:nth-child(5) { text-align: right; }
+.fleet-columns span:nth-child(3) {
+  display: block;
+  text-align: justify;
+  text-align-last: justify;
+  white-space: nowrap;
+}
 
 /* Plates are section dividers, not nested boxes. */
 .plate { margin-bottom: 8px; }
@@ -454,8 +462,8 @@ main.wrap { min-width: 0; padding: 28px 28px 48px; }
 .r-ctx.ctx-stale .ctxbar { background: #6e7781; }
 .r-ctx.ctx-stale .ctxfill { background: #6e7781; background-image: none; }
 .r-ctx.ctx-stale .ctxlbl { color: #d2d9e1; font-weight: 700; }
-.r-ctx.ctx-stale-long .ctxbar { display: flex; align-items: center; justify-content: center; min-width: 18px; height: 14px; color: #d2d9e1; font: 700 11px/1 ui-monospace, Menlo, monospace; }
-.r-ctx-null { color: var(--muted); font-size: 13px; }
+.r-ctx-null { justify-content: stretch; }
+.r-ctx-null .ctxbar { flex: 1 1 auto; width: 100%; max-width: none; background: #6e7781; }
 .rbtn, .btn {
   min-height: 27px;
   padding: 5px 10px;
