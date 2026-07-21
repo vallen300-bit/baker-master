@@ -357,6 +357,63 @@ def test_arrivals_json_api_has_no_frame_ancestors_csp(monkeypatch):
 
 
 # =====================================================================
+# ARRIVALS_COOKIE_REFRESH_ON_VISIT_1 (b3, lead #14494) — legacy cookies
+# upgrade transparently on the next top-level visit
+# =====================================================================
+# The SameSite=None fix (ARRIVALS_EMBED_COOKIE_FIX_1) lands only on the ?pin=
+# path; a Director browser holding the LEGACY SameSite=Strict cookie never
+# refreshes it on plain cookie-authed visits, so the cross-site Lab iframe omits
+# it -> 404 disguise. Fix: a successful COOKIE auth must ALSO re-issue the cookie
+# with the current attributes. TDD seams: (1) cookie-auth HTML re-issues
+# SameSite=None; (2) cookie-auth JSON re-issues; (3) pin path unchanged;
+# (4) fence — an unauthenticated visit must NOT issue a cookie.
+
+
+def test_arrivals_cookie_auth_reissues_samesite_none_on_visit(monkeypatch):
+    # (1) A bare cookie-authed /arrivals visit re-issues Set-Cookie with the
+    # current SameSite=None; Secure; HttpOnly attributes so a legacy Strict
+    # cookie transparently upgrades — no PIN re-entry.
+    client = _embed_client(monkeypatch)
+    client.get("/arrivals?pin=123456")  # seed the cookie jar
+    bare = client.get("/arrivals")
+    assert bare.status_code == 200
+    reissued = bare.headers.get("set-cookie", "")
+    assert "arrivals_board_access" in reissued
+    assert "SameSite=none" in reissued
+    assert "Secure" in reissued
+    assert "HttpOnly" in reissued
+    assert "SameSite=strict" not in reissued
+
+
+def test_arrivals_json_cookie_auth_reissues_samesite_none_on_visit(monkeypatch):
+    # (2) Same refresh-on-visit for the JSON API path (shares the gate).
+    client = _embed_client(monkeypatch)
+    client.get("/api/arrivals.json?pin=123456")  # seed the cookie jar
+    bare = client.get("/api/arrivals.json")
+    assert bare.status_code == 200
+    reissued = bare.headers.get("set-cookie", "")
+    assert "arrivals_board_access" in reissued
+    assert "SameSite=none" in reissued
+
+
+def test_arrivals_pin_path_still_reissues_cookie(monkeypatch):
+    # (3) The ?pin= path is unchanged — a valid pin still issues the cookie.
+    client = _embed_client(monkeypatch)
+    set_cookie = client.get("/arrivals?pin=123456").headers.get("set-cookie", "")
+    assert "arrivals_board_access" in set_cookie
+    assert "SameSite=none" in set_cookie
+
+
+def test_arrivals_unauthenticated_visit_issues_no_cookie(monkeypatch):
+    # (4) Fence: an unauthenticated visit keeps the 404 disguise AND must not
+    # issue any cookie (no cookie leak to an unauthenticated caller).
+    client = _embed_client(monkeypatch)
+    resp = client.get("/arrivals")
+    assert resp.status_code == 404
+    assert "set-cookie" not in {k.lower() for k in resp.headers}
+
+
+# =====================================================================
 # ARRIVALS_BOARD_CLICKUP_MILESTONE_SYNC_1 — deriver + anti-flap + sync
 # =====================================================================
 # TDD seams (brief): (1) pure derive_next_milestone(tasks, today),

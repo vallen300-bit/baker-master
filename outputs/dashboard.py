@@ -2104,7 +2104,15 @@ def _arrivals_board_access(request: Request) -> tuple[bool, bool]:
     supplied_pin = request.query_params.get("pin")
     if supplied_pin is not None:
         return _arrivals_board_pin_ok(supplied_pin), _arrivals_board_pin_ok(supplied_pin)
-    return _arrivals_board_cookie_ok(request), False
+    # ARRIVALS_COOKIE_REFRESH_ON_VISIT_1 (b3, lead #14494): when cookie auth
+    # succeeds, ALSO re-issue Set-Cookie (set_cookie=True) with the current
+    # attributes so a legacy SameSite=Strict cookie transparently upgrades to
+    # SameSite=None on the next top-level /arrivals visit — no PIN re-entry.
+    # A cross-site iframe (onrender.com is on the PSL) omits a Strict cookie,
+    # which surfaced as a 404 disguise. set_cookie mirrors cookie_ok so an
+    # unauthenticated caller is never issued a cookie (404 disguise preserved).
+    cookie_ok = _arrivals_board_cookie_ok(request)
+    return cookie_ok, cookie_ok
 
 
 def _set_arrivals_board_cookie(response: HTMLResponse | JSONResponse) -> None:
