@@ -293,10 +293,11 @@
     termUnacked.hidden = false;
   }
 
-  // COCKPIT_CARD_CLICK_WAKE_INJECT_1 — an explicit Director click (card open or the
-  // drawer Nudge button) force-pushes the composed "check your bus" nudge into the
-  // seat's terminal. force=1 bypasses the controller seat-floor (human intent wins);
-  // origin=cockpit_click gets the richer nudge line + a wake_audit origin tag.
+  // COCKPIT_CARD_CLICK_WAKE_INJECT_1 — the drawer Nudge button force-pushes the
+  // composed "check your bus" nudge into the seat's terminal. Opening a seat
+  // detail pane is inspection only. force=1 bypasses the controller seat-floor
+  // (human intent wins); origin=cockpit_click gets the richer nudge line + a
+  // wake_audit origin tag.
   //
   // Idempotence lives HERE: the controller's force path intentionally bypasses
   // per-message dedupe (merged WAKE_INJECT arc — do-not-touch), so a per-slug
@@ -332,7 +333,6 @@
     syncPanelGo();
     renderPanelUnacked(slug);
     void fetchMessageDetails(slug);
-    nudgeSeat(slug, name);       // explicit-click wake (force + origin, toasted)
     termMount.textContent = "";
     const frame = el("iframe", { id: "termframe", src: url("/term/" + slug + "/"),
                                  title: name + " terminal" });
