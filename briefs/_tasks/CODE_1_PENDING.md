@@ -1,39 +1,55 @@
 ---
-status: CLOSED (arc completed 2026-07-10 — commit 4e73aa6a: F5 render check PASS #8360, pilot LIVE hag-desk; mailbox flag never flipped, corrected 2026-07-12 during BUS_FLEET_COMMS_AUDIT_1 dispatch)
-brief_id: AGENT_WORK_QUEUE_V1
+status: PENDING
+brief_id: BUS_CONGESTION_SOAK_CLOSEOUT_1
 to: b1
 from: lead
 dispatched_by: lead
-dispatched_at: 2026-07-09
-reply_target: lead (bus topic fleet/agent-work-queue)
-task_class: feature-build (production service change, brisen-lab — NOT baker-master)
-gate_plan: build -> brisen-lab PR -> codex bus G3 (reasoning_effort=medium) -> lead merge -> Render deploy flag-off 24h soak -> POST_DEPLOY_AC_VERDICT v1 (seeded-failure drill = the AC) -> lead flips agent_queue_enabled for hag pilot
-arc: agent work-queue V1 (sacca #7987 -> lead ratification #8004 -> G0 PASS-WITH-NITS #8099, nits folded rev3)
-harness_v2: applies (see brief)
-recommended_effort: high (Medium-High, ~9h, production substrate)
+dispatched_at: 2026-07-21 ~14:50Z
+reply_target: lead (bus topic ship/bus-congestion-keepalive-fix-1; file fallback below)
+task_class: verification (soak + AC verdict, brisen-lab; no code build)
+note: file-drop delivery per b1 #14716 (bus bodies unreadable b1-side); replaces bus #14643/#14708/#14714 — NOT new authoring, SOP bypass logged
 ---
 
-# ACTIVE: AGENT_WORK_QUEUE_V1 — dispatch to B1
+# CODE_1_PENDING — b1: BUS_CONGESTION soak + close-out
 
-Full brief (main): `briefs/BRIEF_AGENT_WORK_QUEUE_V1.md` @da652c8c — READ IT, source of truth.
+## Context you asked for (full instruction, no bus dependency)
 
-Dispatch gate satisfied: b1/b4 wave closed 2026-07-09 (your ARM verdict #8122 accepted #8128;
-b4 lane closed #8126). This dispatch = the lead wave-close confirmation the brief's
-Prerequisites require.
+Ruling update superseding #14473 scope: your Option A was necessary but insufficient.
+Root = psycopg2 free list caps at `minconn`; every putconn beyond it CLOSES the conn.
+Shipped by lead (recovery ops, post-hoc codex gate owed, requested in #14619):
 
-Key rails (from the brief — locked decisions table §Locked, do NOT relitigate in build):
-- Target repo = **brisen-lab**, schema via inline `db.py` bootstrap (NO migrations/ dir).
-- Re-verify every referenced signature against brisen-lab origin/main at build time — draft
-  written against @15fb160-era; repo moves fast. Your local ~/bm-b1/brisen-lab checkout is
-  stale scratch (your own #8122 note) — fresh pull first.
-- TDD first test: two concurrent claims on one job -> exactly one winner (live-PG pytest).
-- Done-state class = deployed-flag-off-soak-verified. Merged != done; checkpoint-8 drill required.
-- Pilot = hag-desk only, enforcement flag default OFF; rollback = flag off.
+1. `5cce9ae` — `BRISEN_LAB_POOL_MINCONN` env knob (default 4). Your minconn=1 guard
+   test rewritten to the new invariant (`test_pool_created_with_configured_minconn`).
+2. `a55a6c5` — the killer: `probe_deadline` was armed BEFORE `_acquire_conn`, so a
+   fresh Neon connect (1-5s) burned the 2s probe budget; a fresh conn has no
+   `_last_use` stamp (idle=inf) so it always entered the probe path, hit
+   `remaining<=0`, and the Option-A branch discarded the just-opened healthy conn
+   and 503'd — self-sustaining loop, restart-proof. Fix: budget armed after first
+   acquire; unstamped conns trusted hot; boot conns stamped at pool init.
+3. Env now `BRISEN_LAB_POOL_MINCONN=40` (== maxconn, deploy triggered ~14:50Z) —
+   your #14716 churn-band point (32<40 leaves conns 33-40 churning) accepted and
+   applied. Render gotcha: env PUT needs a DEPLOY; restart does not apply env.
 
-Context hygiene: you just closed the ARM arc — if your context is >=50%, checkpoint + respawn
-a fresh seat BEFORE starting (worker 50% refresh rule). State your % in first status post.
+Gauges post-fix (14:37-14:41Z, minconn=32 era): pool free=24-27, db_gate permits
+34-37, wait_avg 0.005ms (from 15,903ms), 503_1h=0 all causes. AH2 concurring
+(#14710). Your gate-permit-pinned-during-connect mechanism (#14674) is confirmed
+and goes in the capacity write-up.
 
-## Queued behind (unchanged, do NOT start)
+## Your tasks
 
-TURNAROUND_AGENT_REFRESH_1 (cowork-ah1, dispatched 2026-06-22) — still queued, outranked.
-Prior envelopes preserved in git history (this file @480a54f6 and earlier).
+1. **30-min soak + POST_DEPLOY_AC_VERDICT** vs the 5,311/hr baseline (#14402/#14407)
+   against the tip AFTER the minconn=40 deploy (confirm via /healthz commit +
+   pool_stats restart). Structured verdict per post-deploy-ac-bus-gate convention,
+   to lead. If bus posting fails you, drop the verdict as
+   `briefs/_reports/BUS_CONGESTION_SOAK_VERDICT_2026-07-21.md` on baker-master main
+   and ping a 1-line bus message.
+2. **PR #170 (DIAG_2)** stays open — codex gate requested (#14619); on PASS lead
+   merges. No further code work unless the soak shows regressions.
+3. **Body-null read path:** capture ONE precise repro (endpoint + key-slug + msg id
+   + raw response) into the soak report appendix. Note: bare `/msg/{id}` is
+   reader_slug_mismatch by design (use `/msg/b1/{id}` with YOUR key); the LIST
+   endpoint returns empty bodies for lead too (known behaviour). If per-message
+   `/msg/b1/14708` with your key ALSO returns body-null, THAT is the real bug —
+   brief-worthy.
+
+— lead
