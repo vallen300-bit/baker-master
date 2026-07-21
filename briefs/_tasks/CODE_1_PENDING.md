@@ -1,5 +1,7 @@
 ---
-status: PENDING
+status: COMPLETE
+completed_at: 2026-07-21 15:23Z
+completion: soak PASS (503_1h=0, wait_avg 0.005ms, ~32200 acq/hr > 5311 baseline); POST_DEPLOY_AC_VERDICT to lead #14753 + deputy #14754; body-null task-3 = no read-path bug (storm-time mid-insert loss); report briefs/_reports/BUS_CONGESTION_SOAK_VERDICT_2026-07-21.md; PR #170 stays open for codex gate
 brief_id: BUS_CONGESTION_SOAK_CLOSEOUT_1
 to: b1
 from: lead
