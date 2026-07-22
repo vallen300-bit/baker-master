@@ -95,6 +95,101 @@ def test_render_board_html_uses_template_tokens_and_filters_old_landed():
     assert 'style="overflow-x:auto"' in html
 
 
+# =====================================================================
+# ARRIVALS_BOARD_V2_UNIFY_1 — render locks (amendment #2: NO cells / plain text,
+# bare-glyph flip, V2 sticky header). These lock the CLIENT behavior encoded in
+# the template so a future edit that reintroduces cell boxes, an always-embossed
+# glyph, or a scrollY-keyed sticky shadow trips a test.
+# =====================================================================
+import re
+
+_TEMPLATE = ab._TEMPLATE_PATH.read_text(encoding="utf-8")
+
+
+def _css_block(css: str, selector: str) -> str:
+    """Return the declaration body of the FIRST `selector{...}` rule."""
+    m = re.search(re.escape(selector) + r"\{([^}]*)\}", css)
+    assert m, f"selector {selector!r} not found in template CSS"
+    return m.group(1)
+
+
+def test_template_resting_dom_is_plain_text_no_cells():
+    # AMENDMENT #2 (Director ruling): DROP CELLS COMPLETELY. flapify builds one
+    # BARE per-character span (class="g") and separates words with a REAL breakable
+    # text-node space — plain continuous text at rest, no cell containers.
+    assert "Array.from(word)" in _TEMPLATE           # still per-character (for the flip)
+    assert "s.className='g'" in _TEMPLATE            # bare glyph span, not a tile box
+    assert "document.createTextNode(' ')" in _TEMPLATE  # real space -> continuous text
+    # the old cell chrome is gone: no cell-box texture anywhere in the template
+    assert "linear-gradient" not in _TEMPLATE
+    assert "class=\"tile\"" not in _TEMPLATE and "makeTile" not in _TEMPLATE
+    # the bare glyph carries NO box (no bg / border / shadow) at rest
+    g = _css_block(_TEMPLATE, ".g")
+    assert "box-shadow" not in g and "background" not in g and "border" not in g
+    assert "display:inline" in g
+
+
+def test_template_flip_is_bare_glyph_and_settles_to_plain_text():
+    # FLIP MAY STAY but animates BARE glyphs and settles to plain text: the
+    # `.flipping` class only hints motion (opacity) — it must add NO box chrome.
+    assert "classList.add('flipping')" in _TEMPLATE
+    assert "classList.remove('flipping')" in _TEMPLATE
+    assert "Math.min(900," in _TEMPLATE               # settle capped <=1s (no cycling)
+    assert "t.node.textContent=t.ch" in _TEMPLATE     # settle lands the exact glyph
+    flipping = _css_block(_TEMPLATE, ".g.flipping")
+    assert "box-shadow" not in flipping and "background" not in flipping
+
+
+def test_template_sticky_header_uses_recttop_not_scrolly():
+    # V2 sticky mechanics: is-stuck keyed off the header's own
+    # getBoundingClientRect().top (pinned) AND scrollY>0 (no false-stuck at top).
+    assert "is-stuck" in _TEMPLATE
+    assert "getBoundingClientRect().top" in _TEMPLATE
+    assert "rectTop<=0 && window.scrollY>0" in _TEMPLATE
+    header = _css_block(_TEMPLATE, "header")
+    assert "position:sticky" in header and "top:0" in header
+
+
+def _rel_luminance(hexc: str) -> float:
+    hexc = hexc.lstrip("#")
+    ch = [int(hexc[i:i + 2], 16) / 255.0 for i in (0, 2, 4)]
+    lin = [c / 12.92 if c <= 0.03928 else ((c + 0.055) / 1.055) ** 2.4 for c in ch]
+    return 0.2126 * lin[0] + 0.7152 * lin[1] + 0.0722 * lin[2]
+
+
+def _contrast(fg: str, bg: str) -> float:
+    a, b = _rel_luminance(fg), _rel_luminance(bg)
+    hi, lo = max(a, b), min(a, b)
+    return (hi + 0.05) / (lo + 0.05)
+
+
+def _theme_tokens(css: str, theme: str) -> dict:
+    """Pull `--name:#hex` tokens from a theme's :root / html[data-theme] block."""
+    if theme == "dark":
+        m = re.search(r":root\{(.*?)\}", css, re.S)
+    else:
+        m = re.search(r'html\[data-theme="light"\]\{(.*?)\}', css, re.S)
+    assert m, f"{theme} token block not found"
+    return dict(re.findall(r"--([\w-]+):(#[0-9A-Fa-f]{6})", m.group(1)))
+
+
+def test_pending_and_primary_glyph_tokens_pass_7to1_both_themes():
+    # codex gate r1 P1: `tr.pending .flap` recolors EVERY pending-row field with
+    # --pend; the old #575343/#A5A294 measured ~2.4:1 vs panel (unreadable), which
+    # broke the Director visibility ruling and the >=7:1 claim. Lock every board
+    # glyph token — including --pend — at >=7:1 against its own row (panel) in BOTH
+    # themes so dimming can distinguish state but never drop below readable.
+    GLYPH_TOKENS = ("amber", "white", "green", "red", "meta-ink", "pend")
+    for theme in ("dark", "light"):
+        tok = _theme_tokens(_TEMPLATE, theme)
+        panel = tok["panel"]
+        for name in GLYPH_TOKENS:
+            ratio = _contrast(tok[name], panel)
+            assert ratio >= 7.0, (
+                f"{theme} --{name} {tok[name]} vs panel {panel} = {ratio:.2f}:1 (<7:1)"
+            )
+
+
 def test_cockpit_url_rejects_backslashes():
     assert ab._optional_cockpit_url("/flights/BB-AUK-001") == "/flights/BB-AUK-001"
     for url in ("/\\evil.example/path", "/flights\\BB-AUK-001"):
