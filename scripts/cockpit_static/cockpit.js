@@ -709,10 +709,10 @@
   function statusChipText(meta, row, up) {
     if (meta.status_only) return meta.kind || "app";
     if (!up) return "offline";
-    if (row && row.is_working === false) return "idle";
     // Chip label follows the same palette resolver the row color uses, so text
     // and color can never disagree.
     const sc = window.resolveStateClass ? window.resolveStateClass(row, up) : "st-idle";
+    if (row && row.is_working === false && sc === "st-idle") return "idle";
     return CHIP_LABEL[sc] || "idle";
   }
 

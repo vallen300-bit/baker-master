@@ -128,8 +128,8 @@ def test_session_status_uses_session_state_for_offline_idle_working():
     """Offline is a session-down state; an up idle seat must not inherit the
     telemetry-missing offline treatment."""
     assert 'if (!up) return "offline";' in JS
-    assert 'if (row && row.is_working === false) return "idle";' in JS
     assert "resolveStateClass(row, up)" in JS
+    assert 'row.is_working === false && sc === "st-idle"' in JS
 
 
 def test_header_and_rows_share_column_template_and_order():
@@ -227,8 +227,14 @@ def test_subtitle_slot_is_reserved_but_empty():
 def test_inactive_context_has_only_an_empty_track():
     """Director ruling: no telemetry reads as an ordinary muted empty bar, with
     no question mark or square placeholder."""
-    assert 'class: "r-ctx r-ctx-null"' in JS
-    assert 'class: "ctxbar ctxbar-stale", text: "?"' in JS
+    ctx_start = JS.index("function ctxCell")
+    stale_start = JS.index("if (staleLong)", ctx_start)
+    stale_end = JS.index("// SEVERITY-BY-VALUE", stale_start)
+    null_branch = JS[ctx_start:stale_start]
+    stale_branch = JS[stale_start:stale_end]
+    assert 'class: "r-ctx r-ctx-null"' in null_branch
+    assert 'text: "?"' not in null_branch
+    assert 'class: "ctxbar ctxbar-stale", text: "?"' in stale_branch
     assert ".r-ctx-null .ctxbar" in CSS
 
 
