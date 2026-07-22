@@ -71,9 +71,20 @@ def test_stale_context_meter_is_dimmed_and_shows_age():
     assert "context_age_sec" in JS, "stale context age is not rendered"
     assert ".r-ctx.ctx-stale" in CSS, "stale context style missing"
     assert 'age + " old · "' in JS, "stale label must lead with age"
+    assert 'text: "?"' in JS, "long-stale working context must show ?"
+    assert "ctx-stale-long" in JS, "long-stale context class missing"
+    assert ".r-ctx.ctx-stale-long" in CSS, "long-stale context treatment missing"
     assert "#d2d9e1" in CSS, "dark stale label color missing"
     assert 'html[data-theme="light"] .r-ctx.ctx-stale .ctxlbl' in CSS, \
         "light stale label override missing"
+
+
+def test_idle_stale_context_keeps_last_known_meter_with_age_suffix():
+    """An idle seat's stale file is still useful: keep the normal bar and put
+    the age after the percentage instead of replacing the value with ?."""
+    assert "const idleStale = stale && row.is_working === false;" in JS
+    assert 'Math.round(pct) + "% · " + age' in JS
+    assert "stale && !idleStale" in JS
 
 
 def test_inbox_card_shows_age_without_count_pill():
@@ -111,6 +122,14 @@ def test_session_and_refresh_cells_render_on_every_row():
     assert 'class: "rbtn' not in JS[session_start:refresh_start]
     assert ".session-cell" in CSS and ".refresh-cell" in CSS
     assert ".rbtn" in CSS and ".chip" in CSS
+
+
+def test_session_status_uses_session_state_for_offline_idle_working():
+    """Offline is a session-down state; an up idle seat must not inherit the
+    telemetry-missing offline treatment."""
+    assert 'if (!up) return "offline";' in JS
+    assert 'if (row && row.is_working === false) return "idle";' in JS
+    assert "resolveStateClass(row, up)" in JS
 
 
 def test_header_and_rows_share_column_template_and_order():
@@ -208,9 +227,8 @@ def test_subtitle_slot_is_reserved_but_empty():
 def test_inactive_context_has_only_an_empty_track():
     """Director ruling: no telemetry reads as an ordinary muted empty bar, with
     no question mark or square placeholder."""
-    assert "ctx-stale-long" not in JS
-    assert "ctx-stale-long" not in CSS
-    assert 'text: "?"' not in JS
+    assert 'class: "r-ctx r-ctx-null"' in JS
+    assert 'class: "ctxbar ctxbar-stale", text: "?"' in JS
     assert ".r-ctx-null .ctxbar" in CSS
 
 

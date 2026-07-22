@@ -26,16 +26,14 @@ const VECTORS = [
   ["unread at 600s boundary is still fresh", { unacked_count: 1, oldest_unacked_age_sec: 600, has_telemetry: true }, true, "st-unread"],
   ["unread old >600s", { unacked_count: 1, oldest_unacked_age_sec: 601, has_telemetry: true }, true, "st-unread-old"],
   ["unread outranks offline", { unacked_count: 1, oldest_unacked_age_sec: 100, ttyd_up: false }, true, "st-unread"],
-  ["offline — terminal down", { ttyd_up: false, has_telemetry: true }, true, "st-offline"],
-  ["offline — telemetry explicitly false", { has_telemetry: false }, true, "st-offline"],
-  // codex FAIL #13327 P1 — the load-bearing regression vector.
-  ["T-P1 offline — telemetry null on a live seat", { has_telemetry: null, ttyd_up: true }, true, "st-offline"],
-  ["offline — telemetry missing on a live seat", {}, true, "st-offline"],
+  ["idle — up, terminal probe down", { ttyd_up: false, has_telemetry: true }, true, "st-idle"],
+  ["idle — up, telemetry explicitly false", { has_telemetry: false }, true, "st-idle"],
+  ["idle — up, telemetry null", { has_telemetry: null, ttyd_up: true }, true, "st-idle"],
+  ["idle — up, telemetry missing", {}, true, "st-idle"],
   ["idle — up, telemetry present, quiet", { has_telemetry: true }, true, "st-idle"],
-  // QUIET-WHEN-HEALTHY: a not-started (session-down) seat stays grey, never offline.
-  ["not-started — session down, quiet grey", {}, false, "st-idle"],
-  ["not-started — down even without telemetry stays idle", { has_telemetry: false }, false, "st-idle"],
-  ["null row → idle", null, false, "st-idle"],
+  ["offline — session down", {}, false, "st-offline"],
+  ["offline — session down without telemetry", { has_telemetry: false }, false, "st-offline"],
+  ["offline — null row with session down", null, false, "st-offline"],
 ];
 
 let failures = 0;
