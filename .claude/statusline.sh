@@ -13,22 +13,64 @@ CONTEXT_BAND_THROTTLE_S="${CONTEXT_BAND_THROTTLE_S:-15}"
 model_display=$(printf '%s' "$input" | jq -r '.model.display_name // ""')
 
 context_alias() {
-  case "${BAKER_ROLE:-}" in
-    lead|ah1|aihead1) printf 'lead\n' ;;
-    deputy|deputy-codex|ah2|aihead2) printf 'deputy\n' ;;
-    b1) printf 'b1\n' ;;
-    b2) printf 'b2\n' ;;
-    b3) printf 'b3\n' ;;
-    b4) printf 'b4\n' ;;
-    *) case "$PWD" in
-      */bm-aihead1*) printf 'lead\n' ;;
-      */bm-aihead2*) printf 'deputy\n' ;;
-      */bm-b1*) printf 'b1\n' ;;
-      */bm-b2*) printf 'b2\n' ;;
-      */bm-b3*) printf 'b3\n' ;;
-      */bm-b4*) printf 'b4\n' ;;
-      *) printf '\n' ;;
-    esac ;;
+  local source="${FORGE_TERMINAL:-${BAKER_ROLE:-}}"
+  if [ -n "$source" ]; then
+    case "$source" in
+      lead|ah1|aihead1) printf 'lead\n' ;;
+      deputy|ah2|aihead2) printf 'deputy\n' ;;
+      b1|B1) printf 'b1\n' ;;
+      b2|B2) printf 'b2\n' ;;
+      b3|B3) printf 'b3\n' ;;
+      b4|B4) printf 'b4\n' ;;
+      *) printf '%s\n' "$source" ;;
+    esac
+    return 0
+  fi
+  case "$PWD" in
+    */bm-aihead1*) printf 'lead\n' ;;
+    */bm-aihead2*) printf 'deputy\n' ;;
+    */bm-b1*) printf 'b1\n' ;;
+    */bm-b2*) printf 'b2\n' ;;
+    */bm-b3*) printf 'b3\n' ;;
+    */bm-b4*) printf 'b4\n' ;;
+    *) printf '\n' ;;
+  esac
+}
+
+canonical_context_alias() {
+  local value="${1:-}"
+  case "$value" in
+    aihead2|aihead2claude) printf 'deputy\n' ;;
+    aihead2codex|deputy_codex|DEPUTY_CODEX) printf 'deputy-codex\n' ;;
+    aodesk|ao_desk|AO_DESK|AO-DESK) printf 'ao-desk\n' ;;
+    hagenauerdesk|hag_desk|HAG_DESK|HAG-DESK) printf 'hag-desk\n' ;;
+    originationdesk|origination_desk|ORIGINATION_DESK|ORIGINATION-DESK)
+      printf 'origination-desk\n'
+      ;;
+    moviedesk|movie_desk|MOVIE_DESK|MOVIE-DESK) printf 'movie-desk\n' ;;
+    badenbadendesk|baden_baden_desk|BADEN_BADEN_DESK|BADEN-BADEN-DESK)
+      printf 'baden-baden-desk\n'
+      ;;
+    brisendesk|brisen_desk|BRISEN_DESK|BRISEN-DESK) printf 'brisen-desk\n' ;;
+    cm_1|cm-1|CM_1|CM-1) printf 'CM-1\n' ;;
+    cm_2|cm-2|CM_2|CM-2) printf 'CM-2\n' ;;
+    cm_3|cm-3|CM_3|CM-3) printf 'CM-3\n' ;;
+    cm_4|cm-4|CM_4|CM-4) printf 'CM-4\n' ;;
+    lead|deputy|deputy-codex|b1|b2|b3|b4|researcher|codex|codex-arch|arm|publisher|designer|clerk|clerk-haiku|russo-ai|deep55|ben|librarian|hag-filer)
+      printf '%s\n' "$value"
+      ;;
+    '') return 1 ;;
+    *)
+      value="$(printf '%s' "$value" | tr '[:upper:]_' '[:lower:]-')"
+      case "$value" in
+        ''|[-]*|*[!A-Za-z0-9-]*)
+          return 1
+          ;;
+        *)
+          printf '%s\n' "$value"
+          ;;
+      esac
+      ;;
   esac
 }
 
@@ -52,8 +94,9 @@ context_window_tokens() {
 }
 
 write_live_context_band() {
-  local alias pct_raw pct now mtime tmp band window link link_target target_name target_path link_tmp existing_record
-  alias="$(context_alias)"
+  local raw_alias alias pct_raw pct now mtime tmp band window link link_target target_name target_path link_tmp existing_record
+  raw_alias="$(context_alias)"
+  alias="$(canonical_context_alias "$raw_alias" 2>/dev/null || true)"
   [ -n "$alias" ] || return 0
   pct_raw="$(printf '%s' "$input" | jq -r \
     '.context_window.used_percentage // empty' 2>/dev/null || true)"
