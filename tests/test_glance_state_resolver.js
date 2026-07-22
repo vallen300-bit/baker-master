@@ -6,8 +6,8 @@
 // Exercises the REAL exported resolver (CommonJS export) so the vectors can never
 // drift from the shipped logic. Exit 0 = all pass, non-zero = failure.
 //
-// Anchor: codex FAIL #13327 P1 — has_telemetry===null on a LIVE seat must resolve
-// st-offline (no-signal), not st-idle. Vector T-P1 locks that.
+// COCKPIT_CTX_IDLE_SEAT_RENDER_1 — session_up is now the authoritative offline
+// signal. A live but idle seat with sparse telemetry stays neutral.
 const assert = require("assert");
 const { resolveStateClass, UNREAD_OLD_S } = require("../scripts/cockpit_static/glance_state.js");
 
