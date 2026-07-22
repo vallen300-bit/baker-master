@@ -96,10 +96,10 @@ def test_render_board_html_uses_template_tokens_and_filters_old_landed():
 
 
 # =====================================================================
-# ARRIVALS_BOARD_V2_UNIFY_1 — render locks (per-letter tiling, flat settle,
-# V2 sticky header). These lock the split-flap CLIENT behavior encoded in the
-# template so a future edit that regresses to per-word tiles, an always-embossed
-# resting cell, or a scrollY-keyed sticky shadow trips a test.
+# ARRIVALS_BOARD_V2_UNIFY_1 — render locks (amendment #2: NO cells / plain text,
+# bare-glyph flip, V2 sticky header). These lock the CLIENT behavior encoded in
+# the template so a future edit that reintroduces cell boxes, an always-embossed
+# glyph, or a scrollY-keyed sticky shadow trips a test.
 # =====================================================================
 import re
 
@@ -113,31 +113,31 @@ def _css_block(css: str, selector: str) -> str:
     return m.group(1)
 
 
-def test_template_builds_one_flap_cell_per_character():
-    # PER-LETTER (Director ruling): flapify iterates the characters of each word
-    # (Array.from(word)) and appends one `.tile` per character, plus a breakable
-    # blank space cell between words — NOT one tile per word.
-    assert "Array.from(word)" in _TEMPLATE
-    assert "makeTile(extra)" in _TEMPLATE
-    assert "makeTile('blank')" in _TEMPLATE  # inter-word space cell
-    # words stay grouped so a long label folds only at a space, never mid-word
-    assert 'w.className=' in _TEMPLATE and "'word'" in _TEMPLATE
+def test_template_resting_dom_is_plain_text_no_cells():
+    # AMENDMENT #2 (Director ruling): DROP CELLS COMPLETELY. flapify builds one
+    # BARE per-character span (class="g") and separates words with a REAL breakable
+    # text-node space — plain continuous text at rest, no cell containers.
+    assert "Array.from(word)" in _TEMPLATE           # still per-character (for the flip)
+    assert "s.className='g'" in _TEMPLATE            # bare glyph span, not a tile box
+    assert "document.createTextNode(' ')" in _TEMPLATE  # real space -> continuous text
+    # the old cell chrome is gone: no cell-box texture anywhere in the template
+    assert "linear-gradient" not in _TEMPLATE
+    assert "class=\"tile\"" not in _TEMPLATE and "makeTile" not in _TEMPLATE
+    # the bare glyph carries NO box (no bg / border / shadow) at rest
+    g = _css_block(_TEMPLATE, ".g")
+    assert "box-shadow" not in g and "background" not in g and "border" not in g
+    assert "display:inline" in g
 
 
-def test_template_flip_is_transition_only_and_settles_to_flat_static():
-    # FLIP = TRANSITION ONLY: the split-flap texture lives on `.tile.flipping`,
-    # is added at spin start and REMOVED on settle so the resting glyph is flat.
+def test_template_flip_is_bare_glyph_and_settles_to_plain_text():
+    # FLIP MAY STAY but animates BARE glyphs and settles to plain text: the
+    # `.flipping` class only hints motion (opacity) — it must add NO box chrome.
     assert "classList.add('flipping')" in _TEMPLATE
     assert "classList.remove('flipping')" in _TEMPLATE
-    # settle is capped so the board is fully static within <=1s (no cycling loop)
-    assert "Math.min(900," in _TEMPLATE
-    # amendment: the RESTING `.tile` cell carries NO emboss (no gradient / inset
-    # shadow / seam) — that texture is confined to the `.tile.flipping` rule.
-    resting = _css_block(_TEMPLATE, ".tile")
-    assert "box-shadow" not in resting
-    assert "linear-gradient" not in resting
-    flipping = _css_block(_TEMPLATE, ".tile.flipping")
-    assert "box-shadow" in flipping and "linear-gradient" in flipping
+    assert "Math.min(900," in _TEMPLATE               # settle capped <=1s (no cycling)
+    assert "t.node.textContent=t.ch" in _TEMPLATE     # settle lands the exact glyph
+    flipping = _css_block(_TEMPLATE, ".g.flipping")
+    assert "box-shadow" not in flipping and "background" not in flipping
 
 
 def test_template_sticky_header_uses_recttop_not_scrolly():

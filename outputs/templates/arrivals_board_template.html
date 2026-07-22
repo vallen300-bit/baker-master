@@ -8,51 +8,35 @@
 <title>BRISEN AIR · ARRIVALS</title>
 <script>try{if(localStorage.getItem('brisen-board-view')==='light')document.documentElement.dataset.theme='light'}catch(e){}</script>
 <style>
-  /* Board v7 register — ARRIVALS_BOARD_V2_UNIFY_1 (Director order + amendment #1,
-     2026-07-22). Unifies with the Lab V2 design system while keeping the airport
-     split-flap identity:
-       - PER-LETTER cells: every character is its own fixed-width flap cell (even
-         rhythm), words kept intact so wrapping breaks only at spaces.
-       - FLIP = TRANSITION ONLY: the split-flap texture (gradient + seam + inset
-         shadow) lives on `.tile.flipping` and exists ONLY during the initial /
-         data-change animation. The resting state is FLAT crisp type on a subtly
-         bounded cell — the embossed-square readability killer is gone (amendment).
-       - V2 sticky header: slim header pins with an is-stuck elevation shadow keyed
-         off its own getBoundingClientRect().top (pinned AND scrolled>0), same
-         mechanics as the Lab V2 LOOPS/SKILLS headers.
-       - Contrast: every board glyph >= 7:1 against its own cell in BOTH themes
-         (verified). Amber-on-dark identity kept; light theme uses a dark-amber ink.
-     Live content bindings (__ROWS__/__STAMP__, meta/red/inv status classes) and the
-     PIN-cookie / frame-ancestors CSP / 120s refresh / responsive fences preserved. */
+  /* Board v7 register — ARRIVALS_BOARD_V2_UNIFY_1 (Director order + amendments,
+     2026-07-22). Amendment #2 (Director ruling, SUPERSEDES the per-letter-CELL
+     requirement): NO cells. Resting rows are plain, continuous, comfortably sized
+     text — VISIBILITY IS THE MAIN FEATURE (must read at a glance on a 13in laptop
+     at default zoom). Board identity is carried WITHOUT cells: the amber-on-dark
+     palette, mono uppercase, columnar layout and status colors — it still reads as
+     an arrivals board. The split-flap FLIP stays but animates BARE glyphs (no
+     boxes) on load / data-change only, settling to plain text in <=1s.
+
+     Kept from earlier: V2 sticky header (getBoundingClientRect().top-keyed, pinned
+     AND scrolled>0, no false-stuck on fresh load), both themes at >=7:1 glyph
+     contrast, and every live fence (PIN cookie / frame-ancestors CSP /
+     __ROWS__+__STAMP__ bindings / 120s refresh / responsive column-drop + card). */
   :root{
     --bg:#0A0B0A; --panel:#101210; --line:#1E211D; --head:#0C0E0C;
-    /* flap texture tokens — ANIMATION FRAMES ONLY (see .tile.flipping) */
-    --flap-hi:#232823; --flap-lo:#151915; --seam:rgba(0,0,0,.55);
-    --tile-shadow:inset 0 1px 0 rgba(255,255,255,.05),0 1px 1.5px rgba(0,0,0,.45);
-    /* resting cell: a whisper of a boundary, never an embossed square */
-    --cell-bg:rgba(255,255,255,.02);
     --amber:#FFC64B; --amber-dim:#8F7431;
     --white:#EFECE2; --green:#41D96E; --red:#FF796A;
     --dim:#8E8A76; --pend:#575343;
-    --meta-ink:#A8A492;   /* meta glyphs: readable (7:1), secondary by SIZE not by dimming */
-    --inv-ink:#0A0B0A;    /* glyph on the inverted FINAL-APPROACH chip */
+    --meta-ink:#A8A492;   /* meta text: readable (>=7:1), secondary by SIZE not by dimming */
     --mono:'SF Mono','IBM Plex Mono',ui-monospace,Menlo,Consolas,monospace;
-    /* fixed-width flap metrics: main cells + smaller meta cells (arrives/desk/
-       updated don't compete with flight name, destination, status) */
-    --tw:16px; --th:24px; --tf:13.5px;
-    --mw:12px; --mh:18px; --mf:9.5px;
-    --cellgap:2px;
+    /* text metrics — comfortable read at 1280x800 (amendment hard AC) */
+    --ff:16px; --mf:12px;
   }
   html[data-theme="light"]{
     --bg:#E9E9E4; --panel:#F7F6F1; --line:#D8D6CC; --head:#EFEEE8;
-    --flap-hi:#F1EFE7; --flap-lo:#E0DED3; --seam:rgba(0,0,0,.13);
-    --tile-shadow:inset 0 1px 0 rgba(255,255,255,.65),0 1px 1.5px rgba(0,0,0,.12);
-    --cell-bg:rgba(0,0,0,.025);
     --amber:#6A4A00; --amber-dim:#A98F4F;
     --white:#22211B; --green:#0F5326; --red:#96281F;
     --dim:#605E54; --pend:#A5A294;
     --meta-ink:#4F4D45;
-    --inv-ink:#FFFFFF;
   }
   *{box-sizing:border-box;margin:0;padding:0}
   body{background:var(--bg);color:var(--amber);font:14px/1.5 var(--mono);text-transform:uppercase;-webkit-font-smoothing:antialiased}
@@ -76,78 +60,62 @@
   .clock .t{font:700 clamp(15px,1.7vw,20px)/1 var(--mono);color:var(--white);letter-spacing:.1em}
   .clock .d{font:600 10px var(--mono);color:var(--dim);letter-spacing:.18em;margin-top:2px}
 
-  /* RESTING cell = flat crisp type on a subtly bounded cell. NO gradient, NO
-     inset shadow, NO seam line here — that texture belongs to .tile.flipping. */
-  .tile{display:inline-flex;align-items:center;justify-content:center;position:relative;
-    width:var(--tw);height:var(--th);border-radius:2px;
-    background:var(--cell-bg);
-    font:700 var(--tf)/1 var(--mono);color:var(--amber);flex:0 0 auto}
-  /* blank = the inter-word space cell; it is the only breakable point in a flap */
-  .tile.blank{background:transparent}
-  /* meta cells: smaller (hierarchy via size, not low contrast) */
-  .tile.meta{width:var(--mw);height:var(--mh);font-size:var(--mf);color:var(--meta-ink)}
-  .tile.wht{color:var(--white)}
-  .tile.grn{color:var(--green)}
-  .tile.red{color:var(--red)}
-  .tile.inv{background:var(--amber);color:var(--inv-ink)}
-  /* FLIP texture — applied ONLY while a cell is animating; removed on settle so
-     the resting board is plain readable type (amendment: readability > texture). */
-  .tile.flipping{
-    background:linear-gradient(180deg,var(--flap-hi) 0%,var(--flap-hi) 48%,var(--flap-lo) 52%,var(--flap-lo) 100%);
-    box-shadow:var(--tile-shadow)}
-  .tile.flipping::after{content:"";position:absolute;left:0;right:0;top:50%;height:1px;background:var(--seam)}
-
-  /* even per-letter rhythm: uniform gap across cells AND inside words. Words are
-     kept intact (.word) so a long label folds only at a space, never mid-word.
-     Only AIRLINE + DESTINATION (cols 3,4) may wrap. */
-  .flap{display:flex;flex-wrap:nowrap;align-items:center;gap:var(--cellgap)}
-  td:nth-child(3) .flap,td:nth-child(4) .flap{flex-wrap:wrap;row-gap:4px}
-  .word{display:inline-flex;gap:var(--cellgap);flex:0 0 auto}
+  /* NO CELLS (amendment #2): each field is a plain text run. Color + size carry
+     the hierarchy; the columnar table + mono uppercase + amber palette carry the
+     "arrivals board" identity. */
+  .flap{display:block;font:700 var(--ff)/1.4 var(--mono);color:var(--amber);letter-spacing:.045em}
+  .flap.meta{font:700 var(--mf)/1.4 var(--mono);letter-spacing:.06em;color:var(--meta-ink)}
+  .flap.wht{color:var(--white)}
+  .flap.grn{color:var(--green)}
+  .flap.red{color:var(--red)}
+  .flap.inv{color:var(--amber)}          /* FINAL APPROACH: alerting amber + blink, no chip */
+  /* per-character glyph span — BARE (no box, no bg, no border). It exists only so
+     the flip can swap one character at a time; at rest it renders as plain text. */
+  .g{display:inline}
+  .g.flipping{opacity:.85}               /* subtle in-flight cue on the bare glyph */
+  .word{white-space:nowrap}              /* keep a word intact; the spaces between words wrap */
   /* infinite blink kept ONLY for the genuinely alerting FINAL-APPROACH status */
   .blinkgrp{animation:blink 1.2s steps(1) infinite}
   @keyframes blink{50%{opacity:.35}}
   @media(prefers-reduced-motion:reduce){.blinkgrp{animation:none}}
 
   table{width:100%;table-layout:auto;border-collapse:separate;border-spacing:0;margin-top:16px;background:var(--panel);border:2px solid var(--line);border-radius:6px;overflow:hidden}
-  thead th{font:700 10.5px var(--mono);letter-spacing:.2em;color:var(--dim);text-align:left;padding:11px 10px;border-bottom:2px solid var(--line);background:var(--head);white-space:nowrap}
-  tbody td{padding:13px 10px;vertical-align:middle;border-bottom:1px solid var(--line)}
+  thead th{font:700 10.5px var(--mono);letter-spacing:.2em;color:var(--dim);text-align:left;padding:11px 12px;border-bottom:2px solid var(--line);background:var(--head);white-space:nowrap}
+  tbody td{padding:14px 12px;vertical-align:middle;border-bottom:1px solid var(--line)}
   tbody tr:last-child td{border-bottom:none}
   tbody tr.live{cursor:pointer}
   tbody tr.live:hover td{background:var(--head)}
-  tbody tr.pending .tile{color:var(--pend)}
+  tbody tr.pending .flap{color:var(--pend)}
 
   .foot{display:flex;gap:22px;flex-wrap:wrap;margin-top:14px;font:600 10px var(--mono);letter-spacing:.2em;color:var(--dim)}
   .foot .stamp{margin-left:auto}
 
   /* --- responsive layer: the board re-fits live as the window is resized.
      Column-drop ladder sized against worst-case row content so STATUS never
-     clips. Cells stay legible at 1440px and 390px (amendment probe sizes). --- */
-  @media(max-width:1500px){
-    :root{--tw:14px;--th:21px;--tf:12px;--mw:11px;--mh:16px;--mf:8.5px}
-  }
+     clips; text stays comfortably legible at 1440px, 1280px and 390px. --- */
   @media(max-width:1400px){ /* drop DESK — widest meta column, org detail */
     th:nth-child(5),td:nth-child(5){display:none}
   }
   @media(max-width:1150px){ /* drop UPDATED — freshness detail, not a signal */
     th:nth-child(7),td:nth-child(7){display:none}
   }
-  @media(max-width:1000px){ /* tighten cells + row padding */
-    :root{--tw:13px;--th:19px;--tf:11px}
-    tbody td{padding:11px 8px}
-    thead th{padding:10px 8px}
+  @media(max-width:1000px){ /* tighten text + row padding a touch */
+    :root{--ff:15px}
+    tbody td{padding:12px 9px}
+    thead th{padding:10px 9px}
   }
   @media(max-width:900px){ /* drop FLIGHT NO code — airline + destination carry the story */
     th:nth-child(2),td:nth-child(2){display:none}
     main{padding:16px 12px 40px}
   }
   @media(max-width:720px){ /* card board: one flight per card, all signal kept */
-    :root{--tw:13px;--th:19px;--tf:11px}
+    :root{--ff:15px}
     main{padding:12px 8px 32px}
     header{padding:11px 14px}
     thead{display:none}
     table{display:block}
     tbody{display:block}
-    tbody tr{display:grid;grid-template-columns:1fr auto;gap:7px 12px;padding:12px 12px;border-bottom:1px solid var(--line)}
+    tbody tr{display:grid;grid-template-columns:1fr auto;gap:6px 12px;padding:13px 12px;border-bottom:1px solid var(--line)}
     tbody tr:last-child{border-bottom:none}
     tbody td{display:block;padding:0;border-bottom:none}
     tbody td:nth-child(3){grid-column:1;grid-row:1}                  /* airline */
@@ -155,13 +123,12 @@
     tbody td:nth-child(4){grid-column:1/-1;grid-row:2}               /* destination */
     tbody td:nth-child(1){grid-column:1;grid-row:3}                  /* arrives */
     tbody td:nth-child(2){display:block;grid-column:2;grid-row:3;justify-self:end} /* flight no */
-    tbody td:nth-child(2) .tile{width:var(--mw);height:var(--mh);font-size:var(--mf)}
+    tbody td:nth-child(2) .flap{font-size:var(--mf)}
     tbody td:nth-child(5),tbody td:nth-child(7){display:none}        /* desk, updated */
     .foot{gap:8px}
     .foot .stamp{margin-left:0}
   }
-  @media(max-width:430px){ /* narrow phones: STATUS gets its own full row — a
-    13-char single-word airline beside FINAL APPROACH can't share 375px */
+  @media(max-width:430px){ /* narrow phones: STATUS gets its own full row */
     tbody td:nth-child(3){grid-column:1/-1;grid-row:1}               /* airline */
     tbody td:nth-child(6){grid-column:1/-1;grid-row:2;justify-self:start} /* status */
     tbody td:nth-child(4){grid-column:1/-1;grid-row:3}               /* destination */
@@ -169,7 +136,7 @@
     tbody td:nth-child(2){grid-column:2;grid-row:4}                  /* flight no */
   }
   @media(max-width:360px){ /* 320-360px floor: no horizontal overflow */
-    :root{--tw:12px;--th:18px;--tf:10px}
+    :root{--ff:14px}
     main{padding:10px 6px 28px}
   }
 </style>
@@ -218,43 +185,35 @@ __ROWS__
   var GLYPHS='ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789·-.,: ';
   var REDUCED=(function(){try{return window.matchMedia&&window.matchMedia('(prefers-reduced-motion:reduce)').matches}catch(e){return false}})();
 
-  function makeTile(extra){
-    var s=document.createElement('span');
-    s.className='tile'+(extra?' '+extra:'');
-    return s;
-  }
-
-  /* PER-LETTER flap builder. Each character becomes its own fixed-width cell for
-     an even split-flap rhythm; words stay grouped in .word so a long label folds
-     only at a space (a breakable blank cell), never mid-word. The FLIP animation
-     fires exactly once per build — on initial load and, because the page reloads
-     every 120s / on refresh, on each data change — then SETTLES to fully static,
-     crisp text within <=1s (no continuous cycling). During the spin the cell wears
-     the .flipping texture; on settle .flipping is removed so the resting glyph is
-     flat readable type. */
+  /* BARE-GLYPH flap builder (amendment #2). The resting DOM is plain text: each
+     character is a bare <span class="g"> with NO box, grouped into .word runs so a
+     long label folds only at a real space, never mid-word. The FLIP fires exactly
+     once per build — on initial load and, because the page reloads every 120s / on
+     refresh, on each data change — scrambling the bare glyphs and SETTLING to plain
+     static text within <=1s (no continuous cycling, no cell chrome at any point). */
   function flapify(el){
     var text=el.getAttribute('data-flap')||'', extra=el.getAttribute('data-cls')||'';
     el.textContent='';
+    if(extra)el.classList.add(extra);          /* color the whole field; no per-glyph box */
     var words=text.split(' ');
     var cells=[], order=0;
     words.forEach(function(word,wi){
       var w=document.createElement('span');
       w.className='word';
       Array.from(word).forEach(function(ch){
-        var s=makeTile(extra);
+        var s=document.createElement('span');
+        s.className='g';
         s.textContent=ch;
         w.appendChild(s);
         cells.push({node:s,ch:ch,order:order++});
       });
       el.appendChild(w);
-      if(wi<words.length-1){          /* breakable inter-word space cell */
-        var sp=makeTile('blank');
-        sp.textContent=' ';
-        el.appendChild(sp);
+      if(wi<words.length-1){                    /* a real, breakable space between words */
+        el.appendChild(document.createTextNode(' '));
         order++;
       }
     });
-    if(REDUCED){                       /* honor reduced-motion: land static, no flip */
+    if(REDUCED){                                /* honor reduced-motion: land static, no flip */
       cells.forEach(function(t){t.node.textContent=t.ch;});
       return;
     }
@@ -268,18 +227,18 @@ __ROWS__
           setTimeout(spin,45+Math.random()*35);
         } else {
           t.node.textContent=t.ch;               /* settle: the exact glyph */
-          t.node.classList.remove('flipping');   /* drop flap texture -> flat crisp */
+          t.node.classList.remove('flipping');   /* -> plain static text */
         }
       })();
     });
   }
   document.querySelectorAll('[data-flap]').forEach(flapify);
 
-  /* V2 sticky-header elevation. Pure: the header is truly pinned when its own
-     top edge reaches the scrollport top (rectTop <= 0); the extra scrollY>0 guard
-     keeps a fresh load at the top from painting a false stuck shadow (Lab V2
-     sticky mechanics, skills.js). Embedded in the Lab iframe, the iframe document
-     is the scrollport, so its scroll event drives this the same way. */
+  /* V2 sticky-header elevation. Pure: the header is truly pinned when its own top
+     edge reaches the scrollport top (rectTop <= 0); the extra scrollY>0 guard keeps
+     a fresh load at the top from painting a false stuck shadow (Lab V2 sticky
+     mechanics, skills.js). Embedded in the Lab iframe, the iframe document is the
+     scrollport, so its scroll event drives this the same way. */
   function isHeaderStuck(rectTop){return rectTop<=0 && window.scrollY>0;}
   (function wireStickyHeader(){
     var h=document.querySelector('header');
