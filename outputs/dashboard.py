@@ -4542,7 +4542,7 @@ async def get_data_freshness():
             _SOURCES = [
                 ("Email", "email_messages", "email_poll", "received_date"),
                 ("WhatsApp", "whatsapp_messages", None, "timestamp"),
-                ("Meetings", "meeting_transcripts", "fireflies", "meeting_date"),
+                ("Meetings", "meeting_transcripts", "plaud", "meeting_date"),
                 ("ClickUp", "clickup_tasks", None, "updated_at"),
                 ("Todoist", "todoist_tasks", "todoist", None),
                 ("Documents", "documents", "dropbox", "ingested_at"),
