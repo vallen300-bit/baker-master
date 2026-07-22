@@ -22,6 +22,11 @@ for source in "$CONTEXT_BAND_DIR"/*_*.current; do
   canonical_name="${source_name//_/-}"
   canonical="$CONTEXT_BAND_DIR/$canonical_name"
   [[ "$source" == "$canonical" ]] && continue
+  if [[ -e "$canonical" || -L "$canonical" ]]; then
+    printf 'SKIP %s: canonical target already exists at %s\n' "$source" "$canonical" >&2
+    failed=$((failed + 1))
+    continue
+  fi
 
   if [[ -L "$source" ]]; then
     target="$(readlink "$source" 2>/dev/null || true)"

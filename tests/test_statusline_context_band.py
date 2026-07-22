@@ -202,3 +202,33 @@ def test_context_band_migration_relinks_symlink_and_moves_regular_file(tmp_path)
     ) == {"context_percent": 12}
     assert not (tmp_path / "movie_desk.current").exists()
     assert not (tmp_path / "origination_desk.current").exists()
+
+
+def test_context_band_migration_does_not_overwrite_existing_canonical_file(tmp_path):
+    canonical = tmp_path / "movie-desk.current"
+    legacy = tmp_path / "movie_desk.current"
+    canonical.write_text(
+        json.dumps({"context_percent": 99}),
+        encoding="utf-8",
+    )
+    legacy.write_text(
+        json.dumps({"context_percent": 18}),
+        encoding="utf-8",
+    )
+
+    result = subprocess.run(
+        ["bash", str(MIGRATE_SCRIPT)],
+        text=True,
+        capture_output=True,
+        env={**os.environ, "CONTEXT_BAND_DIR": str(tmp_path)},
+        check=False,
+    )
+
+    assert result.returncode != 0
+    assert "canonical target already exists" in result.stderr
+    assert json.loads(canonical.read_text(encoding="utf-8")) == {
+        "context_percent": 99
+    }
+    assert json.loads(legacy.read_text(encoding="utf-8")) == {
+        "context_percent": 18
+    }
