@@ -639,17 +639,37 @@
     return Math.floor(sec / 86400) + "d";
   }
 
-  // D2 — context meter on every row. Fresh values show the percentage; stale
-  // values lead with their age so the number cannot be mistaken for current.
+  // D2 — context meter on every row. An idle seat may only have a last-known
+  // value, but that value is still useful: keep its normal bar and add a compact
+  // age suffix. A working seat keeps the hard stale treatment.
   function ctxCell(meta, row) {
     const pct = (row && typeof row.context_pct === "number")
       ? Math.max(0, Math.min(100, row.context_pct)) : null;
     const stale = row && row.context_stale === true;
+    const idleStale = stale && row.is_working === false;
     const ageSec = stale ? Number(row.context_age_sec) : NaN;
-    const staleLong = stale && Number.isFinite(ageSec) && ageSec > 3600;
-    if (pct === null || staleLong) {
+    const staleLong = stale && !idleStale
+      && Number.isFinite(ageSec) && ageSec > 3600;
+    if (pct === null) {
       return el("span", { class: "r-ctx r-ctx-null", title: "no context telemetry" }, [
         el("span", { class: "ctxbar" }),
+      ]);
+    }
+    if (staleLong) {
+      const age = compactContextAge(ageSec);
+      return el("span", {
+        class: "r-ctx ctx-stale ctx-stale-long",
+        title: age
+          ? "stale context: " + age + " old · " + Math.round(pct) + "% used"
+          : "stale context · " + Math.round(pct) + "% used",
+      }, [
+        el("span", { class: "ctxbar ctxbar-stale", text: "?" }),
+        el("span", {
+          class: "ctxlbl",
+          text: age
+            ? age + " old · " + Math.round(pct) + "%"
+            : "stale · " + Math.round(pct) + "%",
+        }),
       ]);
     }
     // SEVERITY-BY-VALUE (lead ruling #12977): the fill width still tracks pct, but
@@ -659,14 +679,19 @@
     // gradient box exactly one track wide → colour at the fill edge == severity(pct).
     const scale = pct > 0 ? (10000 / pct) : 100;
     const age = stale ? compactContextAge(ageSec) : "";
-    const label = stale
-      ? (age ? age + " old · " + Math.round(pct) + "%" : "stale · " + Math.round(pct) + "%")
+    const label = idleStale
+      ? (age ? Math.round(pct) + "% · " + age : Math.round(pct) + "%")
+      : stale
+        ? (age ? age + " old · " + Math.round(pct) + "%" : "stale · " + Math.round(pct) + "%")
       : Math.round(pct) + "%";
     const bar = el("span", { class: "ctxbar" }, [el("span", { class: "ctxfill",
         style: "width:" + pct + "%;--ctx-track-scale:" + scale + "%" })]);
     return el("span", {
-      class: "r-ctx" + (stale ? " ctx-stale" : ""),
-      title: stale
+      class: "r-ctx" + (stale && !idleStale ? " ctx-stale" : ""),
+      title: idleStale
+        ? (age ? "last-known context: " + Math.round(pct) + "% · " + age + " old"
+               : "last-known context: " + Math.round(pct) + "% used")
+        : stale
         ? (age ? "stale context: " + age + " old · " + Math.round(pct) + "% used"
                : "stale context · " + Math.round(pct) + "% used")
         : "context window " + Math.round(pct) + "% used",
@@ -683,10 +708,11 @@
   };
   function statusChipText(meta, row, up) {
     if (meta.status_only) return meta.kind || "app";
-    if (!up) return "down";
+    if (!up) return "offline";
     // Chip label follows the same palette resolver the row color uses, so text
     // and color can never disagree.
     const sc = window.resolveStateClass ? window.resolveStateClass(row, up) : "st-idle";
+    if (row && row.is_working === false && sc === "st-idle") return "idle";
     return CHIP_LABEL[sc] || "idle";
   }
 

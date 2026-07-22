@@ -27,16 +27,13 @@ function resolveGlanceState({ unacked, isWorking, hasTelemetry, isDoneGreen, nee
 //   st-go          bright blue     needs_go             (pulsating)
 //   st-unread-old  bright red      unread > 600s
 //   st-unread      muted amber     unread 0–600s        (from second zero)
-//   st-offline     muted red       up but no signal     (pulsating)
-//   st-idle        muted grey      everything else / not-started
+//   st-offline     muted red       session_up=false     (pulsating)
+//   st-idle        muted grey      up and not attention-worthy
 // Precedence: running > GO > unread-old > unread > offline > idle — a working seat
 // with unread mail reads running green; GO outranks unread; unread outranks offline.
-// QUIET-WHEN-HEALTHY (spec item 7): a cleanly not-started seat (session down) stays
-// muted grey, NOT offline-red — its Start button is the affordance; offline-red is
-// reserved for a seat that is UP but silent, which is the "no-signal + offline
-// combined" case that needs eyes: terminal down (ttyd_up===false) OR no telemetry
-// signal at all (has_telemetry is anything other than an explicit true — false,
-// null, or missing) while the session is up.
+// COCKPIT_CTX_IDLE_SEAT_RENDER_1: offline is reserved for an absent session.
+// An up-but-idle seat stays quiet even when its telemetry fields are sparse or
+// its terminal probe is stale; session_up is the authoritative offline signal.
 var UNREAD_OLD_S = 600; // >10 min unread flips muted-amber → bright red (named, not magic)
 function resolveStateClass(row, sessionUp) {
   var r = row || {};
@@ -47,9 +44,7 @@ function resolveStateClass(row, sessionUp) {
     var age = Number(r.oldest_unacked_age_sec) || 0;
     return age > UNREAD_OLD_S ? "st-unread-old" : "st-unread";
   }
-  // up-but-silent → offline. has_telemetry must be an explicit true to read idle;
-  // null / undefined / false is a live-seat no-signal and resolves offline (pulse).
-  if (sessionUp === true && (r.ttyd_up === false || r.has_telemetry !== true)) return "st-offline";
+  if (sessionUp !== true) return "st-offline";
   return "st-idle";
 }
 
