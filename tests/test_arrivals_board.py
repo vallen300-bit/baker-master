@@ -95,6 +95,61 @@ def test_render_board_html_uses_template_tokens_and_filters_old_landed():
     assert 'style="overflow-x:auto"' in html
 
 
+# =====================================================================
+# ARRIVALS_BOARD_V2_UNIFY_1 — render locks (per-letter tiling, flat settle,
+# V2 sticky header). These lock the split-flap CLIENT behavior encoded in the
+# template so a future edit that regresses to per-word tiles, an always-embossed
+# resting cell, or a scrollY-keyed sticky shadow trips a test.
+# =====================================================================
+import re
+
+_TEMPLATE = ab._TEMPLATE_PATH.read_text(encoding="utf-8")
+
+
+def _css_block(css: str, selector: str) -> str:
+    """Return the declaration body of the FIRST `selector{...}` rule."""
+    m = re.search(re.escape(selector) + r"\{([^}]*)\}", css)
+    assert m, f"selector {selector!r} not found in template CSS"
+    return m.group(1)
+
+
+def test_template_builds_one_flap_cell_per_character():
+    # PER-LETTER (Director ruling): flapify iterates the characters of each word
+    # (Array.from(word)) and appends one `.tile` per character, plus a breakable
+    # blank space cell between words — NOT one tile per word.
+    assert "Array.from(word)" in _TEMPLATE
+    assert "makeTile(extra)" in _TEMPLATE
+    assert "makeTile('blank')" in _TEMPLATE  # inter-word space cell
+    # words stay grouped so a long label folds only at a space, never mid-word
+    assert 'w.className=' in _TEMPLATE and "'word'" in _TEMPLATE
+
+
+def test_template_flip_is_transition_only_and_settles_to_flat_static():
+    # FLIP = TRANSITION ONLY: the split-flap texture lives on `.tile.flipping`,
+    # is added at spin start and REMOVED on settle so the resting glyph is flat.
+    assert "classList.add('flipping')" in _TEMPLATE
+    assert "classList.remove('flipping')" in _TEMPLATE
+    # settle is capped so the board is fully static within <=1s (no cycling loop)
+    assert "Math.min(900," in _TEMPLATE
+    # amendment: the RESTING `.tile` cell carries NO emboss (no gradient / inset
+    # shadow / seam) — that texture is confined to the `.tile.flipping` rule.
+    resting = _css_block(_TEMPLATE, ".tile")
+    assert "box-shadow" not in resting
+    assert "linear-gradient" not in resting
+    flipping = _css_block(_TEMPLATE, ".tile.flipping")
+    assert "box-shadow" in flipping and "linear-gradient" in flipping
+
+
+def test_template_sticky_header_uses_recttop_not_scrolly():
+    # V2 sticky mechanics: is-stuck keyed off the header's own
+    # getBoundingClientRect().top (pinned) AND scrollY>0 (no false-stuck at top).
+    assert "is-stuck" in _TEMPLATE
+    assert "getBoundingClientRect().top" in _TEMPLATE
+    assert "rectTop<=0 && window.scrollY>0" in _TEMPLATE
+    header = _css_block(_TEMPLATE, "header")
+    assert "position:sticky" in header and "top:0" in header
+
+
 def test_cockpit_url_rejects_backslashes():
     assert ab._optional_cockpit_url("/flights/BB-AUK-001") == "/flights/BB-AUK-001"
     for url in ("/\\evil.example/path", "/flights\\BB-AUK-001"):
