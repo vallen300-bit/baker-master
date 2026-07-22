@@ -150,6 +150,46 @@ def test_template_sticky_header_uses_recttop_not_scrolly():
     assert "position:sticky" in header and "top:0" in header
 
 
+def _rel_luminance(hexc: str) -> float:
+    hexc = hexc.lstrip("#")
+    ch = [int(hexc[i:i + 2], 16) / 255.0 for i in (0, 2, 4)]
+    lin = [c / 12.92 if c <= 0.03928 else ((c + 0.055) / 1.055) ** 2.4 for c in ch]
+    return 0.2126 * lin[0] + 0.7152 * lin[1] + 0.0722 * lin[2]
+
+
+def _contrast(fg: str, bg: str) -> float:
+    a, b = _rel_luminance(fg), _rel_luminance(bg)
+    hi, lo = max(a, b), min(a, b)
+    return (hi + 0.05) / (lo + 0.05)
+
+
+def _theme_tokens(css: str, theme: str) -> dict:
+    """Pull `--name:#hex` tokens from a theme's :root / html[data-theme] block."""
+    if theme == "dark":
+        m = re.search(r":root\{(.*?)\}", css, re.S)
+    else:
+        m = re.search(r'html\[data-theme="light"\]\{(.*?)\}', css, re.S)
+    assert m, f"{theme} token block not found"
+    return dict(re.findall(r"--([\w-]+):(#[0-9A-Fa-f]{6})", m.group(1)))
+
+
+def test_pending_and_primary_glyph_tokens_pass_7to1_both_themes():
+    # codex gate r1 P1: `tr.pending .flap` recolors EVERY pending-row field with
+    # --pend; the old #575343/#A5A294 measured ~2.4:1 vs panel (unreadable), which
+    # broke the Director visibility ruling and the >=7:1 claim. Lock every board
+    # glyph token — including --pend — at >=7:1 against its own row (panel) in BOTH
+    # themes so dimming can distinguish state but never drop below readable.
+    GLYPH_TOKENS = ("amber", "white", "green", "red", "meta-ink", "pend")
+    for theme in ("dark", "light"):
+        tok = _theme_tokens(_TEMPLATE, theme)
+        panel = tok["panel"]
+        for name in GLYPH_TOKENS:
+            ratio = _contrast(tok[name], panel)
+            assert ratio >= 7.0, (
+                f"{theme} --{name} {tok[name]} vs panel {panel} = {ratio:.2f}:1 (<7:1)"
+            )
+
+
 def test_cockpit_url_rejects_backslashes():
     assert ab._optional_cockpit_url("/flights/BB-AUK-001") == "/flights/BB-AUK-001"
     for url in ("/\\evil.example/path", "/flights\\BB-AUK-001"):
