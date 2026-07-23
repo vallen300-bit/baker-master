@@ -58,6 +58,8 @@
 # TEST SEAMS (hermetic suite): ARM_ALARM_SEND_CMD and ARM_ALARM_NOTIFY_CMD, when
 # set, replace the real Outlook send / macOS notification with a recorder, so the
 # suite exercises the full dedupe/recovery logic with zero real email.
+# ARM_ALARM_SLEEP_LOG_CMD, when set, replaces `pmset -g log` with a fixture
+# command; it is also the seam for deterministic sleep-gap and wake-grace probes.
 
 set -u
 set -o pipefail
@@ -106,6 +108,9 @@ EMAIL_TO="${ARM_ALARM_EMAIL_TO:-dvallen@brisengroup.com}"
 MISSING_IS_RED="${ARM_ALARM_MISSING_IS_RED:-0}"
 # re-alarm backstop for a still-active incident.
 COOLDOWN_S="${ARM_ALARM_COOLDOWN_S:-21600}"   # 6h
+# Do not page immediately after a wake: the cadence poller needs one interval
+# plus a small margin to publish its first post-wake snapshot.
+WAKE_GRACE_S="${ARM_ALARM_WAKE_GRACE_S:-2100}"   # 35m
 
 # SEMANTIC consumer gate (rider (a), lead #10630). b2's SEMANTIC_DELIVERY_
 # EVALUATOR_1 (#10544) is the producer of semantic.json; it may not be live/
@@ -176,7 +181,7 @@ trap 'rm -rf "$LOCK_DIR" 2>/dev/null' EXIT
 
 # --- evaluate every source into a verdict -----------------------------------
 # Emits, per source, one line: "<key>\t<incident-type|OK>\t<detail>".
-#   incident-type: stale | failed | missing | db_unreachable | OK
+#   incident-type: stale | failed | missing | missing_amber | db_unreachable | OK
 declare -a VERDICTS=()
 for entry in "${SOURCES[@]}"; do
   # shellcheck disable=SC2086
@@ -192,8 +197,7 @@ for entry in "${SOURCES[@]}"; do
     if [ "$MISSING_IS_RED" = "1" ]; then
       VERDICTS+=("${key}"$'\t'"missing"$'\t'"marker never written: $mfile")
     else
-      VERDICTS+=("${key}"$'\t'"OK"$'\t'"marker absent (AMBER, MISSING_IS_RED=0): $mfile")
-      log_line "AMBER ${key} marker absent $mfile"
+      VERDICTS+=("${key}"$'\t'"missing_amber"$'\t'"marker absent (AMBER, MISSING_IS_RED=0): $mfile")
     fi
     continue
   fi
@@ -248,7 +252,9 @@ if kind == "canary" and d.get("ok") is False:
 if kind == "semantic" and d.get("semantic_ok") is False:
     print("failed\tsemantic_ok=false (evaluated %ss ago)" % age); sys.exit(0)
 if age > maxage:
-    print("stale\t%s is %ss old (> %ss)" % (field, age, maxage)); sys.exit(0)
+    stale_since = iso_epoch(ts) + maxage
+    print("stale\tage-based stale since %d: %s is %ss old (> %ss)"
+          % (stale_since, field, age, maxage)); sys.exit(0)
 if kind == "cadence" and d.get("health") == "degraded":
     print("OK\tcadence health=degraded (%ss old); non-200 is not db_unreachable" % age)
     sys.exit(0)
@@ -272,17 +278,23 @@ done
 #   delivery_pending  bool  — an alarm is due but has NOT yet been delivered
 #   opened_at, last_alarm_at (last SUCCESSFUL delivery), alarm_count (successes)
 #   send_fail_count, next_retry_at — bounded-backoff retry of a failed delivery
-OUT="$(STATE_FILE="$STATE_FILE" NOW="$NOW" COOLDOWN_S="$COOLDOWN_S" HOST="$HOST" \
+OUT="$(STATE_FILE="$STATE_FILE" NOW="$NOW" COOLDOWN_S="$COOLDOWN_S" \
+  WAKE_GRACE_S="$WAKE_GRACE_S" HOST="$HOST" \
   EMAIL_TO="$EMAIL_TO" \
   ARM_ALARM_BACKOFF_BASE_S="${ARM_ALARM_BACKOFF_BASE_S:-60}" \
   ARM_ALARM_BACKOFF_CAP_S="${ARM_ALARM_BACKOFF_CAP_S:-1800}" \
   python3 - "${VERDICTS[@]}" <<'PY' 2>>"$LOG"
-import json, os, sys, subprocess, tempfile
+import json, os, re, sys, subprocess, tempfile
+from datetime import datetime
 state_file = os.environ["STATE_FILE"]; now = int(os.environ["NOW"])
 cooldown = int(os.environ["COOLDOWN_S"]); host = os.environ["HOST"]
 email_to = os.environ.get("EMAIL_TO", "")
 bk_base = int(os.environ.get("ARM_ALARM_BACKOFF_BASE_S", "60"))
 bk_cap  = int(os.environ.get("ARM_ALARM_BACKOFF_CAP_S", "1800"))
+try:
+    wake_grace = max(0, int(os.environ.get("WAKE_GRACE_S", "2100")))
+except ValueError:
+    wake_grace = 2100
 
 # --- per-kind recipient resolution (ARM_ALARM_RECIPIENT_SPLIT_1) -------------
 # Route the alarm by incident source. source = the part of the incident key
@@ -362,11 +374,164 @@ def deliver(subject, body, to):
 def backoff(fails):
     return min(bk_base * (2 ** max(0, fails - 1)), bk_cap)
 
+def _capture_sleep_log():
+    # The command seam keeps the production parser testable without touching
+    # pmset or host sleep state. Production uses the local macOS sleep log.
+    cmd = os.environ.get("ARM_ALARM_SLEEP_LOG_CMD")
+    if not cmd and (
+        os.environ.get("ARM_ALARM_SEND_CMD")
+        or os.environ.get("ARM_ALARM_NOTIFY_CMD")
+    ):
+        # The existing sender seams identify the repository's hermetic tests.
+        # Never let the test machine's own sleep history change their verdicts.
+        return "", True, 0
+    args = ["bash", "-c", cmd] if cmd else ["pmset", "-g", "log"]
+    try:
+        result = subprocess.run(args, stdout=subprocess.PIPE,
+                                stderr=subprocess.DEVNULL, text=True)
+        return result.stdout, result.returncode == 0, result.returncode
+    except Exception:
+        return "", False, -1
+
+def _sysctl_epoch(name):
+    try:
+        result = subprocess.run(["sysctl", "-n", name],
+                                stdout=subprocess.PIPE,
+                                stderr=subprocess.DEVNULL, text=True)
+    except Exception:
+        return None
+    values = re.findall(r"\d+", result.stdout)
+    if not values:
+        return None
+    try:
+        value = int(values[0])
+    except ValueError:
+        return None
+    return value if value > 0 else None
+
+def sleep_evidence():
+    # pmset emits pairs such as:
+    #   2026-07-23 02:08:00 +0200 Sleep ...
+    #   2026-07-23 05:35:38 +0200 Wake ...
+    event_re = re.compile(
+        r"^(\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2} [+-]\d{4})\s+(Sleep|Wake)\s+(.*)$"
+    )
+    intervals = []
+    wakes = []
+    sleep_start = None
+    sleep_log, parser_ok, parser_rc = _capture_sleep_log()
+    if not parser_ok:
+        logs.append(
+            "SLEEP-EVIDENCE-FAIL command exit=%s; fail-open (no sleep suppression)"
+            % parser_rc
+        )
+        return [], None
+    for line in sleep_log.splitlines():
+        match = event_re.match(line.strip())
+        if not match:
+            continue
+        try:
+            stamp = datetime.strptime(match.group(1), "%Y-%m-%d %H:%M:%S %z")
+            event_at = int(stamp.timestamp())
+        except ValueError:
+            continue
+        if event_at > now:
+            continue
+        event = match.group(2)
+        payload = match.group(3).strip()
+        if event == "Wake" and payload.startswith("Requests"):
+            # "Wake Requests" is a scheduler record, not a completed wake.
+            continue
+        if event == "Sleep":
+            if sleep_start is None:
+                sleep_start = event_at
+            continue
+        wakes.append(event_at)
+        if sleep_start is not None:
+            if event_at > sleep_start:
+                intervals.append((sleep_start, event_at))
+            sleep_start = None
+    if sleep_start is not None and now > sleep_start:
+        intervals.append((sleep_start, now))
+
+    # If pmset is unavailable, the kernel pair still gives the latest sleep
+    # interval and wake point. Do not use this fallback when a test seam was
+    # explicitly supplied: an empty fixture means "no sleep evidence".
+    hermetic = (
+        os.environ.get("ARM_ALARM_SLEEP_LOG_CMD")
+        or os.environ.get("ARM_ALARM_SEND_CMD")
+        or os.environ.get("ARM_ALARM_NOTIFY_CMD")
+    )
+    if not hermetic and not intervals and not wakes:
+        slept_at = _sysctl_epoch("kern.sleeptime")
+        woke_at = _sysctl_epoch("kern.waketime")
+        if slept_at is not None and slept_at <= now:
+            if woke_at is not None and slept_at < woke_at <= now:
+                intervals.append((slept_at, woke_at))
+                wakes.append(woke_at)
+            else:
+                intervals.append((slept_at, now))
+    return intervals, max(wakes) if wakes else None
+
+AGE_STALE_RE = re.compile(r"^age-based stale since (\d+):")
+sleep_cache = None
+
+def age_stale_start(detail):
+    match = AGE_STALE_RE.match(detail)
+    return int(match.group(1)) if match else None
+
+def suppression_for(itype, detail):
+    # Only a timestamp-age stale is sleep suppressible. Parse failures,
+    # missing fields, explicit canary failures, and DB failures remain RED.
+    if itype != "stale":
+        return None
+    stale_start = age_stale_start(detail)
+    if stale_start is None or stale_start >= now:
+        return None
+    global sleep_cache
+    if sleep_cache is None:
+        sleep_cache = sleep_evidence()
+    intervals, latest_wake = sleep_cache
+    if latest_wake is not None and 0 <= now - latest_wake < wake_grace:
+        return (
+            "wake-grace",
+            stale_start,
+            "last wake was %ss ago (< %ss grace)" % (now - latest_wake, wake_grace),
+        )
+    gap = now - stale_start
+    if gap <= 0:
+        return None
+    overlap = sum(
+        max(0, min(end, now) - max(start, stale_start))
+        for start, end in intervals
+    )
+    if overlap * 2 > gap:
+        return (
+            "sleep-gap",
+            stale_start,
+            "sleep overlap %ss/%ss covers the majority of the age gap"
+            % (overlap, gap),
+        )
+    return None
+
 try:
     state = json.load(open(state_file))
 except Exception:
     state = {}
+if not isinstance(state, dict):
+    state = {}
 inc = state.setdefault("incidents", {})
+if not isinstance(inc, dict):
+    inc = {}
+    state["incidents"] = inc
+marker_meta = state.setdefault("marker_meta", {})
+if not isinstance(marker_meta, dict):
+    marker_meta = {}
+    state["marker_meta"] = marker_meta
+suppression = state.setdefault("suppression", {})
+if not isinstance(suppression, dict):
+    suppression = {}
+    state["suppression"] = suppression
 
 verdicts = {}
 for a in sys.argv[1:]:
@@ -376,9 +541,63 @@ for a in sys.argv[1:]:
 
 logs = []
 failing = set()
+suppressed = {}
+
+# Update marker history and decide which non-fresh verdicts are safe to hold.
+# marker_meta is deliberately small: it only records existence and the last
+# once-per-day absent-marker log; suppression records only the active stale
+# window/reason so a 3-minute poll does not repeat the same suppression line.
+for key, (itype, detail) in verdicts.items():
+    meta = marker_meta.get(key)
+    if not isinstance(meta, dict):
+        meta = {}
+        marker_meta[key] = meta
+    if itype == "missing_amber":
+        if meta.get("ever_seen"):
+            logs.append("AMBER %s %s" % (key, detail))
+        else:
+            last_amber_at = meta.get("last_amber_at")
+            try:
+                should_log = last_amber_at is None or now - int(last_amber_at) >= 86400
+            except (TypeError, ValueError):
+                should_log = True
+            if should_log:
+                logs.append("AMBER %s %s" % (key, detail))
+                meta["last_amber_at"] = now
+    elif itype != "missing":
+        meta["ever_seen"] = True
+
+    stale_key = "%s:stale" % key
+    reason = suppression_for(itype, detail)
+    if reason is None:
+        suppression.pop(stale_key, None)
+        continue
+    reason_name, stale_start, reason_detail = reason
+    prior = suppression.get(stale_key)
+    try:
+        prior_start = int(prior.get("window_start", -1)) if isinstance(prior, dict) else -1
+    except (TypeError, ValueError):
+        prior_start = -1
+    if (
+        not isinstance(prior, dict)
+        or prior.get("reason") != reason_name
+        or prior_start != stale_start
+    ):
+        logs.append(
+            "SUPPRESSED %s %s: %s (stale-window-start=%s)"
+            % (reason_name, stale_key, reason_detail, stale_start)
+        )
+        suppression[stale_key] = {
+            "reason": reason_name,
+            "window_start": stale_start,
+            "logged_at": now,
+        }
+    suppressed[stale_key] = reason
+
 summary_parts = []
 for key, (itype, detail) in verdicts.items():
-    if itype == "OK":
+    ik = "%s:%s" % (key, itype)
+    if itype in ("OK", "missing_amber") or ik in suppressed:
         continue
     if itype == "db_unreachable":
         summary_parts.append("%s(%s)" % (itype, key))
@@ -386,9 +605,18 @@ for key, (itype, detail) in verdicts.items():
         summary_parts.append("%s:%s" % (key, itype))
 red_summary = "RED: %s" % ", ".join(summary_parts) if summary_parts else "RED"
 for key, (itype, detail) in verdicts.items():
-    if itype == "OK":
+    if itype in ("OK", "missing_amber"):
         continue
     ik = "%s:%s" % (key, itype); failing.add(ik)
+    if ik in suppressed:
+        # Preserve an already-delivered/pending incident across a sleep gap so
+        # suppression does not generate a false RECOVERY while the marker stays
+        # stale. A new suppressed incident creates no state until it can fire.
+        rec = inc.get(ik)
+        if isinstance(rec, dict) and (rec.get("active") or rec.get("delivery_pending")):
+            continue
+        failing.discard(ik)
+        continue
     rec = inc.get(ik) or {}
     active = bool(rec.get("active")); pending = bool(rec.get("delivery_pending"))
     subject = "[ARM OUT-OF-BAND ALARM] %s on %s" % (red_summary, host)
