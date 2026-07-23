@@ -126,7 +126,12 @@ Per Director directive 2026-04-28T07:00Z + `_ops/processes/ai-head-autonomy-char
 
 No lint/typecheck config in repo. No GitHub Actions; Render is single deploy path.
 
-## Architecture — Cortex 3T (canonical docs, not restated here)
+## Architecture — Cortex 3T (RETIRED 2026-07-23)
+
+> **RETIRED by Director decision 2026-07-23** — zero cycles since 2026-05-20; matter desks +
+> airport process superseded it. Decision memo: `briefs/_plans/CORTEX_RETIREMENT_MEMO_2026-07-23.md`.
+> Cycle-starting surfaces return 410 (CORTEX_RETIRE_PHASE1_1); history tables + GET routes kept
+> read-only. Docs below are historical design records, not forward plans.
 
 Live roadmap: https://brisen-docs.onrender.com/architecture/cortex-roadmap-current.html · locked spec:
 `_ops/ideas/2026-04-27-cortex-architecture-final-locked.md` (RA-23) · Stage-2 tracker:
