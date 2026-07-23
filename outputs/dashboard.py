@@ -8241,6 +8241,22 @@ async def get_cortex_stats():
         store._put_conn(conn)
 
 
+def _cortex_retired() -> bool:
+    """CORTEX_RETIRE_PHASE1_1: Cortex cycle service is retired (Director decision
+    2026-07-23; memo briefs/_plans/CORTEX_RETIREMENT_MEMO_2026-07-23.md).
+
+    DEFAULT TRUE — retired is the new normal. The env flag exists ONLY as a
+    rollback lever: set ``CORTEX_RETIRED=false`` to restore cycle-starting
+    behavior. Read at call time so a Render restart with no env var set keeps
+    the retirement in force. Guard failures must fail CLOSED (treat as retired).
+    """
+    try:
+        return os.getenv("CORTEX_RETIRED", "true").strip().lower() == "true"
+    except Exception:
+        # Fail closed: any env-read failure keeps the retirement guard on.
+        return True
+
+
 @app.post("/api/cortex/trigger", tags=["cortex"], dependencies=[Depends(verify_api_key)])
 async def trigger_cortex_cycle(req: CortexTriggerRequest):
     """CORTEX_TRIGGER_ENDPOINT_1: Director-invoke a Cortex cycle synchronously
@@ -8257,6 +8273,9 @@ async def trigger_cortex_cycle(req: CortexTriggerRequest):
     Sensitive payload (director_question, aborted_reason) is NOT info-logged —
     only matter_slug + triggered_by appear in error-level logs.
     """
+    if _cortex_retired():
+        # CORTEX_RETIRE_PHASE1_1: cycle service retired — refuse to start one.
+        raise HTTPException(status_code=410, detail="cortex_retired")
     try:
         cycle = await maybe_run_cycle(
             matter_slug=req.matter_slug,
@@ -8311,6 +8330,9 @@ async def cortex_run_stream(req: CortexRunRequest):
     Sensitive payload (director_question, frontmatter content) is NEVER
     info-logged — only matter_slug + triggered_by + counts at info-level.
     """
+    if _cortex_retired():
+        # CORTEX_RETIRE_PHASE1_1: cycle service retired — refuse to start one.
+        raise HTTPException(status_code=410, detail="cortex_retired")
     from outputs.cortex_run_stream import (
         stream_cycle_events,
         runs_in_last_hour,
@@ -9132,6 +9154,14 @@ async def _cortex_gate_fire_cycle(matter_slug: str, signal_id: int) -> None:
     maybe_run_cycle after a gate approval. Never raises — failures are
     logged so the FastAPI background-task pool stays healthy.
     """
+    if _cortex_retired():
+        # CORTEX_RETIRE_PHASE1_1: cycle service retired. This runs as a FastAPI
+        # background continuation, so it must NEVER raise — log and return.
+        logger.info(
+            "cortex retired — skipping gate-approved cycle (signal_id=%s matter=%s)",
+            signal_id, matter_slug,
+        )
+        return
     try:
         cycle = await maybe_run_cycle(
             matter_slug=matter_slug,

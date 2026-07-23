@@ -1223,8 +1223,17 @@ def _register_jobs(scheduler: BackgroundScheduler):
     # status='archive_failed' from Phase 6 self-fail path. Posts Director DM with
     # baker_actions dedup so one alert per (cycle_id × failure-mode). Env gate
     # ``CORTEX_STUCK_CYCLE_SENTINEL_ENABLED`` (default ``true``).
+    # CORTEX_RETIRE_PHASE1_1: Cortex is retired (Director 2026-07-23). No cycles
+    # can start, so no cycle can go stuck — do NOT register the sentinel when
+    # retired (avoids pointless 5-min sweeps + stuck-cycle bus noise). Mirrors
+    # outputs.dashboard._cortex_retired semantics (default TRUE; env is a
+    # rollback lever). Read here rather than importing dashboard to avoid a
+    # startup-time circular import.
+    _cortex_retired = _os.environ.get("CORTEX_RETIRED", "true").strip().lower() == "true"
     _cortex_stuck_enabled = _os.environ.get("CORTEX_STUCK_CYCLE_SENTINEL_ENABLED", "true").lower()
-    if _cortex_stuck_enabled not in ("false", "0", "no", "off"):
+    if _cortex_retired:
+        logger.info("Skipped: cortex_stuck_cycle_sentinel (CORTEX_RETIRED — cycle service retired)")
+    elif _cortex_stuck_enabled not in ("false", "0", "no", "off"):
         from triggers.cortex_stuck_cycle_sentinel import run_cortex_stuck_cycle_sentinel
         scheduler.add_job(
             run_cortex_stuck_cycle_sentinel,

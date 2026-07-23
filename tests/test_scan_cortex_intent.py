@@ -121,6 +121,10 @@ def test_cortex_run_yields_typed_events_for_ui(monkeypatch):
     from unittest.mock import patch
     from fastapi.testclient import TestClient
 
+    # CORTEX_RETIRE_PHASE1_1: /api/cortex/run 410s when CORTEX_RETIRED (default
+    # TRUE). This UI-passthrough smoke test exercises pre-retirement behavior, so
+    # it runs as the flag-OFF (rollback) variant.
+    monkeypatch.setenv("CORTEX_RETIRED", "false")
     monkeypatch.setenv("BAKER_API_KEY", "test-typed-events")
     import outputs.dashboard as dash
     dash._BAKER_API_KEY = "test-typed-events"
