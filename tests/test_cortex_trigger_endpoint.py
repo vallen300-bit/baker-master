@@ -31,7 +31,12 @@ class _FakeCycle:
 
 
 def test_trigger_cortex_cycle_happy_path(monkeypatch):
-    """Happy path — valid key + valid body → 200 + cycle JSON; mock invoked once."""
+    """Happy path — valid key + valid body → 200 + cycle JSON; mock invoked once.
+
+    CORTEX_RETIRE_PHASE1_1: this is now the flag-OFF (rollback) variant — the
+    endpoint only reaches maybe_run_cycle when CORTEX_RETIRED=false.
+    """
+    monkeypatch.setenv("CORTEX_RETIRED", "false")
     monkeypatch.setenv("BAKER_API_KEY", "test-key-123")
     # _BAKER_API_KEY is bound at module import; rebind for this test.
     import outputs.dashboard as dash
@@ -116,7 +121,12 @@ def test_trigger_cortex_cycle_validation_short_question(monkeypatch):
 
 
 def test_trigger_cortex_cycle_timeout_translates_to_504(monkeypatch):
-    """maybe_run_cycle raising asyncio.TimeoutError → HTTP 504."""
+    """maybe_run_cycle raising asyncio.TimeoutError → HTTP 504.
+
+    CORTEX_RETIRE_PHASE1_1: flag-OFF (rollback) variant — reaches the runner
+    only when CORTEX_RETIRED=false.
+    """
+    monkeypatch.setenv("CORTEX_RETIRED", "false")
     monkeypatch.setenv("BAKER_API_KEY", "test-key-123")
     import outputs.dashboard as dash
     dash._BAKER_API_KEY = "test-key-123"

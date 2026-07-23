@@ -17,6 +17,11 @@ from fastapi.testclient import TestClient
 
 
 def _set_api_key(monkeypatch, key="test-key-123"):
+    # CORTEX_RETIRE_PHASE1_1: the /api/cortex/run handler now 410s when
+    # CORTEX_RETIRED (default TRUE). These tests exercise the pre-retirement
+    # behavior, so they run as the flag-OFF (rollback) variant. The 410-default
+    # behavior is covered in tests/test_cortex_retire_phase1.py.
+    monkeypatch.setenv("CORTEX_RETIRED", "false")
     monkeypatch.setenv("BAKER_API_KEY", key)
     import outputs.dashboard as dash
     dash._BAKER_API_KEY = key
