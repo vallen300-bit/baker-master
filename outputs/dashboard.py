@@ -2834,6 +2834,62 @@ async def emails_read_endpoint(
     return JSONResponse(content=data)
 
 
+@app.get("/api/emails/attachment", tags=["emails"], dependencies=[Depends(verify_api_key)])
+async def emails_attachment_endpoint(
+    message_id: str = Query(
+        ...,
+        min_length=1,
+        description="Stored email message_id that owns the attachment rows",
+    ),
+    filename: Optional[str] = Query(
+        None,
+        description="Exact case-sensitive filename; omit with no index for LIST mode",
+    ),
+    attachment_index: Optional[int] = Query(
+        None,
+        ge=1,
+        description="1-based attachment index; disambiguates duplicate filenames",
+    ),
+    source: Optional[str] = Query(
+        None,
+        description="Optional exact ingest-source filter, such as graph or email",
+    ),
+    include_bytes: bool = Query(
+        False,
+        description="Include base64 raw bytes in FETCH mode; default false",
+    ),
+):
+    """REST mirror of ``baker_email_attachment_read`` for wake seats.
+
+    The MCP dispatcher remains the single implementation for store reads,
+    metadata-only handling, byte resolution, and text extraction.
+    """
+    from tools.email import dispatch_email
+
+    args: dict[str, Any] = {
+        "message_id": message_id,
+        "source": source,
+        "include_bytes": include_bytes,
+    }
+    if filename is not None:
+        args["filename"] = filename
+    if attachment_index is not None:
+        args["attachment_index"] = attachment_index
+
+    try:
+        raw = dispatch_email("baker_email_attachment_read", args)
+        data = json.loads(raw)
+    except Exception as e:
+        logger.error(f"emails_attachment_endpoint failed: {e}")
+        return JSONResponse(
+            status_code=500,
+            content={"status": "error", "message": str(e)},
+        )
+    if isinstance(data, dict) and data.get("backend_unavailable"):
+        return JSONResponse(status_code=503, content=data)
+    return JSONResponse(content=data)
+
+
 # ============================================================
 # BAKER_CAPTURE_BLINDSPOTS_1: iPhone WhatsApp export ingest
 # ============================================================
