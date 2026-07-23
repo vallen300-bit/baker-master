@@ -53,6 +53,19 @@
   const syncNoteEl = document.getElementById("sync-note");
   const rosterNoteEl = document.getElementById("roster-note");
   const stickyHeaderEl = document.getElementById("cockpit-sticky");
+  // LAB_V2_BRAND_LIVE_BADGE_TOGGLE_RESTYLE_1 (Director 2026-07-23): when this
+  // cockpit is embedded in the Brisen Lab /v2 shell (AGENTS iframe), the Lab
+  // sidebar now carries the live health line, so hide the in-cockpit copy to
+  // avoid duplication, and mirror the health across via same-origin postMessage.
+  // Standalone (127.0.0.1:7800 direct) keeps its own stacked line.
+  const EMBEDDED = window.parent !== window;
+  if (EMBEDDED) { try { document.body.classList.add("is-embedded"); } catch (e) {} }
+  function emitHealth(payload) {
+    if (!EMBEDDED) return;
+    // Same-origin only (the Lab bridges this page under its own origin); never
+    // let a messaging failure break standalone or embedded rendering.
+    try { window.parent.postMessage(payload, location.origin); } catch (e) {}
+  }
   // D9 — App-resident card bus-message panel.
   const msgVeil = document.getElementById("msgveil");
   const msgPanel = document.getElementById("msgpanel");
@@ -218,6 +231,7 @@
       // Feed dead — the ONE health line turns red (migrated .feed-dead semantics).
       syncNoteEl.textContent = "Feed offline — " + (health.error || "unreachable");
       syncNoteEl.className = "summary-status feed-dead";
+      emitHealth({ type: "cockpit-health", live: false, error: (health.error || "unreachable") });
     } else if (health && health.live === true) {
       // Feed live — the line stays GREEN whenever the feed answers (the original
       // #conn contract: red is reserved for a dead feed). Degraded Lab telemetry
@@ -226,11 +240,16 @@
       const bits = "Live · " + health.driveable + " with terminal / " + health.total + " seats";
       syncNoteEl.textContent = labOk === false ? bits + " · telemetry source degraded" : bits;
       syncNoteEl.className = "summary-status";
+      emitHealth({ type: "cockpit-health", live: true, driveable: health.driveable,
+                   total: health.total, degraded: labOk === false });
     } else {
       // No health probe yet (first paint from layout metadata).
       syncNoteEl.textContent = labOk === false ? "Telemetry source offline" :
         (stateBySlug.size ? "Live · refreshed just now" : "Waiting for telemetry");
       syncNoteEl.className = "summary-status" + (labOk === false ? " is-warn" : "");
+      // Emit live:null so the Lab sidebar keeps its line HIDDEN until a real probe
+      // (never mirror the "Waiting for telemetry" placeholder as a live line).
+      emitHealth({ type: "cockpit-health", live: null });
     }
   }
 

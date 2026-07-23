@@ -196,16 +196,24 @@ button { font: inherit; }
    fleet needs attention. Keep the four content units in one compact sticky
    block so the row labels never detach from the roster they describe. */
 main.wrap { min-width: 0; padding: 0 28px 48px; }
+/* LAB_V2_BRAND_LIVE_BADGE_TOGGLE_RESTYLE_1 (Director 2026-07-23): the health line
+ * (#sync-note) moved OFF the title row onto its OWN row directly under the h1.
+ * Root cause of the Director's screenshot: title + status shared a grid row
+ * (minmax(0,auto) title track + nowrap h1), so when the AGENTS terminal panel
+ * narrowed the cockpit iframe the nowrap title overflowed its track and the green
+ * status text overlaid "FLEET COCKPIT". Stacked rows make overlap impossible at
+ * any width (down to the 320px floor). */
 .cockpit-sticky {
   position: sticky;
   top: 0;
   z-index: 4;
   display: grid;
-  grid-template-columns: minmax(0, auto) minmax(0, 1fr);
+  grid-template-columns: minmax(0, 1fr);
   grid-template-areas:
-    "title status"
-    "meta meta"
-    "columns columns";
+    "title"
+    "status"
+    "meta"
+    "columns";
   align-items: center;
   min-height: 0;
   padding: 9px 8px 0;
@@ -225,8 +233,14 @@ main.wrap { min-width: 0; padding: 0 28px 48px; }
 }
 .cockpit-sticky > .summary-status {
   grid-area: status;
-  justify-self: end;
+  justify-self: start;      /* own row, left-aligned under the h1 (was end/same-row) */
+  margin: 0 0 3px;
 }
+/* When embedded in the Brisen Lab /v2 shell the Lab sidebar carries the live
+   line, so hide this in-cockpit copy (no duplication). Standalone is unaffected.
+   Selector sits on <body> so renderSummary()'s per-call className rewrite of the
+   status element can't clear it. */
+body.is-embedded .summary-status { display: none; }
 .summary-status {
   display: inline-flex;
   align-items: center;
