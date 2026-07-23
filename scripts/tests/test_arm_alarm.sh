@@ -376,5 +376,24 @@ run_worker "$D" ARM_ALARM_SEMANTIC_ENFORCE=1 ARM_ALARM_EMAIL_TO="$DIRECTOR"   # 
 [ "$(last_to)" = "$LEAD" ] && ok || bad "pin RECOVERY: recovery misrouted to '$(last_to)' after env change (P2 regression)"
 grep -qx "$DIRECTOR" "$TO_LOG" && bad "pin RECOVERY: semantic recovery reached Director after env change" || ok
 
+# --- 32. sleep-evidence parser failure fails open and remains deduped ---------
+# A command can emit a valid majority-sleep line and still fail. The alarm must
+# discard that evidence, log the parser failure, FIRE the real stale incident,
+# and suppress the immediate second poll via the normal incident cooldown.
+D="$TMP/sleep_parser_fail"; write_report "$D" 7200; write_canary "$D" 60 true
+sleep_stamp="$(python3 -c 'import sys,datetime; print(datetime.datetime.fromtimestamp(int(sys.argv[1]),datetime.timezone.utc).strftime("%Y-%m-%d %H:%M:%S +0000"))' "$(( now - 3500 ))")"
+SLEEP_FAIL_CMD="printf '%s\n' '${sleep_stamp} Sleep Entering Sleep state due to test'; exit 1"
+reset_recorders
+run_worker "$D" ARM_ALARM_SLEEP_LOG_CMD="$SLEEP_FAIL_CMD"
+[ "$(emails)" -eq 1 ] && ok || bad "sleep-parser failure did not FIRE exactly once ($(emails))"
+grep -q 'SLEEP-EVIDENCE-FAIL command exit=1' "$D/alarm.log" && ok \
+  || bad "sleep-parser failure log missing"
+grep -q 'SUPPRESSED' "$D/alarm.log" && bad "sleep-parser failure incorrectly suppressed stale alarm" || ok
+grep -q 'FIRE report:stale' "$D/alarm.log" && ok \
+  || bad "sleep-parser failure FIRE log missing"
+reset_recorders
+run_worker "$D" ARM_ALARM_SLEEP_LOG_CMD="$SLEEP_FAIL_CMD"
+[ "$(emails)" -eq 0 ] && ok || bad "sleep-parser failure double-fired on second poll ($(emails))"
+
 echo "arm_alarm tests: $PASS passed, $FAIL failed"
 [ "$FAIL" -eq 0 ]
