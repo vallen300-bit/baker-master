@@ -3,18 +3,18 @@
     "_generated": "DO NOT EDIT BY HAND \u2014 regenerate with scripts/generate_cockpit_layout.py --write",
     "_sources": {
       "registry": "/Users/dimitry/baker-vault/_ops/registries/agent_registry.yml",
-      "registry_sha256": "4d93d53a4dc72621e63ef2456a6c84700929fad8003fd8af92a35f212be676d9",
-      "layout_contract": "/Users/dimitry/bm-aihead2/scripts/cockpit_static/director_layout_contract.json",
+      "registry_sha256": "4591be99d4d45a37f7f449a6ad6b6b12d3986cc9e5f7b2434732f9db913caaa5",
+      "layout_contract": "/Users/dimitry/bm-b4/scripts/cockpit_static/director_layout_contract.json",
       "layout_contract_sha256": "b8b06820e8744a016f54a053ac6735ccc52ac3d9289b858365b051a50300e97c",
-      "manifest": "/Users/dimitry/bm-aihead2/scripts/cockpit_launch_manifest.json"
+      "manifest": "/Users/dimitry/bm-b4/scripts/cockpit_launch_manifest.json"
     },
     "_grouping": "plates + order + in-plate position from the Director layout contract (LAB_COCKPIT_REDESIGN_1 D1); membership gated by registry active status + manifest driveable/ports",
     "counts": {
-      "cards": 42,
+      "cards": 43,
       "driveable": 28,
-      "status_only": 14,
+      "status_only": 15,
       "app_seat": 13,
-      "unassigned": 0
+      "unassigned": 1
     }
   },
   "plates": [
@@ -548,6 +548,23 @@
           "kind": "TERMINAL",
           "badge": null,
           "port": 7615,
+          "notify_eligible": false
+        }
+      ]
+    },
+    {
+      "label": "Unassigned",
+      "cards": [
+        {
+          "slug": "the-fund",
+          "alias": "fund",
+          "display_name": "The Fund",
+          "driveable": true,
+          "app_seat": false,
+          "status_only": false,
+          "kind": "TERMINAL",
+          "badge": null,
+          "port": 7645,
           "notify_eligible": false
         }
       ]
