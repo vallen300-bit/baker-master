@@ -26,7 +26,7 @@
 | 7614 | clerk | `clerkqwenterm` | Clerk Qwen3 |
 | 7615 | clerk-haiku | `clerkhaiku` | Clerk Chat |
 | 7616 | russo-ai | `russoai` | Russo AI |
-| 7617 | deep55 | `deep55picker` | Deep55 |
+| 7619 | librarian | `librarian` | LIBRARIAN |
 | 7620 | arm | `arm` | ARM |
 | 7621 | publisher | `publisher` | Publisher |
 | 7622 | designer | `designer` | UI Designer |

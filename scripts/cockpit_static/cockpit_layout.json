@@ -3,10 +3,10 @@
     "_generated": "DO NOT EDIT BY HAND \u2014 regenerate with scripts/generate_cockpit_layout.py --write",
     "_sources": {
       "registry": "/Users/dimitry/baker-vault/_ops/registries/agent_registry.yml",
-      "registry_sha256": "a66ee7ca7fa4f14f78b19875eb31b8bfd44bdb55ac1a5a44ceecc2f9a16fa584",
-      "layout_contract": "/Users/dimitry/bm-b1/scripts/cockpit_static/director_layout_contract.json",
-      "layout_contract_sha256": "e673ae6edc5d71e7336e4be995c6969c61b4d0c2ce5c8fa212d2d65c5dda85bd",
-      "manifest": "/Users/dimitry/bm-b1/scripts/cockpit_launch_manifest.json"
+      "registry_sha256": "d43a16b536e0c85747b90c92d15ae165010afe14771a3291026da01994c0e7b2",
+      "layout_contract": "/Users/dimitry/bm-aihead2/scripts/cockpit_static/director_layout_contract.json",
+      "layout_contract_sha256": "b8b06820e8744a016f54a053ac6735ccc52ac3d9289b858365b051a50300e97c",
+      "manifest": "/Users/dimitry/bm-aihead2/scripts/cockpit_launch_manifest.json"
     },
     "_grouping": "plates + order + in-plate position from the Director layout contract (LAB_COCKPIT_REDESIGN_1 D1); membership gated by registry active status + manifest driveable/ports",
     "counts": {
