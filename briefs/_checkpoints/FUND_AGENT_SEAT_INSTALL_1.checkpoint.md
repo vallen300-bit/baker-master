@@ -36,7 +36,9 @@ Picker cage `~/bm-the-fund/.claude` has no `.git` → picker wipe silently un-ca
 ## FIX ROUNDS (deputy-codex gate history)
 - R1 P1 #15730 → cage_negative_tests.sh authored (escape-probe hardening).
 - R2 P2 #15737 → cage versioned in vault @c089c99 — **but INCOMPLETE:** commit shipped only 4 doc/script files; the 6 load-bearing `.claude/` files were silently dropped by the vault `.gitignore` (swallows `.claude/`). `--check` from clean extract returned rc=1.
-- R3 P1 #15745 → **FIXED @81fb726.** `git add -f` the 6 files (fund_read/write/bash_cage.sh + fund_memory_append.sh + settings.json + cage_negative_tests.sh), byte-identical to picker. Clean-extract → `--check` rc=0 + 27-case 0-fail. Wiped-picker recovery works. **Count pushback:** suite is 27 cases NOT 34 (codex miscount); README '27-case' kept correct. Re-posted deputy-codex #15746; **awaiting re-verdict.**
+- R3 P1 #15745 → **FIXED @81fb726.** `git add -f` the 6 files (fund_read/write/bash_cage.sh + fund_memory_append.sh + settings.json + cage_negative_tests.sh), byte-identical to picker. Clean-extract → `--check` rc=0 + 27-case 0-fail. Wiped-picker recovery works. **Count pushback:** suite is 27 cases NOT 34 (codex miscount); README '27-case' kept correct.
+- **deputy-codex re-verdict #15748 → PASS / NO_FINDINGS** (durability P1 closed; conceded 34→27 count was theirs, mine 27 correct). Deputy build slice + deputy-codex review = DONE.
+- **Codex cross-vendor gate FIRED #15749** on all 3 legs (bm @d0846d8fe / brisen-lab @0f9a51e2 / vault @81fb726). **Awaiting codex PASS → then lead merges + Tier-B rows (2/3/8/9 + tmux) + E2E → ARM 14-row stamp closes.**
 
 ## RESUME INSTRUCTIONS (successor)
 1. Drain deputy bus — check for deputy-codex round-3 verdict (thread #15733) + any lead follow-up.
