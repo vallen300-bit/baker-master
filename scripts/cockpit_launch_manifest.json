@@ -3,7 +3,7 @@
     "_generated": "DO NOT EDIT BY HAND \u2014 regenerate with scripts/generate_cockpit_manifest.py --write",
     "_sources": {
       "registry": "/Users/dimitry/baker-vault/_ops/registries/agent_registry.yml",
-      "registry_sha256": "d43a16b536e0c85747b90c92d15ae165010afe14771a3291026da01994c0e7b2",
+      "registry_sha256": "4d93d53a4dc72621e63ef2456a6c84700929fad8003fd8af92a35f212be676d9",
       "terminal_plist": "/Users/dimitry/Library/Preferences/com.apple.Terminal.plist"
     },
     "_join": "D (alias-function role-marker derivation, lead ruling #12080)",

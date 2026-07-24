@@ -54,7 +54,7 @@ print(json.dumps({"hookSpecificOutput": {"hookEventName": event, "additionalCont
 
 # BEGIN GENERATED AGENT IDENTITY ROLE MAP
 # Generated from /Users/dimitry/baker-vault/_ops/registries/agent_registry.yml
-# SHA256: d43a16b536e0c85747b90c92d15ae165010afe14771a3291026da01994c0e7b2
+# SHA256: 4d93d53a4dc72621e63ef2456a6c84700929fad8003fd8af92a35f212be676d9
 case "${BAKER_ROLE:-}" in
     AG-001|ag-001|lead|LEAD|AH1|aihead1|AIHEAD1) SLUG=lead ;;
     AG-002|ag-002|cowork-ah1|COWORK-AH1|cowork_ah1|COWORK_AH1|AH1-APP|cowork|COWORK) SLUG=cowork-ah1 ;;
@@ -98,6 +98,7 @@ case "${BAKER_ROLE:-}" in
     AG-403|ag-403|CM-3|CM_3|cm-3) SLUG=CM-3 ;;
     AG-404|ag-404|CM-4|CM_4|cm-4) SLUG=CM-4 ;;
     AG-405|ag-405|hag-filer|HAG-FILER|hag_filer|HAG_FILER) SLUG=hag-filer ;;
+    AG-406|ag-406|the-fund|THE-FUND|the_fund|THE_FUND|fund|FUND|fund-agent|FUND-AGENT) SLUG=the-fund ;;
     daemon|DAEMON) SLUG=daemon ;;
     dispatcher|DISPATCHER) SLUG=dispatcher ;;
     *)

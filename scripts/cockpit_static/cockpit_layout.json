@@ -3,7 +3,7 @@
     "_generated": "DO NOT EDIT BY HAND \u2014 regenerate with scripts/generate_cockpit_layout.py --write",
     "_sources": {
       "registry": "/Users/dimitry/baker-vault/_ops/registries/agent_registry.yml",
-      "registry_sha256": "d43a16b536e0c85747b90c92d15ae165010afe14771a3291026da01994c0e7b2",
+      "registry_sha256": "4d93d53a4dc72621e63ef2456a6c84700929fad8003fd8af92a35f212be676d9",
       "layout_contract": "/Users/dimitry/bm-aihead2/scripts/cockpit_static/director_layout_contract.json",
       "layout_contract_sha256": "b8b06820e8744a016f54a053ac6735ccc52ac3d9289b858365b051a50300e97c",
       "manifest": "/Users/dimitry/bm-aihead2/scripts/cockpit_launch_manifest.json"
