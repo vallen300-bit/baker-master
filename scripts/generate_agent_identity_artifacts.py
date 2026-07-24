@@ -125,6 +125,14 @@ KNOWN_FALLBACK_SLUGS = frozenset({
     # repo, exactly like researcher. SOP Row 12 hard rule (picker-without-git ->
     # ~/baker-vault) wins over brief Row 1's literal "explicit ~/bm-librarian".
     "librarian",
+    # the-fund (AG-406): standing persona-cage seat; picker ~/bm-the-fund is a
+    # plain dir with no .git (install_picker_dir.sh mkdir-only), so the forge
+    # pusher would skip it and the card would stay grey (RESEARCHER_ON_BUS_1
+    # foot-gun). Its findings commit to baker-vault
+    # (wiki/matters/oskolkov/04_working_brief/fund-findings/), so ~/baker-vault is
+    # its real work repo, exactly like librarian. SOP Row 12 picker-without-git ->
+    # ~/baker-vault hard rule. (FUND_AGENT_SEAT_INSTALL_1.)
+    "the-fund",
     "codex",
     "codex-arch",
     "russo-ai",
