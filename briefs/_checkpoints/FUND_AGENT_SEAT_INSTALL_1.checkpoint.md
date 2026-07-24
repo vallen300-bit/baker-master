@@ -2,12 +2,12 @@
 
 **Owner:** deputy (AH2) · **Brief:** `briefs/_tasks/FUND_AGENT_SEAT_INSTALL_1.md`
 **Written:** 2026-07-24 (CTX-BAND order lead #15740; ~31% context remaining)
-**Phase:** deputy build slice essentially complete; **awaiting deputy-codex round-3 verdict** (thread #15733 / lead #15742). No further build action my side unless codex finds more.
+**Phase:** deputy build lane DONE — BOTH gates PASSED (deputy-codex #15748 + codex #15751). Handed to lead #15752 for merge + Tier-B + E2E + ARM. No further build action my side unless lead E2E surfaces something.
 
 ---
 
 ## ONE-LINE STATE
-All three repo legs committed + pushed; 27-case cage suite PASSES 0 failures; cage now vault-versioned (deviation RATIFIED by lead #15742). Waiting on deputy-codex round-3 gate.
+All 3 legs committed + pushed + BOTH gates PASS (deputy-codex + cross-vendor codex, NO_FINDINGS). 27-case cage suite 0-fail; cage vault-versioned + durable (clean-extract --check rc=0). Handed to lead; seat goes live at lead E2E; registry flips at ARM stamp.
 
 ## THREE BRANCH SHAs (all pushed to origin — verified)
 1. **baker-master** — branch `deputy/fund-seat-install-1` @ **ca3bc06b5** (HEAD==origin ✓). Bus identity + generator + drain fixture + cockpit manifest/layout + forge test.
@@ -38,7 +38,9 @@ Picker cage `~/bm-the-fund/.claude` has no `.git` → picker wipe silently un-ca
 - R2 P2 #15737 → cage versioned in vault @c089c99 — **but INCOMPLETE:** commit shipped only 4 doc/script files; the 6 load-bearing `.claude/` files were silently dropped by the vault `.gitignore` (swallows `.claude/`). `--check` from clean extract returned rc=1.
 - R3 P1 #15745 → **FIXED @81fb726.** `git add -f` the 6 files (fund_read/write/bash_cage.sh + fund_memory_append.sh + settings.json + cage_negative_tests.sh), byte-identical to picker. Clean-extract → `--check` rc=0 + 27-case 0-fail. Wiped-picker recovery works. **Count pushback:** suite is 27 cases NOT 34 (codex miscount); README '27-case' kept correct.
 - **deputy-codex re-verdict #15748 → PASS / NO_FINDINGS** (durability P1 closed; conceded 34→27 count was theirs, mine 27 correct). Deputy build slice + deputy-codex review = DONE.
-- **Codex cross-vendor gate FIRED #15749** on all 3 legs (bm @d0846d8fe / brisen-lab @0f9a51e2 / vault @81fb726). **Awaiting codex PASS → then lead merges + Tier-B rows (2/3/8/9 + tmux) + E2E → ARM 14-row stamp closes.**
+- **Codex cross-vendor gate #15751 → PASS / NO_FINDINGS** all 3 legs (bm @d0846d8fe / brisen-lab @0f9a51e2 / vault @81fb726). Forge fixture + generator + singleton guard PASS; brisen-lab pytest -k the_fund 1p/1s; vault clean-source --check PASS + 27-case 0-fail + bash -n PASS. **BOTH GATES PASSED — deputy build lane DONE.**
+- **⚠️ Codex non-blocking E2E note (lead action at E2E):** vault `fund_bash_cage.sh:19` hardcodes `~/bm-b1/scripts/bus_post.sh`; bm-b1's generated identity (lines 8-9) lacks `the-fund` → seat's bus role-resolution FAILS until **b1 pulls/regenerates** after baker-master merge (candidate d0846d8fe already carries the-fund identity). So: merge baker-master FIRST, then have b1 pull+regen, before seat E2E.
+- **HANDED TO LEAD #15752.** Lead owns: merge 3 legs → Tier-B rows (2 zshrc / 3 Terminal profile / 8 1P key / 9 Render env) + tmux/ttyd (`install_cockpit_ttyd.sh the-fund`) → b1 pull/regen → seat E2E (verify bus msg lands via Verification SQL) → ARM 14-row stamp @ `wiki/_fleet/audits/` → registry AG-406 flip planned→active. Registry stays `planned` until ARM.
 
 ## RESUME INSTRUCTIONS (successor)
 1. Drain deputy bus — check for deputy-codex round-3 verdict (thread #15733) + any lead follow-up.
