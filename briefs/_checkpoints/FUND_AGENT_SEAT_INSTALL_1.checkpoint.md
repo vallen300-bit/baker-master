@@ -12,7 +12,7 @@ All three repo legs committed + pushed; 27-case cage suite PASSES 0 failures; ca
 ## THREE BRANCH SHAs (all pushed to origin — verified)
 1. **baker-master** — branch `deputy/fund-seat-install-1` @ **ca3bc06b5** (HEAD==origin ✓). Bus identity + generator + drain fixture + cockpit manifest/layout + forge test.
 2. **brisen-lab** — clone `~/bm-deputy-brisen-lab`, branch `deputy/fund-seat-install-1` @ **0f9a51e** (origin up-to-date ✓). Server rows: agent_identity_generated (py+js), test_a3_a8_a9_bus.py (+35), wake-handler.applescript, wake-listener identity.
-3. **baker-vault** — branch `deputy/fund-findings-dir-1` @ **c089c99** (origin ✓). Cage VERSIONED (durability) — see below. Registry AG-406 already on vault main @cf9a938 (status `planned` — do NOT flip; ARM stamp closes).
+3. **baker-vault** — branch `deputy/fund-findings-dir-1` @ **81fb726** (was c089c99; origin ✓). Cage VERSIONED (durability) — see below. Registry AG-406 already on vault main @cf9a938 (status `planned` — do NOT flip; ARM stamp closes).
 
 ## RATIFIED DEVIATION (lead #15742, from my #15741)
 Picker cage `~/bm-the-fund/.claude` has no `.git` → picker wipe silently un-cages the seat (deputy-codex P2 #15737). FIX: cage source-of-truth now **versioned in vault** @c089c99 under `wiki/matters/oskolkov/04_working_brief/fund-agent-cage/` + `install_fund_cage.sh` (default = (re)install cage into picker + run 27-case suite; `--check` = drift-detect live picker vs vault source). Lead: "durability wins; drift-detector exactly right; do NOT revert to picker-only." Brief stands amended to vault-canonical cage @c089c99 + install_fund_cage.sh deploy path.
@@ -35,8 +35,8 @@ Picker cage `~/bm-the-fund/.claude` has no `.git` → picker wipe silently un-ca
 
 ## FIX ROUNDS (deputy-codex gate history)
 - R1 P1 #15730 → cage_negative_tests.sh authored (escape-probe hardening).
-- R2 P2 #15737 → cage versioned in vault (durability) @c089c99. **DONE.**
-- **R3 (in flight):** awaiting deputy-codex re-verdict, thread #15733. Lead #15742: no further action my side unless they find more.
+- R2 P2 #15737 → cage versioned in vault @c089c99 — **but INCOMPLETE:** commit shipped only 4 doc/script files; the 6 load-bearing `.claude/` files were silently dropped by the vault `.gitignore` (swallows `.claude/`). `--check` from clean extract returned rc=1.
+- R3 P1 #15745 → **FIXED @81fb726.** `git add -f` the 6 files (fund_read/write/bash_cage.sh + fund_memory_append.sh + settings.json + cage_negative_tests.sh), byte-identical to picker. Clean-extract → `--check` rc=0 + 27-case 0-fail. Wiped-picker recovery works. **Count pushback:** suite is 27 cases NOT 34 (codex miscount); README '27-case' kept correct. Re-posted deputy-codex #15746; **awaiting re-verdict.**
 
 ## RESUME INSTRUCTIONS (successor)
 1. Drain deputy bus — check for deputy-codex round-3 verdict (thread #15733) + any lead follow-up.
